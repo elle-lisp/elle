@@ -8,7 +8,7 @@ fn eval(input: &str) -> Result<Value, String> {
     register_primitives(&mut vm, &mut symbols);
 
     let value = read_str(input, &mut symbols)?;
-    let expr = elle::compiler::compile::value_to_expr(&value, &mut symbols)?;
+    let expr = elle::compiler::converters::value_to_expr(&value, &mut symbols)?;
     let bytecode = compile(&expr);
     vm.execute(&bytecode)
 }

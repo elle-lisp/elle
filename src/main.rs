@@ -1,4 +1,4 @@
-use elle::compiler::compile::value_to_expr;
+use elle::compiler::converters::value_to_expr;
 use elle::ffi_primitives;
 use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, VM};
 use std::env;

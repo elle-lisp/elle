@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use elle::compiler::compile::value_to_expr;
+use elle::compiler::converters::value_to_expr;
 use elle::{compile, read_str, register_primitives, SymbolTable, VM};
 
 // DEFENSE: Separate parsing from execution to measure each phase independently

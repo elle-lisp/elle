@@ -6,7 +6,7 @@
 //!
 //! ```
 //! use elle::{read_str, compile, register_primitives, SymbolTable, VM};
-//! use elle::compiler::compile::value_to_expr;
+//! use elle::compiler::converters::value_to_expr;
 //!
 //! let mut vm = VM::new();
 //! let mut symbols = SymbolTable::new();

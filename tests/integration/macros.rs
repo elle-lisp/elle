@@ -1,6 +1,6 @@
 // Macro functionality tests
 // These tests verify that macro definition, registration, and expansion work correctly
-use elle::compiler::compile::value_to_expr;
+use elle::compiler::converters::value_to_expr;
 use elle::{compile, read_str, register_primitives, SymbolTable, Value, VM};
 use std::cell::RefCell;
 use std::rc::Rc;

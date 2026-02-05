@@ -1,5 +1,5 @@
 // DEFENSE: Property-based tests catch edge cases regular tests miss
-use elle::compiler::compile::value_to_expr;
+use elle::compiler::converters::value_to_expr;
 use elle::value::{cons, list};
 use elle::{compile, read_str, register_primitives, SymbolTable, Value, VM};
 use proptest::prelude::*;

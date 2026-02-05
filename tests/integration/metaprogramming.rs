@@ -1,5 +1,5 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
-use elle::compiler::compile::value_to_expr;
+use elle::compiler::converters::value_to_expr;
 use elle::{compile, read_str, register_primitives, SymbolTable, Value, VM};
 
 fn eval(input: &str) -> Result<Value, String> {
