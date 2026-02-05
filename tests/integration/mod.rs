@@ -78,3 +78,7 @@ mod pattern_matching {
 mod module_qualified_names {
     include!("module_qualified_names.rs");
 }
+
+mod tables_and_structs {
+    include!("tables_and_structs.rs");
+}

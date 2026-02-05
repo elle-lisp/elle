@@ -9,6 +9,8 @@ pub mod list;
 pub mod math;
 pub mod meta;
 pub mod string;
+pub mod structs;
+pub mod table;
 pub mod type_check;
 pub mod utility;
 pub mod vector;
@@ -46,6 +48,14 @@ use self::meta::prim_gensym;
 use self::string::{
     prim_char_at, prim_string_append, prim_string_downcase, prim_string_index, prim_string_length,
     prim_string_upcase, prim_substring, prim_to_float, prim_to_int, prim_to_string,
+};
+use self::structs::{
+    prim_struct, prim_struct_del, prim_struct_get, prim_struct_has, prim_struct_keys,
+    prim_struct_length, prim_struct_put, prim_struct_values,
+};
+use self::table::{
+    prim_table, prim_table_del, prim_table_get, prim_table_has, prim_table_keys, prim_table_length,
+    prim_table_put, prim_table_values,
 };
 use self::type_check::{
     prim_is_nil, prim_is_number, prim_is_pair, prim_is_string, prim_is_symbol, prim_type,
@@ -129,6 +139,26 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "vector-length", prim_vector_length);
     register_fn(vm, symbols, "vector-ref", prim_vector_ref);
     register_fn(vm, symbols, "vector-set!", prim_vector_set);
+
+    // Table operations (mutable)
+    register_fn(vm, symbols, "table", prim_table);
+    register_fn(vm, symbols, "get", prim_table_get);
+    register_fn(vm, symbols, "put", prim_table_put);
+    register_fn(vm, symbols, "del", prim_table_del);
+    register_fn(vm, symbols, "keys", prim_table_keys);
+    register_fn(vm, symbols, "values", prim_table_values);
+    register_fn(vm, symbols, "has?", prim_table_has);
+    register_fn(vm, symbols, "table-length", prim_table_length);
+
+    // Struct operations (immutable)
+    register_fn(vm, symbols, "struct", prim_struct);
+    register_fn(vm, symbols, "struct-get", prim_struct_get);
+    register_fn(vm, symbols, "struct-put", prim_struct_put);
+    register_fn(vm, symbols, "struct-del", prim_struct_del);
+    register_fn(vm, symbols, "struct-keys", prim_struct_keys);
+    register_fn(vm, symbols, "struct-values", prim_struct_values);
+    register_fn(vm, symbols, "struct-has?", prim_struct_has);
+    register_fn(vm, symbols, "struct-length", prim_struct_length);
 
     // Type info
     register_fn(vm, symbols, "type", prim_type);

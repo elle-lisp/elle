@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -5,7 +7,7 @@ use std::rc::Rc;
 ///
 /// Symbols are interned for fast comparison (O(1) via ID comparison
 /// instead of O(n) string comparison).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SymbolId(pub u32);
 
 /// Function arity specification.
@@ -85,6 +87,30 @@ impl CHandle {
     }
 }
 
+/// Wrapper for table/struct keys - allows any Value to be a key
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TableKey {
+    Nil,
+    Bool(bool),
+    Int(i64),
+    Symbol(SymbolId),
+    String(String),
+}
+
+impl TableKey {
+    /// Convert a Value to a TableKey if possible
+    pub fn from_value(val: &Value) -> Result<TableKey, String> {
+        match val {
+            Value::Nil => Ok(TableKey::Nil),
+            Value::Bool(b) => Ok(TableKey::Bool(*b)),
+            Value::Int(i) => Ok(TableKey::Int(*i)),
+            Value::Symbol(id) => Ok(TableKey::Symbol(*id)),
+            Value::String(s) => Ok(TableKey::String(s.to_string())),
+            _ => Err(format!("Cannot use {} as table key", val.type_name())),
+        }
+    }
+}
+
 /// Exception value for error handling
 #[derive(Debug, Clone, PartialEq)]
 pub struct Exception {
@@ -123,6 +149,8 @@ pub enum Value {
     String(Rc<str>),
     Cons(Rc<Cons>),
     Vector(Rc<Vec<Value>>),
+    Table(Rc<RefCell<BTreeMap<TableKey, Value>>>), // Mutable table
+    Struct(Rc<BTreeMap<TableKey, Value>>),         // Immutable struct
     Closure(Rc<Closure>),
     NativeFn(NativeFn),
     // FFI types
@@ -143,6 +171,8 @@ impl PartialEq for Value {
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Cons(a), Value::Cons(b)) => a == b,
             (Value::Vector(a), Value::Vector(b)) => a == b,
+            (Value::Table(_), Value::Table(_)) => false, // Tables are mutable, never equal
+            (Value::Struct(a), Value::Struct(b)) => a == b,
             (Value::Closure(_), Value::Closure(_)) => false, // Closures are never equal
             (Value::NativeFn(_), Value::NativeFn(_)) => false, // Functions are never equal
             (Value::LibHandle(a), Value::LibHandle(b)) => a == b,
@@ -225,6 +255,26 @@ impl Value {
         }
     }
 
+    pub fn as_table(&self) -> Result<&Rc<RefCell<BTreeMap<TableKey, Value>>>, String> {
+        match self {
+            Value::Table(table) => Ok(table),
+            _ => Err(format!(
+                "Type error: expected table, got {}",
+                self.type_name()
+            )),
+        }
+    }
+
+    pub fn as_struct(&self) -> Result<&Rc<BTreeMap<TableKey, Value>>, String> {
+        match self {
+            Value::Struct(s) => Ok(s),
+            _ => Err(format!(
+                "Type error: expected struct, got {}",
+                self.type_name()
+            )),
+        }
+    }
+
     /// Check if value is a proper list
     pub fn is_list(&self) -> bool {
         let mut current = self;
@@ -264,6 +314,8 @@ impl Value {
             Value::String(_) => "string",
             Value::Cons(_) => "list",
             Value::Vector(_) => "vector",
+            Value::Table(_) => "table",
+            Value::Struct(_) => "struct",
             Value::Closure(_) => "closure",
             Value::NativeFn(_) => "native-function",
             Value::LibHandle(_) => "library-handle",
@@ -310,6 +362,24 @@ impl fmt::Debug for Value {
                     write!(f, "{:?}", v)?;
                 }
                 write!(f, "]")
+            }
+            Value::Table(tbl) => {
+                write!(f, "#<table")?;
+                if let Ok(borrowed) = tbl.try_borrow() {
+                    for (k, v) in borrowed.iter() {
+                        write!(f, " {:?}={:?}", k, v)?;
+                    }
+                } else {
+                    write!(f, " <borrowed>")?;
+                }
+                write!(f, ">")
+            }
+            Value::Struct(s) => {
+                write!(f, "#<struct")?;
+                for (k, v) in s.iter() {
+                    write!(f, " {:?}={:?}", k, v)?;
+                }
+                write!(f, ">")
             }
             Value::Closure(_) => write!(f, "<closure>"),
             Value::NativeFn(_) => write!(f, "<native-fn>"),

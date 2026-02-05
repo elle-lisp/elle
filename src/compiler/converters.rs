@@ -64,6 +64,8 @@ fn build_quasiquote_expr(
         | Value::String(_)
         | Value::Symbol(_) => Ok(Expr::Literal(value.clone())),
 
+        Value::Table(_) | Value::Struct(_) => Ok(Expr::Literal(value.clone())),
+
         Value::Cons(_) => {
             let list = value.list_to_vec()?;
             if list.is_empty() {
