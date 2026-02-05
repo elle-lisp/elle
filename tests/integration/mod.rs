@@ -35,3 +35,6 @@ mod ffi_marshaling {
 mod ffi_callbacks {
     include!("ffi-callbacks.rs");
 }
+mod finally_clause {
+    include!("finally_clause.rs");
+}

@@ -17,3 +17,6 @@ mod primitives {
 mod exception_handling {
     include!("exception_handling.rs");
 }
+mod finally_clause {
+    include!("finally_clause.rs");
+}
