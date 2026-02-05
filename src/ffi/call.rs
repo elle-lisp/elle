@@ -146,9 +146,12 @@ impl From<&CValue> for i64 {
     fn from(val: &CValue) -> Self {
         match val {
             CValue::Int(n) => *n,
+            CValue::UInt(n) => *n as i64,
             CValue::Float(f) => f.to_bits() as i64,
             CValue::Pointer(p) => *p as i64,
+            CValue::String(_) => 0, // String pointer would need special handling
             CValue::Struct(_) => 0, // Should not happen
+            CValue::Array(_) => 0,  // Arrays pass by pointer
         }
     }
 }

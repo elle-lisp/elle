@@ -26,3 +26,6 @@ mod types {
 mod property {
     include!("property.rs");
 }
+mod ffi_marshaling {
+    include!("ffi-marshaling.rs");
+}
