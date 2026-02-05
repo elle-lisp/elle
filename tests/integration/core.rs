@@ -932,3 +932,158 @@ fn test_closure_preserves_parameter_type() {
     assert_eq!(eval(code).unwrap(), Value::Bool(true));
 }
 
+// Let-binding tests (Issue #21)
+
+#[test]
+fn test_let_simple_binding() {
+    let code = r#"
+        (let ((x 5))
+          x)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(5));
+}
+
+#[test]
+fn test_let_with_arithmetic() {
+    let code = r#"
+        (let ((x 5))
+          (+ x 3))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(8));
+}
+
+#[test]
+fn test_let_multiple_bindings() {
+    let code = r#"
+        (let ((x 5) (y 3))
+          (+ x y))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(8));
+}
+
+#[test]
+fn test_let_binding_with_expressions() {
+    let code = r#"
+        (let ((x (+ 2 3)) (y (* 4 5)))
+          (+ x y))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(25));
+}
+
+#[test]
+fn test_let_shadowing_global() {
+    let code = r#"
+        (define x 10)
+        (let ((x 20))
+          x)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(20));
+}
+
+#[test]
+fn test_let_does_not_modify_global() {
+    let code = r#"
+        (define x 10)
+        (let ((x 20))
+          x)
+        x
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(10));
+}
+
+#[test]
+fn test_let_with_lists() {
+    let code = r#"
+        (let ((lst (list 1 2 3)))
+          (first lst))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(1));
+}
+
+#[test]
+fn test_let_with_string_operations() {
+    let code = r#"
+        (let ((s "hello"))
+          (string? s))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_let_with_conditional() {
+    let code = r#"
+        (let ((x 10))
+          (if (> x 5) "big" "small"))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::String(Rc::from("big")));
+}
+
+#[test]
+fn test_let_empty_body_returns_nil() {
+    let code = r#"
+        (let ((x 5)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Nil);
+}
+
+#[test]
+fn test_let_multiple_body_expressions() {
+    let code = r#"
+        (let ((x 5))
+          (+ x 1)
+          (+ x 2)
+          (+ x 3))
+    "#;
+    // Body should return last expression
+    assert_eq!(eval(code).unwrap(), Value::Int(8));
+}
+
+#[test]
+fn test_let_with_global_reference() {
+    let code = r#"
+        (define y 100)
+        (let ((x 50))
+          (+ x y))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(150));
+}
+
+#[test]
+fn test_let_binding_order() {
+    let code = r#"
+        (let ((x 1) (y 2) (z 3))
+          (+ x y z))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(6));
+}
+
+#[test]
+fn test_let_with_list_literal() {
+    let code = r#"
+        (let ((x (quote (1 2 3))))
+          (rest x))
+    "#;
+    assert_eq!(
+        eval(code).unwrap(),
+        list(vec![Value::Int(2), Value::Int(3)])
+    );
+}
+
+#[test]
+fn test_let_shadowing_with_calculation() {
+    let code = r#"
+        (define x 10)
+        (let ((x (* 2 x)))
+          x)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(20));
+}
+
+#[test]
+fn test_let_with_builtin_functions() {
+    let code = r#"
+        (let ((len (lambda (x) 42)))
+          (len nil))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(42));
+}

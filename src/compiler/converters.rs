@@ -141,6 +141,84 @@ fn value_to_expr_with_scope(
                         Ok(Expr::Define { name, value })
                     }
 
+                    "let" => {
+                        // Syntax: (let ((var1 expr1) (var2 expr2) ...) body...)
+                        // Transform to: ((lambda (var1 var2 ...) body...) expr1 expr2 ...)
+                        if list.len() < 2 {
+                            return Err("let requires at least a binding vector".to_string());
+                        }
+
+                        // Parse the bindings vector
+                        let bindings_vec = list[1].list_to_vec()?;
+                        let mut param_syms = Vec::new();
+                        let mut binding_exprs = Vec::new();
+
+                        for binding in bindings_vec {
+                            let binding_list = binding.list_to_vec()?;
+                            if binding_list.len() != 2 {
+                                return Err(
+                                    "Each let binding must be a [var expr] pair".to_string()
+                                );
+                            }
+                            let var = binding_list[0].as_symbol()?;
+                            param_syms.push(var);
+
+                            // Parse the binding expression in the current scope
+                            // (bindings cannot reference previous bindings or let-bound variables)
+                            let expr =
+                                value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
+                            binding_exprs.push(expr);
+                        }
+
+                        // Parse the body (one or more expressions)
+                        // Body can reference let-bound variables, so we add them to scope
+                        scope_stack.push(param_syms.clone());
+
+                        let body_exprs: Result<Vec<_>, _> = list[2..]
+                            .iter()
+                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                            .collect();
+
+                        scope_stack.pop();
+
+                        let body_exprs = body_exprs?;
+                        let body = if body_exprs.len() == 1 {
+                            Box::new(body_exprs[0].clone())
+                        } else if body_exprs.is_empty() {
+                            Box::new(Expr::Literal(Value::Nil))
+                        } else {
+                            Box::new(Expr::Begin(body_exprs))
+                        };
+
+                        // Analyze free variables in the body
+                        let mut local_bindings = std::collections::HashSet::new();
+                        for param in &param_syms {
+                            local_bindings.insert(*param);
+                        }
+                        let free_vars = analyze_free_vars(&body, &local_bindings);
+
+                        // Convert free vars to captures (with placeholder depth/index)
+                        // These will be resolved at runtime
+                        let captures: Vec<_> = free_vars
+                            .iter()
+                            .map(|sym| (*sym, 0, 0)) // Depth and index will be resolved later
+                            .collect();
+
+                        // Create lambda: (lambda (var1 var2 ...) body...)
+                        let lambda = Expr::Lambda {
+                            params: param_syms,
+                            body,
+                            captures,
+                        };
+
+                        // Create call: (lambda expr1 expr2 ...)
+                        Ok(Expr::Call {
+                            func: Box::new(lambda),
+                            args: binding_exprs,
+                            tail: false,
+                        })
+                    }
+
                     "set!" => {
                         if list.len() != 3 {
                             return Err("set! requires exactly 2 arguments".to_string());

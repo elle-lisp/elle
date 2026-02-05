@@ -171,19 +171,13 @@ impl Compiler {
                 self.bytecode.emit_byte(captures.len() as u8);
             }
 
-            Expr::Let { bindings, body } => {
-                // Compile bindings
-                for (_name, value_expr) in bindings {
-                    self.compile_expr(value_expr, false);
-                }
-
-                // Compile body
-                self.compile_expr(body, tail);
-
-                // Pop bindings
-                for _ in bindings {
-                    self.bytecode.emit(Instruction::Pop);
-                }
+            Expr::Let {
+                bindings: _,
+                body: _,
+            } => {
+                // Let-bindings should have been transformed to lambda calls at the converter stage
+                // This should not be reached in normal compilation
+                panic!("Unexpected Let expression in compile phase - should have been transformed to lambda call");
             }
 
             Expr::Set {
