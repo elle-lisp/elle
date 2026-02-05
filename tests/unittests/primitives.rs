@@ -544,7 +544,6 @@ fn test_symbol_table_module_support() {
 }
 
 #[test]
-#[ignore]
 fn test_module_tracking() {
     use elle::symbol::SymbolTable;
 
@@ -713,7 +712,6 @@ fn test_stdlib_initialization() {
     assert!(vm.get_module_symbol("list", length_id.0).is_some());
 }
 
-#[ignore]
 #[test]
 fn test_module_qualified_access() {
     use elle::init_stdlib;
@@ -735,7 +733,6 @@ fn test_module_qualified_access() {
     let result = vm.get_module_symbol("string", strlen_sym.0);
     assert!(result.is_some());
 }
-#[ignore]
 #[test]
 fn test_module_import() {
     let mut vm = VM::new();
@@ -1067,7 +1064,6 @@ fn test_memory_usage_primitive() {
 }
 
 #[test]
-#[ignore]
 fn test_module_loading_path_tracking() {
     let _vm = VM::new();
 
@@ -1080,7 +1076,6 @@ fn test_module_loading_path_tracking() {
 }
 
 #[test]
-#[ignore]
 fn test_module_circular_dependency_prevention() {
     let _vm = VM::new();
 

@@ -748,7 +748,6 @@ fn test_even_odd() {
 // See PR #13 for partial implementation
 
 #[test]
-#[ignore]
 fn test_recursive_lambda_fibonacci() {
     // Test basic recursive lambda
     let code = r#"
@@ -762,7 +761,6 @@ fn test_recursive_lambda_fibonacci() {
 }
 
 #[test]
-#[ignore]
 fn test_recursive_lambda_fibonacci_10() {
     // Test fibonacci(10) = 55
     let code = r#"
@@ -776,7 +774,6 @@ fn test_recursive_lambda_fibonacci_10() {
 }
 
 #[test]
-#[ignore]
 fn test_tail_recursive_sum() {
     // Test tail-recursive sum accumulation
     let code = r#"
@@ -788,7 +785,6 @@ fn test_tail_recursive_sum() {
 }
 
 #[test]
-#[ignore]
 fn test_recursive_countdown() {
     // Test simple countdown recursion
     let code = r#"
@@ -802,7 +798,6 @@ fn test_recursive_countdown() {
 }
 
 #[test]
-#[ignore]
 fn test_nested_recursive_functions() {
     // Test nested function definitions with recursion
     let code = r#"
