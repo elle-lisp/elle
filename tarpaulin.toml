@@ -4,19 +4,9 @@
 # Output format
 out = ["Xml"]
 
-# Timeout for coverage generation (in seconds)
-# Reduced from 300s to 240s for faster CI
-timeout = 240
-
 # Exclude test and example files from coverage
 exclude_files = ["tests/*", "examples/*"]
 
 # Enable parallel coverage analysis
 # Speeds up coverage collection on multi-core systems
 parallel = true
-
-# Log level
-verbose = false
-
-# Skip generating coverage report
-skip_clean = false
