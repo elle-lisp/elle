@@ -214,20 +214,51 @@ fn unit_while_false_condition() {
 }
 
 #[test]
-#[ignore = "AST structure test needs update"]
 fn unit_loop_construct_ast_structure() {
     let mut symbols = SymbolTable::new();
 
-    // Test: while loop AST structure
-    let code = "(define x 0) (while (< x 5) (set! x (+ x 1)))";
+    // Test: while loop compiles correctly
+    // When we read multiple top-level expressions, only the first is returned
+    // by read_str (it reads one value at a time)
+    let code = "(define x 0)";
     let value = read_str(code, &mut symbols).unwrap();
     let expr = value_to_expr(&value, &mut symbols).unwrap();
 
-    // The expression should contain a Begin with Define and While
+    // Should be a Define expression
+    assert!(
+        matches!(expr, Expr::Define { .. }),
+        "Expected Define expression, got {:?}",
+        expr
+    );
+
+    // Now test a complete program with begin
+    let mut symbols = SymbolTable::new();
+    let code = "(begin (define y 0) (while (< y 5) (set! y (+ y 1))))";
+    let value = read_str(code, &mut symbols).unwrap();
+    let expr = value_to_expr(&value, &mut symbols).unwrap();
+
+    // Should be Begin with Define and While
     match expr {
-        Expr::Begin(_) => {
-            // Expected: Begin containing Define and While
+        Expr::Begin(exprs) => {
+            assert_eq!(
+                exprs.len(),
+                2,
+                "Expected 2 expressions in Begin block, got {}",
+                exprs.len()
+            );
+
+            // First should be Define
+            assert!(
+                matches!(exprs[0], Expr::Define { .. }),
+                "First expression should be Define"
+            );
+
+            // Second should be While
+            assert!(
+                matches!(exprs[1], Expr::While { .. }),
+                "Second expression should be While"
+            );
         }
-        _ => panic!("Expected Begin expression"),
+        _ => panic!("Expected Begin expression, got {:?}", expr),
     }
 }
