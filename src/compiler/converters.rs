@@ -822,6 +822,52 @@ fn value_to_expr_with_scope(
                         Ok(Expr::For { var, iter, body })
                     }
 
+                    "and" => {
+                        // Syntax: (and expr1 expr2 ...)
+                        // Short-circuit evaluation: returns first falsy value or last value
+                        if list.len() < 2 {
+                            return Ok(Expr::Literal(Value::Bool(true))); // (and) => true
+                        }
+                        let exprs: Result<Vec<_>, _> = list[1..]
+                            .iter()
+                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                            .collect();
+                        Ok(Expr::And(exprs?))
+                    }
+
+                    "or" => {
+                        // Syntax: (or expr1 expr2 ...)
+                        // Short-circuit evaluation: returns first truthy value or last value
+                        if list.len() < 2 {
+                            return Ok(Expr::Literal(Value::Bool(false))); // (or) => false
+                        }
+                        let exprs: Result<Vec<_>, _> = list[1..]
+                            .iter()
+                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                            .collect();
+                        Ok(Expr::Or(exprs?))
+                    }
+
+                    "xor" => {
+                        // Syntax: (xor expr1 expr2 ...)
+                        // Transform to a function call to the xor primitive
+                        // This way we don't need special compilation logic
+                        if list.len() < 2 {
+                            return Ok(Expr::Literal(Value::Bool(false))); // (xor) => false
+                        }
+
+                        let func = Box::new(Expr::GlobalVar(symbols.intern("xor")));
+                        let args: Result<Vec<_>, _> = list[1..]
+                            .iter()
+                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                            .collect();
+                        Ok(Expr::Call {
+                            func,
+                            args: args?,
+                            tail: false,
+                        })
+                    }
+
                     _ => {
                         // Check if it's a macro call
                         if let Value::Symbol(sym_id) = first {

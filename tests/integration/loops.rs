@@ -111,7 +111,6 @@ fn test_while_loop_with_nested_operations() {
 }
 
 #[test]
-#[ignore = "requires 'and' operator"]
 fn test_while_loop_with_complex_condition() {
     let mut eval = LoopEval::new();
 

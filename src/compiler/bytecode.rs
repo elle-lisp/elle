@@ -43,6 +43,9 @@ pub enum Instruction {
     /// Jump if false (offset i16)
     JumpIfFalse,
 
+    /// Jump if true (offset i16)
+    JumpIfTrue,
+
     /// Create closure (const_idx, num_upvalues)
     MakeClosure,
 

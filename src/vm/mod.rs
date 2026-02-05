@@ -82,6 +82,10 @@ impl VM {
                     control::handle_jump_if_false(bytecode, &mut ip, self)?;
                 }
 
+                Instruction::JumpIfTrue => {
+                    control::handle_jump_if_true(bytecode, &mut ip, self)?;
+                }
+
                 Instruction::Return => {
                     return control::handle_return(self);
                 }

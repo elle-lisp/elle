@@ -464,6 +464,85 @@ impl Compiler {
                 // This case should never be reached, but we handle it for exhaustiveness
                 self.bytecode.emit(Instruction::Nil);
             }
+
+            Expr::And(exprs) => {
+                // Short-circuit AND: returns first falsy value or last value
+                // (and) => true, (and a) => a, (and a b c) => c if all truthy, else first falsy
+                if exprs.is_empty() {
+                    self.bytecode.emit(Instruction::True);
+                    return;
+                }
+
+                let mut end_jumps = Vec::new();
+
+                for (i, expr) in exprs.iter().enumerate() {
+                    self.compile_expr(expr, false);
+
+                    // For all but the last expression, check if it's false
+                    if i < exprs.len() - 1 {
+                        // Dup the value to check it without consuming it
+                        self.bytecode.emit(Instruction::Dup);
+                        self.bytecode.emit(Instruction::Not);
+                        self.bytecode.emit(Instruction::JumpIfTrue);
+                        let exit_jump = self.bytecode.instructions.len();
+                        self.bytecode.emit_u16(0); // Placeholder
+
+                        // Pop the duplicate for the next evaluation
+                        self.bytecode.emit(Instruction::Pop);
+
+                        end_jumps.push(exit_jump);
+                    }
+                }
+
+                // Patch all exit jumps (for falsy values) to the end
+                let end_pos = self.bytecode.instructions.len();
+                for jump_pos in end_jumps {
+                    let offset = (end_pos as i32) - (jump_pos as i32 + 2);
+                    self.bytecode.patch_jump(jump_pos, offset as i16);
+                }
+            }
+
+            Expr::Or(exprs) => {
+                // Short-circuit OR: returns first truthy value or last value
+                // (or) => false, (or a) => a, (or a b c) => a if truthy, else next...
+                if exprs.is_empty() {
+                    self.bytecode.emit(Instruction::False);
+                    return;
+                }
+
+                let mut end_jumps = Vec::new();
+
+                for (i, expr) in exprs.iter().enumerate() {
+                    self.compile_expr(expr, false);
+
+                    // For all but the last expression, check if it's true
+                    if i < exprs.len() - 1 {
+                        // Dup the value to check it without consuming it
+                        self.bytecode.emit(Instruction::Dup);
+                        self.bytecode.emit(Instruction::JumpIfTrue);
+                        let exit_jump = self.bytecode.instructions.len();
+                        self.bytecode.emit_u16(0); // Placeholder
+
+                        // Pop the duplicate for the next evaluation
+                        self.bytecode.emit(Instruction::Pop);
+
+                        end_jumps.push(exit_jump);
+                    }
+                }
+
+                // Patch all exit jumps (for truthy values) to the end
+                let end_pos = self.bytecode.instructions.len();
+                for jump_pos in end_jumps {
+                    let offset = (end_pos as i32) - (jump_pos as i32 + 2);
+                    self.bytecode.patch_jump(jump_pos, offset as i16);
+                }
+            }
+
+            Expr::Xor(_) => {
+                // XOR is transformed to a function call in the converter
+                // This case should never be reached, but we handle it for exhaustiveness
+                panic!("Xor expression should be transformed to a function call");
+            }
         }
     }
 

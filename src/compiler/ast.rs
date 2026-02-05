@@ -129,6 +129,15 @@ pub enum Expr {
 
     /// Module-qualified name (e.g., math:add)
     ModuleRef { module: SymbolId, name: SymbolId },
+
+    /// And operator (short-circuit evaluation)
+    And(Vec<Expr>),
+
+    /// Or operator (short-circuit evaluation)
+    Or(Vec<Expr>),
+
+    /// Xor operator (exclusive or, all args must be evaluated)
+    Xor(Vec<Expr>),
 }
 
 /// Pattern for pattern matching
@@ -168,6 +177,9 @@ impl Expr {
                 | Expr::For { .. }
                 | Expr::Match { .. }
                 | Expr::Try { .. }
+                | Expr::And(_)
+                | Expr::Or(_)
+                | Expr::Xor(_)
         )
     }
 }

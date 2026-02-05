@@ -15,6 +15,15 @@ pub fn handle_jump_if_false(bytecode: &[u8], ip: &mut usize, vm: &mut VM) -> Res
     Ok(())
 }
 
+pub fn handle_jump_if_true(bytecode: &[u8], ip: &mut usize, vm: &mut VM) -> Result<(), String> {
+    let offset = vm.read_i16(bytecode, ip);
+    let val = vm.stack.pop().ok_or("Stack underflow")?;
+    if val.is_truthy() {
+        *ip = ((*ip as i32) + (offset as i32)) as usize;
+    }
+    Ok(())
+}
+
 pub fn handle_return(vm: &mut VM) -> Result<Value, String> {
     vm.stack
         .pop()

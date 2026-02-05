@@ -23,7 +23,7 @@ pub fn disassemble(instructions: &[u8]) -> String {
                     i += 2;
                 }
             }
-            Instruction::Jump | Instruction::JumpIfFalse => {
+            Instruction::Jump | Instruction::JumpIfFalse | Instruction::JumpIfTrue => {
                 if i + 1 < instructions.len() {
                     let high = instructions[i] as i8 as i16;
                     let low = instructions[i + 1] as i16;

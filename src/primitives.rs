@@ -81,6 +81,9 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Logic
     register_fn(vm, symbols, "not", prim_not);
+    register_fn(vm, symbols, "and", prim_and);
+    register_fn(vm, symbols, "or", prim_or);
+    register_fn(vm, symbols, "xor", prim_xor);
 
     // Display
     register_fn(vm, symbols, "display", prim_display);
@@ -311,6 +314,52 @@ fn prim_not(args: &[Value]) -> Result<Value, String> {
         return Err("not requires exactly 1 argument".to_string());
     }
     Ok(Value::Bool(!args[0].is_truthy()))
+}
+
+fn prim_and(args: &[Value]) -> Result<Value, String> {
+    // (and) => true
+    // (and x) => x
+    // (and x y z) => z if all truthy, else first falsy
+    if args.is_empty() {
+        return Ok(Value::Bool(true));
+    }
+
+    for arg in &args[..args.len() - 1] {
+        if !arg.is_truthy() {
+            return Ok(arg.clone());
+        }
+    }
+
+    Ok(args[args.len() - 1].clone())
+}
+
+fn prim_or(args: &[Value]) -> Result<Value, String> {
+    // (or) => false
+    // (or x) => x
+    // (or x y z) => x if truthy, else next truthy or z
+    if args.is_empty() {
+        return Ok(Value::Bool(false));
+    }
+
+    for arg in &args[..args.len() - 1] {
+        if arg.is_truthy() {
+            return Ok(arg.clone());
+        }
+    }
+
+    Ok(args[args.len() - 1].clone())
+}
+
+fn prim_xor(args: &[Value]) -> Result<Value, String> {
+    // (xor) => false
+    // (xor x) => x (as bool)
+    // (xor x y z) => true if odd number of truthy values, else false
+    if args.is_empty() {
+        return Ok(Value::Bool(false));
+    }
+
+    let truthy_count = args.iter().filter(|v| v.is_truthy()).count();
+    Ok(Value::Bool(truthy_count % 2 == 1))
 }
 
 // Display primitives
