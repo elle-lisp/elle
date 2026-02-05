@@ -13,6 +13,7 @@
 pub mod bindings;
 pub mod call;
 pub mod callback;
+pub mod handlers;
 pub mod header;
 pub mod loader;
 pub mod marshal;
@@ -23,6 +24,7 @@ pub mod symbol;
 pub mod types;
 pub mod wasm;
 
+use handlers::HandlerRegistry;
 use loader::LibraryHandle;
 use std::collections::HashMap;
 use symbol::SymbolResolver;
@@ -40,6 +42,8 @@ pub struct FFISubsystem {
     struct_layouts: HashMap<u32, StructLayout>,
     /// Next struct ID to assign
     next_struct_id: u32,
+    /// Custom type handler registry
+    handler_registry: HandlerRegistry,
 }
 
 impl FFISubsystem {
@@ -51,6 +55,7 @@ impl FFISubsystem {
             symbol_resolver: SymbolResolver::new(),
             struct_layouts: HashMap::new(),
             next_struct_id: 1,
+            handler_registry: HandlerRegistry::new(),
         }
     }
 
@@ -123,6 +128,11 @@ impl FFISubsystem {
             .iter()
             .map(|(id, layout)| (StructId(*id), layout))
             .collect()
+    }
+
+    /// Get the custom type handler registry.
+    pub fn handler_registry(&self) -> &HandlerRegistry {
+        &self.handler_registry
     }
 }
 

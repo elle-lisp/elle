@@ -35,6 +35,9 @@ mod ffi_callbacks {
 mod ffi_struct_marshaling {
     include!("ffi-struct-marshaling.rs");
 }
+mod ffi_custom_handlers {
+    include!("ffi-custom-handlers.rs");
+}
 mod shebang {
     include!("shebang.rs");
 }
