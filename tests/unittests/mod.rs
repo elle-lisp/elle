@@ -20,3 +20,6 @@ mod exception_handling {
 mod finally_clause {
     include!("finally_clause.rs");
 }
+mod loops {
+    include!("loops.rs");
+}

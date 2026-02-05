@@ -38,3 +38,6 @@ mod ffi_callbacks {
 mod finally_clause {
     include!("finally_clause.rs");
 }
+mod loops {
+    include!("loops.rs");
+}
