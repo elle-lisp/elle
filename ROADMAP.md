@@ -6,7 +6,7 @@
 
 - **Current Version**: v1.0.0 (Production Ready)
 - **Release Date**: February 4, 2026
-- **Test Coverage**: 534 tests passing (72 lib + 460 integration + 2 doc)
+- **Test Coverage**: 1,104 tests passing (159 lib + 943 integration + 2 doc)
 - **Build Status**: All clippy warnings resolved (0 warnings)
 - **Performance**: 10-50x vs native Rust (without JIT), memory usage 2-4x vs native
 
@@ -167,7 +167,6 @@ Result (Value)
 - **Pattern Matching**: Basic patterns only (literals, wildcards, nil). Variable binding in patterns not implemented.
 - **Macros**: Basic expansion with parameter substitution; no full quasiquote evaluation.
 - **Module-Qualified Names**: Parser doesn't support `module:symbol` syntax yet.
-- **Concurrency**: No actual bytecode execution in spawned threads (placeholders exist).
 
 ### Performance Characteristics
 - **No JIT Compilation**: Bytecode is interpreted, not compiled to native code
@@ -186,13 +185,13 @@ Result (Value)
 ## Testing & Quality
 
 ### Test Coverage
-- **534 tests total** (100% passing)
-  - Unit tests: 72
-  - Integration tests: 460
+- **1,104 tests total** (100% passing, 26 ignored pending bytecode loop fixes)
+  - Unit tests: 159
+  - Integration tests: 943
   - Doc tests: 2
-- **Test Categories**: Arithmetic, strings, lists, patterns, exceptions, macros, modules, FFI, properties
+- **Test Categories**: Arithmetic, strings, lists, patterns, exceptions, macros, modules, FFI, properties, loops
 - **Property-Based Tests**: 30+ tests using QuickCheck-style generators
-- **Integration Tests**: 460 end-to-end tests covering real-world scenarios
+- **Integration Tests**: 943 end-to-end tests covering real-world scenarios
 
 ### Code Quality
 - **Clippy Warnings**: 0 (strict mode enforced)
@@ -252,8 +251,7 @@ Result (Value)
 
 ### Known FFI Limitations
 - **No Callbacks**: Cannot yet pass Elle functions as C callbacks
-- **No WASM**: JavaScript interop not implemented
-- **Limited Marshaling**: Basic types only; complex types need manual handling
+- **Limited Marshaling**: Advanced types need manual handling
 - **No Auto-Binding Generation**: Headers must be manually mapped
 
 ---
@@ -265,7 +263,6 @@ Result (Value)
 2. **Module-Qualified Names**: `(list:length (list 1 2 3))` → 3
 3. **Full Quasiquote Evaluation**: Proper `` `(,x ,@y) `` expansion
 4. **JIT Compilation**: Native code generation for hot paths
-5. **WASM Target**: Browser-based Elle execution
 
 ### Medium Priority
 1. **Package Manager**: Registry and dependency management
@@ -341,7 +338,7 @@ See `CONTRIBUTING.md` for development setup and guidelines.
 
 ### Quality Metrics
 ✅ 0 compiler warnings (strict clippy mode)
-✅ 534 tests passing (100%)
+✅ 1,104 tests passing (100%, 26 ignored for pending loop bytecode fixes)
 ✅ 98.5% code coverage
 ✅ Full error reporting with stack traces
 ✅ Security audit completed
