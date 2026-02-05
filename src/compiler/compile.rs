@@ -215,15 +215,15 @@ impl Compiler {
             Expr::While { cond, body } => {
                 // Implement while loop using conditional jumps
                 // Loop label - start of condition check
-                let loop_label = self.bytecode.instructions.len();
+                let loop_label = self.bytecode.current_pos() as i32;
 
                 // Compile condition
                 self.compile_expr(cond, false);
 
                 // Jump to end if condition is false
                 self.bytecode.emit(Instruction::JumpIfFalse);
-                let exit_jump = self.bytecode.instructions.len();
-                self.bytecode.emit_i16(0); // Placeholder for exit offset
+                let exit_jump = self.bytecode.current_pos() as i32;
+                self.bytecode.emit_u16(0); // Placeholder for exit offset
 
                 // Compile body
                 self.compile_expr(body, false);
@@ -233,16 +233,17 @@ impl Compiler {
 
                 // Jump back to loop condition
                 self.bytecode.emit(Instruction::Jump);
-                let loop_offset =
-                    (loop_label as i32) - (self.bytecode.instructions.len() as i32 + 2);
-                self.bytecode.emit_i16(loop_offset as i16);
+                let loop_jump = self.bytecode.current_pos() as i32;
+                self.bytecode.emit_u16(0); // Placeholder
 
                 // Patch the exit jump
-                let exit_offset =
-                    (self.bytecode.instructions.len() as i32) - (exit_jump as i32 + 2);
-                let offset_bytes = (exit_offset as i16).to_le_bytes();
-                self.bytecode.instructions[exit_jump] = offset_bytes[0];
-                self.bytecode.instructions[exit_jump + 1] = offset_bytes[1];
+                let exit_pos = self.bytecode.current_pos() as i32;
+                self.bytecode
+                    .patch_jump(exit_jump as usize, (exit_pos - exit_jump - 2) as i16);
+
+                // Patch the loop back jump
+                self.bytecode
+                    .patch_jump(loop_jump as usize, (loop_label - loop_jump - 2) as i16);
 
                 // Return nil after loop
                 self.bytecode.emit(Instruction::Nil);
@@ -254,29 +255,26 @@ impl Compiler {
                 self.compile_expr(iter, false);
 
                 // Store the list in a temporary location and iterate through it
-                // We'll use the stack to track: car of list | rest of list | original list
-                let loop_label = self.bytecode.instructions.len();
+                let loop_label = self.bytecode.current_pos() as i32;
 
                 // Check if list is nil (end of iteration)
                 self.bytecode.emit(Instruction::Dup); // Duplicate the list
                 self.bytecode.emit(Instruction::IsNil);
                 self.bytecode.emit(Instruction::JumpIfFalse);
-                let body_jump = self.bytecode.instructions.len();
-                self.bytecode.emit_i16(0); // Placeholder for jump to body
+                let body_jump = self.bytecode.current_pos() as i32;
+                self.bytecode.emit_u16(0); // Placeholder for jump to body
 
                 // If nil, exit loop
                 self.bytecode.emit(Instruction::Pop);
                 self.bytecode.emit(Instruction::Nil);
                 self.bytecode.emit(Instruction::Jump);
-                let exit_jump = self.bytecode.instructions.len();
-                self.bytecode.emit_i16(0); // Placeholder for exit
+                let exit_jump = self.bytecode.current_pos() as i32;
+                self.bytecode.emit_u16(0); // Placeholder for exit
 
                 // Patch body jump
-                let body_offset =
-                    (self.bytecode.instructions.len() as i32) - (body_jump as i32 + 2);
-                let offset_bytes = (body_offset as i16).to_le_bytes();
-                self.bytecode.instructions[body_jump] = offset_bytes[0];
-                self.bytecode.instructions[body_jump + 1] = offset_bytes[1];
+                let body_pos = self.bytecode.current_pos() as i32;
+                self.bytecode
+                    .patch_jump(body_jump as usize, (body_pos - body_jump - 2) as i16);
 
                 // Extract car (current element) and cdr (rest)
                 self.bytecode.emit(Instruction::Dup); // Duplicate list
@@ -295,16 +293,17 @@ impl Compiler {
 
                 // Loop back
                 self.bytecode.emit(Instruction::Jump);
-                let loop_offset =
-                    (loop_label as i32) - (self.bytecode.instructions.len() as i32 + 2);
-                self.bytecode.emit_i16(loop_offset as i16);
+                let loop_jump = self.bytecode.current_pos() as i32;
+                self.bytecode.emit_u16(0); // Placeholder
 
                 // Patch exit jump
-                let exit_offset =
-                    (self.bytecode.instructions.len() as i32) - (exit_jump as i32 + 2);
-                let offset_bytes = (exit_offset as i16).to_le_bytes();
-                self.bytecode.instructions[exit_jump] = offset_bytes[0];
-                self.bytecode.instructions[exit_jump + 1] = offset_bytes[1];
+                let exit_pos = self.bytecode.current_pos() as i32;
+                self.bytecode
+                    .patch_jump(exit_jump as usize, (exit_pos - exit_jump - 2) as i16);
+
+                // Patch the loop back jump
+                self.bytecode
+                    .patch_jump(loop_jump as usize, (loop_label - loop_jump - 2) as i16);
             }
 
             Expr::Match {

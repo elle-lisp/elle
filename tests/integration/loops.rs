@@ -23,7 +23,7 @@ impl LoopEval {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_basic() {
     let mut eval = LoopEval::new();
 
@@ -37,7 +37,7 @@ fn test_while_loop_basic() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_condition_false_initially() {
     let mut eval = LoopEval::new();
 
@@ -50,7 +50,7 @@ fn test_while_loop_condition_false_initially() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_countdown() {
     let mut eval = LoopEval::new();
 
@@ -63,7 +63,7 @@ fn test_while_loop_countdown() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_with_arithmetic() {
     let mut eval = LoopEval::new();
 
@@ -78,7 +78,7 @@ fn test_while_loop_with_arithmetic() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_returns_nil() {
     let mut eval = LoopEval::new();
 
@@ -90,7 +90,7 @@ fn test_while_loop_returns_nil() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_with_nested_operations() {
     let mut eval = LoopEval::new();
 
@@ -111,7 +111,7 @@ fn test_while_loop_with_nested_operations() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+#[ignore = "requires 'and' operator"]
 fn test_while_loop_with_complex_condition() {
     let mut eval = LoopEval::new();
 
@@ -129,7 +129,7 @@ fn test_while_loop_with_complex_condition() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+#[ignore = "for loop variable scoping issues"]
 fn test_for_loop_basic_iteration() {
     let mut eval = LoopEval::new();
 
@@ -143,7 +143,7 @@ fn test_for_loop_basic_iteration() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_multiplication_table() {
     let mut eval = LoopEval::new();
 
@@ -160,7 +160,7 @@ fn test_while_loop_multiplication_table() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_with_floats() {
     let mut eval = LoopEval::new();
 
@@ -175,7 +175,7 @@ fn test_while_loop_with_floats() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_fibonacci_sequence() {
     let mut eval = LoopEval::new();
 
@@ -205,7 +205,7 @@ fn test_while_loop_fibonacci_sequence() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_nested_while_loops() {
     let mut eval = LoopEval::new();
 
@@ -225,7 +225,7 @@ fn test_nested_while_loops() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_sum_integers() {
     let mut eval = LoopEval::new();
 
@@ -243,7 +243,7 @@ fn test_while_loop_sum_integers() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_condition_never_true() {
     let mut eval = LoopEval::new();
 
@@ -258,7 +258,7 @@ fn test_while_loop_condition_never_true() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_while_loop_power_calculation() {
     let mut eval = LoopEval::new();
 
@@ -277,7 +277,7 @@ fn test_while_loop_power_calculation() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+#[ignore = "requires define inside loop body"]
 fn test_while_loop_gcd_calculation() {
     let mut eval = LoopEval::new();
 
@@ -294,7 +294,7 @@ fn test_while_loop_gcd_calculation() {
 }
 
 #[test]
-#[ignore = "while/for loops have bytecode generation issues"]
+
 fn test_for_loop_with_list() {
     let mut eval = LoopEval::new();
 
