@@ -41,3 +41,6 @@ mod finally_clause {
 mod loops {
     include!("loops.rs");
 }
+mod exception_filtering {
+    include!("exception_filtering.rs");
+}
