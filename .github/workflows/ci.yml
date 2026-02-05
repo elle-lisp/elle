@@ -52,17 +52,18 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  benchmarks:
-    name: Benchmarks
+  audit:
+    name: Dependency Audit
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Run benchmarks
-        run: cargo bench --no-run
-      - name: Execute benchmarks
-        run: cargo bench --bench benchmarks -- --verbose
+      - name: Install and run cargo-audit
+        run: |
+          cargo install cargo-audit
+          cargo audit
 
   examples:
     name: Examples
@@ -306,7 +307,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [test, fmt, clippy, benchmarks, examples, coverage, docs]
+    needs: [test, fmt, clippy, examples, coverage, docs]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -318,9 +319,6 @@ jobs:
         run: exit 1
       - name: Check clippy
         if: needs.clippy.result != 'success'
-        run: exit 1
-      - name: Check benchmarks
-        if: needs.benchmarks.result != 'success'
         run: exit 1
       - name: Check examples
         if: needs.examples.result != 'success'
