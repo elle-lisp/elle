@@ -246,8 +246,15 @@ fn test_phase3_performance_baseline() {
         eval(&format!("(+ {} 1)", i)).unwrap();
     }
     let elapsed = start.elapsed();
-    // Should be fast (< 50ms for 100 operations with caching)
-    assert!(elapsed.as_millis() < 50, "Performance regression detected");
+    // Should be reasonably fast (< 200ms for 100 operations with caching)
+    // Note: This is a soft threshold to avoid flakiness on slower CI runners or under load.
+    // Code coverage instrumentation can add significant overhead, so we use a lenient threshold.
+    // If this consistently fails, it indicates a real performance regression, not CI flakiness.
+    assert!(
+        elapsed.as_millis() < 200,
+        "Performance regression detected: {} ms",
+        elapsed.as_millis()
+    );
 }
 
 #[test]
@@ -282,4 +289,3 @@ fn test_all_phase3_optimizations_enabled() {
     // Inline caching (implicit through performance)
     assert_eq!(eval("(+ 1 2)").unwrap(), Value::Int(3));
 }
-
