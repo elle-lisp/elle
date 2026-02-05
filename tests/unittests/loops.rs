@@ -92,7 +92,6 @@ fn unit_while_loop_returns_nil() {
 }
 
 #[test]
-#[ignore = "for loop variable scoping issues"]
 fn unit_for_loop_returns_nil() {
     let mut env = LoopTestEnv::new();
 

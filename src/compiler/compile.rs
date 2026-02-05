@@ -250,46 +250,42 @@ impl Compiler {
             }
 
             Expr::For { var, iter, body } => {
-                // Implement for loop: (for x in lst (do-something-with x))
+                // Implement for loop: (for x lst (do-something-with x))
                 // Compile the iterable (list)
                 self.compile_expr(iter, false);
 
-                // Store the list in a temporary location and iterate through it
+                // Loop start: check if list is nil
                 let loop_label = self.bytecode.current_pos() as i32;
 
                 // Check if list is nil (end of iteration)
-                self.bytecode.emit(Instruction::Dup); // Duplicate the list
+                // Stack: [list]
+                self.bytecode.emit(Instruction::Dup); // Stack: [list, list]
                 self.bytecode.emit(Instruction::IsNil);
-                self.bytecode.emit(Instruction::JumpIfFalse);
-                let body_jump = self.bytecode.current_pos() as i32;
-                self.bytecode.emit_u16(0); // Placeholder for jump to body
-
-                // If nil, exit loop
-                self.bytecode.emit(Instruction::Pop);
-                self.bytecode.emit(Instruction::Nil);
-                self.bytecode.emit(Instruction::Jump);
+                self.bytecode.emit(Instruction::JumpIfTrue);
                 let exit_jump = self.bytecode.current_pos() as i32;
-                self.bytecode.emit_u16(0); // Placeholder for exit
+                self.bytecode.emit_u16(0); // Placeholder for exit jump
+                                           // Stack: [list]
 
-                // Patch body jump
-                let body_pos = self.bytecode.current_pos() as i32;
-                self.bytecode
-                    .patch_jump(body_jump as usize, (body_pos - body_jump - 2) as i16);
+                // List is not nil: Extract car (current element)
+                self.bytecode.emit(Instruction::Dup); // Stack: [list, list]
+                self.bytecode.emit(Instruction::Car); // Stack: [list, first_element]
 
-                // Extract car (current element) and cdr (rest)
-                self.bytecode.emit(Instruction::Dup); // Duplicate list
-                self.bytecode.emit(Instruction::Car); // Get current element
-                                                      // Store in variable for body
+                // Store element in loop variable (and pop it)
                 let var_idx = self.bytecode.add_constant(Value::Symbol(*var));
                 self.bytecode.emit(Instruction::StoreGlobal);
                 self.bytecode.emit_u16(var_idx);
+                // Stack: [list, first_element] -> StoreGlobal pops then pushes -> [list, first_element]
+                // We need the first_element off the stack
+                self.bytecode.emit(Instruction::Pop);
+                // Stack: [list]
 
-                // Get rest for next iteration
-                self.bytecode.emit(Instruction::Cdr);
-
-                // Compile body
+                // Compile body (body may reference the loop variable, but won't consume the list)
                 self.compile_expr(body, false);
                 self.bytecode.emit(Instruction::Pop); // Pop body result
+                                                      // Stack: [list]
+
+                // Update list to rest for next iteration
+                self.bytecode.emit(Instruction::Cdr); // Stack: [rest_of_list]
 
                 // Loop back
                 self.bytecode.emit(Instruction::Jump);
@@ -304,6 +300,11 @@ impl Compiler {
                 // Patch the loop back jump
                 self.bytecode
                     .patch_jump(loop_jump as usize, (loop_label - loop_jump - 2) as i16);
+
+                // Pop the nil list from stack and push nil (loop return value)
+                // Stack: [nil]
+                self.bytecode.emit(Instruction::Pop);
+                self.bytecode.emit(Instruction::Nil);
             }
 
             Expr::Match {

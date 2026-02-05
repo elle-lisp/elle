@@ -128,7 +128,6 @@ fn test_while_loop_with_complex_condition() {
 }
 
 #[test]
-#[ignore = "for loop variable scoping issues"]
 fn test_for_loop_basic_iteration() {
     let mut eval = LoopEval::new();
 
@@ -136,9 +135,9 @@ fn test_for_loop_basic_iteration() {
     eval.eval("(define lst (list 1 2 3))").unwrap();
     let result = eval.eval("(for item lst (+ 1 1))");
 
-    // For loop might not work perfectly due to variable scoping issues,
-    // but it should at least complete
-    assert!(result.is_ok());
+    // For loop should complete and return nil
+    assert!(result.is_ok(), "for loop failed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Nil);
 }
 
 #[test]
