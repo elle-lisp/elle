@@ -1,6 +1,7 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
 use elle::compiler::converters::value_to_expr;
 use elle::{compile, list, read_str, register_primitives, Lexer, Reader, SymbolTable, Value, VM};
+use std::rc::Rc;
 
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
@@ -843,3 +844,91 @@ fn test_lambda_with_comparison() {
     "#;
     assert_eq!(eval(code).unwrap(), Value::Bool(true));
 }
+
+// Closure scoping tests (Issue #21 - Foundation work on closure improvements)
+// These tests demonstrate working closure parameter scoping with lambda expressions
+
+#[test]
+fn test_closure_captures_outer_variable() {
+    let code = r#"
+        (define x 100)
+        ((lambda (y) (+ x y)) 20)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(120));
+}
+
+#[test]
+fn test_closure_parameter_shadowing() {
+    let code = r#"
+        (define x 100)
+        ((lambda (x) (+ x 1)) 50)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(51));
+}
+
+#[test]
+fn test_closure_captures_multiple_variables() {
+    let code = r#"
+        (define x 10)
+        (define y 20)
+        (define z 30)
+        ((lambda (a b c) (+ a b c x y z)) 1 2 3)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(66));
+}
+
+#[test]
+fn test_closure_parameter_in_nested_expression() {
+    let code = r#"
+        ((lambda (x)
+          (if (> x 50) (* x 2) (+ x 100))) 25)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(125));
+}
+
+#[test]
+fn test_multiple_closures_independent_params() {
+    let code = r#"
+        (define f1 (lambda (x) (+ x 10)))
+        (define f2 (lambda (x) (* x 2)))
+        (+ (f1 5) (f2 5))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(25));
+}
+
+#[test]
+fn test_closure_captured_function_call() {
+    let code = r#"
+        (define add (lambda (a b) (+ a b)))
+        ((lambda (x y) (add x y)) 10 20)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(30));
+}
+
+#[test]
+fn test_closure_with_list_operations() {
+    let code = r#"
+        (define numbers (list 1 2 3 4 5))
+        ((lambda (lst) (first lst)) numbers)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(1));
+}
+
+#[test]
+fn test_closure_parameter_in_conditional() {
+    let code = r#"
+        ((lambda (n)
+          (if (nil? n) "empty" "nonempty"))
+         (list 1))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::String(Rc::from("nonempty")));
+}
+
+#[test]
+fn test_closure_preserves_parameter_type() {
+    let code = r#"
+        ((lambda (s) (string? s)) "hello")
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Bool(true));
+}
+
