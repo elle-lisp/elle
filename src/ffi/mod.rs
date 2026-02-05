@@ -17,6 +17,7 @@ pub mod header;
 pub mod loader;
 pub mod marshal;
 pub mod memory;
+pub mod primitives;
 pub mod safety;
 pub mod symbol;
 pub mod types;

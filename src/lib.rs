@@ -38,12 +38,14 @@ pub mod arithmetic;
 pub mod compiler;
 pub mod error;
 pub mod ffi;
-pub mod ffi_primitives;
 pub mod primitives;
 pub mod reader;
 pub mod symbol;
 pub mod value;
 pub mod vm;
+
+// Re-export ffi primitives from the ffi module
+pub use ffi::primitives as ffi_primitives;
 
 pub use compiler::{compile, Bytecode};
 pub use error::{RuntimeError, SourceLoc};
