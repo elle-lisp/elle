@@ -55,6 +55,8 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
     let contents =
         fs::read_to_string(filename).map_err(|e| format!("Failed to read file: {}", e))?;
 
+    let mut had_parse_error = false;
+
     // First pass: collect all top-level definitions to pre-register them
     // This allows recursive functions to reference themselves
     {
@@ -69,19 +71,27 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
         }
 
         let mut temp_reader = elle::reader::Reader::new(temp_tokens);
-        while let Ok(value) = temp_reader.read(symbols) {
-            // Check if this is a define
-            if let Ok(list) = value.list_to_vec() {
-                if list.len() >= 3 {
-                    if let elle::value::Value::Symbol(sym) = &list[0] {
-                        let name = symbols.name(*sym).unwrap_or("");
-                        if name == "define" {
-                            if let Ok(def_name) = list[1].as_symbol() {
-                                // Pre-register the symbol as nil so forward references work
-                                vm.set_global(def_name.0, elle::value::Value::Nil);
+        while let Some(result) = temp_reader.try_read(symbols) {
+            match result {
+                Ok(value) => {
+                    // Check if this is a define
+                    if let Ok(list) = value.list_to_vec() {
+                        if list.len() >= 3 {
+                            if let elle::value::Value::Symbol(sym) = &list[0] {
+                                let name = symbols.name(*sym).unwrap_or("");
+                                if name == "define" {
+                                    if let Ok(def_name) = list[1].as_symbol() {
+                                        // Pre-register the symbol as nil so forward references work
+                                        vm.set_global(def_name.0, elle::value::Value::Nil);
+                                    }
+                                }
                             }
                         }
                     }
+                }
+                Err(e) => {
+                    eprintln!("✗ Parse error: {}", e);
+                    had_parse_error = true;
                 }
             }
         }
@@ -99,8 +109,8 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
     }
 
     let mut reader = elle::reader::Reader::new(tokens);
-    loop {
-        match reader.read(symbols) {
+    while let Some(result) = reader.try_read(symbols) {
+        match result {
             Ok(value) => {
                 // Compile
                 let expr = match value_to_expr(&value, symbols) {
@@ -127,12 +137,17 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
             }
             Err(e) => {
                 eprintln!("✗ Parse error: {}", e);
-                break;
+                had_parse_error = true;
             }
         }
     }
 
-    Ok(())
+    // Return error if any parse errors occurred (will exit with status 1)
+    if had_parse_error {
+        Err("Parse errors encountered".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
@@ -214,11 +229,14 @@ fn main() {
 
     // Check for command-line arguments
     let args: Vec<String> = env::args().collect();
+    let mut had_errors = false;
+
     if args.len() > 1 {
         // Run file(s)
         for filename in &args[1..] {
             if let Err(e) = run_file(filename, &mut vm, &mut symbols) {
                 eprintln!("Error: {}", e);
+                had_errors = true;
             }
         }
     } else {
@@ -232,5 +250,10 @@ fn main() {
     if args.len() == 1 {
         println!();
         println!("Goodbye!");
+    }
+
+    // Exit with appropriate status code
+    if had_errors {
+        std::process::exit(1);
     }
 }

@@ -323,66 +323,80 @@ impl Reader {
         token
     }
 
-    pub fn read(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
-        match self.current() {
-            None => Err("Unexpected EOF".to_string()),
-            Some(Token::LeftParen) => self.read_list(symbols),
-            Some(Token::LeftBracket) => self.read_vector(symbols),
-            Some(Token::Quote) => {
+    /// Try to read a single value from the token stream.
+    /// Returns None if at EOF (not an error), Some(Err(_)) if there's a parse error.
+    pub fn try_read(&mut self, symbols: &mut SymbolTable) -> Option<Result<Value, String>> {
+        let token = self.current().cloned()?;
+        Some(self.read_one(symbols, &token))
+    }
+
+    /// Read a single token/form and return result
+    fn read_one(&mut self, symbols: &mut SymbolTable, token: &Token) -> Result<Value, String> {
+        match token {
+            Token::LeftParen => self.read_list(symbols),
+            Token::LeftBracket => self.read_vector(symbols),
+            Token::Quote => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let quote_sym = Value::Symbol(symbols.intern("quote"));
                 Ok(cons(quote_sym, cons(val, Value::Nil)))
             }
-            Some(Token::Quasiquote) => {
+            Token::Quasiquote => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let qq_sym = Value::Symbol(symbols.intern("quasiquote"));
                 Ok(cons(qq_sym, cons(val, Value::Nil)))
             }
-            Some(Token::Unquote) => {
+            Token::Unquote => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let uq_sym = Value::Symbol(symbols.intern("unquote"));
                 Ok(cons(uq_sym, cons(val, Value::Nil)))
             }
-            Some(Token::UnquoteSplicing) => {
+            Token::UnquoteSplicing => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let uqs_sym = Value::Symbol(symbols.intern("unquote-splicing"));
                 Ok(cons(uqs_sym, cons(val, Value::Nil)))
             }
-            Some(Token::Integer(n)) => {
+            Token::Integer(n) => {
                 let val = Value::Int(*n);
                 self.advance();
                 Ok(val)
             }
-            Some(Token::Float(f)) => {
+            Token::Float(f) => {
                 let val = Value::Float(*f);
                 self.advance();
                 Ok(val)
             }
-            Some(Token::String(s)) => {
+            Token::String(s) => {
                 let val = Value::String(Rc::from(s.as_str()));
                 self.advance();
                 Ok(val)
             }
-            Some(Token::Bool(b)) => {
+            Token::Bool(b) => {
                 let val = Value::Bool(*b);
                 self.advance();
                 Ok(val)
             }
-            Some(Token::Nil) => {
+            Token::Nil => {
                 self.advance();
                 Ok(Value::Nil)
             }
-            Some(Token::Symbol(s)) => {
+            Token::Symbol(s) => {
                 let id = symbols.intern(s);
                 self.advance();
                 Ok(Value::Symbol(id))
             }
-            Some(Token::RightParen) => Err("Unexpected )".to_string()),
-            Some(Token::RightBracket) => Err("Unexpected ]".to_string()),
+            Token::RightParen => Err("Unexpected )".to_string()),
+            Token::RightBracket => Err("Unexpected ]".to_string()),
+        }
+    }
+
+    pub fn read(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
+        match self.try_read(symbols) {
+            Some(result) => result,
+            None => Err("Unexpected EOF".to_string()), // Keep old API for backward compat
         }
     }
 
