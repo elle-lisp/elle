@@ -38,6 +38,9 @@ mod ffi_struct_marshaling {
 mod ffi_custom_handlers {
     include!("ffi-custom-handlers.rs");
 }
+mod ffi_handler_integration {
+    include!("ffi-handler-integration.rs");
+}
 mod shebang {
     include!("shebang.rs");
 }

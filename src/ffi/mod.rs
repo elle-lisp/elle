@@ -13,6 +13,7 @@
 pub mod bindings;
 pub mod call;
 pub mod callback;
+pub mod handler_marshal;
 pub mod handlers;
 pub mod header;
 pub mod loader;
@@ -133,6 +134,38 @@ impl FFISubsystem {
     /// Get the custom type handler registry.
     pub fn handler_registry(&self) -> &HandlerRegistry {
         &self.handler_registry
+    }
+
+    /// Marshal an Elle value to C with handler support.
+    ///
+    /// This method checks for registered custom handlers before falling back
+    /// to default marshaling.
+    pub fn marshall_elle_to_c(
+        &self,
+        value: &crate::value::Value,
+        ctype: &types::CType,
+    ) -> Result<marshal::CValue, String> {
+        handler_marshal::HandlerMarshal::elle_to_c_with_handlers(
+            value,
+            ctype,
+            &self.handler_registry,
+        )
+    }
+
+    /// Unmarshal a C value to Elle with handler support.
+    ///
+    /// This method checks for registered custom handlers before falling back
+    /// to default unmarshaling.
+    pub fn marshall_c_to_elle(
+        &self,
+        cval: &marshal::CValue,
+        ctype: &types::CType,
+    ) -> Result<crate::value::Value, String> {
+        handler_marshal::HandlerMarshal::c_to_elle_with_handlers(
+            cval,
+            ctype,
+            &self.handler_registry,
+        )
     }
 }
 
