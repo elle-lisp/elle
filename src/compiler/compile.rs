@@ -18,22 +18,44 @@ impl Compiler {
         }
     }
 
-    /// Collect all top-level define statements from an expression
+    /// Collect all define statements from an expression
     /// Returns a vector of symbol IDs that are defined at this level
+    /// Recursively collects from nested structures like while/for loop bodies
     fn collect_defines(expr: &Expr) -> Vec<SymbolId> {
-        match expr {
-            Expr::Begin(exprs) => {
-                let mut defines = Vec::new();
-                for e in exprs {
-                    if let Expr::Define { name, .. } = e {
+        let mut defines = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        fn collect_recursive(
+            expr: &Expr,
+            defines: &mut Vec<SymbolId>,
+            seen: &mut std::collections::HashSet<u32>,
+        ) {
+            match expr {
+                Expr::Begin(exprs) => {
+                    for e in exprs {
+                        if let Expr::Define { name, .. } = e {
+                            if seen.insert(name.0) {
+                                defines.push(*name);
+                            }
+                        }
+                        // Also recursively collect from nested structures
+                        collect_recursive(e, defines, seen);
+                    }
+                }
+                Expr::Define { name, .. } => {
+                    if seen.insert(name.0) {
                         defines.push(*name);
                     }
                 }
-                defines
+                Expr::While { body, .. } | Expr::For { body, .. } => {
+                    collect_recursive(body, defines, seen);
+                }
+                _ => {}
             }
-            Expr::Define { name, .. } => vec![*name],
-            _ => Vec::new(),
         }
+
+        collect_recursive(expr, &mut defines, &mut seen);
+        defines
     }
 
     fn compile_expr(&mut self, expr: &Expr, tail: bool) {
@@ -543,6 +565,28 @@ impl Compiler {
                 // XOR is transformed to a function call in the converter
                 // This case should never be reached, but we handle it for exhaustiveness
                 panic!("Xor expression should be transformed to a function call");
+            }
+
+            Expr::ScopeVar(depth, index) => {
+                // Scoped variable reference (from outer scopes at runtime)
+                // This will be handled by Phase 2 VM runtime scope stack
+                // For now, emit LoadUpvalue as a placeholder
+                self.bytecode.emit(Instruction::LoadUpvalue);
+                self.bytecode.emit_byte((*depth + 1) as u8);
+                self.bytecode.emit_byte(*index as u8);
+            }
+
+            Expr::ScopeEntry(scope_type) => {
+                // Push a new scope onto the runtime scope stack
+                // This will be implemented in Phase 2 with PushScope instruction
+                // For now, this is a no-op (will be handled by Phase 2)
+                let _ = scope_type; // Suppress unused warning
+            }
+
+            Expr::ScopeExit => {
+                // Pop the current scope from the runtime scope stack
+                // This will be implemented in Phase 2 with PopScope instruction
+                // For now, this is a no-op (will be handled by Phase 2)
             }
         }
     }

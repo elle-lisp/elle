@@ -35,3 +35,6 @@ mod closures_and_lambdas {
 mod mutual_recursion {
     include!("mutual_recursion.rs");
 }
+mod scope_compilation {
+    include!("scope_compilation.rs");
+}

@@ -5,6 +5,7 @@ pub mod control;
 pub mod core;
 pub mod data;
 pub mod literals;
+pub mod scope;
 pub mod stack;
 pub mod types;
 pub mod variables;
@@ -305,6 +306,30 @@ impl VM {
 
                 Instruction::False => {
                     literals::handle_false(self);
+                }
+
+                // Scope management (Phase 2)
+                Instruction::PushScope => {
+                    // Read scope type from bytecode
+                    let scope_type_byte = bytecode[ip];
+                    ip += 1;
+                    scope::handle_push_scope(self, scope_type_byte)?;
+                }
+
+                Instruction::PopScope => {
+                    scope::handle_pop_scope(self)?;
+                }
+
+                Instruction::LoadScoped => {
+                    scope::handle_load_scoped(self, bytecode, &mut ip)?;
+                }
+
+                Instruction::StoreScoped => {
+                    scope::handle_store_scoped(self, bytecode, &mut ip)?;
+                }
+
+                Instruction::DefineLocal => {
+                    scope::handle_define_local(self, bytecode, &mut ip, constants)?;
                 }
             }
         }

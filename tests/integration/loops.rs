@@ -275,11 +275,15 @@ fn test_while_loop_power_calculation() {
 }
 
 #[test]
-#[ignore = "requires define inside loop body"]
+#[ignore = "define in nested scopes requires scope management refactor"]
 fn test_while_loop_gcd_calculation() {
     let mut eval = LoopEval::new();
 
     // Test: Euclidean algorithm for GCD using while loop
+    // NOTE: This test requires proper variable scoping for define in nested contexts.
+    // Currently, define only works at the top level. Supporting defines in nested scopes
+    // (like inside while loop bodies) requires refactoring variable scope management
+    // in the compiler and VM. See issue #66 for details.
     eval.eval("(define a 48)").unwrap();
     eval.eval("(define b 18)").unwrap();
 

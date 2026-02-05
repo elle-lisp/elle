@@ -101,6 +101,22 @@ pub enum Instruction {
     /// Boolean constants
     True,
     False,
+
+    /// Scope management instructions (Phase 2)
+    /// Push a new scope (scope_type u8)
+    PushScope,
+
+    /// Pop the current scope
+    PopScope,
+
+    /// Load scoped variable (depth u8, index u8)
+    LoadScoped,
+
+    /// Store scoped variable (depth u8, index u8)
+    StoreScoped,
+
+    /// Define local variable (symbol_idx u16)
+    DefineLocal,
 }
 
 /// Inline cache entry for function lookups

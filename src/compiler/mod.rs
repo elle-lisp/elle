@@ -6,6 +6,7 @@ pub mod compile;
 pub mod converters;
 pub mod macros;
 pub mod patterns;
+pub mod scope;
 
 pub use bytecode::{Bytecode, Instruction};
 pub use bytecode_debug::{disassemble, format_bytecode_with_constants};
