@@ -32,3 +32,6 @@ mod exception_filtering {
 mod closures_and_lambdas {
     include!("closures_and_lambdas.rs");
 }
+mod mutual_recursion {
+    include!("mutual_recursion.rs");
+}
