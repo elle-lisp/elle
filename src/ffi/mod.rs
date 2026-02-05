@@ -25,6 +25,7 @@ pub mod wasm;
 use loader::LibraryHandle;
 use std::collections::HashMap;
 use symbol::SymbolResolver;
+use types::{StructId, StructLayout};
 
 /// The FFI subsystem manages loaded libraries and cached symbols.
 pub struct FFISubsystem {
@@ -34,6 +35,10 @@ pub struct FFISubsystem {
     next_lib_id: u32,
     /// Symbol resolver with caching
     symbol_resolver: SymbolResolver,
+    /// Registered struct layouts: id -> layout
+    struct_layouts: HashMap<u32, StructLayout>,
+    /// Next struct ID to assign
+    next_struct_id: u32,
 }
 
 impl FFISubsystem {
@@ -43,6 +48,8 @@ impl FFISubsystem {
             libraries: HashMap::new(),
             next_lib_id: 1,
             symbol_resolver: SymbolResolver::new(),
+            struct_layouts: HashMap::new(),
+            next_struct_id: 1,
         }
     }
 
@@ -88,6 +95,32 @@ impl FFISubsystem {
         self.libraries
             .iter()
             .map(|(id, lib)| (*id, lib.path.clone()))
+            .collect()
+    }
+
+    /// Register a struct layout.
+    pub fn register_struct_layout(&mut self, layout: StructLayout) -> StructId {
+        let id = StructId::new(self.next_struct_id);
+        self.next_struct_id += 1;
+        self.struct_layouts.insert(id.0, layout);
+        id
+    }
+
+    /// Get a registered struct layout by ID.
+    pub fn get_struct_layout(&self, id: StructId) -> Option<&StructLayout> {
+        self.struct_layouts.get(&id.0)
+    }
+
+    /// Get a mutable reference to a registered struct layout.
+    pub fn get_struct_layout_mut(&mut self, id: StructId) -> Option<&mut StructLayout> {
+        self.struct_layouts.get_mut(&id.0)
+    }
+
+    /// List all registered struct layouts.
+    pub fn struct_layouts(&self) -> Vec<(StructId, &StructLayout)> {
+        self.struct_layouts
+            .iter()
+            .map(|(id, layout)| (StructId(*id), layout))
             .collect()
     }
 }
@@ -136,5 +169,65 @@ mod tests {
 
         // Try to unload nonexistent library
         assert!(ffi.unload_library(id).is_none());
+    }
+
+    #[test]
+    fn test_struct_layout_registration() {
+        use crate::ffi::types::{StructField, StructId, StructLayout};
+
+        let mut ffi = FFISubsystem::new();
+
+        // Create a struct layout
+        let layout = StructLayout::new(
+            StructId::new(1),
+            "Point".to_string(),
+            vec![
+                StructField {
+                    name: "x".to_string(),
+                    ctype: types::CType::Int,
+                    offset: 0,
+                },
+                StructField {
+                    name: "y".to_string(),
+                    ctype: types::CType::Int,
+                    offset: 4,
+                },
+            ],
+            8,
+            4,
+        );
+
+        // Register it
+        let id = ffi.register_struct_layout(layout.clone());
+
+        // Retrieve it
+        let retrieved = ffi.get_struct_layout(id);
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().name, "Point");
+        assert_eq!(retrieved.unwrap().size, 8);
+    }
+
+    #[test]
+    fn test_multiple_struct_layouts() {
+        use crate::ffi::types::{StructId, StructLayout};
+
+        let mut ffi = FFISubsystem::new();
+
+        // Register multiple struct layouts
+        let layout1 = StructLayout::new(StructId::new(1), "Point".to_string(), vec![], 8, 4);
+
+        let layout2 = StructLayout::new(StructId::new(2), "Rectangle".to_string(), vec![], 16, 4);
+
+        let id1 = ffi.register_struct_layout(layout1);
+        let id2 = ffi.register_struct_layout(layout2);
+
+        // Verify both are registered
+        assert_ne!(id1.0, id2.0);
+        assert!(ffi.get_struct_layout(id1).is_some());
+        assert!(ffi.get_struct_layout(id2).is_some());
+
+        // List them
+        let layouts = ffi.struct_layouts();
+        assert_eq!(layouts.len(), 2);
     }
 }
