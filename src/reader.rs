@@ -437,7 +437,15 @@ impl Reader {
 }
 
 pub fn read_str(input: &str, symbols: &mut SymbolTable) -> Result<Value, String> {
-    let mut lexer = Lexer::new(input);
+    // Strip shebang if present (e.g., #!/usr/bin/env elle)
+    let input = if input.starts_with("#!") {
+        // Find the end of the first line and skip it
+        input.lines().skip(1).collect::<Vec<_>>().join("\n")
+    } else {
+        input.to_string()
+    };
+
+    let mut lexer = Lexer::new(&input);
     let mut tokens = Vec::new();
 
     while let Some(token) = lexer.next_token()? {

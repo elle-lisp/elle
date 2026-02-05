@@ -52,8 +52,13 @@ fn print_help() {
 }
 
 fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
-    let contents =
+    let mut contents =
         fs::read_to_string(filename).map_err(|e| format!("Failed to read file: {}", e))?;
+
+    // Strip shebang if present (e.g., #!/usr/bin/env elle)
+    if contents.starts_with("#!") {
+        contents = contents.lines().skip(1).collect::<Vec<_>>().join("\n");
+    }
 
     let mut had_parse_error = false;
     let mut had_runtime_error = false;

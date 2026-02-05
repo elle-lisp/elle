@@ -14,6 +14,9 @@ mod reader {
 mod primitives {
     include!("primitives.rs");
 }
+mod shebang {
+    include!("shebang.rs");
+}
 mod exception_handling {
     include!("exception_handling.rs");
 }
