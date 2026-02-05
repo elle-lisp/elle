@@ -275,7 +275,6 @@ fn test_while_loop_power_calculation() {
 }
 
 #[test]
-#[ignore = "define in nested scopes requires scope management refactor"]
 fn test_while_loop_gcd_calculation() {
     let mut eval = LoopEval::new();
 

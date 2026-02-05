@@ -181,6 +181,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Additional utilities
     register_fn(vm, symbols, "mod", prim_mod);
+    register_fn(vm, symbols, "%", prim_mod); // % as alias for mod
     register_fn(vm, symbols, "remainder", prim_remainder);
     register_fn(vm, symbols, "even?", prim_even);
     register_fn(vm, symbols, "odd?", prim_odd);
