@@ -8,6 +8,7 @@ rustc-hash = "2.0"
 smallvec = "1.11"
 libloading = "0.8"
 bindgen = "0.69"
+rustyline = "14"
 
 [dev-dependencies]
 criterion = "0.5"

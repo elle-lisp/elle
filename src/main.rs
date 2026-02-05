@@ -1,6 +1,8 @@
 use elle::compiler::converters::value_to_expr;
 use elle::ffi_primitives;
+use elle::repl::Repl;
 use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, VM};
+use rustyline::error::ReadlineError;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -161,6 +163,93 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
 
 fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
     print_welcome();
+
+    // Create REPL with readline support
+    let mut repl = match Repl::new() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("✗ Failed to initialize readline: {}", e);
+            // Fall back to basic stdin reading
+            run_repl_fallback(vm, symbols);
+            return;
+        }
+    };
+
+    loop {
+        // Read line with readline support
+        match repl.read_line("> ") {
+            Ok(input) => {
+                let input = input.trim();
+                if input.is_empty() {
+                    continue;
+                }
+
+                // Add to history
+                repl.add_history(input);
+
+                // Check for built-in REPL commands
+                match input {
+                    "(exit)" | "exit" => break,
+                    "(help)" | "help" => {
+                        print_help();
+                        continue;
+                    }
+                    _ => {}
+                }
+
+                // Read
+                let value = match read_str(input, symbols) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("✗ Parse error: {}", e);
+                        print_error_context(input, "parse error", 1, 1);
+                        continue;
+                    }
+                };
+
+                // Compile
+                let expr = match value_to_expr(&value, symbols) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!("✗ Compilation error: {}", e);
+                        continue;
+                    }
+                };
+
+                let bytecode = compile(&expr);
+
+                // Execute
+                match vm.execute(&bytecode) {
+                    Ok(result) => {
+                        if !result.is_nil() {
+                            println!("⟹ {:?}", result);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("✗ Runtime error: {}", e);
+                    }
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("^C");
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                break;
+            }
+            Err(e) => {
+                eprintln!("✗ Readline error: {}", e);
+                break;
+            }
+        }
+    }
+
+    // Save history
+    repl.finalize();
+}
+
+fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) {
+    eprintln!("Using fallback stdin input (no history or editing)");
 
     loop {
         print!("> ");
