@@ -132,14 +132,25 @@ jobs:
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Cache tarpaulin
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/bin/cargo-tarpaulin
+          key: ${{ runner.os }}-tarpaulin-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-tarpaulin-
       - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
+        run: |
+          if ! command -v cargo-tarpaulin &> /dev/null; then
+            cargo install cargo-tarpaulin
+          fi
       - name: Generate coverage
-        run: cargo tarpaulin --out Xml --timeout 300 --exclude-files tests/* --exclude-files examples/*
+        run: cargo tarpaulin
       - name: Upload to Codecov
         uses: codecov/codecov-action@v3
         with:
