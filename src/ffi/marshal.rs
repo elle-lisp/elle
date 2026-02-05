@@ -3,7 +3,7 @@
 //! This module handles conversion of Elle values to C representations
 //! and vice versa, supporting all basic types, pointers, structs, and arrays.
 
-use super::types::{CType, StructLayout};
+use super::types::{CType, StructLayout, UnionLayout};
 use crate::value::{CHandle, Value};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -23,6 +23,8 @@ pub enum CValue {
     String(Vec<u8>),
     /// Raw struct bytes
     Struct(Vec<u8>),
+    /// Raw union bytes (all fields at offset 0)
+    Union(Vec<u8>),
     /// Array of values
     Array(Vec<CValue>),
 }
@@ -41,6 +43,7 @@ impl CValue {
                 ptr.to_le_bytes().to_vec()
             }
             CValue::Struct(bytes) => bytes.clone(),
+            CValue::Union(bytes) => bytes.clone(),
             CValue::Array(_) => {
                 // Arrays are typically passed by pointer
                 vec![]
@@ -323,6 +326,9 @@ impl Marshal {
             },
             CType::Void => Err("Cannot marshal void as argument".to_string()),
             CType::Struct(_) => Self::marshal_struct(value),
+            CType::Union(_) => Err(
+                "Union marshaling requires layout info - use marshal_union_with_layout".to_string(),
+            ),
             CType::Array(elem_type, count) => Self::marshal_array(value, elem_type, *count),
         }
     }
@@ -467,6 +473,10 @@ impl Marshal {
                 _ => Err("Type mismatch in unmarshal: expected enum".to_string()),
             },
             CType::Struct(_) => Self::unmarshal_struct(cvalue),
+            CType::Union(_) => Err(
+                "Union unmarshaling requires layout info - use unmarshal_union_with_layout"
+                    .to_string(),
+            ),
             CType::Array(elem_type, _) => Self::unmarshal_array(cvalue, elem_type),
         }
     }
@@ -519,6 +529,92 @@ impl Marshal {
                 Ok(Value::Vector(std::rc::Rc::new(result)))
             }
             _ => Err("Type mismatch in unmarshal: expected array".to_string()),
+        }
+    }
+
+    /// Marshal a union value to C representation with layout information.
+    ///
+    /// The union value should be a vector with a single element: \[field_index_or_value\].
+    /// The field is packed at offset 0 (all union fields overlap at offset 0).
+    pub fn marshal_union_with_layout(
+        value: &Value,
+        layout: &UnionLayout,
+    ) -> Result<CValue, String> {
+        match value {
+            Value::Vector(fields) => {
+                // Union must have exactly one field value
+                if fields.is_empty() || fields.len() > layout.fields.len() {
+                    return Err(format!(
+                        "Union has {} fields but got {} values",
+                        layout.fields.len(),
+                        fields.len()
+                    ));
+                }
+
+                // Get the field index or use first field
+                let field_idx = if fields.len() == 2 {
+                    // Optional: first element could be field index
+                    match &fields[0] {
+                        Value::Int(idx) => {
+                            if *idx < 0 || *idx as usize >= layout.fields.len() {
+                                return Err(format!("Union field index out of range: {}", idx));
+                            }
+                            *idx as usize
+                        }
+                        _ => 0, // Treat as [value] format - use first field
+                    }
+                } else {
+                    0
+                };
+
+                let field = &layout.fields[field_idx];
+                let field_value = if fields.len() == 2 {
+                    &fields[1]
+                } else {
+                    &fields[0]
+                };
+
+                // Create bytes buffer of union size
+                let mut bytes = vec![0u8; layout.size];
+
+                // Pack the field value at offset 0 (all union fields start at 0)
+                pack_field(&mut bytes, field_value, 0, &field.ctype)?;
+
+                Ok(CValue::Union(bytes))
+            }
+            _ => Err(format!("Cannot marshal {:?} as union", value)),
+        }
+    }
+
+    /// Unmarshal a C union to Elle value with layout information.
+    ///
+    /// Returns a vector with all field values (all fields read at offset 0).
+    /// In practice, the caller must know which field is active.
+    pub fn unmarshal_union_with_layout(
+        cvalue: &CValue,
+        layout: &UnionLayout,
+    ) -> Result<Value, String> {
+        match cvalue {
+            CValue::Union(bytes) => {
+                if bytes.len() != layout.size {
+                    return Err(format!(
+                        "Union data size mismatch: expected {}, got {}",
+                        layout.size,
+                        bytes.len()
+                    ));
+                }
+
+                // Return all field values (they all read the same bytes at offset 0)
+                let mut field_values = Vec::new();
+
+                for field in &layout.fields {
+                    let field_value = unpack_field(bytes, 0, &field.ctype)?;
+                    field_values.push(field_value);
+                }
+
+                Ok(Value::Vector(std::rc::Rc::new(field_values)))
+            }
+            _ => Err("Type mismatch in unmarshal: expected union".to_string()),
         }
     }
 }

@@ -11,6 +11,7 @@ pub mod handlers;
 pub mod library;
 pub mod memory;
 pub mod types;
+pub mod unions;
 pub mod wrappers;
 
 pub use callbacks::{
@@ -37,6 +38,7 @@ pub use memory::{
     prim_with_ffi_safety_checks, prim_with_ffi_safety_checks_wrapper,
 };
 pub use types::parse_ctype;
+pub use unions::{prim_define_c_union, prim_define_c_union_wrapper};
 
 // Header parsing is exported from enums module
 pub use enums::{prim_load_header_with_lib, prim_load_header_with_lib_wrapper};

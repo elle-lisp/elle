@@ -142,6 +142,7 @@ fn ctype_to_lisp_string(ctype: &super::types::CType) -> String {
         }
         CType::Struct(id) => format!(":struct{:?}", id),
         CType::Enum(id) => format!(":enum{:?}", id),
+        CType::Union(id) => format!(":union{:?}", id),
         CType::Array(elem, count) => {
             format!("(:array {} {})", ctype_to_lisp_string(elem), count)
         }

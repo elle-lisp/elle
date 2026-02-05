@@ -25,6 +25,16 @@ impl EnumId {
     }
 }
 
+/// Unique identifier for a C union type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UnionId(pub u32);
+
+impl UnionId {
+    pub fn new(id: u32) -> Self {
+        UnionId(id)
+    }
+}
+
 /// A C type that can be marshaled to/from Elle values.
 ///
 /// # Supported Types
@@ -59,6 +69,8 @@ pub enum CType {
     Struct(StructId),
     /// C enum type identified by EnumId
     Enum(EnumId),
+    /// C union type identified by UnionId
+    Union(UnionId),
     /// C array type
     Array(Box<CType>, usize),
 }
@@ -79,6 +91,7 @@ impl CType {
             CType::Pointer(_) => 8, // x86-64: pointers are 8 bytes
             CType::Struct(_) => panic!("Struct size must be queried from layout"),
             CType::Enum(_) => 4, // enums are typically int-sized
+            CType::Union(_) => panic!("Union size must be queried from layout"),
             CType::Array(elem_type, count) => elem_type.size() * count,
         }
     }
@@ -89,6 +102,7 @@ impl CType {
             CType::Void => 0,
             CType::Pointer(_) => 8,
             CType::Struct(_) => panic!("Struct alignment must be queried from layout"),
+            CType::Union(_) => panic!("Union alignment must be queried from layout"),
             CType::Array(elem_type, _) => elem_type.alignment(),
             _ => self.size(),
         }
@@ -137,6 +151,11 @@ impl CType {
     pub fn is_enum(&self) -> bool {
         matches!(self, CType::Enum(_))
     }
+
+    /// Check if this is a union type.
+    pub fn is_union(&self) -> bool {
+        matches!(self, CType::Union(_))
+    }
 }
 
 impl fmt::Display for CType {
@@ -160,6 +179,7 @@ impl fmt::Display for CType {
             CType::Pointer(inner) => write!(f, "{}*", inner),
             CType::Struct(id) => write!(f, "struct_{:?}", id),
             CType::Enum(id) => write!(f, "enum_{:?}", id),
+            CType::Union(id) => write!(f, "union_{:?}", id),
             CType::Array(elem, count) => write!(f, "{}[{}]", elem, count),
         }
     }
@@ -253,6 +273,58 @@ impl EnumLayout {
     /// Get a variant by name.
     pub fn get_variant(&self, name: &str) -> Option<&EnumVariant> {
         self.variants.iter().find(|v| v.name == name)
+    }
+}
+
+/// A single field within a C union.
+///
+/// Unlike struct fields, all union fields start at offset 0 and overlap in memory.
+#[derive(Debug, Clone)]
+pub struct UnionField {
+    pub name: String,
+    pub ctype: CType,
+}
+
+/// Layout information for a C union type.
+///
+/// A union stores all fields at the same memory location (offset 0).
+/// The size of the union equals the size of its largest field.
+/// The alignment of the union equals the alignment of its largest field.
+#[derive(Debug, Clone)]
+pub struct UnionLayout {
+    pub id: UnionId,
+    pub name: String,
+    pub fields: Vec<UnionField>,
+    pub size: usize,
+    pub align: usize,
+}
+
+impl UnionLayout {
+    /// Create a new union layout.
+    pub fn new(
+        id: UnionId,
+        name: String,
+        fields: Vec<UnionField>,
+        size: usize,
+        align: usize,
+    ) -> Self {
+        UnionLayout {
+            id,
+            name,
+            fields,
+            size,
+            align,
+        }
+    }
+
+    /// Get a field by name.
+    pub fn get_field(&self, name: &str) -> Option<&UnionField> {
+        self.fields.iter().find(|f| f.name == name)
+    }
+
+    /// Check if a field exists by name.
+    pub fn has_field(&self, name: &str) -> bool {
+        self.fields.iter().any(|f| f.name == name)
     }
 }
 

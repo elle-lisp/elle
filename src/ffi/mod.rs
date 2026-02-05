@@ -29,7 +29,7 @@ use handlers::HandlerRegistry;
 use loader::LibraryHandle;
 use std::collections::HashMap;
 use symbol::SymbolResolver;
-use types::{StructId, StructLayout};
+use types::{StructId, StructLayout, UnionId, UnionLayout};
 
 /// The FFI subsystem manages loaded libraries and cached symbols.
 pub struct FFISubsystem {
@@ -43,6 +43,10 @@ pub struct FFISubsystem {
     struct_layouts: HashMap<u32, StructLayout>,
     /// Next struct ID to assign
     next_struct_id: u32,
+    /// Registered union layouts: id -> layout
+    union_layouts: HashMap<u32, UnionLayout>,
+    /// Next union ID to assign
+    next_union_id: u32,
     /// Custom type handler registry
     handler_registry: HandlerRegistry,
 }
@@ -56,6 +60,8 @@ impl FFISubsystem {
             symbol_resolver: SymbolResolver::new(),
             struct_layouts: HashMap::new(),
             next_struct_id: 1,
+            union_layouts: HashMap::new(),
+            next_union_id: 1,
             handler_registry: HandlerRegistry::new(),
         }
     }
@@ -128,6 +134,32 @@ impl FFISubsystem {
         self.struct_layouts
             .iter()
             .map(|(id, layout)| (StructId(*id), layout))
+            .collect()
+    }
+
+    /// Register a union layout.
+    pub fn register_union_layout(&mut self, layout: UnionLayout) -> UnionId {
+        let id = UnionId::new(self.next_union_id);
+        self.next_union_id += 1;
+        self.union_layouts.insert(id.0, layout);
+        id
+    }
+
+    /// Get a registered union layout by ID.
+    pub fn get_union_layout(&self, id: UnionId) -> Option<&UnionLayout> {
+        self.union_layouts.get(&id.0)
+    }
+
+    /// Get a mutable reference to a registered union layout.
+    pub fn get_union_layout_mut(&mut self, id: UnionId) -> Option<&mut UnionLayout> {
+        self.union_layouts.get_mut(&id.0)
+    }
+
+    /// List all registered union layouts.
+    pub fn union_layouts(&self) -> Vec<(UnionId, &UnionLayout)> {
+        self.union_layouts
+            .iter()
+            .map(|(id, layout)| (UnionId(*id), layout))
             .collect()
     }
 
