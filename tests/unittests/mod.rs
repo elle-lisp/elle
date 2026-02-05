@@ -26,3 +26,6 @@ mod loops {
 mod exception_filtering {
     include!("exception_filtering.rs");
 }
+mod closures_and_lambdas {
+    include!("closures_and_lambdas.rs");
+}

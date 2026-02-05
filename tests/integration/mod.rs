@@ -5,23 +5,20 @@ mod core {
 mod advanced {
     include!("advanced.rs");
 }
-mod stdlib {
-    include!("stdlib.rs");
-}
-mod optimization {
-    include!("optimization.rs");
-}
-mod metaprogramming {
-    include!("metaprogramming.rs");
-}
-mod stability {
-    include!("stability.rs");
+mod types {
+    include!("types.rs");
 }
 mod macros {
     include!("macros.rs");
 }
-mod types {
-    include!("types.rs");
+mod metaprogramming {
+    include!("metaprogramming.rs");
+}
+mod stdlib {
+    include!("stdlib.rs");
+}
+mod stability {
+    include!("stability.rs");
 }
 mod property {
     include!("property.rs");
@@ -43,4 +40,10 @@ mod loops {
 }
 mod exception_filtering {
     include!("exception_filtering.rs");
+}
+mod optimization {
+    include!("optimization.rs");
+}
+mod closures_and_lambdas {
+    include!("closures_and_lambdas.rs");
 }
