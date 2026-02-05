@@ -18,6 +18,24 @@ impl Compiler {
         }
     }
 
+    /// Collect all top-level define statements from an expression
+    /// Returns a vector of symbol IDs that are defined at this level
+    fn collect_defines(expr: &Expr) -> Vec<SymbolId> {
+        match expr {
+            Expr::Begin(exprs) => {
+                let mut defines = Vec::new();
+                for e in exprs {
+                    if let Expr::Define { name, .. } = e {
+                        defines.push(*name);
+                    }
+                }
+                defines
+            }
+            Expr::Define { name, .. } => vec![*name],
+            _ => Vec::new(),
+        }
+    }
+
     fn compile_expr(&mut self, expr: &Expr, tail: bool) {
         match expr {
             Expr::Literal(val) => match val {
@@ -71,6 +89,18 @@ impl Compiler {
             }
 
             Expr::Begin(exprs) => {
+                // Pre-declare all top-level defines to enable recursive functions
+                // This allows a function to reference itself in its own body
+                let defines = Self::collect_defines(expr);
+                for sym_id in defines {
+                    // Load nil and store it in the global
+                    self.bytecode.emit(Instruction::Nil);
+                    let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
+                    self.bytecode.emit(Instruction::StoreGlobal);
+                    self.bytecode.emit_u16(idx);
+                }
+
+                // Now compile the expressions normally
                 for (i, expr) in exprs.iter().enumerate() {
                     let is_last = i == exprs.len() - 1;
                     self.compile_expr(expr, tail && is_last);

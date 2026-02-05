@@ -1,13 +1,42 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
 use elle::compiler::converters::value_to_expr;
-use elle::{compile, read_str, register_primitives, SymbolTable, Value, VM};
+use elle::{compile, list, read_str, register_primitives, Lexer, Reader, SymbolTable, Value, VM};
 
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     register_primitives(&mut vm, &mut symbols);
 
-    let value = read_str(input, &mut symbols)?;
+    // Tokenize the input
+    let mut lexer = Lexer::new(input);
+    let mut tokens = Vec::new();
+    while let Some(token) = lexer.next_token()? {
+        tokens.push(token);
+    }
+
+    if tokens.is_empty() {
+        return Err("No input".to_string());
+    }
+
+    // Read all expressions
+    let mut reader = Reader::new(tokens);
+    let mut values = Vec::new();
+    while let Some(result) = reader.try_read(&mut symbols) {
+        values.push(result?);
+    }
+
+    // If we have multiple expressions, wrap them in a begin
+    let value = if values.len() == 1 {
+        values.into_iter().next().unwrap()
+    } else if values.is_empty() {
+        return Err("No input".to_string());
+    } else {
+        // Wrap multiple expressions in a begin
+        let mut begin_args = vec![Value::Symbol(symbols.intern("begin"))];
+        begin_args.extend(values);
+        list(begin_args)
+    };
+
     let expr = value_to_expr(&value, &mut symbols)?;
     let bytecode = compile(&expr);
     vm.execute(&bytecode)
@@ -783,4 +812,34 @@ fn test_nested_recursive_functions() {
         (outer 5)
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(15)); // 5 + 4 + 3 + 2 + 1
+}
+
+#[test]
+fn test_simple_lambda_call() {
+    // Simple lambda that takes a parameter and returns it
+    let code = r#"
+        (define identity (lambda (x) x))
+        (identity 42)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_lambda_with_arithmetic() {
+    // Lambda that does arithmetic on its parameter
+    let code = r#"
+        (define double (lambda (x) (* x 2)))
+        (double 21)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_lambda_with_comparison() {
+    // Lambda that uses comparison on its parameter
+    let code = r#"
+        (define is-positive (lambda (x) (> x 0)))
+        (is-positive 5)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Bool(true));
 }

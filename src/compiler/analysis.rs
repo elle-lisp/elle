@@ -19,11 +19,9 @@ pub fn analyze_free_vars(expr: &Expr, local_bindings: &HashSet<SymbolId>) -> Has
             }
         }
 
-        Expr::GlobalVar(sym) => {
-            // Global variable - check if it's not a local binding
-            if !local_bindings.contains(sym) {
-                free_vars.insert(*sym);
-            }
+        Expr::GlobalVar(_sym) => {
+            // Global variables don't need to be captured - they're accessed at runtime
+            // This includes built-in functions like *, +, -, etc.
         }
 
         Expr::If { cond, then, else_ } => {
