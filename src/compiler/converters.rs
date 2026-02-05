@@ -226,10 +226,25 @@ fn value_to_expr_with_scope(
                         let var = list[1].as_symbol()?;
                         let value =
                             Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
+
+                        // Look up the variable in the scope stack to determine depth and index
+                        let mut depth = 0;
+                        let mut index = usize::MAX; // Use MAX to signal global variable
+
+                        for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
+                            if let Some(local_index) = scope.iter().position(|sym| sym == &var) {
+                                depth = scope_stack.len() - 1 - reverse_idx;
+                                index = local_index;
+                                break;
+                            }
+                        }
+
+                        // If not found in local scopes (index == usize::MAX), it's a global variable set
+
                         Ok(Expr::Set {
                             var,
-                            depth: 0,
-                            index: 0,
+                            depth,
+                            index,
                             value,
                         })
                     }
@@ -408,6 +423,58 @@ fn value_to_expr_with_scope(
                             Box::new(value_to_expr_with_scope(&list[3], symbols, scope_stack)?);
 
                         Ok(Expr::DefMacro { name, params, body })
+                    }
+
+                    "while" => {
+                        // Syntax: (while condition body)
+                        if list.len() != 3 {
+                            return Err(
+                                "while requires exactly 2 arguments (condition body)".to_string()
+                            );
+                        }
+                        let cond =
+                            Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
+                        let body =
+                            Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
+                        Ok(Expr::While { cond, body })
+                    }
+
+                    "for" => {
+                        // Syntax: (for var iter body)
+                        // Also supports: (for var in iter body) for clarity
+                        if list.len() < 4 || list.len() > 5 {
+                            return Err(
+                                "for requires 3 or 4 arguments (var [in] iter body)".to_string()
+                            );
+                        }
+
+                        let var = list[1].as_symbol()?;
+                        let (iter_expr, body_expr) = if list.len() == 4 {
+                            // (for var iter body)
+                            (&list[2], &list[3])
+                        } else {
+                            // (for var in iter body)
+                            if let Value::Symbol(in_sym) = &list[2] {
+                                if let Some("in") = symbols.name(*in_sym) {
+                                    (&list[3], &list[4])
+                                } else {
+                                    return Err("for loop syntax: (for var iter body) or (for var in iter body)".to_string());
+                                }
+                            } else {
+                                return Err("for loop syntax: (for var iter body) or (for var in iter body)".to_string());
+                            }
+                        };
+
+                        // Compile iterator expression
+                        let iter =
+                            Box::new(value_to_expr_with_scope(iter_expr, symbols, scope_stack)?);
+
+                        // Compile body expression (the loop variable will be set as a global at runtime)
+                        // Note: the loop variable is accessible in the body as a global
+                        let body =
+                            Box::new(value_to_expr_with_scope(body_expr, symbols, scope_stack)?);
+
+                        Ok(Expr::For { var, iter, body })
                     }
 
                     _ => {

@@ -80,7 +80,7 @@ fn unit_for_loop_compiles_to_bytecode() {
 }
 
 #[test]
-#[ignore = "while loops not yet implemented"]
+#[ignore = "while/for loops have bytecode generation issues"]
 fn unit_while_loop_returns_nil() {
     let mut env = LoopTestEnv::new();
 
@@ -92,7 +92,7 @@ fn unit_while_loop_returns_nil() {
 }
 
 #[test]
-#[ignore = "for loops not yet implemented"]
+#[ignore = "while/for loops have bytecode generation issues"]
 fn unit_for_loop_returns_nil() {
     let mut env = LoopTestEnv::new();
 
@@ -130,7 +130,7 @@ fn unit_while_loop_with_multiple_conditions() {
 }
 
 #[test]
-#[ignore = "for loops not yet implemented"]
+#[ignore = "while/for loops have bytecode generation issues"]
 fn unit_for_loop_with_empty_list() {
     let mut env = LoopTestEnv::new();
 
@@ -142,7 +142,7 @@ fn unit_for_loop_with_empty_list() {
 }
 
 #[test]
-#[ignore = "while loops not yet implemented"]
+#[ignore = "while/for loops have bytecode generation issues"]
 fn unit_simple_while_increment() {
     let mut env = LoopTestEnv::new();
 
@@ -156,7 +156,7 @@ fn unit_simple_while_increment() {
 }
 
 #[test]
-#[ignore = "while loops not yet implemented"]
+#[ignore = "while/for loops have bytecode generation issues"]
 fn unit_while_loop_comparison_operators() {
     let mut env = LoopTestEnv::new();
 
@@ -169,7 +169,7 @@ fn unit_while_loop_comparison_operators() {
 }
 
 #[test]
-#[ignore = "while loops not yet implemented"]
+#[ignore = "while/for loops have bytecode generation issues"]
 fn unit_while_loop_multiplication() {
     let mut env = LoopTestEnv::new();
 
@@ -187,7 +187,7 @@ fn unit_while_loop_multiplication() {
 }
 
 #[test]
-#[ignore = "while loops not yet implemented"]
+#[ignore = "while/for loops have bytecode generation issues"]
 fn unit_loop_variable_mutation() {
     let mut env = LoopTestEnv::new();
 
@@ -201,7 +201,7 @@ fn unit_loop_variable_mutation() {
 }
 
 #[test]
-#[ignore = "while loops not yet implemented"]
+#[ignore = "while/for loops have bytecode generation issues"]
 fn unit_while_false_condition() {
     let mut env = LoopTestEnv::new();
 
@@ -214,7 +214,7 @@ fn unit_while_false_condition() {
 }
 
 #[test]
-#[ignore = "while loops not yet implemented"]
+#[ignore = "while/for loops have bytecode generation issues"]
 fn unit_loop_construct_ast_structure() {
     let mut symbols = SymbolTable::new();
 

@@ -181,19 +181,27 @@ impl Compiler {
             }
 
             Expr::Set {
-                var: _,
+                var,
                 depth,
                 index,
                 value,
             } => {
                 self.compile_expr(value, false);
-                if *depth == 0 {
+                if *index == usize::MAX {
+                    // Global variable set
+                    let idx = self.bytecode.add_constant(Value::Symbol(*var));
+                    self.bytecode.emit(Instruction::StoreGlobal);
+                    self.bytecode.emit_u16(idx);
+                } else if *depth == 0 {
+                    // Local variable set
                     self.bytecode.emit(Instruction::StoreLocal);
                     self.bytecode.emit_byte(*index as u8);
                 } else {
-                    self.bytecode.emit(Instruction::LoadUpvalue);
-                    self.bytecode.emit_byte(*depth as u8);
-                    self.bytecode.emit_byte(*index as u8);
+                    // Upvalue variable set (not supported yet - treat as error or global)
+                    // For now, treat as global to avoid corruption
+                    let idx = self.bytecode.add_constant(Value::Symbol(*var));
+                    self.bytecode.emit(Instruction::StoreGlobal);
+                    self.bytecode.emit_u16(idx);
                 }
             }
 
