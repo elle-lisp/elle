@@ -169,6 +169,19 @@ impl Lexer {
         sym
     }
 
+    /// Read a module-qualified symbol (e.g., "module:symbol")
+    /// Returns (module_name, symbol_name) if qualified, or (symbol_name, "") if unqualified
+    fn parse_qualified_symbol(sym: &str) -> (String, String) {
+        if let Some(colon_pos) = sym.rfind(':') {
+            let module = sym[..colon_pos].to_string();
+            let name = sym[colon_pos + 1..].to_string();
+            if !module.is_empty() && !name.is_empty() {
+                return (module, name);
+            }
+        }
+        (sym.to_string(), String::new())
+    }
+
     pub fn next_token_with_loc(&mut self) -> Result<Option<TokenWithLoc>, String> {
         self.skip_whitespace();
         let loc = self.get_loc();
@@ -384,9 +397,29 @@ impl Reader {
                 Ok(Value::Nil)
             }
             Token::Symbol(s) => {
-                let id = symbols.intern(s);
-                self.advance();
-                Ok(Value::Symbol(id))
+                // Check if this is a qualified symbol (e.g., "list:length")
+                let (module_name, symbol_name) = Lexer::parse_qualified_symbol(s);
+                if !symbol_name.is_empty() {
+                    // This is a qualified symbol - represent as: (qualified-ref module-name symbol-name)
+                    let module_sym = symbols.intern(&module_name);
+                    let name_sym = symbols.intern(&symbol_name);
+                    let qualified_ref = symbols.intern("qualified-ref");
+                    // Build list: (qualified-ref module symbol)
+                    let result = cons(
+                        Value::Symbol(qualified_ref),
+                        cons(
+                            Value::Symbol(module_sym),
+                            cons(Value::Symbol(name_sym), Value::Nil),
+                        ),
+                    );
+                    self.advance();
+                    Ok(result)
+                } else {
+                    // Regular unqualified symbol
+                    let id = symbols.intern(s);
+                    self.advance();
+                    Ok(Value::Symbol(id))
+                }
             }
             Token::RightParen => Err("Unexpected )".to_string()),
             Token::RightBracket => Err("Unexpected ]".to_string()),

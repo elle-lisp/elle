@@ -74,3 +74,7 @@ mod closure_optimization {
 mod pattern_matching {
     include!("pattern_matching.rs");
 }
+
+mod module_qualified_names {
+    include!("module_qualified_names.rs");
+}

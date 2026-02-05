@@ -80,6 +80,36 @@ fn value_to_expr_with_scope(
                 let name = symbols.name(*sym).ok_or("Unknown symbol")?;
 
                 match name {
+                    "qualified-ref" => {
+                        // Handle module-qualified symbols: (qualified-ref module-name symbol-name)
+                        if list.len() != 3 {
+                            return Err("qualified-ref requires exactly 2 arguments".to_string());
+                        }
+                        let module_sym = list[1].as_symbol()?;
+                        let name_sym = list[2].as_symbol()?;
+
+                        let module_name =
+                            symbols.name(module_sym).ok_or("Unknown module symbol")?;
+                        let func_name = symbols.name(name_sym).ok_or("Unknown function symbol")?;
+
+                        // Try to resolve from the specified module's exports
+                        if let Some(module_def) = symbols.get_module(module_sym) {
+                            // Check if the symbol is exported from the module
+                            if module_def.exports.contains(&name_sym) {
+                                // Return as a qualified global reference
+                                // We use GlobalVar but could add a QualifiedVar variant if needed
+                                Ok(Expr::GlobalVar(name_sym))
+                            } else {
+                                Err(format!(
+                                    "Symbol '{}' not exported from module '{}'",
+                                    func_name, module_name
+                                ))
+                            }
+                        } else {
+                            Err(format!("Unknown module: '{}'", module_name))
+                        }
+                    }
+
                     "quote" => {
                         if list.len() != 2 {
                             return Err("quote requires exactly 1 argument".to_string());

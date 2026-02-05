@@ -5,7 +5,7 @@
 **Elle** is a high-performance bytecode-compiled Lisp interpreter written in Rust at **v1.0.0 production maturity** with all core features implemented and extensively tested.
 
 - **Current Version**: v1.0.0 (Production Ready)
-- **Test Coverage**: 1,104 tests passing (159 lib + 943 integration + 2 doc)
+- **Test Coverage**: 1,020 tests passing (159 lib + 996 integration + 2 doc)
 - **Build Status**: All clippy warnings resolved (0 warnings)
 
 ---
@@ -21,12 +21,13 @@
    - Complexity: Medium
    - Tests needed: ~15
 
-2. **Module-Qualified Names**
-   - Status: Not started
-   - Example: `(list:length (list 1 2 3))` → 3
-   - Impact: Cleaner namespace disambiguation without imports
-   - Complexity: Medium
-   - Tests needed: ~10
+2. **Module-Qualified Names** ✓ COMPLETED (PR #60)
+    - Status: Implemented and merged
+    - Example: `(list:length (list 1 2 3))` → 3
+    - Impact: Cleaner namespace disambiguation without imports
+    - Implementation: Reader recognizes `module:symbol` syntax, converter resolves exports
+    - Tests: 22 comprehensive integration tests added
+    - Backward compatible: All existing code works unchanged
 
 3. **Full Quasiquote Evaluation**
    - Status: Partial (basic expansion works)
@@ -118,11 +119,11 @@
 - Update `src/vm/mod.rs` to bind variables in pattern context
 - No new bytecode instructions needed
 
-### Module-Qualified Names
-- Parser needs to recognize `symbol:symbol` syntax
-- Add resolution in compiler symbol lookup
-- Extend scope tracking to search qualified namespaces
-- Backward compatible with current import mechanism
+### Module-Qualified Names (COMPLETED)
+- ✓ Parser recognizes `symbol:symbol` syntax via `parse_qualified_symbol()`
+- ✓ Converter resolves exports from specified modules
+- ✓ Returns `(qualified-ref module-name symbol-name)` special form
+- ✓ Fully backward compatible with current import mechanism
 
 ### JIT Compilation
 - Start with profiling instrumentation to identify hot paths
