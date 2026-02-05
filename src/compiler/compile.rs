@@ -336,9 +336,21 @@ impl Compiler {
                     let pattern_jumps = self.compile_pattern_check(pattern);
                     pending_jumps.push(pattern_jumps);
 
-                    // Pattern matched - pop the value and execute body
-                    self.bytecode.emit(Instruction::Pop);
-                    self.compile_expr(body_expr, tail);
+                    // Pattern matched - compile the body
+                    // If the body is a lambda (pattern variables), keep the matched value on stack
+                    // to apply to the lambda. Otherwise, pop it.
+                    let is_lambda = matches!(body_expr, Expr::Lambda { .. });
+                    if is_lambda {
+                        // Keep matched value on stack to apply to lambda
+                        self.compile_expr(body_expr, false);
+                        // Apply lambda to matched value: (lambda-expr matched-value)
+                        self.bytecode.emit(Instruction::Call);
+                        self.bytecode.emit_byte(1); // 1 argument
+                    } else {
+                        // No pattern variables, pop the value and execute body
+                        self.bytecode.emit(Instruction::Pop);
+                        self.compile_expr(body_expr, tail);
+                    }
 
                     // Jump to end of match
                     self.bytecode.emit(Instruction::Jump);
@@ -488,8 +500,7 @@ impl Compiler {
                 vec![fail_jump]
             }
             Pattern::Var(_var_id) => {
-                // Variable pattern always matches - store the value
-                // In Phase 2, we'll just accept any value (binding handled later)
+                // Variable pattern always matches - no type check needed
                 Vec::new()
             }
             Pattern::Cons { head: _, tail: _ } => {

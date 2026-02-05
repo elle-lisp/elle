@@ -275,3 +275,226 @@ fn test_match_conditional_arithmetic() {
     .unwrap();
     assert_eq!(result, elle::value::Value::Int(150));
 }
+
+// ============================================================================
+// Variable Binding in Pattern Matching Tests
+// ============================================================================
+
+#[test]
+fn test_match_variable_binding_simple() {
+    // Simple variable binding: (match value (x expr-using-x))
+    let result = PatternMatchingTest::eval(r#"(match 42 (x x))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(42));
+}
+
+#[test]
+fn test_match_variable_binding_with_filter() {
+    // Use bound list with filter (note: filter with closures not supported, using simpler test)
+    let result =
+        PatternMatchingTest::eval(r#"(match (list 1 2 3 4 5) (lst (first (rest (rest lst)))))"#)
+            .unwrap();
+    assert_eq!(result, elle::value::Value::Int(3));
+}
+
+#[test]
+fn test_match_variable_binding_multiplication() {
+    // Use bound variable in multiplication
+    let result = PatternMatchingTest::eval(r#"(match 7 (x (* x 2)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(14));
+}
+
+#[test]
+fn test_match_variable_binding_string() {
+    // Bind string value
+    let result = PatternMatchingTest::eval(r#"(match "hello" (s s))"#).unwrap();
+    assert_eq!(result, elle::value::Value::String("hello".into()));
+}
+
+#[test]
+fn test_match_variable_binding_string_operation() {
+    // Use bound string in operation
+    let result =
+        PatternMatchingTest::eval(r#"(match "world" (s (string-append "hello " s)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::String("hello world".into()));
+}
+
+#[test]
+fn test_match_variable_binding_list() {
+    // Bind list value and verify it's returned
+    let result =
+        PatternMatchingTest::eval(r#"(match (list 1 2 3) (lst (= lst (list 1 2 3))))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Bool(true));
+}
+
+#[test]
+fn test_match_variable_binding_list_length() {
+    // Use bound list in length operation
+    let result = PatternMatchingTest::eval(r#"(match (list 1 2 3) (lst (length lst)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(3));
+}
+
+#[test]
+fn test_match_variable_binding_list_first() {
+    // Use bound list in first operation
+    let result = PatternMatchingTest::eval(r#"(match (list 10 20 30) (lst (first lst)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(10));
+}
+
+#[test]
+fn test_match_variable_binding_multiple_uses() {
+    // Use bound variable multiple times
+    let result = PatternMatchingTest::eval(r#"(match 5 (x (+ x (+ x x))))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(15)); // 5 + (5 + 5)
+}
+
+#[test]
+fn test_match_variable_binding_nested_arithmetic() {
+    // Nested arithmetic with bound variable
+    let result = PatternMatchingTest::eval(r#"(match 3 (x (* (+ x 2) x)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(15)); // (3 + 2) * 3 = 5 * 3
+}
+
+#[test]
+fn test_match_variable_binding_with_if() {
+    // Use bound variable in if expression
+    let result =
+        PatternMatchingTest::eval(r#"(match 42 (x (if (> x 40) "big" "small")))"#).unwrap();
+    assert_eq!(result, elle::value::Value::String("big".into()));
+}
+
+#[test]
+fn test_match_variable_binding_with_begin() {
+    // Use bound variable in begin block
+    let result = PatternMatchingTest::eval(r#"(match 10 (x (begin (+ x 5) (+ x 10))))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(20)); // Returns result of last expr
+}
+
+#[test]
+fn test_match_variable_binding_wildcard_no_binding() {
+    // Wildcard doesn't bind variables
+    let result = PatternMatchingTest::eval(r#"(match 42 (_ "matched"))"#).unwrap();
+    assert_eq!(result, elle::value::Value::String("matched".into()));
+}
+
+#[test]
+fn test_match_variable_binding_literal_pattern_no_binding() {
+    // Literal pattern doesn't create binding
+    let result = PatternMatchingTest::eval(r#"(match 42 (42 "matched"))"#).unwrap();
+    assert_eq!(result, elle::value::Value::String("matched".into()));
+}
+
+#[test]
+fn test_match_variable_binding_nil() {
+    // Bind nil value
+    let result = PatternMatchingTest::eval(r#"(match nil (x x))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Nil);
+}
+
+#[test]
+fn test_match_variable_binding_float() {
+    // Bind float value
+    let result = PatternMatchingTest::eval(r#"(match 2.5 (x x))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Float(2.5));
+}
+
+#[test]
+fn test_match_variable_binding_float_arithmetic() {
+    // Use bound float in arithmetic
+    let result = PatternMatchingTest::eval(r#"(match 2.5 (x (+ x 1.5)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Float(4.0));
+}
+
+#[test]
+fn test_match_variable_binding_multiple_patterns_first() {
+    // Variable binding in first pattern
+    let result = PatternMatchingTest::eval(r#"(match 10 (5 "five") (x (+ x 100)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(110));
+}
+
+#[test]
+fn test_match_variable_binding_multiple_patterns_second() {
+    // Variable binding in second pattern
+    let result = PatternMatchingTest::eval(r#"(match 20 (10 "ten") (x (* x 2)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(40));
+}
+
+#[test]
+fn test_match_variable_binding_fallthrough_to_binding() {
+    // Fall through from literal to binding
+    let result =
+        PatternMatchingTest::eval(r#"(match 99 (1 "one") (2 "two") (x (+ x 1)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(100));
+}
+
+#[test]
+fn test_match_variable_binding_with_default_fallback() {
+    // Variable binding pattern followed by default
+    let result = PatternMatchingTest::eval(r#"(match 42 (x (+ x 10)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(52));
+}
+
+#[test]
+fn test_match_variable_binding_list_comparison() {
+    // Compare bound list
+    let result =
+        PatternMatchingTest::eval(r#"(match (list 1 2) (lst (= lst (list 1 2))))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Bool(true));
+}
+
+#[test]
+fn test_match_variable_binding_list_rest() {
+    // Use bound list in rest operation and verify length
+    let result =
+        PatternMatchingTest::eval(r#"(match (list 1 2 3) (lst (length (rest lst))))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(2));
+}
+
+#[test]
+fn test_match_variable_binding_double_binding() {
+    // Two sequential pattern bindings
+    let result =
+        PatternMatchingTest::eval(r#"(+ (match 4 (x (+ x 1))) (match 3 (y (+ y 2))))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(10)); // (4 + 1) + (3 + 2) = 5 + 5
+}
+
+#[test]
+fn test_match_variable_binding_shadowing() {
+    // Inner binding shadows outer
+    let result = PatternMatchingTest::eval(r#"(match 10 (x (match 20 (x x))))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(20));
+}
+
+#[test]
+fn test_match_variable_binding_bool_value() {
+    // Bind boolean value and verify it
+    let result = PatternMatchingTest::eval(r#"(match 1 (x (= x 1)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Bool(true));
+}
+
+#[test]
+fn test_match_variable_binding_bool_in_condition() {
+    // Use bound value in comparison
+    let result = PatternMatchingTest::eval(r#"(match 42 (x (> x 40)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Bool(true));
+}
+
+#[test]
+fn test_match_variable_binding_with_not() {
+    // Use bound value with not
+    let result = PatternMatchingTest::eval(r#"(match 42 (x (not (> x 100))))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Bool(true));
+}
+
+#[test]
+fn test_match_variable_binding_named_descriptively() {
+    // More descriptive variable names
+    let result = PatternMatchingTest::eval(r#"(match 100 (amount (- amount 25)))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(75));
+}
+
+#[test]
+fn test_match_variable_binding_result_as_operand() {
+    // Match result used as operand in surrounding expression
+    let result = PatternMatchingTest::eval(r#"(* 2 (match 5 (x (+ x 3))))"#).unwrap();
+    assert_eq!(result, elle::value::Value::Int(16)); // 2 * (5 + 3)
+}

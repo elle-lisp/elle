@@ -1,9 +1,38 @@
 use super::analysis::analyze_free_vars;
-use super::ast::Expr;
+use super::ast::{Expr, Pattern};
 use super::macros::expand_macro;
 use super::patterns::value_to_pattern;
 use crate::symbol::SymbolTable;
 use crate::value::{SymbolId, Value};
+
+/// Extract all variable bindings from a pattern
+fn extract_pattern_variables(pattern: &Pattern) -> Vec<SymbolId> {
+    let mut vars = Vec::new();
+    match pattern {
+        Pattern::Var(sym_id) => {
+            vars.push(*sym_id);
+        }
+        Pattern::Wildcard | Pattern::Literal(_) | Pattern::Nil => {
+            // These don't bind variables
+        }
+        Pattern::List(patterns) => {
+            // Extract variables from all list elements
+            for p in patterns {
+                vars.extend(extract_pattern_variables(p));
+            }
+        }
+        Pattern::Cons { head, tail } => {
+            // Extract from head and tail
+            vars.extend(extract_pattern_variables(head));
+            vars.extend(extract_pattern_variables(tail));
+        }
+        Pattern::Guard { pattern: inner, .. } => {
+            // Extract from inner pattern
+            vars.extend(extract_pattern_variables(inner));
+        }
+    }
+    vars
+}
 
 /// Simple value-to-expr conversion for bootstrap
 /// This is a simple tree-walking approach before full macro expansion
@@ -345,11 +374,40 @@ fn value_to_expr_with_scope(
                                 } else if clause_vec.len() == 2 {
                                     // Pattern and result
                                     let pattern = value_to_pattern(&clause_vec[0], symbols)?;
-                                    let result = value_to_expr_with_scope(
-                                        &clause_vec[1],
-                                        symbols,
-                                        scope_stack,
-                                    )?;
+
+                                    // Extract pattern variables
+                                    let pattern_vars = extract_pattern_variables(&pattern);
+
+                                    // If there are pattern variables, wrap the body in a lambda
+                                    // that binds them to the matched value
+                                    let result = if !pattern_vars.is_empty() {
+                                        // Add pattern variables to scope for parsing the body
+                                        let mut new_scope_stack = scope_stack.clone();
+                                        new_scope_stack.push(pattern_vars.clone());
+
+                                        // Parse the result in the new scope
+                                        let body_expr = value_to_expr_with_scope(
+                                            &clause_vec[1],
+                                            symbols,
+                                            &mut new_scope_stack,
+                                        )?;
+
+                                        // Transform: (lambda (var1 var2 ...) body_expr)
+                                        // This binds the pattern variables for use in the body
+                                        Expr::Lambda {
+                                            params: pattern_vars,
+                                            body: Box::new(body_expr),
+                                            captures: Vec::new(),
+                                        }
+                                    } else {
+                                        // No variables to bind
+                                        value_to_expr_with_scope(
+                                            &clause_vec[1],
+                                            symbols,
+                                            scope_stack,
+                                        )?
+                                    };
+
                                     patterns.push((pattern, result));
                                 } else {
                                     return Err(
