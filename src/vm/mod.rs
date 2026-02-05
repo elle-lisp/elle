@@ -105,10 +105,49 @@ impl VM {
                                 return Err("Stack overflow".to_string());
                             }
 
+                            // Validate argument count
+                            match closure.arity {
+                                crate::value::Arity::Exact(n) => {
+                                    if args.len() != n {
+                                        return Err(format!(
+                                            "Function expects {} arguments, got {}",
+                                            n,
+                                            args.len()
+                                        ));
+                                    }
+                                }
+                                crate::value::Arity::AtLeast(n) => {
+                                    if args.len() < n {
+                                        return Err(format!(
+                                            "Function expects at least {} arguments, got {}",
+                                            n,
+                                            args.len()
+                                        ));
+                                    }
+                                }
+                                crate::value::Arity::Range(min, max) => {
+                                    if args.len() < min || args.len() > max {
+                                        return Err(format!(
+                                            "Function expects {}-{} arguments, got {}",
+                                            min,
+                                            max,
+                                            args.len()
+                                        ));
+                                    }
+                                }
+                            }
+
+                            // Create a new environment that includes both captured variables and parameters
+                            // The closure's env contains captured variables, and we append the arguments as parameters
+                            let mut new_env = Vec::new();
+                            new_env.extend((*closure.env).iter().cloned());
+                            new_env.extend(args.clone());
+                            let new_env_rc = std::rc::Rc::new(new_env);
+
                             let result = self.execute_bytecode(
                                 &closure.bytecode,
                                 &closure.constants,
-                                Some(&closure.env),
+                                Some(&new_env_rc),
                             )?;
 
                             self.call_depth -= 1;

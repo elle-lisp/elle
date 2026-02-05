@@ -711,3 +711,76 @@ fn test_even_odd() {
     assert_eq!(eval("(odd? 3)").unwrap(), Value::Bool(true));
     assert_eq!(eval("(even? 0)").unwrap(), Value::Bool(true));
 }
+
+// Recursive function tests (issue #6)
+// Note: These tests demonstrate the expected behavior for recursive lambdas
+// Full support requires forward reference mechanism or circular reference handling
+// See PR #13 for partial implementation
+
+#[test]
+#[ignore]
+fn test_recursive_lambda_fibonacci() {
+    // Test basic recursive lambda
+    let code = r#"
+        (define fib (lambda (n) 
+          (if (< n 2) 
+            n 
+            (+ (fib (- n 1)) (fib (- n 2))))))
+        (fib 5)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(5));
+}
+
+#[test]
+#[ignore]
+fn test_recursive_lambda_fibonacci_10() {
+    // Test fibonacci(10) = 55
+    let code = r#"
+        (define fib (lambda (n) 
+          (if (< n 2) 
+            n 
+            (+ (fib (- n 1)) (fib (- n 2))))))
+        (fib 10)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(55));
+}
+
+#[test]
+#[ignore]
+fn test_tail_recursive_sum() {
+    // Test tail-recursive sum accumulation
+    let code = r#"
+        (define sum-to (lambda (n acc)
+          (if (= n 0) acc (sum-to (- n 1) (+ acc n)))))
+        (sum-to 100 0)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(5050));
+}
+
+#[test]
+#[ignore]
+fn test_recursive_countdown() {
+    // Test simple countdown recursion
+    let code = r#"
+        (define countdown (lambda (n)
+          (if (<= n 0)
+            0
+            (+ n (countdown (- n 1))))))
+        (countdown 5)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(15)); // 5 + 4 + 3 + 2 + 1
+}
+
+#[test]
+#[ignore]
+fn test_nested_recursive_functions() {
+    // Test nested function definitions with recursion
+    let code = r#"
+        (define outer (lambda (n)
+          (define inner (lambda (x)
+            (if (< x 1) 0 (+ x (inner (- x 1))))))
+          (inner n)))
+        (outer 5)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(15)); // 5 + 4 + 3 + 2 + 1
+}

@@ -32,14 +32,14 @@ impl Compiler {
             },
 
             Expr::Var(_sym, depth, index) => {
-                if *depth == 0 {
-                    self.bytecode.emit(Instruction::LoadLocal);
-                    self.bytecode.emit_byte(*index as u8);
-                } else {
-                    self.bytecode.emit(Instruction::LoadUpvalue);
-                    self.bytecode.emit_byte(*depth as u8);
-                    self.bytecode.emit_byte(*index as u8);
-                }
+                // Variables in closure environment - access via LoadUpvalue
+                // depth indicates nesting level:
+                // 0 = current lambda's scope (parameters + captures)
+                // 1 = enclosing lambda's scope
+                // We add 1 to depth when using LoadUpvalue since it counts from current closure
+                self.bytecode.emit(Instruction::LoadUpvalue);
+                self.bytecode.emit_byte((*depth + 1) as u8);
+                self.bytecode.emit_byte(*index as u8);
             }
 
             Expr::GlobalVar(sym) => {
