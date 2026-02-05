@@ -1,6 +1,19 @@
 //! FFI primitives for Elle.
 //!
 //! Provides Lisp functions for loading and calling C functions.
+//!
+//! # Module Organization
+//!
+//! This file contains FFI primitive functions organized into logical sections:
+//! - VM Context management (lines 1-50)
+//! - Library loading/management (lines 51-70)
+//! - Function calling (lines 71-177)
+//! - Type utilities (lines 178-177)
+//! - Header/enum support (lines 178-267)
+//! - Callback management (lines 268-333)
+//! - Memory/safety utilities (lines 334-448)
+//! - Wrapper functions (lines 449-735)
+//! - Tests (lines 736-751)
 
 use crate::ffi::bindings::generate_elle_bindings;
 use crate::ffi::call::FunctionCall;
@@ -13,6 +26,11 @@ use crate::value::{LibHandle, Value};
 use crate::vm::VM;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+// ============================================================================
+// VM Context Management
+// ============================================================================
+
 thread_local! {
     static VM_CONTEXT: RefCell<Option<*mut VM>> = const { RefCell::new(None) };
 }
@@ -37,6 +55,10 @@ pub fn register_ffi_primitives(_vm: &mut VM) {
     // Phase 2: FFI primitives for function calling
     // Note: These are meant to be called from Elle code
 }
+
+// ============================================================================
+// Library Loading and Management
+// ============================================================================
 
 /// (load-library path) -> library-handle
 pub fn prim_load_library(vm: &mut VM, args: &[Value]) -> Result<Value, String> {
@@ -68,6 +90,45 @@ pub fn prim_list_libraries(vm: &VM, _args: &[Value]) -> Result<Value, String> {
 
     Ok(result)
 }
+
+// ============================================================================
+// Type Utilities
+// ============================================================================
+
+/// Parse a C type from a keyword value.
+fn parse_ctype(val: &Value) -> Result<CType, String> {
+    match val {
+        Value::Symbol(_) => {
+            // We need to look up the symbol name, but we don't have access to SymbolTable
+            // For now, we'll return an error indicating this needs symbol table integration
+            Err("Symbol-based type specification not yet supported".to_string())
+        }
+        Value::String(s) => match s.as_ref() {
+            "void" => Ok(CType::Void),
+            "bool" => Ok(CType::Bool),
+            "char" => Ok(CType::Char),
+            "schar" => Ok(CType::SChar),
+            "uchar" => Ok(CType::UChar),
+            "short" => Ok(CType::Short),
+            "ushort" => Ok(CType::UShort),
+            "int" => Ok(CType::Int),
+            "uint" => Ok(CType::UInt),
+            "long" => Ok(CType::Long),
+            "ulong" => Ok(CType::ULong),
+            "longlong" => Ok(CType::LongLong),
+            "ulonglong" => Ok(CType::ULongLong),
+            "float" => Ok(CType::Float),
+            "double" => Ok(CType::Double),
+            "pointer" => Ok(CType::Pointer(Box::new(CType::Void))),
+            _ => Err(format!("Unknown C type: {}", s)),
+        },
+        _ => Err("Type must be a string".to_string()),
+    }
+}
+
+// ============================================================================
+// Function Calling
+// ============================================================================
 
 /// (call-c-function lib-id func-name return-type (arg-type ...) (arg-val ...)) -> result
 ///
@@ -145,36 +206,9 @@ pub fn prim_call_c_function(vm: &VM, args: &[Value]) -> Result<Value, String> {
     call.call(&arg_values)
 }
 
-/// Parse a C type from a keyword value.
-fn parse_ctype(val: &Value) -> Result<CType, String> {
-    match val {
-        Value::Symbol(_) => {
-            // We need to look up the symbol name, but we don't have access to SymbolTable
-            // For now, we'll return an error indicating this needs symbol table integration
-            Err("Symbol-based type specification not yet supported".to_string())
-        }
-        Value::String(s) => match s.as_ref() {
-            "void" => Ok(CType::Void),
-            "bool" => Ok(CType::Bool),
-            "char" => Ok(CType::Char),
-            "schar" => Ok(CType::SChar),
-            "uchar" => Ok(CType::UChar),
-            "short" => Ok(CType::Short),
-            "ushort" => Ok(CType::UShort),
-            "int" => Ok(CType::Int),
-            "uint" => Ok(CType::UInt),
-            "long" => Ok(CType::Long),
-            "ulong" => Ok(CType::ULong),
-            "longlong" => Ok(CType::LongLong),
-            "ulonglong" => Ok(CType::ULongLong),
-            "float" => Ok(CType::Float),
-            "double" => Ok(CType::Double),
-            "pointer" => Ok(CType::Pointer(Box::new(CType::Void))),
-            _ => Err(format!("Unknown C type: {}", s)),
-        },
-        _ => Err("Type must be a string".to_string()),
-    }
-}
+// ============================================================================
+// Header Parsing and Enum Support
+// ============================================================================
 
 /// (load-header-with-lib header-path lib-path) -> library-handle
 ///
@@ -266,7 +300,10 @@ pub fn prim_define_enum(_vm: &mut VM, args: &[Value]) -> Result<Value, String> {
     Ok(Value::Int(enum_id.0 as i64))
 }
 
-/// Phase 4: Advanced Features Primitives
+// ============================================================================
+// Callback Management
+// ============================================================================
+
 /// (make-c-callback closure arg-types return-type) -> callback-handle
 ///
 /// Creates a C callback from an Elle closure.
@@ -331,6 +368,10 @@ pub fn prim_free_callback(_vm: &mut VM, args: &[Value]) -> Result<Value, String>
         Err(format!("Callback with ID {} not found", cb_id))
     }
 }
+
+// ============================================================================
+// Memory and Safety Utilities
+// ============================================================================
 
 /// (register-allocation ptr type-name size owner) -> alloc-id
 ///
@@ -447,7 +488,9 @@ pub fn prim_with_ffi_safety_checks(_vm: &mut VM, args: &[Value]) -> Result<Value
     Ok(args[0].clone())
 }
 
-// Wrapper functions for primitive registration with VM context access
+// ============================================================================
+// Wrapper Functions for Context-Aware Calls
+// ============================================================================
 
 pub fn prim_load_library_wrapper(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
