@@ -1,5 +1,6 @@
 use crate::ffi::FFISubsystem;
 use crate::value::Value;
+use crate::vm::scope::ScopeStack;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -22,6 +23,7 @@ pub struct VM {
     pub current_module: Option<String>,
     pub loaded_modules: HashSet<String>, // Track loaded module paths to prevent circular deps
     pub module_search_paths: Vec<PathBuf>, // Directories to search for modules
+    pub scope_stack: ScopeStack,         // Runtime scope stack for variable management
 }
 
 impl VM {
@@ -36,6 +38,7 @@ impl VM {
             current_module: None,
             loaded_modules: HashSet::new(),
             module_search_paths: vec![PathBuf::from(".")],
+            scope_stack: ScopeStack::new(),
         }
     }
 

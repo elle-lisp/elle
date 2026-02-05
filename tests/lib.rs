@@ -5,3 +5,6 @@ mod unittests {
 mod integration {
     include!("integration/mod.rs");
 }
+mod vm {
+    include!("vm/mod.rs");
+}
