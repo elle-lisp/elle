@@ -235,6 +235,15 @@ impl Compiler {
             }
 
             Expr::While { cond, body } => {
+                // Pre-declare any defines in the loop body to support define in nested scopes
+                let defines = Self::collect_defines(body);
+                for sym_id in defines {
+                    self.bytecode.emit(Instruction::Nil);
+                    let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
+                    self.bytecode.emit(Instruction::StoreGlobal);
+                    self.bytecode.emit_u16(idx);
+                }
+
                 // Implement while loop using conditional jumps
                 // Loop label - start of condition check
                 let loop_label = self.bytecode.current_pos() as i32;
@@ -272,6 +281,15 @@ impl Compiler {
             }
 
             Expr::For { var, iter, body } => {
+                // Pre-declare any defines in the loop body to support define in nested scopes
+                let defines = Self::collect_defines(body);
+                for sym_id in defines {
+                    self.bytecode.emit(Instruction::Nil);
+                    let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
+                    self.bytecode.emit(Instruction::StoreGlobal);
+                    self.bytecode.emit_u16(idx);
+                }
+
                 // Implement for loop: (for x lst (do-something-with x))
                 // Compile the iterable (list)
                 self.compile_expr(iter, false);
