@@ -62,3 +62,6 @@ mod mutual_recursion {
 mod closure_optimization {
     include!("closure_optimization.rs");
 }
+mod pattern_matching {
+    include!("pattern_matching.rs");
+}
