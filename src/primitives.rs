@@ -3,6 +3,7 @@ pub mod comparison;
 pub mod concurrency;
 pub mod debug;
 pub mod exception;
+pub mod file_io;
 pub mod higher_order;
 pub mod list;
 pub mod math;
@@ -25,6 +26,13 @@ use self::comparison::{prim_eq, prim_ge, prim_gt, prim_le, prim_lt};
 use self::concurrency::{prim_current_thread_id, prim_join, prim_sleep, prim_spawn};
 use self::debug::{prim_debug_print, prim_memory_usage, prim_profile, prim_trace};
 use self::exception::{prim_exception, prim_exception_data, prim_exception_message, prim_throw};
+use self::file_io::{
+    prim_absolute_path, prim_append_file, prim_change_directory, prim_copy_file,
+    prim_create_directory, prim_create_directory_all, prim_current_directory,
+    prim_delete_directory, prim_delete_file, prim_file_exists, prim_file_extension, prim_file_name,
+    prim_file_size, prim_is_directory, prim_is_file, prim_join_path, prim_list_directory,
+    prim_parent_directory, prim_read_file, prim_read_lines, prim_rename_file, prim_write_file,
+};
 use self::higher_order::{prim_filter, prim_fold, prim_map};
 use self::list::{
     prim_append, prim_cons, prim_drop, prim_first, prim_last, prim_length, prim_list, prim_nth,
@@ -256,6 +264,35 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "trace", prim_trace);
     register_fn(vm, symbols, "profile", prim_profile);
     register_fn(vm, symbols, "memory-usage", prim_memory_usage);
+
+    // File I/O primitives
+    register_fn(vm, symbols, "read-file", prim_read_file);
+    register_fn(vm, symbols, "write-file", prim_write_file);
+    register_fn(vm, symbols, "append-file", prim_append_file);
+    register_fn(vm, symbols, "file-exists?", prim_file_exists);
+    register_fn(vm, symbols, "directory?", prim_is_directory);
+    register_fn(vm, symbols, "file?", prim_is_file);
+    register_fn(vm, symbols, "delete-file", prim_delete_file);
+    register_fn(vm, symbols, "delete-directory", prim_delete_directory);
+    register_fn(vm, symbols, "create-directory", prim_create_directory);
+    register_fn(
+        vm,
+        symbols,
+        "create-directory-all",
+        prim_create_directory_all,
+    );
+    register_fn(vm, symbols, "rename-file", prim_rename_file);
+    register_fn(vm, symbols, "copy-file", prim_copy_file);
+    register_fn(vm, symbols, "file-size", prim_file_size);
+    register_fn(vm, symbols, "list-directory", prim_list_directory);
+    register_fn(vm, symbols, "absolute-path", prim_absolute_path);
+    register_fn(vm, symbols, "current-directory", prim_current_directory);
+    register_fn(vm, symbols, "change-directory", prim_change_directory);
+    register_fn(vm, symbols, "join-path", prim_join_path);
+    register_fn(vm, symbols, "file-extension", prim_file_extension);
+    register_fn(vm, symbols, "file-name", prim_file_name);
+    register_fn(vm, symbols, "parent-directory", prim_parent_directory);
+    register_fn(vm, symbols, "read-lines", prim_read_lines);
 }
 
 fn register_fn(
