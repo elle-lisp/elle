@@ -1077,8 +1077,37 @@ fn test_let_shadowing_with_calculation() {
 #[test]
 fn test_let_with_builtin_functions() {
     let code = r#"
-        (let ((len (lambda (x) 42)))
-          (len nil))
+         (let ((len (lambda (x) 42)))
+           (len nil))
+     "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(42));
+}
+
+// Tests for let* (sequential binding with access to previous bindings)
+
+#[test]
+fn test_let_star_empty() {
+    let code = r#"
+        (let* ()
+          42)
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_let_star_simple_binding() {
+    let code = r#"
+        (let* ((x 5))
+          x)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(5));
+}
+
+#[test]
+fn test_let_star_with_multiple_bindings_no_dependencies() {
+    let code = r#"
+        (let* ((x 1) (y 2))
+          (+ x y))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(3));
 }

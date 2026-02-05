@@ -248,6 +248,105 @@ fn value_to_expr_with_scope(
                         })
                     }
 
+                    "let*" => {
+                        // Syntax: (let* ((var1 expr1) (var2 expr2) ...) body...)
+                        // Let* differs from let in that each binding can reference previous bindings.
+                        //
+                        // Strategy: parse binding expressions sequentially, adding each variable
+                        // to scope as we go. This naturally handles the sequential evaluation.
+                        // Then create a single large lambda with all parameters, using the
+                        // parsed expressions as arguments.
+                        if list.len() < 2 {
+                            return Err("let* requires at least a binding vector".to_string());
+                        }
+
+                        let bindings_vec = list[1].list_to_vec()?;
+
+                        if bindings_vec.is_empty() {
+                            // (let* () body...) - just evaluate body
+                            let body_exprs: Result<Vec<_>, _> = list[2..]
+                                .iter()
+                                .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                                .collect();
+                            let body_exprs = body_exprs?;
+                            if body_exprs.is_empty() {
+                                return Ok(Expr::Literal(Value::Nil));
+                            } else if body_exprs.len() == 1 {
+                                return Ok(body_exprs[0].clone());
+                            } else {
+                                return Ok(Expr::Begin(body_exprs));
+                            }
+                        }
+
+                        // Parse bindings sequentially with growing scope
+                        let mut param_syms = Vec::new();
+                        let mut binding_exprs = Vec::new();
+                        scope_stack.push(Vec::new());
+
+                        for binding in &bindings_vec {
+                            let binding_list = binding.list_to_vec()?;
+                            if binding_list.len() != 2 {
+                                return Err(
+                                    "Each let* binding must be a [var expr] pair".to_string()
+                                );
+                            }
+                            let var = binding_list[0].as_symbol()?;
+                            param_syms.push(var);
+
+                            // Parse binding expression WITH PREVIOUS BINDINGS IN SCOPE
+                            // This allows y = (+ x 1) where x was previously bound
+                            let expr =
+                                value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
+                            binding_exprs.push(expr);
+
+                            // Add this variable to scope for next binding
+                            if let Some(current_scope) = scope_stack.last_mut() {
+                                current_scope.push(var);
+                            }
+                        }
+
+                        // Parse body with all let* variables in scope
+                        let body_exprs: Result<Vec<_>, _> = list[2..]
+                            .iter()
+                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                            .collect();
+
+                        scope_stack.pop();
+
+                        let body_exprs = body_exprs?;
+                        let body = if body_exprs.len() == 1 {
+                            Box::new(body_exprs[0].clone())
+                        } else if body_exprs.is_empty() {
+                            Box::new(Expr::Literal(Value::Nil))
+                        } else {
+                            Box::new(Expr::Begin(body_exprs))
+                        };
+
+                        // Analyze free variables
+                        let mut local_bindings = std::collections::HashSet::new();
+                        for param in &param_syms {
+                            local_bindings.insert(*param);
+                        }
+                        let free_vars = analyze_free_vars(&body, &local_bindings);
+
+                        // Convert free vars to captures
+                        let captures: Vec<_> = free_vars.iter().map(|sym| (*sym, 0, 0)).collect();
+
+                        // Create lambda: (lambda (var1 var2 ...) body...)
+                        let lambda = Expr::Lambda {
+                            params: param_syms,
+                            body,
+                            captures,
+                        };
+
+                        // Create call: (lambda expr1 expr2 ...)
+                        Ok(Expr::Call {
+                            func: Box::new(lambda),
+                            args: binding_exprs,
+                            tail: false,
+                        })
+                    }
+
                     "set!" => {
                         if list.len() != 3 {
                             return Err("set! requires exactly 2 arguments".to_string());
