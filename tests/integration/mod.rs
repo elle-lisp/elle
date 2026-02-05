@@ -29,3 +29,6 @@ mod property {
 mod ffi_marshaling {
     include!("ffi-marshaling.rs");
 }
+mod ffi_callbacks {
+    include!("ffi-callbacks.rs");
+}

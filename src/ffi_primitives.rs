@@ -4,7 +4,7 @@
 
 use crate::ffi::bindings::generate_elle_bindings;
 use crate::ffi::call::FunctionCall;
-use crate::ffi::callback::create_callback;
+use crate::ffi::callback::{create_callback, register_callback, unregister_callback};
 use crate::ffi::header::HeaderParser;
 use crate::ffi::memory::{get_memory_stats, register_allocation, MemoryOwner};
 use crate::ffi::safety::{get_last_error, NullPointerChecker, TypeChecker};
@@ -12,6 +12,7 @@ use crate::ffi::types::{CType, EnumId, EnumLayout, EnumVariant, FunctionSignatur
 use crate::value::{LibHandle, Value};
 use crate::vm::VM;
 use std::cell::RefCell;
+use std::rc::Rc;
 thread_local! {
     static VM_CONTEXT: RefCell<Option<*mut VM>> = const { RefCell::new(None) };
 }
@@ -279,6 +280,8 @@ pub fn prim_make_c_callback(_vm: &mut VM, args: &[Value]) -> Result<Value, Strin
         return Err("make-c-callback requires exactly 3 arguments".to_string());
     }
 
+    let closure = &args[0];
+
     // Parse argument types
     let arg_types = match &args[1] {
         Value::Nil => vec![],
@@ -295,30 +298,38 @@ pub fn prim_make_c_callback(_vm: &mut VM, args: &[Value]) -> Result<Value, Strin
     // Parse return type
     let return_type = parse_ctype(&args[2])?;
 
-    // Create callback (closure is stored outside this registry for now)
+    // Create callback
     let (cb_id, _info) = create_callback(arg_types, return_type);
 
+    // Register the closure with the callback registry
+    let closure_rc = Rc::new(closure.clone());
+    if !register_callback(cb_id, closure_rc) {
+        return Err(format!("Failed to register callback with ID {}", cb_id));
+    }
+
     // Return callback ID as integer
-    // Note: In a full implementation, the closure would be stored in a separate
-    // non-thread-safe registry managed by the VM
     Ok(Value::Int(cb_id as i64))
 }
 
 /// (free-callback callback-id) -> nil
 ///
-/// Frees a callback by ID (placeholder for now).
+/// Frees a callback by ID, unregistering it and cleaning up.
 pub fn prim_free_callback(_vm: &mut VM, args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err("free-callback requires exactly 1 argument".to_string());
     }
 
-    let _cb_id = match &args[0] {
+    let cb_id = match &args[0] {
         Value::Int(id) => *id as u32,
         _ => return Err("callback-id must be an integer".to_string()),
     };
 
-    // In a full implementation, would unregister the callback
-    Ok(Value::Nil)
+    // Unregister the callback from the registry
+    if unregister_callback(cb_id) {
+        Ok(Value::Nil)
+    } else {
+        Err(format!("Callback with ID {} not found", cb_id))
+    }
 }
 
 /// (register-allocation ptr type-name size owner) -> alloc-id
@@ -625,6 +636,8 @@ pub fn prim_make_c_callback_wrapper(args: &[Value]) -> Result<Value, String> {
         return Err("make-c-callback requires exactly 3 arguments".to_string());
     }
 
+    let closure = &args[0];
+
     // Parse argument types
     let arg_types = match &args[1] {
         Value::Nil => vec![],
@@ -644,13 +657,32 @@ pub fn prim_make_c_callback_wrapper(args: &[Value]) -> Result<Value, String> {
     // Create callback
     let (cb_id, _info) = create_callback(arg_types, return_type);
 
+    // Register the closure with the callback registry
+    let closure_rc = Rc::new(closure.clone());
+    if !register_callback(cb_id, closure_rc) {
+        return Err(format!("Failed to register callback with ID {}", cb_id));
+    }
+
     // Return callback ID as integer
     Ok(Value::Int(cb_id as i64))
 }
 
-pub fn prim_free_callback_wrapper(_args: &[Value]) -> Result<Value, String> {
-    // Placeholder - full implementation would unregister
-    Ok(Value::Nil)
+pub fn prim_free_callback_wrapper(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 1 {
+        return Err("free-callback requires exactly 1 argument".to_string());
+    }
+
+    let cb_id = match &args[0] {
+        Value::Int(id) => *id as u32,
+        _ => return Err("callback-id must be an integer".to_string()),
+    };
+
+    // Unregister the callback from the registry
+    if unregister_callback(cb_id) {
+        Ok(Value::Nil)
+    } else {
+        Err(format!("Callback with ID {} not found", cb_id))
+    }
 }
 
 pub fn prim_register_allocation_wrapper(_args: &[Value]) -> Result<Value, String> {
