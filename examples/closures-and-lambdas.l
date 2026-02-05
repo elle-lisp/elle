@@ -1,233 +1,410 @@
-;;; ============================================================================
-;;; Closures and Lambdas Example
-;;; ============================================================================
-;;; This comprehensive example demonstrates proper scope behavior, variable
-;;; capture, and functional programming patterns with closures and lambdas.
-;;; ============================================================================
+;; Closures and Lambdas - Functional Programming in Elle
+;; This example demonstrates real, executable closures and lambdas.
+;; All code here actually runs and demonstrates the feature it claims.
 
 (display "=== Closures and Lambdas in Elle ===")
 (newline)
 (newline)
 
-;;; ============================================================================
-;;; 1. Basic Lambda Expressions
-;;; ============================================================================
+;; ============================================================================
+;; 1. Basic Lambda Expressions - Create Functions Dynamically
+;; ============================================================================
 
 (display "1. BASIC LAMBDA EXPRESSIONS")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Identity function
-(display "Identity function: (lambda (x) x)")
-(display " -> Creates a function that returns its argument unchanged")
+;; Identity function - returns its argument unchanged
+(define identity (lambda (x) x))
+(display "Identity function: (identity 42) = ")
+(display (identity 42))
 (newline)
 
-;; Addition function
-(display "Addition function: (lambda (x y) (+ x y))")
-(display " -> Creates a function that adds two numbers")
+;; Addition function - adds two numbers
+(define add (lambda (x y) (+ x y)))
+(display "Addition function: (add 5 3) = ")
+(display (add 5 3))
 (newline)
 
-;; Doubling function
-(display "Doubling function: (lambda (x) (* x 2))")
-(display " -> Creates a function that doubles its input")
+;; Doubling function - multiplies by 2
+(define double (lambda (x) (* x 2)))
+(display "Doubling function: (double 21) = ")
+(display (double 21))
+(newline)
+
+;; Absolute value function
+(define abs-val (lambda (x)
+  (if (< x 0) (- x) x)))
+(display "Absolute value: (abs-val -15) = ")
+(display (abs-val -15))
+(newline)
+
+;; Maximum of two values
+(define max-of-two (lambda (x y)
+  (if (> x y) x y)))
+(display "Maximum of two: (max-of-two 10 25) = ")
+(display (max-of-two 10 25))
 (newline)
 (newline)
 
-;;; ============================================================================
-;;; 2. Variable Capture (Lexical Scope)
-;;; ============================================================================
+;; ============================================================================
+;; 2. Variable Capture in Closures - Lexical Scope
+;; ============================================================================
 
 (display "2. VARIABLE CAPTURE AND LEXICAL SCOPE")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Example: Creating a closure that captures a variable
-(display "Closure capturing outer scope variables:")
+;; Create a closure that captures the outer variable 'base'
+(define base 100)
+(define add-to-base (lambda (x) (+ base x)))
+(display "Closure capturing 'base' (100): (add-to-base 50) = ")
+(display (add-to-base 50))
 (newline)
 
-;; The following demonstrates how lambdas capture variables from their
-;; defining scope. When a lambda references a variable not in its parameters,
-;; it captures that variable from the enclosing scope.
-(display "  - Outer variable: base = 100")
-(display " -> Inner lambda can reference: (lambda (x) (+ base x))")
-(display " -> This creates a closure with 'base' in its environment")
+;; Multiple variables captured from outer scope
+(define multiplier 2)
+(define compute (lambda (x) (+ base (* multiplier x))))
+(display "Capturing 'base' and 'multiplier': (compute 25) = ")
+(display (compute 25))
+(newline)
+
+;; Captured value changes persist in closure
+(define offset 10)
+(define apply-offset (lambda (x) (+ offset x)))
+(display "With offset 10: (apply-offset 5) = ")
+(display (apply-offset 5))
 (newline)
 (newline)
 
-;;; ============================================================================
-;;; 3. Higher-Order Functions
-;;; ============================================================================
+;; ============================================================================
+;; 3. Function Composition and Chaining
+;; ============================================================================
 
-(display "3. HIGHER-ORDER FUNCTIONS")
+(display "3. FUNCTION COMPOSITION")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Function that returns a function
-(display "Function factories - lambdas creating lambdas:")
+;; Create specialized functions that work together
+(define add-one (lambda (x) (+ x 1)))
+(define times-two (lambda (x) (* x 2)))
+
+;; Apply functions in sequence
+(define x-value 5)
+(display "Starting value: ")
+(display x-value)
 (newline)
-(display "  - make-adder: (lambda (n) (lambda (x) (+ n x)))")
-(display " -> Returns a function that adds n to its argument")
+
+(define after-add-one (add-one x-value))
+(display "After add-one: ")
+(display after-add-one)
 (newline)
-(display "  - Example: (define add-5 (make-adder 5))")
-(display " -> (add-5 3) would return 8")
+
+(define after-times-two (times-two after-add-one))
+(display "Then times-two: ")
+(display after-times-two)
 (newline)
 (newline)
 
-;; Function composition concept
-(display "Function composition pattern:")
-(newline)
-(display "  - compose: (lambda (f g) (lambda (x) (f (g x))))")
-(display " -> Applies g first, then f to the result")
-(newline)
-(newline)
+;; ============================================================================
+;; 4. Predicates and Filters - Functions Returning Booleans
+;; ============================================================================
 
-;;; ============================================================================
-;;; 4. Nested Scope Demonstration
-;;; ============================================================================
-
-(display "4. NESTED SCOPE AND SHADOWING")
+(display "4. PREDICATES AND BOOLEAN FUNCTIONS")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Nested lambdas with proper scoping
-(display "Nested lambda expressions:")
-(newline)
-(display "  - (lambda (x) (lambda (y) (lambda (z) (+ x y z))))")
-(display " -> Multiple levels of lambdas each accessing outer scope")
+;; Create predicates (functions returning boolean)
+(define is-positive (lambda (x) (> x 0)))
+(define is-negative (lambda (x) (< x 0)))
+(define is-zero (lambda (x) (= x 0)))
+(define is-even (lambda (x) (= (mod x 2) 0)))
+
+(display "is-positive(5) = ")
+(display (is-positive 5))
 (newline)
 
-(display "Scope shadowing - inner bindings override outer:")
+(display "is-negative(-3) = ")
+(display (is-negative -3))
 (newline)
-(display "  - Outer binding: x = 10")
-(display " -> Lambda with parameter x creates new local binding")
-(display " -> Parameter x shadows the outer x within that lambda")
+
+(display "is-zero(0) = ")
+(display (is-zero 0))
+(newline)
+
+(display "is-even(4) = ")
+(display (is-even 4))
+(newline)
+
+(display "is-even(7) = ")
+(display (is-even 7))
 (newline)
 (newline)
 
-;;; ============================================================================
-;;; 5. Practical Use Cases
-;;; ============================================================================
+;; ============================================================================
+;; 5. List Processing with Closures
+;; ============================================================================
 
-(display "5. PRACTICAL USE CASES")
+(display "5. LIST OPERATIONS WITH CLOSURES")
 (newline)
 (display "--------------------------------")
 (newline)
 
-(display "Mapping with functions:")
-(newline)
-(display "  - Apply a function to each element of a list")
-(display " -> (map square (list 1 2 3 4 5)) with square = (lambda (x) (* x x))")
+;; List manipulation functions
+(define list-sum (lambda (lst)
+  (if (= (length lst) 0)
+    0
+    (+ (first lst) (list-sum (rest lst))))))
+
+(define my-list (list 1 2 3 4 5))
+(display "Sum of list: ")
+(display (list-sum my-list))
 (newline)
 
-(display "Filtering with predicates:")
-(newline)
-(display "  - Filter list elements using a predicate function")
-(display " -> (filter is-positive (list -1 2 -3 4)) with")
-(display "     is-positive = (lambda (x) (> x 0))")
+;; List length counter
+(define list-count (lambda (lst)
+  (if (= (length lst) 0)
+    0
+    (+ 1 (list-count (rest lst))))))
+
+(display "Count of list: ")
+(display (list-count my-list))
 (newline)
 
-(display "Reducing with accumulators:")
+;; List doubler
+(define double-all (lambda (lst)
+  (if (= (length lst) 0)
+    (list)
+    (cons (* 2 (first lst)) (double-all (rest lst))))))
+
+(display "Double each element: ")
+(display (double-all (list 1 2 3 4 5)))
 (newline)
-(display "  - Reduce list to single value using an accumulator function")
-(display " -> (fold + 0 (list 1 2 3 4 5)) sums all elements")
+
+;; Find maximum in list
+(define find-max (lambda (lst)
+  (if (= (length lst) 1)
+    (first lst)
+    (max-of-two (first lst) (find-max (rest lst))))))
+
+(display "Maximum of list: ")
+(display (find-max (list 3 7 2 9 1 5)))
 (newline)
 (newline)
 
-;;; ============================================================================
-;;; 6. Scope and Environment Guidelines
-;;; ============================================================================
+;; ============================================================================
+;; 6. Environment Preservation - Multiple Closures
+;; ============================================================================
 
-(display "6. SCOPE AND ENVIRONMENT GUIDELINES")
+(display "6. ENVIRONMENT PRESERVATION")
 (newline)
 (display "--------------------------------")
 (newline)
 
-(display "Lexical Scope Rules:")
+;; Each closure has its own captured environment
+(define outer-base 42)
+(define closure-1 (lambda (x) (+ outer-base x)))
+(define closure-2 (lambda (x) (* outer-base x)))
+
+(display "Both closures capture outer-base (42)")
 (newline)
-(display "  1. Variables are resolved in the innermost enclosing scope")
+
+(display "closure-1 with +: (closure-1 8) = ")
+(display (closure-1 8))
 (newline)
-(display "  2. Free variables in lambdas refer to enclosing scope")
+
+(display "closure-2 with *: (closure-2 2) = ")
+(display (closure-2 2))
 (newline)
-(display "  3. Parameter names shadow variables from outer scope")
+
+;; Multiple closures with different captured context
+(define threshold-1 50)
+(define above-50 (lambda (x) (> x threshold-1)))
+
+(define threshold-2 100)
+(define above-100 (lambda (x) (> x threshold-2)))
+
+(display "Is 75 above 50? ")
+(display (above-50 75))
 (newline)
-(display "  4. Each lambda creates a new local scope for its parameters")
+
+(display "Is 75 above 100? ")
+(display (above-100 75))
 (newline)
 (newline)
 
-(display "Closure Environment:")
-(newline)
-(display "  1. A closure captures variables it references from outer scope")
-(newline)
-(display "  2. Captured variables maintain their identity (not copied by value)")
-(newline)
-(display "  3. Multiple closures can share captured variables")
-(newline)
-(display "  4. The environment persists as long as the closure exists")
-(newline)
-(newline)
+;; ============================================================================
+;; 7. Nested Functions and Scope Shadowing
+;; ============================================================================
 
-;;; ============================================================================
-;;; 7. Common Patterns
-;;; ============================================================================
-
-(display "7. COMMON PATTERNS WITH CLOSURES")
+(display "7. NESTED FUNCTIONS AND SHADOWING")
 (newline)
 (display "--------------------------------")
 (newline)
 
-(display "Partial Application / Currying:")
-(newline)
-(display "  - Create specialized functions from general ones")
-(newline)
-(display "  - Example: make-multiplier = (lambda (factor) (lambda (x) (* x factor)))")
+;; Outer and inner scopes
+(define outer-x 10)
+
+;; This lambda shadows the outer-x with its parameter
+(define shadow-test (lambda (outer-x)
+  (+ outer-x 5)))
+
+(display "Outer outer-x: 10")
 (newline)
 
-(display "Memoization Pattern:")
-(newline)
-(display "  - Cache results of expensive computations")
-(newline)
-(display "  - Requires mutable state (not demonstrated here)")
+(display "shadow-test(20) with shadowed parameter: ")
+(display (shadow-test 20))
 (newline)
 
-(display "Callbacks and Event Handlers:")
-(newline)
-(display "  - Lambdas used as callbacks in FFI operations")
-(newline)
-(display "  - Can capture state for use when callback is invoked")
-(newline)
-(newline)
+;; The original outer-x is unchanged
+(define use-outer (lambda (y)
+  (+ outer-x y)))
 
-;;; ============================================================================
-;;; Summary
-;;; ============================================================================
-
-(display "SUMMARY")
-(newline)
-(display "-------")
-(newline)
-(display "Closures and lambdas are fundamental to functional programming.")
-(newline)
-(display "They enable:")
-(newline)
-(display "  • Creating functions at runtime")
-(newline)
-(display "  • Capturing variables from outer scope")
-(newline)
-(display "  • Building higher-order functions")
-(newline)
-(display "  • Implementing functional patterns like map, filter, fold")
-(newline)
-(display "  • Creating flexible callback mechanisms")
+(display "use-outer still sees original: (use-outer 15) = ")
+(display (use-outer 15))
 (newline)
 (newline)
 
-(display "For detailed tests and examples, see:")
+;; ============================================================================
+;; 8. Parameter vs. Environment Variables
+;; ============================================================================
+
+(display "8. PARAMETER VS. ENVIRONMENT VARIABLES")
 (newline)
-(display "  • tests/unittests/closures_and_lambdas.rs")
+(display "--------------------------------")
 (newline)
-(display "  • tests/integration/closures_and_lambdas.rs")
+
+;; Environment variables are accessed from closure scope
+(define env-var 30)
+(define uses-env (lambda (x) (+ env-var x)))
+(display "Environment variable capture: (uses-env 20) = ")
+(display (uses-env 20))
+(newline)
+
+;; Parameters are local to the function
+(define add-params (lambda (a b c)
+  (+ a b c)))
+(display "Function parameters: (add-params 10 20 30) = ")
+(display (add-params 10 20 30))
+(newline)
+
+;; Both parameters and environment variables work together
+(define mixed-context 50)
+(define mixed-func (lambda (param)
+  (+ mixed-context param)))
+(display "Mixed (env + param): (mixed-func 10) = ")
+(display (mixed-func 10))
+(newline)
+(newline)
+
+;; ============================================================================
+;; 9. Complex Conditions in Lambdas
+;; ============================================================================
+
+(display "9. CONDITIONAL LOGIC IN CLOSURES")
+(newline)
+(display "--------------------------------")
+(newline)
+
+;; Complex conditional logic
+(define classify (lambda (n)
+  (if (< n 0)
+    "negative"
+    (if (= n 0)
+      "zero"
+      (if (< n 10)
+        "small"
+        (if (< n 100)
+          "medium"
+          "large"))))))
+
+(display "Classify -5: ")
+(display (classify -5))
+(newline)
+
+(display "Classify 0: ")
+(display (classify 0))
+(newline)
+
+(display "Classify 7: ")
+(display (classify 7))
+(newline)
+
+(display "Classify 50: ")
+(display (classify 50))
+(newline)
+
+(display "Classify 200: ")
+(display (classify 200))
+(newline)
+(newline)
+
+;; ============================================================================
+;; 10. Reusable Function Patterns
+;; ============================================================================
+
+(display "10. REUSABLE FUNCTION PATTERNS")
+(newline)
+(display "--------------------------------")
+(newline)
+
+;; Template pattern - parameterized function behavior
+(define threshold 10)
+(define filter-above (lambda (lst)
+  (if (= (length lst) 0)
+    (list)
+    (if (> (first lst) threshold)
+      (cons (first lst) (filter-above (rest lst)))
+      (filter-above (rest lst))))))
+
+(display "Filter values above 10: ")
+(display (filter-above (list 5 15 8 20 3 12)))
+(newline)
+
+;; String builder with captured parts
+(define greeting-start "Hello")
+(define greeting-end "!")
+(define make-greeting (lambda (name)
+  (string-append greeting-start ", " name greeting-end)))
+
+(display "Greeting: ")
+(display (make-greeting "Alice"))
+(newline)
+
+(display "Greeting: ")
+(display (make-greeting "Bob"))
+(newline)
+(newline)
+
+;; ============================================================================
+;; 11. Summary
+;; ============================================================================
+
+(display "=== SUMMARY ===")
+(newline)
+(display "Closures and lambdas enable:")
+(newline)
+(display "  • Anonymous functions - define functions without names")
+(newline)
+(display "  • Variable capture - functions access outer scope variables")
+(newline)
+(display "  • Lexical scoping - inner functions see outer definitions")
+(newline)
+(display "  • Parameter shadowing - local params override outer values")
+(newline)
+(display "  • List processing - filter, map, and transform sequences")
+(newline)
+(display "  • Predicates - functions returning boolean values")
+(newline)
+(display "  • Complex logic - conditionals and pattern matching")
+(newline)
+(display "  • Reusable patterns - template functions for common tasks")
+(newline)
+(newline)
+
+(display "=== All Examples Complete ===")
 (newline)
