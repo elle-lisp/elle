@@ -57,13 +57,13 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install and run cargo-audit
-        run: |
-          cargo install cargo-audit
-          cargo audit
+       - uses: actions/checkout@v4
+       - uses: dtolnay/rust-toolchain@stable
+       - uses: Swatinem/rust-cache@v2
+       - name: Install and run cargo-audit
+         run: |
+           cargo install cargo-audit
+           cargo audit
 
   examples:
     name: Examples
@@ -74,48 +74,60 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build release binary
         run: cargo build --release
-      - name: Test Lisp examples with release build
+      - name: Test all Lisp examples with release build
         run: |
           ELLE_BIN="./target/release/elle"
-          
-          # Simple, runnable examples (no external dependencies)
-          RUNNABLE_EXAMPLES=(
-            "hello.l"
-            "arithmetic.l"
-            "list-demo.l"
-          )
-          
-          echo "Testing examples with release build ($ELLE_BIN):"
-          echo "================================================"
-          
-          for example in "${RUNNABLE_EXAMPLES[@]}"; do
-            if [ -f "examples/$example" ]; then
-              echo ""
-              echo "Running: $example"
-              echo "---"
-              if timeout 10s "$ELLE_BIN" "examples/$example" > /tmp/output.txt 2>&1; then
-                output=$(cat /tmp/output.txt)
-                if [ -z "$output" ]; then
-                  echo "✓ $example executed successfully (no output)"
-                else
-                  echo "✓ $example executed successfully"
-                  echo "Output:"
-                  echo "$output" | head -20
-                fi
-              else
-                echo "✗ $example failed"
-                cat /tmp/output.txt
-                exit 1
-              fi
+          # Try TMPDIR, then TMP, then fallback to /tmp
+          TEMP_DIR="${TMPDIR:-${TMP:-/tmp}}/elle-examples-$$"
+          mkdir -p "$TEMP_DIR"
+
+          echo "Testing all Lisp examples with release build:"
+          echo "=============================================="
+
+          TOTAL=0
+          PASSED=0
+          FAILED=0
+
+          for example in examples/*.l; do
+            if [ ! -f "$example" ]; then
+              continue
+            fi
+
+            TOTAL=$((TOTAL + 1))
+            EXAMPLE_NAME=$(basename "$example")
+
+            echo ""
+            echo "Running: $EXAMPLE_NAME"
+            echo "---"
+
+            OUTPUT_FILE="$TEMP_DIR/output_$EXAMPLE_NAME.txt"
+            if timeout 10s "$ELLE_BIN" "$example" > "$OUTPUT_FILE" 2>&1; then
+              PASSED=$((PASSED + 1))
+              echo "✓ $EXAMPLE_NAME PASSED"
+              # Show first few lines of output
+              head -5 "$OUTPUT_FILE" | sed 's/^/  /'
             else
-              echo "✗ $example not found"
-              exit 1
+              FAILED=$((FAILED + 1))
+              echo "✗ $EXAMPLE_NAME FAILED"
+              # Show error details
+              head -10 "$OUTPUT_FILE" | sed 's/^/  /'
+              # Don't exit on failure - continue testing all examples
             fi
           done
-          
+
+          # Cleanup
+          rm -rf "$TEMP_DIR"
+
           echo ""
-          echo "================================================"
-          echo "✓ All runnable examples passed"
+          echo "=============================================="
+          echo "Results: $PASSED/$TOTAL passed, $FAILED failed"
+
+          if [ $FAILED -gt 0 ]; then
+            echo "✗ Some examples failed"
+            exit 1
+          else
+            echo "✓ All examples passed"
+          fi
 
   coverage:
     name: Code Coverage
