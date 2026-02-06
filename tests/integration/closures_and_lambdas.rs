@@ -629,3 +629,57 @@ fn test_conditional_logic_in_closure() {
     );
     assert!(result.is_ok());
 }
+
+// ============================================================================
+// SECTION 8: Scope Management with Let-bindings
+// ============================================================================
+
+#[test]
+fn test_let_binding_basic_scope() {
+    // Let-bindings work with basic variable isolation
+    let result = eval("(let ((x 5)) (+ x 1))");
+    assert_eq!(result.unwrap(), Value::Int(6));
+}
+
+#[test]
+fn test_let_binding_multiple_vars() {
+    // Multiple variables in let-binding
+    let result = eval("(let ((x 5) (y 3)) (+ x y))");
+    assert_eq!(result.unwrap(), Value::Int(8));
+}
+
+#[test]
+fn test_let_binding_global_shadowing() {
+    // Let-binding shadows global variable (via lambda transformation)
+    let result = eval(
+        "(begin
+          (define x 100)
+          (let ((x 5))
+            (+ x 1)))"
+    );
+    assert_eq!(result.unwrap(), Value::Int(6));
+}
+
+#[test]
+fn test_let_binding_function_scope() {
+    // Let-binding works with functions
+    let result = eval(
+        "(begin
+          (define double (lambda (x) (* x 2)))
+          (let ((x 5))
+            (double x)))"
+    );
+    assert_eq!(result.unwrap(), Value::Int(10));
+}
+
+#[test]
+fn test_let_binding_with_global_access() {
+    // Let-binding can access global variables
+    let result = eval(
+        "(begin
+          (define multiplier 10)
+          (let ((x 5))
+            (* x multiplier)))"
+    );
+    assert_eq!(result.unwrap(), Value::Int(50));
+}

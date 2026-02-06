@@ -193,13 +193,31 @@ impl Compiler {
                 self.bytecode.emit_byte(captures.len() as u8);
             }
 
-            Expr::Let {
-                bindings: _,
-                body: _,
-            } => {
-                // Let-bindings should have been transformed to lambda calls at the converter stage
-                // This should not be reached in normal compilation
-                panic!("Unexpected Let expression in compile phase - should have been transformed to lambda call");
+            Expr::Let { bindings, body } => {
+                // Let-bindings create a local scope with proper isolation
+                // NOTE: Currently, let-bindings are transformed to lambda calls at the converter stage
+                // (see src/compiler/converters.rs), so this code is never reached in normal execution.
+                // This implementation is preserved for future direct let-binding compilation.
+
+                // Push a Let scope
+                self.bytecode.emit(Instruction::PushScope);
+                self.bytecode.emit_byte(4); // ScopeType::Let = 4
+
+                // Compile and store each binding in the local scope
+                for (var, expr) in bindings {
+                    // Compile the binding expression
+                    self.compile_expr(expr, false);
+                    // Define the variable in the let scope
+                    let idx = self.bytecode.add_constant(Value::Symbol(*var));
+                    self.bytecode.emit(Instruction::DefineLocal);
+                    self.bytecode.emit_u16(idx);
+                }
+
+                // Compile the body in the let scope
+                self.compile_expr(body, tail);
+
+                // Pop the let scope
+                self.bytecode.emit(Instruction::PopScope);
             }
 
             Expr::Set {
