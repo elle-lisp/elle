@@ -1,0 +1,16 @@
+[package]
+name = "elle-lint"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+elle = { path = ".." }
+serde_json = "1.0"
+
+[[bin]]
+name = "elle-lint"
+path = "src/main.rs"
+
+[lib]
+name = "elle_lint"
+path = "src/lib.rs"
