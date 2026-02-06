@@ -41,6 +41,14 @@ pub enum Expr {
         else_: Box<Expr>,
     },
 
+    /// Cond expression (multi-way conditional)
+    /// Evaluates each condition in order until one is true
+    /// Each clause is (condition body...)
+    Cond {
+        clauses: Vec<(Expr, Expr)>,   // (condition, body) pairs
+        else_body: Option<Box<Expr>>, // Optional else clause
+    },
+
     /// Begin (sequence of expressions)
     Begin(Vec<Expr>),
 
@@ -184,6 +192,7 @@ impl Expr {
             self,
             Expr::Call { tail: true, .. }
                 | Expr::If { .. }
+                | Expr::Cond { .. }
                 | Expr::Begin(_)
                 | Expr::Let { .. }
                 | Expr::While { .. }

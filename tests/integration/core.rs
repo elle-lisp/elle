@@ -1111,3 +1111,139 @@ fn test_let_star_with_multiple_bindings_no_dependencies() {
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(3));
 }
+
+// Tests for cond expression (multi-way conditional)
+
+#[test]
+fn test_cond_single_true_clause() {
+    assert_eq!(eval("(cond (#t 42))").unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_cond_single_false_clause_with_else() {
+    assert_eq!(eval("(cond (#f 42) (else 100))").unwrap(), Value::Int(100));
+}
+
+#[test]
+fn test_cond_single_false_clause_without_else() {
+    // If no clause matches and no else, return nil
+    assert_eq!(eval("(cond (#f 42))").unwrap(), Value::Nil);
+}
+
+#[test]
+fn test_cond_first_clause_matches() {
+    assert_eq!(
+        eval("(cond ((> 5 3) 100) ((> 4 2) 200))").unwrap(),
+        Value::Int(100)
+    );
+}
+
+#[test]
+fn test_cond_second_clause_matches() {
+    assert_eq!(
+        eval("(cond ((> 3 5) 100) ((> 4 2) 200))").unwrap(),
+        Value::Int(200)
+    );
+}
+
+#[test]
+fn test_cond_multiple_clauses_with_else() {
+    assert_eq!(
+        eval("(cond ((> 3 5) 100) ((> 2 4) 200) (else 300))").unwrap(),
+        Value::Int(300)
+    );
+}
+
+#[test]
+fn test_cond_with_expressions_as_conditions() {
+    let code = r#"
+        (cond
+          ((= 1 2) "one-two")
+          ((= 2 2) "two-two")
+          (else "other"))
+    "#;
+    match eval(code).unwrap() {
+        Value::String(s) => assert_eq!(&*s, "two-two"),
+        _ => panic!("Expected string"),
+    }
+}
+
+#[test]
+fn test_cond_with_complex_bodies() {
+    let code = r#"
+        (cond
+          (#f (+ 1 1))
+          (#t (+ 2 3))
+          (else (+ 4 5)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(5));
+}
+
+#[test]
+fn test_cond_with_multiple_body_expressions() {
+    // Cond body can have multiple expressions, returns the last one
+    let code = r#"
+        (cond
+          (#t
+            (+ 1 1)
+            (+ 2 2)
+            (+ 3 3)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(6));
+}
+
+#[test]
+fn test_cond_nested() {
+    let code = r#"
+        (cond
+          (#t
+            (cond
+              (#t 42)
+              (else 100)))
+          (else 200))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_cond_with_variable_references() {
+    let code = r#"
+        (define x 10)
+        (cond
+          ((< x 5) "small")
+          ((< x 15) "medium")
+          (else "large"))
+    "#;
+    match eval(code).unwrap() {
+        Value::String(s) => assert_eq!(&*s, "medium"),
+        _ => panic!("Expected string"),
+    }
+}
+
+#[test]
+fn test_cond_respects_clause_order() {
+    // The first matching clause wins
+    let code = r#"
+        (cond
+          ((>= 10 5) "first")
+          ((>= 10 3) "second")
+          (else "third"))
+    "#;
+    match eval(code).unwrap() {
+        Value::String(s) => assert_eq!(&*s, "first"),
+        _ => panic!("Expected string"),
+    }
+}
+
+#[test]
+fn test_cond_with_else_body_multiple_expressions() {
+    let code = r#"
+        (cond
+          (#f 100)
+          (else
+            (+ 1 1)
+            (+ 2 2)
+            (* 3 3)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(9));
+}

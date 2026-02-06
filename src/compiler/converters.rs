@@ -873,6 +873,87 @@ fn value_to_expr_with_scope(
                         })
                     }
 
+                    "cond" => {
+                        // Syntax: (cond (test1 body1) (test2 body2) ... [(else body)])
+                        // A cond expression evaluates test expressions in order until one is truthy,
+                        // then evaluates and returns its corresponding body.
+                        // If no tests are truthy and there's an else clause, evaluate the else body.
+                        // If no tests are truthy and there's no else clause, return nil.
+                        if list.len() < 2 {
+                            return Err("cond requires at least one clause".to_string());
+                        }
+
+                        let mut clauses = Vec::new();
+                        let mut else_body = None;
+
+                        // Parse clauses
+                        for clause in &list[1..] {
+                            let clause_vec = clause.list_to_vec()?;
+                            if clause_vec.is_empty() {
+                                return Err("cond clause cannot be empty".to_string());
+                            }
+
+                            // Check if this is the else clause (single symbol 'else' followed by body)
+                            if !clause_vec.is_empty() {
+                                if let Value::Symbol(test_sym) = &clause_vec[0] {
+                                    if let Some("else") = symbols.name(*test_sym) {
+                                        // This is the else clause
+                                        if else_body.is_some() {
+                                            return Err(
+                                                "cond can have at most one else clause".to_string()
+                                            );
+                                        }
+                                        // The else clause body can be multiple expressions
+                                        let body_exprs: Result<Vec<_>, _> = clause_vec[1..]
+                                            .iter()
+                                            .map(|v| {
+                                                value_to_expr_with_scope(v, symbols, scope_stack)
+                                            })
+                                            .collect();
+                                        let body_exprs = body_exprs?;
+                                        let body = if body_exprs.is_empty() {
+                                            Expr::Literal(Value::Nil)
+                                        } else if body_exprs.len() == 1 {
+                                            body_exprs[0].clone()
+                                        } else {
+                                            Expr::Begin(body_exprs)
+                                        };
+                                        else_body = Some(Box::new(body));
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            // Regular clause: (test body...)
+                            if clause_vec.len() < 2 {
+                                return Err(
+                                    "cond clause must have at least a test and a body".to_string()
+                                );
+                            }
+
+                            let test =
+                                value_to_expr_with_scope(&clause_vec[0], symbols, scope_stack)?;
+
+                            // The body can be multiple expressions
+                            let body_exprs: Result<Vec<_>, _> = clause_vec[1..]
+                                .iter()
+                                .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                                .collect();
+                            let body_exprs = body_exprs?;
+                            let body = if body_exprs.is_empty() {
+                                Expr::Literal(Value::Nil)
+                            } else if body_exprs.len() == 1 {
+                                body_exprs[0].clone()
+                            } else {
+                                Expr::Begin(body_exprs)
+                            };
+
+                            clauses.push((test, body));
+                        }
+
+                        Ok(Expr::Cond { clauses, else_body })
+                    }
+
                     _ => {
                         // Check if it's a macro call
                         if let Value::Symbol(sym_id) = first {

@@ -593,6 +593,71 @@ impl Compiler {
                 }
             }
 
+            Expr::Cond { clauses, else_body } => {
+                // Cond expression: evaluates test expressions until one is truthy
+                // Syntax: (cond (test1 body1) (test2 body2) ... [(else body)])
+                //
+                // Compilation strategy:
+                // For each clause:
+                //   1. Compile test expression
+                //   2. JumpIfFalse to next clause
+                //   3. Compile body (in tail position if tail is true)
+                //   4. Jump to end
+                // For else clause (if present):
+                //   1. Compile body (in tail position if tail is true)
+                // If no else clause:
+                //   1. Load nil
+
+                if clauses.is_empty() {
+                    // (cond) with no clauses => nil, or else_body if present
+                    if let Some(else_expr) = else_body {
+                        self.compile_expr(else_expr, tail);
+                    } else {
+                        self.bytecode.emit(Instruction::Nil);
+                    }
+                    return;
+                }
+
+                let mut end_jumps = Vec::new();
+
+                // Compile each clause
+                for (test, body) in clauses {
+                    self.compile_expr(test, false);
+
+                    self.bytecode.emit(Instruction::JumpIfFalse);
+                    let next_clause_jump = self.bytecode.instructions.len();
+                    self.bytecode.emit_u16(0); // Placeholder for next clause
+
+                    // Compile the body
+                    self.compile_expr(body, tail);
+
+                    // Jump to end after executing this body
+                    self.bytecode.emit(Instruction::Jump);
+                    let end_jump = self.bytecode.instructions.len();
+                    self.bytecode.emit_u16(0); // Placeholder for end
+                    end_jumps.push(end_jump);
+
+                    // Patch the jump to next clause
+                    let next_clause_pos = self.bytecode.instructions.len();
+                    let offset = (next_clause_pos as i32) - (next_clause_jump as i32 + 2);
+                    self.bytecode.patch_jump(next_clause_jump, offset as i16);
+                }
+
+                // Handle else clause or nil
+                if let Some(else_expr) = else_body {
+                    self.compile_expr(else_expr, tail);
+                } else {
+                    self.bytecode.emit(Instruction::Nil);
+                }
+
+                // Patch all end jumps
+                let end_pos = self.bytecode.instructions.len();
+                for jump_pos in end_jumps {
+                    let offset = (end_pos as i32) - (jump_pos as i32 + 2);
+                    self.bytecode.patch_jump(jump_pos, offset as i16);
+                }
+            }
+
             Expr::Xor(_) => {
                 // XOR is transformed to a function call in the converter
                 // This case should never be reached, but we handle it for exhaustiveness
