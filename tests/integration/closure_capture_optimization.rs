@@ -198,6 +198,67 @@ fn test_closure_uses_parameter_not_capture() {
   (define x 100)
   (define y 200)
   ((lambda (x) (+ x y)) 50))
-    "#;
+     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(250));
+}
+
+#[test]
+fn test_dead_capture_elimination_nested_lambda() {
+    // x is captured by outer lambda but only used in nested lambda
+    // Dead capture elimination should NOT eliminate x
+    let code = r#"
+(begin
+  (define x 10)
+  (define f (lambda ()
+    ((lambda () x))))
+  (f))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(10));
+}
+
+#[test]
+fn test_capture_free_closure_works() {
+    // Lambda with no captures should work via LoadConst optimization
+    let code = r#"
+(begin
+  (define f (lambda (x) (+ x 1)))
+  (f 5))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(6));
+}
+
+#[test]
+fn test_capture_free_closure_as_argument() {
+    // Pass a capture-free closure as an argument
+    let code = r#"
+(begin
+  (define apply-fn (lambda (f x) (f x)))
+  (apply-fn (lambda (n) (* n 2)) 5))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(10));
+}
+
+#[test]
+fn test_dead_capture_in_let() {
+    // let-binding where some captures are unused
+    let code = r#"
+((lambda (x y z)
+   (let ((a (+ x z)))
+     a))
+ 1 2 3)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(4));
+}
+
+#[test]
+fn test_mixed_capture_and_no_capture() {
+    // One closure captures, another doesn't
+    let code = r#"
+(begin
+  (define x 10)
+  (define f (lambda () x))        ; captures x
+  (define g (lambda (n) (+ n 1))) ; no captures
+  (+ (f) (g 5)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(16));
 }

@@ -47,17 +47,15 @@ pub fn analyze_capture_usage(
             }
         }
 
-        Expr::Lambda {
-            params, body: _, ..
-        } => {
-            // For nested lambdas, we don't optimize yet (Phase 1: leaf lambdas only)
+        Expr::Lambda { params, body, .. } => {
+            // Phase 4: Recurse into nested lambdas
             // Create new local bindings that include lambda parameters
-            let mut _new_bindings = local_bindings.clone();
+            let mut new_bindings = local_bindings.clone();
             for param in params {
-                _new_bindings.insert(*param);
+                new_bindings.insert(*param);
             }
-            // Don't recurse into nested lambdas - Phase 1 handles leaf lambdas only
-            // Nested lambda optimization is deferred to Phase 3
+            // Recurse into nested lambda body with extended bindings
+            used_vars.extend(analyze_capture_usage(body, &new_bindings, candidates));
         }
 
         Expr::Let { bindings, body } => {
@@ -132,6 +130,35 @@ pub fn analyze_capture_usage(
                     local_bindings,
                     candidates,
                 ));
+            }
+        }
+
+        Expr::Block(exprs) => {
+            for e in exprs {
+                used_vars.extend(analyze_capture_usage(e, local_bindings, candidates));
+            }
+        }
+
+        Expr::Letrec { bindings, body } => {
+            for (_, expr) in bindings {
+                used_vars.extend(analyze_capture_usage(expr, local_bindings, candidates));
+            }
+            used_vars.extend(analyze_capture_usage(body, local_bindings, candidates));
+        }
+
+        Expr::Cond { clauses, else_body } => {
+            for (test, body) in clauses {
+                used_vars.extend(analyze_capture_usage(test, local_bindings, candidates));
+                used_vars.extend(analyze_capture_usage(body, local_bindings, candidates));
+            }
+            if let Some(else_expr) = else_body {
+                used_vars.extend(analyze_capture_usage(else_expr, local_bindings, candidates));
+            }
+        }
+
+        Expr::And(exprs) | Expr::Or(exprs) => {
+            for e in exprs {
+                used_vars.extend(analyze_capture_usage(e, local_bindings, candidates));
             }
         }
 

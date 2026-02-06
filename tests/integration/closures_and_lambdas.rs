@@ -809,3 +809,71 @@ fn test_immediately_invoked_nested_lambda() {
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(15));
 }
+
+// ============================================================================
+// SECTION: Regression Tests for Let/Let* Closure Behavior
+// ============================================================================
+// These tests ensure that let and let* bindings work correctly with closures
+// and prevent regressions in closure escape and shadowing behavior.
+
+#[test]
+fn test_let_closure_escape() {
+    // A closure created inside let that captures a let-bound variable
+    // must work even after the let scope exits.
+    // This tests that let-bound variables are properly captured by closures.
+    let code = r#"
+        (begin
+          (define make-fn (lambda ()
+            (let ((x 42))
+              (lambda () x))))
+          (define f (make-fn))
+          (f))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_let_with_closure_capture() {
+    // let-bound variables should be capturable by closures
+    let code = r#"
+        (let ((x 5) (y 10))
+          (lambda () (+ x y)))
+    "#;
+    let result = eval(code).unwrap();
+    assert!(matches!(result, Value::Closure(_)));
+}
+
+#[test]
+fn test_let_basic_binding() {
+    // Basic let binding should work correctly
+    let code = r#"
+        (let ((x 5) (y 10))
+          (+ x y))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(15));
+}
+
+#[test]
+fn test_let_star_basic() {
+    // Basic let* binding should work correctly
+    let code = r#"
+        (let* ((x 1) (y 2) (z 3))
+          (+ x y z))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(6));
+}
+
+#[test]
+fn test_nested_let_closure_escape() {
+    // Nested let scopes with closure escape
+    let code = r#"
+        (begin
+          (define make-adder (lambda (base)
+            (let ((b base))
+              (lambda (x)
+                (+ b x)))))
+          (define add5 (make-adder 5))
+          (add5 3))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(8));
+}

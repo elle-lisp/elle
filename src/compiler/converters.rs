@@ -1,9 +1,10 @@
-use super::analysis::analyze_free_vars;
+use super::analysis::{analyze_capture_usage, analyze_free_vars};
 use super::ast::{Expr, Pattern};
 use super::macros::expand_macro;
 use super::patterns::value_to_pattern;
 use crate::symbol::SymbolTable;
 use crate::value::{SymbolId, Value};
+use std::collections::HashSet;
 
 /// Extract all variable bindings from a pattern
 fn extract_pattern_variables(pattern: &Pattern) -> Vec<SymbolId> {
@@ -508,6 +509,16 @@ fn value_to_expr_with_scope(
                             })
                             .collect();
 
+                        // Dead capture elimination: filter out captures that aren't actually used in the body
+                        let candidates: HashSet<SymbolId> =
+                            captures.iter().map(|(sym, _, _)| *sym).collect();
+                        let actually_used =
+                            analyze_capture_usage(&body, &local_bindings, &candidates);
+                        let captures: Vec<_> = captures
+                            .into_iter()
+                            .filter(|(sym, _, _)| actually_used.contains(sym))
+                            .collect();
+
                         // Adjust variable indices in body to account for closure environment layout
                         // The closure environment is [captures..., parameters...]
                         let mut adjusted_body = body;
@@ -603,6 +614,16 @@ fn value_to_expr_with_scope(
                                 // If not found in scope stack, it's a global variable
                                 (*sym, 0, usize::MAX)
                             })
+                            .collect();
+
+                        // Dead capture elimination: filter out captures that aren't actually used in the body
+                        let candidates: HashSet<SymbolId> =
+                            captures.iter().map(|(sym, _, _)| *sym).collect();
+                        let actually_used =
+                            analyze_capture_usage(&body, &local_bindings, &candidates);
+                        let captures: Vec<_> = captures
+                            .into_iter()
+                            .filter(|(sym, _, _)| actually_used.contains(sym))
                             .collect();
 
                         // Adjust variable indices in body to account for closure environment layout
@@ -722,6 +743,16 @@ fn value_to_expr_with_scope(
                                 // If not found in scope stack, it's a global variable
                                 (*sym, 0, usize::MAX)
                             })
+                            .collect();
+
+                        // Dead capture elimination: filter out captures that aren't actually used in the body
+                        let candidates: HashSet<SymbolId> =
+                            captures.iter().map(|(sym, _, _)| *sym).collect();
+                        let actually_used =
+                            analyze_capture_usage(&body, &local_bindings, &candidates);
+                        let captures: Vec<_> = captures
+                            .into_iter()
+                            .filter(|(sym, _, _)| actually_used.contains(sym))
                             .collect();
 
                         // Adjust variable indices in body to account for closure environment layout
