@@ -351,7 +351,6 @@ fn main() {
 
     if args.len() == 1 {
         println!();
-        println!("Goodbye!");
     }
 
     // Exit with appropriate status code
