@@ -26,6 +26,8 @@ pub enum Token {
     RightParen,
     LeftBracket,
     RightBracket,
+    LeftBrace,
+    RightBrace,
     Quote,
     Quasiquote,
     Unquote,
@@ -162,7 +164,7 @@ impl Lexer {
     fn read_symbol(&mut self) -> String {
         let mut sym = String::new();
         while let Some(c) = self.current() {
-            if c.is_whitespace() || "()[]'`,:@".contains(c) {
+            if c.is_whitespace() || "()[]{}'`,:@".contains(c) {
                 break;
             }
             sym.push(c);
@@ -215,6 +217,20 @@ impl Lexer {
                 self.advance();
                 Ok(Some(TokenWithLoc {
                     token: Token::RightBracket,
+                    loc,
+                }))
+            }
+            Some('{') => {
+                self.advance();
+                Ok(Some(TokenWithLoc {
+                    token: Token::LeftBrace,
+                    loc,
+                }))
+            }
+            Some('}') => {
+                self.advance();
+                Ok(Some(TokenWithLoc {
+                    token: Token::RightBrace,
                     loc,
                 }))
             }
@@ -370,9 +386,11 @@ impl Reader {
         match token {
             Token::LeftParen => self.read_list(symbols),
             Token::LeftBracket => self.read_vector(symbols),
+            Token::LeftBrace => self.read_struct(symbols),
             Token::ListSugar => {
                 self.advance();
                 // @[...] is sugar for (list ...)
+                // @{...} is sugar for (table ...)
                 if self.current() == Some(&Token::LeftBracket) {
                     self.advance(); // skip [
                     let mut elements = Vec::new();
@@ -393,10 +411,14 @@ impl Reader {
                             _ => elements.push(self.read(symbols)?),
                         }
                     }
+                } else if self.current() == Some(&Token::LeftBrace) {
+                    // Handle @{...} for table sugar
+                    self.read_table(symbols)
                 } else {
-                    Err("@ must be followed by [...]".to_string())
+                    Err("@ must be followed by [...] or {...}".to_string())
                 }
             }
+
             Token::Quote => {
                 self.advance();
                 let val = self.read(symbols)?;
@@ -478,6 +500,7 @@ impl Reader {
             }
             Token::RightParen => Err("Unexpected )".to_string()),
             Token::RightBracket => Err("Unexpected ]".to_string()),
+            Token::RightBrace => Err("Unexpected }".to_string()),
         }
     }
 
@@ -517,6 +540,50 @@ impl Reader {
                 Some(Token::RightBracket) => {
                     self.advance();
                     return Ok(Value::Vector(Rc::new(elements)));
+                }
+                _ => elements.push(self.read(symbols)?),
+            }
+        }
+    }
+
+    fn read_struct(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
+        self.advance(); // skip {
+        let mut elements = Vec::new();
+
+        loop {
+            match self.current() {
+                None => return Err("Unterminated struct literal".to_string()),
+                Some(Token::RightBrace) => {
+                    self.advance();
+                    // Build (struct k1 v1 k2 v2 ...)
+                    let struct_sym = Value::Symbol(symbols.intern("struct"));
+                    let result = elements
+                        .into_iter()
+                        .rev()
+                        .fold(Value::Nil, |acc, v| cons(v, acc));
+                    return Ok(cons(struct_sym, result));
+                }
+                _ => elements.push(self.read(symbols)?),
+            }
+        }
+    }
+
+    fn read_table(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
+        self.advance(); // skip {
+        let mut elements = Vec::new();
+
+        loop {
+            match self.current() {
+                None => return Err("Unterminated table literal".to_string()),
+                Some(Token::RightBrace) => {
+                    self.advance();
+                    // Build (table k1 v1 k2 v2 ...)
+                    let table_sym = Value::Symbol(symbols.intern("table"));
+                    let result = elements
+                        .into_iter()
+                        .rev()
+                        .fold(Value::Nil, |acc, v| cons(v, acc));
+                    return Ok(cons(table_sym, result));
                 }
                 _ => elements.push(self.read(symbols)?),
             }
