@@ -311,3 +311,27 @@ fn test_for_loop_with_list() {
     let _counter = eval.eval("counter");
     // We just check that the evaluation doesn't crash
 }
+
+#[test]
+fn test_scope_management_features() {
+    let mut eval = LoopEval::new();
+
+    // Test 1: Loop variable modifications preserve global scope
+    eval.eval("(define x 10)").unwrap();
+    eval.eval("(while (< x 15) (set! x (+ x 1)))").unwrap();
+    let result = eval.eval("x").unwrap();
+    assert_eq!(result, Value::Int(15));
+
+    // Test 2: For loop correctly accumulates with global variable
+    eval.eval("(define result 0)").unwrap();
+    eval.eval("(for i (list 1 2 3) (set! result (+ result i)))").unwrap();
+    let result = eval.eval("result").unwrap();
+    assert_eq!(result, Value::Int(6)); // 1 + 2 + 3
+
+    // Test 3: Global variable access from loop
+    eval.eval("(define multiplier 10)").unwrap();
+    eval.eval("(define sum 0)").unwrap();
+    eval.eval("(for item (list 1 2 3) (set! sum (+ sum (* item multiplier))))").unwrap();
+    let result = eval.eval("sum").unwrap();
+    assert_eq!(result, Value::Int(60)); // (1+2+3) * 10
+}

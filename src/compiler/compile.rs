@@ -235,14 +235,9 @@ impl Compiler {
             }
 
             Expr::While { cond, body } => {
-                // Pre-declare any defines in the loop body to support define in nested scopes
-                let defines = Self::collect_defines(body);
-                for sym_id in defines {
-                    self.bytecode.emit(Instruction::Nil);
-                    let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
-                    self.bytecode.emit(Instruction::StoreGlobal);
-                    self.bytecode.emit_u16(idx);
-                }
+                // Push loop scope to isolate loop variables
+                self.bytecode.emit(Instruction::PushScope);
+                self.bytecode.emit_byte(3); // ScopeType::Loop = 3
 
                 // Implement while loop using conditional jumps
                 // Loop label - start of condition check
@@ -276,19 +271,17 @@ impl Compiler {
                 self.bytecode
                     .patch_jump(loop_jump as usize, (loop_label - loop_jump - 2) as i16);
 
+                // Pop loop scope
+                self.bytecode.emit(Instruction::PopScope);
+
                 // Return nil after loop
                 self.bytecode.emit(Instruction::Nil);
             }
 
             Expr::For { var, iter, body } => {
-                // Pre-declare any defines in the loop body to support define in nested scopes
-                let defines = Self::collect_defines(body);
-                for sym_id in defines {
-                    self.bytecode.emit(Instruction::Nil);
-                    let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
-                    self.bytecode.emit(Instruction::StoreGlobal);
-                    self.bytecode.emit_u16(idx);
-                }
+                // Push loop scope to isolate loop variables
+                self.bytecode.emit(Instruction::PushScope);
+                self.bytecode.emit_byte(3); // ScopeType::Loop = 3
 
                 // Implement for loop: (for x lst (do-something-with x))
                 // Compile the iterable (list)
@@ -340,6 +333,9 @@ impl Compiler {
                 // Patch the loop back jump
                 self.bytecode
                     .patch_jump(loop_jump as usize, (loop_label - loop_jump - 2) as i16);
+
+                // Pop loop scope
+                self.bytecode.emit(Instruction::PopScope);
 
                 // Pop the nil list from stack and push nil (loop return value)
                 // Stack: [nil]
