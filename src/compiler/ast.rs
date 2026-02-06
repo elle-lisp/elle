@@ -75,6 +75,12 @@ pub enum Expr {
         body: Box<Expr>,
     },
 
+    /// Letrec binding (mutually recursive bindings)
+    Letrec {
+        bindings: Vec<(SymbolId, Expr)>,
+        body: Box<Expr>,
+    },
+
     /// Set! (mutation)
     Set {
         var: SymbolId,
@@ -199,6 +205,7 @@ impl Expr {
                 | Expr::Begin(_)
                 | Expr::Block(_)
                 | Expr::Let { .. }
+                | Expr::Letrec { .. }
                 | Expr::While { .. }
                 | Expr::For { .. }
                 | Expr::Match { .. }

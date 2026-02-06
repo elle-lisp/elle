@@ -114,6 +114,12 @@ fn adjust_var_indices(expr: &mut Expr, captures: &[(SymbolId, usize, usize)], pa
             }
             adjust_var_indices(body, captures, params);
         }
+        Expr::Letrec { bindings, body } => {
+            for (_, expr) in bindings {
+                adjust_var_indices(expr, captures, params);
+            }
+            adjust_var_indices(body, captures, params);
+        }
         Expr::Set { value, .. } => {
             adjust_var_indices(value, captures, params);
         }
@@ -315,6 +321,7 @@ fn build_quasiquote_expr(
 pub fn value_to_expr(value: &Value, symbols: &mut SymbolTable) -> Result<Expr, String> {
     let mut expr = value_to_expr_with_scope(value, symbols, &mut Vec::new())?;
     super::capture_resolution::resolve_captures(&mut expr);
+    mark_tail_calls(&mut expr, true);
     Ok(expr)
 }
 
@@ -734,6 +741,59 @@ fn value_to_expr_with_scope(
                             args: binding_exprs,
                             tail: false,
                         })
+                    }
+
+                    "letrec" => {
+                        // Syntax: (letrec ((var1 expr1) (var2 expr2) ...) body...)
+                        // All bindings are visible to all binding expressions and the body.
+                        // Unlike let, bindings can reference each other.
+                        if list.len() < 2 {
+                            return Err("letrec requires at least a binding vector".to_string());
+                        }
+
+                        let bindings_vec = list[1].list_to_vec()?;
+                        let mut param_syms = Vec::new();
+                        let mut binding_exprs = Vec::new();
+
+                        // First pass: collect all variable names
+                        for binding in &bindings_vec {
+                            let binding_list = binding.list_to_vec()?;
+                            if binding_list.len() != 2 {
+                                return Err(
+                                    "Each letrec binding must be a [var expr] pair".to_string()
+                                );
+                            }
+                            param_syms.push(binding_list[0].as_symbol()?);
+                        }
+
+                        // Second pass: parse binding expressions
+                        // Names are NOT in scope during binding expression parsing
+                        // They'll reference each other as GlobalVar, resolved at runtime via scope_stack
+                        for binding in &bindings_vec {
+                            let binding_list = binding.list_to_vec()?;
+                            let expr =
+                                value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
+                            binding_exprs.push(expr);
+                        }
+
+                        // Parse body in current scope (names also as GlobalVar)
+                        let body_exprs: Result<Vec<_>, _> = list[2..]
+                            .iter()
+                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                            .collect();
+
+                        let body_exprs = body_exprs?;
+                        let body = if body_exprs.len() == 1 {
+                            Box::new(body_exprs[0].clone())
+                        } else if body_exprs.is_empty() {
+                            Box::new(Expr::Literal(Value::Nil))
+                        } else {
+                            Box::new(Expr::Begin(body_exprs))
+                        };
+
+                        let bindings: Vec<_> = param_syms.into_iter().zip(binding_exprs).collect();
+
+                        Ok(Expr::Letrec { bindings, body })
                     }
 
                     "set!" => {
@@ -1202,5 +1262,119 @@ fn value_to_expr_with_scope(
         }
 
         _ => Err(format!("Cannot convert {:?} to expression", value)),
+    }
+}
+
+/// Mark Call expressions in tail position with tail=true for TCO
+fn mark_tail_calls(expr: &mut Expr, in_tail: bool) {
+    match expr {
+        Expr::Call { func, args, tail } => {
+            if in_tail {
+                *tail = true;
+            }
+            // Function and arguments are NOT in tail position
+            mark_tail_calls(func, false);
+            for arg in args {
+                mark_tail_calls(arg, false);
+            }
+        }
+        Expr::If { cond, then, else_ } => {
+            mark_tail_calls(cond, false);
+            mark_tail_calls(then, in_tail);
+            mark_tail_calls(else_, in_tail);
+        }
+        Expr::Cond { clauses, else_body } => {
+            for (test, body) in clauses {
+                mark_tail_calls(test, false);
+                mark_tail_calls(body, in_tail);
+            }
+            if let Some(else_expr) = else_body {
+                mark_tail_calls(else_expr, in_tail);
+            }
+        }
+        Expr::Begin(exprs) => {
+            let len = exprs.len();
+            for (i, e) in exprs.iter_mut().enumerate() {
+                let is_last = i == len - 1;
+                mark_tail_calls(e, in_tail && is_last);
+            }
+        }
+        Expr::Block(exprs) => {
+            let len = exprs.len();
+            for (i, e) in exprs.iter_mut().enumerate() {
+                let is_last = i == len - 1;
+                mark_tail_calls(e, in_tail && is_last);
+            }
+        }
+        Expr::Lambda { body, .. } => {
+            // Lambda body is in tail position (of the lambda)
+            mark_tail_calls(body, true);
+        }
+        Expr::Let { bindings, body } => {
+            for (_, e) in bindings {
+                mark_tail_calls(e, false);
+            }
+            mark_tail_calls(body, in_tail);
+        }
+        Expr::Letrec { bindings, body } => {
+            for (_, e) in bindings {
+                mark_tail_calls(e, false);
+            }
+            mark_tail_calls(body, in_tail);
+        }
+        Expr::Set { value, .. } => {
+            mark_tail_calls(value, false);
+        }
+        Expr::Define { value, .. } => {
+            mark_tail_calls(value, false);
+        }
+        Expr::While { cond, body } => {
+            mark_tail_calls(cond, false);
+            mark_tail_calls(body, false); // Loop body is not in tail position
+        }
+        Expr::For { iter, body, .. } => {
+            mark_tail_calls(iter, false);
+            mark_tail_calls(body, false);
+        }
+        Expr::Match {
+            value,
+            patterns,
+            default,
+        } => {
+            mark_tail_calls(value, false);
+            for (_, body) in patterns {
+                mark_tail_calls(body, in_tail);
+            }
+            if let Some(d) = default {
+                mark_tail_calls(d, in_tail);
+            }
+        }
+        Expr::Try {
+            body,
+            catch,
+            finally,
+        } => {
+            // Try body is NOT in tail position (might need to run finally)
+            mark_tail_calls(body, false);
+            if let Some((_, handler)) = catch {
+                mark_tail_calls(handler, false);
+            }
+            if let Some(f) = finally {
+                mark_tail_calls(f, false);
+            }
+        }
+        Expr::And(exprs) | Expr::Or(exprs) => {
+            // Only the last expression in and/or is in tail position
+            let len = exprs.len();
+            for (i, e) in exprs.iter_mut().enumerate() {
+                let is_last = i == len - 1;
+                mark_tail_calls(e, in_tail && is_last);
+            }
+        }
+        Expr::DefMacro { body, .. } => {
+            mark_tail_calls(body, false);
+        }
+        // Leaf nodes and others — nothing to do
+        _ => {}
     }
 }

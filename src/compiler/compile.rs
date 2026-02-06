@@ -113,18 +113,21 @@ impl Compiler {
             }
 
             Expr::Begin(exprs) => {
-                // Pre-declare all top-level defines to enable recursive functions
+                // Pre-declare all defines to enable recursive functions and forward references
                 // This allows a function to reference itself in its own body
-                // Only do this at global scope, not inside loops/blocks
-                if self.scope_depth == 0 {
-                    let defines = Self::collect_defines(expr);
-                    for sym_id in defines {
-                        // Load nil and store it in the global
-                        self.bytecode.emit(Instruction::Nil);
-                        let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
+                let defines = Self::collect_defines(expr);
+                for sym_id in defines {
+                    // Load nil and store it
+                    self.bytecode.emit(Instruction::Nil);
+                    let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
+                    if self.scope_depth > 0 {
+                        // Inside a scope (lambda, block, etc.) — define locally
+                        self.bytecode.emit(Instruction::DefineLocal);
+                    } else {
+                        // Top-level — define globally
                         self.bytecode.emit(Instruction::StoreGlobal);
-                        self.bytecode.emit_u16(idx);
                     }
+                    self.bytecode.emit_u16(idx);
                 }
 
                 // Now compile the expressions normally
@@ -194,9 +197,17 @@ impl Compiler {
             } => {
                 // Create a new compiler for the lambda body
                 let mut lambda_compiler = Compiler::new();
+                lambda_compiler.scope_depth = 1; // We're inside a function scope
+
+                // Push function scope for local defines
+                lambda_compiler.bytecode.emit(Instruction::PushScope);
+                lambda_compiler.bytecode.emit_byte(1); // ScopeType::Function = 1
 
                 // Compile the body
                 lambda_compiler.compile_expr(body, true);
+
+                // Pop function scope and return
+                lambda_compiler.bytecode.emit(Instruction::PopScope);
                 lambda_compiler.bytecode.emit(Instruction::Return);
 
                 // Create closure value with environment
@@ -259,6 +270,36 @@ impl Compiler {
                 self.compile_expr(body, tail);
 
                 // Pop the let scope
+                self.bytecode.emit(Instruction::PopScope);
+            }
+
+            Expr::Letrec { bindings, body } => {
+                // Letrec creates a scope where all bindings are mutually visible
+                // Pre-declare all binding names as nil, then update them with their values
+                self.bytecode.emit(Instruction::PushScope);
+                self.bytecode.emit_byte(4); // ScopeType::Let = 4
+                self.scope_depth += 1;
+
+                // Pre-declare all binding names as nil (enables mutual references)
+                for (var, _) in bindings {
+                    self.bytecode.emit(Instruction::Nil);
+                    let idx = self.bytecode.add_constant(Value::Symbol(*var));
+                    self.bytecode.emit(Instruction::DefineLocal);
+                    self.bytecode.emit_u16(idx);
+                }
+
+                // Compile each binding expression and update the scope
+                for (var, expr) in bindings {
+                    self.compile_expr(expr, false);
+                    let idx = self.bytecode.add_constant(Value::Symbol(*var));
+                    self.bytecode.emit(Instruction::DefineLocal);
+                    self.bytecode.emit_u16(idx);
+                }
+
+                // Compile the body
+                self.compile_expr(body, tail);
+
+                self.scope_depth -= 1;
                 self.bytecode.emit(Instruction::PopScope);
             }
 

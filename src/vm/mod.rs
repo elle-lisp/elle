@@ -179,10 +179,18 @@ impl VM {
                             return f(&args);
                         }
                         Value::Closure(closure) => {
+                            // Build proper environment: captures + args (same as Call)
+                            let mut new_env = Vec::new();
+                            new_env.extend((*closure.env).iter().cloned());
+                            new_env.extend(args);
+                            let new_env_rc = std::rc::Rc::new(new_env);
+
+                            // Use closure's own constants table (not parent's)
+                            // Don't increment call_depth — this is the tail call optimization
                             return self.execute_bytecode(
                                 &closure.bytecode,
-                                constants,
-                                Some(&closure.env),
+                                &closure.constants,
+                                Some(&new_env_rc),
                             );
                         }
                         _ => return Err(format!("Cannot call {:?}", func)),
