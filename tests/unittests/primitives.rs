@@ -618,6 +618,521 @@ fn test_string_module_functions() {
 }
 
 #[test]
+fn test_string_split() {
+    let (vm, mut symbols) = setup();
+    let split_fn = get_primitive(&vm, &mut symbols, "string-split");
+
+    // Basic split
+    let result = call_primitive(
+        &split_fn,
+        &[Value::String("a,b,c".into()), Value::String(",".into())],
+    )
+    .unwrap();
+    assert!(result.is_list());
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 3);
+    assert_eq!(vec[0], Value::String("a".into()));
+    assert_eq!(vec[1], Value::String("b".into()));
+    assert_eq!(vec[2], Value::String("c".into()));
+
+    // Split with multi-char delimiter
+    let result = call_primitive(
+        &split_fn,
+        &[Value::String("hello".into()), Value::String("ll".into())],
+    )
+    .unwrap();
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 2);
+    assert_eq!(vec[0], Value::String("he".into()));
+    assert_eq!(vec[1], Value::String("o".into()));
+
+    // No match returns original in list
+    let result = call_primitive(
+        &split_fn,
+        &[Value::String("hello".into()), Value::String("xyz".into())],
+    )
+    .unwrap();
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 1);
+    assert_eq!(vec[0], Value::String("hello".into()));
+}
+
+#[test]
+fn test_string_replace() {
+    let (vm, mut symbols) = setup();
+    let replace_fn = get_primitive(&vm, &mut symbols, "string-replace");
+
+    // Basic replace
+    let result = call_primitive(
+        &replace_fn,
+        &[
+            Value::String("hello world".into()),
+            Value::String("world".into()),
+            Value::String("elle".into()),
+        ],
+    )
+    .unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), "hello elle"),
+        _ => panic!("Expected string"),
+    }
+
+    // Replace all occurrences
+    let result = call_primitive(
+        &replace_fn,
+        &[
+            Value::String("aaa".into()),
+            Value::String("a".into()),
+            Value::String("bb".into()),
+        ],
+    )
+    .unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), "bbbbbb"),
+        _ => panic!("Expected string"),
+    }
+}
+
+#[test]
+fn test_string_trim() {
+    let (vm, mut symbols) = setup();
+    let trim_fn = get_primitive(&vm, &mut symbols, "string-trim");
+
+    // Trim whitespace
+    let result = call_primitive(&trim_fn, &[Value::String("  hello  ".into())]).unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), "hello"),
+        _ => panic!("Expected string"),
+    }
+
+    // No whitespace
+    let result = call_primitive(&trim_fn, &[Value::String("hello".into())]).unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), "hello"),
+        _ => panic!("Expected string"),
+    }
+}
+
+#[test]
+fn test_string_contains() {
+    let (vm, mut symbols) = setup();
+    let contains_fn = get_primitive(&vm, &mut symbols, "string-contains?");
+
+    // Contains substring
+    assert_eq!(
+        call_primitive(
+            &contains_fn,
+            &[
+                Value::String("hello world".into()),
+                Value::String("world".into()),
+            ]
+        )
+        .unwrap(),
+        Value::Bool(true)
+    );
+
+    // Does not contain
+    assert_eq!(
+        call_primitive(
+            &contains_fn,
+            &[Value::String("hello".into()), Value::String("xyz".into()),]
+        )
+        .unwrap(),
+        Value::Bool(false)
+    );
+
+    // Empty string is contained in everything
+    assert_eq!(
+        call_primitive(
+            &contains_fn,
+            &[Value::String("hello".into()), Value::String("".into()),]
+        )
+        .unwrap(),
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn test_string_starts_with() {
+    let (vm, mut symbols) = setup();
+    let starts_fn = get_primitive(&vm, &mut symbols, "string-starts-with?");
+
+    // Starts with
+    assert_eq!(
+        call_primitive(
+            &starts_fn,
+            &[Value::String("hello".into()), Value::String("hel".into()),]
+        )
+        .unwrap(),
+        Value::Bool(true)
+    );
+
+    // Does not start with
+    assert_eq!(
+        call_primitive(
+            &starts_fn,
+            &[Value::String("hello".into()), Value::String("world".into()),]
+        )
+        .unwrap(),
+        Value::Bool(false)
+    );
+}
+
+#[test]
+fn test_string_ends_with() {
+    let (vm, mut symbols) = setup();
+    let ends_fn = get_primitive(&vm, &mut symbols, "string-ends-with?");
+
+    // Ends with
+    assert_eq!(
+        call_primitive(
+            &ends_fn,
+            &[Value::String("hello".into()), Value::String("llo".into()),]
+        )
+        .unwrap(),
+        Value::Bool(true)
+    );
+
+    // Does not end with
+    assert_eq!(
+        call_primitive(
+            &ends_fn,
+            &[Value::String("hello".into()), Value::String("world".into()),]
+        )
+        .unwrap(),
+        Value::Bool(false)
+    );
+}
+
+#[test]
+fn test_string_join() {
+    let (vm, mut symbols) = setup();
+    let join_fn = get_primitive(&vm, &mut symbols, "string-join");
+
+    // Join list of strings
+    let list_val = list(vec![
+        Value::String("a".into()),
+        Value::String("b".into()),
+        Value::String("c".into()),
+    ]);
+    let result = call_primitive(&join_fn, &[list_val, Value::String(",".into())]).unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), "a,b,c"),
+        _ => panic!("Expected string"),
+    }
+
+    // Single element
+    let list_val = list(vec![Value::String("hello".into())]);
+    let result = call_primitive(&join_fn, &[list_val, Value::String(" ".into())]).unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), "hello"),
+        _ => panic!("Expected string"),
+    }
+
+    // Empty list
+    let list_val = list(vec![]);
+    let result = call_primitive(&join_fn, &[list_val, Value::String(",".into())]).unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), ""),
+        _ => panic!("Expected string"),
+    }
+}
+
+#[test]
+fn test_number_to_string() {
+    let (vm, mut symbols) = setup();
+    let num_to_str = get_primitive(&vm, &mut symbols, "number->string");
+
+    // Integer to string
+    let result = call_primitive(&num_to_str, &[Value::Int(42)]).unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), "42"),
+        _ => panic!("Expected string"),
+    }
+
+    // Float to string
+    let result = call_primitive(&num_to_str, &[Value::Float(std::f64::consts::PI)]).unwrap();
+    match result {
+        Value::String(s) => {
+            // Just check that it starts with "3.14" since float representation may vary
+            assert!(s.starts_with("3.14"));
+        }
+        _ => panic!("Expected string"),
+    }
+
+    // Negative numbers
+    let result = call_primitive(&num_to_str, &[Value::Int(-42)]).unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), "-42"),
+        _ => panic!("Expected string"),
+    }
+
+    // Zero
+    let result = call_primitive(&num_to_str, &[Value::Int(0)]).unwrap();
+    match result {
+        Value::String(s) => assert_eq!(s.as_ref(), "0"),
+        _ => panic!("Expected string"),
+    }
+}
+
+#[test]
+fn test_string_split_errors() {
+    let (vm, mut symbols) = setup();
+    let split_fn = get_primitive(&vm, &mut symbols, "string-split");
+
+    // Wrong arity - too few args
+    assert!(call_primitive(&split_fn, &[Value::String("hello".into())]).is_err());
+
+    // Wrong arity - too many args
+    assert!(call_primitive(
+        &split_fn,
+        &[
+            Value::String("hello".into()),
+            Value::String(",".into()),
+            Value::String("extra".into()),
+        ]
+    )
+    .is_err());
+
+    // Wrong type - first arg not string
+    assert!(call_primitive(&split_fn, &[Value::Int(42), Value::String(",".into()),]).is_err());
+
+    // Wrong type - second arg not string
+    assert!(call_primitive(&split_fn, &[Value::String("hello".into()), Value::Int(42),]).is_err());
+
+    // Empty delimiter
+    assert!(call_primitive(
+        &split_fn,
+        &[Value::String("hello".into()), Value::String("".into()),]
+    )
+    .is_err());
+}
+
+#[test]
+fn test_string_replace_errors() {
+    let (vm, mut symbols) = setup();
+    let replace_fn = get_primitive(&vm, &mut symbols, "string-replace");
+
+    // Wrong arity - too few args
+    assert!(call_primitive(
+        &replace_fn,
+        &[Value::String("hello".into()), Value::String("l".into()),]
+    )
+    .is_err());
+
+    // Wrong arity - too many args
+    assert!(call_primitive(
+        &replace_fn,
+        &[
+            Value::String("hello".into()),
+            Value::String("l".into()),
+            Value::String("x".into()),
+            Value::String("extra".into()),
+        ]
+    )
+    .is_err());
+
+    // Wrong type - first arg not string
+    assert!(call_primitive(
+        &replace_fn,
+        &[
+            Value::Int(42),
+            Value::String("l".into()),
+            Value::String("x".into()),
+        ]
+    )
+    .is_err());
+
+    // Wrong type - second arg not string
+    assert!(call_primitive(
+        &replace_fn,
+        &[
+            Value::String("hello".into()),
+            Value::Int(42),
+            Value::String("x".into()),
+        ]
+    )
+    .is_err());
+
+    // Wrong type - third arg not string
+    assert!(call_primitive(
+        &replace_fn,
+        &[
+            Value::String("hello".into()),
+            Value::String("l".into()),
+            Value::Int(42),
+        ]
+    )
+    .is_err());
+
+    // Empty search string
+    assert!(call_primitive(
+        &replace_fn,
+        &[
+            Value::String("hello".into()),
+            Value::String("".into()),
+            Value::String("x".into()),
+        ]
+    )
+    .is_err());
+}
+
+#[test]
+fn test_string_trim_errors() {
+    let (vm, mut symbols) = setup();
+    let trim_fn = get_primitive(&vm, &mut symbols, "string-trim");
+
+    // Wrong arity - too few args
+    assert!(call_primitive(&trim_fn, &[]).is_err());
+
+    // Wrong arity - too many args
+    assert!(call_primitive(
+        &trim_fn,
+        &[Value::String("hello".into()), Value::String("extra".into()),]
+    )
+    .is_err());
+
+    // Wrong type - not string
+    assert!(call_primitive(&trim_fn, &[Value::Int(42)]).is_err());
+}
+
+#[test]
+fn test_string_contains_errors() {
+    let (vm, mut symbols) = setup();
+    let contains_fn = get_primitive(&vm, &mut symbols, "string-contains?");
+
+    // Wrong arity - too few args
+    assert!(call_primitive(&contains_fn, &[Value::String("hello".into())]).is_err());
+
+    // Wrong arity - too many args
+    assert!(call_primitive(
+        &contains_fn,
+        &[
+            Value::String("hello".into()),
+            Value::String("l".into()),
+            Value::String("extra".into()),
+        ]
+    )
+    .is_err());
+
+    // Wrong type - first arg not string
+    assert!(call_primitive(&contains_fn, &[Value::Int(42), Value::String("l".into()),]).is_err());
+
+    // Wrong type - second arg not string
+    assert!(call_primitive(
+        &contains_fn,
+        &[Value::String("hello".into()), Value::Int(42),]
+    )
+    .is_err());
+}
+
+#[test]
+fn test_string_starts_with_errors() {
+    let (vm, mut symbols) = setup();
+    let starts_fn = get_primitive(&vm, &mut symbols, "string-starts-with?");
+
+    // Wrong arity - too few args
+    assert!(call_primitive(&starts_fn, &[Value::String("hello".into())]).is_err());
+
+    // Wrong arity - too many args
+    assert!(call_primitive(
+        &starts_fn,
+        &[
+            Value::String("hello".into()),
+            Value::String("h".into()),
+            Value::String("extra".into()),
+        ]
+    )
+    .is_err());
+
+    // Wrong type - first arg not string
+    assert!(call_primitive(&starts_fn, &[Value::Int(42), Value::String("h".into()),]).is_err());
+
+    // Wrong type - second arg not string
+    assert!(call_primitive(
+        &starts_fn,
+        &[Value::String("hello".into()), Value::Int(42),]
+    )
+    .is_err());
+}
+
+#[test]
+fn test_string_ends_with_errors() {
+    let (vm, mut symbols) = setup();
+    let ends_fn = get_primitive(&vm, &mut symbols, "string-ends-with?");
+
+    // Wrong arity - too few args
+    assert!(call_primitive(&ends_fn, &[Value::String("hello".into())]).is_err());
+
+    // Wrong arity - too many args
+    assert!(call_primitive(
+        &ends_fn,
+        &[
+            Value::String("hello".into()),
+            Value::String("o".into()),
+            Value::String("extra".into()),
+        ]
+    )
+    .is_err());
+
+    // Wrong type - first arg not string
+    assert!(call_primitive(&ends_fn, &[Value::Int(42), Value::String("o".into()),]).is_err());
+
+    // Wrong type - second arg not string
+    assert!(call_primitive(&ends_fn, &[Value::String("hello".into()), Value::Int(42),]).is_err());
+}
+
+#[test]
+fn test_string_join_errors() {
+    let (vm, mut symbols) = setup();
+    let join_fn = get_primitive(&vm, &mut symbols, "string-join");
+
+    // Wrong arity - too few args
+    assert!(call_primitive(&join_fn, &[list(vec![])]).is_err());
+
+    // Wrong arity - too many args
+    assert!(call_primitive(
+        &join_fn,
+        &[
+            list(vec![]),
+            Value::String(",".into()),
+            Value::String("extra".into()),
+        ]
+    )
+    .is_err());
+
+    // Wrong type - second arg not string
+    assert!(call_primitive(&join_fn, &[list(vec![]), Value::Int(42),]).is_err());
+
+    // Non-string list elements
+    let list_val = list(vec![
+        Value::String("a".into()),
+        Value::Int(42),
+        Value::String("c".into()),
+    ]);
+    assert!(call_primitive(&join_fn, &[list_val, Value::String(",".into())]).is_err());
+}
+
+#[test]
+fn test_number_to_string_errors() {
+    let (vm, mut symbols) = setup();
+    let num_to_str = get_primitive(&vm, &mut symbols, "number->string");
+
+    // Wrong arity - too few args
+    assert!(call_primitive(&num_to_str, &[]).is_err());
+
+    // Wrong arity - too many args
+    assert!(call_primitive(&num_to_str, &[Value::Int(42), Value::Int(100),]).is_err());
+
+    // Wrong type - not a number
+    assert!(call_primitive(&num_to_str, &[Value::String("42".into())]).is_err());
+
+    assert!(call_primitive(&num_to_str, &[Value::Nil]).is_err());
+
+    assert!(call_primitive(&num_to_str, &[Value::Bool(true)]).is_err());
+}
+
+#[test]
 fn test_math_module_functions() {
     let (vm, mut symbols) = setup();
 
@@ -925,7 +1440,7 @@ fn test_spawn_primitive() {
         arity: elle::value::Arity::Exact(0),
         env: std::rc::Rc::new(vec![]),
         num_locals: 0,
-                num_captures: 0,
+        num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
     }));
 
@@ -1036,7 +1551,7 @@ fn test_profile_primitive() {
         arity: elle::value::Arity::Exact(0),
         env: std::rc::Rc::new(vec![]),
         num_locals: 0,
-                num_captures: 0,
+        num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
     }));
 

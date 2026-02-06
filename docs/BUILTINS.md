@@ -670,18 +670,18 @@ This document provides comprehensive documentation for all built-in primitives i
 
 ### `string-index` (Find Character Index)
 
-**Semantics**: Returns index of first occurrence of substring, or -1 if not found.
+**Semantics**: Returns index of first occurrence of a single character, or `nil` if not found.
 
 **Usage**:
 ```lisp
 (string-index "hello" "l")
 ⟹ 2
 
-(string-index "hello" "ll")
-⟹ 2
+(string-index "hello" "e")
+⟹ 1
 
 (string-index "hello" "x")
-⟹ -1
+⟹ nil
 ```
 
 ### `char-at` (Character at Index)
@@ -698,6 +698,137 @@ This document provides comprehensive documentation for all built-in primitives i
 
 (char-at "test" 2)
 ⟹ "s"
+```
+
+### `string-split` (Split String)
+
+**Semantics**: Splits a string on a delimiter string (not just single character). Returns a list of strings.
+
+**Usage**:
+```lisp
+(string-split "a,b,c" ",")
+⟹ ("a" "b" "c")
+
+(string-split "hello" "ll")
+⟹ ("he" "o")
+
+(string-split "aaa" "a")
+⟹ ("" "" "" "")
+
+(string-split "hello" "xyz")
+⟹ ("hello")
+```
+
+### `string-replace` (Replace Substring)
+
+**Semantics**: Replaces all occurrences of `old` with `new` in a string.
+
+**Usage**:
+```lisp
+(string-replace "hello world" "world" "elle")
+⟹ "hello elle"
+
+(string-replace "aaa" "a" "bb")
+⟹ "bbbbbb"
+
+(string-replace "test" "x" "y")
+⟹ "test"
+```
+
+### `string-trim` (Trim Whitespace)
+
+**Semantics**: Removes leading and trailing whitespace from a string.
+
+**Usage**:
+```lisp
+(string-trim "  hello  ")
+⟹ "hello"
+
+(string-trim "hello")
+⟹ "hello"
+
+(string-trim "  ")
+⟹ ""
+```
+
+### `string-contains?` (Contains Substring)
+
+**Semantics**: Returns `#t` if the first string contains the second string as a substring, `#f` otherwise.
+
+**Usage**:
+```lisp
+(string-contains? "hello world" "world")
+⟹ #t
+
+(string-contains? "hello" "xyz")
+⟹ #f
+
+(string-contains? "hello" "")
+⟹ #t
+```
+
+### `string-starts-with?` (Starts With Prefix)
+
+**Semantics**: Returns `#t` if the string starts with the given prefix, `#f` otherwise.
+
+**Usage**:
+```lisp
+(string-starts-with? "hello" "hel")
+⟹ #t
+
+(string-starts-with? "hello" "world")
+⟹ #f
+
+(string-starts-with? "test" "")
+⟹ #t
+```
+
+### `string-ends-with?` (Ends With Suffix)
+
+**Semantics**: Returns `#t` if the string ends with the given suffix, `#f` otherwise.
+
+**Usage**:
+```lisp
+(string-ends-with? "hello" "llo")
+⟹ #t
+
+(string-ends-with? "hello" "world")
+⟹ #f
+
+(string-ends-with? "test" "")
+⟹ #t
+```
+
+### `string-join` (Join Strings)
+
+**Semantics**: Joins a list of strings with a separator string.
+
+**Usage**:
+```lisp
+(string-join (list "a" "b" "c") ",")
+⟹ "a,b,c"
+
+(string-join (list "hello") " ")
+⟹ "hello"
+
+(string-join (list) ",")
+⟹ ""
+```
+
+### `number->string` (Number to String)
+
+**Semantics**: Converts an integer or float to its string representation.
+
+**Usage**:
+```lisp
+(number->string 42)
+⟹ "42"
+
+(number->string 3.14)
+⟹ "3.14"
+
+(number->string -100)
+⟹ "-100"
 ```
 
 ---
