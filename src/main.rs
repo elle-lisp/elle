@@ -1,4 +1,5 @@
 use elle::compiler::converters::value_to_expr;
+use elle::ffi::primitives::context::set_symbol_table;
 use elle::ffi_primitives;
 use elle::repl::Repl;
 use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, VM};
@@ -324,6 +325,9 @@ fn main() {
 
     // Set VM context for FFI primitives
     ffi_primitives::set_vm_context(&mut vm as *mut VM);
+
+    // Set symbol table context for primitives
+    set_symbol_table(&mut symbols as *mut SymbolTable);
 
     // Check for command-line arguments
     let args: Vec<String> = env::args().collect();

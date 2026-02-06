@@ -1,4 +1,5 @@
 //! Type checking primitives
+use crate::ffi::primitives::context::get_symbol_table;
 use crate::value::Value;
 
 /// Check if value is nil
@@ -52,12 +53,24 @@ pub fn prim_is_bool(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Bool(matches!(args[0], Value::Bool(_))))
 }
 
-/// Get the type name of a value
+/// Get the type name of a value as a keyword
 pub fn prim_type(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err("type requires exactly 1 argument".to_string());
     }
-    Ok(Value::String(std::rc::Rc::from(
-        args[0].type_name().to_string(),
-    )))
+
+    let type_name = args[0].type_name();
+
+    // Try to get the symbol table from thread-local context
+    // Safety: The symbol table pointer is set in main() and cleared only at exit,
+    // so it's valid during program execution.
+    unsafe {
+        if let Some(symbols_ptr) = get_symbol_table() {
+            let keyword_id = (*symbols_ptr).intern(type_name);
+            Ok(Value::Keyword(keyword_id))
+        } else {
+            // Fallback to string if no symbol table in context
+            Ok(Value::String(std::rc::Rc::from(type_name.to_string())))
+        }
+    }
 }
