@@ -180,11 +180,19 @@ impl Compiler {
 
                 // Emit captured values onto the stack (in order)
                 // These will be stored in the closure's environment by the VM
-                for (sym, _depth, _index) in captures {
-                    // Load the captured variable
-                    let sym_idx = self.bytecode.add_constant(Value::Symbol(*sym));
-                    self.bytecode.emit(Instruction::LoadGlobal);
-                    self.bytecode.emit_u16(sym_idx);
+                for (sym, depth, index) in captures {
+                    if *index == usize::MAX {
+                        // This is a global variable - load it as a global
+                        let sym_idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                        self.bytecode.emit(Instruction::LoadGlobal);
+                        self.bytecode.emit_u16(sym_idx);
+                    } else {
+                        // This is a local variable from an outer scope
+                        // Load it using LoadUpvalue with the resolved depth and index
+                        self.bytecode.emit(Instruction::LoadUpvalue);
+                        self.bytecode.emit_byte((*depth + 1) as u8);
+                        self.bytecode.emit_byte(*index as u8);
+                    }
                 }
 
                 // Create closure with captured values

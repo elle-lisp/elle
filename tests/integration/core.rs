@@ -1247,3 +1247,35 @@ fn test_cond_with_else_body_multiple_expressions() {
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(9));
 }
+
+// Tests for nested lambdas with closure capture
+// Note: These are limited scope tests due to known issues #78 with parameter access
+// when captures are present. Only tests that access captures without parameter interference work.
+
+#[test]
+fn test_nested_lambda_single_capture() {
+    // Test that nested lambdas can access outer lambda parameters (capture only)
+    let code = r#"
+        (define make-const (lambda (x)
+          (lambda (y)
+            x)))
+        
+        (define f (make-const 42))
+        (f 100)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_nested_lambda_parameter_only() {
+    // Test that nested lambdas can access their own parameters (no captures)
+    let code = r#"
+        (define make-id (lambda (x)
+          (lambda (y)
+            y)))
+        
+        (define f (make-id 100))
+        (f 42)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(42));
+}

@@ -341,11 +341,24 @@ fn value_to_expr_with_scope(
                         }
                         let free_vars = analyze_free_vars(&body, &local_bindings);
 
-                        // Convert free vars to captures (with placeholder depth/index)
-                        // These will be resolved at runtime
-                        let captures: Vec<_> = free_vars
+                        // Convert free vars to captures, resolving their scope location
+                        // We need to distinguish: is this a global, or from an outer scope?
+                        let mut sorted_free_vars: Vec<_> = free_vars.iter().copied().collect();
+                        sorted_free_vars.sort(); // Deterministic ordering
+
+                        let captures: Vec<_> = sorted_free_vars
                             .iter()
-                            .map(|sym| (*sym, 0, 0)) // Depth and index will be resolved later
+                            .map(|sym| {
+                                // Look up in scope stack to determine if global or local
+                                for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
+                                    if let Some(local_index) = scope.iter().position(|s| s == sym) {
+                                        let depth = scope_stack.len() - 1 - reverse_idx;
+                                        return (*sym, depth, local_index);
+                                    }
+                                }
+                                // If not found in scope stack, it's a global variable
+                                (*sym, 0, usize::MAX)
+                            })
                             .collect();
 
                         Ok(Expr::Lambda {
