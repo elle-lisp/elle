@@ -1,0 +1,222 @@
+{
+  "title": "Getting Started with Elle",
+  "description": "Installation, setup, and your first Elle program",
+  "sections": [
+    {
+      "heading": "Installation",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Elle is written in Rust and requires `cargo` to build. Clone the repository and build the interpreter:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "git clone https://github.com/yourusername/elle.git\ncd elle\ncargo build --release"
+        },
+        {
+          "type": "paragraph",
+          "text": "The compiled binary will be at `./target/release/elle`. You can add it to your PATH or use it directly."
+        }
+      ]
+    },
+    {
+      "heading": "Running the REPL",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Start the interactive REPL (Read-Eval-Print Loop) by running Elle without arguments:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "./target/release/elle"
+        },
+        {
+          "type": "paragraph",
+          "text": "You'll see a prompt where you can type Elle expressions:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": "elle> (+ 1 2 3)\n6\nelle> (define x 42)\nnil\nelle> x\n42"
+        }
+      ]
+    },
+    {
+      "heading": "Running a Script",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Create a file `hello.l` with your Elle code:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": "(display \"Hello, Elle!\")\n(newline)"
+        },
+        {
+          "type": "paragraph",
+          "text": "Run it with:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "./target/release/elle hello.l"
+        },
+        {
+          "type": "paragraph",
+          "text": "You can also make scripts executable with a shebang:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": "#!/usr/bin/env elle\n(display \"Hello from a script!\")\n(newline)"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "chmod +x hello.l\n./hello.l"
+        }
+      ]
+    },
+    {
+      "heading": "Your First Program",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Let's write a simple program that greets the user. Create `greet.l`:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; A simple greeting program\n(define name \"World\")\n(define greeting (string-append \"Hello, \" name \"!\"))\n(display greeting)\n(newline)"
+        },
+        {
+          "type": "paragraph",
+          "text": "Run it:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "./target/release/elle greet.l"
+        },
+        {
+          "type": "paragraph",
+          "text": "Output:"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "Hello, World!"
+        }
+      ]
+    },
+    {
+      "heading": "Basic Syntax Overview",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Elle uses S-expressions (symbolic expressions) with prefix notation. Here are the basics:"
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Variables and Definitions**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": ";; Define a variable\n(define x 42)\n\n;; Define a function\n(define add (lambda (a b) (+ a b)))\n\n;; Use them\n(display (add x 8))\n(newline)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Conditionals**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": ";; if expression\n(if (> 10 5)\n  (display \"10 is greater than 5\")\n  (display \"10 is not greater than 5\"))\n(newline)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Local Bindings**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": ";; let creates local variables\n(let ((x 10)\n      (y 20))\n  (display (+ x y)))\n(newline)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Sequencing**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": ";; begin executes multiple expressions in order\n(begin\n  (display \"First\")\n  (newline)\n  (display \"Second\")\n  (newline))"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Important Note",
+      "level": 2,
+      "content": [
+        {
+          "type": "note",
+          "text": "Elle is under active development. Some features described in this documentation may change. Check the [GitHub repository](https://github.com/disruptek/elle) for the latest updates.",
+          "kind": "info"
+        }
+      ]
+    },
+    {
+      "heading": "Next Steps",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Now that you've got Elle running, explore the [Language Guide](language-guide.html) to learn about:"
+        },
+        {
+          "type": "list",
+          "items": [
+            "Data types (numbers, strings, lists, tables, etc.)",
+            "Functions and closures",
+            "Pattern matching",
+            "File I/O and JSON processing",
+            "Exception handling"
+          ],
+          "ordered": true
+        }
+      ]
+    }
+  ]
+}

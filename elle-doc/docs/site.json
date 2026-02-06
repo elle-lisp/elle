@@ -1,0 +1,12 @@
+{
+  "title": "Elle Programming Language",
+  "description": "A bytecode-compiled Lisp interpreter with modern features",
+  "base_url": "/elle",
+  "nav": [
+    {"slug": "index", "title": "Home"},
+    {"slug": "getting-started", "title": "Getting Started"},
+    {"slug": "language-guide", "title": "Language Guide"},
+    {"slug": "stdlib-reference", "title": "Standard Library"},
+    {"slug": "examples", "title": "Examples"}
+  ]
+}

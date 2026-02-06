@@ -1,0 +1,394 @@
+{
+  "title": "Elle Language Guide",
+  "description": "Comprehensive guide to Elle's data types, functions, and control flow",
+  "sections": [
+    {
+      "heading": "Data Types",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Elle supports a rich set of data types for different programming needs."
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Nil and Booleans**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "nil          ; The null value\n#t           ; True\n#f           ; False"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Numbers**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "42           ; Integer\n3.14         ; Float\n-17          ; Negative numbers\n1.5e-3       ; Scientific notation"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Strings**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "\"hello\"      ; String literal\n\"line 1\\nline 2\" ; Escape sequences supported"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Symbols and Keywords**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "'symbol      ; Symbol (quoted identifier)\n:keyword     ; Keyword (self-evaluating)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Lists**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(list 1 2 3)        ; Create a list\n(cons 1 (list 2 3)) ; Cons a value onto a list\n(first (list 1 2))  ; Get first element\n(rest (list 1 2))   ; Get rest of list"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Vectors**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "[1 2 3]             ; Vector literal\n(vector 1 2 3)      ; Create vector\n(nth vec 0)         ; Access by index\n(length vec)        ; Get length"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Tables (Mutable Maps)**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(table)              ; Create empty table\n(get tbl \"key\")      ; Get value\n(put tbl \"key\" val)  ; Set value\n(has? tbl \"key\")     ; Check if key exists\n(del tbl \"key\")      ; Delete key"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Structs**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": ";; Define a struct type\n(define-struct point (x y))\n\n;; Create an instance\n(define p (point 10 20))\n\n;; Access fields\n(point-x p)  ; 10\n(point-y p)  ; 20"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Variables and Bindings",
+      "level": 2,
+      "content": [
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**define — Global Variables**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(define x 42)\n(define name \"Alice\")\n(define add (lambda (a b) (+ a b)))"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**let — Local Bindings**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(let ((x 10)\n      (y 20))\n  (+ x y))  ; 30\n\n;; x and y are not accessible outside the let"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**let* — Sequential Bindings**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(let* ((x 10)\n       (y (+ x 5)))  ; y can use x\n  (+ x y))  ; 25"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**set! — Mutation**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(define x 10)\n(set! x 20)  ; Change x to 20\n(display x)  ; 20"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Functions",
+      "level": 2,
+      "content": [
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**lambda — Anonymous Functions**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": ";; Create a function\n(define add (lambda (a b) (+ a b)))\n\n;; Call it\n(add 3 4)  ; 7"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Closures**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": ";; Functions capture their environment\n(define make-adder\n  (lambda (n)\n    (lambda (x) (+ x n))))\n\n(define add-5 (make-adder 5))\n(add-5 10)  ; 15"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**Recursion**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": ";; Recursive factorial\n(define factorial\n  (lambda (n)\n    (if (<= n 1)\n      1\n      (* n (factorial (- n 1))))))\n\n(factorial 5)  ; 120"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Control Flow",
+      "level": 2,
+      "content": [
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**if — Conditional Execution**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(if (> x 10)\n  (display \"x is large\")\n  (display \"x is small\"))"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**cond — Multiple Conditions**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(cond\n  ((< x 0) (display \"negative\"))\n  ((= x 0) (display \"zero\"))\n  (#t (display \"positive\")))"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**match — Pattern Matching**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(match (list 1 2 3)\n  ((list a b c) (+ a b c))\n  (_ 0))"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**while — Loops**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(define i 0)\n(while (< i 5)\n  (display i)\n  (newline)\n  (set! i (+ i 1)))"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**for — Iteration**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": ";; Iterate over a list\n(for x in (list 1 2 3)\n  (display x)\n  (newline))"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": [
+            {
+              "type": "paragraph",
+              "text": "**begin — Sequencing**"
+            },
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(begin\n  (display \"First\")\n  (newline)\n  (display \"Second\")\n  (newline))"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Pattern Matching",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Elle's `match` expression provides powerful destructuring:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Match on list structure\n(match (list 1 2 3)\n  ((list a b c) (+ a b c))  ; Binds a=1, b=2, c=3\n  (_ 0))                     ; Default case\n\n;; Match on values\n(match x\n  (0 \"zero\")\n  (1 \"one\")\n  (_ \"other\"))"
+        }
+      ]
+    },
+    {
+      "heading": "Exception Handling",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Handle errors gracefully with `try/catch/finally`:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": "(try\n  (/ 10 0)  ; This will raise an error\n  (catch (e)\n    (display \"Error: \")\n    (display e)\n    (newline))\n  (finally\n    (display \"Cleanup\")))"
+        }
+      ]
+    },
+    {
+      "heading": "Modules",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Load and compose code with `import-file`:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; In utils.l\n(define double (lambda (x) (* x 2)))\n\n;; In main.l\n(import-file \"utils.l\")\n(display (double 21))  ; 42"
+        }
+      ]
+    }
+  ]
+}

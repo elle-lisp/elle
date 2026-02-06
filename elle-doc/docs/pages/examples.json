@@ -1,0 +1,180 @@
+{
+  "title": "Elle Examples",
+  "description": "Real-world code examples demonstrating Elle features",
+  "sections": [
+    {
+      "heading": "Hello World",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "The simplest Elle program:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": "(display \"Hello, World!\")\n(newline)"
+        }
+      ]
+    },
+    {
+      "heading": "Fibonacci Sequence",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Calculate Fibonacci numbers using recursion:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Naive recursive approach\n(define fib\n  (lambda (n)\n    (if (<= n 1)\n      n\n      (+ (fib (- n 1)) (fib (- n 2))))))\n\n(display \"fib(10) = \")\n(display (fib 10))\n(newline)"
+        },
+        {
+          "type": "paragraph",
+          "text": "For better performance, use an accumulator:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Tail-recursive with accumulator\n(define fib-acc\n  (lambda (n acc1 acc2)\n    (if (= n 0)\n      acc1\n      (fib-acc (- n 1) acc2 (+ acc1 acc2)))))\n\n(define fib-fast\n  (lambda (n)\n    (fib-acc n 0 1)))\n\n(display \"fib-fast(10) = \")\n(display (fib-fast 10))\n(newline)"
+        }
+      ]
+    },
+    {
+      "heading": "Closures and Higher-Order Functions",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Create functions that return functions:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Function factory\n(define make-multiplier\n  (lambda (factor)\n    (lambda (x)\n      (* x factor))))\n\n(define double (make-multiplier 2))\n(define triple (make-multiplier 3))\n\n(display \"double(5) = \")\n(display (double 5))\n(newline)\n\n(display \"triple(5) = \")\n(display (triple 5))\n(newline)"
+        }
+      ]
+    },
+    {
+      "heading": "Working with Lists",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Process lists with recursion:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Sum all elements in a list\n(define sum-list\n  (lambda (lst)\n    (if (empty? lst)\n      0\n      (+ (first lst) (sum-list (rest lst))))))\n\n(define numbers (list 1 2 3 4 5))\n(display \"Sum: \")\n(display (sum-list numbers))\n(newline)\n\n;; Count elements\n(define count-list\n  (lambda (lst)\n    (if (empty? lst)\n      0\n      (+ 1 (count-list (rest lst))))))\n\n(display \"Count: \")\n(display (count-list numbers))\n(newline)"
+        }
+      ]
+    },
+    {
+      "heading": "Pattern Matching",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Use pattern matching for elegant data processing:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Classify a list\n(define classify\n  (lambda (lst)\n    (match lst\n      ((list) \"empty\")\n      ((list x) \"single element\")\n      ((list x y) \"pair\")\n      ((list x y z) \"triple\")\n      (_ \"many elements\"))))\n\n(display (classify (list)))\n(newline)\n(display (classify (list 1)))\n(newline)\n(display (classify (list 1 2)))\n(newline)\n(display (classify (list 1 2 3)))\n(newline)\n(display (classify (list 1 2 3 4)))\n(newline)"
+        }
+      ]
+    },
+    {
+      "heading": "Working with Tables",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Use tables for key-value data:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Create a person record\n(define person (table))\n(put person \"name\" \"Alice\")\n(put person \"age\" 30)\n(put person \"city\" \"Portland\")\n\n(display \"Name: \")\n(display (get person \"name\"))\n(newline)\n\n(display \"Age: \")\n(display (get person \"age\"))\n(newline)\n\n;; Check if key exists\n(if (has? person \"email\")\n  (display \"Has email\")\n  (display \"No email on file\"))\n(newline)"
+        }
+      ]
+    },
+    {
+      "heading": "File I/O",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Read and write files:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Write to a file\n(write-file \"output.txt\" \"Hello from Elle!\\n\")\n\n;; Append to a file\n(append-file \"output.txt\" \"Second line\\n\")\n\n;; Read the file\n(define content (read-file \"output.txt\"))\n(display \"File contents:\")\n(newline)\n(display content)\n\n;; Check file properties\n(if (file-exists? \"output.txt\")\n  (begin\n    (display \"File size: \")\n    (display (file-size \"output.txt\"))\n    (display \" bytes\")\n    (newline)))"
+        }
+      ]
+    },
+    {
+      "heading": "JSON Processing",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Parse and generate JSON:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Parse JSON\n(define json-str \"{\\\"name\\\": \\\"Bob\\\", \\\"age\\\": 25}\")\n(define data (json-parse json-str))\n\n(display \"Name: \")\n(display (get data \"name\"))\n(newline)\n\n;; Create and serialize\n(define person (table))\n(put person \"name\" \"Charlie\")\n(put person \"age\" 35)\n(put person \"active\" #t)\n\n(define json-output (json-serialize person))\n(display \"JSON: \")\n(display json-output)\n(newline)"
+        }
+      ]
+    },
+    {
+      "heading": "String Processing",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Manipulate and analyze strings:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Split and process CSV-like data\n(define csv-line \"Alice,30,Engineer\")\n(define fields (string-split csv-line \",\"))\n\n(display \"Fields: \")\n(display fields)\n(newline)\n\n;; String manipulation\n(define text \"  Hello World  \")\n(define cleaned (string-trim text))\n(define lowered (string-downcase cleaned))\n(define replaced (string-replace lowered \"world\" \"elle\"))\n\n(display \"Original: '\")\n(display text)\n(display \"'\")\n(newline)\n\n(display \"Processed: '\")\n(display replaced)\n(display \"'\")\n(newline)\n\n;; Check string properties\n(if (string-contains? replaced \"elle\")\n  (display \"Contains 'elle'\")\n  (display \"Does not contain 'elle'\"))\n(newline)"
+        }
+      ]
+    },
+    {
+      "heading": "Exception Handling",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Handle errors gracefully:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Safe division\n(define safe-divide\n  (lambda (a b)\n    (try\n      (/ a b)\n      (catch (e)\n        (begin\n          (display \"Error: \")\n          (display e)\n          (newline)\n          0))\n      (finally\n        (display \"Division attempt complete\")\n        (newline)))))\n\n(display \"10 / 2 = \")\n(display (safe-divide 10 2))\n(newline)\n\n(display \"10 / 0 = \")\n(display (safe-divide 10 0))\n(newline)"
+        }
+      ]
+    },
+    {
+      "heading": "Iteration Patterns",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Iterate over collections:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Iterate with for\n(display \"Numbers 1-5:\")\n(newline)\n(for x in (list 1 2 3 4 5)\n  (begin\n    (display x)\n    (display \" \")))\n(newline)\n\n;; Iterate with while\n(display \"Countdown:\")\n(newline)\n(define i 5)\n(while (> i 0)\n  (begin\n    (display i)\n    (display \" \")\n    (set! i (- i 1))))\n(newline)"
+        }
+      ]
+    }
+  ]
+}

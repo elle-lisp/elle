@@ -8,7 +8,7 @@ pub fn prim_string_length(args: &[Value]) -> Result<Value, String> {
         return Err("string-length requires exactly 1 argument".to_string());
     }
     match &args[0] {
-        Value::String(s) => Ok(Value::Int(s.len() as i64)),
+        Value::String(s) => Ok(Value::Int(s.chars().count() as i64)),
         _ => Err("string-length requires a string".to_string()),
     }
 }
@@ -59,18 +59,28 @@ pub fn prim_substring(args: &[Value]) -> Result<Value, String> {
     };
 
     let start = args[1].as_int()? as usize;
-
+    let char_count = s.chars().count();
     let end = if args.len() == 3 {
         args[2].as_int()? as usize
     } else {
-        s.len()
+        char_count
     };
 
-    if start > s.len() || end > s.len() || start > end {
-        return Err("substring indices out of range".to_string());
+    if start > char_count || end > char_count || start > end {
+        return Err(format!(
+            "substring indices out of range: start={}, end={}, length={}",
+            start, end, char_count
+        ));
     }
 
-    Ok(Value::String(Rc::from(&s[start..end])))
+    // Convert character indices to byte indices
+    let byte_start = s
+        .char_indices()
+        .nth(start)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    let byte_end = s.char_indices().nth(end).map(|(i, _)| i).unwrap_or(s.len());
+    Ok(Value::String(Rc::from(&s[byte_start..byte_end])))
 }
 
 /// Find the index of a character
@@ -86,7 +96,7 @@ pub fn prim_string_index(args: &[Value]) -> Result<Value, String> {
 
     let needle = match &args[1] {
         Value::String(s) => {
-            if s.len() != 1 {
+            if s.chars().count() != 1 {
                 return Err(
                     "string-index requires a single character as second argument".to_string(),
                 );
@@ -96,8 +106,8 @@ pub fn prim_string_index(args: &[Value]) -> Result<Value, String> {
         _ => return Err("string-index requires a string as second argument".to_string()),
     };
 
-    match haystack.find(needle) {
-        Some(idx) => Ok(Value::Int(idx as i64)),
+    match haystack.chars().position(|ch| ch == needle) {
+        Some(pos) => Ok(Value::Int(pos as i64)),
         None => Ok(Value::Nil),
     }
 }
@@ -114,13 +124,22 @@ pub fn prim_char_at(args: &[Value]) -> Result<Value, String> {
     };
 
     let index = args[1].as_int()? as usize;
+    let char_count = s.chars().count();
 
-    if index >= s.len() {
-        return Err("Index out of bounds".to_string());
+    if index >= char_count {
+        return Err(format!(
+            "Index out of bounds: index={}, length={}",
+            index, char_count
+        ));
     }
 
-    let ch = s.chars().nth(index).ok_or("Index out of bounds")?;
-    Ok(Value::String(Rc::from(ch.to_string())))
+    match s.chars().nth(index) {
+        Some(c) => Ok(Value::String(Rc::from(c.to_string()))),
+        None => Err(format!(
+            "Index out of bounds: index={}, length={}",
+            index, char_count
+        )),
+    }
 }
 
 /// Convert to integer

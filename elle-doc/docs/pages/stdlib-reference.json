@@ -1,0 +1,274 @@
+{
+  "title": "Standard Library Reference",
+  "description": "Built-in functions and operations in Elle",
+  "sections": [
+    {
+      "heading": "Arithmetic Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(+ a b ...)", "Add numbers"],
+            ["(- a b ...)", "Subtract numbers"],
+            ["(* a b ...)", "Multiply numbers"],
+            ["(/ a b ...)", "Divide numbers"],
+            ["(mod a b)", "Modulo (remainder)"],
+            ["(abs x)", "Absolute value"],
+            ["(min a b ...)", "Minimum value"],
+            ["(max a b ...)", "Maximum value"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Comparison Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(= a b)", "Numeric equality"],
+            ["(< a b)", "Less than"],
+            ["(> a b)", "Greater than"],
+            ["(<= a b)", "Less than or equal"],
+            ["(>= a b)", "Greater than or equal"],
+            ["(== a b)", "Structural equality"],
+            ["(!= a b)", "Not equal"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Logic Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(and a b ...)", "Logical AND"],
+            ["(or a b ...)", "Logical OR"],
+            ["(not x)", "Logical NOT"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "List Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(list a b ...)", "Create a list"],
+            ["(cons x lst)", "Prepend element to list"],
+            ["(first lst)", "Get first element"],
+            ["(rest lst)", "Get rest of list"],
+            ["(nth lst i)", "Get element at index"],
+            ["(length lst)", "Get list length"],
+            ["(append lst1 lst2)", "Concatenate lists"],
+            ["(reverse lst)", "Reverse a list"],
+            ["(empty? lst)", "Check if list is empty"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "String Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(string-append s1 s2 ...)", "Concatenate strings"],
+            ["(string-length s)", "Get string length"],
+            ["(substring s start end)", "Extract substring"],
+            ["(string-split s delim)", "Split string on delimiter"],
+            ["(string-replace s old new)", "Replace all occurrences"],
+            ["(string-contains? s sub)", "Check if contains substring"],
+            ["(string-starts-with? s prefix)", "Check if starts with"],
+            ["(string-ends-with? s suffix)", "Check if ends with"],
+            ["(string-trim s)", "Remove leading/trailing whitespace"],
+            ["(string-upcase s)", "Convert to uppercase"],
+            ["(string-downcase s)", "Convert to lowercase"],
+            ["(string-join lst sep)", "Join list of strings"],
+            ["(char-at s i)", "Get character at index"],
+            ["(string-index s sub)", "Find index of substring"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Type Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(nil? x)", "Check if nil"],
+            ["(boolean? x)", "Check if boolean"],
+            ["(number? x)", "Check if number"],
+            ["(integer? x)", "Check if integer"],
+            ["(float? x)", "Check if float"],
+            ["(string? x)", "Check if string"],
+            ["(symbol? x)", "Check if symbol"],
+            ["(keyword? x)", "Check if keyword"],
+            ["(list? x)", "Check if list"],
+            ["(vector? x)", "Check if vector"],
+            ["(table? x)", "Check if table"],
+            ["(function? x)", "Check if function"],
+            ["(type-of x)", "Get type name as string"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Math Functions",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(sqrt x)", "Square root"],
+            ["(pow x y)", "Power (x^y)"],
+            ["(floor x)", "Round down"],
+            ["(ceil x)", "Round up"],
+            ["(round x)", "Round to nearest"],
+            ["(sin x)", "Sine (radians)"],
+            ["(cos x)", "Cosine (radians)"],
+            ["(tan x)", "Tangent (radians)"],
+            ["(log x)", "Natural logarithm"],
+            ["(exp x)", "e^x"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Vector Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(vector a b ...)", "Create a vector"],
+            ["(nth vec i)", "Get element at index"],
+            ["(length vec)", "Get vector length"],
+            ["(vector-append v1 v2)", "Concatenate vectors"],
+            ["(vector-reverse v)", "Reverse a vector"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Table Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(table)", "Create empty table"],
+            ["(get tbl key)", "Get value by key"],
+            ["(put tbl key val)", "Set value by key"],
+            ["(del tbl key)", "Delete key"],
+            ["(has? tbl key)", "Check if key exists"],
+            ["(keys tbl)", "Get all keys as list"],
+            ["(values tbl)", "Get all values as list"],
+            ["(table-size tbl)", "Get number of entries"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "File I/O Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(read-file path)", "Read entire file as string"],
+            ["(write-file path content)", "Write or overwrite file"],
+            ["(append-file path content)", "Append to file"],
+            ["(read-lines path)", "Read file as list of lines"],
+            ["(file-exists? path)", "Check if file exists"],
+            ["(file? path)", "Check if path is a file"],
+            ["(directory? path)", "Check if path is a directory"],
+            ["(file-size path)", "Get file size in bytes"],
+            ["(delete-file path)", "Delete a file"],
+            ["(copy-file src dest)", "Copy file"],
+            ["(rename-file old new)", "Rename file"],
+            ["(create-directory path)", "Create directory"],
+            ["(create-directory-all path)", "Create with parents"],
+            ["(delete-directory path)", "Delete empty directory"],
+            ["(list-directory path)", "List directory contents"],
+            ["(current-directory)", "Get working directory"],
+            ["(change-directory path)", "Change working directory"],
+            ["(file-name path)", "Extract filename"],
+            ["(file-extension path)", "Extract file extension"],
+            ["(parent-directory path)", "Get parent directory"],
+            ["(join-path ...parts)", "Join path components"],
+            ["(absolute-path path)", "Get absolute path"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "JSON Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(json-parse str)", "Parse JSON string to Elle value"],
+            ["(json-serialize val)", "Serialize Elle value to JSON"],
+            ["(json-serialize-pretty val)", "Serialize with pretty-printing"]
+          ]
+        },
+        {
+          "type": "note",
+          "text": "JSON objects become Tables, JSON arrays become Lists. Use `get`, `put`, `has?` to work with parsed JSON objects.",
+          "kind": "info"
+        }
+      ]
+    },
+    {
+      "heading": "Exception Handling",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(try body (catch (e) handler) (finally cleanup))", "Exception handling"],
+            ["(throw msg)", "Raise an exception"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "I/O Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(display x)", "Print value without newline"],
+            ["(newline)", "Print newline"],
+            ["(number->string n)", "Convert number to string"]
+          ]
+        }
+      ]
+    }
+  ]
+}
