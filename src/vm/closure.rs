@@ -26,6 +26,7 @@ pub fn handle_make_closure(
             arity: template.arity,
             env: Rc::new(captured),
             num_locals: template.num_locals,
+            num_captures: template.num_captures,
             constants: template.constants.clone(),
         };
 

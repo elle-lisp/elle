@@ -64,6 +64,7 @@ pub struct Closure {
     pub arity: Arity,
     pub env: Rc<Vec<Value>>,
     pub num_locals: usize,
+    pub num_captures: usize, // Number of captured variables (for env layout)
     pub constants: Rc<Vec<Value>>,
 }
 

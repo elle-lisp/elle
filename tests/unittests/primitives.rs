@@ -925,6 +925,7 @@ fn test_spawn_primitive() {
         arity: elle::value::Arity::Exact(0),
         env: std::rc::Rc::new(vec![]),
         num_locals: 0,
+                num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
     }));
 
@@ -1035,6 +1036,7 @@ fn test_profile_primitive() {
         arity: elle::value::Arity::Exact(0),
         env: std::rc::Rc::new(vec![]),
         num_locals: 0,
+                num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
     }));
 

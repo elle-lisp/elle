@@ -34,6 +34,100 @@ fn extract_pattern_variables(pattern: &Pattern) -> Vec<SymbolId> {
     vars
 }
 
+/// Adjust variable indices in an expression to account for captures offset
+/// For Var expressions with depth=0 (current lambda parameters), add captures_offset to the index
+/// This is necessary because the closure environment layout is [captures..., parameters...]
+fn adjust_var_indices(expr: &mut Expr, captures_offset: usize) {
+    match expr {
+        Expr::Var(_, depth, index) if *depth == 0 => {
+            // Current lambda parameter - adjust index to account for captures
+            *index += captures_offset;
+        }
+        Expr::If { cond, then, else_ } => {
+            adjust_var_indices(cond, captures_offset);
+            adjust_var_indices(then, captures_offset);
+            adjust_var_indices(else_, captures_offset);
+        }
+        Expr::Cond { clauses, else_body } => {
+            for (test, body) in clauses {
+                adjust_var_indices(test, captures_offset);
+                adjust_var_indices(body, captures_offset);
+            }
+            if let Some(else_expr) = else_body {
+                adjust_var_indices(else_expr, captures_offset);
+            }
+        }
+        Expr::Begin(exprs) => {
+            for e in exprs {
+                adjust_var_indices(e, captures_offset);
+            }
+        }
+        Expr::Call { func, args, .. } => {
+            adjust_var_indices(func, captures_offset);
+            for arg in args {
+                adjust_var_indices(arg, captures_offset);
+            }
+        }
+        Expr::Lambda { body, .. } => {
+            // Don't adjust nested lambda bodies - they have their own capture scope
+            adjust_var_indices(body, captures_offset);
+        }
+        Expr::Let { bindings, body } => {
+            for (_, expr) in bindings {
+                adjust_var_indices(expr, captures_offset);
+            }
+            adjust_var_indices(body, captures_offset);
+        }
+        Expr::Set { value, .. } => {
+            adjust_var_indices(value, captures_offset);
+        }
+        Expr::While { cond, body } => {
+            adjust_var_indices(cond, captures_offset);
+            adjust_var_indices(body, captures_offset);
+        }
+        Expr::For { iter, body, .. } => {
+            adjust_var_indices(iter, captures_offset);
+            adjust_var_indices(body, captures_offset);
+        }
+        Expr::Match {
+            value,
+            patterns,
+            default,
+        } => {
+            adjust_var_indices(value, captures_offset);
+            for (_, expr) in patterns {
+                adjust_var_indices(expr, captures_offset);
+            }
+            if let Some(default_expr) = default {
+                adjust_var_indices(default_expr, captures_offset);
+            }
+        }
+        Expr::Try {
+            body,
+            catch,
+            finally,
+        } => {
+            adjust_var_indices(body, captures_offset);
+            if let Some((_, handler)) = catch {
+                adjust_var_indices(handler, captures_offset);
+            }
+            if let Some(finally_expr) = finally {
+                adjust_var_indices(finally_expr, captures_offset);
+            }
+        }
+        Expr::And(exprs) | Expr::Or(exprs) => {
+            for e in exprs {
+                adjust_var_indices(e, captures_offset);
+            }
+        }
+        Expr::DefMacro { body, .. } => {
+            adjust_var_indices(body, captures_offset);
+        }
+        // Literals, GlobalVar, Var with depth>0, etc. don't need adjustment
+        _ => {}
+    }
+}
+
 /// Expand a quasiquote form with support for unquote and unquote-splicing
 /// Quasiquote recursively quotes all forms except those wrapped in unquote/unquote-splicing
 fn expand_quasiquote(
@@ -361,9 +455,15 @@ fn value_to_expr_with_scope(
                             })
                             .collect();
 
+                        // Adjust variable indices in body to account for captures offset
+                        // The closure environment layout is [captures..., parameters...]
+                        // So current-lambda parameters need their indices offset by captures.len()
+                        let mut adjusted_body = body;
+                        adjust_var_indices(&mut adjusted_body, captures.len());
+
                         Ok(Expr::Lambda {
                             params: param_syms,
-                            body,
+                            body: adjusted_body,
                             captures,
                         })
                     }
@@ -434,17 +534,33 @@ fn value_to_expr_with_scope(
                         }
                         let free_vars = analyze_free_vars(&body, &local_bindings);
 
-                        // Convert free vars to captures (with placeholder depth/index)
-                        // These will be resolved at runtime
-                        let captures: Vec<_> = free_vars
+                        // Convert free vars to captures, resolving their scope location
+                        let mut sorted_free_vars: Vec<_> = free_vars.iter().copied().collect();
+                        sorted_free_vars.sort(); // Deterministic ordering
+
+                        let captures: Vec<_> = sorted_free_vars
                             .iter()
-                            .map(|sym| (*sym, 0, 0)) // Depth and index will be resolved later
+                            .map(|sym| {
+                                // Look up in scope stack to determine if global or local
+                                for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
+                                    if let Some(local_index) = scope.iter().position(|s| s == sym) {
+                                        let depth = scope_stack.len() - 1 - reverse_idx;
+                                        return (*sym, depth, local_index);
+                                    }
+                                }
+                                // If not found in scope stack, it's a global variable
+                                (*sym, 0, usize::MAX)
+                            })
                             .collect();
+
+                        // Adjust variable indices in body to account for captures offset
+                        let mut adjusted_body = body;
+                        adjust_var_indices(&mut adjusted_body, captures.len());
 
                         // Create lambda: (lambda (var1 var2 ...) body...)
                         let lambda = Expr::Lambda {
                             params: param_syms,
-                            body,
+                            body: adjusted_body,
                             captures,
                         };
 
@@ -537,13 +653,33 @@ fn value_to_expr_with_scope(
                         }
                         let free_vars = analyze_free_vars(&body, &local_bindings);
 
-                        // Convert free vars to captures
-                        let captures: Vec<_> = free_vars.iter().map(|sym| (*sym, 0, 0)).collect();
+                        // Convert free vars to captures, resolving their scope location
+                        let mut sorted_free_vars: Vec<_> = free_vars.iter().copied().collect();
+                        sorted_free_vars.sort(); // Deterministic ordering
+
+                        let captures: Vec<_> = sorted_free_vars
+                            .iter()
+                            .map(|sym| {
+                                // Look up in scope stack to determine if global or local
+                                for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
+                                    if let Some(local_index) = scope.iter().position(|s| s == sym) {
+                                        let depth = scope_stack.len() - 1 - reverse_idx;
+                                        return (*sym, depth, local_index);
+                                    }
+                                }
+                                // If not found in scope stack, it's a global variable
+                                (*sym, 0, usize::MAX)
+                            })
+                            .collect();
+
+                        // Adjust variable indices in body to account for captures offset
+                        let mut adjusted_body = body;
+                        adjust_var_indices(&mut adjusted_body, captures.len());
 
                         // Create lambda: (lambda (var1 var2 ...) body...)
                         let lambda = Expr::Lambda {
                             params: param_syms,
-                            body,
+                            body: adjusted_body,
                             captures,
                         };
 

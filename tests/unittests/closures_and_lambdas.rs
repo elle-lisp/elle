@@ -25,6 +25,7 @@ fn test_closure_type_identification() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     let value = Value::Closure(Rc::new(closure));
@@ -43,6 +44,7 @@ fn test_closure_display() {
         arity: Arity::Exact(1),
         env: Rc::new(vec![]),
         num_locals: 1,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     let value = Value::Closure(Rc::new(closure));
@@ -58,6 +60,7 @@ fn test_closure_clone() {
         arity: Arity::Exact(2),
         env: Rc::new(vec![Value::Int(42)]),
         num_locals: 2,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     let value1 = Value::Closure(Rc::new(closure.clone()));
@@ -119,6 +122,7 @@ fn test_closure_empty_environment() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert_eq!(closure.env.len(), 0);
@@ -133,6 +137,7 @@ fn test_closure_single_captured_variable() {
         arity: Arity::Exact(1),
         env: Rc::new(env),
         num_locals: 1,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert_eq!(closure.env.len(), 1);
@@ -153,6 +158,7 @@ fn test_closure_multiple_captured_variables() {
         arity: Arity::Exact(2),
         env: Rc::new(env),
         num_locals: 2,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert_eq!(closure.env.len(), 4);
@@ -170,6 +176,7 @@ fn test_closure_environment_sharing() {
         arity: Arity::Exact(1),
         env: shared_env.clone(),
         num_locals: 1,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
 
@@ -178,6 +185,7 @@ fn test_closure_environment_sharing() {
         arity: Arity::Exact(1),
         env: shared_env.clone(),
         num_locals: 1,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
 
@@ -199,6 +207,7 @@ fn test_closure_bytecode_storage() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert_eq!(*closure.bytecode, bytecode);
@@ -217,6 +226,7 @@ fn test_closure_constants_storage() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(constants.clone()),
     };
     assert_eq!(*closure.constants, constants);
@@ -231,6 +241,7 @@ fn test_closure_num_locals() {
             arity: Arity::Exact(0),
             env: Rc::new(vec![]),
             num_locals,
+            num_captures: 0,
             constants: Rc::new(vec![]),
         };
         assert_eq!(closure.num_locals, num_locals);
@@ -248,6 +259,7 @@ fn test_closure_zero_parameters() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert!(closure.arity.matches(0));
@@ -261,6 +273,7 @@ fn test_closure_single_parameter() {
         arity: Arity::Exact(1),
         env: Rc::new(vec![]),
         num_locals: 1,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert!(closure.arity.matches(1));
@@ -273,6 +286,7 @@ fn test_closure_multiple_parameters() {
         arity: Arity::Exact(3),
         env: Rc::new(vec![]),
         num_locals: 3,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert!(closure.arity.matches(3));
@@ -287,6 +301,7 @@ fn test_closure_variadic_parameters() {
         arity: Arity::AtLeast(1),
         env: Rc::new(vec![]),
         num_locals: 1,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert!(closure.arity.matches(1));
@@ -306,6 +321,7 @@ fn test_closures_never_equal() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     }));
 
@@ -314,6 +330,7 @@ fn test_closures_never_equal() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     }));
 
@@ -329,6 +346,7 @@ fn test_same_closure_reference_equality() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     });
 
@@ -360,6 +378,7 @@ fn test_closure_with_nested_captured_values() {
         arity: Arity::Exact(0),
         env: Rc::new(env),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
 
@@ -374,6 +393,7 @@ fn test_closure_with_closure_in_constants() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     }));
 
@@ -382,6 +402,7 @@ fn test_closure_with_closure_in_constants() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![inner_closure]),
     };
 
@@ -398,6 +419,7 @@ fn test_closure_with_many_upvalues() {
         arity: Arity::Exact(0),
         env: Rc::new(env),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
 
@@ -417,6 +439,7 @@ fn test_closure_as_method() {
         arity: Arity::Exact(2),
         env: Rc::new(vec![Value::Int(10)]),
         num_locals: 2,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
 
@@ -438,6 +461,7 @@ fn test_closure_type_check() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     }));
 
@@ -462,6 +486,7 @@ fn test_closure_environment_isolation() {
         arity: Arity::Exact(0),
         env: env1,
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
 
@@ -470,6 +495,7 @@ fn test_closure_environment_isolation() {
         arity: Arity::Exact(0),
         env: env2,
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
 
@@ -485,6 +511,7 @@ fn test_closure_local_variables_count() {
             arity: Arity::Exact(0),
             env: Rc::new(vec![]),
             num_locals: locals,
+            num_captures: 0,
             constants: Rc::new(vec![]),
         };
         assert_eq!(closure.num_locals, locals);
@@ -502,6 +529,7 @@ fn test_closure_with_empty_bytecode() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert_eq!(closure.bytecode.len(), 0);
@@ -516,6 +544,7 @@ fn test_closure_with_large_bytecode() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
     assert_eq!(closure.bytecode.len(), 10000);
@@ -532,6 +561,7 @@ fn test_closure_rc_reference_counting() {
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
         num_locals: 0,
+        num_captures: 0,
         constants: Rc::new(vec![]),
     };
 
@@ -551,6 +581,7 @@ fn test_closure_debug_format() {
         arity: Arity::Exact(2),
         env: Rc::new(vec![Value::Int(42)]),
         num_locals: 2,
+        num_captures: 0,
         constants: Rc::new(vec![Value::String("test".into())]),
     };
 
