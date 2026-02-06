@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod ast;
 pub mod bytecode;
 pub mod bytecode_debug;
+pub mod capture_resolution;
 pub mod compile;
 pub mod converters;
 pub mod macros;

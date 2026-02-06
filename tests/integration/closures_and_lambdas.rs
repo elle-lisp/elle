@@ -655,7 +655,7 @@ fn test_let_binding_global_shadowing() {
         "(begin
           (define x 100)
           (let ((x 5))
-            (+ x 1)))"
+            (+ x 1)))",
     );
     assert_eq!(result.unwrap(), Value::Int(6));
 }
@@ -667,7 +667,7 @@ fn test_let_binding_function_scope() {
         "(begin
           (define double (lambda (x) (* x 2)))
           (let ((x 5))
-            (double x)))"
+            (double x)))",
     );
     assert_eq!(result.unwrap(), Value::Int(10));
 }
@@ -679,7 +679,133 @@ fn test_let_binding_with_global_access() {
         "(begin
           (define multiplier 10)
           (let ((x 5))
-            (* x multiplier)))"
+            (* x multiplier)))",
     );
     assert_eq!(result.unwrap(), Value::Int(50));
+}
+
+// ============================================================================
+// SECTION 21: Nested Closure Execution (capture resolution)
+// ============================================================================
+
+#[test]
+fn test_closure_returning_closure_called() {
+    // make-adder pattern: create and immediately use
+    let code = r#"
+        (((lambda (x) (lambda (y) (+ x y))) 10) 20)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(30));
+}
+
+#[test]
+fn test_two_level_closure_call() {
+    // outer captures global, inner captures outer param
+    let code = r#"
+        (begin
+          (define x 100)
+          ((lambda (a) ((lambda (b) (+ x a b)) 2)) 1))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(103));
+}
+
+#[test]
+fn test_set_in_nested_closure() {
+    // set! on a captured variable should work
+    let code = r#"
+        (begin
+          (define counter 0)
+          (define inc (lambda () (begin (set! counter (+ counter 1)) counter)))
+          (inc)
+          (inc)
+          (inc))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(3));
+}
+
+#[test]
+fn test_make_adder_pattern() {
+    // Classic make-adder: define, then call
+    let code = r#"
+        (begin
+          (define make-adder (lambda (x) (lambda (y) (+ x y))))
+          (define add5 (make-adder 5))
+          (add5 10))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(15));
+}
+
+#[test]
+fn test_triple_nested_closure_execution() {
+    // Three levels of nesting
+    let code = r#"
+        ((((lambda (a) (lambda (b) (lambda (c) (+ a b c)))) 1) 2) 3)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(6));
+}
+
+#[test]
+fn test_closure_captures_multiple_from_same_scope() {
+    // Inner lambda captures two variables from the same outer lambda
+    let code = r#"
+        ((lambda (x y) ((lambda (z) (+ x y z)) 3)) 1 2)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(6));
+}
+
+#[test]
+fn test_closure_with_let_and_capture() {
+    // let-binding inside a closure that captures from outer scope
+    let code = r#"
+        ((lambda (x)
+           (let ((y (* x 2)))
+             (+ x y)))
+         5)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(15));
+}
+
+#[test]
+fn test_closure_global_still_works() {
+    // Ensure globals still work through nested closures
+    let code = r#"
+        (begin
+          (define g 100)
+          ((lambda (x) (+ g x)) 5))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(105));
+}
+
+#[test]
+fn test_multiple_closures_from_same_factory() {
+    // Create multiple closures from the same factory, each with different captured values
+    let code = r#"
+        (begin
+          (define make-adder (lambda (x) (lambda (y) (+ x y))))
+          (define add3 (make-adder 3))
+          (define add7 (make-adder 7))
+          (+ (add3 10) (add7 10)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(30));
+}
+
+#[test]
+fn test_closure_captures_closure() {
+    // A closure that captures another closure and calls it
+    let code = r#"
+        (begin
+          (define f (lambda (x) (+ x 1)))
+          ((lambda (g) (g 10)) f))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(11));
+}
+
+#[test]
+fn test_immediately_invoked_nested_lambda() {
+    // Immediately invoked lambda inside another lambda
+    let code = r#"
+        ((lambda (x)
+           ((lambda (y) (+ x y)) (* x 2)))
+         5)
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(15));
 }

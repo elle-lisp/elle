@@ -308,7 +308,9 @@ fn build_quasiquote_expr(
 /// Simple value-to-expr conversion for bootstrap
 /// This is a simple tree-walking approach before full macro expansion
 pub fn value_to_expr(value: &Value, symbols: &mut SymbolTable) -> Result<Expr, String> {
-    value_to_expr_with_scope(value, symbols, &mut Vec::new())
+    let mut expr = value_to_expr_with_scope(value, symbols, &mut Vec::new())?;
+    super::capture_resolution::resolve_captures(&mut expr);
+    Ok(expr)
 }
 
 /// Convert a value to an expression, tracking local variable scopes
