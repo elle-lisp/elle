@@ -2009,6 +2009,189 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 ---
 
+## JSON Operations
+
+JSON parsing and serialization for working with JSON data. All JSON primitives are hand-written without external dependencies.
+
+### `json-parse` (Parse JSON)
+
+**Semantics**: Parses a JSON string into Elle values.
+
+**Type Mapping**:
+- JSON `null` → Elle `nil`
+- JSON `true` / `false` → Elle `#t` / `#f`
+- JSON integer → Elle `Int`
+- JSON float → Elle `Float`
+- JSON string → Elle `String`
+- JSON array → Elle List (cons-based)
+- JSON object → Elle Table (mutable map)
+
+**Handles**:
+- All JSON escape sequences: `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`, `\uXXXX`
+- Nested structures to arbitrary depth
+- Whitespace between tokens
+- Proper error messages with position information
+
+**Usage**:
+```lisp
+(json-parse "null")
+⟹ nil
+
+(json-parse "true")
+⟹ #t
+
+(json-parse "42")
+⟹ 42
+
+(json-parse "3.14")
+⟹ 3.14
+
+(json-parse "\"hello\"")
+⟹ "hello"
+
+(json-parse "[1, 2, 3]")
+⟹ (1 2 3)
+
+(json-parse "{\"name\": \"Alice\", \"age\": 30}")
+⟹ #<table String("age")=30 String("name")="Alice">
+
+; Access parsed object fields
+(define user (json-parse "{\"name\": \"Bob\", \"active\": true}"))
+(get user "name")
+⟹ "Bob"
+
+(get user "active")
+⟹ #t
+```
+
+**Errors**:
+- Empty input: `"Unexpected end of input: empty JSON"`
+- Trailing content: `"Unexpected trailing content at position X"`
+- Invalid tokens: `"Unexpected character 'X' at position Y"`
+- Unterminated strings: `"Unterminated string"`
+- Unclosed arrays/objects: `"Unexpected end of input in array/object"`
+
+### `json-serialize` (Serialize to Compact JSON)
+
+**Semantics**: Serializes an Elle value to compact JSON (no whitespace).
+
+**Type Mapping**:
+- Elle `nil` → JSON `null`
+- Elle `#t` / `#f` → JSON `true` / `false`
+- Elle `Int` → JSON number
+- Elle `Float` → JSON number (always includes decimal point)
+- Elle `String` → JSON string with proper escaping
+- Elle List → JSON array
+- Elle Vector → JSON array
+- Elle Table → JSON object (keys must be strings)
+- Elle Struct → JSON object (keys must be strings)
+
+**Usage**:
+```lisp
+(json-serialize nil)
+⟹ "null"
+
+(json-serialize #t)
+⟹ "true"
+
+(json-serialize 42)
+⟹ "42"
+
+(json-serialize 3.14)
+⟹ "3.14"
+
+(json-serialize "hello")
+⟹ "\"hello\""
+
+(json-serialize (list 1 2 3))
+⟹ "[1,2,3]"
+
+(define config (table))
+(put config "name" "MyApp")
+(put config "version" "1.0.0")
+(json-serialize config)
+⟹ "{\"name\":\"MyApp\",\"version\":\"1.0.0\"}"
+```
+
+**String Escaping**:
+- `"` → `\"`
+- `\` → `\\`
+- newline → `\n`
+- tab → `\t`
+- carriage return → `\r`
+- backspace → `\b`
+- form feed → `\f`
+- Control characters → `\uXXXX`
+
+**Errors**:
+- Non-string table keys: `"Table keys must be strings for JSON serialization"`
+- Closures: `"Cannot serialize closures to JSON"`
+- Native functions: `"Cannot serialize native functions to JSON"`
+- Symbols: `"Cannot serialize symbols to JSON"`
+
+### `json-serialize-pretty` (Serialize to Pretty JSON)
+
+**Semantics**: Serializes an Elle value to pretty-printed JSON with 2-space indentation.
+
+**Usage**:
+```lisp
+(define user (table))
+(put user "name" "Alice")
+(put user "age" 30)
+(put user "active" #t)
+
+(json-serialize-pretty user)
+⟹ "{
+  \"active\": true,
+  \"age\": 30,
+  \"name\": \"Alice\"
+}"
+
+(define users (list user))
+(json-serialize-pretty users)
+⟹ "[
+  {
+    \"active\": true,
+    \"age\": 30,
+    \"name\": \"Alice\"
+  }
+]"
+```
+
+**Format**:
+- 2-space indentation per level
+- Newlines after opening braces/brackets
+- Newlines before closing braces/brackets
+- Space after colons in objects
+- Comma-separated elements on separate lines
+
+### Round-trip Example
+
+Parse JSON, modify, and serialize back:
+
+```lisp
+(define original "{\"product\": \"Widget\", \"price\": 19.99}")
+(define parsed (json-parse original))
+
+; Modify the parsed data
+(put parsed "price" 24.99)
+(put parsed "discount" 0.1)
+
+; Serialize back to JSON
+(json-serialize parsed)
+⟹ "{\"discount\":0.1,\"price\":24.99,\"product\":\"Widget\"}"
+
+; Pretty print for readability
+(json-serialize-pretty parsed)
+⟹ "{
+  \"discount\": 0.1,
+  \"price\": 24.99,
+  \"product\": \"Widget\"
+}"
+```
+
+---
+
 ## Module & Package Operations
 
 ### `import-file` (Import Module)

@@ -5,6 +5,7 @@ pub mod debug;
 pub mod exception;
 pub mod file_io;
 pub mod higher_order;
+pub mod json;
 pub mod list;
 pub mod math;
 pub mod meta;
@@ -36,6 +37,7 @@ use self::file_io::{
     prim_parent_directory, prim_read_file, prim_read_lines, prim_rename_file, prim_write_file,
 };
 use self::higher_order::{prim_filter, prim_fold, prim_map};
+use self::json::{prim_json_parse, prim_json_serialize, prim_json_serialize_pretty};
 use self::list::{
     prim_append, prim_cons, prim_drop, prim_first, prim_last, prim_length, prim_list, prim_nth,
     prim_rest, prim_reverse, prim_take,
@@ -338,6 +340,16 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "file-name", prim_file_name);
     register_fn(vm, symbols, "parent-directory", prim_parent_directory);
     register_fn(vm, symbols, "read-lines", prim_read_lines);
+
+    // JSON operations
+    register_fn(vm, symbols, "json-parse", prim_json_parse);
+    register_fn(vm, symbols, "json-serialize", prim_json_serialize);
+    register_fn(
+        vm,
+        symbols,
+        "json-serialize-pretty",
+        prim_json_serialize_pretty,
+    );
 }
 
 fn register_fn(
@@ -422,6 +434,7 @@ pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable) {
     init_list_module(vm, symbols);
     init_string_module(vm, symbols);
     init_math_module(vm, symbols);
+    init_json_module(vm, symbols);
 }
 
 fn init_list_module(vm: &mut VM, symbols: &mut SymbolTable) {
@@ -537,6 +550,29 @@ fn init_math_module(vm: &mut VM, symbols: &mut SymbolTable) {
     };
     symbols.define_module(math_module);
     vm.define_module("math".to_string(), math_exports);
+}
+
+fn init_json_module(vm: &mut VM, symbols: &mut SymbolTable) {
+    // JSON module exports
+    let mut json_exports = std::collections::HashMap::new();
+
+    let functions = vec!["json-parse", "json-serialize", "json-serialize-pretty"];
+
+    let mut exports = Vec::new();
+    for func_name in &functions {
+        if let Some(func) = vm.get_global(symbols.intern(func_name).0) {
+            json_exports.insert(symbols.intern(func_name).0, func.clone());
+        }
+        exports.push(symbols.intern(func_name));
+    }
+
+    use crate::symbol::ModuleDef;
+    let json_module = ModuleDef {
+        name: symbols.intern("json"),
+        exports,
+    };
+    symbols.define_module(json_module);
+    vm.define_module("json".to_string(), json_exports);
 }
 
 // Package manager primitives

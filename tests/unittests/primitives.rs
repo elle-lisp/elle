@@ -1604,3 +1604,307 @@ fn test_module_circular_dependency_prevention() {
     // assert!(result1.is_ok());
     // assert!(result2.is_ok());
 }
+
+// JSON Parsing and Serialization Tests
+#[test]
+fn test_json_parse_null() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+
+    let result = call_primitive(&json_parse, &[Value::String("null".into())]);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), Value::Nil);
+}
+
+#[test]
+fn test_json_parse_booleans() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+
+    let result = call_primitive(&json_parse, &[Value::String("true".into())]);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), Value::Bool(true));
+
+    let result = call_primitive(&json_parse, &[Value::String("false".into())]);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), Value::Bool(false));
+}
+
+#[test]
+fn test_json_parse_integers() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+
+    let result = call_primitive(&json_parse, &[Value::String("0".into())]);
+    assert_eq!(result.unwrap(), Value::Int(0));
+
+    let result = call_primitive(&json_parse, &[Value::String("42".into())]);
+    assert_eq!(result.unwrap(), Value::Int(42));
+
+    let result = call_primitive(&json_parse, &[Value::String("-17".into())]);
+    assert_eq!(result.unwrap(), Value::Int(-17));
+}
+
+#[test]
+#[allow(clippy::approx_constant)]
+fn test_json_parse_floats() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+
+    let result = call_primitive(&json_parse, &[Value::String("3.14".into())]);
+    match result.unwrap() {
+        Value::Float(f) => assert!((f - 3.14).abs() < 1e-10),
+        _ => panic!("Expected float"),
+    }
+
+    let result = call_primitive(&json_parse, &[Value::String("1e10".into())]);
+    match result.unwrap() {
+        Value::Float(f) => assert!((f - 1e10).abs() < 1e5),
+        _ => panic!("Expected float"),
+    }
+
+    let result = call_primitive(&json_parse, &[Value::String("1.0".into())]);
+    match result.unwrap() {
+        Value::Float(f) => assert!((f - 1.0).abs() < 1e-10),
+        _ => panic!("Expected float"),
+    }
+}
+
+#[test]
+fn test_json_parse_strings() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+
+    let result = call_primitive(&json_parse, &[Value::String("\"hello\"".into())]);
+    assert_eq!(result.unwrap(), Value::String("hello".into()));
+
+    let result = call_primitive(&json_parse, &[Value::String("\"\"".into())]);
+    assert_eq!(result.unwrap(), Value::String("".into()));
+
+    let result = call_primitive(&json_parse, &[Value::String("\"hello\\nworld\"".into())]);
+    assert_eq!(result.unwrap(), Value::String("hello\nworld".into()));
+
+    let result = call_primitive(&json_parse, &[Value::String("\"quote\\\"test\"".into())]);
+    assert_eq!(result.unwrap(), Value::String("quote\"test".into()));
+
+    let result = call_primitive(&json_parse, &[Value::String("\"\\u0041\"".into())]);
+    assert_eq!(result.unwrap(), Value::String("A".into()));
+}
+
+#[test]
+fn test_json_parse_arrays() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+
+    let result = call_primitive(&json_parse, &[Value::String("[]".into())]);
+    assert_eq!(result.unwrap(), Value::Nil);
+
+    let result = call_primitive(&json_parse, &[Value::String("[1,2,3]".into())]);
+    let list = result.unwrap();
+    let vec = list.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 3);
+    assert_eq!(vec[0], Value::Int(1));
+    assert_eq!(vec[1], Value::Int(2));
+    assert_eq!(vec[2], Value::Int(3));
+
+    let result = call_primitive(
+        &json_parse,
+        &[Value::String("[1,\"two\",true,null]".into())],
+    );
+    let list = result.unwrap();
+    let vec = list.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 4);
+    assert_eq!(vec[0], Value::Int(1));
+    assert_eq!(vec[1], Value::String("two".into()));
+    assert_eq!(vec[2], Value::Bool(true));
+    assert_eq!(vec[3], Value::Nil);
+}
+
+#[test]
+fn test_json_parse_objects() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+
+    let result = call_primitive(&json_parse, &[Value::String("{}".into())]);
+    match result.unwrap() {
+        Value::Table(t) => {
+            assert_eq!(t.borrow().len(), 0);
+        }
+        _ => panic!("Expected table"),
+    }
+
+    let result = call_primitive(
+        &json_parse,
+        &[Value::String("{\"name\":\"Alice\",\"age\":30}".into())],
+    );
+    match result.unwrap() {
+        Value::Table(t) => {
+            let table = t.borrow();
+            assert_eq!(table.len(), 2);
+        }
+        _ => panic!("Expected table"),
+    }
+}
+
+#[test]
+fn test_json_parse_whitespace() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+
+    let result = call_primitive(&json_parse, &[Value::String("  \n\t  42  \n\t  ".into())]);
+    assert_eq!(result.unwrap(), Value::Int(42));
+
+    let result = call_primitive(&json_parse, &[Value::String("[ 1 , 2 , 3 ]".into())]);
+    let list = result.unwrap();
+    let vec = list.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 3);
+}
+
+#[test]
+fn test_json_parse_errors() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+
+    // Empty input
+    let result = call_primitive(&json_parse, &[Value::String("".into())]);
+    assert!(result.is_err());
+
+    // Trailing content
+    let result = call_primitive(&json_parse, &[Value::String("42 extra".into())]);
+    assert!(result.is_err());
+
+    // Unterminated string
+    let result = call_primitive(&json_parse, &[Value::String("\"unterminated".into())]);
+    assert!(result.is_err());
+
+    // Unclosed array
+    let result = call_primitive(&json_parse, &[Value::String("[1,2".into())]);
+    assert!(result.is_err());
+
+    // Unclosed object
+    let result = call_primitive(&json_parse, &[Value::String("{\"key\":42".into())]);
+    assert!(result.is_err());
+
+    // Invalid token
+    let result = call_primitive(&json_parse, &[Value::String("invalid".into())]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_json_serialize_compact() {
+    let (vm, mut symbols) = setup();
+    let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
+
+    let result = call_primitive(&json_serialize, &[Value::Nil]);
+    assert_eq!(result.unwrap(), Value::String("null".into()));
+
+    let result = call_primitive(&json_serialize, &[Value::Bool(true)]);
+    assert_eq!(result.unwrap(), Value::String("true".into()));
+
+    let result = call_primitive(&json_serialize, &[Value::Bool(false)]);
+    assert_eq!(result.unwrap(), Value::String("false".into()));
+
+    let result = call_primitive(&json_serialize, &[Value::Int(42)]);
+    assert_eq!(result.unwrap(), Value::String("42".into()));
+
+    let result = call_primitive(&json_serialize, &[Value::String("hello".into())]);
+    assert_eq!(result.unwrap(), Value::String("\"hello\"".into()));
+
+    let list = list(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+    let result = call_primitive(&json_serialize, &[list]);
+    assert_eq!(result.unwrap(), Value::String("[1,2,3]".into()));
+}
+
+#[test]
+fn test_json_serialize_string_escaping() {
+    let (vm, mut symbols) = setup();
+    let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
+
+    let result = call_primitive(&json_serialize, &[Value::String("hello\"world".into())]);
+    assert_eq!(result.unwrap(), Value::String("\"hello\\\"world\"".into()));
+
+    let result = call_primitive(&json_serialize, &[Value::String("hello\\world".into())]);
+    assert_eq!(result.unwrap(), Value::String("\"hello\\\\world\"".into()));
+
+    let result = call_primitive(&json_serialize, &[Value::String("hello\nworld".into())]);
+    assert_eq!(result.unwrap(), Value::String("\"hello\\nworld\"".into()));
+
+    let result = call_primitive(&json_serialize, &[Value::String("hello\tworld".into())]);
+    assert_eq!(result.unwrap(), Value::String("\"hello\\tworld\"".into()));
+}
+
+#[test]
+fn test_json_serialize_pretty() {
+    let (vm, mut symbols) = setup();
+    let json_serialize_pretty = get_primitive(&vm, &mut symbols, "json-serialize-pretty");
+
+    let list = list(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+    let result = call_primitive(&json_serialize_pretty, &[list]);
+    let serialized = result.unwrap();
+    match serialized {
+        Value::String(s) => {
+            assert!(s.contains('\n'), "Pretty JSON should contain newlines");
+            assert!(s.contains("  "), "Pretty JSON should contain indentation");
+        }
+        _ => panic!("Expected string"),
+    }
+}
+
+#[test]
+fn test_json_serialize_roundtrip() {
+    let (vm, mut symbols) = setup();
+    let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
+    let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
+
+    let original = list(vec![
+        Value::Int(1),
+        Value::String("test".into()),
+        Value::Bool(true),
+        Value::Nil,
+    ]);
+
+    let serialized = call_primitive(&json_serialize, std::slice::from_ref(&original)).unwrap();
+    let json_str = match serialized {
+        Value::String(s) => s.to_string(),
+        _ => panic!("Expected string"),
+    };
+
+    let deserialized = call_primitive(&json_parse, &[Value::String(json_str.into())]).unwrap();
+    assert_eq!(original, deserialized);
+}
+
+#[test]
+fn test_json_serialize_vectors() {
+    let (vm, mut symbols) = setup();
+    let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
+
+    let vec = Value::Vector(std::rc::Rc::new(vec![
+        Value::Int(1),
+        Value::Int(2),
+        Value::Int(3),
+    ]));
+    let result = call_primitive(&json_serialize, &[vec]);
+    assert_eq!(result.unwrap(), Value::String("[1,2,3]".into()));
+}
+
+#[test]
+fn test_json_serialize_errors() {
+    let (vm, mut symbols) = setup();
+    let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
+
+    let closure = Value::Closure(std::rc::Rc::new(Closure {
+        bytecode: std::rc::Rc::new(vec![]),
+        arity: elle::value::Arity::Exact(0),
+        env: std::rc::Rc::new(vec![]),
+        num_locals: 0,
+        num_captures: 0,
+        constants: std::rc::Rc::new(vec![]),
+    }));
+    let result = call_primitive(&json_serialize, &[closure]);
+    assert!(result.is_err());
+
+    let native_fn: elle::value::NativeFn = |_| Ok(Value::Nil);
+    let fn_val = Value::NativeFn(native_fn);
+    let result = call_primitive(&json_serialize, &[fn_val]);
+    assert!(result.is_err());
+}
