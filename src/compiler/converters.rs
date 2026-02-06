@@ -34,72 +34,103 @@ fn extract_pattern_variables(pattern: &Pattern) -> Vec<SymbolId> {
     vars
 }
 
-/// Adjust variable indices in an expression to account for captures offset
-/// For Var expressions with depth=0 (current lambda parameters), add captures_offset to the index
-/// This is necessary because the closure environment layout is [captures..., parameters...]
-fn adjust_var_indices(expr: &mut Expr, captures_offset: usize) {
+/// Adjust variable indices in an expression to account for the closure environment layout.
+/// The closure environment is laid out as [captures..., parameters...]
+///
+/// During parsing, Var nodes contain indices relative to the scope_stack at parse time.
+/// After computing captures, we need to convert these to absolute indices in the final environment.
+///
+/// For each Var:
+/// - If it's a parameter of the current lambda: map to captures.len() + position_in_params
+/// - If it's a captured value: map to position_in_captures_list
+fn adjust_var_indices(expr: &mut Expr, captures: &[(SymbolId, usize, usize)], params: &[SymbolId]) {
+    // Build a map of captures to their position in the list
+    let mut capture_map: std::collections::HashMap<SymbolId, usize> =
+        std::collections::HashMap::new();
+    for (i, (sym, _, _)) in captures.iter().enumerate() {
+        capture_map.insert(*sym, i);
+    }
+
+    // Build a map of parameters to their position in the list
+    let mut param_map: std::collections::HashMap<SymbolId, usize> =
+        std::collections::HashMap::new();
+    for (i, sym) in params.iter().enumerate() {
+        param_map.insert(*sym, i);
+    }
+
     match expr {
-        Expr::Var(_, depth, index) if *depth == 0 => {
-            // Current lambda parameter - adjust index to account for captures
-            *index += captures_offset;
+        Expr::Var(sym_id, _depth, index) => {
+            // Adjust indices for variables that are captures or parameters of this lambda
+            // Both depth==0 (current scope params) and depth>0 (captured vars) need adjustment
+            // because the index is currently relative to scope_stack at parse time, not the
+            // final closure environment [captures..., parameters...]
+            if let Some(cap_pos) = capture_map.get(sym_id) {
+                // This variable is a capture - map to its position in the captures list
+                *index = *cap_pos;
+            } else if let Some(param_pos) = param_map.get(sym_id) {
+                // This variable is a parameter - map to captures.len() + position
+                *index = captures.len() + param_pos;
+            }
+            // Otherwise, it's a global or something from an even outer scope
         }
         Expr::If { cond, then, else_ } => {
-            adjust_var_indices(cond, captures_offset);
-            adjust_var_indices(then, captures_offset);
-            adjust_var_indices(else_, captures_offset);
+            adjust_var_indices(cond, captures, params);
+            adjust_var_indices(then, captures, params);
+            adjust_var_indices(else_, captures, params);
         }
         Expr::Cond { clauses, else_body } => {
             for (test, body) in clauses {
-                adjust_var_indices(test, captures_offset);
-                adjust_var_indices(body, captures_offset);
+                adjust_var_indices(test, captures, params);
+                adjust_var_indices(body, captures, params);
             }
             if let Some(else_expr) = else_body {
-                adjust_var_indices(else_expr, captures_offset);
+                adjust_var_indices(else_expr, captures, params);
             }
         }
         Expr::Begin(exprs) => {
             for e in exprs {
-                adjust_var_indices(e, captures_offset);
+                adjust_var_indices(e, captures, params);
             }
         }
         Expr::Call { func, args, .. } => {
-            adjust_var_indices(func, captures_offset);
+            adjust_var_indices(func, captures, params);
             for arg in args {
-                adjust_var_indices(arg, captures_offset);
+                adjust_var_indices(arg, captures, params);
             }
         }
-        Expr::Lambda { body, .. } => {
-            // Don't adjust nested lambda bodies - they have their own capture scope
-            adjust_var_indices(body, captures_offset);
+        Expr::Lambda { .. } => {
+            // Don't adjust nested lambda bodies at all - they have already been fully processed
+            // with their own capture scopes, parameters, and indices when they were parsed.
+            // Recursing into them would incorrectly adjust already-correct indices.
         }
         Expr::Let { bindings, body } => {
             for (_, expr) in bindings {
-                adjust_var_indices(expr, captures_offset);
+                adjust_var_indices(expr, captures, params);
             }
-            adjust_var_indices(body, captures_offset);
+            adjust_var_indices(body, captures, params);
         }
         Expr::Set { value, .. } => {
-            adjust_var_indices(value, captures_offset);
+            adjust_var_indices(value, captures, params);
         }
         Expr::While { cond, body } => {
-            adjust_var_indices(cond, captures_offset);
-            adjust_var_indices(body, captures_offset);
+            adjust_var_indices(cond, captures, params);
+            adjust_var_indices(body, captures, params);
         }
         Expr::For { iter, body, .. } => {
-            adjust_var_indices(iter, captures_offset);
-            adjust_var_indices(body, captures_offset);
+            adjust_var_indices(iter, captures, params);
+            adjust_var_indices(body, captures, params);
         }
         Expr::Match {
             value,
             patterns,
             default,
         } => {
-            adjust_var_indices(value, captures_offset);
+            adjust_var_indices(value, captures, params);
             for (_, expr) in patterns {
-                adjust_var_indices(expr, captures_offset);
+                adjust_var_indices(expr, captures, params);
             }
             if let Some(default_expr) = default {
-                adjust_var_indices(default_expr, captures_offset);
+                adjust_var_indices(default_expr, captures, params);
             }
         }
         Expr::Try {
@@ -107,23 +138,23 @@ fn adjust_var_indices(expr: &mut Expr, captures_offset: usize) {
             catch,
             finally,
         } => {
-            adjust_var_indices(body, captures_offset);
+            adjust_var_indices(body, captures, params);
             if let Some((_, handler)) = catch {
-                adjust_var_indices(handler, captures_offset);
+                adjust_var_indices(handler, captures, params);
             }
             if let Some(finally_expr) = finally {
-                adjust_var_indices(finally_expr, captures_offset);
+                adjust_var_indices(finally_expr, captures, params);
             }
         }
         Expr::And(exprs) | Expr::Or(exprs) => {
             for e in exprs {
-                adjust_var_indices(e, captures_offset);
+                adjust_var_indices(e, captures, params);
             }
         }
         Expr::DefMacro { body, .. } => {
-            adjust_var_indices(body, captures_offset);
+            adjust_var_indices(body, captures, params);
         }
-        // Literals, GlobalVar, Var with depth>0, etc. don't need adjustment
+        // Literals, GlobalVar, etc. don't need adjustment
         _ => {}
     }
 }
@@ -455,11 +486,10 @@ fn value_to_expr_with_scope(
                             })
                             .collect();
 
-                        // Adjust variable indices in body to account for captures offset
-                        // The closure environment layout is [captures..., parameters...]
-                        // So current-lambda parameters need their indices offset by captures.len()
+                        // Adjust variable indices in body to account for closure environment layout
+                        // The closure environment is [captures..., parameters...]
                         let mut adjusted_body = body;
-                        adjust_var_indices(&mut adjusted_body, captures.len());
+                        adjust_var_indices(&mut adjusted_body, &captures, &param_syms);
 
                         Ok(Expr::Lambda {
                             params: param_syms,
@@ -553,9 +583,9 @@ fn value_to_expr_with_scope(
                             })
                             .collect();
 
-                        // Adjust variable indices in body to account for captures offset
+                        // Adjust variable indices in body to account for closure environment layout
                         let mut adjusted_body = body;
-                        adjust_var_indices(&mut adjusted_body, captures.len());
+                        adjust_var_indices(&mut adjusted_body, &captures, &param_syms);
 
                         // Create lambda: (lambda (var1 var2 ...) body...)
                         let lambda = Expr::Lambda {
@@ -672,9 +702,9 @@ fn value_to_expr_with_scope(
                             })
                             .collect();
 
-                        // Adjust variable indices in body to account for captures offset
+                        // Adjust variable indices in body to account for closure environment layout
                         let mut adjusted_body = body;
-                        adjust_var_indices(&mut adjusted_body, captures.len());
+                        adjust_var_indices(&mut adjusted_body, &captures, &param_syms);
 
                         // Create lambda: (lambda (var1 var2 ...) body...)
                         let lambda = Expr::Lambda {

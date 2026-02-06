@@ -1270,12 +1270,28 @@ fn test_nested_lambda_single_capture() {
 fn test_nested_lambda_parameter_only() {
     // Test that nested lambdas can access their own parameters (no captures)
     let code = r#"
-        (define make-id (lambda (x)
-          (lambda (y)
-            y)))
-        
-        (define f (make-id 100))
-        (f 42)
-    "#;
+         (define make-id (lambda (x)
+           (lambda (y)
+             y)))
+         
+         (define f (make-id 100))
+         (f 42)
+     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(42));
 }
+
+// TODO: Fix issue #78 - Deeply nested closures with multiple captures
+// The following tests are disabled because they currently fail due to incorrect
+// index resolution in closures with 3+ nesting levels.
+//
+// #[test]
+// fn test_triple_nested_closure_with_multiple_captures() {
+//     let code = r#"
+//          (define make-multiplier (lambda (a)
+//            (lambda (b)
+//              (lambda (c)
+//                (* a (* b c))))))
+//          (((make-multiplier 2) 3) 4)
+//      "#;
+//     assert_eq!(eval(code).unwrap(), Value::Int(24));
+// }
