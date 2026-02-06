@@ -32,6 +32,7 @@ pub enum Token {
     UnquoteSplicing,
     ListSugar, // @ for list sugar
     Symbol(String),
+    Keyword(String),
     Integer(i64),
     Float(f64),
     String(String),
@@ -161,7 +162,7 @@ impl Lexer {
     fn read_symbol(&mut self) -> String {
         let mut sym = String::new();
         while let Some(c) = self.current() {
-            if c.is_whitespace() || "()[]'`,@".contains(c) {
+            if c.is_whitespace() || "()[]'`,:@".contains(c) {
                 break;
             }
             sym.push(c);
@@ -252,6 +253,19 @@ impl Lexer {
                     token: Token::ListSugar,
                     loc,
                 }))
+            }
+            Some(':') => {
+                self.advance();
+                // Read keyword - must be followed by symbol characters
+                let keyword = self.read_symbol();
+                if keyword.is_empty() {
+                    Err("Invalid keyword: expected symbol after :".to_string())
+                } else {
+                    Ok(Some(TokenWithLoc {
+                        token: Token::Keyword(keyword),
+                        loc,
+                    }))
+                }
             }
             Some('"') => self.read_string().map(|s| {
                 Some(TokenWithLoc {
@@ -455,6 +469,12 @@ impl Reader {
                     self.advance();
                     Ok(Value::Symbol(id))
                 }
+            }
+            Token::Keyword(s) => {
+                // Keywords are self-evaluating values
+                let id = symbols.intern(s);
+                self.advance();
+                Ok(Value::Keyword(id))
             }
             Token::RightParen => Err("Unexpected )".to_string()),
             Token::RightBracket => Err("Unexpected ]".to_string()),

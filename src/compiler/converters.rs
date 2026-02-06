@@ -62,7 +62,8 @@ fn build_quasiquote_expr(
         | Value::Int(_)
         | Value::Float(_)
         | Value::String(_)
-        | Value::Symbol(_) => Ok(Expr::Literal(value.clone())),
+        | Value::Symbol(_)
+        | Value::Keyword(_) => Ok(Expr::Literal(value.clone())),
 
         Value::Table(_) | Value::Struct(_) => Ok(Expr::Literal(value.clone())),
 
@@ -198,6 +199,7 @@ fn value_to_expr_with_scope(
         | Value::Int(_)
         | Value::Float(_)
         | Value::String(_)
+        | Value::Keyword(_)
         | Value::Vector(_) => Ok(Expr::Literal(value.clone())),
 
         Value::Symbol(id) => {

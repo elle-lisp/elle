@@ -146,6 +146,7 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Symbol(SymbolId),
+    Keyword(SymbolId), // Keywords are self-evaluating, like :name
     String(Rc<str>),
     Cons(Rc<Cons>),
     Vector(Rc<Vec<Value>>),
@@ -168,6 +169,7 @@ impl PartialEq for Value {
             (Value::Int(a), Value::Int(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::Symbol(a), Value::Symbol(b)) => a == b,
+            (Value::Keyword(a), Value::Keyword(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Cons(a), Value::Cons(b)) => a == b,
             (Value::Vector(a), Value::Vector(b)) => a == b,
@@ -311,6 +313,7 @@ impl Value {
             Value::Int(_) => "integer",
             Value::Float(_) => "float",
             Value::Symbol(_) => "symbol",
+            Value::Keyword(_) => "keyword",
             Value::String(_) => "string",
             Value::Cons(_) => "list",
             Value::Vector(_) => "vector",
@@ -333,6 +336,7 @@ impl fmt::Debug for Value {
             Value::Int(n) => write!(f, "{}", n),
             Value::Float(fl) => write!(f, "{}", fl),
             Value::Symbol(id) => write!(f, "Symbol({})", id.0),
+            Value::Keyword(id) => write!(f, ":{}", id.0),
             Value::String(s) => write!(f, "\"{}\"", s),
             Value::Cons(cons) => {
                 write!(f, "(")?;
