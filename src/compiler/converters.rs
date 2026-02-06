@@ -193,9 +193,12 @@ fn value_to_expr_with_scope(
     scope_stack: &mut Vec<Vec<SymbolId>>,
 ) -> Result<Expr, String> {
     match value {
-        Value::Nil | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_) => {
-            Ok(Expr::Literal(value.clone()))
-        }
+        Value::Nil
+        | Value::Bool(_)
+        | Value::Int(_)
+        | Value::Float(_)
+        | Value::String(_)
+        | Value::Vector(_) => Ok(Expr::Literal(value.clone())),
 
         Value::Symbol(id) => {
             // Check if the symbol is a local binding by walking up the scope stack

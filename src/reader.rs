@@ -30,6 +30,7 @@ pub enum Token {
     Quasiquote,
     Unquote,
     UnquoteSplicing,
+    ListSugar, // @ for list sugar
     Symbol(String),
     Integer(i64),
     Float(f64),
@@ -160,7 +161,7 @@ impl Lexer {
     fn read_symbol(&mut self) -> String {
         let mut sym = String::new();
         while let Some(c) = self.current() {
-            if c.is_whitespace() || "()[]'`,".contains(c) {
+            if c.is_whitespace() || "()[]'`,@".contains(c) {
                 break;
             }
             sym.push(c);
@@ -244,6 +245,13 @@ impl Lexer {
                         loc,
                     }))
                 }
+            }
+            Some('@') => {
+                self.advance();
+                Ok(Some(TokenWithLoc {
+                    token: Token::ListSugar,
+                    loc,
+                }))
             }
             Some('"') => self.read_string().map(|s| {
                 Some(TokenWithLoc {
@@ -348,6 +356,33 @@ impl Reader {
         match token {
             Token::LeftParen => self.read_list(symbols),
             Token::LeftBracket => self.read_vector(symbols),
+            Token::ListSugar => {
+                self.advance();
+                // @[...] is sugar for (list ...)
+                if self.current() == Some(&Token::LeftBracket) {
+                    self.advance(); // skip [
+                    let mut elements = Vec::new();
+
+                    loop {
+                        match self.current() {
+                            None => return Err("Unterminated list literal".to_string()),
+                            Some(Token::RightBracket) => {
+                                self.advance();
+                                // Build (list e1 e2 e3 ...)
+                                let list_sym = Value::Symbol(symbols.intern("list"));
+                                let result = elements
+                                    .into_iter()
+                                    .rev()
+                                    .fold(Value::Nil, |acc, v| cons(v, acc));
+                                return Ok(cons(list_sym, result));
+                            }
+                            _ => elements.push(self.read(symbols)?),
+                        }
+                    }
+                } else {
+                    Err("@ must be followed by [...]".to_string())
+                }
+            }
             Token::Quote => {
                 self.advance();
                 let val = self.read(symbols)?;
