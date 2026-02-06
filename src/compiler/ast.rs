@@ -52,6 +52,9 @@ pub enum Expr {
     /// Begin (sequence of expressions)
     Begin(Vec<Expr>),
 
+    /// Block expression (like begin but with its own scope)
+    Block(Vec<Expr>),
+
     /// Function call
     Call {
         func: Box<Expr>,
@@ -194,6 +197,7 @@ impl Expr {
                 | Expr::If { .. }
                 | Expr::Cond { .. }
                 | Expr::Begin(_)
+                | Expr::Block(_)
                 | Expr::Let { .. }
                 | Expr::While { .. }
                 | Expr::For { .. }

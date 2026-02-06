@@ -1,6 +1,16 @@
 use crate::value::SymbolId;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Global counter for gensym to ensure uniqueness
+static GENSYM_COUNTER: AtomicU64 = AtomicU64::new(1_000_000);
+
+/// Generate a unique symbol ID for use in macros and hygiene
+pub fn gensym_id() -> SymbolId {
+    let id = GENSYM_COUNTER.fetch_add(1, Ordering::Relaxed);
+    SymbolId(id as u32)
+}
 
 /// Macro definition
 #[derive(Debug, Clone)]

@@ -82,3 +82,7 @@ mod module_qualified_names {
 mod tables_and_structs {
     include!("tables_and_structs.rs");
 }
+
+mod scoping {
+    include!("scoping.rs");
+}

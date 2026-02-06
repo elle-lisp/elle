@@ -36,26 +36,18 @@ pub fn handle_store_global(
     let idx = vm.read_u16(bytecode, ip) as usize;
     let val = vm.stack.pop().ok_or("Stack underflow")?;
     if let Value::Symbol(sym_id) = constants[idx] {
-        // Check if variable exists in globals or current scope
-        if vm.globals.contains_key(&sym_id.0) {
-            // Exists in global scope - update there
-            vm.globals.insert(sym_id.0, val.clone());
-        } else if vm.scope_stack.get(sym_id.0).is_some() {
-            // Exists in scope stack somewhere - try to update it
-            // Walk up scope chain to find where it's defined
-            let mut found = false;
-            for depth in 0..vm.scope_stack.depth() {
-                if vm.scope_stack.set_at_depth(depth, sym_id.0, val.clone()) {
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                // Shouldn't happen if get() succeeded, but be defensive
+        // Check scope stack first (for proper shadowing)
+        if vm.scope_stack.get(sym_id.0).is_some() {
+            // Variable exists in scope stack — update it there
+            if !vm.scope_stack.set(sym_id.0, val.clone()) {
+                // Shouldn't happen if get() succeeded
                 vm.scope_stack.define_local(sym_id.0, val.clone());
             }
+        } else if vm.globals.contains_key(&sym_id.0) {
+            // Exists in global scope — update there
+            vm.globals.insert(sym_id.0, val.clone());
         } else if vm.scope_stack.depth() > 1 {
-            // New variable in a local scope - define locally
+            // New variable in a local scope — define locally
             vm.scope_stack.define_local(sym_id.0, val.clone());
         } else {
             // New variable at global scope

@@ -92,6 +92,11 @@ fn adjust_var_indices(expr: &mut Expr, captures: &[(SymbolId, usize, usize)], pa
                 adjust_var_indices(e, captures, params);
             }
         }
+        Expr::Block(exprs) => {
+            for e in exprs {
+                adjust_var_indices(e, captures, params);
+            }
+        }
         Expr::Call { func, args, .. } => {
             adjust_var_indices(func, captures, params);
             for arg in args {
@@ -431,6 +436,14 @@ fn value_to_expr_with_scope(
                             .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
                             .collect();
                         Ok(Expr::Begin(exprs?))
+                    }
+
+                    "block" => {
+                        let exprs: Result<Vec<_>, _> = list[1..]
+                            .iter()
+                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                            .collect();
+                        Ok(Expr::Block(exprs?))
                     }
 
                     "lambda" => {

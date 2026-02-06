@@ -8,6 +8,7 @@ struct Compiler {
     bytecode: Bytecode,
     #[allow(dead_code)]
     symbols: HashMap<SymbolId, usize>,
+    scope_depth: usize,
 }
 
 impl Compiler {
@@ -15,6 +16,7 @@ impl Compiler {
         Compiler {
             bytecode: Bytecode::new(),
             symbols: HashMap::new(),
+            scope_depth: 0,
         }
     }
 
@@ -113,13 +115,16 @@ impl Compiler {
             Expr::Begin(exprs) => {
                 // Pre-declare all top-level defines to enable recursive functions
                 // This allows a function to reference itself in its own body
-                let defines = Self::collect_defines(expr);
-                for sym_id in defines {
-                    // Load nil and store it in the global
-                    self.bytecode.emit(Instruction::Nil);
-                    let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
-                    self.bytecode.emit(Instruction::StoreGlobal);
-                    self.bytecode.emit_u16(idx);
+                // Only do this at global scope, not inside loops/blocks
+                if self.scope_depth == 0 {
+                    let defines = Self::collect_defines(expr);
+                    for sym_id in defines {
+                        // Load nil and store it in the global
+                        self.bytecode.emit(Instruction::Nil);
+                        let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
+                        self.bytecode.emit(Instruction::StoreGlobal);
+                        self.bytecode.emit_u16(idx);
+                    }
                 }
 
                 // Now compile the expressions normally
@@ -130,6 +135,34 @@ impl Compiler {
                         self.bytecode.emit(Instruction::Pop);
                     }
                 }
+            }
+
+            Expr::Block(exprs) => {
+                // Push block scope
+                self.bytecode.emit(Instruction::PushScope);
+                self.bytecode.emit_byte(2); // ScopeType::Block = 2
+                self.scope_depth += 1;
+
+                // Pre-declare defines within the block for mutual visibility
+                let defines = Self::collect_defines(expr);
+                for sym_id in defines {
+                    self.bytecode.emit(Instruction::Nil);
+                    let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
+                    self.bytecode.emit(Instruction::DefineLocal);
+                    self.bytecode.emit_u16(idx);
+                }
+
+                // Compile expressions
+                for (i, expr) in exprs.iter().enumerate() {
+                    let is_last = i == exprs.len() - 1;
+                    self.compile_expr(expr, tail && is_last);
+                    if !is_last {
+                        self.bytecode.emit(Instruction::Pop);
+                    }
+                }
+
+                self.scope_depth -= 1;
+                self.bytecode.emit(Instruction::PopScope);
             }
 
             Expr::Call {
@@ -257,7 +290,14 @@ impl Compiler {
             Expr::Define { name, value } => {
                 self.compile_expr(value, false);
                 let idx = self.bytecode.add_constant(Value::Symbol(*name));
-                self.bytecode.emit(Instruction::StoreGlobal);
+                if self.scope_depth > 0 {
+                    // Inside a scope (loop, block) — define locally
+                    self.bytecode.emit(Instruction::Dup);
+                    self.bytecode.emit(Instruction::DefineLocal);
+                } else {
+                    // Top-level — define globally
+                    self.bytecode.emit(Instruction::StoreGlobal);
+                }
                 self.bytecode.emit_u16(idx);
             }
 
@@ -265,6 +305,7 @@ impl Compiler {
                 // Push loop scope to isolate loop variables
                 self.bytecode.emit(Instruction::PushScope);
                 self.bytecode.emit_byte(3); // ScopeType::Loop = 3
+                self.scope_depth += 1;
 
                 // Implement while loop using conditional jumps
                 // Loop label - start of condition check
@@ -298,6 +339,7 @@ impl Compiler {
                 self.bytecode
                     .patch_jump(loop_jump as usize, (loop_label - loop_jump - 2) as i16);
 
+                self.scope_depth -= 1;
                 // Pop loop scope
                 self.bytecode.emit(Instruction::PopScope);
 
@@ -309,6 +351,7 @@ impl Compiler {
                 // Push loop scope to isolate loop variables
                 self.bytecode.emit(Instruction::PushScope);
                 self.bytecode.emit_byte(3); // ScopeType::Loop = 3
+                self.scope_depth += 1;
 
                 // Implement for loop: (for x lst (do-something-with x))
                 // Compile the iterable (list)
@@ -330,14 +373,12 @@ impl Compiler {
                 self.bytecode.emit(Instruction::Dup); // Stack: [list, list]
                 self.bytecode.emit(Instruction::Car); // Stack: [list, first_element]
 
-                // Store element in loop variable (and pop it)
+                // Store element in loop variable (locally, not globally)
                 let var_idx = self.bytecode.add_constant(Value::Symbol(*var));
-                self.bytecode.emit(Instruction::StoreGlobal);
+                self.bytecode.emit(Instruction::DefineLocal);
                 self.bytecode.emit_u16(var_idx);
-                // Stack: [list, first_element] -> StoreGlobal pops then pushes -> [list, first_element]
-                // We need the first_element off the stack
-                self.bytecode.emit(Instruction::Pop);
-                // Stack: [list]
+                // DefineLocal pops the value without pushing back
+                // Stack: [list, first_element] -> DefineLocal pops first_element -> [list]
 
                 // Compile body (body may reference the loop variable, but won't consume the list)
                 self.compile_expr(body, false);
@@ -361,6 +402,7 @@ impl Compiler {
                 self.bytecode
                     .patch_jump(loop_jump as usize, (loop_label - loop_jump - 2) as i16);
 
+                self.scope_depth -= 1;
                 // Pop loop scope
                 self.bytecode.emit(Instruction::PopScope);
 

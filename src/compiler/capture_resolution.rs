@@ -91,6 +91,11 @@ fn resolve_in_expr(expr: &mut Expr, env_stack: &mut Vec<LambdaEnvInfo>) {
                 resolve_in_expr(e, env_stack);
             }
         }
+        Expr::Block(exprs) => {
+            for e in exprs {
+                resolve_in_expr(e, env_stack);
+            }
+        }
         Expr::Call { func, args, .. } => {
             resolve_in_expr(func, env_stack);
             for a in args {
@@ -207,6 +212,11 @@ fn remap_body_vars(expr: &mut Expr, env_info: &LambdaEnvInfo) {
             }
         }
         Expr::Begin(exprs) => {
+            for e in exprs {
+                remap_body_vars(e, env_info);
+            }
+        }
+        Expr::Block(exprs) => {
             for e in exprs {
                 remap_body_vars(e, env_info);
             }
