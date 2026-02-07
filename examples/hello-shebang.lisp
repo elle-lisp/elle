@@ -1,8 +1,8 @@
 #!/usr/bin/env elle
 ;; Hello World - Executable Script Example
 ;; This script demonstrates shebang support in Elle Lisp
-;; Make this file executable with: chmod +x hello-shebang.l
-;; Then run it directly: ./hello-shebang.l
+;; Make this file executable with: chmod +x hello-shebang.lisp
+;; Then run it directly: ./hello-shebang.lisp
 
 ;; Simple greeting
 (display "Hello from Elle Lisp!")

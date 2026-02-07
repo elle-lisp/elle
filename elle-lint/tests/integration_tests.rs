@@ -11,7 +11,7 @@ fn test_lint_naming_good() {
     };
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_file(Path::new("tests/fixtures/naming-good.l"));
+    let result = linter.lint_file(Path::new("tests/fixtures/naming-good.lisp"));
     assert!(result.is_ok());
     assert_eq!(linter.diagnostics().len(), 0);
 }
@@ -24,7 +24,7 @@ fn test_lint_naming_bad() {
     };
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_file(Path::new("tests/fixtures/naming-bad.l"));
+    let result = linter.lint_file(Path::new("tests/fixtures/naming-bad.lisp"));
     assert!(result.is_ok());
     assert!(linter.diagnostics().len() > 0);
 
@@ -43,7 +43,7 @@ fn test_json_output() {
     };
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_file(Path::new("tests/fixtures/naming-bad.l"));
+    let result = linter.lint_file(Path::new("tests/fixtures/naming-bad.lisp"));
     assert!(result.is_ok());
 
     let output = linter.format_output();
@@ -63,7 +63,7 @@ fn test_lint_nonexistent_file() {
     let config = LintConfig::default();
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_file(Path::new("nonexistent.l"));
+    let result = linter.lint_file(Path::new("nonexistent.lisp"));
     assert!(result.is_err());
 }
 
@@ -72,6 +72,6 @@ fn test_simple_elle_code() {
     let config = LintConfig::default();
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_str("(+ 1 2 3)", "test.l");
+    let result = linter.lint_str("(+ 1 2 3)", "test.lisp");
     assert!(result.is_ok());
 }

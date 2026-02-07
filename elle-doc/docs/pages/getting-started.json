@@ -51,7 +51,7 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "Create a file `hello.l` with your Elle code:"
+          "text": "Create a file `hello.lisp` with your Elle code:"
         },
         {
           "type": "code",
@@ -65,7 +65,7 @@
         {
           "type": "code",
           "language": "bash",
-          "text": "./target/release/elle hello.l"
+          "text": "./target/release/elle hello.lisp"
         },
         {
           "type": "paragraph",
@@ -79,7 +79,7 @@
         {
           "type": "code",
           "language": "bash",
-          "text": "chmod +x hello.l\n./hello.l"
+          "text": "chmod +x hello.lisp\n./hello.lisp"
         }
       ]
     },
@@ -89,7 +89,7 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "Let's write a simple program that greets the user. Create `greet.l`:"
+          "text": "Let's write a simple program that greets the user. Create `greet.lisp`:"
         },
         {
           "type": "code",
@@ -103,7 +103,7 @@
         {
           "type": "code",
           "language": "bash",
-          "text": "./target/release/elle greet.l"
+          "text": "./target/release/elle greet.lisp"
         },
         {
           "type": "paragraph",

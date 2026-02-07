@@ -6,7 +6,7 @@
 ;;
 
 ;; Import simple utility module
-(import-file "test-modules/test.l")
+(import-file "test-modules/test.lisp")
 
 ;; Demonstrate successful module import
 (display "=== File-Based Modules Demo ===")
@@ -15,7 +15,7 @@
 ;; Test 1: Verify the file was loaded successfully
 (display "Test 1: Module Import Success")
 (newline)
-(display "  Successfully imported test-modules/test.l")
+(display "  Successfully imported test-modules/test.lisp")
 (newline)
 
 ;; Test 2: Add a module search path
@@ -28,7 +28,7 @@
 ;; Test 3: Import the same file twice (idempotent)
 (display "Test 3: Idempotent Loading")
 (newline)
-(import-file "test-modules/test.l")
+(import-file "test-modules/test.lisp")
 (display "  Successfully imported the same file twice (idempotent)")
 (newline)
 

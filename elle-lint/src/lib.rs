@@ -181,7 +181,7 @@ mod tests {
         config.min_severity = Severity::Warning;
         let mut linter = Linter::new(config);
 
-        let result = linter.lint_str("(+ 1 2)", "test.l");
+        let result = linter.lint_str("(+ 1 2)", "test.lisp");
         assert!(result.is_ok());
     }
 }

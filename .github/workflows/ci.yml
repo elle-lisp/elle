@@ -88,7 +88,7 @@ jobs:
           PASSED=0
           FAILED=0
 
-          for example in examples/*.l; do
+          for example in examples/*.lisp; do
             if [ ! -f "$example" ]; then
               continue
             fi
@@ -130,7 +130,7 @@ jobs:
            fi
       - name: Run documentation generator
         run: |
-          timeout 30 ./target/release/elle elle-doc/generate.l
+          timeout 30 ./target/release/elle elle-doc/generate.lisp
           echo "Documentation generator: PASSED"
 
   elle-doc:
@@ -143,7 +143,7 @@ jobs:
       - name: Build Elle
         run: cargo build --release
       - name: Generate documentation site
-        run: ./target/release/elle elle-doc/generate.l
+        run: ./target/release/elle elle-doc/generate.lisp
       - name: Verify generated files
         run: |
           test -f site/index.html || (echo "Missing index.html" && exit 1)
@@ -203,7 +203,7 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
       - name: Generate Elle documentation site
-        run: ./target/release/elle elle-doc/generate.l
+        run: ./target/release/elle elle-doc/generate.lisp
       - name: Merge documentation
         run: |
           # Move Rust API docs under site/api/

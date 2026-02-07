@@ -1,6 +1,6 @@
 ;; Content block rendering
 
-(import-file "elle-doc/lib/html.l")
+(import-file "elle-doc/lib/html.lisp")
 
 ;; Render a paragraph block
 (define render-paragraph

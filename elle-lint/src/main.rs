@@ -117,7 +117,7 @@ fn print_help() {
     println!("  --help, -h            Show this help message");
     println!();
     println!("Examples:");
-    println!("  elle-lint script.l");
+    println!("  elle-lint script.lisp");
     println!("  elle-lint src/ --format json");
     println!("  elle-lint script.l --level error");
 }

@@ -66,7 +66,7 @@ npm run compile
 
 ### Usage
 
-Once installed, open any `.l` or `.lisp` file:
+Once installed, open any `.lisp` or `.lisp` file:
 - Diagnostics appear automatically as you type
 - Hover over symbols to see information
 - Use standard editor commands for navigation
@@ -227,7 +227,7 @@ Future versions will integrate with Elle's symbol table for:
 ### VS Code extension not working
 - Ensure LSP server binary path is correct
 - Check VS Code output panel for error messages
-- Verify file extension is `.l` or `.lisp`
+- Verify file extension is `.lisp` or `.lisp`
 
 ## Contributing
 

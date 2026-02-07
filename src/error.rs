@@ -483,8 +483,8 @@ mod tests {
 
     #[test]
     fn test_file_not_found_error() {
-        let err = EllError::file_not_found("script.l");
-        assert_eq!(err.description(), "File not found: script.l");
+        let err = EllError::file_not_found("script.lisp");
+        assert_eq!(err.description(), "File not found: script.lisp");
     }
 
     #[test]
@@ -668,12 +668,12 @@ mod tests {
     #[test]
     fn test_file_read_error() {
         let err = EllError::FileReadError {
-            path: "file.l".to_string(),
+            path: "file.lisp".to_string(),
             reason: "permission denied".to_string(),
         };
         assert_eq!(
             err.description(),
-            "Failed to read file file.l: permission denied"
+            "Failed to read file file.lisp: permission denied"
         );
     }
 

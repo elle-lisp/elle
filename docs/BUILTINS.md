@@ -1742,8 +1742,8 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 (file-name "/home/user/document.txt")
 ⟹ "document.txt"
 
-(file-name "folder/subfolder/file.l")
-⟹ "file.l"
+(file-name "folder/subfolder/file.lisp")
+⟹ "file.lisp"
 ```
 
 ### `file-extension` (Get Extension)
@@ -2200,8 +2200,8 @@ Parse JSON, modify, and serialize back:
 
 **Usage**:
 ```lisp
-(import-file "utils.l")
-; Loads definitions from utils.l
+(import-file "utils.lisp")
+; Loads definitions from utils.lisp
 ```
 
 ### `add-module-path` (Add Module Search Path)

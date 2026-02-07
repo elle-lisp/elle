@@ -1269,7 +1269,7 @@ fn test_import_file_primitive() {
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
 
     // Test with valid string argument (file may not exist, but function should accept it)
-    let result = call_primitive(&import_file, &[Value::String("lib/math.l".into())]);
+    let result = call_primitive(&import_file, &[Value::String("lib/math.lisp".into())]);
     // Result depends on file existence - we're just checking error handling
     assert!(result.is_ok() || result.is_err());
 
@@ -1288,7 +1288,7 @@ fn test_import_file_with_valid_file() {
     use elle::{register_primitives, SymbolTable, VM};
 
     // Use the test module in the repo
-    let module_path = "test-modules/test.l";
+    let module_path = "test-modules/test.lisp";
 
     // Set up VM and register primitives
     let mut vm = VM::new();
@@ -1322,7 +1322,7 @@ fn test_import_file_with_invalid_file() {
 
     // Test loading a non-existent file
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
-    let result = call_primitive(&import_file, &[Value::String("/nonexistent/path.l".into())]);
+    let result = call_primitive(&import_file, &[Value::String("/nonexistent/path.lisp".into())]);
     assert!(result.is_err(), "Should fail for non-existent file");
 
     // Clean up
@@ -1334,7 +1334,7 @@ fn test_import_file_circular_dependency_prevention() {
     use elle::ffi_primitives;
     use elle::{register_primitives, SymbolTable, VM};
 
-    let module_path = "test-modules/test.l";
+    let module_path = "test-modules/test.lisp";
 
     // Set up VM
     let mut vm = VM::new();
