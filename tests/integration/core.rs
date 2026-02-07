@@ -1295,3 +1295,76 @@ fn test_nested_lambda_parameter_only() {
 //      "#;
 //     assert_eq!(eval(code).unwrap(), Value::Int(24));
 // }
+
+// Threading operators (-> and ->>)
+#[test]
+fn test_thread_first_simple() {
+    // (-> 5 (+ 10) (* 2)) => (* (+ 5 10) 2) => 30
+    let code = "(-> 5 (+ 10) (* 2))";
+    assert_eq!(eval(code).unwrap(), Value::Int(30));
+}
+
+#[test]
+fn test_thread_first_with_multiple_args() {
+    // (-> 5 (+ 10 2) (* 3)) => (* (+ 5 10 2) 3) => 51
+    let code = "(-> 5 (+ 10 2) (* 3))";
+    assert_eq!(eval(code).unwrap(), Value::Int(51));
+}
+
+#[test]
+fn test_thread_last_simple() {
+    // (->> 5 (+ 10) (* 2)) => (* 2 (+ 10 5)) => 30
+    let code = "(->> 5 (+ 10) (* 2))";
+    assert_eq!(eval(code).unwrap(), Value::Int(30));
+}
+
+#[test]
+fn test_thread_last_with_multiple_args() {
+    // (->> 2 (+ 10) (* 3)) => (* 3 (+ 10 2)) => 36
+    let code = "(->> 2 (+ 10) (* 3))";
+    assert_eq!(eval(code).unwrap(), Value::Int(36));
+}
+
+#[test]
+fn test_thread_first_chain() {
+    // (-> 1 (+ 1) (+ 1) (+ 1)) => (+ (+ (+ 1 1) 1) 1) => 4
+    let code = "(-> 1 (+ 1) (+ 1) (+ 1))";
+    assert_eq!(eval(code).unwrap(), Value::Int(4));
+}
+
+#[test]
+fn test_thread_last_chain() {
+    // (->> 1 (+ 1) (+ 1) (+ 1)) => (+ 1 (+ 1 (+ 1 1))) => 4
+    let code = "(->> 1 (+ 1) (+ 1) (+ 1))";
+    assert_eq!(eval(code).unwrap(), Value::Int(4));
+}
+
+#[test]
+fn test_thread_first_with_list_ops() {
+    // (-> (list 1 2 3) (length)) => (length (list 1 2 3)) => 3
+    let code = "(-> (list 1 2 3) (length))";
+    assert_eq!(eval(code).unwrap(), Value::Int(3));
+}
+
+#[test]
+fn test_thread_last_with_list_ops() {
+    // (->> (list 1 2 3) (length)) => (length (list 1 2 3)) => 3
+    let code = "(->> (list 1 2 3) (length))";
+    assert_eq!(eval(code).unwrap(), Value::Int(3));
+}
+
+#[test]
+fn test_thread_first_nested() {
+    // Test threading through nested operations
+    let code = "(-> 10 (- 3) (+ 5))";
+    // (+ (- 10 3) 5) = (+ 7 5) = 12
+    assert_eq!(eval(code).unwrap(), Value::Int(12));
+}
+
+#[test]
+fn test_thread_last_nested() {
+    // Test threading through nested operations
+    let code = "(->> 10 (- 3) (+ 5))";
+    // (+ 5 (- 3 10)) = (+ 5 -7) = -2
+    assert_eq!(eval(code).unwrap(), Value::Int(-2));
+}
