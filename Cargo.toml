@@ -13,6 +13,7 @@ rustyline = "14"
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.4"
+iai-callgrind = "0.11"
 
 [profile.release]
 lto = "fat"
@@ -25,4 +26,8 @@ inherits = "release"
 
 [[bench]]
 name = "benchmarks"
+harness = false
+
+[[bench]]
+name = "iai_benchmarks"
 harness = false
