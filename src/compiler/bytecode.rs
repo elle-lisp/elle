@@ -131,6 +131,9 @@ pub enum Instruction {
     /// Check if exception occurred and potentially unwind
     CheckException,
 
+    /// Match exception against handler exception ID (compares stack top with current exception's ID)
+    MatchException,
+
     /// Bind caught exception to variable (var_symbol_id u16)
     BindException,
 

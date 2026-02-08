@@ -387,6 +387,21 @@ impl VM {
                     }
                 }
 
+                Instruction::MatchException => {
+                    // Read handler exception ID from bytecode as immediate
+                    let handler_id = self.read_u16(bytecode, &mut ip);
+
+                    // Check if current exception matches the handler's exception ID
+                    let matches = if let Some(exc) = &self.current_exception {
+                        exc.exception_id == handler_id as u32
+                    } else {
+                        false
+                    };
+
+                    // Push boolean result onto stack for JumpIfFalse to check
+                    self.stack.push(Value::Bool(matches));
+                }
+
                 Instruction::BindException => {
                     // Bind caught exception to a variable
                     let var_id = self.read_u16(bytecode, &mut ip);

@@ -651,12 +651,17 @@ impl Compiler {
 
                 // Compile each handler clause
                 let mut handler_end_jumps = Vec::new();
-                for (_exception_id, var, handler_expr) in handlers {
-                    // Check if this handler matches the current exception
-                    // TODO: Implement condition matching based on exception_id
-                    // For now, compile a simple handler that binds the exception
+                for (exception_id, var, handler_expr) in handlers {
+                    // Emit match check instruction with exception ID as immediate
+                    self.bytecode.emit(Instruction::MatchException);
+                    self.bytecode.emit_u16(*exception_id as u16);
 
-                    // Bind the exception to the handler variable
+                    // If doesn't match, jump to next handler
+                    self.bytecode.emit(Instruction::JumpIfFalse);
+                    let next_handler_jump = self.bytecode.current_pos();
+                    self.bytecode.emit_i16(0); // Placeholder for next handler
+
+                    // Handler matches - bind the exception to the handler variable
                     self.bytecode.emit(Instruction::BindException);
                     let var_idx = self.bytecode.add_constant(Value::Symbol(*var));
                     self.bytecode.emit_u16(var_idx);
@@ -667,7 +672,12 @@ impl Compiler {
                     // Jump past remaining handlers on success
                     self.bytecode.emit(Instruction::Jump);
                     handler_end_jumps.push(self.bytecode.current_pos());
-                    self.bytecode.emit_i16(0); // Placeholder
+                    self.bytecode.emit_i16(0); // Placeholder for end
+
+                    // Patch the next handler jump
+                    let next_handler_offset = self.bytecode.current_pos() as i16;
+                    self.bytecode
+                        .patch_jump(next_handler_jump, next_handler_offset);
                 }
 
                 // Patch all handler end jumps to the final end

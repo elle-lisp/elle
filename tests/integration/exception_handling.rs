@@ -387,3 +387,27 @@ fn test_division_by_zero_specialized() {
     let result = eval("(/ 100 0)");
     assert!(result.is_err());
 }
+
+// ============================================================================
+// Exception Matching Infrastructure Tests
+// ============================================================================
+
+// Note: Full handler-case tests require special parsing support in the language
+// For now, we test the underlying exception propagation and Condition creation
+
+#[test]
+fn test_condition_creation_on_division_by_zero() {
+    // Division by zero creates a Condition internally
+    let result = eval("(/ 10 0)");
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err();
+    assert_eq!(err_msg, "Division by zero");
+}
+
+#[test]
+fn test_multiple_divisions_independent() {
+    // Each division by zero is independent
+    let r1 = eval("(/ 5 0)");
+    let r2 = eval("(/ 10 0)");
+    assert!(r1.is_err() && r2.is_err());
+}
