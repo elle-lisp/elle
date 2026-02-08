@@ -74,7 +74,7 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
         let mut temp_tokens = Vec::new();
         loop {
             match lexer.next_token() {
-                Ok(Some(token)) => temp_tokens.push(token),
+                Ok(Some(token)) => temp_tokens.push(elle::reader::OwnedToken::from(token)),
                 Ok(None) => break,
                 Err(_) => break,
             }
@@ -112,7 +112,7 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
     let mut tokens = Vec::new();
     loop {
         match lexer.next_token() {
-            Ok(Some(token)) => tokens.push(token),
+            Ok(Some(token)) => tokens.push(elle::reader::OwnedToken::from(token)),
             Ok(None) => break,
             Err(e) => return Err(format!("Lexer error: {}", e)),
         }

@@ -25,13 +25,13 @@ impl SourceLoc {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TokenWithLoc {
-    pub token: Token,
+pub struct TokenWithLoc<'a> {
+    pub token: Token<'a>,
     pub loc: SourceLoc,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Token {
+pub enum Token<'a> {
     LeftParen,
     RightParen,
     LeftBracket,
@@ -43,8 +43,8 @@ pub enum Token {
     Unquote,
     UnquoteSplicing,
     ListSugar, // @ for list sugar
-    Symbol(String),
-    Keyword(String),
+    Symbol(&'a str),
+    Keyword(&'a str),
     Integer(i64),
     Float(f64),
     String(String),
@@ -52,17 +52,19 @@ pub enum Token {
     Nil,
 }
 
-pub struct Lexer {
-    input: Vec<char>,
+pub struct Lexer<'a> {
+    input: &'a str,
+    bytes: &'a [u8],
     pos: usize,
     line: usize,
     col: usize,
 }
 
-impl Lexer {
-    pub fn new(input: &str) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(input: &'a str) -> Self {
         Lexer {
-            input: input.chars().collect(),
+            input,
+            bytes: input.as_bytes(),
             pos: 0,
             line: 1,
             col: 1,
@@ -74,7 +76,17 @@ impl Lexer {
     }
 
     fn current(&self) -> Option<char> {
-        self.input.get(self.pos).copied()
+        if self.pos >= self.bytes.len() {
+            return None;
+        }
+        // Decode UTF-8 character at current position
+        let byte = self.bytes[self.pos];
+        if byte < 128 {
+            Some(byte as char)
+        } else {
+            // Multi-byte UTF-8 character
+            self.input[self.pos..].chars().next()
+        }
     }
 
     fn advance(&mut self) -> Option<char> {
@@ -86,13 +98,27 @@ impl Lexer {
             } else {
                 self.col += 1;
             }
+            self.pos += ch.len_utf8();
         }
-        self.pos += 1;
         c
     }
 
     fn peek(&self, offset: usize) -> Option<char> {
-        self.input.get(self.pos + offset).copied()
+        if self.pos + offset >= self.bytes.len() {
+            return None;
+        }
+        let byte_pos = self.pos + offset;
+        let byte = self.bytes[byte_pos];
+        if byte < 128 {
+            Some(byte as char)
+        } else {
+            self.input[byte_pos..].chars().next()
+        }
+    }
+
+    /// Get a slice of the original input from start to current position
+    fn slice(&self, start: usize, end: usize) -> &'a str {
+        &self.input[start..end]
     }
 
     fn skip_whitespace(&mut self) {
@@ -143,7 +169,7 @@ impl Lexer {
         }
     }
 
-    fn read_number(&mut self) -> Result<Token, String> {
+    fn read_number(&mut self) -> Result<Token<'a>, String> {
         let mut num = String::new();
         let mut has_dot = false;
 
@@ -171,33 +197,20 @@ impl Lexer {
         }
     }
 
-    fn read_symbol(&mut self) -> String {
-        let mut sym = String::new();
+    /// Read a symbol and return a slice of the original input
+    fn read_symbol(&mut self) -> (usize, usize) {
+        let start = self.pos;
         while let Some(c) = self.current() {
             // Use fast delimiter check instead of string contains()
             if c.is_whitespace() || is_delimiter(c) {
                 break;
             }
-            sym.push(c);
             self.advance();
         }
-        sym
+        (start, self.pos)
     }
 
-    /// Read a module-qualified symbol (e.g., "module:symbol")
-    /// Returns (module_name, symbol_name) if qualified, or (symbol_name, "") if unqualified
-    fn parse_qualified_symbol(sym: &str) -> (String, String) {
-        if let Some(colon_pos) = sym.rfind(':') {
-            let module = sym[..colon_pos].to_string();
-            let name = sym[colon_pos + 1..].to_string();
-            if !module.is_empty() && !name.is_empty() {
-                return (module, name);
-            }
-        }
-        (sym.to_string(), String::new())
-    }
-
-    pub fn next_token_with_loc(&mut self) -> Result<Option<TokenWithLoc>, String> {
+    pub fn next_token_with_loc(&mut self) -> Result<Option<TokenWithLoc<'a>>, String> {
         self.skip_whitespace();
         let loc = self.get_loc();
 
@@ -284,10 +297,11 @@ impl Lexer {
             Some(':') => {
                 self.advance();
                 // Read keyword - must be followed by symbol characters
-                let keyword = self.read_symbol();
-                if keyword.is_empty() {
+                let (start, end) = self.read_symbol();
+                if start == end {
                     Err("Invalid keyword: expected symbol after :".to_string())
                 } else {
+                    let keyword = self.slice(start, end);
                     Ok(Some(TokenWithLoc {
                         token: Token::Keyword(keyword),
                         loc,
@@ -304,8 +318,10 @@ impl Lexer {
                 // Check if it's a number or symbol
                 if let Some(next) = self.peek(1) {
                     if (c == '-' || c == '+') && !next.is_ascii_digit() {
+                        let (start, end) = self.read_symbol();
+                        let sym = self.slice(start, end);
                         Ok(Some(TokenWithLoc {
-                            token: Token::Symbol(self.read_symbol()),
+                            token: Token::Symbol(sym),
                             loc,
                         }))
                     } else {
@@ -313,8 +329,10 @@ impl Lexer {
                             .map(|t| Some(TokenWithLoc { token: t, loc }))
                     }
                 } else if c == '-' || c == '+' {
+                    let (start, end) = self.read_symbol();
+                    let sym = self.slice(start, end);
                     Ok(Some(TokenWithLoc {
-                        token: Token::Symbol(self.read_symbol()),
+                        token: Token::Symbol(sym),
                         loc,
                     }))
                 } else {
@@ -343,7 +361,8 @@ impl Lexer {
                 }
             }
             Some(_) => {
-                let sym = self.read_symbol();
+                let (start, end) = self.read_symbol();
+                let sym = self.slice(start, end);
                 if sym == "nil" {
                     Ok(Some(TokenWithLoc {
                         token: Token::Nil,
@@ -359,27 +378,75 @@ impl Lexer {
         }
     }
 
-    pub fn next_token(&mut self) -> Result<Option<Token>, String> {
+    pub fn next_token(&mut self) -> Result<Option<Token<'a>>, String> {
         self.next_token_with_loc()
             .map(|opt| opt.map(|twl| twl.token))
     }
 }
 
+/// Owned token variant for storage in Reader
+#[derive(Debug, Clone, PartialEq)]
+pub enum OwnedToken {
+    LeftParen,
+    RightParen,
+    LeftBracket,
+    RightBracket,
+    LeftBrace,
+    RightBrace,
+    Quote,
+    Quasiquote,
+    Unquote,
+    UnquoteSplicing,
+    ListSugar,
+    Symbol(String),
+    Keyword(String),
+    Integer(i64),
+    Float(f64),
+    String(String),
+    Bool(bool),
+    Nil,
+}
+
+impl<'a> From<Token<'a>> for OwnedToken {
+    fn from(token: Token<'a>) -> Self {
+        match token {
+            Token::LeftParen => OwnedToken::LeftParen,
+            Token::RightParen => OwnedToken::RightParen,
+            Token::LeftBracket => OwnedToken::LeftBracket,
+            Token::RightBracket => OwnedToken::RightBracket,
+            Token::LeftBrace => OwnedToken::LeftBrace,
+            Token::RightBrace => OwnedToken::RightBrace,
+            Token::Quote => OwnedToken::Quote,
+            Token::Quasiquote => OwnedToken::Quasiquote,
+            Token::Unquote => OwnedToken::Unquote,
+            Token::UnquoteSplicing => OwnedToken::UnquoteSplicing,
+            Token::ListSugar => OwnedToken::ListSugar,
+            Token::Symbol(s) => OwnedToken::Symbol(s.to_string()),
+            Token::Keyword(s) => OwnedToken::Keyword(s.to_string()),
+            Token::Integer(i) => OwnedToken::Integer(i),
+            Token::Float(f) => OwnedToken::Float(f),
+            Token::String(s) => OwnedToken::String(s),
+            Token::Bool(b) => OwnedToken::Bool(b),
+            Token::Nil => OwnedToken::Nil,
+        }
+    }
+}
+
 pub struct Reader {
-    tokens: Vec<Token>,
+    tokens: Vec<OwnedToken>,
     pos: usize,
 }
 
 impl Reader {
-    pub fn new(tokens: Vec<Token>) -> Self {
+    pub fn new(tokens: Vec<OwnedToken>) -> Self {
         Reader { tokens, pos: 0 }
     }
 
-    fn current(&self) -> Option<&Token> {
+    fn current(&self) -> Option<&OwnedToken> {
         self.tokens.get(self.pos)
     }
 
-    fn advance(&mut self) -> Option<Token> {
+    fn advance(&mut self) -> Option<OwnedToken> {
         let token = self.current().cloned();
         self.pos += 1;
         token
@@ -393,23 +460,23 @@ impl Reader {
     }
 
     /// Read a single token/form and return result
-    fn read_one(&mut self, symbols: &mut SymbolTable, token: &Token) -> Result<Value, String> {
+    fn read_one(&mut self, symbols: &mut SymbolTable, token: &OwnedToken) -> Result<Value, String> {
         match token {
-            Token::LeftParen => self.read_list(symbols),
-            Token::LeftBracket => self.read_vector(symbols),
-            Token::LeftBrace => self.read_struct(symbols),
-            Token::ListSugar => {
+            OwnedToken::LeftParen => self.read_list(symbols),
+            OwnedToken::LeftBracket => self.read_vector(symbols),
+            OwnedToken::LeftBrace => self.read_struct(symbols),
+            OwnedToken::ListSugar => {
                 self.advance();
                 // @[...] is sugar for (list ...)
                 // @{...} is sugar for (table ...)
-                if self.current() == Some(&Token::LeftBracket) {
+                if self.current() == Some(&OwnedToken::LeftBracket) {
                     self.advance(); // skip [
                     let mut elements = Vec::new();
 
                     loop {
                         match self.current() {
                             None => return Err("Unterminated list literal".to_string()),
-                            Some(Token::RightBracket) => {
+                            Some(OwnedToken::RightBracket) => {
                                 self.advance();
                                 // Build (list e1 e2 e3 ...)
                                 let list_sym = Value::Symbol(symbols.intern("list"));
@@ -422,7 +489,7 @@ impl Reader {
                             _ => elements.push(self.read(symbols)?),
                         }
                     }
-                } else if self.current() == Some(&Token::LeftBrace) {
+                } else if self.current() == Some(&OwnedToken::LeftBrace) {
                     // Handle @{...} for table sugar
                     self.read_table(symbols)
                 } else {
@@ -430,57 +497,57 @@ impl Reader {
                 }
             }
 
-            Token::Quote => {
+            OwnedToken::Quote => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let quote_sym = Value::Symbol(symbols.intern("quote"));
                 Ok(cons(quote_sym, cons(val, Value::Nil)))
             }
-            Token::Quasiquote => {
+            OwnedToken::Quasiquote => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let qq_sym = Value::Symbol(symbols.intern("quasiquote"));
                 Ok(cons(qq_sym, cons(val, Value::Nil)))
             }
-            Token::Unquote => {
+            OwnedToken::Unquote => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let uq_sym = Value::Symbol(symbols.intern("unquote"));
                 Ok(cons(uq_sym, cons(val, Value::Nil)))
             }
-            Token::UnquoteSplicing => {
+            OwnedToken::UnquoteSplicing => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let uqs_sym = Value::Symbol(symbols.intern("unquote-splicing"));
                 Ok(cons(uqs_sym, cons(val, Value::Nil)))
             }
-            Token::Integer(n) => {
+            OwnedToken::Integer(n) => {
                 let val = Value::Int(*n);
                 self.advance();
                 Ok(val)
             }
-            Token::Float(f) => {
+            OwnedToken::Float(f) => {
                 let val = Value::Float(*f);
                 self.advance();
                 Ok(val)
             }
-            Token::String(s) => {
+            OwnedToken::String(s) => {
                 let val = Value::String(Rc::from(s.as_str()));
                 self.advance();
                 Ok(val)
             }
-            Token::Bool(b) => {
+            OwnedToken::Bool(b) => {
                 let val = Value::Bool(*b);
                 self.advance();
                 Ok(val)
             }
-            Token::Nil => {
+            OwnedToken::Nil => {
                 self.advance();
                 Ok(Value::Nil)
             }
-            Token::Symbol(s) => {
+            OwnedToken::Symbol(s) => {
                 // Check if this is a qualified symbol (e.g., "list:length")
-                let (module_name, symbol_name) = Lexer::parse_qualified_symbol(s);
+                let (module_name, symbol_name) = Self::parse_qualified_symbol(s);
                 if !symbol_name.is_empty() {
                     // This is a qualified symbol - represent as: (qualified-ref module-name symbol-name)
                     let module_sym = symbols.intern(&module_name);
@@ -503,15 +570,15 @@ impl Reader {
                     Ok(Value::Symbol(id))
                 }
             }
-            Token::Keyword(s) => {
+            OwnedToken::Keyword(s) => {
                 // Keywords are self-evaluating values
                 let id = symbols.intern(s);
                 self.advance();
                 Ok(Value::Keyword(id))
             }
-            Token::RightParen => Err("Unexpected )".to_string()),
-            Token::RightBracket => Err("Unexpected ]".to_string()),
-            Token::RightBrace => Err("Unexpected }".to_string()),
+            OwnedToken::RightParen => Err("Unexpected )".to_string()),
+            OwnedToken::RightBracket => Err("Unexpected ]".to_string()),
+            OwnedToken::RightBrace => Err("Unexpected }".to_string()),
         }
     }
 
@@ -522,6 +589,19 @@ impl Reader {
         }
     }
 
+    /// Parse a module-qualified symbol (e.g., "module:symbol")
+    /// Returns (module_slice, symbol_slice) if qualified, or (symbol_slice, "") if unqualified
+    fn parse_qualified_symbol(sym: &str) -> (String, String) {
+        if let Some(colon_pos) = sym.rfind(':') {
+            let module = sym[..colon_pos].to_string();
+            let name = sym[colon_pos + 1..].to_string();
+            if !module.is_empty() && !name.is_empty() {
+                return (module, name);
+            }
+        }
+        (sym.to_string(), String::new())
+    }
+
     fn read_list(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
         self.advance(); // skip (
         let mut elements = Vec::new();
@@ -529,7 +609,7 @@ impl Reader {
         loop {
             match self.current() {
                 None => return Err("Unterminated list".to_string()),
-                Some(Token::RightParen) => {
+                Some(OwnedToken::RightParen) => {
                     self.advance();
                     return Ok(elements
                         .into_iter()
@@ -548,7 +628,7 @@ impl Reader {
         loop {
             match self.current() {
                 None => return Err("Unterminated vector".to_string()),
-                Some(Token::RightBracket) => {
+                Some(OwnedToken::RightBracket) => {
                     self.advance();
                     return Ok(Value::Vector(Rc::new(elements)));
                 }
@@ -564,7 +644,7 @@ impl Reader {
         loop {
             match self.current() {
                 None => return Err("Unterminated struct literal".to_string()),
-                Some(Token::RightBrace) => {
+                Some(OwnedToken::RightBrace) => {
                     self.advance();
                     // Build (struct k1 v1 k2 v2 ...)
                     let struct_sym = Value::Symbol(symbols.intern("struct"));
@@ -586,7 +666,7 @@ impl Reader {
         loop {
             match self.current() {
                 None => return Err("Unterminated table literal".to_string()),
-                Some(Token::RightBrace) => {
+                Some(OwnedToken::RightBrace) => {
                     self.advance();
                     // Build (table k1 v1 k2 v2 ...)
                     let table_sym = Value::Symbol(symbols.intern("table"));
@@ -604,18 +684,18 @@ impl Reader {
 
 pub fn read_str(input: &str, symbols: &mut SymbolTable) -> Result<Value, String> {
     // Strip shebang if present (e.g., #!/usr/bin/env elle)
-    let input = if input.starts_with("#!") {
+    let input_owned = if input.starts_with("#!") {
         // Find the end of the first line and skip it
         input.lines().skip(1).collect::<Vec<_>>().join("\n")
     } else {
         input.to_string()
     };
 
-    let mut lexer = Lexer::new(&input);
+    let mut lexer = Lexer::new(&input_owned);
     let mut tokens = Vec::new();
 
     while let Some(token) = lexer.next_token()? {
-        tokens.push(token);
+        tokens.push(OwnedToken::from(token));
     }
 
     if tokens.is_empty() {

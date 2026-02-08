@@ -1,6 +1,7 @@
 // DEFENSE: Integration tests for closure optimization (Issue #20)
 // These tests verify closure correctness and provide baseline for optimization work
 
+use elle::reader::OwnedToken;
 use elle::{compile, list, register_primitives, Lexer, Reader, SymbolTable, Value, VM};
 
 fn eval(input: &str) -> Result<Value, String> {
@@ -11,7 +12,7 @@ fn eval(input: &str) -> Result<Value, String> {
     let mut lexer = Lexer::new(input);
     let mut tokens = Vec::new();
     while let Some(token) = lexer.next_token()? {
-        tokens.push(token);
+        tokens.push(OwnedToken::from(token));
     }
 
     if tokens.is_empty() {

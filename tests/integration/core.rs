@@ -1,5 +1,6 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
 use elle::compiler::converters::value_to_expr;
+use elle::reader::OwnedToken;
 use elle::{compile, list, read_str, register_primitives, Lexer, Reader, SymbolTable, Value, VM};
 use std::rc::Rc;
 
@@ -12,7 +13,7 @@ fn eval(input: &str) -> Result<Value, String> {
     let mut lexer = Lexer::new(input);
     let mut tokens = Vec::new();
     while let Some(token) = lexer.next_token()? {
-        tokens.push(token);
+        tokens.push(OwnedToken::from(token));
     }
 
     if tokens.is_empty() {
