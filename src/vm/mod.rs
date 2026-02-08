@@ -10,7 +10,7 @@ pub mod stack;
 pub mod types;
 pub mod variables;
 
-pub use core::{CallFrame, VM};
+pub use core::{is_exception_subclass, CallFrame, VM};
 
 use crate::compiler::bytecode::{Bytecode, Instruction};
 use crate::value::Value;
@@ -392,8 +392,9 @@ impl VM {
                     let handler_id = self.read_u16(bytecode, &mut ip);
 
                     // Check if current exception matches the handler's exception ID
+                    // Uses inheritance matching: catching a parent type catches children
                     let matches = if let Some(exc) = &self.current_exception {
-                        exc.exception_id == handler_id as u32
+                        is_exception_subclass(exc.exception_id, handler_id as u32)
                     } else {
                         false
                     };

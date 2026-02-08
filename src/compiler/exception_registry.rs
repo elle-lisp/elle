@@ -156,6 +156,35 @@ impl ExceptionRegistry {
         false
     }
 
+    /// Check if exception with child_id is a subclass of exception with parent_id
+    /// Returns true if they're the same or child is a descendant of parent
+    pub fn is_subclass_by_id(&self, child_id: u32, parent_id: u32) -> bool {
+        // If same ID, it matches
+        if child_id == parent_id {
+            return true;
+        }
+
+        // Get the child exception info
+        if let Some(child_info) = self.get_exception_by_id(child_id) {
+            let mut current_name = Some(child_info.name.clone());
+
+            // Walk up the inheritance hierarchy
+            while let Some(name) = current_name {
+                if let Some(exc_info) = self.get_exception(&name) {
+                    if exc_info.id == parent_id {
+                        return true;
+                    }
+                    // Move to parent
+                    current_name = exc_info.parent.clone();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        false
+    }
+
     pub fn all_exceptions(&self) -> Vec<&ExceptionInfo> {
         let mut excs: Vec<_> = self.exceptions.values().collect();
         excs.sort_by_key(|e| e.id);

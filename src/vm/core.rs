@@ -36,6 +36,44 @@ pub struct VM {
     pub current_exception: Option<Rc<Condition>>, // Current exception being handled
 }
 
+/// Exception type hierarchy (baked into VM for inheritance checking)
+/// ID 1: condition (base)
+///   ID 2: error
+///     ID 3: type-error
+///     ID 4: division-by-zero
+///     ID 5: undefined-variable
+///     ID 6: arity-error
+///   ID 7: warning
+///     ID 8: style-warning
+pub fn exception_parent(exception_id: u32) -> Option<u32> {
+    match exception_id {
+        2 => Some(1), // error -> condition
+        3 => Some(2), // type-error -> error
+        4 => Some(2), // division-by-zero -> error
+        5 => Some(2), // undefined-variable -> error
+        6 => Some(2), // arity-error -> error
+        7 => Some(1), // warning -> condition
+        8 => Some(7), // style-warning -> warning
+        _ => None,
+    }
+}
+
+/// Check if child exception ID is a subclass of parent exception ID
+pub fn is_exception_subclass(child_id: u32, parent_id: u32) -> bool {
+    if child_id == parent_id {
+        return true;
+    }
+
+    let mut current = child_id;
+    while let Some(parent) = exception_parent(current) {
+        if parent == parent_id {
+            return true;
+        }
+        current = parent;
+    }
+    false
+}
+
 impl VM {
     pub fn new() -> Self {
         VM {
