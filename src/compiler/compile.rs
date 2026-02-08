@@ -538,16 +538,17 @@ impl Compiler {
 
             Expr::Try {
                 body,
-                catch: _,
+                catch,
                 finally,
             } => {
-                // Try-catch implementation
-                // For now: compile body, then optionally execute finally
-                // Full exception handling requires VM-level support for stack unwinding
+                // Try-catch-finally implementation
+                // For now: implement the basic case where no exception occurs
+                // TODO: Full integration with handler-case for exception catching
 
+                // Compile the body
                 self.compile_expr(body, false);
 
-                // Finally block: always executed after try/catch
+                // Handle finally block (executes always)
                 if let Some(finally_expr) = finally {
                     // Save the result
                     self.bytecode.emit(Instruction::Dup);
@@ -556,12 +557,18 @@ impl Compiler {
                     // The original result stays on stack
                 }
 
-                // NOTE: Catch handlers will need VM support to:
-                // 1. Check if body produced an exception
-                // 2. Unwind stack to try frame
-                // 3. Bind exception to catch variable
-                // 4. Execute handler
-                // For now, parsing works but catch is not yet functional
+                // NOTE: Catch implementation would require:
+                // 1. Setting up a handler frame with PushHandler
+                // 2. Checking if an exception occurred after body
+                // 3. If exception matches the catch variable's type, execute handler
+                // 4. Otherwise, re-signal the exception
+                //
+                // This would look like:
+                // (handler-case body (error-id (catch-var) catch-handler))
+                //
+                // For now, we compile the body successfully and skip catch execution.
+                // Exceptions will propagate up to outer handlers.
+                let _ = catch; // Suppress unused warning - will be used when implemented
             }
 
             Expr::Quote(expr) => {
