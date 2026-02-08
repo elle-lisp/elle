@@ -321,6 +321,20 @@ impl SymbolExtractor {
                 self.walk_expr(value, loc, index, symbols);
             }
 
+            Expr::HandlerCase { body, handlers } => {
+                self.walk_expr(body, loc, index, symbols);
+                for (_exc_id, _var, handler_expr) in handlers {
+                    self.walk_expr(handler_expr, loc, index, symbols);
+                }
+            }
+
+            Expr::HandlerBind { handlers, body } => {
+                self.walk_expr(body, loc, index, symbols);
+                for (_exc_id, handler_fn) in handlers {
+                    self.walk_expr(handler_fn, loc, index, symbols);
+                }
+            }
+
             Expr::Quote(_) | Expr::Quasiquote(_) | Expr::Unquote(_) => {
                 // Don't walk quoted expressions
             }

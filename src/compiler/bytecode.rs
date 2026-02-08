@@ -117,6 +117,28 @@ pub enum Instruction {
 
     /// Define local variable (symbol_idx u16)
     DefineLocal,
+
+    // Exception handling instructions (Phase 3)
+    /// Push handler frame for handler-case (handler_offset i16, finally_offset i16 or -1)
+    PushHandler,
+
+    /// Pop handler frame
+    PopHandler,
+
+    /// Create handler context (handler_fn_idx, condition_id)
+    CreateHandler,
+
+    /// Check if exception occurred and potentially unwind
+    CheckException,
+
+    /// Bind caught exception to variable (var_symbol_id u16)
+    BindException,
+
+    /// Clear current exception state
+    ClearException,
+
+    /// Invoke a restart by name (restart_name_id u16)
+    InvokeRestart,
 }
 
 /// Inline cache entry for function lookups

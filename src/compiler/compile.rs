@@ -620,6 +620,79 @@ impl Compiler {
                 self.bytecode.emit(Instruction::Nil);
             }
 
+            Expr::HandlerCase { body, handlers } => {
+                // handler-case: immediate stack unwinding on exception
+                // (handler-case protected (type1 (var1) handler1) ...)
+
+                // Emit PushHandler with placeholder offsets (will be patched later)
+                self.bytecode.emit(Instruction::PushHandler);
+                let handler_offset_pos = self.bytecode.current_pos();
+                self.bytecode.emit_i16(0); // Placeholder for handler_offset
+                self.bytecode.emit_i16(-1); // No finally block for now
+
+                // Compile the protected body
+                self.compile_expr(body, tail);
+
+                // Emit PopHandler to clean up on successful completion
+                self.bytecode.emit(Instruction::PopHandler);
+
+                // Jump past handler clauses after successful execution
+                self.bytecode.emit(Instruction::Jump);
+                let end_jump = self.bytecode.current_pos();
+                self.bytecode.emit_i16(0); // Placeholder for end jump
+
+                // Patch the handler_offset to point here
+                let handler_code_offset = self.bytecode.current_pos() as i16;
+                self.bytecode
+                    .patch_jump(handler_offset_pos, handler_code_offset);
+
+                // Emit CheckException to see if one occurred
+                self.bytecode.emit(Instruction::CheckException);
+
+                // Compile each handler clause
+                let mut handler_end_jumps = Vec::new();
+                for (_exception_id, var, handler_expr) in handlers {
+                    // Check if this handler matches the current exception
+                    // TODO: Implement condition matching based on exception_id
+                    // For now, compile a simple handler that binds the exception
+
+                    // Bind the exception to the handler variable
+                    self.bytecode.emit(Instruction::BindException);
+                    let var_idx = self.bytecode.add_constant(Value::Symbol(*var));
+                    self.bytecode.emit_u16(var_idx);
+
+                    // Execute handler code
+                    self.compile_expr(handler_expr, tail);
+
+                    // Jump past remaining handlers on success
+                    self.bytecode.emit(Instruction::Jump);
+                    handler_end_jumps.push(self.bytecode.current_pos());
+                    self.bytecode.emit_i16(0); // Placeholder
+                }
+
+                // Patch all handler end jumps to the final end
+                let final_end = self.bytecode.current_pos() as i16;
+                for jump_pos in handler_end_jumps {
+                    self.bytecode.patch_jump(jump_pos, final_end);
+                }
+
+                // Patch the end jump from after PopHandler
+                self.bytecode.patch_jump(end_jump, final_end);
+
+                // Clear exception state
+                self.bytecode.emit(Instruction::ClearException);
+            }
+
+            Expr::HandlerBind { handlers: _, body } => {
+                // handler-bind: non-unwinding handler attachment
+                // (handler-bind ((type handler-fn) ...) body)
+                // Handlers are called but don't unwind the stack
+
+                // For now, just compile the body (no unwinding handlers supported yet)
+                // TODO: Implement actual handler-bind execution with non-unwinding semantics
+                self.compile_expr(body, tail);
+            }
+
             Expr::And(exprs) => {
                 // Short-circuit AND: returns first falsy value or last value
                 // (and) => true, (and a) => a, (and a b c) => c if all truthy, else first falsy

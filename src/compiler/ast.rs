@@ -119,6 +119,20 @@ pub enum Expr {
     /// Throw exception
     Throw { value: Box<Expr> },
 
+    /// Handler-case: immediate stack unwinding on exception
+    /// (handler-case protected-code (type1 (var1) handler1) (type2 (var2) handler2) ...)
+    HandlerCase {
+        body: Box<Expr>,
+        handlers: Vec<(u32, SymbolId, Box<Expr>)>, // (exception_id, variable, handler_code)
+    },
+
+    /// Handler-bind: non-unwinding handler attachment
+    /// (handler-bind ((type handler-fn) ...) protected-code)
+    HandlerBind {
+        handlers: Vec<(u32, Box<Expr>)>, // (exception_id, handler_function)
+        body: Box<Expr>,
+    },
+
     /// Quote expression (prevents evaluation)
     Quote(Box<Expr>),
 
@@ -210,6 +224,8 @@ impl Expr {
                 | Expr::For { .. }
                 | Expr::Match { .. }
                 | Expr::Try { .. }
+                | Expr::HandlerCase { .. }
+                | Expr::HandlerBind { .. }
                 | Expr::And(_)
                 | Expr::Or(_)
                 | Expr::Xor(_)

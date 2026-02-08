@@ -1,9 +1,10 @@
 use crate::ffi::FFISubsystem;
-use crate::value::Value;
+use crate::value::{Condition, Value};
 use crate::vm::scope::ScopeStack;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 type StackVec = SmallVec<[Value; 256]>;
 
@@ -11,6 +12,13 @@ type StackVec = SmallVec<[Value; 256]>;
 pub struct CallFrame {
     pub name: String,
     pub ip: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExceptionHandler {
+    pub handler_offset: i16,
+    pub finally_offset: Option<i16>,
+    pub stack_depth: usize,
 }
 
 pub struct VM {
@@ -24,6 +32,8 @@ pub struct VM {
     pub loaded_modules: HashSet<String>, // Track loaded module paths to prevent circular deps
     pub module_search_paths: Vec<PathBuf>, // Directories to search for modules
     pub scope_stack: ScopeStack,         // Runtime scope stack for variable management
+    pub exception_handlers: Vec<ExceptionHandler>, // Stack of active exception handlers
+    pub current_exception: Option<Rc<Condition>>, // Current exception being handled
 }
 
 impl VM {
@@ -39,6 +49,8 @@ impl VM {
             loaded_modules: HashSet::new(),
             module_search_paths: vec![PathBuf::from(".")],
             scope_stack: ScopeStack::new(),
+            exception_handlers: Vec::new(),
+            current_exception: None,
         }
     }
 

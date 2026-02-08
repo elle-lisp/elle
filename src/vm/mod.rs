@@ -339,6 +339,68 @@ impl VM {
                 Instruction::DefineLocal => {
                     scope::handle_define_local(self, bytecode, &mut ip, constants)?;
                 }
+
+                // Exception handling (Phase 3)
+                Instruction::PushHandler => {
+                    // Read handler_offset (i16) and finally_offset (i16)
+                    let handler_offset = self.read_i16(bytecode, &mut ip);
+                    let finally_offset_val = self.read_i16(bytecode, &mut ip);
+                    let finally_offset = if finally_offset_val == -1 {
+                        None
+                    } else {
+                        Some(finally_offset_val)
+                    };
+
+                    // Push handler frame to exception_handlers stack
+                    use crate::vm::core::ExceptionHandler;
+                    self.exception_handlers.push(ExceptionHandler {
+                        handler_offset,
+                        finally_offset,
+                        stack_depth: self.stack.len(),
+                    });
+                }
+
+                Instruction::PopHandler => {
+                    // Pop from exception_handlers stack when handler completes successfully
+                    self.exception_handlers.pop();
+                }
+
+                Instruction::CreateHandler => {
+                    // TODO: Implement create handler
+                    // Create handler context
+                    let _handler_fn_idx = self.read_u16(bytecode, &mut ip);
+                    let _condition_id = self.read_u16(bytecode, &mut ip);
+                }
+
+                Instruction::CheckException => {
+                    // TODO: Implement check exception
+                    // Check if exception occurred
+                }
+
+                Instruction::BindException => {
+                    // Bind caught exception to a variable
+                    let var_id = self.read_u16(bytecode, &mut ip);
+
+                    // Get the current exception if it exists
+                    if let Some(exc) = &self.current_exception {
+                        // Bind the exception to the variable in the current scope
+                        // For now, use globals as a simple binding mechanism
+                        self.globals
+                            .insert(var_id as u32, Value::Condition(exc.clone()));
+                    }
+                }
+
+                Instruction::ClearException => {
+                    // TODO: Implement clear exception
+                    // Clear current exception
+                    self.current_exception = None;
+                }
+
+                Instruction::InvokeRestart => {
+                    // TODO: Implement invoke restart
+                    // Invoke a restart by name
+                    let _restart_name_id = self.read_u16(bytecode, &mut ip);
+                }
             }
         }
     }

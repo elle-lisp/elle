@@ -170,6 +170,20 @@ impl Linter {
                 self.check_expr(value, loc, symbol_table);
             }
 
+            Expr::HandlerCase { body, handlers } => {
+                self.check_expr(body, loc, symbol_table);
+                for (_exc_id, _var, handler_expr) in handlers {
+                    self.check_expr(handler_expr, loc, symbol_table);
+                }
+            }
+
+            Expr::HandlerBind { handlers, body } => {
+                self.check_expr(body, loc, symbol_table);
+                for (_exc_id, handler_fn) in handlers {
+                    self.check_expr(handler_fn, loc, symbol_table);
+                }
+            }
+
             Expr::Quote(_) => {
                 // Quoted expressions are not evaluated
             }
