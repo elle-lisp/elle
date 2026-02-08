@@ -85,11 +85,11 @@
 
 ; Check table has key
 (display "Table has key 3? ")
-(display (has? table1 3))
+(display (has-key? table1 3))
 (newline)
 
 (display "Table has key 10? ")
-(display (has? table1 10))
+(display (has-key? table1 10))
 (newline)
 
 ; Get table length

@@ -128,7 +128,7 @@ impl Default for Scope {
 pub fn builtin_arity(name: &str) -> Option<usize> {
     match name {
         // Arithmetic
-        "+" | "-" | "*" | "/" | "mod" | "remainder" => Some(2), // Actually variadic, but min 2
+        "+" | "-" | "*" | "/" | "mod" | "rem" => Some(2), // Actually variadic, but min 2
         // Comparison
         "=" | "<" | ">" | "<=" | ">=" => Some(2),
         // List operations

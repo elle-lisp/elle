@@ -3,9 +3,9 @@ use crate::value::Value;
 use std::rc::Rc;
 
 /// Read entire file as a string
-pub fn prim_read_file(args: &[Value]) -> Result<Value, String> {
+pub fn prim_slurp(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
-        return Err("read-file requires exactly 1 argument".to_string());
+        return Err("slurp requires exactly 1 argument".to_string());
     }
     match &args[0] {
         Value::String(path) => {
@@ -14,24 +14,24 @@ pub fn prim_read_file(args: &[Value]) -> Result<Value, String> {
                 .map(|content| Value::String(Rc::from(content)))
                 .map_err(|e| format!("Failed to read file '{}': {}", path_str, e))
         }
-        _ => Err("read-file requires a string path".to_string()),
+        _ => Err("slurp requires a string path".to_string()),
     }
 }
 
 /// Write string content to a file (overwrites if exists)
-pub fn prim_write_file(args: &[Value]) -> Result<Value, String> {
+pub fn prim_spit(args: &[Value]) -> Result<Value, String> {
     if args.len() != 2 {
-        return Err("write-file requires exactly 2 arguments (path, content)".to_string());
+        return Err("spit requires exactly 2 arguments (path, content)".to_string());
     }
 
     let path = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("write-file: first argument must be a string path".to_string()),
+        _ => return Err("spit: first argument must be a string path".to_string()),
     };
 
     let content = match &args[1] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("write-file: second argument must be a string".to_string()),
+        _ => return Err("spit: second argument must be a string".to_string()),
     };
 
     std::fs::write(path, content)

@@ -17,12 +17,12 @@
   (newline)
 
   (define temp-file "./elle_example_basic.txt")
-  (write-file temp-file "Hello, Elle!")
+  (spit temp-file "Hello, Elle!")
   (display "Wrote to file: ")
   (display temp-file)
   (newline)
 
-  (define content (read-file temp-file))
+  (define content (slurp temp-file))
   (display "Read from file: ")
   (display content)
   (newline)
@@ -72,7 +72,7 @@
   (append-file temp-file "\nThis is appended content.")
   (display "Appended more content. New content:")
   (newline)
-  (display (read-file temp-file))
+  (display (slurp temp-file))
   (newline)
   (newline)
 
@@ -172,7 +172,7 @@
   (newline)
 
   (define lines-file "./elle_example_lines.txt")
-  (write-file lines-file "Line 1: First line of text\nLine 2: Second line of text\nLine 3: Third line of text\n")
+  (spit lines-file "Line 1: First line of text\nLine 2: Second line of text\nLine 3: Third line of text\n")
 
   (display "Lines in file:")
   (newline)
@@ -188,9 +188,9 @@
   (newline)
 
   ;; Create some test files in a directory
-  (write-file (join-path test-dir "file1.txt") "Content 1")
-  (write-file (join-path test-dir "file2.txt") "Content 2")
-  (write-file (join-path test-dir "file3.txt") "Content 3")
+  (spit (join-path test-dir "file1.txt") "Content 1")
+  (spit (join-path test-dir "file2.txt") "Content 2")
+  (spit (join-path test-dir "file3.txt") "Content 3")
 
   (display "Files in directory:")
   (newline)
@@ -218,14 +218,14 @@
   (define config-file "./elle_example_config.txt")
 
   ;; Write initial config
-  (write-file config-file "# Elle Configuration File\nversion=1.0\nauthor=Elle Users\n")
+  (spit config-file "# Elle Configuration File\nversion=1.0\nauthor=Elle Users\n")
   (display "Created config file")
   (newline)
 
   ;; Read and display config
   (display "Current config:")
   (newline)
-  (display (read-file config-file))
+  (display (slurp config-file))
   (newline)
 
   ;; Append new settings
@@ -236,7 +236,7 @@
   ;; Read updated version
   (display "Updated config:")
   (newline)
-  (display (read-file config-file))
+  (display (slurp config-file))
   (newline)
   (newline)
 
@@ -253,9 +253,9 @@
   (create-directory-all archive-dir)
 
   ;; Create some data files
-  (write-file (join-path data-dir "data1.txt") "Important data 1")
-  (write-file (join-path data-dir "data2.txt") "Important data 2")
-  (write-file (join-path data-dir "data3.txt") "Important data 3")
+  (spit (join-path data-dir "data1.txt") "Important data 1")
+  (spit (join-path data-dir "data2.txt") "Important data 2")
+  (spit (join-path data-dir "data3.txt") "Important data 3")
 
   (display "Organized data files in: ")
   (display data-dir)
@@ -340,9 +340,9 @@
 
   (display "Reading and Writing:")
   (newline)
-  (display "  (read-file path) - Read entire file as string")
+  (display "  (slurp path) - Read entire file as string")
   (newline)
-  (display "  (write-file path content) - Write or overwrite file")
+  (display "  (spit path content) - Write or overwrite file")
   (newline)
   (display "  (append-file path content) - Append to file")
   (newline)

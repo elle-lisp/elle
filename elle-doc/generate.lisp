@@ -649,14 +649,14 @@ tbody tr:nth-child(even) {
 ;; Read and parse site configuration
 (display "Reading site configuration...")
 (newline)
-(define site-json (read-file (join-path docs-dir "site.json")))
+(define site-json (slurp (join-path docs-dir "site.json")))
 (define site-config (json-parse site-json))
 
 ;; Generate and write CSS
 (display "Generating CSS...")
 (newline)
 (define css-content (generate-css))
-(write-file (join-path output-dir "style.css") css-content)
+(spit (join-path output-dir "style.css") css-content)
 
 ;; Get navigation items
 (define nav-items (get site-config "nav"))
@@ -680,7 +680,7 @@ tbody tr:nth-child(even) {
         (display ".html...")
         (newline)
         
-        (define page-json (read-file page-file))
+        (define page-json (slurp page-file))
         (define page-data (json-parse page-json))
         
         ;; Add slug to page data for template
@@ -696,7 +696,7 @@ tbody tr:nth-child(even) {
         
         ;; Write HTML file
         (define output-file (join-path output-dir (string-append slug ".html")))
-        (write-file output-file full-html)
+        (spit output-file full-html)
         
         ;; Process next page
         (process-pages all-nav-items rest-nav-items)))))

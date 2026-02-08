@@ -31,24 +31,24 @@
 ; Test 5: Has? predicate
 (let ((t (table 5 "five")))
   (display "Table has key 5? ")
-  (display (has? t 5))
+  (display (has-key? t 5))
   (newline)
   (display "Table has key 10? ")
-  (display (has? t 10))
+  (display (has-key? t 10))
   (newline))
 
 ; Test 6: Put and verify
 (let ((t (table)))
   (put t 100 "hundred")
   (display "After put, has key? ")
-  (display (has? t 100))
+  (display (has-key? t 100))
   (newline))
 
 ; Test 7: Del and verify
 (let ((t (table 7 "seven" 8 "eight")))
   (del t 7)
   (display "After delete, has key 7? ")
-  (display (has? t 7))
+  (display (has-key? t 7))
   (newline))
 
 ; Test 8: Table inspection

@@ -730,8 +730,8 @@ fn test_mod_and_remainder() {
     assert_eq!(eval("(mod -17 5)").unwrap(), Value::Int(3));
 
     // Remainder
-    assert_eq!(eval("(remainder 17 5)").unwrap(), Value::Int(2));
-    assert_eq!(eval("(remainder 20 4)").unwrap(), Value::Int(0));
+    assert_eq!(eval("(rem 17 5)").unwrap(), Value::Int(2));
+    assert_eq!(eval("(rem 20 4)").unwrap(), Value::Int(0));
 }
 
 #[test]

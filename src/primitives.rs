@@ -24,7 +24,7 @@ use crate::vm::VM;
 
 use self::arithmetic::{
     prim_abs, prim_add, prim_div, prim_even, prim_max, prim_min, prim_mod, prim_mul, prim_odd,
-    prim_remainder, prim_sub,
+    prim_rem, prim_sub,
 };
 use self::comparison::{prim_eq, prim_ge, prim_gt, prim_le, prim_lt};
 use self::concurrency::{prim_current_thread_id, prim_join, prim_sleep, prim_spawn};
@@ -35,7 +35,7 @@ use self::file_io::{
     prim_create_directory, prim_create_directory_all, prim_current_directory,
     prim_delete_directory, prim_delete_file, prim_file_exists, prim_file_extension, prim_file_name,
     prim_file_size, prim_is_directory, prim_is_file, prim_join_path, prim_list_directory,
-    prim_parent_directory, prim_read_file, prim_read_lines, prim_rename_file, prim_write_file,
+    prim_parent_directory, prim_read_lines, prim_rename_file, prim_slurp, prim_spit,
 };
 use self::signaling::{prim_error, prim_signal, prim_warn};
 // Higher-order functions (map, filter, fold) are now defined in Lisp in init_stdlib
@@ -61,11 +61,12 @@ use self::structs::{
     prim_struct_length, prim_struct_put, prim_struct_values,
 };
 use self::table::{
-    prim_table, prim_table_del, prim_table_get, prim_table_has, prim_table_keys, prim_table_length,
-    prim_table_put, prim_table_values,
+    prim_table, prim_table_del, prim_table_get, prim_table_has as prim_table_has_key,
+    prim_table_keys, prim_table_length, prim_table_put, prim_table_values,
 };
 use self::type_check::{
-    prim_is_nil, prim_is_number, prim_is_pair, prim_is_string, prim_is_symbol, prim_type,
+    prim_is_boolean, prim_is_nil, prim_is_number, prim_is_pair, prim_is_string, prim_is_symbol,
+    prim_type,
 };
 use self::vector::{prim_vector, prim_vector_length, prim_vector_ref, prim_vector_set};
 
@@ -95,6 +96,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "number?", prim_is_number);
     register_fn(vm, symbols, "symbol?", prim_is_symbol);
     register_fn(vm, symbols, "string?", prim_is_string);
+    register_fn(vm, symbols, "boolean?", prim_is_boolean);
 
     // Logic
     register_fn(vm, symbols, "not", prim_not);
@@ -160,7 +162,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "del", prim_table_del);
     register_fn(vm, symbols, "keys", prim_table_keys);
     register_fn(vm, symbols, "values", prim_table_values);
-    register_fn(vm, symbols, "has?", prim_table_has);
+    register_fn(vm, symbols, "has-key?", prim_table_has_key);
     register_fn(vm, symbols, "table-length", prim_table_length);
 
     // Struct operations (immutable)
@@ -195,7 +197,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     // Additional utilities
     register_fn(vm, symbols, "mod", prim_mod);
     register_fn(vm, symbols, "%", prim_mod); // % as alias for mod
-    register_fn(vm, symbols, "remainder", prim_remainder);
+    register_fn(vm, symbols, "rem", prim_rem);
     register_fn(vm, symbols, "even?", prim_even);
     register_fn(vm, symbols, "odd?", prim_odd);
 
@@ -318,8 +320,8 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "memory-usage", prim_memory_usage);
 
     // File I/O primitives
-    register_fn(vm, symbols, "read-file", prim_read_file);
-    register_fn(vm, symbols, "write-file", prim_write_file);
+    register_fn(vm, symbols, "slurp", prim_slurp);
+    register_fn(vm, symbols, "spit", prim_spit);
     register_fn(vm, symbols, "append-file", prim_append_file);
     register_fn(vm, symbols, "file-exists?", prim_file_exists);
     register_fn(vm, symbols, "directory?", prim_is_directory);
@@ -582,29 +584,8 @@ fn init_math_module(vm: &mut VM, symbols: &mut SymbolTable) {
     let mut math_exports = std::collections::HashMap::new();
 
     let functions = vec![
-        "+",
-        "-",
-        "*",
-        "/",
-        "mod",
-        "remainder",
-        "abs",
-        "min",
-        "max",
-        "sqrt",
-        "sin",
-        "cos",
-        "tan",
-        "log",
-        "exp",
-        "pow",
-        "floor",
-        "ceil",
-        "round",
-        "even?",
-        "odd?",
-        "pi",
-        "e",
+        "+", "-", "*", "/", "mod", "rem", "abs", "min", "max", "sqrt", "sin", "cos", "tan", "log",
+        "exp", "pow", "floor", "ceil", "round", "even?", "odd?", "pi", "e",
     ];
 
     let mut exports = Vec::new();

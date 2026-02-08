@@ -108,10 +108,10 @@ pub fn prim_table_values(args: &[Value]) -> Result<Value, String> {
 }
 
 /// Check if a table has a key
-/// (has? table key)
+/// (has-key? table key)
 pub fn prim_table_has(args: &[Value]) -> Result<Value, String> {
     if args.len() != 2 {
-        return Err("has? requires exactly 2 arguments (table, key)".to_string());
+        return Err("has-key? requires exactly 2 arguments (table, key)".to_string());
     }
 
     let table = args[0].as_table()?;

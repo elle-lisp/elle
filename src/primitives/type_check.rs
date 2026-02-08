@@ -46,9 +46,9 @@ pub fn prim_is_string(args: &[Value]) -> Result<Value, String> {
 }
 
 /// Check if value is a boolean
-pub fn prim_is_bool(args: &[Value]) -> Result<Value, String> {
+pub fn prim_is_boolean(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
-        return Err("bool? requires exactly 1 argument".to_string());
+        return Err("boolean? requires exactly 1 argument".to_string());
     }
     Ok(Value::Bool(matches!(args[0], Value::Bool(_))))
 }

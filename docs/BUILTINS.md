@@ -123,16 +123,16 @@ This document provides comprehensive documentation for all built-in primitives i
 ⟹ 1
 ```
 
-### `remainder` (Remainder)
+### `rem` (Remainder)
 
 **Semantics**: Returns remainder of division (similar to mod, with different behavior for negative numbers).
 
 **Usage**:
 ```lisp
-(remainder 10 3)
+(rem 10 3)
 ⟹ 1
 
-(remainder 20 6)
+(rem 20 6)
 ⟹ 2
 ```
 
@@ -1243,21 +1243,21 @@ Tables are mutable hash maps. Keys and values can be any type.
 ```lisp
 (define t (table 1 "a" 2 "b"))
 (del t 1)
-(has? t 1)
+(has-key? t 1)
 ⟹ #f
 ```
 
-### `has?` (Has Key)
+### `has-key?` (Has Key)
 
 **Semantics**: Returns `#t` if key exists in table.
 
 **Usage**:
 ```lisp
 (define t (table "x" 10))
-(has? t "x")
+(has-key? t "x")
 ⟹ #t
 
-(has? t "y")
+(has-key? t "y")
 ⟹ #f
 ```
 
@@ -1556,24 +1556,24 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 ## File I/O
 
-### `read-file` (Read File)
+### `slurp` (Read File)
 
 **Semantics**: Reads entire file contents as string.
 
 **Usage**:
 ```lisp
-(write-file "test.txt" "Hello, World!")
-(read-file "test.txt")
+(spit "test.txt" "Hello, World!")
+(slurp "test.txt")
 ⟹ "Hello, World!"
 ```
 
-### `write-file` (Write File)
+### `spit` (Write File)
 
 **Semantics**: Writes string to file, creates or overwrites.
 
 **Usage**:
 ```lisp
-(write-file "output.txt" "File content")
+(spit "output.txt" "File content")
 (file-exists? "output.txt")
 ⟹ #t
 ```
@@ -1584,7 +1584,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(write-file "log.txt" "Line 1\n")
+(spit "log.txt" "Line 1\n")
 (append-file "log.txt" "Line 2\n")
 ```
 
@@ -1594,7 +1594,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(write-file "temp.txt" "data")
+(spit "temp.txt" "data")
 (file-exists? "temp.txt")
 ⟹ #t
 

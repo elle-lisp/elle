@@ -86,11 +86,11 @@ pub fn prim_mod(args: &[Value]) -> Result<Value, String> {
     arithmetic::mod_values(&args[0], &args[1])
 }
 
-pub fn prim_remainder(args: &[Value]) -> Result<Value, String> {
+pub fn prim_rem(args: &[Value]) -> Result<Value, String> {
     // Truncated division remainder: result has same sign as dividend (a)
-    // Example: (remainder -17 5) => -2 (because -17 = -3*5 + -2)
+    // Example: (rem -17 5) => -2 (because -17 = -3*5 + -2)
     if args.len() != 2 {
-        return Err("remainder requires exactly 2 arguments".to_string());
+        return Err("rem requires exactly 2 arguments".to_string());
     }
     arithmetic::remainder_values(&args[0], &args[1])
 }
