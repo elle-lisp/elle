@@ -24,17 +24,17 @@
     (let ((items (get block "items"))
           (ordered (get block "ordered"))
           (tag (if ordered "ol" "ul")))
-      (define render-items
-        (lambda (items result)
-          (if (empty? items)
-            result
-            (let ((item (first items)))
-              (render-items (rest items)
-                (string-append result "<li>" (format-inline item) "</li>"))))))
-      (string-append 
-        "<" tag ">"
-        (render-items items "")
-        "</" tag ">"))))
+      ;; Use fold to concatenate all rendered list items
+      (let ((rendered-items
+              (fold
+                (lambda (acc item)
+                  (string-append acc "<li>" (format-inline item) "</li>"))
+                ""
+                items)))
+        (string-append 
+          "<" tag ">"
+          rendered-items
+          "</" tag ">"))))))
 
 ;; Render a blockquote block
 (define render-blockquote
@@ -47,37 +47,38 @@
   (lambda (block)
     (let ((headers (get block "headers"))
           (rows (get block "rows")))
-      (define render-header-cells
-        (lambda (headers result)
-          (if (empty? headers)
-            result
-            (let ((header (first headers)))
-              (render-header-cells (rest headers)
-                (string-append result "<th>" (html-escape header) "</th>"))))))
       
-      (define render-row-cells
-        (lambda (cells result)
-          (if (empty? cells)
-            result
-            (let ((cell (first cells)))
-              (render-row-cells (rest cells)
-                (string-append result "<td>" (html-escape cell) "</td>"))))))
-      
-      (define render-rows
-        (lambda (rows result)
-          (if (empty? rows)
-            result
-            (let ((row (first rows)))
-              (render-rows (rest rows)
-                (string-append result 
-                  "<tr>" (render-row-cells row "") "</tr>"))))))
-      
-      (string-append 
-        "<table><thead><tr>"
-        (render-header-cells headers "")
-        "</tr></thead><tbody>"
-        (render-rows rows "")
-        "</tbody></table>"))))
+      ;; Render header cells using fold
+      (let ((rendered-headers
+              (fold
+                (lambda (acc header)
+                  (string-append acc "<th>" (html-escape header) "</th>"))
+                ""
+                headers)))
+        
+        ;; Render a single row of cells using fold
+        (define render-row-cells
+          (lambda (cells)
+            (fold
+              (lambda (acc cell)
+                (string-append acc "<td>" (html-escape cell) "</td>"))
+              ""
+              cells)))
+        
+        ;; Render all rows using fold
+        (let ((rendered-rows
+                (fold
+                  (lambda (acc row)
+                    (string-append acc "<tr>" (render-row-cells row) "</tr>"))
+                  ""
+                  rows)))
+          
+          (string-append 
+            "<table><thead><tr>"
+            rendered-headers
+            "</tr></thead><tbody>"
+            rendered-rows
+            "</tbody></table>"))))))
 
 ;; Render a note/callout block
 (define render-note
@@ -109,26 +110,23 @@
           (level (get section "level"))
           (content (get section "content")))
       (define level-str (number->string level))
-      (define render-blocks
-        (lambda (blocks result)
-          (if (empty? blocks)
-            result
-            (let ((block (first blocks)))
-              (render-blocks (rest blocks)
-                (string-append result (render-block block)))))))
-      
-      (string-append 
-        "<h" level-str ">" (html-escape heading) "</h" level-str ">"
-        (render-blocks content "")))))
+      ;; Use fold to render all blocks
+      (let ((rendered-content
+              (fold
+                (lambda (acc block)
+                  (string-append acc (render-block block)))
+                ""
+                content)))
+        
+        (string-append 
+          "<h" level-str ">" (html-escape heading) "</h" level-str ">"
+          rendered-content)))))
 
-;; Render all sections
+;; Render all sections using fold
 (define render-sections
   (lambda (sections)
-    (define render-all
-      (lambda (sections result)
-        (if (empty? sections)
-          result
-          (let ((section (first sections)))
-            (render-all (rest sections)
-              (string-append result (render-section section)))))))
-    (render-all sections "")))
+    (fold
+      (lambda (acc section)
+        (string-append acc (render-section section)))
+      ""
+      sections)))

@@ -1,21 +1,18 @@
 ;; Page template generation
 
-;; Generate navigation HTML
+;; Generate navigation HTML using fold
 (define generate-nav
   (lambda (nav-items current-slug)
-    (define render-nav-items
-      (lambda (items result)
-        (if (empty? items)
-          result
-          (let ((item (first items)))
-            (let ((slug (get item "slug"))
-                  (title (get item "title"))
-                  (active-class (if (string-contains? slug current-slug) " active" "")))
-              (render-nav-items (rest items)
-                (string-append result 
-                  "<li><a href=\"" slug ".html\" class=\"nav-link" active-class "\">" 
-                  title "</a></li>")))))))
-    (render-nav-items items "")))
+    (fold
+      (lambda (acc item)
+        (let ((slug (get item "slug"))
+              (title (get item "title"))
+              (active-class (if (string-contains? slug current-slug) " active" "")))
+          (string-append acc
+            "<li><a href=\"" slug ".html\" class=\"nav-link" active-class "\">" 
+            title "</a></li>")))
+      ""
+      nav-items)))
 
 ;; Generate the full HTML page
 (define generate-page

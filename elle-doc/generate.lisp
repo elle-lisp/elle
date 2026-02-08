@@ -443,24 +443,23 @@ tbody tr:nth-child(even) {
         (html-escape text)
         "</code></pre>"))))
 
-;; Render a list block
+;; Render a list block using fold
 (define render-list
   (lambda (block)
     (begin
       (define items (get block "items"))
       (define ordered (get block "ordered"))
       (define tag (if ordered "ol" "ul"))
-      (define render-items
-        (lambda (items result)
-          (if (nil? items)
-            result
-            (begin
-              (define item (first items))
-              (render-items (rest items)
-                (string-append result "<li>" (format-inline item) "</li>"))))))
+      ;; Use fold to concatenate all rendered list items
+      (define rendered-items
+        (fold
+          (lambda (acc item)
+            (string-append acc "<li>" (format-inline item) "</li>"))
+          ""
+          items))
       (string-append 
         "<" tag ">"
-        (render-items items "")
+        rendered-items
         "</" tag ">"))))
 
 ;; Render a blockquote block
@@ -470,45 +469,43 @@ tbody tr:nth-child(even) {
       (define text (get block "text"))
       (string-append "<blockquote>" (format-inline text) "</blockquote>"))))
 
-;; Render a table block
+;; Render a table block using fold
 (define render-table
   (lambda (block)
     (begin
       (define headers (get block "headers"))
       (define rows (get block "rows"))
-      (define render-header-cells
-        (lambda (headers result)
-          (if (nil? headers)
-            result
-            (begin
-              (define header (first headers))
-              (render-header-cells (rest headers)
-                (string-append result "<th>" (html-escape header) "</th>"))))))
       
+      ;; Render header cells using fold
+      (define rendered-headers
+        (fold
+          (lambda (acc header)
+            (string-append acc "<th>" (html-escape header) "</th>"))
+          ""
+          headers))
+      
+      ;; Render row cells using fold
       (define render-row-cells
-        (lambda (cells result)
-          (if (nil? cells)
-            result
-            (begin
-              (define cell (first cells))
-              (render-row-cells (rest cells)
-                (string-append result "<td>" (html-escape cell) "</td>"))))))
+        (lambda (cells)
+          (fold
+            (lambda (acc cell)
+              (string-append acc "<td>" (html-escape cell) "</td>"))
+            ""
+            cells)))
       
-      (define render-rows
-        (lambda (rows result)
-          (if (nil? rows)
-            result
-            (begin
-              (define row (first rows))
-              (render-rows (rest rows)
-                (string-append result 
-                  "<tr>" (render-row-cells row "") "</tr>"))))))
+      ;; Render all rows using fold
+      (define rendered-rows
+        (fold
+          (lambda (acc row)
+            (string-append acc "<tr>" (render-row-cells row) "</tr>"))
+          ""
+          rows))
       
       (string-append 
         "<table><thead><tr>"
-        (render-header-cells headers "")
+        rendered-headers
         "</tr></thead><tbody>"
-        (render-rows rows "")
+        rendered-rows
         "</tbody></table>"))))
 
 ;; Render a note/callout block
@@ -570,20 +567,14 @@ tbody tr:nth-child(even) {
         "<h" level-str ">" (html-escape heading) "</h" level-str ">"
         (render-blocks-in-section content "")))))
 
-;; Render all sections
-(define render-all-sections
-  (lambda (sections result)
-    (if (nil? sections)
-      result
-      (begin
-        (define section (first sections))
-        (define rest-sections (rest sections))
-        (render-all-sections rest-sections
-          (string-append result (render-section section)))))))
-
+;; Render all sections using fold
 (define render-sections
   (lambda (sections)
-    (render-all-sections sections "")))
+    (fold
+      (lambda (acc section)
+        (string-append acc (render-section section)))
+      ""
+      sections)))
 
 ;; ============================================================================
 ;; Page template generation
