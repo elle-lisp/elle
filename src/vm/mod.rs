@@ -373,8 +373,18 @@ impl VM {
                 }
 
                 Instruction::CheckException => {
-                    // TODO: Implement check exception
-                    // Check if exception occurred
+                    // Check if an exception has occurred
+                    // If current_exception is set, unwind stack and jump to handler code
+                    if let Some(handler) = self.exception_handlers.last() {
+                        if self.current_exception.is_some() {
+                            // Exception occurred - unwind stack to saved depth
+                            while self.stack.len() > handler.stack_depth {
+                                self.stack.pop();
+                            }
+                            // Jump to handler code
+                            ip = (ip as i32 + handler.handler_offset as i32) as usize;
+                        }
+                    }
                 }
 
                 Instruction::BindException => {

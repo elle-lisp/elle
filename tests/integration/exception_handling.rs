@@ -359,3 +359,31 @@ fn test_exception_message_all_types_as_data() {
     assert_eq!(bool_data, Value::Bool(false));
     assert_eq!(nil_data, Value::Nil);
 }
+
+// ============================================================================
+// Handler-case with division by zero
+// ============================================================================
+
+#[test]
+fn test_division_by_zero_creates_condition() {
+    // Division by zero should create an internal Condition, not an exception
+    // For now, division by zero still returns an error string
+    let result = eval("(/ 10 0)");
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err();
+    assert_eq!(err_msg, "Division by zero");
+}
+
+#[test]
+fn test_safe_division() {
+    // Normal division should work
+    let result = eval("(/ 10 2)").unwrap();
+    assert_eq!(result, Value::Int(5));
+}
+
+#[test]
+fn test_division_by_zero_specialized() {
+    // Division by zero with specialized int instruction
+    let result = eval("(/ 100 0)");
+    assert!(result.is_err());
+}
