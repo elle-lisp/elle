@@ -1,11 +1,12 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
 use elle::compiler::converters::value_to_expr;
-use elle::{compile, read_str, register_primitives, SymbolTable, Value, VM};
+use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, Value, VM};
 
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     register_primitives(&mut vm, &mut symbols);
+    init_stdlib(&mut vm, &mut symbols);
 
     let value = read_str(input, &mut symbols)?;
     let expr = value_to_expr(&value, &mut symbols)?;

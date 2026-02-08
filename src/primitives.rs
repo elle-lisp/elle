@@ -36,7 +36,7 @@ use self::file_io::{
     prim_file_size, prim_is_directory, prim_is_file, prim_join_path, prim_list_directory,
     prim_parent_directory, prim_read_file, prim_read_lines, prim_rename_file, prim_write_file,
 };
-use self::higher_order::{prim_filter, prim_fold, prim_map};
+// Higher-order functions (map, filter, fold) are now defined in Lisp in init_stdlib
 use self::json::{prim_json_parse, prim_json_serialize, prim_json_serialize_pretty};
 use self::list::{
     prim_append, prim_cons, prim_drop, prim_first, prim_last, prim_length, prim_list, prim_nth,
@@ -108,9 +108,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "length", prim_length);
     register_fn(vm, symbols, "append", prim_append);
     register_fn(vm, symbols, "reverse", prim_reverse);
-    register_fn(vm, symbols, "map", prim_map);
-    register_fn(vm, symbols, "filter", prim_filter);
-    register_fn(vm, symbols, "fold", prim_fold);
+    // map, filter, fold are now defined as Lisp functions in init_stdlib to support closures
 
     // Type conversions
     register_fn(vm, symbols, "int", prim_to_int);
@@ -431,10 +429,77 @@ fn prim_newline(_args: &[Value]) -> Result<Value, String> {
 
 // Standard library initialization
 pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable) {
+    // Define Lisp implementations of higher-order functions that support closures
+    // These override the Rust primitives to enable closure support
+    define_higher_order_functions(vm, symbols);
+
     init_list_module(vm, symbols);
     init_string_module(vm, symbols);
     init_math_module(vm, symbols);
     init_json_module(vm, symbols);
+}
+
+/// Define map, filter, and fold as Lisp functions that support closures
+fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
+    use crate::read_str;
+
+    // Define map: (lambda (f lst) (if (nil? lst) nil (cons (f (first lst)) (map f (rest lst)))))
+    let map_code = r#"
+        (define map (lambda (f lst)
+          (if (nil? lst)
+            nil
+            (cons (f (first lst)) (map f (rest lst))))))
+    "#;
+
+    // Define filter: (lambda (p lst) (if (nil? lst) nil (if (p (first lst)) (cons (first lst) (filter p (rest lst))) (filter p (rest lst)))))
+    let filter_code = r#"
+        (define filter (lambda (p lst)
+          (if (nil? lst)
+            nil
+            (if (p (first lst))
+              (cons (first lst) (filter p (rest lst)))
+              (filter p (rest lst))))))
+    "#;
+
+    // Define fold: (lambda (f init lst) (if (nil? lst) init (fold f (f init (first lst)) (rest lst))))
+    let fold_code = r#"
+        (define fold (lambda (f init lst)
+          (if (nil? lst)
+            init
+            (fold f (f init (first lst)) (rest lst)))))
+    "#;
+
+    // Execute each definition
+    for code in &[map_code, filter_code, fold_code] {
+        match read_str(code, symbols) {
+            Ok(value) => {
+                match crate::compiler::value_to_expr(&value, symbols) {
+                    Ok(expr) => {
+                        // Compile and evaluate
+                        let bytecode = crate::compile(&expr);
+                        if let Err(e) = vm.execute(&bytecode) {
+                            eprintln!(
+                                "Warning: Failed to execute higher-order function definition: {}",
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Failed to compile higher-order function definition: {}",
+                            e
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to parse higher-order function definition: {}",
+                    e
+                );
+            }
+        }
+    }
 }
 
 fn init_list_module(vm: &mut VM, symbols: &mut SymbolTable) {

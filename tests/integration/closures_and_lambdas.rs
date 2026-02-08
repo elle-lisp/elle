@@ -1,12 +1,14 @@
 // DEFENSE: Integration tests for closures and lambdas
 // Tests the full pipeline from parsing through execution with closures and lambdas
 use elle::compiler::converters::value_to_expr;
-use elle::{compile, read_str, register_primitives, SymbolTable, Value, VM};
+use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, Value, VM};
+use std::rc::Rc;
 
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     register_primitives(&mut vm, &mut symbols);
+    init_stdlib(&mut vm, &mut symbols);
 
     let value = read_str(input, &mut symbols)?;
     let expr = value_to_expr(&value, &mut symbols)?;
@@ -867,13 +869,190 @@ fn test_let_star_basic() {
 fn test_nested_let_closure_escape() {
     // Nested let scopes with closure escape
     let code = r#"
-        (begin
-          (define make-adder (lambda (base)
-            (let ((b base))
-              (lambda (x)
-                (+ b x)))))
-          (define add5 (make-adder 5))
-          (add5 3))
-    "#;
+         (begin
+           (define make-adder (lambda (base)
+             (let ((b base))
+               (lambda (x)
+                 (+ b x)))))
+           (define add5 (make-adder 5))
+           (add5 3))
+     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(8));
+}
+
+// ============================================================================
+// SECTION: Higher-Order Functions with Closures (Issue #99)
+// ============================================================================
+
+#[test]
+fn test_map_with_inline_lambda() {
+    // Test map with an inline lambda closure
+    let code = r#"
+        (map (lambda (x) (* x 2)) (list 1 2 3))
+    "#;
+    let result = eval(code).unwrap();
+    // Result should be (2 4 6)
+    let list = result.list_to_vec().unwrap();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[0], Value::Int(2));
+    assert_eq!(list[1], Value::Int(4));
+    assert_eq!(list[2], Value::Int(6));
+}
+
+#[test]
+fn test_map_with_defined_closure() {
+    // Test map with a previously defined closure
+    let code = r#"
+        (begin
+          (define double (lambda (x) (* x 2)))
+          (map double (list 1 2 3)))
+    "#;
+    let result = eval(code).unwrap();
+    let list = result.list_to_vec().unwrap();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[0], Value::Int(2));
+    assert_eq!(list[1], Value::Int(4));
+    assert_eq!(list[2], Value::Int(6));
+}
+
+#[test]
+fn test_map_with_closure_capturing_variable() {
+    // Test map with a closure that captures an outer variable
+    let code = r#"
+        (begin
+          (define multiplier 3)
+          (map (lambda (x) (* x multiplier)) (list 1 2 3)))
+    "#;
+    let result = eval(code).unwrap();
+    let list = result.list_to_vec().unwrap();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[0], Value::Int(3));
+    assert_eq!(list[1], Value::Int(6));
+    assert_eq!(list[2], Value::Int(9));
+}
+
+#[test]
+fn test_filter_with_inline_lambda() {
+    // Test filter with an inline lambda closure
+    let code = r#"
+        (filter (lambda (x) (> x 2)) (list 1 2 3 4 5))
+    "#;
+    let result = eval(code).unwrap();
+    // Result should be (3 4 5)
+    let list = result.list_to_vec().unwrap();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[0], Value::Int(3));
+    assert_eq!(list[1], Value::Int(4));
+    assert_eq!(list[2], Value::Int(5));
+}
+
+#[test]
+fn test_filter_with_closure_capturing_threshold() {
+    // Test filter with a closure that captures a threshold value
+    let code = r#"
+        (begin
+          (define threshold 2)
+          (filter (lambda (x) (> x threshold)) (list 1 2 3 4 5)))
+    "#;
+    let result = eval(code).unwrap();
+    let list = result.list_to_vec().unwrap();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[0], Value::Int(3));
+    assert_eq!(list[1], Value::Int(4));
+    assert_eq!(list[2], Value::Int(5));
+}
+
+#[test]
+fn test_fold_with_inline_lambda() {
+    // Test fold with an inline lambda closure
+    let code = r#"
+        (fold (lambda (acc x) (+ acc x)) 0 (list 1 2 3))
+    "#;
+    let result = eval(code).unwrap();
+    assert_eq!(result, Value::Int(6));
+}
+
+#[test]
+fn test_fold_with_closure_capturing_initial_value() {
+    // Test fold with a closure that uses captured context
+    let code = r#"
+        (begin
+          (define initial 10)
+          (fold (lambda (acc x) (+ acc x)) initial (list 1 2 3)))
+    "#;
+    let result = eval(code).unwrap();
+    assert_eq!(result, Value::Int(16));
+}
+
+#[test]
+fn test_fold_with_multiplication() {
+    // Test fold for computing factorial-like product
+    let code = r#"
+        (fold (lambda (acc x) (* acc x)) 1 (list 2 3 4))
+    "#;
+    let result = eval(code).unwrap();
+    assert_eq!(result, Value::Int(24));
+}
+
+#[test]
+fn test_nested_map_with_closures() {
+    // Test nested map calls with closures
+    let code = r#"
+        (map (lambda (x) (map (lambda (y) (* x y)) (list 1 2))) (list 1 2))
+    "#;
+    let result = eval(code).unwrap();
+    let outer = result.list_to_vec().unwrap();
+    assert_eq!(outer.len(), 2);
+    // First inner list: (1 2)
+    let inner1 = outer[0].list_to_vec().unwrap();
+    assert_eq!(inner1.len(), 2);
+    assert_eq!(inner1[0], Value::Int(1));
+    assert_eq!(inner1[1], Value::Int(2));
+    // Second inner list: (2 4)
+    let inner2 = outer[1].list_to_vec().unwrap();
+    assert_eq!(inner2.len(), 2);
+    assert_eq!(inner2[0], Value::Int(2));
+    assert_eq!(inner2[1], Value::Int(4));
+}
+
+#[test]
+fn test_map_filter_composition() {
+    // Test composing map and filter with closures
+    let code = r#"
+        (map (lambda (x) (* x 2)) (filter (lambda (x) (> x 2)) (list 1 2 3 4 5)))
+    "#;
+    let result = eval(code).unwrap();
+    // Filter: (1 2 3 4 5) -> (3 4 5)
+    // Map: (3 4 5) -> (6 8 10)
+    let list = result.list_to_vec().unwrap();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[0], Value::Int(6));
+    assert_eq!(list[1], Value::Int(8));
+    assert_eq!(list[2], Value::Int(10));
+}
+
+#[test]
+fn test_map_with_native_function() {
+    // Test that map still works with closures (we removed native function registration)
+    let code = r#"
+        (begin
+          (define inc (lambda (x) (+ x 1)))
+          (map inc (list 1 2 3)))
+    "#;
+    let result = eval(code).unwrap();
+    let list = result.list_to_vec().unwrap();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[0], Value::Int(2));
+    assert_eq!(list[1], Value::Int(3));
+    assert_eq!(list[2], Value::Int(4));
+}
+
+#[test]
+fn test_fold_string_concatenation_with_closure() {
+    // Test fold for string operations
+    let code = r#"
+        (fold (lambda (acc x) (string-append acc x)) "" (list "a" "b" "c"))
+    "#;
+    let result = eval(code).unwrap();
+    assert_eq!(result, Value::String(Rc::from("abc")));
 }
