@@ -542,13 +542,15 @@ impl Compiler {
                 finally,
             } => {
                 // Try-catch-finally implementation
-                // For now: implement the basic case where no exception occurs
-                // TODO: Full integration with handler-case for exception catching
+                // NOTE: Proper exception handling requires completing the VM exception infrastructure
+                // For now, we support try/finally but not actual catch semantics
+                // Catch clauses are parsed but not executed - exceptions would need to be
+                // properly thrown and caught via CheckException mechanism (currently disabled)
 
                 // Compile the body
-                self.compile_expr(body, false);
+                self.compile_expr(body, tail);
 
-                // Handle finally block (executes always)
+                // Handle finally block (executes after body)
                 if let Some(finally_expr) = finally {
                     // Save the result
                     self.bytecode.emit(Instruction::Dup);
@@ -557,18 +559,14 @@ impl Compiler {
                     // The original result stays on stack
                 }
 
-                // NOTE: Catch implementation would require:
-                // 1. Setting up a handler frame with PushHandler
-                // 2. Checking if an exception occurred after body
-                // 3. If exception matches the catch variable's type, execute handler
-                // 4. Otherwise, re-signal the exception
-                //
-                // This would look like:
-                // (handler-case body (error-id (catch-var) catch-handler))
-                //
-                // For now, we compile the body successfully and skip catch execution.
-                // Exceptions will propagate up to outer handlers.
-                let _ = catch; // Suppress unused warning - will be used when implemented
+                // NOTE: Catch clause not yet implemented
+                // The catch variable and handler are present in the AST but not compiled
+                // Proper implementation requires:
+                // 1. Exceptions to be thrown (not Err returned) during arithmetic operations
+                // 2. CheckException to interrupt execution and jump to handler
+                // 3. Proper relative offset calculation in bytecode
+                // For now, exceptions in try/catch propagate uncaught
+                let _ = catch; // Suppress unused variable warning
             }
 
             Expr::Quote(expr) => {
