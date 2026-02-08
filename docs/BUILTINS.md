@@ -16,10 +16,11 @@ This document provides comprehensive documentation for all built-in primitives i
 10. [Struct Operations](#struct-operations)
 11. [Higher-Order Functions](#higher-order-functions)
 12. [Exception Handling](#exception-handling)
-13. [File I/O](#file-io)
-14. [Concurrency](#concurrency)
-15. [Debugging & Meta](#debugging--meta)
-16. [FFI Operations](#ffi-operations)
+13. [Condition System](#condition-system)
+14. [File I/O](#file-io)
+15. [Concurrency](#concurrency)
+16. [Debugging & Meta](#debugging--meta)
+17. [FFI Operations](#ffi-operations)
 
 ---
 
@@ -2256,6 +2257,149 @@ Parse JSON, modify, and serialize back:
 
 (macro? +)
 ⟹ #f
+```
+
+## Condition System
+
+The condition system provides sophisticated error handling beyond simple exceptions, allowing custom signal types with registered handlers.
+
+### `define-condition` (Define Condition Type)
+
+**Semantics**: Creates a new condition type with named fields and default values.
+
+**Usage**:
+```lisp
+(define-condition :validation-error
+  (message "Validation failed")
+  (field "unknown")
+  (value nil))
+
+(define-condition :network-error
+  (message "Network error")
+  (url "")
+  (status-code 0)
+  (retry #f))
+```
+
+### `define-handler` (Register Condition Handler)
+
+**Semantics**: Registers a handler function for a condition type. Multiple handlers can be registered.
+
+**Usage**:
+```lisp
+(define-handler :validation-error
+  (lambda (c)
+    (display "Validation Error: ")
+    (display (condition-get c 'message))
+    (newline)))
+
+(define-handler :validation-error
+  (lambda (c)
+    (display "  Field: ")
+    (display (condition-get c 'field))
+    (newline)))
+```
+
+### `signal` (Signal Condition)
+
+**Semantics**: Triggers a condition, calling all registered handlers in order.
+
+**Usage**:
+```lisp
+(signal :validation-error
+  :message "Invalid email format"
+  :field "email"
+  :value "not-an-email")
+```
+
+Handlers are invoked:
+```
+Validation Error: Invalid email format
+  Field: email
+```
+
+### `condition-get` (Get Condition Field)
+
+**Semantics**: Extracts a field value from a condition object.
+
+**Usage**:
+```lisp
+(define-handler :validation-error
+  (lambda (c)
+    (display (condition-get c 'message))
+    (display " in field: ")
+    (display (condition-get c 'field))))
+```
+
+### `catch-condition` (Catch Specific Condition)
+
+**Semantics**: Intercepts a specific condition type during execution.
+
+**Usage**:
+```lisp
+(catch-condition :validation-error
+  (validate-user-input username)
+  (lambda (c)
+    (display "Fix the error: ")
+    (display (condition-get c 'message))
+    (newline)))
+```
+
+### `condition-catch` (Catch Any Condition)
+
+**Semantics**: Generic handler that catches any condition.
+
+**Usage**:
+```lisp
+(condition-catch
+  (signal :any-error :data "info")
+  (lambda (condition-type condition-data)
+    (display "Caught ")
+    (display condition-type)
+    (display ": ")
+    (display (condition-get condition-data 'message))))
+```
+
+### Example: Input Validation System
+
+```lisp
+; Define validation conditions
+(define-condition :field-error
+  (message "Field validation failed")
+  (field "unknown")
+  (constraint "unknown"))
+
+; Register multiple handlers
+(define-handler :field-error
+  (lambda (c)
+    (display "ERROR: ")
+    (display (condition-get c 'field'))
+    (display " - ")
+    (display (condition-get c 'message'))
+    (newline)))
+
+(define-handler :field-error
+  (lambda (c)
+    (display "  Required: ")
+    (display (condition-get c 'constraint'))
+    (newline)))
+
+; Validation function
+(define (validate-email email)
+  (unless (string-contains? email "@")
+    (signal :field-error
+      :message "Must contain @"
+      :field "email"
+      :constraint "valid email format")))
+
+; Use it
+(validate-email "bad-email")
+```
+
+Output:
+```
+ERROR: email - Must contain @
+  Required: valid email format
 ```
 
 ---

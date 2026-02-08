@@ -1,0 +1,501 @@
+# What's New in Elle
+
+A summary of recent additions and improvements to the Elle language.
+
+## Recent Additions
+
+### Exception Handling (try-catch-finally)
+
+Elle now provides comprehensive exception handling with the `try-catch-finally` construct:
+
+```lisp
+(try
+  (risky-operation)
+  (catch (e)
+    (handle-error e))
+  (finally
+    (cleanup-resources)))
+```
+
+**Features:**
+- `try` wraps code that might throw exceptions
+- `catch` handles exceptions with access to the error value
+- `finally` ensures cleanup code always runs
+- Returns the value from `try` block or `catch` block
+- `finally` block's value is discarded
+
+**Examples:**
+
+```lisp
+(try
+  (/ 10 0)
+  (catch (e)
+    (display "Division by zero: ")
+    (display e)
+    0))
+⟹ 0
+
+(try
+  (display "Opening file")
+  (newline)
+  (file-contents)
+  (catch (e)
+    (display "Failed to read")
+    "")
+  (finally
+    (display "Closed file")
+    (newline)))
+```
+
+### Condition System
+
+Beyond simple exceptions, Elle provides a sophisticated condition system for handling expected error scenarios:
+
+```lisp
+(define-condition :validation-error
+  (message "Validation failed")
+  (field "unknown"))
+
+(define-handler :validation-error
+  (lambda (c)
+    (display "Error in ")
+    (display (condition-get c 'field))
+    (newline)))
+
+(signal :validation-error
+  :message "Email is invalid"
+  :field "email")
+```
+
+**Features:**
+- Define custom condition types with fields
+- Register multiple handlers per condition
+- Signal conditions to trigger handlers
+- Catch specific conditions with `catch-condition`
+- Generic condition catching with `condition-catch`
+
+This is useful for:
+- Input validation with descriptive error reporting
+- Network errors with retry logic
+- Permission/authentication errors with user prompts
+- Logging and monitoring
+
+### Exception Values
+
+Create and throw exception objects:
+
+```lisp
+(define e (exception "Error message" data))
+(exception-message e)  ⟹ "Error message"
+(exception-data e)     ⟹ data
+
+(throw e)
+(throw (exception "Quick error" nil))
+```
+
+---
+
+## Primitive Naming Standardization
+
+Recent updates have standardized Elle's primitive names to match Clojure conventions and common Lisp idioms.
+
+### Updated Primitive Names
+
+| Old Name | New Name | Reason |
+|----------|----------|--------|
+| `read-file` | `slurp` | Idiomatic file I/O naming |
+| `write-file` | `spit` | Companion to slurp |
+| `has?` | `has-key?` | Clarifies table key checking |
+| `bool?` | `boolean?` | Standard Lisp predicate naming |
+| `remainder` | `rem` | Aligns with Scheme/CL conventions |
+
+This brings Elle into better alignment with:
+- **Clojure** (~20K-50K developers) - uses slurp/spit, has-key?, etc.
+- **Janet** (~500-2K developers) - modern Lisp conventions
+- **Scheme/Common Lisp** - established naming standards
+
+### Migration Guide
+
+If you have existing Elle code:
+
+```lisp
+; Old code
+(read-file "data.txt")
+(write-file "output.txt" data)
+(has? table "key")
+(remainder 10 3)
+(define (my-bool? x) (boolean? x))
+
+; Updated code
+(slurp "data.txt")
+(spit "output.txt" data)
+(has-key? table "key")
+(rem 10 3)
+(define (my-boolean? x) (boolean? x))
+```
+
+---
+
+## File I/O Functions
+
+### Renamed: slurp and spit
+
+File I/O was renamed for idiom consistency with Clojure/Janet:
+
+```lisp
+; Read entire file (old: read-file)
+(define content (slurp "path/to/file.txt"))
+
+; Write to file - overwrites (old: write-file)
+(spit "output.txt" content)
+
+; Append to file (unchanged)
+(append-file "log.txt" "New log entry\n")
+```
+
+### File Information
+
+```lisp
+(file-exists? "path.txt")        ⟹ #t
+(file? "path.txt")               ⟹ #t
+(directory? "path/")             ⟹ #t
+(file-size "path.txt")           ⟹ 1024
+```
+
+### Directory Operations
+
+```lisp
+(create-directory "new-dir")
+(create-directory-all "a/b/c/d")
+(list-directory ".")
+(delete-directory "empty-dir")
+```
+
+### Path Manipulation
+
+```lisp
+(file-name "/path/to/file.txt")      ⟹ "file.txt"
+(file-extension "/path/to/file.txt") ⟹ ".txt"
+(parent-directory "/path/to/file.txt") ⟹ "/path/to"
+(absolute-path "relative.txt")       ⟹ "/full/path/to/relative.txt"
+(join-path "dir1" "dir2" "file.txt") ⟹ "dir1/dir2/file.txt"
+(current-directory)                  ⟹ "/home/user"
+(change-directory "/tmp")            ; Switch working directory
+```
+
+### File Manipulation
+
+```lisp
+(copy-file "source.txt" "dest.txt")
+(rename-file "old.txt" "new.txt")
+(delete-file "to-delete.txt")
+(read-lines "file.txt")              ⟹ ("line1" "line2" "line3")
+```
+
+---
+
+## Higher-Order Functions
+
+Elle supports functional programming with powerful higher-order functions:
+
+### map
+
+Apply a function to each element:
+
+```lisp
+(map (lambda (x) (* x 2)) (list 1 2 3))     ⟹ (2 4 6)
+(map string-upcase (list "a" "b" "c"))      ⟹ ("A" "B" "C")
+(map abs (list -1 -2 3 -4))                 ⟹ (1 2 3 4)
+```
+
+### filter
+
+Select elements matching a predicate:
+
+```lisp
+(filter (lambda (x) (> x 2)) (list 1 2 3 4))  ⟹ (3 4)
+(filter even? (list 1 2 3 4 5 6))             ⟹ (2 4 6)
+(filter (lambda (s) (> (string-length s) 3)) 
+  (list "hi" "hello" "world" "a"))            ⟹ ("hello" "world")
+```
+
+### fold (reduce)
+
+Accumulate a result:
+
+```lisp
+(fold (lambda (acc x) (+ acc x)) 0 (list 1 2 3 4))  ⟹ 10
+(fold (lambda (acc x) (cons x acc)) nil (list 1 2 3)) ⟹ (3 2 1)
+(fold (lambda (acc s) (string-append acc " " s)) 
+  "" (list "hello" "world"))                        ⟹ " hello world"
+```
+
+### apply
+
+Call a function with arguments from a list:
+
+```lisp
+(apply + (list 1 2 3))                 ⟹ 6
+(apply (lambda (a b c) (+ a b c)) 
+  (list 10 20 30))                     ⟹ 60
+```
+
+---
+
+## String Operations
+
+### Case Conversion
+
+```lisp
+(string-upcase "hello")    ⟹ "HELLO"
+(string-downcase "HELLO")  ⟹ "hello"
+```
+
+### String Analysis
+
+```lisp
+(string-length "hello")           ⟹ 5
+(string-contains? "hello" "ell")  ⟹ #t
+(string-starts-with? "hello" "he")⟹ #t
+(string-ends-with? "hello" "lo")  ⟹ #t
+(string-index "hello" "ll")       ⟹ 2
+(char-at "hello" 0)               ⟹ "h"
+```
+
+### String Manipulation
+
+```lisp
+(string-append "hello" " " "world") ⟹ "hello world"
+(substring "hello" 1 4)             ⟹ "ell"
+(string-split "a,b,c" ",")          ⟹ ("a" "b" "c")
+(string-replace "hello" "l" "L")    ⟹ "heLLo"
+(string-trim "  hello  ")           ⟹ "hello"
+(string-join (list "a" "b" "c") ",") ⟹ "a,b,c"
+```
+
+### Type Conversions
+
+```lisp
+(int "42")          ⟹ 42
+(float "3.14")      ⟹ 3.14
+(string 42)         ⟹ "42"
+(number->string 42) ⟹ "42"
+```
+
+---
+
+## Collection Operations
+
+### Tables (Mutable Hash Maps)
+
+```lisp
+(define t (table "x" 10 "y" 20))
+(get t "x")          ⟹ 10
+(put t "z" 30)       ; Modifies t
+(del t "x")          ; Removes "x" from t
+(has-key? t "x")     ⟹ #f (now deleted)
+(keys t)             ⟹ ("y" "z")
+(values t)           ⟹ (20 30)
+(table-length t)     ⟹ 2
+```
+
+### Structs (Immutable Hash Maps)
+
+```lisp
+(define s (struct "a" 1 "b" 2))
+(struct-get s "a")          ⟹ 1
+(define s2 (struct-put s "c" 3))  ; Returns new struct
+(struct-del s2 "b")         ; Returns new struct without "b"
+(struct-has? s2 "c")        ⟹ #t
+(struct-keys s)             ⟹ ("a" "b")
+(struct-values s)           ⟹ (1 2)
+(struct-length s)           ⟹ 2
+```
+
+### Vectors
+
+```lisp
+(define v [1 2 3])
+(vector-length v)    ⟹ 3
+(vector-ref v 1)     ⟹ 2
+(vector-set! v 0 99) ⟹ [99 2 3]
+```
+
+### Lists
+
+```lisp
+(first (list 1 2 3))  ⟹ 1
+(rest (list 1 2 3))   ⟹ (2 3)
+(append (list 1 2) (list 3 4)) ⟹ (1 2 3 4)
+(reverse (list 1 2 3)) ⟹ (3 2 1)
+(take 2 (list 1 2 3 4)) ⟹ (1 2)
+(drop 2 (list 1 2 3 4)) ⟹ (3 4)
+(length (list 1 2 3)) ⟹ 3
+(nth 1 (list 'a 'b 'c')) ⟹ b
+(last (list 1 2 3)) ⟹ 3
+```
+
+---
+
+## JSON Operations
+
+```lisp
+; Parse JSON string to table
+(define data (json-parse "{\"x\": 42, \"y\": \"hello\"}"))
+(get data "x") ⟹ 42
+
+; Serialize table to JSON
+(json-serialize (table "x" 42 "y" "hello"))
+⟹ "{\"x\":42,\"y\":\"hello\"}"
+
+; Pretty-print JSON
+(json-serialize-pretty (table "x" 42 "y" "hello"))
+⟹ "{\n  \"x\": 42,\n  \"y\": \"hello\"\n}"
+```
+
+---
+
+## Concurrency
+
+```lisp
+; Create and run a thread
+(spawn (lambda ()
+  (display "Running in thread")
+  (newline)))
+
+; Create and wait for result
+(define t (spawn (lambda () (+ 2 2))))
+(join t)  ⟹ 4
+
+; Sleep current thread
+(sleep 1000)  ; Sleep 1000ms
+
+; Get current thread ID
+(current-thread-id) ⟹ some-id
+```
+
+---
+
+## Type System Improvements
+
+### Type Checking Predicates
+
+All type predicates end with `?`:
+
+```lisp
+(nil? nil)          ⟹ #t
+(boolean? #t)       ⟹ #t
+(number? 42)        ⟹ #t
+(symbol? 'x)        ⟹ #t
+(string? "hello")   ⟹ #t
+(pair? (list 1 2))  ⟹ #t
+```
+
+### Type Name
+
+Get the type name as a keyword:
+
+```lisp
+(type 42)     ⟹ :int
+(type 3.14)   ⟹ :float
+(type "hello")⟹ :string
+(type #t)     ⟹ :bool
+(type 'x)     ⟹ :symbol
+(type (list))⟹ :pair
+```
+
+---
+
+## Debugging and Profiling
+
+```lisp
+(debug-print "Debug message")
+(trace function-name)
+(profile (expensive-operation))
+(memory-usage)
+```
+
+---
+
+## Module System
+
+```lisp
+; Load an external module
+(import-file "lib/helpers.elle")
+
+; Add custom search paths
+(add-module-path "/opt/elle-libs")
+
+; Get package info
+(package-version) ⟹ "0.3.0"
+(package-info)    ⟹ ("Elle" "0.3.0" "description...")
+```
+
+---
+
+## Migration Guide
+
+### From Older Elle Versions
+
+If upgrading from pre-exception-handling versions:
+
+**Old Pattern (using define with result):**
+```lisp
+(define result (if (can-do?)
+  (do-it)
+  default-value))
+```
+
+**New Pattern (using try-catch):**
+```lisp
+(define result (try
+  (do-it)
+  (catch (e)
+    default-value)))
+```
+
+**Old Pattern (custom error handling):**
+```lisp
+(if (valid-input? x)
+  (process x)
+  (display "Error!"))
+```
+
+**New Pattern (condition system):**
+```lisp
+(catch-condition :validation-error
+  (validate x)
+  (lambda (c)
+    (display "Error: ")
+    (display (condition-get c 'message))))
+```
+
+---
+
+## Summary of Key Features
+
+| Feature | Version | Status |
+|---------|---------|--------|
+| try-catch-finally | Recent | Stable |
+| Condition system | Recent | Stable |
+| Exception objects | Recent | Stable |
+| slurp/spit naming | Recent | Stable |
+| boolean? predicate | Recent | Stable |
+| has-key? predicate | Recent | Stable |
+| rem instead of remainder | Recent | Stable |
+| Comprehensive stdlib | Stable | Mature |
+| Higher-order functions | Stable | Mature |
+| Pattern matching | Stable | Mature |
+| FFI (C interop) | Stable | Mature |
+| Module system | Stable | Mature |
+| Concurrency | Stable | Mature |
+
+---
+
+## Further Reading
+
+- **LANGUAGE_GUIDE.md**: Comprehensive language tutorial
+- **CONTROL_FLOW.md**: Detailed control flow documentation
+- **BUILTINS.md**: Complete builtin functions reference
+- **SCOPING_GUIDE.md**: Variable scoping and closures
+- **examples/**: Browse example programs
