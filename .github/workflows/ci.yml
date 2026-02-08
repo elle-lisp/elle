@@ -264,9 +264,21 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v2
 
+  benchmarks:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run Criterion benchmarks
+        run: cargo bench --bench benchmarks --no-run
+      - name: Check IAI benchmark build
+        run: cargo build --benches
+
   all-checks:
     name: All Checks Passed
-    needs: [test, fmt, clippy, examples, elle-doc, coverage, docs]
+    needs: [test, fmt, clippy, examples, elle-doc, coverage, docs, benchmarks]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -287,6 +299,9 @@ jobs:
         run: exit 1
       - name: Check docs
         if: needs.docs.result != 'success'
+        run: exit 1
+      - name: Check benchmarks
+        if: needs.benchmarks.result != 'success'
         run: exit 1
       - name: Success
         run: echo "All checks passed"

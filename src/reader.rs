@@ -2,6 +2,16 @@ use crate::symbol::SymbolTable;
 use crate::value::{cons, Value};
 use std::rc::Rc;
 
+/// Fast delimiter check - O(1) instead of string contains O(n)
+/// Checks if a character is a Lisp delimiter
+#[inline]
+fn is_delimiter(c: char) -> bool {
+    matches!(
+        c,
+        '(' | ')' | '[' | ']' | '{' | '}' | '\'' | '`' | ',' | ':' | '@'
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceLoc {
     pub line: usize,
@@ -164,7 +174,8 @@ impl Lexer {
     fn read_symbol(&mut self) -> String {
         let mut sym = String::new();
         while let Some(c) = self.current() {
-            if c.is_whitespace() || "()[]{}'`,:@".contains(c) {
+            // Use fast delimiter check instead of string contains()
+            if c.is_whitespace() || is_delimiter(c) {
                 break;
             }
             sym.push(c);

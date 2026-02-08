@@ -28,10 +28,15 @@ pub struct ModuleDef {
 }
 
 /// Symbol interning table for fast symbol comparison
+///
+/// Uses `Rc<str>` for symbol names to avoid duplication:
+/// - Single allocation via `Rc::from(name)`
+/// - Shared reference counting between map and names vector
+/// - Reduces memory fragmentation
 #[derive(Debug)]
 pub struct SymbolTable {
-    map: FxHashMap<String, SymbolId>,
-    names: Vec<String>,
+    map: FxHashMap<Rc<str>, SymbolId>,
+    names: Vec<Rc<str>>,
     macros: FxHashMap<SymbolId, Rc<MacroDef>>,
     modules: FxHashMap<SymbolId, Rc<ModuleDef>>,
     current_module: Option<SymbolId>,
@@ -49,20 +54,24 @@ impl SymbolTable {
     }
 
     /// Intern a symbol, returning its ID
+    ///
+    /// Uses `Rc::from()` for a single allocation that's shared between
+    /// the map and names vector, avoiding the previous double-allocation.
     pub fn intern(&mut self, name: &str) -> SymbolId {
         if let Some(&id) = self.map.get(name) {
             return id;
         }
 
         let id = SymbolId(self.names.len() as u32);
-        self.names.push(name.to_string());
-        self.map.insert(name.to_string(), id);
+        let shared_name: Rc<str> = Rc::from(name); // Single allocation
+        self.names.push(shared_name.clone());
+        self.map.insert(shared_name, id);
         id
     }
 
     /// Get the name of a symbol by ID
     pub fn name(&self, id: SymbolId) -> Option<&str> {
-        self.names.get(id.0 as usize).map(|s| s.as_str())
+        self.names.get(id.0 as usize).map(|s| s.as_ref())
     }
 
     /// Check if a symbol exists
