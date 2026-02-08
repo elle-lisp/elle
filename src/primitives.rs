@@ -9,6 +9,7 @@ pub mod json;
 pub mod list;
 pub mod math;
 pub mod meta;
+pub mod signaling;
 pub mod string;
 pub mod structs;
 pub mod table;
@@ -36,6 +37,7 @@ use self::file_io::{
     prim_file_size, prim_is_directory, prim_is_file, prim_join_path, prim_list_directory,
     prim_parent_directory, prim_read_file, prim_read_lines, prim_rename_file, prim_write_file,
 };
+use self::signaling::{prim_error, prim_signal, prim_warn};
 // Higher-order functions (map, filter, fold) are now defined in Lisp in init_stdlib
 use self::json::{prim_json_parse, prim_json_serialize, prim_json_serialize_pretty};
 use self::list::{
@@ -277,11 +279,16 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
         ffi_primitives::prim_with_ffi_safety_checks_wrapper,
     );
 
-    // Exception handling
+    // Exception handling (old string-based)
     register_fn(vm, symbols, "throw", prim_throw);
     register_fn(vm, symbols, "exception", prim_exception);
     register_fn(vm, symbols, "exception-message", prim_exception_message);
     register_fn(vm, symbols, "exception-data", prim_exception_data);
+
+    // Condition system (new CL-style)
+    register_fn(vm, symbols, "signal", prim_signal);
+    register_fn(vm, symbols, "warn", prim_warn);
+    register_fn(vm, symbols, "error", prim_error);
 
     // Quoting and meta-programming
     register_fn(vm, symbols, "gensym", prim_gensym);

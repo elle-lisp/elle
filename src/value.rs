@@ -1,6 +1,5 @@
 pub mod condition;
-
-use condition::Condition;
+pub use condition::Condition;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
