@@ -529,6 +529,7 @@ fn serialize_value(value: &Value) -> Result<String, String> {
         Value::LibHandle(_) => Err("Cannot serialize library handles to JSON".to_string()),
         Value::CHandle(_) => Err("Cannot serialize C handles to JSON".to_string()),
         Value::Exception(_) => Err("Cannot serialize exceptions to JSON".to_string()),
+        Value::Condition(_) => Err("Cannot serialize conditions to JSON".to_string()),
     }
 }
 
@@ -639,6 +640,7 @@ fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<String, 
         Value::LibHandle(_) => Err("Cannot serialize library handles to JSON".to_string()),
         Value::CHandle(_) => Err("Cannot serialize C handles to JSON".to_string()),
         Value::Exception(_) => Err("Cannot serialize exceptions to JSON".to_string()),
+        Value::Condition(_) => Err("Cannot serialize conditions to JSON".to_string()),
     }
 }
 

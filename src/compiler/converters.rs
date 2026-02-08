@@ -313,7 +313,8 @@ fn build_quasiquote_expr(
         | Value::NativeFn(_)
         | Value::LibHandle(_)
         | Value::CHandle(_)
-        | Value::Exception(_) => Err("Cannot quote closure or native function".to_string()),
+        | Value::Exception(_)
+        | Value::Condition(_) => Err("Cannot quote closure or native function".to_string()),
     }
 }
 

@@ -1,3 +1,6 @@
+pub mod condition;
+
+use condition::Condition;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -160,6 +163,8 @@ pub enum Value {
     CHandle(CHandle),
     // Exception handling
     Exception(Rc<Exception>),
+    // Condition system (new CL-style exceptions)
+    Condition(Rc<Condition>),
 }
 
 impl PartialEq for Value {
@@ -181,6 +186,7 @@ impl PartialEq for Value {
             (Value::LibHandle(a), Value::LibHandle(b)) => a == b,
             (Value::CHandle(a), Value::CHandle(b)) => a == b,
             (Value::Exception(a), Value::Exception(b)) => a == b,
+            (Value::Condition(a), Value::Condition(b)) => a == b,
             _ => false,
         }
     }
@@ -325,6 +331,7 @@ impl Value {
             Value::LibHandle(_) => "library-handle",
             Value::CHandle(_) => "c-handle",
             Value::Exception(_) => "exception",
+            Value::Condition(_) => "condition",
         }
     }
 }
@@ -391,6 +398,7 @@ impl fmt::Debug for Value {
             Value::LibHandle(h) => write!(f, "<library-handle:{}>", h.0),
             Value::CHandle(h) => write!(f, "<c-handle:{}>", h.id),
             Value::Exception(exc) => write!(f, "<exception: {}>", exc.message),
+            Value::Condition(cond) => write!(f, "<condition: id={}>", cond.exception_id),
         }
     }
 }
@@ -400,6 +408,7 @@ impl fmt::Display for Value {
         match self {
             Value::String(s) => write!(f, "{}", s),
             Value::Exception(exc) => write!(f, "Exception: {}", exc.message),
+            Value::Condition(cond) => write!(f, "Condition(id={})", cond.exception_id),
             _ => write!(f, "{:?}", self),
         }
     }
