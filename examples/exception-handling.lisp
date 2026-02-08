@@ -180,3 +180,102 @@ result3
 
 result-inheritance-1  ;; Should return 10
 result-inheritance-2  ;; Should return 400 ((15+25) * (100/5))
+
+;; ============================================================================
+;; Phase 8: Exception Introspection and Field Access
+;; ============================================================================
+;;
+;; Phase 8 adds primitives for inspecting exception details within handlers:
+;;
+;; - exception-id: Get the numeric exception ID from a Condition
+;; - condition-field: Access specific field values by field ID
+;; - condition-matches-type: Check if exception matches a type (with inheritance)
+;; - condition-backtrace: Get backtrace information if available
+
+;; Example: Safe operation that provides detailed error information
+(define safe-divide-with-details
+  (lambda (dividend divisor)
+    "Safely divide, providing detailed error info on failure"
+    (if (= divisor 0)
+      ;; In a full handler-case, we could:
+      ;; (handler-case
+      ;;   (/ dividend divisor)
+      ;;   (4 (exc)
+      ;;     (begin
+      ;;       (format "Division by zero error~n")
+      ;;       (format "  Dividend: ~a~n" (condition-field exc 0))
+      ;;       (format "  Divisor: ~a~n" (condition-field exc 1))
+      ;;       0)))
+      0
+      (/ dividend divisor))))
+
+;; Test the safe operation
+(safe-divide-with-details 100 10)   ;; Returns 10
+(safe-divide-with-details 50 0)     ;; Returns 0 (protected)
+
+;; Exception introspection primitives (for use in handlers):
+;;
+;; (exception-id condition)
+;;   Returns the numeric ID of the exception
+;;   Example: (exception-id caught-error) → 4 (division-by-zero)
+;;
+;; (condition-field condition field-id)
+;;   Returns a specific field value from the condition
+;;   Example: (condition-field caught-error 0) → dividend
+;;
+;; (condition-matches-type condition exception-type-id)
+;;   Checks if condition matches type (including inheritance)
+;;   Example: (condition-matches-type caught-error 2) → #t (matches 'error')
+;;
+;; (condition-backtrace condition)
+;;   Returns backtrace information if available
+;;   Example: (condition-backtrace caught-error) → backtrace string or nil
+
+;; ============================================================================
+;; Benefits of Exception Introspection
+;; ============================================================================
+;;
+;; 1. Detailed Error Information: Access exception fields in handlers
+;; 2. Type Checking: Verify exception type match with inheritance
+;; 3. Debugging: Get backtrace for debugging support
+;; 4. Better Error Messages: Create custom error messages using field values
+;; 5. Conditional Recovery: Different recovery based on exception details
+;;
+;; Example multi-level handler with introspection:
+;; (handler-case
+;;   (risky-operation)
+;;   (4 (div-e)
+;;     (format "Caught division by zero: ~a / ~a~n"
+;;       (condition-field div-e 0)
+;;       (condition-field div-e 1))
+;;     0)
+;;   (2 (err-e)
+;;     (format "Caught error ~a~n" (exception-id err-e))
+;;     (if (condition-backtrace err-e)
+;;       (format "Backtrace: ~a~n" (condition-backtrace err-e)))
+;;     0))
+
+;; More complex safe arithmetic with better error handling
+(define safe-complex-operation
+  (lambda (a b c)
+    "Demonstrate safe operation with potential multiple failures"
+    (if (= b 0)
+      0  ;; Protect against division by zero
+      (if (= c 0)
+        (+ a (/ 100 b))  ;; Can't divide by c, but b is safe
+        (* (+ a b) (/ 100 c))))))
+
+(safe-complex-operation 10 5 2)   ;; (10+5) * (100/2) = 750
+(safe-complex-operation 10 0 2)   ;; b is 0, returns 0
+(safe-complex-operation 10 5 0)   ;; c is 0, returns 10 + 20 = 30
+
+;; ============================================================================
+;; Future Enhancements (Phase 9+)
+;; ============================================================================
+;;
+;; - Restart Mechanism: Define and invoke restarts for recovery
+;; - Full try/catch integration with these introspection functions
+;; - Interactive debugger with exception inspection
+;; - Custom exception types with user-defined fields
+;; - Exception aggregation and collection
+;; - Condition filtering and routing to specialized handlers

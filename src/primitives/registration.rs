@@ -19,6 +19,9 @@ use super::file_io::{
     prim_file_size, prim_is_directory, prim_is_file, prim_join_path, prim_list_directory,
     prim_parent_directory, prim_read_lines, prim_rename_file, prim_slurp, prim_spit,
 };
+use super::introspection::{
+    prim_condition_backtrace, prim_condition_field, prim_condition_matches_type, prim_exception_id,
+};
 use super::json::{prim_json_parse, prim_json_serialize, prim_json_serialize_pretty};
 use super::list::{
     prim_append, prim_cons, prim_drop, prim_first, prim_last, prim_length, prim_list, prim_nth,
@@ -276,6 +279,17 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "signal", prim_signal);
     register_fn(vm, symbols, "warn", prim_warn);
     register_fn(vm, symbols, "error", prim_error);
+
+    // Exception introspection (Phase 8)
+    register_fn(vm, symbols, "exception-id", prim_exception_id);
+    register_fn(vm, symbols, "condition-field", prim_condition_field);
+    register_fn(
+        vm,
+        symbols,
+        "condition-matches-type",
+        prim_condition_matches_type,
+    );
+    register_fn(vm, symbols, "condition-backtrace", prim_condition_backtrace);
 
     // Quoting and meta-programming
     register_fn(vm, symbols, "gensym", prim_gensym);
