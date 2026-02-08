@@ -9,9 +9,11 @@ pub mod linter;
 pub mod macros;
 pub mod patterns;
 pub mod scope;
+pub mod symbol_index;
 
 pub use bytecode::{Bytecode, Instruction};
 pub use bytecode_debug::{disassemble, format_bytecode_with_constants};
 pub use compile::compile;
 pub use converters::value_to_expr;
 pub use linter::Linter;
+pub use symbol_index::{extract_symbols, SymbolDef, SymbolIndex, SymbolKind};

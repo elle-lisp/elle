@@ -1,9 +1,15 @@
 //! Language Server Protocol implementation for Elle Lisp
 //!
-//! A simplified LSP server that provides:
-//! - Real-time diagnostics from elle-lint
-//! - Basic hover information for functions
-//! - Symbol definitions and references
+//! A resident compiler-based LSP server that provides:
+//! - Real-time diagnostics from integrated linter
+//! - Hover information with symbol lookup
+//! - Code completion suggestions
+//! - Navigation to symbols
 
+pub mod compiler_state;
+pub mod completion;
 pub mod handler;
+pub mod hover;
 pub mod protocol;
+
+pub use compiler_state::CompilerState;
