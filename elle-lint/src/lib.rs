@@ -5,14 +5,16 @@
 //! - Arity validation
 //! - Unused variable detection
 //! - Pattern matching validation
-//! - Module boundary checking
+//!
+//! This crate provides a wrapper around the compiler's integrated linter.
 
-pub mod context;
-pub mod diagnostics;
-pub mod rules;
+pub use elle::compiler::linter::diagnostics::{Diagnostic, Severity};
 
-use diagnostics::{Diagnostic, Severity};
-use elle::value::Value;
+use elle::compiler::ast::ExprWithLoc;
+use elle::compiler::converters::value_to_expr;
+use elle::compiler::linter::Linter as CompilerLinter;
+use elle::symbol::SymbolTable;
+use elle::{init_stdlib, register_primitives, VM};
 use std::path::Path;
 
 /// Main linter configuration
@@ -40,47 +42,48 @@ impl Default for LintConfig {
 /// Main linter instance
 pub struct Linter {
     config: LintConfig,
-    diagnostics: Vec<Diagnostic>,
+    compiler_linter: CompilerLinter,
 }
 
 impl Linter {
     pub fn new(config: LintConfig) -> Self {
         Self {
             config,
-            diagnostics: Vec::new(),
+            compiler_linter: CompilerLinter::new(),
         }
     }
 
     /// Lint Elle code from a string
-    pub fn lint_str(&mut self, code: &str, filename: &str) -> Result<(), String> {
-        let mut symbols = elle::SymbolTable::new();
-        elle::register_primitives(&mut elle::VM::new(), &mut symbols);
-        elle::init_stdlib(&mut elle::VM::new(), &mut symbols);
+    pub fn lint_str(&mut self, code: &str, _filename: &str) -> Result<(), String> {
+        let mut symbols = SymbolTable::new();
+        let mut vm = VM::new();
+        register_primitives(&mut vm, &mut symbols);
+        init_stdlib(&mut vm, &mut symbols);
 
-        // Parse code
+        // Parse code using lexer and reader to handle multiple forms
         let mut lexer = elle::Lexer::new(code);
         let mut tokens = Vec::new();
         loop {
             match lexer.next_token() {
                 Ok(Some(token)) => tokens.push(token),
                 Ok(None) => break,
-                Err(e) => return Err(format!("Parse error: {}", e)),
+                Err(e) => return Err(format!("Lex error: {}", e)),
             }
         }
 
         let mut reader = elle::Reader::new(tokens);
-        let mut values = Vec::new();
         while let Some(result) = reader.try_read(&mut symbols) {
             match result {
-                Ok(value) => values.push(value),
+                Ok(value) => {
+                    // Convert value to expr for linting
+                    let expr = value_to_expr(&value, &mut symbols)
+                        .map_err(|e| format!("Conversion error: {}", e))?;
+                    // Wrap in ExprWithLoc with no location info (we don't have precise source locations from Value)
+                    let expr_with_loc = ExprWithLoc::new(expr, None);
+                    self.compiler_linter.lint_expr(&expr_with_loc, &symbols);
+                }
                 Err(e) => return Err(format!("Read error: {}", e)),
             }
-        }
-
-        // Apply linting rules
-        for (i, value) in values.iter().enumerate() {
-            let line = i + 1; // Approximate line numbering
-            self.check_value(value, filename, line, &symbols);
         }
 
         Ok(())
@@ -96,20 +99,9 @@ impl Linter {
         self.lint_str(&content, &filename)
     }
 
-    fn check_value(
-        &mut self,
-        value: &Value,
-        filename: &str,
-        line: usize,
-        symbols: &elle::SymbolTable,
-    ) {
-        // Apply all rules
-        rules::check_naming_conventions(value, filename, line, &mut self.diagnostics, symbols);
-    }
-
     /// Get all diagnostics
     pub fn diagnostics(&self) -> &[Diagnostic] {
-        &self.diagnostics
+        self.compiler_linter.diagnostics()
     }
 
     /// Format diagnostics for output
@@ -122,7 +114,7 @@ impl Linter {
 
     fn format_human(&self) -> String {
         let mut output = String::new();
-        for diag in &self.diagnostics {
+        for diag in self.diagnostics() {
             if diag.severity >= self.config.min_severity {
                 output.push_str(&diag.format_human());
             }
@@ -132,10 +124,24 @@ impl Linter {
 
     fn format_json(&self) -> String {
         let diagnostics: Vec<_> = self
-            .diagnostics
+            .diagnostics()
             .iter()
             .filter(|d| d.severity >= self.config.min_severity)
-            .map(|d| d.to_json())
+            .map(|d| {
+                let (line, col) = match &d.location {
+                    Some(loc) => (loc.line as u32, loc.col as u32),
+                    None => (0, 0),
+                };
+                serde_json::json!({
+                    "severity": d.severity.to_string(),
+                    "code": d.code,
+                    "rule": d.rule,
+                    "message": d.message,
+                    "line": line,
+                    "column": col,
+                    "suggestions": d.suggestions,
+                })
+            })
             .collect();
 
         serde_json::to_string_pretty(&serde_json::json!({
@@ -147,13 +153,13 @@ impl Linter {
     /// Get exit code (0 = no errors, 1 = errors, 2 = warnings)
     pub fn exit_code(&self) -> i32 {
         if self
-            .diagnostics
+            .diagnostics()
             .iter()
             .any(|d| d.severity == Severity::Error)
         {
             1
         } else if self
-            .diagnostics
+            .diagnostics()
             .iter()
             .any(|d| d.severity == Severity::Warning)
         {

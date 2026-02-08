@@ -1,6 +1,6 @@
 //! Command-line interface for elle-lint
 
-use elle_lint::{diagnostics::Severity, LintConfig, Linter, OutputFormat};
+use elle_lint::{LintConfig, Linter, OutputFormat, Severity};
 use std::env;
 use std::path::Path;
 use std::process;
