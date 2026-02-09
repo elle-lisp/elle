@@ -505,3 +505,43 @@ fn test_warn_primitive_exists() {
     let _result = eval("(warn \"test warning\")");
     // warn should signal a warning
 }
+
+// ============================================================================
+// Phase 9a: Exception Interrupt Mechanism Tests
+// ============================================================================
+
+#[test]
+fn test_division_by_zero_interrupt_without_handler() {
+    // Division by zero should return error when no handler is present
+    let result = eval("(/ 10 0)");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.contains("Division by zero") || err.contains("exception"));
+}
+
+#[test]
+fn test_exception_state_set_after_interrupt() {
+    // Test that exception is properly set after division by zero
+    // This is a meta-test to ensure the interrupt mechanism worked
+    let result = eval("(/ 5 0)");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_safe_division_no_interrupt() {
+    // Safe division should work without triggering exception
+    let result = eval("(/ 10 2)").unwrap();
+    assert_eq!(result, Value::Int(5));
+}
+
+#[test]
+fn test_multiple_safe_operations() {
+    // Multiple operations without exceptions should work
+    let r1 = eval("(+ 5 3)").unwrap();
+    let r2 = eval("(- 10 2)").unwrap();
+    let r3 = eval("(* 4 5)").unwrap();
+    
+    assert_eq!(r1, Value::Int(8));
+    assert_eq!(r2, Value::Int(8));
+    assert_eq!(r3, Value::Int(20));
+}

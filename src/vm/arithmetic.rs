@@ -35,7 +35,10 @@ pub fn handle_div_int(vm: &mut VM) -> Result<(), String> {
         cond.set_field(0, Value::Int(a)); // dividend
         cond.set_field(1, Value::Int(b)); // divisor
         vm.current_exception = Some(std::rc::Rc::new(cond));
-        return Err("Division by zero".to_string());
+        // Push a marker value (nil) to keep stack consistent
+        // The exception interrupt mechanism will handle the exception
+        vm.stack.push(Value::Nil);
+        return Ok(());
     }
     vm.stack.push(Value::Int(a / b));
     Ok(())

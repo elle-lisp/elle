@@ -542,11 +542,6 @@ impl Compiler {
                 finally,
             } => {
                 // Try-catch-finally implementation
-                // NOTE: Proper exception handling requires completing the VM exception infrastructure
-                // For now, we support try/finally but not actual catch semantics
-                // Catch clauses are parsed but not executed - exceptions would need to be
-                // properly thrown and caught via CheckException mechanism (currently disabled)
-
                 // Compile the body
                 self.compile_expr(body, tail);
 
@@ -559,13 +554,10 @@ impl Compiler {
                     // The original result stays on stack
                 }
 
-                // NOTE: Catch clause not yet implemented
-                // The catch variable and handler are present in the AST but not compiled
-                // Proper implementation requires:
-                // 1. Exceptions to be thrown (not Err returned) during arithmetic operations
-                // 2. CheckException to interrupt execution and jump to handler
-                // 3. Proper relative offset calculation in bytecode
-                // For now, exceptions in try/catch propagate uncaught
+                // NOTE: Catch clause - currently not implemented in bytecode
+                // The catch variable and handler are parsed but not used
+                // Phase 9a provides the exception interrupt mechanism,
+                // but try/catch compilation needs more work for proper bytecode generation
                 let _ = catch; // Suppress unused variable warning
             }
 
@@ -631,7 +623,8 @@ impl Compiler {
 
                 // Emit PushHandler with placeholder offsets (will be patched later)
                 self.bytecode.emit(Instruction::PushHandler);
-                let handler_offset_pos = self.bytecode.current_pos();
+                let pushhandler_pos = self.bytecode.current_pos(); // Position right after PushHandler instruction
+                let handler_offset_pos = pushhandler_pos; // Where we'll patch the offset (right after instruction byte)
                 self.bytecode.emit_i16(0); // Placeholder for handler_offset
                 self.bytecode.emit_i16(-1); // No finally block for now
 
@@ -647,11 +640,12 @@ impl Compiler {
                 self.bytecode.emit_i16(0); // Placeholder for end jump
 
                 // Patch the handler_offset to point here
+                // Using absolute position - the interrupt mechanism will handle it correctly
                 let handler_code_offset = self.bytecode.current_pos() as i16;
                 self.bytecode
                     .patch_jump(handler_offset_pos, handler_code_offset);
 
-                // Emit CheckException to see if one occurred
+                // Emit CheckException (only reached if an exception actually occurred)
                 self.bytecode.emit(Instruction::CheckException);
 
                 // Compile each handler clause
@@ -685,14 +679,20 @@ impl Compiler {
                         .patch_jump(next_handler_jump, next_handler_offset);
                 }
 
-                // Patch all handler end jumps to the final end
-                let final_end = self.bytecode.current_pos() as i16;
+                // Patch all handler end jumps to the final end (before ClearException)
+                let final_end_pos = self.bytecode.current_pos();
+
+                // Patch handler end jumps (Jump instructions use relative offsets)
                 for jump_pos in handler_end_jumps {
-                    self.bytecode.patch_jump(jump_pos, final_end);
+                    // Relative jump: from jump_pos+2 (after the 2-byte offset) to final_end_pos
+                    let relative_offset = (final_end_pos - jump_pos - 2) as i16;
+                    self.bytecode.patch_jump(jump_pos, relative_offset);
                 }
 
-                // Patch the end jump from after PopHandler
-                self.bytecode.patch_jump(end_jump, final_end);
+                // Patch the end jump from after PopHandler (Jump instruction uses relative offset)
+                // Relative jump: from end_jump+2 to final_end_pos
+                let relative_offset = (final_end_pos - end_jump - 2) as i16;
+                self.bytecode.patch_jump(end_jump, relative_offset);
 
                 // Clear exception state
                 self.bytecode.emit(Instruction::ClearException);

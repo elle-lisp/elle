@@ -128,7 +128,9 @@ pub enum Instruction {
     /// Create handler context (handler_fn_idx, condition_id)
     CreateHandler,
 
-    /// Check if exception occurred and potentially unwind
+    /// Check if exception occurred
+    /// Used in handler code to verify exception is still set
+    /// (Only reached if an exception occurred)
     CheckException,
 
     /// Match exception against handler exception ID (compares stack top with current exception's ID)

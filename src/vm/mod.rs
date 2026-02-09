@@ -28,8 +28,26 @@ impl VM {
         closure_env: Option<&Rc<Vec<Value>>>,
     ) -> Result<Value, String> {
         let mut ip = 0;
+        let mut instruction_count = 0;
+        const MAX_INSTRUCTIONS: usize = 100000; // Safety limit to prevent infinite loops
 
         loop {
+            instruction_count += 1;
+            if instruction_count > MAX_INSTRUCTIONS {
+                let instr_byte = if ip < bytecode.len() {
+                    bytecode[ip]
+                } else {
+                    255
+                };
+                return Err(format!(
+                    "Instruction limit exceeded at ip={} (instr={}), stack depth={}, exception={}",
+                    ip,
+                    instr_byte,
+                    self.stack.len(),
+                    self.current_exception.is_some()
+                ));
+            }
+
             if ip >= bytecode.len() {
                 return Err("Unexpected end of bytecode".to_string());
             }
@@ -103,7 +121,24 @@ impl VM {
                     args.reverse();
 
                     let result = match func {
-                        Value::NativeFn(f) => f(&args)?,
+                        Value::NativeFn(f) => {
+                            match f(&args) {
+                                Ok(val) => val,
+                                Err(msg) if msg == "Division by zero" => {
+                                    // Create a division-by-zero exception
+                                    let mut cond = crate::value::Condition::new(4);
+                                    // Try to set dividend and divisor if we have the arguments
+                                    if args.len() >= 2 {
+                                        cond.set_field(0, args[0].clone()); // dividend
+                                        cond.set_field(1, args[1].clone()); // divisor
+                                    }
+                                    self.current_exception = Some(std::rc::Rc::new(cond));
+                                    // Push Nil to keep stack consistent
+                                    Value::Nil
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        }
                         Value::Closure(closure) => {
                             self.call_depth += 1;
                             if self.call_depth > 1000 {
@@ -373,18 +408,14 @@ impl VM {
                 }
 
                 Instruction::CheckException => {
-                    // Check if an exception has occurred
-                    // If current_exception is set, unwind stack and jump to handler code
-                    if let Some(handler) = self.exception_handlers.last() {
-                        if self.current_exception.is_some() {
-                            // Exception occurred - unwind stack to saved depth
-                            while self.stack.len() > handler.stack_depth {
-                                self.stack.pop();
-                            }
-                            // Jump to handler code
-                            ip = (ip as i32 + handler.handler_offset as i32) as usize;
-                        }
+                    // Verify that an exception has occurred
+                    // This instruction should only be reached if an exception occurred
+                    // (Normal path jumps past this via the Jump after PopHandler)
+                    if self.current_exception.is_none() {
+                        // This shouldn't happen, but if it does, we have a bug
+                        return Err("CheckException reached with no exception set".to_string());
                     }
+                    // Exception is set, fall through to handler matching code
                 }
 
                 Instruction::MatchException => {
@@ -417,15 +448,39 @@ impl VM {
                 }
 
                 Instruction::ClearException => {
-                    // TODO: Implement clear exception
                     // Clear current exception
                     self.current_exception = None;
+                    // No longer handling exception
+                    self.handling_exception = false;
                 }
 
                 Instruction::InvokeRestart => {
                     // TODO: Implement invoke restart
                     // Invoke a restart by name
                     let _restart_name_id = self.read_u16(bytecode, &mut ip);
+                }
+            }
+
+            // Phase 9a: Exception interrupt mechanism
+            // Check if an exception occurred during instruction execution
+            // If yes, jump to the handler if one exists, otherwise propagate error
+            // But only jump if we're not already in exception handler code
+            if self.current_exception.is_some() && !self.handling_exception {
+                if let Some(handler) = self.exception_handlers.last() {
+                    // Unwind stack to saved depth
+                    while self.stack.len() > handler.stack_depth {
+                        self.stack.pop();
+                    }
+                    // Mark that we're handling an exception
+                    self.handling_exception = true;
+                    // Jump to handler code (handler_offset is absolute bytecode position)
+                    ip = handler.handler_offset as usize;
+                } else {
+                    // No handler for this exception - propagate as error
+                    if let Some(exc) = &self.current_exception {
+                        return Err(format!("Unhandled exception: {}", exc.exception_id));
+                    }
+                    return Err("Unhandled exception".to_string());
                 }
             }
         }

@@ -57,13 +57,13 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-       - uses: actions/checkout@v4
-       - uses: dtolnay/rust-toolchain@stable
-       - uses: Swatinem/rust-cache@v2
-       - name: Install and run cargo-audit
-         run: |
-           cargo install cargo-audit
-           cargo audit
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install and run cargo-audit
+        run: |
+          cargo install cargo-audit
+          cargo audit
 
   examples:
     name: Examples
@@ -224,7 +224,7 @@ jobs:
           https://disruptek.github.io/elle/api/elle/
           https://disruptek.github.io/elle/api/elle/vm/
           https://disruptek.github.io/elle/api/elle/ffi/
-           https://disruptek.github.io/elle/api/elle/compiler/
+          https://disruptek.github.io/elle/api/elle/compiler/
           EOF
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4

@@ -925,6 +925,135 @@ fn value_to_expr_with_scope(
                         })
                     }
 
+                    "handler-case" => {
+                        // Syntax: (handler-case body (exception-id (var) handler-code) ...)
+                        // exception-id can be numeric or a symbol (will be looked up)
+                        if list.len() < 2 {
+                            return Err("handler-case requires at least a body".to_string());
+                        }
+
+                        let body =
+                            Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
+                        let mut handlers = Vec::new();
+
+                        // Parse handler clauses
+                        for clause in &list[2..] {
+                            if let Ok(clause_vec) = clause.list_to_vec() {
+                                if clause_vec.len() != 3 {
+                                    return Err(
+                                        "handler-case clause requires (exception-id (var) handler)"
+                                            .to_string(),
+                                    );
+                                }
+
+                                // Parse exception ID
+                                let exception_id = match &clause_vec[0] {
+                                    Value::Int(id) => *id as u32,
+                                    Value::Symbol(sym) => {
+                                        // Map symbol to exception ID
+                                        let name = symbols.name(*sym).unwrap_or("unknown");
+                                        match name {
+                                            "condition" => 1,
+                                            "error" => 2,
+                                            "type-error" => 3,
+                                            "division-by-zero" => 4,
+                                            "undefined-variable" => 5,
+                                            "arity-error" => 6,
+                                            "warning" => 7,
+                                            "style-warning" => 8,
+                                            _ => {
+                                                return Err(format!(
+                                                    "Unknown exception type: {}",
+                                                    name
+                                                ))
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        return Err(
+                                            "Exception ID must be integer or symbol".to_string()
+                                        )
+                                    }
+                                };
+
+                                // Parse variable
+                                let var = clause_vec[1].as_symbol()?;
+
+                                // Parse handler code
+                                let handler_code = Box::new(value_to_expr_with_scope(
+                                    &clause_vec[2],
+                                    symbols,
+                                    scope_stack,
+                                )?);
+
+                                handlers.push((exception_id, var, handler_code));
+                            } else {
+                                return Err("Handler clauses must be lists".to_string());
+                            }
+                        }
+
+                        Ok(Expr::HandlerCase { body, handlers })
+                    }
+
+                    "handler-bind" => {
+                        // Syntax: (handler-bind ((exception-id handler-fn) ...) body)
+                        // handler-fn is called but doesn't unwind the stack
+                        if list.len() != 3 {
+                            return Err("handler-bind requires ((handlers...) body)".to_string());
+                        }
+
+                        let handlers_list = list[1].list_to_vec()?;
+                        let mut handlers = Vec::new();
+
+                        for handler_spec in handlers_list {
+                            let spec_vec = handler_spec.list_to_vec()?;
+                            if spec_vec.len() != 2 {
+                                return Err(
+                                    "Each handler binding must be (exception-id handler-fn)"
+                                        .to_string(),
+                                );
+                            }
+
+                            // Parse exception ID
+                            let exception_id = match &spec_vec[0] {
+                                Value::Int(id) => *id as u32,
+                                Value::Symbol(sym) => {
+                                    let name = symbols.name(*sym).unwrap_or("unknown");
+                                    match name {
+                                        "condition" => 1,
+                                        "error" => 2,
+                                        "type-error" => 3,
+                                        "division-by-zero" => 4,
+                                        "undefined-variable" => 5,
+                                        "arity-error" => 6,
+                                        "warning" => 7,
+                                        "style-warning" => 8,
+                                        _ => {
+                                            return Err(format!("Unknown exception type: {}", name))
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    return Err("Exception ID must be integer or symbol".to_string())
+                                }
+                            };
+
+                            // Parse handler function
+                            let handler_fn = Box::new(value_to_expr_with_scope(
+                                &spec_vec[1],
+                                symbols,
+                                scope_stack,
+                            )?);
+
+                            handlers.push((exception_id, handler_fn));
+                        }
+
+                        let body =
+                            Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
+
+                        Ok(Expr::HandlerBind { handlers, body })
+                    }
+
                     "match" => {
                         // Syntax: (match value (pattern1 result1) (pattern2 result2) ... [default])
                         if list.len() < 2 {

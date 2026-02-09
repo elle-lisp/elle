@@ -34,6 +34,7 @@ pub struct VM {
     pub scope_stack: ScopeStack,         // Runtime scope stack for variable management
     pub exception_handlers: Vec<ExceptionHandler>, // Stack of active exception handlers
     pub current_exception: Option<Rc<Condition>>, // Current exception being handled
+    pub handling_exception: bool,        // True if we're currently in exception handler code
 }
 
 /// Exception type hierarchy (baked into VM for inheritance checking)
@@ -89,6 +90,7 @@ impl VM {
             scope_stack: ScopeStack::new(),
             exception_handlers: Vec::new(),
             current_exception: None,
+            handling_exception: false,
         }
     }
 
