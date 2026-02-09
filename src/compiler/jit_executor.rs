@@ -80,6 +80,8 @@ pub struct JitExecutor {
     cache: Rc<RefCell<std::collections::HashMap<u64, CachedJitCode>>>,
     /// JIT context for compilation
     jit_context: Option<Rc<RefCell<JITContext>>>,
+    /// Call counters for profiling hot functions (bytecode pointer -> call count)
+    call_counts: Rc<RefCell<std::collections::HashMap<*const u8, usize>>>,
 }
 
 impl JitExecutor {
@@ -89,6 +91,7 @@ impl JitExecutor {
         Ok(JitExecutor {
             cache: Rc::new(RefCell::new(std::collections::HashMap::new())),
             jit_context: jit_ctx.map(|ctx| Rc::new(RefCell::new(ctx))),
+            call_counts: Rc::new(RefCell::new(std::collections::HashMap::new())),
         })
     }
 
@@ -96,7 +99,7 @@ impl JitExecutor {
     pub fn try_jit_execute(
         &mut self,
         expr: &Expr,
-        _symbols: &SymbolTable,
+        symbols: &SymbolTable,
     ) -> Result<Option<Value>, String> {
         if self.jit_context.is_none() {
             return Ok(None);
@@ -129,10 +132,10 @@ impl JitExecutor {
             }
 
             // If expressions and Begin can be JIT compiled
-            Expr::If { .. } | Expr::Begin(_) => self.compile_and_execute_expr(expr, hash),
+            Expr::If { .. } | Expr::Begin(_) => self.compile_and_execute_expr(expr, hash, symbols),
 
-            // Call expressions - try to compile
-            Expr::Call { .. } => self.compile_and_execute_expr(expr, hash),
+            // Call expressions - try to compile them
+            Expr::Call { .. } => self.compile_and_execute_expr(expr, hash, symbols),
 
             // Everything else
             _ => {
@@ -150,6 +153,7 @@ impl JitExecutor {
         &mut self,
         expr: &Expr,
         hash: u64,
+        symbols: &SymbolTable,
     ) -> Result<Option<Value>, String> {
         let ctx = self
             .jit_context
@@ -161,7 +165,7 @@ impl JitExecutor {
         let func_name = format!("jit_expr_{:x}", hash);
 
         // Compile the expression to native code
-        match ExprCompiler::compile_expr(&mut jit_ctx, &func_name, expr) {
+        match ExprCompiler::compile_expr(&mut jit_ctx, &func_name, expr, symbols) {
             Ok(func_ptr) => {
                 // Cache the compiled code
                 let mut cache = self.cache.borrow_mut();
@@ -252,6 +256,37 @@ impl JitExecutor {
         let compiled = cache.values().filter(|c| c.compiled).count();
         (compiled, total)
     }
+
+    /// Try to compile and cache bytecode for a closure (optimization attempt)
+    /// Returns true if compilation succeeded and code can be used
+    pub fn can_compile_bytecode(&self, _bytecode: &[u8]) -> bool {
+        // Check if we can compile this bytecode signature
+        // For now, return false - full implementation would analyze bytecode pattern
+        // This is a placeholder for future bytecode analysis
+        false
+    }
+
+    /// Get cache statistics for profiling
+    pub fn get_cache_size(&self) -> usize {
+        self.cache.borrow().len()
+    }
+
+    /// Record a closure call and return whether it's "hot" (called 10+ times)
+    pub fn record_closure_call(&self, bytecode_ptr: *const u8) -> bool {
+        let mut counts = self.call_counts.borrow_mut();
+        let count = counts.entry(bytecode_ptr).or_insert(0);
+        *count += 1;
+        *count >= 10
+    }
+
+    /// Get the call count for a closure
+    pub fn get_call_count(&self, bytecode_ptr: *const u8) -> usize {
+        self.call_counts
+            .borrow()
+            .get(&bytecode_ptr)
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 impl Default for JitExecutor {
@@ -259,6 +294,7 @@ impl Default for JitExecutor {
         Self::new().unwrap_or(JitExecutor {
             cache: Rc::new(RefCell::new(std::collections::HashMap::new())),
             jit_context: None,
+            call_counts: Rc::new(RefCell::new(std::collections::HashMap::new())),
         })
     }
 }

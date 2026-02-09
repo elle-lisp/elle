@@ -5,7 +5,7 @@
 
 (define check-safe-helper
   (lambda (col remaining row-offset)
-    (if (= (length remaining) 0)
+    (if (empty? remaining)
       #t
       (let ((placed-col (first remaining)))
         (if (or (= col placed-col)

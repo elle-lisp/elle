@@ -11,6 +11,7 @@ mod tests {
     use cranelift::prelude::*;
 
     fn test_compilation_no_panic(expr: &Expr, name: &str) {
+        use crate::symbol::SymbolTable;
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = cranelift::codegen::ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -22,7 +23,8 @@ mod tests {
         builder.switch_to_block(block);
         builder.seal_block(block);
 
-        let result = ExprCompiler::compile_expr_block(&mut builder, expr);
+        let symbols = SymbolTable::new();
+        let result = ExprCompiler::compile_expr_block(&mut builder, expr, &symbols);
 
         // Should not panic and should successfully compile
         assert!(

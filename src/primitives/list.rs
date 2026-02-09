@@ -41,6 +41,37 @@ pub fn prim_length(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Int(vec.len() as i64))
 }
 
+/// Check if a collection is empty (O(1) operation for most types)
+pub fn prim_empty(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 1 {
+        return Err("empty? requires exactly 1 argument".to_string());
+    }
+
+    match &args[0] {
+        // For lists: just check if it's nil
+        Value::Nil => Ok(Value::Bool(true)),
+        Value::Cons(_) => Ok(Value::Bool(false)),
+
+        // For strings: check if empty
+        Value::String(s) => Ok(Value::Bool(s.is_empty())),
+
+        // For vectors: check length (Rc<Vec<Value>>)
+        Value::Vector(v) => Ok(Value::Bool(v.is_empty())),
+
+        // For tables (hash maps): check if empty (Rc<RefCell<BTreeMap>>)
+        Value::Table(t) => Ok(Value::Bool(t.borrow().is_empty())),
+
+        // For structs: check field count (Rc<BTreeMap>)
+        Value::Struct(s) => Ok(Value::Bool(s.is_empty())),
+
+        // Other types are not sequences
+        _ => Err(format!(
+            "empty? requires a collection type (list, string, vector, table, or struct), got {:?}",
+            args[0].type_name()
+        )),
+    }
+}
+
 /// Append multiple lists
 pub fn prim_append(args: &[Value]) -> Result<Value, String> {
     let mut result = Vec::new();

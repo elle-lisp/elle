@@ -24,8 +24,8 @@ use super::introspection::{
 };
 use super::json::{prim_json_parse, prim_json_serialize, prim_json_serialize_pretty};
 use super::list::{
-    prim_append, prim_cons, prim_drop, prim_first, prim_last, prim_length, prim_list, prim_nth,
-    prim_rest, prim_reverse, prim_take,
+    prim_append, prim_cons, prim_drop, prim_empty, prim_first, prim_last, prim_length, prim_list,
+    prim_nth, prim_rest, prim_reverse, prim_take,
 };
 use super::logic::{prim_and, prim_not, prim_or, prim_xor};
 use super::macros::{prim_expand_macro, prim_is_macro};
@@ -99,6 +99,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Additional list operations
     register_fn(vm, symbols, "length", prim_length);
+    register_fn(vm, symbols, "empty?", prim_empty);
     register_fn(vm, symbols, "append", prim_append);
     register_fn(vm, symbols, "reverse", prim_reverse);
 
