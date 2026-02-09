@@ -1,0 +1,42 @@
+[package]
+name = "elle"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rustc-hash = "2.0"
+smallvec = "1.11"
+libloading = "0.8"
+bindgen = "0.69"
+rustyline = "14"
+cranelift = "0.101"
+cranelift-module = "0.101"
+cranelift-jit = "0.101"
+cranelift-native = "0.101"
+target-lexicon = "0.12"
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.4"
+iai-callgrind = "0.11"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+strip = true
+
+[profile.bench]
+inherits = "release"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[[bench]]
+name = "iai_benchmarks"
+harness = false
+
+[[bench]]
+name = "cranelift_jit_benchmarks"
+harness = false
