@@ -97,3 +97,7 @@ mod compiler_core {
 mod primitives_core {
     include!("primitives_core.rs");
 }
+
+mod jit_integration {
+    include!("jit_integration.rs");
+}

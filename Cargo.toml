@@ -40,3 +40,7 @@ harness = false
 [[bench]]
 name = "cranelift_jit_benchmarks"
 harness = false
+
+[[bench]]
+name = "jit_vs_bytecode"
+harness = false
