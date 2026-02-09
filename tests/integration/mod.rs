@@ -26,6 +26,9 @@ mod property {
 mod exception_handling {
     include!("exception_handling.rs");
 }
+mod handler_case {
+    include!("handler_case.rs");
+}
 mod ffi_marshaling {
     include!("ffi-marshaling.rs");
 }
