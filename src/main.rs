@@ -332,16 +332,31 @@ fn main() {
     // Check for command-line arguments
     let args: Vec<String> = env::args().collect();
     let mut had_errors = false;
+    let mut use_jit = false;
+    let mut files = Vec::new();
 
-    if args.len() > 1 {
+    // Parse flags and files
+    for arg in &args[1..] {
+        if arg == "--jit" {
+            use_jit = true;
+        } else if !arg.starts_with('-') {
+            files.push(arg.as_str());
+        }
+    }
+
+    if use_jit {
+        eprintln!("Elle: JIT mode enabled (experimental)");
+    }
+
+    if !files.is_empty() {
         // Run file(s)
-        for filename in &args[1..] {
+        for filename in files {
             if let Err(e) = run_file(filename, &mut vm, &mut symbols) {
                 eprintln!("Error: {}", e);
                 had_errors = true;
             }
         }
-    } else {
+    } else if args.len() == 1 || (use_jit && args.len() == 2) {
         // Run REPL
         run_repl(&mut vm, &mut symbols);
     }

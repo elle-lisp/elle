@@ -48,7 +48,10 @@ pub mod vm;
 // Re-export ffi primitives from the ffi module
 pub use ffi::primitives as ffi_primitives;
 
-pub use compiler::{compile, Bytecode};
+pub use compiler::{
+    compile, compile_jit, is_jit_compilable, Bytecode, JitCompiledFunction, JitCoordinator,
+    JitExecutor,
+};
 pub use error::{RuntimeError, SourceLoc};
 pub use primitives::{init_stdlib, register_primitives};
 pub use reader::{read_str, Lexer, Reader};
