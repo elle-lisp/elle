@@ -30,8 +30,8 @@ A classic backtracking algorithm that solves the N-Queens chess problem. Tests:
 |----------|-----|-----|--------|
 | Chez Scheme | 2 ✓ | 92 ✓ | Working |
 | SBCL | 2 ✓ | 92 ✓ | Working |
-| Janet | 0 ✗ | 0 ✗ | [Issue #155](https://github.com/disruptek/elle/issues/155) |
-| Elle | 1 ✗ | 1 ✗ | [Issue #154](https://github.com/disruptek/elle/issues/154) |
+| Janet | 2 ✓ | 92 ✓ | Fixed in #158 |
+| Elle | 2 ✓ | 92 ✓ | Fixed |
 
 ### Matrix Operations (`./matrix-ops/`)
 
@@ -146,18 +146,21 @@ DateTime (YYYYMMDDTHHmmSSZ): 20230208T153045Z
 
 ## Known Issues
 
-### Elle Bug #154: Incomplete Solution Search
-Elle's append operation in recursive contexts only preserves the first solution found.
-- File: `nqueens/nqueens.lisp`
-- Issue: [#154](https://github.com/disruptek/elle/issues/154)
-- Impact: All test sizes return 1 solution instead of the correct count
-
-### Janet Bug #155: Array Accumulation in Recursion
-Janet's `array/concat` in recursive backtracking contexts fails to accumulate solutions.
+### ✓ FIXED: Janet Bug #155: Array Accumulation in Recursion
+Janet's `array/concat` in recursive backtracking contexts failed to accumulate solutions.
 - File: `nqueens/nqueens.janet`
 - Issue: [#155](https://github.com/disruptek/elle/issues/155)
-- Impact: All test sizes return 0 solutions
-- Note: Safe function verified correct in isolation; bug is in recursive accumulation
+- Fix: [PR #158](https://github.com/disruptek/elle/pull/158) - Corrected queen array ordering
+- Previous Impact: All test sizes returned 0 solutions
+- Current Status: All test sizes return correct solution counts
+
+### ✓ FIXED: Elle Bug #154: Incomplete Solution Search
+Elle now correctly accumulates all solutions in recursive backtracking.
+- File: `nqueens/nqueens.lisp`
+- Issue: [#154](https://github.com/disruptek/elle/issues/154)
+- Fix: Provided working implementation that correctly uses append
+- Previous Impact: All test sizes returned 1 solution instead of correct count
+- Current Status: N=8 finds 92 solutions correctly
 
 ## Code Organization
 
