@@ -1,28 +1,28 @@
 # N-Queens Problem Solver in Janet
-# 
-# *** BUG: This implementation finds 0 solutions instead of the correct count ***
-# Expected: N=4 -> 2 solutions, N=8 -> 92 solutions
-# Actual: All return 0 solutions
 #
-# The algorithm mirrors the working Chez Scheme and SBCL versions.
-# The safe? function works correctly when tested in isolation.
-# The issue appears to be in how recursive solutions are accumulated via array/concat.
+# This implementation correctly solves the N-Queens problem using recursive backtracking.
 #
-# SUSPECTED ROOT CAUSE:
-# When solve() is called recursively, it returns an array of solutions.
-# We try to append these to our 'result' array using array/concat.
-# However, result always stays empty, suggesting:
-#   1. array/concat may not be working as expected
-#   2. The 'result' variable may be shadowed or scoped incorrectly
-#   3. The for loop + when block may not properly accumulate into result
-#   4. There could be a subtle issue with array mutation and closure capture
+# ROOT CAUSE OF THE ORIGINAL BUG:
+# The safe? function expects the queens array to be ordered with the most recently
+# placed queen first (most recent row first), but the code was building the array
+# in the opposite order by using array/push (which adds to the end).
 #
-# DEBUGGING TIPS:
-# - Add (printf "concat result: %v with solutions: %v\n" result solutions)
-#   before each array/concat call to trace what's happening
-# - Verify array/concat is actually modifying result by checking its length
-# - Try implementing an iterative solver that builds solutions without recursion
-# - Compare with a working recursive accumulator in pure Janet to isolate the issue
+# When checking if a column is safe, the algorithm iterates through queens[]:
+#   - queens[0] is treated as being 1 row back (row-offset = 1)
+#   - queens[1] is treated as being 2 rows back (row-offset = 2)
+#   - etc.
+#
+# But array/push appends to the end, so:
+#   - queens[0] was the FIRST queen placed (most rows ago)
+#   - queens[1] was placed LATER
+#
+# This caused the algorithm to check diagonal threats incorrectly, rejecting all
+# valid column placements and never reaching any solutions.
+#
+# THE FIX:
+# Use array/insert with index 0 instead of array/push to insert new queens at
+# the front of the array, maintaining the "most recent first" ordering that
+# safe? expects.
 
 (defn safe? [col queens]
   "Check if column col is safe given previously placed queens.
@@ -48,22 +48,16 @@
      Recursive case: Try each column, recurse, accumulate solutions"
     (if (= row n)
       # BASE CASE: successfully placed all n queens
-      (let [result @[]]
-        (array/push result (array/slice queens))
-        result)
+      @[(array/slice queens)]
       # RECURSIVE CASE: try each column in current row
-      (let [result @[]]
+        (let [result @[]]
         (for col 0 n
           (when (safe? col queens)
             # This column is safe - place queen here
-            (let [new-queens (array/push (array/slice queens) col)]
+            (let [new-queens (array/insert (array/slice queens) 0 col)]
               # Recurse to place remaining queens
               # solve() returns an array of solutions from that subtree
-              # We concat those solutions into our result array
-              # 
-              # THIS IS WHERE THE BUG LIKELY IS:
-              # After this line, result should contain accumulated solutions
-              # but it appears to stay empty no matter how many times this runs
+              # array/concat returns the modified result array
               (array/concat result (solve (+ row 1) new-queens)))))
         result)))
   (solve 0 @[]))
