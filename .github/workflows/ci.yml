@@ -1,0 +1,307 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: [stable, beta, nightly]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: cargo test --lib --verbose
+      - name: Run integration tests
+        run: cargo test --test '*' --verbose
+      - name: Run doc tests
+        run: cargo test --doc --verbose
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install and run cargo-audit
+        run: |
+          cargo install cargo-audit
+          cargo audit
+
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release
+      - name: Test all Lisp examples with release build
+        run: |
+          ELLE_BIN="./target/release/elle"
+          # Try TMPDIR, then TMP, then fallback to /tmp
+          TEMP_DIR="${TMPDIR:-${TMP:-/tmp}}/elle-examples-$$"
+          mkdir -p "$TEMP_DIR"
+
+          echo "Testing all Lisp examples with release build:"
+          echo "=============================================="
+
+          TOTAL=0
+          PASSED=0
+          FAILED=0
+
+          for example in examples/*.lisp; do
+            if [ ! -f "$example" ]; then
+              continue
+            fi
+
+            TOTAL=$((TOTAL + 1))
+            EXAMPLE_NAME=$(basename "$example")
+
+            echo ""
+            echo "Running: $EXAMPLE_NAME"
+            echo "---"
+
+            OUTPUT_FILE="$TEMP_DIR/output_$EXAMPLE_NAME.txt"
+            if timeout 10s "$ELLE_BIN" "$example" > "$OUTPUT_FILE" 2>&1; then
+              PASSED=$((PASSED + 1))
+              echo "✓ $EXAMPLE_NAME PASSED"
+              # Show first few lines of output
+              head -5 "$OUTPUT_FILE" | sed 's/^/  /'
+            else
+              FAILED=$((FAILED + 1))
+              echo "✗ $EXAMPLE_NAME FAILED"
+              # Show error details
+              head -10 "$OUTPUT_FILE" | sed 's/^/  /'
+              # Don't exit on failure - continue testing all examples
+            fi
+          done
+
+          # Cleanup
+          rm -rf "$TEMP_DIR"
+
+          echo ""
+          echo "=============================================="
+          echo "Results: $PASSED/$TOTAL passed, $FAILED failed"
+
+           if [ $FAILED -gt 0 ]; then
+             echo "✗ Some examples failed"
+             exit 1
+           else
+             echo "✓ All examples passed"
+           fi
+      - name: Run documentation generator
+        run: |
+          timeout 30 ./target/release/elle elle-doc/generate.lisp
+          echo "Documentation generator: PASSED"
+
+  elle-doc:
+    name: Documentation Generator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Elle
+        run: cargo build --release
+      - name: Generate documentation site
+        run: ./target/release/elle elle-doc/generate.lisp
+      - name: Verify generated files
+        run: |
+          test -f site/index.html || (echo "Missing index.html" && exit 1)
+          test -f site/getting-started.html || (echo "Missing getting-started.html" && exit 1)
+          test -f site/language-guide.html || (echo "Missing language-guide.html" && exit 1)
+          test -f site/stdlib-reference.html || (echo "Missing stdlib-reference.html" && exit 1)
+          test -f site/examples.html || (echo "Missing examples.html" && exit 1)
+          test -f site/style.css || (echo "Missing style.css" && exit 1)
+          echo "All documentation files generated successfully"
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: elle-doc-site
+          path: site/
+          retention-days: 30
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache tarpaulin
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/bin/cargo-tarpaulin
+          key: ${{ runner.os }}-tarpaulin-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-tarpaulin-
+      - name: Install tarpaulin
+        run: |
+          if ! command -v cargo-tarpaulin &> /dev/null; then
+            cargo install cargo-tarpaulin
+          fi
+      - name: Generate coverage
+        run: cargo tarpaulin
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./cobertura.xml
+          fail_ci_if_error: false
+
+  docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Elle
+        run: cargo build --release
+      - name: Generate Rust API docs
+        run: cargo doc --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+      - name: Generate Elle documentation site
+        run: ./target/release/elle elle-doc/generate.lisp
+      - name: Merge documentation
+        run: |
+          # Move Rust API docs under site/api/
+          mv target/doc site/api
+          # Create robots.txt
+          cat > site/robots.txt << 'EOF'
+          User-agent: *
+          Allow: /
+          Sitemap: https://disruptek.github.io/elle/sitemap.txt
+          EOF
+          # Create sitemap
+          cat > site/sitemap.txt << 'EOF'
+          https://disruptek.github.io/elle/
+          https://disruptek.github.io/elle/getting-started.html
+          https://disruptek.github.io/elle/language-guide.html
+          https://disruptek.github.io/elle/stdlib-reference.html
+          https://disruptek.github.io/elle/examples.html
+          https://disruptek.github.io/elle/api/elle/
+          https://disruptek.github.io/elle/api/elle/vm/
+          https://disruptek.github.io/elle/api/elle/ffi/
+          https://disruptek.github.io/elle/api/elle/compiler/
+          EOF
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation
+          path: site/
+          retention-days: 30
+
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    needs: docs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download documentation
+        uses: actions/download-artifact@v4
+        with:
+          name: documentation
+          path: ./doc-build
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: ./doc-build
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
+
+  benchmarks:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run Criterion benchmarks
+        run: cargo bench --bench benchmarks --no-run
+      - name: Check IAI benchmark build
+        run: cargo build --benches
+
+  all-checks:
+    name: All Checks Passed
+    needs: [test, fmt, clippy, examples, elle-doc, coverage, docs, benchmarks]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check test
+        if: needs.test.result != 'success'
+        run: exit 1
+      - name: Check fmt
+        if: needs.fmt.result != 'success'
+        run: exit 1
+      - name: Check clippy
+        if: needs.clippy.result != 'success'
+        run: exit 1
+      - name: Check examples
+        if: needs.examples.result != 'success'
+        run: exit 1
+      - name: Check elle-doc
+        if: needs.elle-doc.result != 'success'
+        run: exit 1
+      - name: Check docs
+        if: needs.docs.result != 'success'
+        run: exit 1
+      - name: Check benchmarks
+        if: needs.benchmarks.result != 'success'
+        run: exit 1
+      - name: Success
+        run: echo "All checks passed"
