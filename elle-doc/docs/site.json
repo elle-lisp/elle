@@ -7,6 +7,7 @@
     {"slug": "getting-started", "title": "Getting Started"},
     {"slug": "language-guide", "title": "Language Guide"},
     {"slug": "stdlib-reference", "title": "Standard Library"},
+    {"slug": "concurrency", "title": "Concurrency"},
     {"slug": "examples", "title": "Examples"}
   ]
 }

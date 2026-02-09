@@ -4,6 +4,31 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+
+/// A wrapper around Value that implements Send by using Arc instead of Rc
+/// This is only safe for values that have been checked with is_value_sendable
+#[derive(Clone)]
+pub struct SendValue(pub Arc<Value>);
+
+impl SendValue {
+    #[allow(clippy::arc_with_non_send_sync)]
+    pub fn new(value: Value) -> Self {
+        SendValue(Arc::new(value))
+    }
+
+    pub fn into_value(self) -> Value {
+        // Try to unwrap the Arc, or clone if there are other references
+        match Arc::try_unwrap(self.0) {
+            Ok(value) => value,
+            Err(arc) => (*arc).clone(),
+        }
+    }
+}
+
+// SAFETY: This is only safe because we check that values are sendable before wrapping
+unsafe impl Send for SendValue {}
+unsafe impl Sync for SendValue {}
 
 /// Symbol ID for interned symbols.
 ///
@@ -141,6 +166,30 @@ impl Exception {
     }
 }
 
+/// Thread handle for concurrent execution
+/// Holds the actual `Result<Value>` from the spawned thread
+///
+/// The result is wrapped in a `SendValue` to allow safe transmission across threads
+#[derive(Clone)]
+pub struct ThreadHandle {
+    /// The result of the spawned thread execution
+    /// `Arc<Mutex<>>` allows safe sharing across threads
+    /// The `Result` is wrapped in `SendValue` to make it Send
+    pub(crate) result: Arc<Mutex<Option<Result<SendValue, String>>>>,
+}
+
+impl fmt::Debug for ThreadHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ThreadHandle")
+    }
+}
+
+impl PartialEq for ThreadHandle {
+    fn eq(&self, _other: &Self) -> bool {
+        false // Thread handles are never equal
+    }
+}
+
 /// Core Lisp value type
 #[derive(Clone)]
 pub enum Value {
@@ -164,6 +213,8 @@ pub enum Value {
     Exception(Rc<Exception>),
     // Condition system (new CL-style exceptions)
     Condition(Rc<Condition>),
+    // Concurrency
+    ThreadHandle(ThreadHandle),
 }
 
 impl PartialEq for Value {
@@ -186,6 +237,7 @@ impl PartialEq for Value {
             (Value::CHandle(a), Value::CHandle(b)) => a == b,
             (Value::Exception(a), Value::Exception(b)) => a == b,
             (Value::Condition(a), Value::Condition(b)) => a == b,
+            (Value::ThreadHandle(a), Value::ThreadHandle(b)) => a == b,
             _ => false,
         }
     }
@@ -331,6 +383,7 @@ impl Value {
             Value::CHandle(_) => "c-handle",
             Value::Exception(_) => "exception",
             Value::Condition(_) => "condition",
+            Value::ThreadHandle(_) => "thread-handle",
         }
     }
 }
@@ -398,6 +451,7 @@ impl fmt::Debug for Value {
             Value::CHandle(h) => write!(f, "<c-handle:{}>", h.id),
             Value::Exception(exc) => write!(f, "<exception: {}>", exc.message),
             Value::Condition(cond) => write!(f, "<condition: id={}>", cond.exception_id),
+            Value::ThreadHandle(_) => write!(f, "<thread-handle>"),
         }
     }
 }

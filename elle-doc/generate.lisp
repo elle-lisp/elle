@@ -9,12 +9,18 @@
 ;; Escape HTML special characters
 (define html-escape
   (lambda (str)
-    ;; Apply all escapes in sequence
-    (define s1 (string-replace str "&" "&amp;"))
-    (define s2 (string-replace s1 "<" "&lt;"))
-    (define s3 (string-replace s2 ">" "&gt;"))
-    (define s4 (string-replace s3 "\"" "&quot;"))
-    (string-replace s4 "'" "&#39;")))
+    ;; Handle nil or non-string values
+    (if (nil? str)
+      ""
+      (if (not (string? str))
+        (string str)
+        ;; Apply all escapes in sequence
+        (begin
+          (define s1 (string-replace str "&" "&amp;"))
+          (define s2 (string-replace s1 "<" "&lt;"))
+          (define s3 (string-replace s2 ">" "&gt;"))
+          (define s4 (string-replace s3 "\"" "&quot;"))
+          (string-replace s4 "'" "&#39;"))))))
 
 ;; Find delimiter in text starting from character position
 (define find-closing-helper (lambda (text pos tlen delimiter dlen)

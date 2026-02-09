@@ -214,8 +214,10 @@ fn test_phase5_feature_availability() {
     assert!(eval("(add-module-path \".\")").is_ok());
     assert!(eval("(expand-macro 'x)").is_ok());
     assert!(eval("(macro? 'x)").is_ok());
-    assert!(eval("(spawn +)").is_ok());
-    assert!(eval("(join \"id\")").is_ok());
+    // spawn now requires a closure, not a native function
+    assert!(eval("(spawn (lambda () 42))").is_ok());
+    // join requires a thread handle, not a string
+    assert!(eval("(join (spawn (lambda () 42)))").is_ok());
     assert!(eval("(sleep 0)").is_ok());
     assert!(eval("(current-thread-id)").is_ok());
     assert!(eval("(debug-print 42)").is_ok());

@@ -1322,7 +1322,10 @@ fn test_import_file_with_invalid_file() {
 
     // Test loading a non-existent file
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
-    let result = call_primitive(&import_file, &[Value::String("/nonexistent/path.lisp".into())]);
+    let result = call_primitive(
+        &import_file,
+        &[Value::String("/nonexistent/path.lisp".into())],
+    );
     assert!(result.is_err(), "Should fail for non-existent file");
 
     // Clean up
@@ -1447,11 +1450,10 @@ fn test_spawn_primitive() {
     let result = call_primitive(&spawn, &[closure]);
     assert!(result.is_ok());
     match result.unwrap() {
-        Value::String(s) => {
-            // Should return a thread ID string
-            assert!(!s.is_empty());
+        Value::ThreadHandle(_) => {
+            // Should return a thread handle
         }
-        _ => panic!("spawn should return a string (thread ID)"),
+        _ => panic!("spawn should return a thread handle"),
     }
 
     // Test with non-function
@@ -1464,9 +1466,10 @@ fn test_join_primitive() {
     let (vm, mut symbols) = setup();
     let join = get_primitive(&vm, &mut symbols, "join");
 
-    // join with thread handle string
+    // join with invalid argument (not a thread handle)
     let result = call_primitive(&join, &[Value::String("thread-id".into())]);
-    assert!(result.is_ok());
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("thread handle"));
 }
 
 #[test]
