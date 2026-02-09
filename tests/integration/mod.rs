@@ -101,3 +101,7 @@ mod primitives_core {
 mod jit_integration {
     include!("jit_integration.rs");
 }
+
+mod concurrency {
+    include!("concurrency.rs");
+}

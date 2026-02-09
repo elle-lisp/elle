@@ -21,7 +21,11 @@ impl VM {
         self.execute_bytecode(&bytecode.instructions, &bytecode.constants, None)
     }
 
-    fn execute_bytecode(
+    /// Execute raw bytecode with optional closure environment
+    ///
+    /// This is used internally for closure execution and by spawn/join primitives
+    /// to execute closures in spawned threads.
+    pub fn execute_bytecode(
         &mut self,
         bytecode: &[u8],
         constants: &[Value],
