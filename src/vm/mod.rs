@@ -145,6 +145,14 @@ impl VM {
                                 return Err("Stack overflow".to_string());
                             }
 
+                            // Record this closure call for profiling (only track hot closures)
+                            let bytecode_ptr = closure.bytecode.as_ptr();
+                            let is_hot = self.record_closure_call(bytecode_ptr);
+                            if is_hot {
+                                // TODO: When hot, attempt to compile and cache this closure
+                                // For now, just track that it's hot
+                            }
+
                             // Validate argument count
                             match closure.arity {
                                 crate::value::Arity::Exact(n) => {

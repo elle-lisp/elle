@@ -35,6 +35,7 @@ pub struct VM {
     pub exception_handlers: Vec<ExceptionHandler>, // Stack of active exception handlers
     pub current_exception: Option<Rc<Condition>>, // Current exception being handled
     pub handling_exception: bool,        // True if we're currently in exception handler code
+    pub closure_call_counts: std::collections::HashMap<*const u8, usize>, // Track closure call frequencies for JIT
 }
 
 /// Exception type hierarchy (baked into VM for inheritance checking)
@@ -91,6 +92,7 @@ impl VM {
             exception_handlers: Vec::new(),
             current_exception: None,
             handling_exception: false,
+            closure_call_counts: std::collections::HashMap::new(),
         }
     }
 
@@ -100,6 +102,21 @@ impl VM {
 
     pub fn get_global(&self, sym_id: u32) -> Option<&Value> {
         self.globals.get(&sym_id)
+    }
+
+    /// Record a closure call and return whether it's "hot" (called 10+ times)
+    pub fn record_closure_call(&mut self, bytecode_ptr: *const u8) -> bool {
+        let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
+        *count += 1;
+        *count >= 10
+    }
+
+    /// Get call count for a closure
+    pub fn get_closure_call_count(&self, bytecode_ptr: *const u8) -> usize {
+        self.closure_call_counts
+            .get(&bytecode_ptr)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Define a module with exported symbols
