@@ -10,5 +10,9 @@ the beginning.
 A second goal is to be fast enough that LLMs can live-code with any shared
 object on the system. Let's be real, though; you can never be fast enough.
 
+One non-goal is to ever support backward compatibility. Instead, we will
+maintain a program to convert Elle code from the prior version to the new
+version.
+
 ## License
 MIT
