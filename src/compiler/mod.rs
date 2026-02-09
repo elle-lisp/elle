@@ -5,6 +5,7 @@ pub mod bytecode_debug;
 pub mod capture_resolution;
 pub mod compile;
 pub mod converters;
+pub mod cranelift;
 pub mod exception_registry;
 pub mod linter;
 pub mod macros;
