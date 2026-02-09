@@ -436,14 +436,19 @@ impl VM {
 
                 Instruction::BindException => {
                     // Bind caught exception to a variable
-                    let var_id = self.read_u16(bytecode, &mut ip);
+                    // Read constant index that contains the symbol
+                    let const_idx = self.read_u16(bytecode, &mut ip) as usize;
 
                     // Get the current exception if it exists
                     if let Some(exc) = &self.current_exception {
-                        // Bind the exception to the variable in the current scope
-                        // For now, use globals as a simple binding mechanism
-                        self.globals
-                            .insert(var_id as u32, Value::Condition(exc.clone()));
+                        // Extract the symbol ID from constants
+                        if let Some(Value::Symbol(sym_id)) = constants.get(const_idx) {
+                            // Bind the exception to the variable in the current scope
+                            // For now, use globals as a simple binding mechanism
+                            self.globals.insert(sym_id.0, Value::Condition(exc.clone()));
+                        } else {
+                            return Err("BindException: Expected symbol in constants".to_string());
+                        }
                     }
                 }
 

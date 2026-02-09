@@ -783,3 +783,157 @@ fn test_try_catch_with_side_effects() {
     let result = eval("(try (/ 10 0) (catch e 99))").unwrap();
     assert_eq!(result, Value::Int(99));
 }
+
+// ============================================================================
+// Regression Tests for Issue #162: Sequential Exception-Catching
+// ============================================================================
+
+#[test]
+fn test_sequential_exception_catching_regression() {
+    // Issue #162: Sequential exception-catching failed in same execution context
+    // First exception should be caught and handled
+    let r1 = eval("(try (/ 10 0) (catch e 99))").unwrap();
+    assert_eq!(r1, Value::Int(99));
+
+    // Second exception should also be caught (this used to fail with "Cannot call <condition: id=4>")
+    let r2 = eval("(try (/ 20 0) (catch e 88))").unwrap();
+    assert_eq!(r2, Value::Int(88));
+}
+
+#[test]
+fn test_multiple_sequential_catches() {
+    // Multiple sequential try/catch blocks in single expression
+    let result = eval(
+        "(begin 
+        (define r1 (try (/ 10 0) (catch e 99)))
+        (define r2 (try (/ 20 0) (catch e 88)))
+        (define r3 (try (+ 1 2) (catch e 0)))
+        (list r1 r2 r3)
+    )",
+    )
+    .unwrap();
+
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 3);
+    assert_eq!(vec[0], Value::Int(99));
+    assert_eq!(vec[1], Value::Int(88));
+    assert_eq!(vec[2], Value::Int(3));
+}
+
+#[test]
+fn test_exception_variable_binding_multiple_catches() {
+    // Verify exception variables are correctly bound in sequential catches
+    let result = eval(
+        "(begin
+        (define e1 (try (/ 10 0) (catch exc exc)))
+        (define e2 (try (/ 20 0) (catch exc exc)))
+        (list e1 e2)
+    )",
+    )
+    .unwrap();
+
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 2);
+    // Both should be condition values
+    assert!(matches!(vec[0], Value::Condition(_)));
+    assert!(matches!(vec[1], Value::Condition(_)));
+}
+
+#[test]
+fn test_nested_sequential_exception_catching() {
+    // Nested function calls with sequential exception catching
+    let result = eval(
+        "(begin
+        (define safe-divide (lambda (a b)
+          (try (/ a b) (catch e nil))))
+        (define r1 (safe-divide 10 0))
+        (define r2 (safe-divide 20 0))
+        (list r1 r2)
+    )",
+    )
+    .unwrap();
+
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 2);
+    assert_eq!(vec[0], Value::Nil);
+    assert_eq!(vec[1], Value::Nil);
+}
+
+#[test]
+fn test_mixed_success_and_exception_sequential() {
+    // Mix of successful and exception-throwing expressions
+    let result = eval(
+        "(begin
+        (define r1 (try (+ 1 2) (catch e 0)))
+        (define r2 (try (/ 10 0) (catch e 99)))
+        (define r3 (try (* 3 4) (catch e 0)))
+        (define r4 (try (/ 20 0) (catch e 88)))
+        (list r1 r2 r3 r4)
+    )",
+    )
+    .unwrap();
+
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 4);
+    assert_eq!(vec[0], Value::Int(3));
+    assert_eq!(vec[1], Value::Int(99));
+    assert_eq!(vec[2], Value::Int(12));
+    assert_eq!(vec[3], Value::Int(88));
+}
+
+#[test]
+fn test_exception_catching_in_loop() {
+    // Exception catching inside nested expressions
+    let result = eval(
+        "(list
+        (try (/ 10 0) (catch e 110))
+        (try (/ 20 0) (catch e 120))
+        (try (/ 30 0) (catch e 130))
+    )",
+    )
+    .unwrap();
+
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 3);
+    assert_eq!(vec[0], Value::Int(110));
+    assert_eq!(vec[1], Value::Int(120));
+    assert_eq!(vec[2], Value::Int(130));
+}
+
+#[test]
+fn test_exception_with_finally_sequential() {
+    // Sequential exception catching with finally blocks
+    let result = eval(
+        "(begin
+        (define r1 (try (/ 10 0) (catch e 99) (finally #f)))
+        (define r2 (try (/ 20 0) (catch e 88) (finally #f)))
+        (list r1 r2)
+    )",
+    )
+    .unwrap();
+
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 2);
+    assert_eq!(vec[0], Value::Int(99));
+    assert_eq!(vec[1], Value::Int(88));
+}
+
+#[test]
+fn test_exception_access_in_subsequent_expression() {
+    // Access exception variable in subsequent code paths
+    let result = eval(
+        "(begin
+        (define exc1 (try (/ 10 0) (catch e e)))
+        (define exc2 (try (/ 20 0) (catch e e)))
+        ; Both should be condition values - just verify they're defined
+        (list exc1 exc2)
+    )",
+    )
+    .unwrap();
+
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 2);
+    // Both should be condition values
+    assert!(matches!(vec[0], Value::Condition(_)));
+    assert!(matches!(vec[1], Value::Condition(_)));
+}
