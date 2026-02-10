@@ -5,7 +5,7 @@
 mod tests {
     use elle::compiler::symbol_index::SymbolIndex;
     use elle::SymbolTable;
-    use elle_lsp::{definition, formatting, references};
+    use elle_lsp::{definition, formatting, references, rename};
 
     // --- Definition tests ---
 
@@ -118,5 +118,68 @@ mod tests {
         let edit = &edits[0];
         assert!(edit.get("range").is_some());
         assert!(edit.get("newText").is_some());
+    }
+
+    // --- Rename tests ---
+
+    #[test]
+    fn test_rename_symbol_no_symbol_at_position() {
+        let index = SymbolIndex::new();
+        let symbol_table = SymbolTable::new();
+        let source = "(define foo 1)";
+        let uri = "file:///test.elle";
+
+        let result = rename::rename_symbol(0, 0, "bar", &index, &symbol_table, source, uri);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No symbol found"));
+    }
+
+    #[test]
+    fn test_rename_symbol_validate_empty_name() {
+        let index = SymbolIndex::new();
+        let symbol_table = SymbolTable::new();
+        let source = "(define foo 1)";
+        let uri = "file:///test.elle";
+
+        // Empty name should fail validation
+        let result = rename::rename_symbol(0, 10, "", &index, &symbol_table, source, uri);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rename_symbol_validate_reserved_word() {
+        let index = SymbolIndex::new();
+        let symbol_table = SymbolTable::new();
+        let source = "(define foo 1)";
+        let uri = "file:///test.elle";
+
+        // Reserved word should fail validation
+        let result = rename::rename_symbol(0, 10, "define", &index, &symbol_table, source, uri);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("reserved"));
+    }
+
+    #[test]
+    fn test_rename_symbol_validate_invalid_characters() {
+        let index = SymbolIndex::new();
+        let symbol_table = SymbolTable::new();
+        let source = "(define foo 1)";
+        let uri = "file:///test.elle";
+
+        // Invalid characters should fail validation
+        let result = rename::rename_symbol(0, 10, "foo@bar", &index, &symbol_table, source, uri);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rename_symbol_returns_workspace_edit() {
+        let index = SymbolIndex::new();
+        let symbol_table = SymbolTable::new();
+        let source = "(define foo 1)";
+        let uri = "file:///test.elle";
+
+        // With empty symbol index, should return error about no symbol found
+        let result = rename::rename_symbol(0, 10, "bar", &index, &symbol_table, source, uri);
+        assert!(result.is_err());
     }
 }

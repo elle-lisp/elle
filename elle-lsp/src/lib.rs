@@ -14,5 +14,6 @@ pub mod handler;
 pub mod hover;
 pub mod protocol;
 pub mod references;
+pub mod rename;
 
 pub use compiler_state::CompilerState;
