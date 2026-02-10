@@ -22,16 +22,18 @@ pub fn read_str(input: &str, symbols: &mut SymbolTable) -> Result<Value, String>
 
     let mut lexer = Lexer::new(&input_owned);
     let mut tokens = Vec::new();
+    let mut locations = Vec::new();
 
-    while let Some(token) = lexer.next_token()? {
-        tokens.push(OwnedToken::from(token));
+    while let Some(token_with_loc) = lexer.next_token_with_loc()? {
+        tokens.push(OwnedToken::from(token_with_loc.token));
+        locations.push(token_with_loc.loc);
     }
 
     if tokens.is_empty() {
         return Err("No input".to_string());
     }
 
-    let mut reader = Reader::new(tokens);
+    let mut reader = Reader::with_locations(tokens, locations);
     reader.read(symbols)
 }
 

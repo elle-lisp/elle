@@ -39,6 +39,22 @@ impl SourceLoc {
             col: 1,
         }
     }
+
+    /// Get position as "file:line:col" string
+    pub fn position(&self) -> String {
+        format!("{}:{}:{}", self.file, self.line, self.col)
+    }
+
+    /// Check if this is an unknown location
+    pub fn is_unknown(&self) -> bool {
+        self.file == "<unknown>"
+    }
+
+    /// Create a copy with a different file name
+    pub fn with_file(mut self, file: impl Into<String>) -> Self {
+        self.file = file.into();
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

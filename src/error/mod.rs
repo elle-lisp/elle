@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 mod builders;
+pub mod formatting;
 mod runtime;
 mod sourceloc;
 mod types;

@@ -3,6 +3,11 @@
 use crate::reader::SourceLoc;
 use std::fmt;
 
+/// Optional source code for displaying diagnostics with context
+pub struct DiagnosticContext {
+    pub source: String,
+}
+
 /// Severity level of a diagnostic
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
@@ -81,6 +86,63 @@ impl Diagnostic {
         }
 
         output
+    }
+
+    /// Format diagnostic with source context
+    ///
+    /// Includes source line and caret pointing to error location
+    pub fn format_with_context(&self, source: &str) -> String {
+        let mut output = String::new();
+
+        match &self.location {
+            Some(loc) => {
+                output.push_str(&format!(
+                    "{} [{}] {}\n",
+                    self.severity, self.code, self.rule
+                ));
+                output.push_str(&format!("  --> {}\n", loc.position()));
+
+                // Add source context if available
+                if !loc.is_unknown() {
+                    if let Some(line) =
+                        crate::error::formatting::extract_source_line(source, loc.line)
+                    {
+                        output.push_str("   |\n");
+                        let line_num_str = loc.line.to_string();
+                        let padding = " ".repeat(line_num_str.len());
+                        output.push_str(&format!(" {} | {}\n", line_num_str, line));
+                        output.push_str(&format!(
+                            " {} | {}\n",
+                            padding,
+                            crate::error::formatting::highlight_column(&line, loc.col)
+                        ));
+                    }
+                }
+            }
+            None => {
+                output.push_str(&format!(
+                    "{} [{}] {}\n",
+                    self.severity, self.code, self.rule
+                ));
+            }
+        }
+
+        output.push_str(&format!("   message: {}\n", self.message));
+
+        if !self.suggestions.is_empty() {
+            output.push_str("   help:\n");
+            for suggestion in &self.suggestions {
+                output.push_str(&format!("     - {}\n", suggestion));
+            }
+        }
+
+        output
+    }
+}
+
+impl fmt::Display for Diagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.format_human())
     }
 }
 
