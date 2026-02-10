@@ -8,6 +8,7 @@
 
 pub mod compiler_state;
 pub mod completion;
+pub mod definition;
 pub mod handler;
 pub mod hover;
 pub mod protocol;

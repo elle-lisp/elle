@@ -6,7 +6,7 @@
 //! - Code completion suggestions
 //! - Navigation to symbol definitions
 
-use elle_lsp::{completion, hover, CompilerState};
+use elle_lsp::{completion, definition, hover, CompilerState};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 
@@ -55,13 +55,13 @@ fn main() {
 
             // Send response
             let body = response.to_string();
-            let _ = writeln!(stdout, "Content-Length: {}\r\n\r{}", body.len(), body);
+            let _ = write!(stdout, "Content-Length: {}\r\n\r\n{}", body.len(), body);
             let _ = stdout.flush();
 
             // Send notifications (e.g., diagnostics)
             for notification in notifications {
                 let body = notification.to_string();
-                let _ = writeln!(stdout, "Content-Length: {}\r\n\r{}", body.len(), body);
+                let _ = write!(stdout, "Content-Length: {}\r\n\r\n{}", body.len(), body);
                 let _ = stdout.flush();
             }
         }
@@ -113,6 +113,7 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                     "capabilities": {
                         "textDocumentSync": 1,
                         "hoverProvider": true,
+                        "definitionProvider": true,
                         "completionProvider": {
                             "resolveProvider": true,
                             "triggerCharacters": ["("]
@@ -337,6 +338,39 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                     "isIncomplete": false,
                     "items": items
                 }
+            })
+        }
+        "textDocument/definition" => {
+            let mut result = None;
+
+            if let Some(params) = params {
+                if let Some(uri) = params
+                    .get("textDocument")
+                    .and_then(|d| d.get("uri"))
+                    .and_then(|u| u.as_str())
+                {
+                    if let Some(position) = params.get("position").and_then(|p| p.as_object()) {
+                        if let (Some(line), Some(character)) = (
+                            position.get("line").and_then(|l| l.as_u64()),
+                            position.get("character").and_then(|c| c.as_u64()),
+                        ) {
+                            if let Some(doc) = compiler_state.get_document(uri) {
+                                result = definition::find_definition(
+                                    line as u32,
+                                    character as u32,
+                                    &doc.symbol_index,
+                                    compiler_state.symbol_table(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": result
             })
         }
         _ => {
