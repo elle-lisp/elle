@@ -109,3 +109,7 @@ mod concurrency {
 mod error_reporting {
     include!("error_reporting.rs");
 }
+
+mod repl_exit_codes {
+    include!("repl_exit_codes.rs");
+}

@@ -173,7 +173,7 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
     }
 }
 
-fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
+fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
     print_welcome();
 
     // Create REPL with readline support
@@ -182,12 +182,12 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
         Err(e) => {
             eprintln!("✗ Failed to initialize readline: {}", e);
             // Fall back to basic stdin reading
-            run_repl_fallback(vm, symbols);
-            return;
+            return run_repl_fallback(vm, symbols);
         }
     };
 
     let mut accumulated_input = String::new();
+    let mut had_errors = false;
 
     loop {
         // Read line with readline support
@@ -225,6 +225,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
                             Ok(e) => e,
                             Err(e) => {
                                 eprintln!("✗ Compilation error: {}", e);
+                                had_errors = true;
                                 continue;
                             }
                         };
@@ -240,6 +241,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
                             }
                             Err(e) => {
                                 eprintln!("✗ Runtime error: {}", e);
+                                had_errors = true;
                             }
                         }
                     }
@@ -278,6 +280,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
 
                             print_error_context(accumulated_input.trim(), "parse error", line, col);
                             accumulated_input.clear();
+                            had_errors = true;
                         }
                     }
                 }
@@ -292,6 +295,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
             }
             Err(e) => {
                 eprintln!("✗ Readline error: {}", e);
+                had_errors = true;
                 break;
             }
         }
@@ -299,12 +303,15 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Save history
     repl.finalize();
+
+    had_errors
 }
 
-fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) {
+fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
     eprintln!("Using fallback stdin input (no history or editing)");
 
     let mut accumulated_input = String::new();
+    let mut had_errors = false;
 
     loop {
         print!("> ");
@@ -345,6 +352,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) {
                     Ok(e) => e,
                     Err(e) => {
                         eprintln!("✗ Compilation error: {}", e);
+                        had_errors = true;
                         continue;
                     }
                 };
@@ -360,6 +368,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) {
                     }
                     Err(e) => {
                         eprintln!("✗ Runtime error: {}", e);
+                        had_errors = true;
                     }
                 }
             }
@@ -396,10 +405,13 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) {
 
                     print_error_context(trimmed, "parse error", line, col);
                     accumulated_input.clear();
+                    had_errors = true;
                 }
             }
         }
     }
+
+    had_errors
 }
 
 fn main() {
@@ -447,7 +459,9 @@ fn main() {
         }
     } else if args.len() == 1 || (use_jit && args.len() == 2) {
         // Run REPL
-        run_repl(&mut vm, &mut symbols);
+        if run_repl(&mut vm, &mut symbols) {
+            had_errors = true;
+        }
     }
 
     // Clear VM context
