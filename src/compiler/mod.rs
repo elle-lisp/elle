@@ -18,7 +18,7 @@ pub mod symbol_index;
 
 pub use bytecode::{Bytecode, Instruction};
 pub use bytecode_debug::{disassemble, format_bytecode_with_constants};
-pub use compile::compile;
+pub use compile::{compile, compile_with_metadata};
 pub use converters::value_to_expr;
 pub use jit_coordinator::JitCoordinator;
 pub use jit_executor::JitExecutor;

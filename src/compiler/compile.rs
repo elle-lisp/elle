@@ -1,5 +1,6 @@
 use super::ast::Expr;
 use super::bytecode::{Bytecode, Instruction};
+use crate::error::LocationMap;
 use crate::value::{Closure, SymbolId, Value};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -1044,4 +1045,20 @@ pub fn compile(expr: &Expr) -> Bytecode {
     compiler.compile_expr(expr, true);
     compiler.bytecode.emit(Instruction::Return);
     compiler.finish()
+}
+
+/// Compile an expression to bytecode with source location metadata
+///
+/// Returns a tuple of (bytecode, location_map) where the location_map
+/// contains the mapping from bytecode instruction index to source location.
+///
+/// Note: Currently returns an empty location map. Full metadata tracking
+/// will be implemented in a future phase.
+pub fn compile_with_metadata(
+    expr: &Expr,
+    _location: Option<crate::reader::SourceLoc>,
+) -> (Bytecode, LocationMap) {
+    let bytecode = compile(expr);
+    let location_map = LocationMap::new(); // Empty for now - phase 2 will populate this
+    (bytecode, location_map)
 }

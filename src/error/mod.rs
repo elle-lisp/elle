@@ -3,6 +3,8 @@
 //! Replaces generic `Result<T, String>` with typed error enums for better
 //! error handling, reporting, and composability.
 
+use std::collections::HashMap;
+
 mod builders;
 mod runtime;
 mod sourceloc;
@@ -15,6 +17,13 @@ pub use builders::{
 pub use runtime::RuntimeError;
 pub use sourceloc::SourceLoc;
 pub use types::EllError;
+
+/// Mapping from bytecode instruction index to source code location
+///
+/// Used for generating runtime error messages with source location information.
+/// Maps instruction pointers to the source location they originated from.
+/// Uses SourceLoc from the reader module which includes file information.
+pub type LocationMap = HashMap<usize, SourceLoc>;
 
 #[cfg(test)]
 mod tests {
@@ -225,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_source_loc_creation() {
-        let loc = SourceLoc::new(10, 5);
+        let loc = SourceLoc::from_line_col(10, 5);
         assert_eq!(loc.line, 10);
         assert_eq!(loc.col, 5);
     }
@@ -239,14 +248,15 @@ mod tests {
 
     #[test]
     fn test_source_loc_display() {
-        let loc = SourceLoc::new(42, 13);
+        let loc = SourceLoc::from_line_col(42, 13);
         let display = format!("{}", loc);
-        assert_eq!(display, "42:13");
+        assert!(display.contains("42:13"));
     }
 
     #[test]
     fn test_runtime_error_with_location() {
-        let err = RuntimeError::new("test error".to_string()).with_location(SourceLoc::new(5, 10));
+        let err = RuntimeError::new("test error".to_string())
+            .with_location(SourceLoc::from_line_col(5, 10));
         assert!(err.location.is_some());
         assert_eq!(err.location.unwrap().line, 5);
     }
@@ -261,7 +271,8 @@ mod tests {
 
     #[test]
     fn test_runtime_error_display_with_location() {
-        let err = RuntimeError::new("test error".to_string()).with_location(SourceLoc::new(42, 5));
+        let err = RuntimeError::new("test error".to_string())
+            .with_location(SourceLoc::from_line_col(42, 5));
         let display = format!("{}", err);
         assert!(display.contains("42:5"));
         assert!(display.contains("test error"));
