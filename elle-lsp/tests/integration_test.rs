@@ -5,7 +5,7 @@
 mod tests {
     use elle::compiler::symbol_index::SymbolIndex;
     use elle::SymbolTable;
-    use elle_lsp::{definition, formatting, references, rename};
+    use elle_lsp::{definition, formatting, references, rename, CompilerState};
 
     // --- Definition tests ---
 
@@ -181,5 +181,101 @@ mod tests {
         // With empty symbol index, should return error about no symbol found
         let result = rename::rename_symbol(0, 10, "bar", &index, &symbol_table, source, uri);
         assert!(result.is_err());
+    }
+
+    // --- Syntax Error Tests ---
+
+    #[test]
+    fn test_compile_document_captures_syntax_errors() {
+        let mut compiler_state = CompilerState::new();
+        let uri = "file:///test.elle";
+        let invalid_code = "(define foo 1))"; // Extra closing paren
+
+        compiler_state.on_document_open(uri.to_string(), invalid_code.to_string());
+        compiler_state.compile_document(uri);
+
+        if let Some(doc) = compiler_state.get_document(uri) {
+            // Should have captured a syntax error
+            assert!(!doc.diagnostics.is_empty());
+            assert!(doc.diagnostics[0].severity as i32 >= 2); // Error level (3) >= 2
+        }
+    }
+
+    #[test]
+    fn test_didopen_emits_syntax_errors_as_diagnostics() {
+        let mut compiler_state = CompilerState::new();
+        let uri = "file:///test.elle";
+        let invalid_code = "(((("; // Invalid expression
+
+        compiler_state.on_document_open(uri.to_string(), invalid_code.to_string());
+        compiler_state.compile_document(uri);
+
+        if let Some(doc) = compiler_state.get_document(uri) {
+            // Should have syntax error diagnostics
+            assert!(!doc.diagnostics.is_empty());
+            let error_diags: Vec<_> = doc
+                .diagnostics
+                .iter()
+                .filter(|d| d.severity == elle::compiler::linter::diagnostics::Severity::Error)
+                .collect();
+            assert!(!error_diags.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_didchange_updates_syntax_errors() {
+        let mut compiler_state = CompilerState::new();
+        let uri = "file:///test.elle";
+
+        // Start with valid code
+        compiler_state.on_document_open(uri.to_string(), "(+ 1 2)".to_string());
+        compiler_state.compile_document(uri);
+
+        if let Some(doc) = compiler_state.get_document(uri) {
+            assert!(doc.diagnostics.is_empty());
+        }
+
+        // Change to invalid code
+        compiler_state.on_document_change(uri, "((((invalid".to_string());
+        compiler_state.compile_document(uri);
+
+        if let Some(doc) = compiler_state.get_document(uri) {
+            // Should now have syntax errors
+            assert!(!doc.diagnostics.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_didclose_removes_document_state() {
+        let mut compiler_state = CompilerState::new();
+        let uri = "file:///test.elle";
+
+        compiler_state.on_document_open(uri.to_string(), "(+ 1 2)".to_string());
+        assert!(compiler_state.get_document(uri).is_some());
+
+        compiler_state.on_document_close(uri);
+        assert!(compiler_state.get_document(uri).is_none());
+    }
+
+    #[test]
+    fn test_compile_valid_code_no_syntax_errors() {
+        let mut compiler_state = CompilerState::new();
+        let uri = "file:///test.elle";
+
+        compiler_state.on_document_open(
+            uri.to_string(),
+            "(define my-func (lambda (x) (+ x 1)))".to_string(),
+        );
+        compiler_state.compile_document(uri);
+
+        if let Some(doc) = compiler_state.get_document(uri) {
+            // Valid code should have no syntax errors
+            let syntax_errors: Vec<_> = doc
+                .diagnostics
+                .iter()
+                .filter(|d| d.rule == "syntax-error")
+                .collect();
+            assert!(syntax_errors.is_empty());
+        }
     }
 }
