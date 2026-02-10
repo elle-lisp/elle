@@ -6,7 +6,7 @@
 //! - Code completion suggestions
 //! - Navigation to symbol definitions
 
-use elle_lsp::{completion, definition, hover, CompilerState};
+use elle_lsp::{completion, definition, hover, references, CompilerState};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 
@@ -114,6 +114,7 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                         "textDocumentSync": 1,
                         "hoverProvider": true,
                         "definitionProvider": true,
+                        "referencesProvider": true,
                         "completionProvider": {
                             "resolveProvider": true,
                             "triggerCharacters": ["("]
@@ -371,6 +372,47 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": result
+            })
+        }
+        "textDocument/references" => {
+            let mut results = Vec::new();
+
+            if let Some(params) = params {
+                if let Some(uri) = params
+                    .get("textDocument")
+                    .and_then(|d| d.get("uri"))
+                    .and_then(|u| u.as_str())
+                {
+                    if let Some(position) = params.get("position").and_then(|p| p.as_object()) {
+                        if let (Some(line), Some(character)) = (
+                            position.get("line").and_then(|l| l.as_u64()),
+                            position.get("character").and_then(|c| c.as_u64()),
+                        ) {
+                            // Get include_declaration parameter (defaults to false per LSP spec)
+                            let include_declaration = params
+                                .get("context")
+                                .and_then(|ctx| ctx.get("includeDeclaration"))
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+
+                            if let Some(doc) = compiler_state.get_document(uri) {
+                                results = references::find_references(
+                                    line as u32,
+                                    character as u32,
+                                    include_declaration,
+                                    &doc.symbol_index,
+                                    compiler_state.symbol_table(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": results
             })
         }
         _ => {
