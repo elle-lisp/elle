@@ -72,15 +72,21 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
     {
         let mut lexer = elle::reader::Lexer::new(&contents);
         let mut temp_tokens = Vec::new();
+        let mut temp_locations = Vec::new();
         loop {
-            match lexer.next_token() {
-                Ok(Some(token)) => temp_tokens.push(elle::reader::OwnedToken::from(token)),
+            match lexer.next_token_with_loc() {
+                Ok(Some(mut token_with_loc)) => {
+                    // Set the file name in the location
+                    token_with_loc.loc.file = filename.to_string();
+                    temp_tokens.push(elle::reader::OwnedToken::from(token_with_loc.token));
+                    temp_locations.push(token_with_loc.loc);
+                }
                 Ok(None) => break,
                 Err(_) => break,
             }
         }
 
-        let mut temp_reader = elle::reader::Reader::new(temp_tokens);
+        let mut temp_reader = elle::reader::Reader::with_locations(temp_tokens, temp_locations);
         while let Some(result) = temp_reader.try_read(symbols) {
             match result {
                 Ok(value) => {
@@ -99,9 +105,8 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("✗ Parse error: {}", e);
-                    had_parse_error = true;
+                Err(_) => {
+                    // Suppress error reporting in first pass; errors will be reported in second pass
                 }
             }
         }
@@ -110,15 +115,21 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
     // Second pass: execute all expressions
     let mut lexer = elle::reader::Lexer::new(&contents);
     let mut tokens = Vec::new();
+    let mut locations = Vec::new();
     loop {
-        match lexer.next_token() {
-            Ok(Some(token)) => tokens.push(elle::reader::OwnedToken::from(token)),
+        match lexer.next_token_with_loc() {
+            Ok(Some(mut token_with_loc)) => {
+                // Set the file name in the location
+                token_with_loc.loc.file = filename.to_string();
+                tokens.push(elle::reader::OwnedToken::from(token_with_loc.token));
+                locations.push(token_with_loc.loc);
+            }
             Ok(None) => break,
             Err(e) => return Err(format!("Lexer error: {}", e)),
         }
     }
 
-    let mut reader = elle::reader::Reader::new(tokens);
+    let mut reader = elle::reader::Reader::with_locations(tokens, locations);
     while let Some(result) = reader.try_read(symbols) {
         match result {
             Ok(value) => {
@@ -241,9 +252,31 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
                             // Expression is incomplete, prompt for more input on next line
                             // Don't print an error, just continue accumulating
                         } else {
-                            // Real parse error
-                            eprintln!("✗ Parse error: {}", e);
-                            print_error_context(accumulated_input.trim(), "parse error", 1, 1);
+                            // Real parse error - extract line and column from error message
+                            let err_msg = e.to_string();
+                            eprintln!("✗ Parse error: {}", err_msg);
+
+                            // Try to extract line and column from format like "<input>:1:3: message"
+                            let (line, col) = if let Some(colon_pos) = err_msg.find(':') {
+                                let rest = &err_msg[colon_pos + 1..];
+                                if let Ok(line_num) =
+                                    rest.split(':').next().unwrap_or("1").parse::<usize>()
+                                {
+                                    if let Ok(col_num) =
+                                        rest.split(':').nth(1).unwrap_or("1").parse::<usize>()
+                                    {
+                                        (line_num, col_num)
+                                    } else {
+                                        (line_num, 1)
+                                    }
+                                } else {
+                                    (1, 1)
+                                }
+                            } else {
+                                (1, 1)
+                            };
+
+                            print_error_context(accumulated_input.trim(), "parse error", line, col);
                             accumulated_input.clear();
                         }
                     }
@@ -338,9 +371,30 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) {
                     print!(". ");
                     io::stdout().flush().unwrap();
                 } else {
-                    // Real parse error
-                    eprintln!("✗ Parse error: {}", e);
-                    print_error_context(trimmed, "parse error", 1, 1);
+                    // Real parse error - extract line and column from error message
+                    let err_msg = e.to_string();
+                    eprintln!("✗ Parse error: {}", err_msg);
+
+                    // Try to extract line and column from format like "<input>:1:3: message"
+                    let (line, col) = if let Some(colon_pos) = err_msg.find(':') {
+                        let rest = &err_msg[colon_pos + 1..];
+                        if let Ok(line_num) = rest.split(':').next().unwrap_or("1").parse::<usize>()
+                        {
+                            if let Ok(col_num) =
+                                rest.split(':').nth(1).unwrap_or("1").parse::<usize>()
+                            {
+                                (line_num, col_num)
+                            } else {
+                                (line_num, 1)
+                            }
+                        } else {
+                            (1, 1)
+                        }
+                    } else {
+                        (1, 1)
+                    };
+
+                    print_error_context(trimmed, "parse error", line, col);
                     accumulated_input.clear();
                 }
             }

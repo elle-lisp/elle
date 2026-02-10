@@ -105,3 +105,7 @@ mod jit_integration {
 mod concurrency {
     include!("concurrency.rs");
 }
+
+mod error_reporting {
+    include!("error_reporting.rs");
+}

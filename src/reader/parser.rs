@@ -1,20 +1,45 @@
-use super::token::OwnedToken;
+use super::token::{OwnedToken, SourceLoc};
 use crate::symbol::SymbolTable;
 use crate::value::{cons, Value};
 use std::rc::Rc;
 
 pub struct Reader {
     tokens: Vec<OwnedToken>,
+    locations: Vec<SourceLoc>,
     pos: usize,
 }
 
 impl Reader {
     pub fn new(tokens: Vec<OwnedToken>) -> Self {
-        Reader { tokens, pos: 0 }
+        // Create default locations for tokens (when not provided with location info)
+        let locations = vec![SourceLoc::from_line_col(1, 1); tokens.len()];
+        Reader {
+            tokens,
+            locations,
+            pos: 0,
+        }
+    }
+
+    pub fn with_locations(tokens: Vec<OwnedToken>, locations: Vec<SourceLoc>) -> Self {
+        Reader {
+            tokens,
+            locations,
+            pos: 0,
+        }
     }
 
     fn current(&self) -> Option<&OwnedToken> {
         self.tokens.get(self.pos)
+    }
+
+    fn current_location(&self) -> SourceLoc {
+        self.locations.get(self.pos).cloned().unwrap_or_else(|| {
+            // If we're past the end, use the last location
+            self.locations
+                .last()
+                .cloned()
+                .unwrap_or_else(SourceLoc::start)
+        })
     }
 
     fn advance(&mut self) -> Option<OwnedToken> {
@@ -46,7 +71,13 @@ impl Reader {
 
                     loop {
                         match self.current() {
-                            None => return Err("Unterminated list literal".to_string()),
+                            None => {
+                                let loc = self.current_location();
+                                return Err(format!(
+                                    "{}: unterminated list literal",
+                                    loc.position()
+                                ));
+                            }
                             Some(OwnedToken::RightBracket) => {
                                 self.advance();
                                 // Build (list e1 e2 e3 ...)
@@ -64,7 +95,11 @@ impl Reader {
                     // Handle @{...} for table sugar
                     self.read_table(symbols)
                 } else {
-                    Err("@ must be followed by [...] or {...}".to_string())
+                    let loc = self.current_location();
+                    Err(format!(
+                        "{}: @ must be followed by [...] or {{...}}",
+                        loc.position()
+                    ))
                 }
             }
 
@@ -147,16 +182,31 @@ impl Reader {
                 self.advance();
                 Ok(Value::Keyword(id))
             }
-            OwnedToken::RightParen => Err("Unexpected )".to_string()),
-            OwnedToken::RightBracket => Err("Unexpected ]".to_string()),
-            OwnedToken::RightBrace => Err("Unexpected }".to_string()),
+            OwnedToken::RightParen => {
+                let loc = self.current_location();
+                Err(format!(
+                    "{}: unexpected closing parenthesis",
+                    loc.position()
+                ))
+            }
+            OwnedToken::RightBracket => {
+                let loc = self.current_location();
+                Err(format!("{}: unexpected closing bracket", loc.position()))
+            }
+            OwnedToken::RightBrace => {
+                let loc = self.current_location();
+                Err(format!("{}: unexpected closing brace", loc.position()))
+            }
         }
     }
 
     pub fn read(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
         match self.try_read(symbols) {
             Some(result) => result,
-            None => Err("Unexpected EOF".to_string()), // Keep old API for backward compat
+            None => {
+                let loc = self.current_location();
+                Err(format!("{}: unexpected end of input", loc.position()))
+            }
         }
     }
 
@@ -179,7 +229,13 @@ impl Reader {
 
         loop {
             match self.current() {
-                None => return Err("Unterminated list".to_string()),
+                None => {
+                    let loc = self.current_location();
+                    return Err(format!(
+                        "{}: unterminated list (missing closing paren)",
+                        loc.position()
+                    ));
+                }
                 Some(OwnedToken::RightParen) => {
                     self.advance();
                     return Ok(elements
@@ -198,7 +254,13 @@ impl Reader {
 
         loop {
             match self.current() {
-                None => return Err("Unterminated vector".to_string()),
+                None => {
+                    let loc = self.current_location();
+                    return Err(format!(
+                        "{}: unterminated vector (missing closing bracket)",
+                        loc.position()
+                    ));
+                }
                 Some(OwnedToken::RightBracket) => {
                     self.advance();
                     return Ok(Value::Vector(Rc::new(elements)));
@@ -214,7 +276,13 @@ impl Reader {
 
         loop {
             match self.current() {
-                None => return Err("Unterminated struct literal".to_string()),
+                None => {
+                    let loc = self.current_location();
+                    return Err(format!(
+                        "{}: unterminated struct literal (missing closing brace)",
+                        loc.position()
+                    ));
+                }
                 Some(OwnedToken::RightBrace) => {
                     self.advance();
                     // Build (struct k1 v1 k2 v2 ...)
