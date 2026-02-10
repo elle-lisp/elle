@@ -1,4 +1,3 @@
-use super::scope::ScopeType;
 use crate::reader::SourceLoc;
 use crate::value::{SymbolId, Value};
 
@@ -171,18 +170,6 @@ pub enum Expr {
 
     /// Xor operator (exclusive or, all args must be evaluated)
     Xor(Vec<Expr>),
-
-    /// Scoped variable reference (depth, index)
-    /// Used to reference variables that are in outer scopes
-    ScopeVar(usize, usize),
-
-    /// Scope entry (pushes a new scope onto the runtime scope stack)
-    /// Emitted at the start of a scoped block
-    ScopeEntry(ScopeType),
-
-    /// Scope exit (pops the current scope from the runtime scope stack)
-    /// Emitted at the end of a scoped block
-    ScopeExit,
 }
 
 /// Pattern for pattern matching

@@ -425,14 +425,6 @@ impl VM {
                     scope::handle_pop_scope(self)?;
                 }
 
-                Instruction::LoadScoped => {
-                    scope::handle_load_scoped(self, bytecode, &mut ip)?;
-                }
-
-                Instruction::StoreScoped => {
-                    scope::handle_store_scoped(self, bytecode, &mut ip)?;
-                }
-
                 Instruction::DefineLocal => {
                     scope::handle_define_local(self, bytecode, &mut ip, constants)?;
                 }

@@ -115,12 +115,6 @@ pub enum Instruction {
     /// Pop the current scope
     PopScope,
 
-    /// Load scoped variable (depth u8, index u8)
-    LoadScoped,
-
-    /// Store scoped variable (depth u8, index u8)
-    StoreScoped,
-
     /// Define local variable (symbol_idx u16)
     DefineLocal,
 
