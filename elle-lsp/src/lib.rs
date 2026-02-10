@@ -12,5 +12,6 @@ pub mod definition;
 pub mod handler;
 pub mod hover;
 pub mod protocol;
+pub mod references;
 
 pub use compiler_state::CompilerState;
