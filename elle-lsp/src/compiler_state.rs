@@ -5,7 +5,7 @@
 
 use elle::compiler::converters::value_to_expr;
 use elle::compiler::{ast::ExprWithLoc, extract_symbols, Linter, SymbolIndex};
-use elle::reader::Lexer;
+use elle::reader::{Lexer, OwnedToken};
 use elle::symbol::SymbolTable;
 use elle::{init_stdlib, register_primitives, Reader, VM};
 use std::collections::HashMap;
@@ -92,7 +92,7 @@ impl CompilerState {
 
         loop {
             match lexer.next_token() {
-                Ok(Some(token)) => tokens.push(token),
+                Ok(Some(token)) => tokens.push(OwnedToken::from(token)),
                 Ok(None) => break,
                 Err(_e) => {
                     // Parse error - skip this document for now

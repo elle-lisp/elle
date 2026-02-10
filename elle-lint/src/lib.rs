@@ -13,6 +13,7 @@ pub use elle::compiler::linter::diagnostics::{Diagnostic, Severity};
 use elle::compiler::ast::ExprWithLoc;
 use elle::compiler::converters::value_to_expr;
 use elle::compiler::linter::Linter as CompilerLinter;
+use elle::reader::OwnedToken;
 use elle::symbol::SymbolTable;
 use elle::{init_stdlib, register_primitives, VM};
 use std::path::Path;
@@ -65,7 +66,7 @@ impl Linter {
         let mut tokens = Vec::new();
         loop {
             match lexer.next_token() {
-                Ok(Some(token)) => tokens.push(token),
+                Ok(Some(token)) => tokens.push(OwnedToken::from(token)),
                 Ok(None) => break,
                 Err(e) => return Err(format!("Lex error: {}", e)),
             }
