@@ -1,3 +1,4 @@
+use crate::error::LocationMap;
 use crate::ffi::FFISubsystem;
 use crate::value::{Condition, Value};
 use crate::vm::scope::ScopeStack;
@@ -36,6 +37,7 @@ pub struct VM {
     pub current_exception: Option<Rc<Condition>>, // Current exception being handled
     pub handling_exception: bool,        // True if we're currently in exception handler code
     pub closure_call_counts: std::collections::HashMap<*const u8, usize>, // Track closure call frequencies for JIT
+    pub location_map: LocationMap, // Bytecode instruction index → source location mapping
 }
 
 /// Exception type hierarchy (baked into VM for inheritance checking)
@@ -93,6 +95,7 @@ impl VM {
             current_exception: None,
             handling_exception: false,
             closure_call_counts: std::collections::HashMap::new(),
+            location_map: LocationMap::new(),
         }
     }
 
@@ -102,6 +105,16 @@ impl VM {
 
     pub fn get_global(&self, sym_id: u32) -> Option<&Value> {
         self.globals.get(&sym_id)
+    }
+
+    /// Set the location map for mapping bytecode instructions to source locations
+    pub fn set_location_map(&mut self, map: LocationMap) {
+        self.location_map = map;
+    }
+
+    /// Get the location map for bytecode instruction lookups
+    pub fn get_location_map(&self) -> &LocationMap {
+        &self.location_map
     }
 
     /// Record a closure call and return whether it's "hot" (called 10+ times)

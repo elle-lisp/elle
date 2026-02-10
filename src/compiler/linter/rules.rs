@@ -39,7 +39,7 @@ pub fn check_naming_convention(
             "W001",
             "naming-kebab-case",
             format!("identifier '{}' should use kebab-case", name),
-            *location,
+            location.clone(),
         )
         .with_suggestions(vec![format!("rename to '{}'", suggested_name)]);
 
@@ -69,7 +69,7 @@ pub fn check_call_arity(
                         "function '{}' expects {} argument(s) but got {}",
                         func_name, expected_arity, arg_count
                     ),
-                    *location,
+                    location.clone(),
                 );
 
                 diagnostics.push(diag);

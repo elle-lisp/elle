@@ -16,6 +16,7 @@ pub struct Lexer<'a> {
     pos: usize,
     line: usize,
     col: usize,
+    file: String,
 }
 
 impl<'a> Lexer<'a> {
@@ -26,11 +27,23 @@ impl<'a> Lexer<'a> {
             pos: 0,
             line: 1,
             col: 1,
+            file: "<unknown>".to_string(),
+        }
+    }
+
+    pub fn with_file(input: &'a str, file: impl Into<String>) -> Self {
+        Lexer {
+            input,
+            bytes: input.as_bytes(),
+            pos: 0,
+            line: 1,
+            col: 1,
+            file: file.into(),
         }
     }
 
     fn get_loc(&self) -> SourceLoc {
-        SourceLoc::new(self.line, self.col)
+        SourceLoc::new(&self.file, self.line, self.col)
     }
 
     fn current(&self) -> Option<char> {

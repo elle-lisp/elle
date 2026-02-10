@@ -41,6 +41,7 @@ pub mod ffi;
 pub mod primitives;
 pub mod reader;
 pub mod repl;
+pub mod resident_compiler;
 pub mod symbol;
 pub mod value;
 pub mod vm;

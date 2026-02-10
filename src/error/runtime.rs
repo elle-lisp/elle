@@ -36,7 +36,7 @@ impl RuntimeError {
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.location {
+        match &self.location {
             Some(loc) => write!(f, "Error at {}: {}", loc, self.message)?,
             None => write!(f, "Error: {}", self.message)?,
         }
