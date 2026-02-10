@@ -96,6 +96,14 @@ impl VM {
                     variables::handle_load_upvalue(self, bytecode, &mut ip, closure_env)?;
                 }
 
+                Instruction::LoadUpvalueRaw => {
+                    variables::handle_load_upvalue_raw(self, bytecode, &mut ip, closure_env)?;
+                }
+
+                Instruction::StoreUpvalue => {
+                    variables::handle_store_upvalue(self, bytecode, &mut ip, closure_env)?;
+                }
+
                 // Control flow
                 Instruction::Jump => {
                     control::handle_jump(bytecode, &mut ip, self);
@@ -189,11 +197,34 @@ impl VM {
                                 }
                             }
 
-                            // Create a new environment that includes both captured variables and parameters
-                            // The closure's env contains captured variables, and we append the arguments as parameters
+                            // Create a new environment that includes:
+                            // [captured_vars..., parameters..., locally_defined_cells...]
+                            // The closure's env contains captured variables
+                            // We append the arguments as parameters
+                            // We append empty cells for locally-defined variables (Phase 4)
                             let mut new_env = Vec::new();
                             new_env.extend((*closure.env).iter().cloned());
                             new_env.extend(args.clone());
+
+                            // Calculate number of locally-defined variables
+                            let num_params = match closure.arity {
+                                crate::value::Arity::Exact(n) => n,
+                                crate::value::Arity::AtLeast(n) => n,
+                                crate::value::Arity::Range(min, _) => min,
+                            };
+                            let num_locally_defined = closure
+                                .num_locals
+                                .saturating_sub(num_params + closure.num_captures);
+
+                            // Add empty cells for locally-defined variables
+                            // These will be initialized when define statements execute
+                            for _ in 0..num_locally_defined {
+                                let empty_cell = Value::Cell(std::rc::Rc::new(
+                                    std::cell::RefCell::new(Box::new(Value::Nil)),
+                                ));
+                                new_env.push(empty_cell);
+                            }
+
                             let new_env_rc = std::rc::Rc::new(new_env);
 
                             let result = self.execute_bytecode(
@@ -226,10 +257,29 @@ impl VM {
                             return f(&args);
                         }
                         Value::Closure(closure) => {
-                            // Build proper environment: captures + args (same as Call)
+                            // Build proper environment: captures + args + locals (same as Call)
                             let mut new_env = Vec::new();
                             new_env.extend((*closure.env).iter().cloned());
                             new_env.extend(args);
+
+                            // Calculate number of locally-defined variables
+                            let num_params = match closure.arity {
+                                crate::value::Arity::Exact(n) => n,
+                                crate::value::Arity::AtLeast(n) => n,
+                                crate::value::Arity::Range(min, _) => min,
+                            };
+                            let num_locally_defined = closure
+                                .num_locals
+                                .saturating_sub(num_params + closure.num_captures);
+
+                            // Add empty cells for locally-defined variables
+                            for _ in 0..num_locally_defined {
+                                let empty_cell = Value::Cell(std::rc::Rc::new(
+                                    std::cell::RefCell::new(Box::new(Value::Nil)),
+                                ));
+                                new_env.push(empty_cell);
+                            }
+
                             let new_env_rc = std::rc::Rc::new(new_env);
 
                             // Use closure's own constants table (not parent's)
@@ -385,6 +435,19 @@ impl VM {
 
                 Instruction::DefineLocal => {
                     scope::handle_define_local(self, bytecode, &mut ip, constants)?;
+                }
+
+                // Cell operations for shared mutable captures (Phase 4)
+                Instruction::MakeCell => {
+                    scope::handle_make_cell(self)?;
+                }
+
+                Instruction::UnwrapCell => {
+                    scope::handle_unwrap_cell(self)?;
+                }
+
+                Instruction::UpdateCell => {
+                    scope::handle_update_cell(self)?;
                 }
 
                 // Exception handling (Phase 3)

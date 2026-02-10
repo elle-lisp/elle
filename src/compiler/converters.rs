@@ -35,6 +35,44 @@ fn extract_pattern_variables(pattern: &Pattern) -> Vec<SymbolId> {
     vars
 }
 
+/// Pre-scan body values for define names and register them in the current scope.
+/// This enables mutual recursion and self-recursion by making all locally-defined
+/// names visible before any lambda values are parsed.
+fn pre_register_defines(
+    body_vals: &[Value],
+    symbols: &SymbolTable,
+    scope_stack: &mut Vec<Vec<SymbolId>>,
+) {
+    for val in body_vals {
+        if let Ok(inner_list) = val.list_to_vec() {
+            if inner_list.is_empty() {
+                continue;
+            }
+            if let Value::Symbol(sym) = &inner_list[0] {
+                if let Some(name) = symbols.name(*sym) {
+                    match name {
+                        "define" => {
+                            if inner_list.len() == 3 {
+                                if let Ok(def_name) = inner_list[1].as_symbol() {
+                                    if let Some(scope) = scope_stack.last_mut() {
+                                        if !scope.contains(&def_name) {
+                                            scope.push(def_name);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "begin" => {
+                            pre_register_defines(&inner_list[1..], symbols, scope_stack);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Adjust variable indices in an expression to account for the closure environment layout.
 /// The closure environment is laid out as [captures..., parameters...]
 ///
@@ -44,7 +82,12 @@ fn extract_pattern_variables(pattern: &Pattern) -> Vec<SymbolId> {
 /// For each Var:
 /// - If it's a parameter of the current lambda: map to captures.len() + position_in_params
 /// - If it's a captured value: map to position_in_captures_list
-fn adjust_var_indices(expr: &mut Expr, captures: &[(SymbolId, usize, usize)], params: &[SymbolId]) {
+fn adjust_var_indices(
+    expr: &mut Expr,
+    captures: &[(SymbolId, usize, usize)],
+    params: &[SymbolId],
+    locals: &[SymbolId],
+) {
     // Build a map of captures to their position in the list
     let mut capture_map: std::collections::HashMap<SymbolId, usize> =
         std::collections::HashMap::new();
@@ -59,49 +102,60 @@ fn adjust_var_indices(expr: &mut Expr, captures: &[(SymbolId, usize, usize)], pa
         param_map.insert(*sym, i);
     }
 
+    // Build a map of locally-defined variables to their position in the list
+    let mut locals_map: std::collections::HashMap<SymbolId, usize> =
+        std::collections::HashMap::new();
+    for (i, sym) in locals.iter().enumerate() {
+        locals_map.insert(*sym, i);
+    }
+
     match expr {
         Expr::Var(sym_id, _depth, index) => {
-            // Adjust indices for variables that are captures or parameters of this lambda
-            // Both depth==0 (current scope params) and depth>0 (captured vars) need adjustment
-            // because the index is currently relative to scope_stack at parse time, not the
-            // final closure environment [captures..., parameters...]
+            // Variables are adjusted based on their scope:
+            // 1. Captures: map to position in captures list (0..captures.len()-1)
+            // 2. Parameters: map to captures.len() + position
+            // 3. Locals: map to captures.len() + params.len() + position
             if let Some(cap_pos) = capture_map.get(sym_id) {
                 // This variable is a capture - map to its position in the captures list
                 *index = *cap_pos;
             } else if let Some(param_pos) = param_map.get(sym_id) {
                 // This variable is a parameter - map to captures.len() + position
                 *index = captures.len() + param_pos;
+            } else if let Some(local_pos) = locals_map.get(sym_id) {
+                // This variable is defined locally within lambda body
+                // Map to captures.len() + params.len() + position
+                *index = captures.len() + params.len() + local_pos;
             }
-            // Otherwise, it's a global or something from an even outer scope
+            // If not found in any map, it's likely a global or error - leave as is
         }
         Expr::If { cond, then, else_ } => {
-            adjust_var_indices(cond, captures, params);
-            adjust_var_indices(then, captures, params);
-            adjust_var_indices(else_, captures, params);
+            adjust_var_indices(cond, captures, params, locals);
+            adjust_var_indices(then, captures, params, locals);
+            adjust_var_indices(else_, captures, params, locals);
         }
         Expr::Cond { clauses, else_body } => {
             for (test, body) in clauses {
-                adjust_var_indices(test, captures, params);
-                adjust_var_indices(body, captures, params);
+                adjust_var_indices(test, captures, params, locals);
+                adjust_var_indices(body, captures, params, locals);
             }
             if let Some(else_expr) = else_body {
-                adjust_var_indices(else_expr, captures, params);
+                adjust_var_indices(else_expr, captures, params, locals);
             }
         }
         Expr::Begin(exprs) => {
             for e in exprs {
-                adjust_var_indices(e, captures, params);
+                adjust_var_indices(e, captures, params, locals);
             }
         }
         Expr::Block(exprs) => {
             for e in exprs {
-                adjust_var_indices(e, captures, params);
+                adjust_var_indices(e, captures, params, locals);
             }
         }
         Expr::Call { func, args, .. } => {
-            adjust_var_indices(func, captures, params);
+            adjust_var_indices(func, captures, params, locals);
             for arg in args {
-                adjust_var_indices(arg, captures, params);
+                adjust_var_indices(arg, captures, params, locals);
             }
         }
         Expr::Lambda { .. } => {
@@ -111,38 +165,51 @@ fn adjust_var_indices(expr: &mut Expr, captures: &[(SymbolId, usize, usize)], pa
         }
         Expr::Let { bindings, body } => {
             for (_, expr) in bindings {
-                adjust_var_indices(expr, captures, params);
+                adjust_var_indices(expr, captures, params, locals);
             }
-            adjust_var_indices(body, captures, params);
+            adjust_var_indices(body, captures, params, locals);
         }
         Expr::Letrec { bindings, body } => {
             for (_, expr) in bindings {
-                adjust_var_indices(expr, captures, params);
+                adjust_var_indices(expr, captures, params, locals);
             }
-            adjust_var_indices(body, captures, params);
+            adjust_var_indices(body, captures, params, locals);
         }
-        Expr::Set { value, .. } => {
-            adjust_var_indices(value, captures, params);
+        Expr::Set {
+            var,
+            depth: _,
+            index,
+            value,
+        } => {
+            // Remap the target variable index, same as Expr::Var
+            if let Some(cap_pos) = capture_map.get(var) {
+                *index = *cap_pos;
+            } else if let Some(param_pos) = param_map.get(var) {
+                *index = captures.len() + param_pos;
+            } else if let Some(local_pos) = locals_map.get(var) {
+                *index = captures.len() + params.len() + local_pos;
+            }
+            adjust_var_indices(value, captures, params, locals);
         }
         Expr::While { cond, body } => {
-            adjust_var_indices(cond, captures, params);
-            adjust_var_indices(body, captures, params);
+            adjust_var_indices(cond, captures, params, locals);
+            adjust_var_indices(body, captures, params, locals);
         }
         Expr::For { iter, body, .. } => {
-            adjust_var_indices(iter, captures, params);
-            adjust_var_indices(body, captures, params);
+            adjust_var_indices(iter, captures, params, locals);
+            adjust_var_indices(body, captures, params, locals);
         }
         Expr::Match {
             value,
             patterns,
             default,
         } => {
-            adjust_var_indices(value, captures, params);
+            adjust_var_indices(value, captures, params, locals);
             for (_, expr) in patterns {
-                adjust_var_indices(expr, captures, params);
+                adjust_var_indices(expr, captures, params, locals);
             }
             if let Some(default_expr) = default {
-                adjust_var_indices(default_expr, captures, params);
+                adjust_var_indices(default_expr, captures, params, locals);
             }
         }
         Expr::Try {
@@ -150,21 +217,24 @@ fn adjust_var_indices(expr: &mut Expr, captures: &[(SymbolId, usize, usize)], pa
             catch,
             finally,
         } => {
-            adjust_var_indices(body, captures, params);
+            adjust_var_indices(body, captures, params, locals);
             if let Some((_, handler)) = catch {
-                adjust_var_indices(handler, captures, params);
+                adjust_var_indices(handler, captures, params, locals);
             }
             if let Some(finally_expr) = finally {
-                adjust_var_indices(finally_expr, captures, params);
+                adjust_var_indices(finally_expr, captures, params, locals);
             }
         }
         Expr::And(exprs) | Expr::Or(exprs) => {
             for e in exprs {
-                adjust_var_indices(e, captures, params);
+                adjust_var_indices(e, captures, params, locals);
             }
         }
+        Expr::Define { value, .. } => {
+            adjust_var_indices(value, captures, params, locals);
+        }
         Expr::DefMacro { body, .. } => {
-            adjust_var_indices(body, captures, params);
+            adjust_var_indices(body, captures, params, locals);
         }
         // Literals, GlobalVar, etc. don't need adjustment
         _ => {}
@@ -315,7 +385,8 @@ fn build_quasiquote_expr(
         | Value::CHandle(_)
         | Value::Exception(_)
         | Value::Condition(_)
-        | Value::ThreadHandle(_) => Err("Cannot quote closure or native function".to_string()),
+        | Value::ThreadHandle(_)
+        | Value::Cell(_) => Err("Cannot quote closure or native function".to_string()),
     }
 }
 
@@ -326,6 +397,698 @@ pub fn value_to_expr(value: &Value, symbols: &mut SymbolTable) -> Result<Expr, S
     super::capture_resolution::resolve_captures(&mut expr);
     mark_tail_calls(&mut expr, true);
     Ok(expr)
+}
+
+/// Helper function to convert lambda expressions
+/// Extracted to reduce stack frame size of value_to_expr_with_scope
+#[inline(never)]
+fn convert_lambda(
+    list: &[Value],
+    symbols: &mut SymbolTable,
+    scope_stack: &mut Vec<Vec<SymbolId>>,
+) -> Result<Expr, String> {
+    if list.len() < 3 {
+        return Err("lambda requires at least 2 arguments".to_string());
+    }
+
+    let params = list[1].list_to_vec()?;
+    let param_syms: Result<Vec<_>, _> = params.iter().map(|p| p.as_symbol()).collect();
+    let param_syms = param_syms?;
+
+    // Push a new scope with the lambda parameters (as Vec for ordered indices)
+    scope_stack.push(param_syms.clone());
+
+    // Pre-scan body for define names to enable mutual recursion and self-recursion
+    // All locally-defined names must be in scope before any lambda values are parsed
+    pre_register_defines(&list[2..], symbols, scope_stack);
+
+    // Process body expressions sequentially to handle variable definitions properly
+    let mut body_exprs_vec = Vec::new();
+    for expr_val in &list[2..] {
+        let expr = value_to_expr_with_scope(expr_val, symbols, scope_stack)?;
+        body_exprs_vec.push(expr);
+    }
+
+    let body_exprs = body_exprs_vec;
+
+    let body = if body_exprs.len() == 1 {
+        Box::new(body_exprs[0].clone())
+    } else {
+        Box::new(Expr::Begin(body_exprs))
+    };
+
+    // Get the current lambda's scope (which includes all locally-defined variables)
+    let lambda_scope = scope_stack.last().unwrap().clone();
+
+    // Identify which variables in the lambda scope are defined in the lambda body
+    // (as opposed to being parameters)
+    let mut locally_defined_vars: Vec<SymbolId> = lambda_scope
+        .iter()
+        .filter(|var| !param_syms.contains(var))
+        .copied()
+        .collect();
+    // Sort for deterministic ordering
+    locally_defined_vars.sort();
+
+    // Analyze free variables that need to be captured
+    // IMPORTANT: Do this BEFORE popping scope_stack, so locally-defined
+    // variables from the lambda body are still visible
+    let mut local_bindings = HashSet::new();
+    for param in &param_syms {
+        local_bindings.insert(*param);
+    }
+    // Also include locally-defined variables so they're not treated as free variables
+    // They will be tracked separately in the `locals` field of the Lambda expression
+    for local_var in &locally_defined_vars {
+        local_bindings.insert(*local_var);
+    }
+    let free_vars = analyze_free_vars(&body, &local_bindings);
+
+    // Identify locally-defined variables that are captured by nested lambdas
+    // These need special handling (cell wrapping) for Phase 4
+    let mut sorted_free_vars: Vec<_> = free_vars.iter().copied().collect();
+    sorted_free_vars.sort(); // Deterministic ordering
+
+    let captures: Vec<_> = sorted_free_vars
+        .iter()
+        .map(|sym| {
+            // Look up in scope stack to determine if global or local
+            for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
+                if let Some(local_index) = scope.iter().position(|s| s == sym) {
+                    let depth = scope_stack.len() - 1 - reverse_idx;
+                    return (*sym, depth, local_index);
+                }
+            }
+            // If not found in scope stack, it's a global variable
+            (*sym, 0, usize::MAX)
+        })
+        .collect();
+
+    // Pop the lambda's scope NOW, after we've analyzed captures
+    scope_stack.pop();
+
+    // Dead capture elimination: filter out captures that aren't actually used in the body
+    let candidates: HashSet<SymbolId> = captures.iter().map(|(sym, _, _)| *sym).collect();
+    let actually_used = analyze_capture_usage(&body, &local_bindings, &candidates);
+    let captures: Vec<_> = captures
+        .into_iter()
+        .filter(|(sym, _, _)| actually_used.contains(sym))
+        .collect();
+
+    // Adjust variable indices in body to account for closure environment layout
+    // The closure environment is [captures..., parameters..., locals...]
+    let mut adjusted_body = body;
+    adjust_var_indices(
+        &mut adjusted_body,
+        &captures,
+        &param_syms,
+        &locally_defined_vars,
+    );
+
+    Ok(Expr::Lambda {
+        params: param_syms,
+        body: adjusted_body,
+        captures,
+        locals: locally_defined_vars,
+    })
+}
+
+/// Helper function to convert let expressions
+/// Extracted to reduce stack frame size of value_to_expr_with_scope
+#[inline(never)]
+fn convert_let(
+    list: &[Value],
+    symbols: &mut SymbolTable,
+    scope_stack: &mut Vec<Vec<SymbolId>>,
+) -> Result<Expr, String> {
+    // Syntax: (let ((var1 expr1) (var2 expr2) ...) body...)
+    // Transform to: ((lambda (var1 var2 ...) body...) expr1 expr2 ...)
+    if list.len() < 2 {
+        return Err("let requires at least a binding vector".to_string());
+    }
+
+    // Parse the bindings vector
+    let bindings_vec = list[1].list_to_vec()?;
+    let mut param_syms = Vec::new();
+    let mut binding_exprs = Vec::new();
+
+    for binding in bindings_vec {
+        let binding_list = binding.list_to_vec()?;
+        if binding_list.len() != 2 {
+            return Err("Each let binding must be a [var expr] pair".to_string());
+        }
+        let var = binding_list[0].as_symbol()?;
+        param_syms.push(var);
+
+        // Parse the binding expression in the current scope
+        // (bindings cannot reference previous bindings or let-bound variables)
+        let expr = value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
+        binding_exprs.push(expr);
+    }
+
+    // Parse the body (one or more expressions)
+    // Body can reference let-bound variables, so we add them to scope
+    scope_stack.push(param_syms.clone());
+
+    let body_exprs: Result<Vec<_>, _> = list[2..]
+        .iter()
+        .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+        .collect();
+
+    scope_stack.pop();
+
+    let body_exprs = body_exprs?;
+    let body = if body_exprs.len() == 1 {
+        Box::new(body_exprs[0].clone())
+    } else if body_exprs.is_empty() {
+        Box::new(Expr::Literal(Value::Nil))
+    } else {
+        Box::new(Expr::Begin(body_exprs))
+    };
+
+    // Analyze free variables in the body
+    let mut local_bindings = HashSet::new();
+    for param in &param_syms {
+        local_bindings.insert(*param);
+    }
+    let free_vars = analyze_free_vars(&body, &local_bindings);
+
+    // Convert free vars to captures, resolving their scope location
+    let mut sorted_free_vars: Vec<_> = free_vars.iter().copied().collect();
+    sorted_free_vars.sort(); // Deterministic ordering
+
+    let captures: Vec<_> = sorted_free_vars
+        .iter()
+        .map(|sym| {
+            // Look up in scope stack to determine if global or local
+            for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
+                if let Some(local_index) = scope.iter().position(|s| s == sym) {
+                    let depth = scope_stack.len() - 1 - reverse_idx;
+                    return (*sym, depth, local_index);
+                }
+            }
+            // If not found in scope stack, it's a global variable
+            (*sym, 0, usize::MAX)
+        })
+        .collect();
+
+    // Dead capture elimination: filter out captures that aren't actually used in the body
+    let candidates: HashSet<SymbolId> = captures.iter().map(|(sym, _, _)| *sym).collect();
+    let actually_used = analyze_capture_usage(&body, &local_bindings, &candidates);
+    let captures: Vec<_> = captures
+        .into_iter()
+        .filter(|(sym, _, _)| actually_used.contains(sym))
+        .collect();
+
+    // Adjust variable indices in body to account for closure environment layout
+    let mut adjusted_body = body;
+    adjust_var_indices(&mut adjusted_body, &captures, &param_syms, &[]);
+
+    // Create lambda: (lambda (var1 var2 ...) body...)
+    let lambda = Expr::Lambda {
+        params: param_syms,
+        body: adjusted_body,
+        captures,
+        locals: vec![], // Let-converted lambdas have no local defines
+    };
+
+    // Create call: (lambda expr1 expr2 ...)
+    Ok(Expr::Call {
+        func: Box::new(lambda),
+        args: binding_exprs,
+        tail: false,
+    })
+}
+
+/// Helper function to convert let* expressions
+/// Extracted to reduce stack frame size of value_to_expr_with_scope
+#[inline(never)]
+fn convert_let_star(
+    list: &[Value],
+    symbols: &mut SymbolTable,
+    scope_stack: &mut Vec<Vec<SymbolId>>,
+) -> Result<Expr, String> {
+    // Syntax: (let* ((var1 expr1) (var2 expr2) ...) body...)
+    // Let* differs from let in that each binding can reference previous bindings.
+    //
+    // Strategy: parse binding expressions sequentially, adding each variable
+    // to scope as we go. This naturally handles the sequential evaluation.
+    // Then create a single large lambda with all parameters, using the
+    // parsed expressions as arguments.
+    if list.len() < 2 {
+        return Err("let* requires at least a binding vector".to_string());
+    }
+
+    let bindings_vec = list[1].list_to_vec()?;
+
+    if bindings_vec.is_empty() {
+        // (let* () body...) - just evaluate body
+        let body_exprs: Result<Vec<_>, _> = list[2..]
+            .iter()
+            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+            .collect();
+        let body_exprs = body_exprs?;
+        if body_exprs.is_empty() {
+            return Ok(Expr::Literal(Value::Nil));
+        } else if body_exprs.len() == 1 {
+            return Ok(body_exprs[0].clone());
+        } else {
+            return Ok(Expr::Begin(body_exprs));
+        }
+    }
+
+    // Parse bindings sequentially with growing scope
+    let mut param_syms = Vec::new();
+    let mut binding_exprs = Vec::new();
+    scope_stack.push(Vec::new());
+
+    for binding in &bindings_vec {
+        let binding_list = binding.list_to_vec()?;
+        if binding_list.len() != 2 {
+            return Err("Each let* binding must be a [var expr] pair".to_string());
+        }
+        let var = binding_list[0].as_symbol()?;
+        param_syms.push(var);
+
+        // Parse binding expression WITH PREVIOUS BINDINGS IN SCOPE
+        // This allows y = (+ x 1) where x was previously bound
+        let expr = value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
+        binding_exprs.push(expr);
+
+        // Add this variable to scope for next binding
+        if let Some(current_scope) = scope_stack.last_mut() {
+            current_scope.push(var);
+        }
+    }
+
+    // Parse body with all let* variables in scope
+    let body_exprs: Result<Vec<_>, _> = list[2..]
+        .iter()
+        .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+        .collect();
+
+    scope_stack.pop();
+
+    let body_exprs = body_exprs?;
+    let body = if body_exprs.len() == 1 {
+        Box::new(body_exprs[0].clone())
+    } else if body_exprs.is_empty() {
+        Box::new(Expr::Literal(Value::Nil))
+    } else {
+        Box::new(Expr::Begin(body_exprs))
+    };
+
+    // Analyze free variables
+    let mut local_bindings = HashSet::new();
+    for param in &param_syms {
+        local_bindings.insert(*param);
+    }
+    let free_vars = analyze_free_vars(&body, &local_bindings);
+
+    // Convert free vars to captures, resolving their scope location
+    let mut sorted_free_vars: Vec<_> = free_vars.iter().copied().collect();
+    sorted_free_vars.sort(); // Deterministic ordering
+
+    let captures: Vec<_> = sorted_free_vars
+        .iter()
+        .map(|sym| {
+            // Look up in scope stack to determine if global or local
+            for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
+                if let Some(local_index) = scope.iter().position(|s| s == sym) {
+                    let depth = scope_stack.len() - 1 - reverse_idx;
+                    return (*sym, depth, local_index);
+                }
+            }
+            // If not found in scope stack, it's a global variable
+            (*sym, 0, usize::MAX)
+        })
+        .collect();
+
+    // Dead capture elimination: filter out captures that aren't actually used in the body
+    let candidates: HashSet<SymbolId> = captures.iter().map(|(sym, _, _)| *sym).collect();
+    let actually_used = analyze_capture_usage(&body, &local_bindings, &candidates);
+    let captures: Vec<_> = captures
+        .into_iter()
+        .filter(|(sym, _, _)| actually_used.contains(sym))
+        .collect();
+
+    // Adjust variable indices in body to account for closure environment layout
+    let mut adjusted_body = body;
+    adjust_var_indices(&mut adjusted_body, &captures, &param_syms, &[]);
+
+    // Create lambda: (lambda (var1 var2 ...) body...)
+    let lambda = Expr::Lambda {
+        locals: vec![], // Let*-converted lambdas have no local defines
+        params: param_syms,
+        body: adjusted_body,
+        captures,
+    };
+
+    // Create call: (lambda expr1 expr2 ...)
+    Ok(Expr::Call {
+        func: Box::new(lambda),
+        args: binding_exprs,
+        tail: false,
+    })
+}
+
+/// Helper function to convert letrec expressions
+/// Extracted to reduce stack frame size of value_to_expr_with_scope
+#[inline(never)]
+fn convert_letrec(
+    list: &[Value],
+    symbols: &mut SymbolTable,
+    scope_stack: &mut Vec<Vec<SymbolId>>,
+) -> Result<Expr, String> {
+    // Syntax: (letrec ((var1 expr1) (var2 expr2) ...) body...)
+    // All bindings are visible to all binding expressions and the body.
+    // Unlike let, bindings can reference each other.
+    if list.len() < 2 {
+        return Err("letrec requires at least a binding vector".to_string());
+    }
+
+    let bindings_vec = list[1].list_to_vec()?;
+    let mut param_syms = Vec::new();
+    let mut binding_exprs = Vec::new();
+
+    // First pass: collect all variable names
+    for binding in &bindings_vec {
+        let binding_list = binding.list_to_vec()?;
+        if binding_list.len() != 2 {
+            return Err("Each letrec binding must be a [var expr] pair".to_string());
+        }
+        param_syms.push(binding_list[0].as_symbol()?);
+    }
+
+    // Second pass: parse binding expressions
+    // Names are NOT in scope during binding expression parsing
+    // They'll reference each other as GlobalVar, resolved at runtime via scope_stack
+    for binding in &bindings_vec {
+        let binding_list = binding.list_to_vec()?;
+        let expr = value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
+        binding_exprs.push(expr);
+    }
+
+    // Parse body in current scope (names also as GlobalVar)
+    let body_exprs: Result<Vec<_>, _> = list[2..]
+        .iter()
+        .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+        .collect();
+
+    let body_exprs = body_exprs?;
+    let body = if body_exprs.len() == 1 {
+        Box::new(body_exprs[0].clone())
+    } else if body_exprs.is_empty() {
+        Box::new(Expr::Literal(Value::Nil))
+    } else {
+        Box::new(Expr::Begin(body_exprs))
+    };
+
+    let bindings: Vec<_> = param_syms.into_iter().zip(binding_exprs).collect();
+
+    Ok(Expr::Letrec { bindings, body })
+}
+
+/// Helper function to convert handler-case expressions
+/// Extracted to reduce stack frame size of value_to_expr_with_scope
+#[inline(never)]
+fn convert_handler_case(
+    list: &[Value],
+    symbols: &mut SymbolTable,
+    scope_stack: &mut Vec<Vec<SymbolId>>,
+) -> Result<Expr, String> {
+    // Syntax: (handler-case body (exception-id (var) handler-code) ...)
+    // exception-id can be numeric or a symbol (will be looked up)
+    if list.len() < 2 {
+        return Err("handler-case requires at least a body".to_string());
+    }
+
+    let body = Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
+    let mut handlers = Vec::new();
+
+    // Parse handler clauses
+    for clause in &list[2..] {
+        if let Ok(clause_vec) = clause.list_to_vec() {
+            if clause_vec.len() != 3 {
+                return Err("handler-case clause requires (exception-id (var) handler)".to_string());
+            }
+
+            // Parse exception ID
+            let exception_id = match &clause_vec[0] {
+                Value::Int(id) => *id as u32,
+                Value::Symbol(sym) => {
+                    // Map symbol to exception ID
+                    let name = symbols.name(*sym).unwrap_or("unknown");
+                    match name {
+                        "condition" => 1,
+                        "error" => 2,
+                        "type-error" => 3,
+                        "division-by-zero" => 4,
+                        "undefined-variable" => 5,
+                        "arity-error" => 6,
+                        "warning" => 7,
+                        "style-warning" => 8,
+                        _ => return Err(format!("Unknown exception type: {}", name)),
+                    }
+                }
+                _ => return Err("Exception ID must be integer or symbol".to_string()),
+            };
+
+            // Parse variable
+            let var = clause_vec[1].as_symbol()?;
+
+            // Parse handler code
+            let handler_code = Box::new(value_to_expr_with_scope(
+                &clause_vec[2],
+                symbols,
+                scope_stack,
+            )?);
+
+            handlers.push((exception_id, var, handler_code));
+        } else {
+            return Err("Handler clauses must be lists".to_string());
+        }
+    }
+
+    Ok(Expr::HandlerCase { body, handlers })
+}
+
+/// Helper function to convert handler-bind expressions
+/// Extracted to reduce stack frame size of value_to_expr_with_scope
+#[inline(never)]
+fn convert_handler_bind(
+    list: &[Value],
+    symbols: &mut SymbolTable,
+    scope_stack: &mut Vec<Vec<SymbolId>>,
+) -> Result<Expr, String> {
+    // Syntax: (handler-bind ((exception-id handler-fn) ...) body)
+    // handler-fn is called but doesn't unwind the stack
+    if list.len() != 3 {
+        return Err("handler-bind requires ((handlers...) body)".to_string());
+    }
+
+    let handlers_list = list[1].list_to_vec()?;
+    let mut handlers = Vec::new();
+
+    for handler_spec in handlers_list {
+        let spec_vec = handler_spec.list_to_vec()?;
+        if spec_vec.len() != 2 {
+            return Err("Each handler binding must be (exception-id handler-fn)".to_string());
+        }
+
+        // Parse exception ID
+        let exception_id = match &spec_vec[0] {
+            Value::Int(id) => *id as u32,
+            Value::Symbol(sym) => {
+                let name = symbols.name(*sym).unwrap_or("unknown");
+                match name {
+                    "condition" => 1,
+                    "error" => 2,
+                    "type-error" => 3,
+                    "division-by-zero" => 4,
+                    "undefined-variable" => 5,
+                    "arity-error" => 6,
+                    "warning" => 7,
+                    "style-warning" => 8,
+                    _ => return Err(format!("Unknown exception type: {}", name)),
+                }
+            }
+            _ => return Err("Exception ID must be integer or symbol".to_string()),
+        };
+
+        // Parse handler function
+        let handler_fn = Box::new(value_to_expr_with_scope(
+            &spec_vec[1],
+            symbols,
+            scope_stack,
+        )?);
+
+        handlers.push((exception_id, handler_fn));
+    }
+
+    let body = Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
+
+    Ok(Expr::HandlerBind { handlers, body })
+}
+
+/// Helper function to convert match expressions
+/// Extracted to reduce stack frame size of value_to_expr_with_scope
+#[inline(never)]
+fn convert_match_expr(
+    list: &[Value],
+    symbols: &mut SymbolTable,
+    scope_stack: &mut Vec<Vec<SymbolId>>,
+) -> Result<Expr, String> {
+    // Syntax: (match value (pattern1 result1) (pattern2 result2) ... [default])
+    if list.len() < 2 {
+        return Err("match requires at least a value".to_string());
+    }
+
+    let value = Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
+    let mut patterns = Vec::new();
+    let mut default = None;
+
+    // Parse pattern clauses
+    for clause in &list[2..] {
+        if let Ok(clause_vec) = clause.list_to_vec() {
+            if clause_vec.is_empty() {
+                return Err("Empty pattern clause".to_string());
+            }
+
+            // Check if this is a default clause (symbol, not a list)
+            if clause_vec.len() == 1 {
+                // Single value - treat as default
+                default = Some(Box::new(value_to_expr_with_scope(
+                    &clause_vec[0],
+                    symbols,
+                    scope_stack,
+                )?));
+            } else if clause_vec.len() == 2 {
+                // Pattern and result
+                let pattern = value_to_pattern(&clause_vec[0], symbols)?;
+
+                // Extract pattern variables
+                let pattern_vars = extract_pattern_variables(&pattern);
+
+                // If there are pattern variables, wrap the body in a lambda
+                // that binds them to the matched value
+                let result = if !pattern_vars.is_empty() {
+                    // Add pattern variables to scope for parsing the body
+                    let mut new_scope_stack = scope_stack.clone();
+                    new_scope_stack.push(pattern_vars.clone());
+
+                    // Parse the result in the new scope
+                    let body_expr =
+                        value_to_expr_with_scope(&clause_vec[1], symbols, &mut new_scope_stack)?;
+
+                    // Transform: (lambda (var1 var2 ...) body_expr)
+                    // This binds the pattern variables for use in the body
+                    Expr::Lambda {
+                        params: pattern_vars,
+                        body: Box::new(body_expr),
+                        captures: Vec::new(),
+                        locals: Vec::new(),
+                    }
+                } else {
+                    // No variables to bind
+                    value_to_expr_with_scope(&clause_vec[1], symbols, scope_stack)?
+                };
+
+                patterns.push((pattern, result));
+            } else {
+                return Err("Pattern clause must have pattern and result".to_string());
+            }
+        } else {
+            return Err("Expected pattern clause to be a list".to_string());
+        }
+    }
+
+    Ok(Expr::Match {
+        value,
+        patterns,
+        default,
+    })
+}
+
+/// Helper function to convert cond expressions
+/// Extracted to reduce stack frame size of value_to_expr_with_scope
+#[inline(never)]
+fn convert_cond(
+    list: &[Value],
+    symbols: &mut SymbolTable,
+    scope_stack: &mut Vec<Vec<SymbolId>>,
+) -> Result<Expr, String> {
+    // Syntax: (cond (test1 body1) (test2 body2) ... [(else body)])
+    // A cond expression evaluates test expressions in order until one is truthy,
+    // then evaluates and returns its corresponding body.
+    // If no tests are truthy and there's an else clause, evaluate the else body.
+    // If no tests are truthy and there's no else clause, return nil.
+    if list.len() < 2 {
+        return Err("cond requires at least one clause".to_string());
+    }
+
+    let mut clauses = Vec::new();
+    let mut else_body = None;
+
+    // Parse clauses
+    for clause in &list[1..] {
+        let clause_vec = clause.list_to_vec()?;
+        if clause_vec.is_empty() {
+            return Err("cond clause cannot be empty".to_string());
+        }
+
+        // Check if this is the else clause (single symbol 'else' followed by body)
+        if !clause_vec.is_empty() {
+            if let Value::Symbol(test_sym) = &clause_vec[0] {
+                if let Some("else") = symbols.name(*test_sym) {
+                    // This is the else clause
+                    if else_body.is_some() {
+                        return Err("cond can have at most one else clause".to_string());
+                    }
+                    // The else clause body can be multiple expressions
+                    let body_exprs: Result<Vec<_>, _> = clause_vec[1..]
+                        .iter()
+                        .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                        .collect();
+                    let body_exprs = body_exprs?;
+                    let body = if body_exprs.is_empty() {
+                        Expr::Literal(Value::Nil)
+                    } else if body_exprs.len() == 1 {
+                        body_exprs[0].clone()
+                    } else {
+                        Expr::Begin(body_exprs)
+                    };
+                    else_body = Some(Box::new(body));
+                    continue;
+                }
+            }
+        }
+
+        // Regular clause: (test body...)
+        if clause_vec.len() < 2 {
+            return Err("cond clause must have at least a test and a body".to_string());
+        }
+
+        let test = value_to_expr_with_scope(&clause_vec[0], symbols, scope_stack)?;
+
+        // The body can be multiple expressions
+        let body_exprs: Result<Vec<_>, _> = clause_vec[1..]
+            .iter()
+            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+            .collect();
+        let body_exprs = body_exprs?;
+        let body = if body_exprs.is_empty() {
+            Expr::Literal(Value::Nil)
+        } else if body_exprs.len() == 1 {
+            body_exprs[0].clone()
+        } else {
+            Expr::Begin(body_exprs)
+        };
+
+        clauses.push((test, body));
+    }
+
+    Ok(Expr::Cond { clauses, else_body })
 }
 
 /// Convert a value to an expression, tracking local variable scopes
@@ -441,11 +1204,14 @@ fn value_to_expr_with_scope(
                     }
 
                     "begin" => {
-                        let exprs: Result<Vec<_>, _> = list[1..]
-                            .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                            .collect();
-                        Ok(Expr::Begin(exprs?))
+                        // Process expressions sequentially to handle variable definitions properly
+                        // This allows define to register variables that are then available to later expressions
+                        let mut exprs = Vec::new();
+                        for v in &list[1..] {
+                            let expr = value_to_expr_with_scope(v, symbols, scope_stack)?;
+                            exprs.push(expr);
+                        }
+                        Ok(Expr::Begin(exprs))
                     }
 
                     "block" => {
@@ -456,378 +1222,36 @@ fn value_to_expr_with_scope(
                         Ok(Expr::Block(exprs?))
                     }
 
-                    "lambda" => {
-                        if list.len() < 3 {
-                            return Err("lambda requires at least 2 arguments".to_string());
-                        }
-
-                        let params = list[1].list_to_vec()?;
-                        let param_syms: Result<Vec<_>, _> =
-                            params.iter().map(|p| p.as_symbol()).collect();
-                        let param_syms = param_syms?;
-
-                        // Push a new scope with the lambda parameters (as Vec for ordered indices)
-                        scope_stack.push(param_syms.clone());
-
-                        let body_exprs: Result<Vec<_>, _> = list[2..]
-                            .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                            .collect();
-
-                        // Pop the lambda's scope
-                        scope_stack.pop();
-
-                        let body_exprs = body_exprs?;
-                        let body = if body_exprs.len() == 1 {
-                            Box::new(body_exprs[0].clone())
-                        } else {
-                            Box::new(Expr::Begin(body_exprs))
-                        };
-
-                        // Analyze free variables that need to be captured
-                        let mut local_bindings = std::collections::HashSet::new();
-                        for param in &param_syms {
-                            local_bindings.insert(*param);
-                        }
-                        let free_vars = analyze_free_vars(&body, &local_bindings);
-
-                        // Convert free vars to captures, resolving their scope location
-                        // We need to distinguish: is this a global, or from an outer scope?
-                        let mut sorted_free_vars: Vec<_> = free_vars.iter().copied().collect();
-                        sorted_free_vars.sort(); // Deterministic ordering
-
-                        let captures: Vec<_> = sorted_free_vars
-                            .iter()
-                            .map(|sym| {
-                                // Look up in scope stack to determine if global or local
-                                for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
-                                    if let Some(local_index) = scope.iter().position(|s| s == sym) {
-                                        let depth = scope_stack.len() - 1 - reverse_idx;
-                                        return (*sym, depth, local_index);
-                                    }
-                                }
-                                // If not found in scope stack, it's a global variable
-                                (*sym, 0, usize::MAX)
-                            })
-                            .collect();
-
-                        // Dead capture elimination: filter out captures that aren't actually used in the body
-                        let candidates: HashSet<SymbolId> =
-                            captures.iter().map(|(sym, _, _)| *sym).collect();
-                        let actually_used =
-                            analyze_capture_usage(&body, &local_bindings, &candidates);
-                        let captures: Vec<_> = captures
-                            .into_iter()
-                            .filter(|(sym, _, _)| actually_used.contains(sym))
-                            .collect();
-
-                        // Adjust variable indices in body to account for closure environment layout
-                        // The closure environment is [captures..., parameters...]
-                        let mut adjusted_body = body;
-                        adjust_var_indices(&mut adjusted_body, &captures, &param_syms);
-
-                        Ok(Expr::Lambda {
-                            params: param_syms,
-                            body: adjusted_body,
-                            captures,
-                        })
-                    }
+                    "lambda" => convert_lambda(&list, symbols, scope_stack),
 
                     "define" => {
                         if list.len() != 3 {
                             return Err("define requires exactly 2 arguments".to_string());
                         }
                         let name = list[1].as_symbol()?;
+
+                        // Register the variable in the current scope BEFORE processing the value
+                        // This way, if the value references the variable (unusual but possible),
+                        // it can be found. More importantly, it makes the variable available to
+                        // subsequent expressions in the same scope.
+                        if !scope_stack.is_empty() {
+                            let scope = scope_stack.last_mut().unwrap();
+                            if !scope.contains(&name) {
+                                scope.push(name);
+                            }
+                        }
+
                         let value =
                             Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
+
                         Ok(Expr::Define { name, value })
                     }
 
-                    "let" => {
-                        // Syntax: (let ((var1 expr1) (var2 expr2) ...) body...)
-                        // Transform to: ((lambda (var1 var2 ...) body...) expr1 expr2 ...)
-                        if list.len() < 2 {
-                            return Err("let requires at least a binding vector".to_string());
-                        }
+                    "let" => convert_let(&list, symbols, scope_stack),
 
-                        // Parse the bindings vector
-                        let bindings_vec = list[1].list_to_vec()?;
-                        let mut param_syms = Vec::new();
-                        let mut binding_exprs = Vec::new();
+                    "let*" => convert_let_star(&list, symbols, scope_stack),
 
-                        for binding in bindings_vec {
-                            let binding_list = binding.list_to_vec()?;
-                            if binding_list.len() != 2 {
-                                return Err(
-                                    "Each let binding must be a [var expr] pair".to_string()
-                                );
-                            }
-                            let var = binding_list[0].as_symbol()?;
-                            param_syms.push(var);
-
-                            // Parse the binding expression in the current scope
-                            // (bindings cannot reference previous bindings or let-bound variables)
-                            let expr =
-                                value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
-                            binding_exprs.push(expr);
-                        }
-
-                        // Parse the body (one or more expressions)
-                        // Body can reference let-bound variables, so we add them to scope
-                        scope_stack.push(param_syms.clone());
-
-                        let body_exprs: Result<Vec<_>, _> = list[2..]
-                            .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                            .collect();
-
-                        scope_stack.pop();
-
-                        let body_exprs = body_exprs?;
-                        let body = if body_exprs.len() == 1 {
-                            Box::new(body_exprs[0].clone())
-                        } else if body_exprs.is_empty() {
-                            Box::new(Expr::Literal(Value::Nil))
-                        } else {
-                            Box::new(Expr::Begin(body_exprs))
-                        };
-
-                        // Analyze free variables in the body
-                        let mut local_bindings = std::collections::HashSet::new();
-                        for param in &param_syms {
-                            local_bindings.insert(*param);
-                        }
-                        let free_vars = analyze_free_vars(&body, &local_bindings);
-
-                        // Convert free vars to captures, resolving their scope location
-                        let mut sorted_free_vars: Vec<_> = free_vars.iter().copied().collect();
-                        sorted_free_vars.sort(); // Deterministic ordering
-
-                        let captures: Vec<_> = sorted_free_vars
-                            .iter()
-                            .map(|sym| {
-                                // Look up in scope stack to determine if global or local
-                                for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
-                                    if let Some(local_index) = scope.iter().position(|s| s == sym) {
-                                        let depth = scope_stack.len() - 1 - reverse_idx;
-                                        return (*sym, depth, local_index);
-                                    }
-                                }
-                                // If not found in scope stack, it's a global variable
-                                (*sym, 0, usize::MAX)
-                            })
-                            .collect();
-
-                        // Dead capture elimination: filter out captures that aren't actually used in the body
-                        let candidates: HashSet<SymbolId> =
-                            captures.iter().map(|(sym, _, _)| *sym).collect();
-                        let actually_used =
-                            analyze_capture_usage(&body, &local_bindings, &candidates);
-                        let captures: Vec<_> = captures
-                            .into_iter()
-                            .filter(|(sym, _, _)| actually_used.contains(sym))
-                            .collect();
-
-                        // Adjust variable indices in body to account for closure environment layout
-                        let mut adjusted_body = body;
-                        adjust_var_indices(&mut adjusted_body, &captures, &param_syms);
-
-                        // Create lambda: (lambda (var1 var2 ...) body...)
-                        let lambda = Expr::Lambda {
-                            params: param_syms,
-                            body: adjusted_body,
-                            captures,
-                        };
-
-                        // Create call: (lambda expr1 expr2 ...)
-                        Ok(Expr::Call {
-                            func: Box::new(lambda),
-                            args: binding_exprs,
-                            tail: false,
-                        })
-                    }
-
-                    "let*" => {
-                        // Syntax: (let* ((var1 expr1) (var2 expr2) ...) body...)
-                        // Let* differs from let in that each binding can reference previous bindings.
-                        //
-                        // Strategy: parse binding expressions sequentially, adding each variable
-                        // to scope as we go. This naturally handles the sequential evaluation.
-                        // Then create a single large lambda with all parameters, using the
-                        // parsed expressions as arguments.
-                        if list.len() < 2 {
-                            return Err("let* requires at least a binding vector".to_string());
-                        }
-
-                        let bindings_vec = list[1].list_to_vec()?;
-
-                        if bindings_vec.is_empty() {
-                            // (let* () body...) - just evaluate body
-                            let body_exprs: Result<Vec<_>, _> = list[2..]
-                                .iter()
-                                .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                                .collect();
-                            let body_exprs = body_exprs?;
-                            if body_exprs.is_empty() {
-                                return Ok(Expr::Literal(Value::Nil));
-                            } else if body_exprs.len() == 1 {
-                                return Ok(body_exprs[0].clone());
-                            } else {
-                                return Ok(Expr::Begin(body_exprs));
-                            }
-                        }
-
-                        // Parse bindings sequentially with growing scope
-                        let mut param_syms = Vec::new();
-                        let mut binding_exprs = Vec::new();
-                        scope_stack.push(Vec::new());
-
-                        for binding in &bindings_vec {
-                            let binding_list = binding.list_to_vec()?;
-                            if binding_list.len() != 2 {
-                                return Err(
-                                    "Each let* binding must be a [var expr] pair".to_string()
-                                );
-                            }
-                            let var = binding_list[0].as_symbol()?;
-                            param_syms.push(var);
-
-                            // Parse binding expression WITH PREVIOUS BINDINGS IN SCOPE
-                            // This allows y = (+ x 1) where x was previously bound
-                            let expr =
-                                value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
-                            binding_exprs.push(expr);
-
-                            // Add this variable to scope for next binding
-                            if let Some(current_scope) = scope_stack.last_mut() {
-                                current_scope.push(var);
-                            }
-                        }
-
-                        // Parse body with all let* variables in scope
-                        let body_exprs: Result<Vec<_>, _> = list[2..]
-                            .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                            .collect();
-
-                        scope_stack.pop();
-
-                        let body_exprs = body_exprs?;
-                        let body = if body_exprs.len() == 1 {
-                            Box::new(body_exprs[0].clone())
-                        } else if body_exprs.is_empty() {
-                            Box::new(Expr::Literal(Value::Nil))
-                        } else {
-                            Box::new(Expr::Begin(body_exprs))
-                        };
-
-                        // Analyze free variables
-                        let mut local_bindings = std::collections::HashSet::new();
-                        for param in &param_syms {
-                            local_bindings.insert(*param);
-                        }
-                        let free_vars = analyze_free_vars(&body, &local_bindings);
-
-                        // Convert free vars to captures, resolving their scope location
-                        let mut sorted_free_vars: Vec<_> = free_vars.iter().copied().collect();
-                        sorted_free_vars.sort(); // Deterministic ordering
-
-                        let captures: Vec<_> = sorted_free_vars
-                            .iter()
-                            .map(|sym| {
-                                // Look up in scope stack to determine if global or local
-                                for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
-                                    if let Some(local_index) = scope.iter().position(|s| s == sym) {
-                                        let depth = scope_stack.len() - 1 - reverse_idx;
-                                        return (*sym, depth, local_index);
-                                    }
-                                }
-                                // If not found in scope stack, it's a global variable
-                                (*sym, 0, usize::MAX)
-                            })
-                            .collect();
-
-                        // Dead capture elimination: filter out captures that aren't actually used in the body
-                        let candidates: HashSet<SymbolId> =
-                            captures.iter().map(|(sym, _, _)| *sym).collect();
-                        let actually_used =
-                            analyze_capture_usage(&body, &local_bindings, &candidates);
-                        let captures: Vec<_> = captures
-                            .into_iter()
-                            .filter(|(sym, _, _)| actually_used.contains(sym))
-                            .collect();
-
-                        // Adjust variable indices in body to account for closure environment layout
-                        let mut adjusted_body = body;
-                        adjust_var_indices(&mut adjusted_body, &captures, &param_syms);
-
-                        // Create lambda: (lambda (var1 var2 ...) body...)
-                        let lambda = Expr::Lambda {
-                            params: param_syms,
-                            body: adjusted_body,
-                            captures,
-                        };
-
-                        // Create call: (lambda expr1 expr2 ...)
-                        Ok(Expr::Call {
-                            func: Box::new(lambda),
-                            args: binding_exprs,
-                            tail: false,
-                        })
-                    }
-
-                    "letrec" => {
-                        // Syntax: (letrec ((var1 expr1) (var2 expr2) ...) body...)
-                        // All bindings are visible to all binding expressions and the body.
-                        // Unlike let, bindings can reference each other.
-                        if list.len() < 2 {
-                            return Err("letrec requires at least a binding vector".to_string());
-                        }
-
-                        let bindings_vec = list[1].list_to_vec()?;
-                        let mut param_syms = Vec::new();
-                        let mut binding_exprs = Vec::new();
-
-                        // First pass: collect all variable names
-                        for binding in &bindings_vec {
-                            let binding_list = binding.list_to_vec()?;
-                            if binding_list.len() != 2 {
-                                return Err(
-                                    "Each letrec binding must be a [var expr] pair".to_string()
-                                );
-                            }
-                            param_syms.push(binding_list[0].as_symbol()?);
-                        }
-
-                        // Second pass: parse binding expressions
-                        // Names are NOT in scope during binding expression parsing
-                        // They'll reference each other as GlobalVar, resolved at runtime via scope_stack
-                        for binding in &bindings_vec {
-                            let binding_list = binding.list_to_vec()?;
-                            let expr =
-                                value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
-                            binding_exprs.push(expr);
-                        }
-
-                        // Parse body in current scope (names also as GlobalVar)
-                        let body_exprs: Result<Vec<_>, _> = list[2..]
-                            .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                            .collect();
-
-                        let body_exprs = body_exprs?;
-                        let body = if body_exprs.len() == 1 {
-                            Box::new(body_exprs[0].clone())
-                        } else if body_exprs.is_empty() {
-                            Box::new(Expr::Literal(Value::Nil))
-                        } else {
-                            Box::new(Expr::Begin(body_exprs))
-                        };
-
-                        let bindings: Vec<_> = param_syms.into_iter().zip(binding_exprs).collect();
-
-                        Ok(Expr::Letrec { bindings, body })
-                    }
+                    "letrec" => convert_letrec(&list, symbols, scope_stack),
 
                     "set!" => {
                         if list.len() != 3 {
@@ -926,215 +1350,11 @@ fn value_to_expr_with_scope(
                         })
                     }
 
-                    "handler-case" => {
-                        // Syntax: (handler-case body (exception-id (var) handler-code) ...)
-                        // exception-id can be numeric or a symbol (will be looked up)
-                        if list.len() < 2 {
-                            return Err("handler-case requires at least a body".to_string());
-                        }
+                    "handler-case" => convert_handler_case(&list, symbols, scope_stack),
 
-                        let body =
-                            Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
-                        let mut handlers = Vec::new();
+                    "handler-bind" => convert_handler_bind(&list, symbols, scope_stack),
 
-                        // Parse handler clauses
-                        for clause in &list[2..] {
-                            if let Ok(clause_vec) = clause.list_to_vec() {
-                                if clause_vec.len() != 3 {
-                                    return Err(
-                                        "handler-case clause requires (exception-id (var) handler)"
-                                            .to_string(),
-                                    );
-                                }
-
-                                // Parse exception ID
-                                let exception_id = match &clause_vec[0] {
-                                    Value::Int(id) => *id as u32,
-                                    Value::Symbol(sym) => {
-                                        // Map symbol to exception ID
-                                        let name = symbols.name(*sym).unwrap_or("unknown");
-                                        match name {
-                                            "condition" => 1,
-                                            "error" => 2,
-                                            "type-error" => 3,
-                                            "division-by-zero" => 4,
-                                            "undefined-variable" => 5,
-                                            "arity-error" => 6,
-                                            "warning" => 7,
-                                            "style-warning" => 8,
-                                            _ => {
-                                                return Err(format!(
-                                                    "Unknown exception type: {}",
-                                                    name
-                                                ))
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(
-                                            "Exception ID must be integer or symbol".to_string()
-                                        )
-                                    }
-                                };
-
-                                // Parse variable
-                                let var = clause_vec[1].as_symbol()?;
-
-                                // Parse handler code
-                                let handler_code = Box::new(value_to_expr_with_scope(
-                                    &clause_vec[2],
-                                    symbols,
-                                    scope_stack,
-                                )?);
-
-                                handlers.push((exception_id, var, handler_code));
-                            } else {
-                                return Err("Handler clauses must be lists".to_string());
-                            }
-                        }
-
-                        Ok(Expr::HandlerCase { body, handlers })
-                    }
-
-                    "handler-bind" => {
-                        // Syntax: (handler-bind ((exception-id handler-fn) ...) body)
-                        // handler-fn is called but doesn't unwind the stack
-                        if list.len() != 3 {
-                            return Err("handler-bind requires ((handlers...) body)".to_string());
-                        }
-
-                        let handlers_list = list[1].list_to_vec()?;
-                        let mut handlers = Vec::new();
-
-                        for handler_spec in handlers_list {
-                            let spec_vec = handler_spec.list_to_vec()?;
-                            if spec_vec.len() != 2 {
-                                return Err(
-                                    "Each handler binding must be (exception-id handler-fn)"
-                                        .to_string(),
-                                );
-                            }
-
-                            // Parse exception ID
-                            let exception_id = match &spec_vec[0] {
-                                Value::Int(id) => *id as u32,
-                                Value::Symbol(sym) => {
-                                    let name = symbols.name(*sym).unwrap_or("unknown");
-                                    match name {
-                                        "condition" => 1,
-                                        "error" => 2,
-                                        "type-error" => 3,
-                                        "division-by-zero" => 4,
-                                        "undefined-variable" => 5,
-                                        "arity-error" => 6,
-                                        "warning" => 7,
-                                        "style-warning" => 8,
-                                        _ => {
-                                            return Err(format!("Unknown exception type: {}", name))
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    return Err("Exception ID must be integer or symbol".to_string())
-                                }
-                            };
-
-                            // Parse handler function
-                            let handler_fn = Box::new(value_to_expr_with_scope(
-                                &spec_vec[1],
-                                symbols,
-                                scope_stack,
-                            )?);
-
-                            handlers.push((exception_id, handler_fn));
-                        }
-
-                        let body =
-                            Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
-
-                        Ok(Expr::HandlerBind { handlers, body })
-                    }
-
-                    "match" => {
-                        // Syntax: (match value (pattern1 result1) (pattern2 result2) ... [default])
-                        if list.len() < 2 {
-                            return Err("match requires at least a value".to_string());
-                        }
-
-                        let value =
-                            Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
-                        let mut patterns = Vec::new();
-                        let mut default = None;
-
-                        // Parse pattern clauses
-                        for clause in &list[2..] {
-                            if let Ok(clause_vec) = clause.list_to_vec() {
-                                if clause_vec.is_empty() {
-                                    return Err("Empty pattern clause".to_string());
-                                }
-
-                                // Check if this is a default clause (symbol, not a list)
-                                if clause_vec.len() == 1 {
-                                    // Single value - treat as default
-                                    default = Some(Box::new(value_to_expr_with_scope(
-                                        &clause_vec[0],
-                                        symbols,
-                                        scope_stack,
-                                    )?));
-                                } else if clause_vec.len() == 2 {
-                                    // Pattern and result
-                                    let pattern = value_to_pattern(&clause_vec[0], symbols)?;
-
-                                    // Extract pattern variables
-                                    let pattern_vars = extract_pattern_variables(&pattern);
-
-                                    // If there are pattern variables, wrap the body in a lambda
-                                    // that binds them to the matched value
-                                    let result = if !pattern_vars.is_empty() {
-                                        // Add pattern variables to scope for parsing the body
-                                        let mut new_scope_stack = scope_stack.clone();
-                                        new_scope_stack.push(pattern_vars.clone());
-
-                                        // Parse the result in the new scope
-                                        let body_expr = value_to_expr_with_scope(
-                                            &clause_vec[1],
-                                            symbols,
-                                            &mut new_scope_stack,
-                                        )?;
-
-                                        // Transform: (lambda (var1 var2 ...) body_expr)
-                                        // This binds the pattern variables for use in the body
-                                        Expr::Lambda {
-                                            params: pattern_vars,
-                                            body: Box::new(body_expr),
-                                            captures: Vec::new(),
-                                        }
-                                    } else {
-                                        // No variables to bind
-                                        value_to_expr_with_scope(
-                                            &clause_vec[1],
-                                            symbols,
-                                            scope_stack,
-                                        )?
-                                    };
-
-                                    patterns.push((pattern, result));
-                                } else {
-                                    return Err(
-                                        "Pattern clause must have pattern and result".to_string()
-                                    );
-                                }
-                            } else {
-                                return Err("Expected pattern clause to be a list".to_string());
-                            }
-                        }
-
-                        Ok(Expr::Match {
-                            value,
-                            patterns,
-                            default,
-                        })
-                    }
+                    "match" => convert_match_expr(&list, symbols, scope_stack),
 
                     "throw" => {
                         // Syntax: (throw <exception>)
@@ -1384,86 +1604,7 @@ fn value_to_expr_with_scope(
                         Ok(result)
                     }
 
-                    "cond" => {
-                        // Syntax: (cond (test1 body1) (test2 body2) ... [(else body)])
-                        // A cond expression evaluates test expressions in order until one is truthy,
-                        // then evaluates and returns its corresponding body.
-                        // If no tests are truthy and there's an else clause, evaluate the else body.
-                        // If no tests are truthy and there's no else clause, return nil.
-                        if list.len() < 2 {
-                            return Err("cond requires at least one clause".to_string());
-                        }
-
-                        let mut clauses = Vec::new();
-                        let mut else_body = None;
-
-                        // Parse clauses
-                        for clause in &list[1..] {
-                            let clause_vec = clause.list_to_vec()?;
-                            if clause_vec.is_empty() {
-                                return Err("cond clause cannot be empty".to_string());
-                            }
-
-                            // Check if this is the else clause (single symbol 'else' followed by body)
-                            if !clause_vec.is_empty() {
-                                if let Value::Symbol(test_sym) = &clause_vec[0] {
-                                    if let Some("else") = symbols.name(*test_sym) {
-                                        // This is the else clause
-                                        if else_body.is_some() {
-                                            return Err(
-                                                "cond can have at most one else clause".to_string()
-                                            );
-                                        }
-                                        // The else clause body can be multiple expressions
-                                        let body_exprs: Result<Vec<_>, _> = clause_vec[1..]
-                                            .iter()
-                                            .map(|v| {
-                                                value_to_expr_with_scope(v, symbols, scope_stack)
-                                            })
-                                            .collect();
-                                        let body_exprs = body_exprs?;
-                                        let body = if body_exprs.is_empty() {
-                                            Expr::Literal(Value::Nil)
-                                        } else if body_exprs.len() == 1 {
-                                            body_exprs[0].clone()
-                                        } else {
-                                            Expr::Begin(body_exprs)
-                                        };
-                                        else_body = Some(Box::new(body));
-                                        continue;
-                                    }
-                                }
-                            }
-
-                            // Regular clause: (test body...)
-                            if clause_vec.len() < 2 {
-                                return Err(
-                                    "cond clause must have at least a test and a body".to_string()
-                                );
-                            }
-
-                            let test =
-                                value_to_expr_with_scope(&clause_vec[0], symbols, scope_stack)?;
-
-                            // The body can be multiple expressions
-                            let body_exprs: Result<Vec<_>, _> = clause_vec[1..]
-                                .iter()
-                                .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                                .collect();
-                            let body_exprs = body_exprs?;
-                            let body = if body_exprs.is_empty() {
-                                Expr::Literal(Value::Nil)
-                            } else if body_exprs.len() == 1 {
-                                body_exprs[0].clone()
-                            } else {
-                                Expr::Begin(body_exprs)
-                            };
-
-                            clauses.push((test, body));
-                        }
-
-                        Ok(Expr::Cond { clauses, else_body })
-                    }
+                    "cond" => convert_cond(&list, symbols, scope_stack),
 
                     _ => {
                         // Check if it's a macro call

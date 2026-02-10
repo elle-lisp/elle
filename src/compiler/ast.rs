@@ -67,6 +67,7 @@ pub enum Expr {
         params: Vec<SymbolId>,
         body: Box<Expr>,
         captures: Vec<(SymbolId, usize, usize)>,
+        locals: Vec<SymbolId>, // Locally-defined variables in the lambda body
     },
 
     /// Let binding

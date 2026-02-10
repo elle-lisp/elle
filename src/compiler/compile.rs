@@ -1,8 +1,9 @@
+use super::analysis::analyze_mutated_vars;
 use super::ast::Expr;
 use super::bytecode::{Bytecode, Instruction};
 use crate::error::LocationMap;
 use crate::value::{Closure, SymbolId, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 struct Compiler {
@@ -10,6 +11,10 @@ struct Compiler {
     #[allow(dead_code)]
     symbols: HashMap<SymbolId, usize>,
     scope_depth: usize,
+    // Phase 4: Track lambda locals for proper cell-based storage
+    lambda_locals: Vec<SymbolId>,
+    lambda_captures_len: usize,
+    lambda_params_len: usize,
 }
 
 impl Compiler {
@@ -18,6 +23,9 @@ impl Compiler {
             bytecode: Bytecode::new(),
             symbols: HashMap::new(),
             scope_depth: 0,
+            lambda_locals: Vec::new(),
+            lambda_captures_len: 0,
+            lambda_params_len: 0,
         }
     }
 
@@ -42,7 +50,10 @@ impl Compiler {
                             }
                         }
                         // Also recursively collect from nested structures
-                        collect_recursive(e, defines, seen);
+                        // BUT: Don't recurse into nested lambdas (they have their own scope)
+                        if !matches!(e, Expr::Lambda { .. }) {
+                            collect_recursive(e, defines, seen);
+                        }
                     }
                 }
                 Expr::Define { name, .. } => {
@@ -118,17 +129,39 @@ impl Compiler {
                 // This allows a function to reference itself in its own body
                 let defines = Self::collect_defines(expr);
                 for sym_id in defines {
+                    // Skip pre-declaration for lambda locals — their cells are pre-allocated by the Call handler
+                    if self.lambda_locals.contains(&sym_id) {
+                        continue;
+                    }
                     // Load nil and store it
                     self.bytecode.emit(Instruction::Nil);
                     let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
-                    if self.scope_depth > 0 {
-                        // Inside a scope (lambda, block, etc.) — define locally
+                    if !self.lambda_locals.is_empty() {
+                        // Inside a lambda — store to closure environment
+                        if let Some(local_idx) =
+                            self.lambda_locals.iter().position(|s| s == &sym_id)
+                        {
+                            let env_idx =
+                                self.lambda_captures_len + self.lambda_params_len + local_idx;
+                            self.bytecode.emit(Instruction::StoreUpvalue);
+                            self.bytecode.emit_byte(1); // depth = 1 (current closure)
+                            self.bytecode.emit_byte(env_idx as u8);
+                        } else {
+                            // Symbol is not in lambda_locals, so it's not a local variable
+                            // This shouldn't happen in normal code, but we'll skip it
+                            self.bytecode.emit(Instruction::Pop);
+                        }
+                    } else if self.scope_depth > 0 {
+                        // Inside a block/loop scope (not a lambda) — define locally
                         self.bytecode.emit(Instruction::DefineLocal);
+                        self.bytecode.emit_u16(idx);
+                        // DefineLocal pushes the value back, but we don't need it for pre-declaration
+                        self.bytecode.emit(Instruction::Pop);
                     } else {
                         // Top-level — define globally
                         self.bytecode.emit(Instruction::StoreGlobal);
+                        self.bytecode.emit_u16(idx);
                     }
-                    self.bytecode.emit_u16(idx);
                 }
 
                 // Now compile the expressions normally
@@ -154,6 +187,8 @@ impl Compiler {
                     let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
                     self.bytecode.emit(Instruction::DefineLocal);
                     self.bytecode.emit_u16(idx);
+                    // DefineLocal pushes the value back, but we don't need it for pre-declaration
+                    self.bytecode.emit(Instruction::Pop);
                 }
 
                 // Compile expressions
@@ -195,56 +230,87 @@ impl Compiler {
                 params,
                 body,
                 captures,
+                locals,
             } => {
-                // Create a new compiler for the lambda body
+                // Phase 4: Locally-defined variables are now part of the closure environment
+                // The closure environment layout is: [captures..., parameters..., locals...]
+                // Each local is pre-allocated as a cell in the environment
+                // We NO LONGER use PushScope/PopScope for lambda bodies - all variables are in closure_env
                 let mut lambda_compiler = Compiler::new();
-                lambda_compiler.scope_depth = 1; // We're inside a function scope
+                lambda_compiler.scope_depth = 0; // NOT inside a scope (Phase 4: no scope_stack for lambdas)
+                lambda_compiler.lambda_locals = locals.clone();
+                lambda_compiler.lambda_captures_len = captures.len();
+                lambda_compiler.lambda_params_len = params.len();
 
-                // Push function scope for local defines
-                lambda_compiler.bytecode.emit(Instruction::PushScope);
-                lambda_compiler.bytecode.emit_byte(1); // ScopeType::Function = 1
-
-                // Compile the body
+                // Compile the body directly (no scope management)
                 lambda_compiler.compile_expr(body, true);
 
-                // Pop function scope and return
-                lambda_compiler.bytecode.emit(Instruction::PopScope);
+                // Return from the lambda
                 lambda_compiler.bytecode.emit(Instruction::Return);
 
                 // Create closure value with environment
                 // Note: env is empty here, actual capturing happens at runtime via MakeClosure instruction
+                // num_locals includes: parameters + captures + locally-defined variables
+                // The environment layout will be: [captures..., parameters..., locals...]
                 let closure = Closure {
                     bytecode: Rc::new(lambda_compiler.bytecode.instructions),
                     arity: crate::value::Arity::Exact(params.len()),
                     env: Rc::new(Vec::new()), // Will be populated by VM when closure is created
-                    num_locals: params.len() + captures.len(),
+                    num_locals: params.len() + captures.len() + locals.len(),
                     num_captures: captures.len(),
                     constants: Rc::new(lambda_compiler.bytecode.constants),
                 };
 
                 let idx = self.bytecode.add_constant(Value::Closure(Rc::new(closure)));
 
-                if captures.is_empty() {
-                    // No captures — just load the closure template directly as a constant
+                if captures.is_empty() && locals.is_empty() {
+                    // No captures AND no locals — just load the closure template directly as a constant
                     // No need for MakeClosure instruction
                     self.bytecode.emit(Instruction::LoadConst);
                     self.bytecode.emit_u16(idx);
+                } else if captures.is_empty() {
+                    // Has locals but no external captures — still need MakeClosure for closure env
+                    // so that nested lambdas can access locally-defined variables via LoadUpvalueRaw
+                    self.bytecode.emit(Instruction::MakeClosure);
+                    self.bytecode.emit_u16(idx);
+                    self.bytecode.emit_byte(0); // 0 captures
                 } else {
                     // Has captures — emit capture loads + MakeClosure as before
+                    // First, analyze which variables are mutated in the lambda body
+                    let mutated_vars = analyze_mutated_vars(body);
+                    let mutated_captures: HashSet<SymbolId> = captures
+                        .iter()
+                        .map(|(sym, _, _)| *sym)
+                        .filter(|sym| mutated_vars.contains(sym))
+                        .collect();
+
                     // Emit captured values onto the stack (in order)
                     // These will be stored in the closure's environment by the VM
                     for (sym, depth, index) in captures {
                         if *index == usize::MAX {
-                            // This is a global variable - load it as a global
+                            // This is a global variable - store the symbol itself, not the value
+                            // This allows us to look it up in the global scope at runtime
                             let sym_idx = self.bytecode.add_constant(Value::Symbol(*sym));
-                            self.bytecode.emit(Instruction::LoadGlobal);
+                            self.bytecode.emit(Instruction::LoadConst);
                             self.bytecode.emit_u16(sym_idx);
                         } else {
                             // This is a local variable from an outer scope
-                            // Load it using LoadUpvalue with the resolved depth and index
-                            self.bytecode.emit(Instruction::LoadUpvalue);
-                            self.bytecode.emit_byte((*depth + 1) as u8);
+                            // Load it using LoadUpvalueRaw with the resolved depth and index
+                            // depth is relative to the inner lambda's scope_stack
+                            // We need to adjust it to be relative to the current lambda's closure environment
+                            // depth=1 means one level up from the inner lambda (i.e., the outer lambda)
+                            // When we're compiling the outer lambda, we're inside the outer lambda's bytecode
+                            // So we need to adjust depth from 1 to 0 (the current closure)
+                            // Use LoadUpvalueRaw to preserve cells for shared mutable captures
+                            let adjusted_depth = if *depth > 0 { *depth - 1 } else { 0 };
+                            self.bytecode.emit(Instruction::LoadUpvalueRaw);
+                            self.bytecode.emit_byte((adjusted_depth + 1) as u8);
                             self.bytecode.emit_byte(*index as u8);
+
+                            // If this variable is mutated in the lambda body, wrap it in a cell
+                            if mutated_captures.contains(sym) {
+                                self.bytecode.emit(Instruction::MakeCell);
+                            }
                         }
                     }
 
@@ -314,23 +380,18 @@ impl Compiler {
 
             Expr::Set {
                 var,
-                depth,
+                depth: _,
                 index,
                 value,
             } => {
                 self.compile_expr(value, false);
-                if *index == usize::MAX {
-                    // Global variable set
-                    let idx = self.bytecode.add_constant(Value::Symbol(*var));
-                    self.bytecode.emit(Instruction::StoreGlobal);
-                    self.bytecode.emit_u16(idx);
-                } else if *depth == 0 {
-                    // Local variable set
-                    self.bytecode.emit(Instruction::StoreLocal);
+                if *index != usize::MAX {
+                    // Variable is in closure environment (capture, param, or local)
+                    self.bytecode.emit(Instruction::StoreUpvalue);
+                    self.bytecode.emit_byte(1); // depth = 1 (current closure)
                     self.bytecode.emit_byte(*index as u8);
                 } else {
-                    // Upvalue variable set (not supported yet - treat as error or global)
-                    // For now, treat as global to avoid corruption
+                    // Global variable
                     let idx = self.bytecode.add_constant(Value::Symbol(*var));
                     self.bytecode.emit(Instruction::StoreGlobal);
                     self.bytecode.emit_u16(idx);
@@ -339,16 +400,23 @@ impl Compiler {
 
             Expr::Define { name, value } => {
                 self.compile_expr(value, false);
-                let idx = self.bytecode.add_constant(Value::Symbol(*name));
-                if self.scope_depth > 0 {
-                    // Inside a scope (loop, block) — define locally
-                    self.bytecode.emit(Instruction::Dup);
+                if let Some(local_idx) = self.lambda_locals.iter().position(|s| s == name) {
+                    // Inside a lambda: store to the pre-allocated cell in closure env
+                    let env_idx = self.lambda_captures_len + self.lambda_params_len + local_idx;
+                    self.bytecode.emit(Instruction::StoreUpvalue);
+                    self.bytecode.emit_byte(1); // depth = 1 (current closure)
+                    self.bytecode.emit_byte(env_idx as u8);
+                } else if self.scope_depth > 0 {
+                    // Inside a block/loop/let scope (not a lambda) — define locally
+                    let idx = self.bytecode.add_constant(Value::Symbol(*name));
                     self.bytecode.emit(Instruction::DefineLocal);
+                    self.bytecode.emit_u16(idx);
                 } else {
                     // Top-level — define globally
+                    let idx = self.bytecode.add_constant(Value::Symbol(*name));
                     self.bytecode.emit(Instruction::StoreGlobal);
+                    self.bytecode.emit_u16(idx);
                 }
-                self.bytecode.emit_u16(idx);
             }
 
             Expr::While { cond, body } => {
@@ -427,8 +495,10 @@ impl Compiler {
                 let var_idx = self.bytecode.add_constant(Value::Symbol(*var));
                 self.bytecode.emit(Instruction::DefineLocal);
                 self.bytecode.emit_u16(var_idx);
-                // DefineLocal pops the value without pushing back
-                // Stack: [list, first_element] -> DefineLocal pops first_element -> [list]
+                // DefineLocal stores the value and pushes it back (expression semantics)
+                // We don't need the pushed value, so pop it
+                self.bytecode.emit(Instruction::Pop);
+                // Stack: [list, first_element] -> DefineLocal -> [list, first_element] -> Pop -> [list]
 
                 // Compile body (body may reference the loop variable, but won't consume the list)
                 self.compile_expr(body, false);

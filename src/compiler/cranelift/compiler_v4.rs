@@ -91,6 +91,7 @@ impl ExprCompilerV4 {
                 params,
                 body,
                 captures,
+                locals: _, // Locals are handled at compile time
             } => Self::compile_lambda(ctx, params.clone(), body.clone(), captures.clone()),
             Expr::Call { func, args, .. } => Self::compile_call(ctx, func, args),
             _ => Err(format!(
