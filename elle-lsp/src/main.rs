@@ -6,7 +6,7 @@
 //! - Code completion suggestions
 //! - Navigation to symbol definitions
 
-use elle_lsp::{completion, definition, hover, references, CompilerState};
+use elle_lsp::{completion, definition, formatting, hover, references, CompilerState};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 
@@ -115,6 +115,7 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                         "hoverProvider": true,
                         "definitionProvider": true,
                         "referencesProvider": true,
+                        "documentFormattingProvider": true,
                         "completionProvider": {
                             "resolveProvider": true,
                             "triggerCharacters": ["("]
@@ -414,6 +415,49 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                 "id": id,
                 "result": results
             })
+        }
+        "textDocument/formatting" => {
+            let mut result = Vec::new();
+            let mut error = None;
+
+            if let Some(params) = params {
+                if let Some(uri) = params
+                    .get("textDocument")
+                    .and_then(|d| d.get("uri"))
+                    .and_then(|u| u.as_str())
+                {
+                    if let Some(doc) = compiler_state.get_document(uri) {
+                        // Calculate the end position of the document
+                        let (end_line, end_char) =
+                            formatting::document_end_position(&doc.source_text);
+
+                        // Format the document
+                        match formatting::format_document(&doc.source_text, end_line, end_char) {
+                            Ok(edits) => result = edits,
+                            Err(e) => {
+                                error = Some(json!({
+                                    "code": -32603,
+                                    "message": format!("Formatting error: {}", e)
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(err) = error {
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": err
+                })
+            } else {
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": result
+                })
+            }
         }
         _ => {
             json!({
