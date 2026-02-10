@@ -193,7 +193,11 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                     }
                 }
             }
-            json!({})
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": null
+            })
         }
         "textDocument/didChange" => {
             if let Some(params) = params {
@@ -251,7 +255,11 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                     }
                 }
             }
-            json!({})
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": null
+            })
         }
         "textDocument/didClose" => {
             if let Some(params) = params {
@@ -263,7 +271,11 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                     compiler_state.on_document_close(uri);
                 }
             }
-            json!({})
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": null
+            })
         }
         "textDocument/hover" => {
             let mut result = None;
