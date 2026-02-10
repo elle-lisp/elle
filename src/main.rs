@@ -176,6 +176,8 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
         }
     };
 
+    let mut accumulated_input = String::new();
+
     loop {
         // Read line with readline support
         match repl.read_line("> ") {
@@ -185,6 +187,9 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
                     continue;
                 }
 
+                accumulated_input.push_str(input);
+                accumulated_input.push('\n');
+
                 // Add to history
                 repl.add_history(input);
 
@@ -193,20 +198,114 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
                     "(exit)" | "exit" => break,
                     "(help)" | "help" => {
                         print_help();
+                        accumulated_input.clear();
                         continue;
                     }
                     _ => {}
                 }
 
-                // Read
-                let value = match read_str(input, symbols) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("✗ Parse error: {}", e);
-                        print_error_context(input, "parse error", 1, 1);
-                        continue;
+                // Try to parse accumulated input
+                match read_str(accumulated_input.trim(), symbols) {
+                    Ok(value) => {
+                        accumulated_input.clear();
+
+                        // Compile
+                        let expr = match value_to_expr(&value, symbols) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                eprintln!("✗ Compilation error: {}", e);
+                                continue;
+                            }
+                        };
+
+                        let bytecode = compile(&expr);
+
+                        // Execute
+                        match vm.execute(&bytecode) {
+                            Ok(result) => {
+                                if !result.is_nil() {
+                                    println!("⟹ {:?}", result);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("✗ Runtime error: {}", e);
+                            }
+                        }
                     }
-                };
+                    Err(e) => {
+                        // Check if this is just an incomplete expression
+                        let err_msg = e.to_string();
+                        if err_msg.contains("Unterminated")
+                            || err_msg.contains("unexpected end of input")
+                        {
+                            // Expression is incomplete, prompt for more input on next line
+                            // Don't print an error, just continue accumulating
+                        } else {
+                            // Real parse error
+                            eprintln!("✗ Parse error: {}", e);
+                            print_error_context(accumulated_input.trim(), "parse error", 1, 1);
+                            accumulated_input.clear();
+                        }
+                    }
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("^C");
+                accumulated_input.clear();
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                break;
+            }
+            Err(e) => {
+                eprintln!("✗ Readline error: {}", e);
+                break;
+            }
+        }
+    }
+
+    // Save history
+    repl.finalize();
+}
+
+fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) {
+    eprintln!("Using fallback stdin input (no history or editing)");
+
+    let mut accumulated_input = String::new();
+
+    loop {
+        print!("> ");
+        io::stdout().flush().unwrap();
+
+        let mut line = String::new();
+        match io::stdin().read_line(&mut line) {
+            Ok(0) => break, // EOF
+            Err(_) => break,
+            Ok(_) => {}
+        }
+
+        accumulated_input.push_str(&line);
+
+        let trimmed = accumulated_input.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Check for built-in REPL commands
+        match trimmed {
+            "(exit)" | "exit" => break,
+            "(help)" | "help" => {
+                print_help();
+                accumulated_input.clear();
+                continue;
+            }
+            _ => {}
+        }
+
+        // Try to parse accumulated input
+        match read_str(trimmed, symbols) {
+            Ok(value) => {
+                accumulated_input.clear();
 
                 // Compile
                 let expr = match value_to_expr(&value, symbols) {
@@ -231,83 +330,19 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) {
                     }
                 }
             }
-            Err(ReadlineError::Interrupted) => {
-                println!("^C");
-                continue;
-            }
-            Err(ReadlineError::Eof) => {
-                break;
-            }
             Err(e) => {
-                eprintln!("✗ Readline error: {}", e);
-                break;
-            }
-        }
-    }
-
-    // Save history
-    repl.finalize();
-}
-
-fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) {
-    eprintln!("Using fallback stdin input (no history or editing)");
-
-    loop {
-        print!("> ");
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        match io::stdin().read_line(&mut input) {
-            Ok(0) => break, // EOF
-            Err(_) => break,
-            Ok(_) => {}
-        }
-
-        let input = input.trim();
-        if input.is_empty() {
-            continue;
-        }
-
-        // Check for built-in REPL commands
-        match input {
-            "(exit)" | "exit" => break,
-            "(help)" | "help" => {
-                print_help();
-                continue;
-            }
-            _ => {}
-        }
-
-        // Read
-        let value = match read_str(input, symbols) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("✗ Parse error: {}", e);
-                print_error_context(input, "parse error", 1, 1);
-                continue;
-            }
-        };
-
-        // Compile
-        let expr = match value_to_expr(&value, symbols) {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("✗ Compilation error: {}", e);
-                continue;
-            }
-        };
-
-        let bytecode = compile(&expr);
-
-        // Execute
-        match vm.execute(&bytecode) {
-            Ok(result) => {
-                if !result.is_nil() {
-                    println!("⟹ {:?}", result);
+                // Check if this is just an incomplete expression
+                let err_msg = e.to_string();
+                if err_msg.contains("Unterminated") || err_msg.contains("unexpected end of input") {
+                    // Expression is incomplete, prompt for more input
+                    print!(". ");
+                    io::stdout().flush().unwrap();
+                } else {
+                    // Real parse error
+                    eprintln!("✗ Parse error: {}", e);
+                    print_error_context(trimmed, "parse error", 1, 1);
+                    accumulated_input.clear();
                 }
-            }
-            Err(e) => {
-                eprintln!("✗ Runtime error: {}", e);
             }
         }
     }
