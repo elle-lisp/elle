@@ -376,10 +376,6 @@ impl SymbolExtractor {
             Expr::Import { .. } | Expr::ModuleRef { .. } => {
                 // Module references are handled elsewhere
             }
-
-            Expr::ScopeVar(_, _) | Expr::ScopeEntry(_) | Expr::ScopeExit => {
-                // Runtime scope markers, not relevant for IDE
-            }
         }
     }
 

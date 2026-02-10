@@ -26,41 +26,6 @@ pub fn handle_pop_scope(vm: &mut VM) -> Result<(), String> {
     Ok(())
 }
 
-/// Handle LoadScoped instruction
-pub fn handle_load_scoped(_vm: &mut VM, bytecode: &[u8], ip: &mut usize) -> Result<(), String> {
-    let depth = bytecode[*ip] as usize;
-    *ip += 1;
-    let index = bytecode[*ip] as usize;
-    *ip += 1;
-
-    // This instruction is for future use - currently variables use LoadUpvalue
-    // For now, just treat as a no-op to avoid breaking existing code
-    let _ = depth;
-    let _ = index;
-    Ok(())
-}
-
-/// Handle StoreScoped instruction
-pub fn handle_store_scoped(vm: &mut VM, bytecode: &[u8], ip: &mut usize) -> Result<(), String> {
-    let depth = bytecode[*ip] as usize;
-    *ip += 1;
-    let index = bytecode[*ip] as usize;
-    *ip += 1;
-
-    // Pop value from stack
-    let value = vm.stack.pop().ok_or("Stack underflow")?;
-
-    // Store to scope at the specified depth
-    if !vm.scope_stack.set_at_depth(depth, index as u32, value) {
-        return Err(format!(
-            "Variable not found at depth {} index {}",
-            depth, index
-        ));
-    }
-
-    Ok(())
-}
-
 /// Handle DefineLocal instruction
 pub fn handle_define_local(
     vm: &mut VM,

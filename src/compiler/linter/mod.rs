@@ -213,10 +213,6 @@ impl Linter {
                     self.check_expr(e, loc, symbol_table);
                 }
             }
-
-            Expr::ScopeVar(_, _) | Expr::ScopeEntry(_) | Expr::ScopeExit => {
-                // No linting needed for scope markers
-            }
         }
     }
 

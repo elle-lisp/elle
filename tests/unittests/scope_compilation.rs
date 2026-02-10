@@ -20,18 +20,16 @@ fn test_scope_type_enum_exists() {
     let _let = ScopeType::Let;
 }
 
-/// Test that scope expressions can be created
+/// Test that scope types can be created
 #[test]
-fn test_scope_expressions_exist() {
-    // Test that ScopeVar, ScopeEntry, and ScopeExit expressions exist
-    let scope_var = Expr::ScopeVar(0, 0);
-    let scope_entry = Expr::ScopeEntry(ScopeType::Block);
-    let scope_exit = Expr::ScopeExit;
+fn test_scope_types_can_be_created() {
+    // Test that ScopeType variants can be created and used
+    let _block = ScopeType::Block;
+    let _loop_scope = ScopeType::Loop;
+    let _let_scope = ScopeType::Let;
 
-    // Verify they're expressions
-    assert!(!format!("{:?}", scope_var).is_empty());
-    assert!(!format!("{:?}", scope_entry).is_empty());
-    assert!(!format!("{:?}", scope_exit).is_empty());
+    // Verify they're valid
+    assert_eq!(ScopeType::Block, ScopeType::Block);
 }
 
 /// Test that variables in lambdas have correct depth

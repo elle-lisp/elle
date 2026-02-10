@@ -1015,28 +1015,6 @@ impl Compiler {
                 // This case should never be reached, but we handle it for exhaustiveness
                 panic!("Xor expression should be transformed to a function call");
             }
-
-            Expr::ScopeVar(depth, index) => {
-                // Scoped variable reference (from outer scopes at runtime)
-                // This will be handled by Phase 2 VM runtime scope stack
-                // For now, emit LoadUpvalue as a placeholder
-                self.bytecode.emit(Instruction::LoadUpvalue);
-                self.bytecode.emit_byte((*depth + 1) as u8);
-                self.bytecode.emit_byte(*index as u8);
-            }
-
-            Expr::ScopeEntry(scope_type) => {
-                // Push a new scope onto the runtime scope stack
-                // This will be implemented in Phase 2 with PushScope instruction
-                // For now, this is a no-op (will be handled by Phase 2)
-                let _ = scope_type; // Suppress unused warning
-            }
-
-            Expr::ScopeExit => {
-                // Pop the current scope from the runtime scope stack
-                // This will be implemented in Phase 2 with PopScope instruction
-                // For now, this is a no-op (will be handled by Phase 2)
-            }
         }
     }
 
