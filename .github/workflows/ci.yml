@@ -23,12 +23,8 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
-      - name: Run tests
-        run: cargo test --lib --verbose
-      - name: Run integration tests
-        run: cargo test --test '*' --verbose
-      - name: Run doc tests
-        run: cargo test --doc --verbose
+      - name: Run all workspace tests
+        run: cargo test --workspace --verbose
 
   fmt:
     name: Rustfmt
@@ -49,8 +45,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run clippy on workspace
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   audit:
     name: Dependency Audit

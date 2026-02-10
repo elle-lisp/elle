@@ -26,7 +26,7 @@ fn test_lint_naming_bad() {
 
     let result = linter.lint_file(Path::new("tests/fixtures/naming-bad.lisp"));
     assert!(result.is_ok());
-    assert!(linter.diagnostics().len() > 0);
+    assert!(!linter.diagnostics().is_empty());
 
     // All diagnostics should be warnings about naming
     for diag in linter.diagnostics() {

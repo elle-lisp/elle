@@ -38,6 +38,7 @@ pub mod arithmetic;
 pub mod compiler;
 pub mod error;
 pub mod ffi;
+pub mod formatter;
 pub mod primitives;
 pub mod reader;
 pub mod repl;

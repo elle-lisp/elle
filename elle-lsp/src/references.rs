@@ -33,7 +33,7 @@ pub fn find_references(
     for (sym_id, usages) in &symbol_index.symbol_usages {
         for usage_loc in usages {
             if usage_loc.line == target_line {
-                let distance = (target_col as isize - usage_loc.col as isize).abs() as usize;
+                let distance = (target_col as isize - usage_loc.col as isize).unsigned_abs();
                 if distance < closest_distance && distance <= 10 {
                     // Within 10 characters of the symbol
                     target_symbol = Some(*sym_id);
@@ -46,7 +46,7 @@ pub fn find_references(
     // Check symbol definitions
     for (sym_id, loc) in &symbol_index.symbol_locations {
         if loc.line == target_line {
-            let distance = (target_col as isize - loc.col as isize).abs() as usize;
+            let distance = (target_col as isize - loc.col as isize).unsigned_abs();
             if distance < closest_distance && distance <= 10 {
                 target_symbol = Some(*sym_id);
                 closest_distance = distance;

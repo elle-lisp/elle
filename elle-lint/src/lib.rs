@@ -184,8 +184,10 @@ mod tests {
 
     #[test]
     fn test_lint_simple_code() {
-        let mut config = LintConfig::default();
-        config.min_severity = Severity::Warning;
+        let config = LintConfig {
+            min_severity: Severity::Warning,
+            ..Default::default()
+        };
         let mut linter = Linter::new(config);
 
         let result = linter.lint_str("(+ 1 2)", "test.lisp");

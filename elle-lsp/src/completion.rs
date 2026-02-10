@@ -25,20 +25,20 @@ pub fn get_completions(
                 SymbolKind::Function => symbol_index
                     .definitions
                     .get(sym_id)
-                    .and_then(|d| d.documentation.as_ref())
-                    .map(|d| d.clone())
+                    .and_then(|d| d.documentation.as_deref())
+                    .map(|d| d.to_string())
                     .unwrap_or_else(|| "User-defined function".to_string()),
                 SymbolKind::Variable => symbol_index
                     .definitions
                     .get(sym_id)
-                    .and_then(|d| d.documentation.as_ref())
-                    .map(|d| d.clone())
+                    .and_then(|d| d.documentation.as_deref())
+                    .map(|d| d.to_string())
                     .unwrap_or_else(|| "Variable".to_string()),
                 _ => symbol_index
                     .definitions
                     .get(sym_id)
-                    .and_then(|d| d.documentation.as_ref())
-                    .map(|d| d.clone())
+                    .and_then(|d| d.documentation.as_deref())
+                    .map(|d| d.to_string())
                     .unwrap_or_else(|| "Symbol".to_string()),
             };
 
