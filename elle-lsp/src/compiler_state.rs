@@ -4,6 +4,7 @@
 //! symbol index for IDE features.
 
 use elle::compiler::converters::value_to_expr;
+use elle::compiler::linter::diagnostics::{Diagnostic, Severity};
 use elle::compiler::{ast::ExprWithLoc, extract_symbols, Linter, SymbolIndex};
 use elle::reader::{Lexer, OwnedToken};
 use elle::symbol::SymbolTable;
@@ -86,6 +87,11 @@ impl CompilerState {
             return false;
         };
 
+        // Clear previous diagnostics
+        doc.diagnostics.clear();
+        doc.compiled_expr = None;
+        doc.symbol_index = SymbolIndex::new();
+
         // Parse the document
         let mut lexer = Lexer::new(&doc.source_text);
         let mut tokens = Vec::new();
@@ -94,8 +100,16 @@ impl CompilerState {
             match lexer.next_token() {
                 Ok(Some(token)) => tokens.push(OwnedToken::from(token)),
                 Ok(None) => break,
-                Err(_e) => {
-                    // Parse error - skip this document for now
+                Err(e) => {
+                    // Lexer error - add as diagnostic
+                    let msg = format!("Lexer error: {}", e);
+                    doc.diagnostics.push(Diagnostic::new(
+                        Severity::Error,
+                        "E0001",
+                        "syntax-error",
+                        msg,
+                        None,
+                    ));
                     return false;
                 }
             }
@@ -107,8 +121,16 @@ impl CompilerState {
         while let Some(result) = reader.try_read(&mut self.symbol_table) {
             match result {
                 Ok(value) => values.push(value),
-                Err(_e) => {
-                    // Read error
+                Err(e) => {
+                    // Reader error - add as diagnostic
+                    let msg = format!("Reader error: {}", e);
+                    doc.diagnostics.push(Diagnostic::new(
+                        Severity::Error,
+                        "E0002",
+                        "syntax-error",
+                        msg,
+                        None,
+                    ));
                     return false;
                 }
             }
@@ -121,8 +143,16 @@ impl CompilerState {
                 Ok(expr) => {
                     exprs.push(ExprWithLoc::new(expr, None));
                 }
-                Err(_e) => {
-                    // Conversion error
+                Err(e) => {
+                    // Conversion error - add as diagnostic
+                    let msg = format!("Conversion error: {}", e);
+                    doc.diagnostics.push(Diagnostic::new(
+                        Severity::Error,
+                        "E0003",
+                        "syntax-error",
+                        msg,
+                        None,
+                    ));
                     return false;
                 }
             }
@@ -137,8 +167,8 @@ impl CompilerState {
             linter.lint_expr(expr, &self.symbol_table);
         }
 
-        // Store diagnostics
-        doc.diagnostics = linter.diagnostics().to_vec();
+        // Store diagnostics (append linter diagnostics to any existing syntax errors)
+        doc.diagnostics.extend(linter.diagnostics().iter().cloned());
 
         // Store compiled expressions
         if !exprs.is_empty() {
