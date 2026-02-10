@@ -6,7 +6,7 @@
 //! - Code completion suggestions
 //! - Navigation to symbol definitions
 
-use elle_lsp::{completion, definition, formatting, hover, references, CompilerState};
+use elle_lsp::{completion, definition, formatting, hover, references, rename, CompilerState};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 
@@ -115,6 +115,10 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                         "hoverProvider": true,
                         "definitionProvider": true,
                         "referencesProvider": true,
+                        "renameProvider": {
+                            "prepareProvider": false,
+                            "workspaceEdits": false
+                        },
                         "documentFormattingProvider": true,
                         "completionProvider": {
                             "resolveProvider": true,
@@ -439,6 +443,61 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                                     "code": -32603,
                                     "message": format!("Formatting error: {}", e)
                                 }));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(err) = error {
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": err
+                })
+            } else {
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": result
+                })
+            }
+        }
+        "textDocument/rename" => {
+            let mut result = None;
+            let mut error = None;
+
+            if let Some(params) = params {
+                if let Some(uri) = params
+                    .get("textDocument")
+                    .and_then(|d| d.get("uri"))
+                    .and_then(|u| u.as_str())
+                {
+                    if let Some(position) = params.get("position").and_then(|p| p.as_object()) {
+                        if let (Some(line), Some(character)) = (
+                            position.get("line").and_then(|l| l.as_u64()),
+                            position.get("character").and_then(|c| c.as_u64()),
+                        ) {
+                            if let Some(new_name) = params.get("newName").and_then(|n| n.as_str()) {
+                                if let Some(doc) = compiler_state.get_document(uri) {
+                                    match rename::rename_symbol(
+                                        line as u32,
+                                        character as u32,
+                                        new_name,
+                                        &doc.symbol_index,
+                                        compiler_state.symbol_table(),
+                                        &doc.source_text,
+                                        uri,
+                                    ) {
+                                        Ok(workspace_edit) => result = Some(workspace_edit),
+                                        Err(e) => {
+                                            error = Some(json!({
+                                                "code": -32603,
+                                                "message": e
+                                            }));
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
