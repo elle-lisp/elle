@@ -24,6 +24,7 @@ fn resolve_in_expr(expr: &mut Expr, env_stack: &mut Vec<LambdaEnvInfo>) {
             params,
             body,
             captures,
+            locals,
         } => {
             // Phase A: Fix capture indices.
             // For each capture (sym, depth, index) where index != usize::MAX (not global):
@@ -47,13 +48,17 @@ fn resolve_in_expr(expr: &mut Expr, env_stack: &mut Vec<LambdaEnvInfo>) {
             }
 
             // Phase B: Build LambdaEnvInfo for this lambda.
-            // Environment layout: [capture_0, capture_1, ..., param_0, param_1, ...]
+            // Environment layout: [capture_0, capture_1, ..., param_0, param_1, ..., local_0, local_1, ...]
             let mut symbol_to_env_index = FxHashMap::default();
             for (i, (sym, _, _)) in captures.iter().enumerate() {
                 symbol_to_env_index.insert(*sym, i);
             }
             for (i, param) in params.iter().enumerate() {
                 symbol_to_env_index.insert(*param, captures.len() + i);
+            }
+            // Phase 4: Include locally-defined variables in the env info
+            for (i, local) in locals.iter().enumerate() {
+                symbol_to_env_index.insert(*local, captures.len() + params.len() + i);
             }
             let info = LambdaEnvInfo {
                 num_captures: captures.len(),

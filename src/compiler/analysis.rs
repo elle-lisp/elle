@@ -199,8 +199,34 @@ pub fn analyze_free_vars(expr: &Expr, local_bindings: &HashSet<SymbolId>) -> Has
         }
 
         Expr::Begin(exprs) => {
+            let mut growing_bindings = local_bindings.clone();
             for e in exprs {
-                free_vars.extend(analyze_free_vars(e, local_bindings));
+                // Check if this is a define - if so, add it to local bindings for subsequent expressions
+                if let Expr::Define { name, value } = e {
+                    // First, analyze the value with current bindings
+                    free_vars.extend(analyze_free_vars(value, &growing_bindings));
+                    // Then add the defined name to bindings for subsequent expressions
+                    growing_bindings.insert(*name);
+                } else {
+                    // For non-define expressions, use the growing set of bindings
+                    free_vars.extend(analyze_free_vars(e, &growing_bindings));
+                }
+            }
+        }
+
+        Expr::Block(exprs) => {
+            let mut growing_bindings = local_bindings.clone();
+            for e in exprs {
+                // Check if this is a define - if so, add it to local bindings for subsequent expressions
+                if let Expr::Define { name, value } = e {
+                    // First, analyze the value with current bindings
+                    free_vars.extend(analyze_free_vars(value, &growing_bindings));
+                    // Then add the defined name to bindings for subsequent expressions
+                    growing_bindings.insert(*name);
+                } else {
+                    // For non-define expressions, use the growing set of bindings
+                    free_vars.extend(analyze_free_vars(e, &growing_bindings));
+                }
             }
         }
 
@@ -212,12 +238,22 @@ pub fn analyze_free_vars(expr: &Expr, local_bindings: &HashSet<SymbolId>) -> Has
         }
 
         Expr::Lambda { params, body, .. } => {
-            // Create new local bindings that include lambda parameters
-            let mut new_bindings = local_bindings.clone();
+            // For nested lambdas, analyze with only the lambda's own parameters as bindings.
+            // This identifies variables that the nested lambda needs to capture.
+            // However, we must filter the results: only propagate vars that are ALSO free
+            // in the current scope. Variables that are locally defined in the current scope
+            // (in local_bindings) are NOT free at this level — they're only free inside
+            // the nested lambda (which will capture them).
+            let mut new_bindings = HashSet::new();
             for param in params {
                 new_bindings.insert(*param);
             }
-            free_vars.extend(analyze_free_vars(body, &new_bindings));
+            let inner_free = analyze_free_vars(body, &new_bindings);
+            for var in inner_free {
+                if !local_bindings.contains(&var) {
+                    free_vars.insert(var);
+                }
+            }
         }
 
         Expr::Let { bindings, body } => {
@@ -293,4 +329,178 @@ pub fn analyze_free_vars(expr: &Expr, local_bindings: &HashSet<SymbolId>) -> Has
     }
 
     free_vars
+}
+
+/// Analyze which locally-defined variables in an expression are referenced by nested lambdas
+/// Returns a set of SymbolIds that are defined locally and referenced in nested lambdas
+/// These variables need cell boxing for shared mutable access
+pub fn analyze_local_vars_captured_by_nested_lambdas(expr: &Expr) -> HashSet<SymbolId> {
+    match expr {
+        Expr::Begin(exprs) | Expr::Block(exprs) => analyze_local_captures_in_seq(exprs),
+        Expr::Lambda { .. } => {
+            // Don't look inside nested lambdas - they're analyzed separately
+            // Each lambda is analyzed independently with its own scope
+            HashSet::new()
+        }
+        Expr::If { cond, then, else_ } => {
+            let mut result = analyze_local_vars_captured_by_nested_lambdas(cond);
+            result.extend(analyze_local_vars_captured_by_nested_lambdas(then));
+            result.extend(analyze_local_vars_captured_by_nested_lambdas(else_));
+            result
+        }
+        Expr::Call { func, args, .. } => {
+            let mut result = analyze_local_vars_captured_by_nested_lambdas(func);
+            for arg in args {
+                result.extend(analyze_local_vars_captured_by_nested_lambdas(arg));
+            }
+            result
+        }
+        Expr::Let { bindings, body } | Expr::Letrec { bindings, body } => {
+            let mut result = HashSet::new();
+            for (_, expr) in bindings {
+                result.extend(analyze_local_vars_captured_by_nested_lambdas(expr));
+            }
+            result.extend(analyze_local_vars_captured_by_nested_lambdas(body));
+            result
+        }
+        _ => HashSet::new(),
+    }
+}
+
+/// Helper to find locally-defined variables that are captured by nested lambdas
+fn analyze_local_captures_in_seq(exprs: &[Expr]) -> HashSet<SymbolId> {
+    let mut captured_by_nested = HashSet::new();
+    let mut locally_defined = HashSet::new();
+
+    for e in exprs {
+        // Track which variables are defined at this level
+        if let Expr::Define { name, .. } = e {
+            locally_defined.insert(*name);
+        } else {
+            // For each non-define expression, check if it's a lambda that captures locals
+            if let Expr::Lambda { body, params, .. } = e {
+                // Find free variables in the nested lambda's body
+                let nested_local_bindings = params.iter().copied().collect::<HashSet<_>>();
+                let free_in_nested = analyze_free_vars(body, &nested_local_bindings);
+                // Variables that are locally defined and free in nested lambda need cells
+                for var in free_in_nested {
+                    if locally_defined.contains(&var) {
+                        captured_by_nested.insert(var);
+                    }
+                }
+            }
+        }
+        // Also recursively check for deeper nesting
+        captured_by_nested.extend(analyze_local_vars_captured_by_nested_lambdas(e));
+    }
+
+    captured_by_nested
+}
+
+/// Analyze which variables are mutated with set! in an expression
+/// This is used to determine which captured variables need cell boxing
+pub fn analyze_mutated_vars(expr: &Expr) -> HashSet<SymbolId> {
+    let mut mutated = HashSet::new();
+
+    match expr {
+        Expr::Set { var, .. } => {
+            mutated.insert(*var);
+        }
+
+        Expr::If { cond, then, else_ } => {
+            mutated.extend(analyze_mutated_vars(cond));
+            mutated.extend(analyze_mutated_vars(then));
+            mutated.extend(analyze_mutated_vars(else_));
+        }
+
+        Expr::Begin(exprs) | Expr::Block(exprs) => {
+            for e in exprs {
+                mutated.extend(analyze_mutated_vars(e));
+            }
+        }
+
+        Expr::Call { func, args, .. } => {
+            mutated.extend(analyze_mutated_vars(func));
+            for arg in args {
+                mutated.extend(analyze_mutated_vars(arg));
+            }
+        }
+
+        Expr::Lambda { body: _, .. } => {
+            // Don't collect mutations from nested lambdas - only the current level matters
+            // Nested lambda mutations are separate from the outer lambda's concerns
+        }
+
+        Expr::Let { bindings, body } => {
+            for (_, expr) in bindings {
+                mutated.extend(analyze_mutated_vars(expr));
+            }
+            mutated.extend(analyze_mutated_vars(body));
+        }
+
+        Expr::Letrec { bindings, body } => {
+            for (_, expr) in bindings {
+                mutated.extend(analyze_mutated_vars(expr));
+            }
+            mutated.extend(analyze_mutated_vars(body));
+        }
+
+        Expr::Define { value, .. } => {
+            mutated.extend(analyze_mutated_vars(value));
+        }
+
+        Expr::While { cond, body } => {
+            mutated.extend(analyze_mutated_vars(cond));
+            mutated.extend(analyze_mutated_vars(body));
+        }
+
+        Expr::For { iter, body, .. } => {
+            mutated.extend(analyze_mutated_vars(iter));
+            mutated.extend(analyze_mutated_vars(body));
+        }
+
+        Expr::Match {
+            value,
+            patterns,
+            default,
+        } => {
+            mutated.extend(analyze_mutated_vars(value));
+            for (_, expr) in patterns {
+                mutated.extend(analyze_mutated_vars(expr));
+            }
+            if let Some(default_expr) = default {
+                mutated.extend(analyze_mutated_vars(default_expr));
+            }
+        }
+
+        Expr::Try {
+            body,
+            catch,
+            finally,
+        } => {
+            mutated.extend(analyze_mutated_vars(body));
+            if let Some((_, handler)) = catch {
+                mutated.extend(analyze_mutated_vars(handler));
+            }
+            if let Some(finally_expr) = finally {
+                mutated.extend(analyze_mutated_vars(finally_expr));
+            }
+        }
+
+        Expr::Cond { clauses, else_body } => {
+            for (test, body) in clauses {
+                mutated.extend(analyze_mutated_vars(test));
+                mutated.extend(analyze_mutated_vars(body));
+            }
+            if let Some(else_expr) = else_body {
+                mutated.extend(analyze_mutated_vars(else_expr));
+            }
+        }
+
+        _ => {
+            // Other expression types don't mutate variables
+        }
+    }
+
+    mutated
 }

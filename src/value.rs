@@ -215,6 +215,8 @@ pub enum Value {
     Condition(Rc<Condition>),
     // Concurrency
     ThreadHandle(ThreadHandle),
+    // Shared mutable cell for captured variables across closures
+    Cell(Rc<RefCell<Box<Value>>>),
 }
 
 impl PartialEq for Value {
@@ -238,6 +240,7 @@ impl PartialEq for Value {
             (Value::Exception(a), Value::Exception(b)) => a == b,
             (Value::Condition(a), Value::Condition(b)) => a == b,
             (Value::ThreadHandle(a), Value::ThreadHandle(b)) => a == b,
+            (Value::Cell(_), Value::Cell(_)) => false, // Cells are mutable, never equal
             _ => false,
         }
     }
@@ -384,6 +387,7 @@ impl Value {
             Value::Exception(_) => "exception",
             Value::Condition(_) => "condition",
             Value::ThreadHandle(_) => "thread-handle",
+            Value::Cell(_) => "cell",
         }
     }
 }
@@ -452,6 +456,7 @@ impl fmt::Debug for Value {
             Value::Exception(exc) => write!(f, "<exception: {}>", exc.message),
             Value::Condition(cond) => write!(f, "<condition: id={}>", cond.exception_id),
             Value::ThreadHandle(_) => write!(f, "<thread-handle>"),
+            Value::Cell(_) => write!(f, "<cell>"),
         }
     }
 }

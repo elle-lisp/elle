@@ -725,6 +725,22 @@ fn test_set_in_nested_closure() {
 }
 
 #[test]
+fn test_set_local_variable_in_lambda() {
+    // set! on a local variable inside a lambda should work
+    // This is the test case from issue #106
+    let code = r#"
+        (begin
+          (define test (lambda ()
+            (begin
+              (define x 0)
+              (set! x 42)
+              x)))
+          (test))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(42));
+}
+
+#[test]
 fn test_make_adder_pattern() {
     // Classic make-adder: define, then call
     let code = r#"

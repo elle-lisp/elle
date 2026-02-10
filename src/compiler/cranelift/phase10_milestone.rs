@@ -165,6 +165,7 @@ mod tests {
                 tail: false,
             }),
             captures: vec![],
+            locals: vec![],
         };
 
         let result = AdvancedOptimizer::analyze_tail_calls(&lambda, Some(func_id));
@@ -613,6 +614,7 @@ mod tests {
                 }),
             }),
             captures: vec![],
+            locals: vec![],
         };
 
         // Analyze tail calls

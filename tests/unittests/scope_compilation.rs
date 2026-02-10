@@ -80,6 +80,7 @@ fn test_nested_lambda_variable_scope() {
                     params: inner_params,
                     body: inner_body,
                     captures,
+                    locals: _,
                 } => {
                     assert_eq!(inner_params.len(), 1); // (y)
                                                        // Inner body references outer x (should be in captures)

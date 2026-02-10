@@ -85,7 +85,61 @@ pub fn handle_define_local(
     };
 
     // Define in current scope
-    vm.scope_stack.define_local(sym_id, value);
+    // Note: ScopeStack always has at least the global scope, so we don't need to check
+    vm.scope_stack.define_local(sym_id, value.clone());
+
+    // Push the value back on the stack to maintain expression semantics
+    // This way (define x 10) returns 10, allowing it to be used in expression contexts
+    vm.stack.push(value);
 
     Ok(())
+}
+
+/// Handle MakeCell instruction - wraps a value in a cell for shared mutable access
+/// Pops value from stack, wraps it in a cell, pushes the cell
+/// Idempotent: if the value is already a cell, it is not double-wrapped
+pub fn handle_make_cell(vm: &mut VM) -> Result<(), String> {
+    let value = vm.stack.pop().ok_or("Stack underflow")?;
+    match value {
+        Value::Cell(_) => {
+            // Already a cell (e.g., locally-defined variable from outer lambda) — don't double-wrap
+            vm.stack.push(value);
+        }
+        _ => {
+            let cell = Value::Cell(std::rc::Rc::new(std::cell::RefCell::new(Box::new(value))));
+            vm.stack.push(cell);
+        }
+    }
+    Ok(())
+}
+
+/// Handle UnwrapCell instruction - extracts value from a cell
+/// Pops cell from stack, unwraps it, pushes the value
+pub fn handle_unwrap_cell(vm: &mut VM) -> Result<(), String> {
+    let cell_val = vm.stack.pop().ok_or("Stack underflow")?;
+    match cell_val {
+        Value::Cell(cell_rc) => {
+            let cell_ref = cell_rc.borrow();
+            let value = (**cell_ref).clone();
+            vm.stack.push(value);
+            Ok(())
+        }
+        _ => Err(format!("Expected cell, got {}", cell_val.type_name())),
+    }
+}
+
+/// Handle UpdateCell instruction - updates a cell's contents
+/// Pops new_value, then cell from stack, updates cell, pushes new_value
+pub fn handle_update_cell(vm: &mut VM) -> Result<(), String> {
+    let new_value = vm.stack.pop().ok_or("Stack underflow")?;
+    let cell_val = vm.stack.pop().ok_or("Stack underflow")?;
+    match cell_val {
+        Value::Cell(cell_rc) => {
+            let mut cell_ref = cell_rc.borrow_mut();
+            **cell_ref = new_value.clone();
+            vm.stack.push(new_value);
+            Ok(())
+        }
+        _ => Err(format!("Expected cell, got {}", cell_val.type_name())),
+    }
 }

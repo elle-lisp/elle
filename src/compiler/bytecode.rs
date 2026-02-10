@@ -22,6 +22,12 @@ pub enum Instruction {
     /// Load from closure environment
     LoadUpvalue,
 
+    /// Load from closure environment WITHOUT unwrapping cells (for capture forwarding)
+    LoadUpvalueRaw,
+
+    /// Store to closure environment
+    StoreUpvalue,
+
     /// Pop value from stack
     Pop,
 
@@ -117,6 +123,16 @@ pub enum Instruction {
 
     /// Define local variable (symbol_idx u16)
     DefineLocal,
+
+    /// Wrap value in a cell for shared mutable access (Phase 4)
+    /// Pops value from stack, wraps it in a cell, pushes the cell
+    MakeCell,
+
+    /// Unwrap a cell to get its value
+    UnwrapCell,
+
+    /// Update a cell's value
+    UpdateCell,
 
     // Exception handling instructions (Phase 3)
     /// Push handler frame for handler-case (handler_offset i16, finally_offset i16 or -1)
