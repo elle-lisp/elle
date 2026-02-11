@@ -27,6 +27,7 @@ pub mod type_check;
 pub mod utility;
 pub mod vector;
 
+pub use list::{clear_length_symbol_table, set_length_symbol_table};
 pub use macros::{clear_macro_symbol_table, set_macro_symbol_table};
 pub use module_init::init_stdlib;
 pub use registration::register_primitives;

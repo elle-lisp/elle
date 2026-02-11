@@ -1,5 +1,43 @@
 //! List manipulation primitives
-use crate::value::{list, Value};
+use crate::symbol::SymbolTable;
+use crate::value::{list, SymbolId, Value};
+use std::cell::RefCell;
+
+thread_local! {
+    static SYMBOL_TABLE: RefCell<Option<*mut SymbolTable>> = const { RefCell::new(None) };
+}
+
+/// Set the symbol table context for length primitive
+///
+/// # Safety
+/// The pointer must remain valid for the duration of use.
+pub fn set_length_symbol_table(symbols: *mut SymbolTable) {
+    SYMBOL_TABLE.with(|st| {
+        *st.borrow_mut() = Some(symbols);
+    });
+}
+
+/// Clear the symbol table context
+pub fn clear_length_symbol_table() {
+    SYMBOL_TABLE.with(|st| {
+        *st.borrow_mut() = None;
+    });
+}
+
+/// Get the keyword name from a keyword ID
+fn get_keyword_name(kid: SymbolId) -> Option<String> {
+    SYMBOL_TABLE.with(|st| {
+        let ptr = st.borrow();
+        match *ptr {
+            Some(p) => {
+                // SAFETY: Caller ensures pointer validity via set_length_symbol_table
+                let symbols = unsafe { &*p };
+                symbols.name(kid).map(|s| s.to_string())
+            }
+            None => None,
+        }
+    })
+}
 
 /// Construct a cons cell
 pub fn prim_cons(args: &[Value]) -> Result<Value, String> {
@@ -32,13 +70,48 @@ pub fn prim_list(args: &[Value]) -> Result<Value, String> {
     Ok(list(args.to_vec()))
 }
 
-/// Get the length of a list
+/// Get the length of a collection (universal for all container types)
 pub fn prim_length(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err("length requires exactly 1 argument".to_string());
     }
-    let vec = args[0].list_to_vec()?;
-    Ok(Value::Int(vec.len() as i64))
+
+    match &args[0] {
+        // For lists: convert to vec and get length
+        Value::Nil => Ok(Value::Int(0)),
+        Value::Cons(_) => {
+            let vec = args[0].list_to_vec()?;
+            Ok(Value::Int(vec.len() as i64))
+        }
+
+        // For strings: get character count
+        Value::String(s) => Ok(Value::Int(s.len() as i64)),
+
+        // For vectors: get length (Rc<Vec<Value>>)
+        Value::Vector(v) => Ok(Value::Int(v.len() as i64)),
+
+        // For tables (hash maps): get entry count (Rc<RefCell<BTreeMap>>)
+        Value::Table(t) => Ok(Value::Int(t.borrow().len() as i64)),
+
+        // For structs: get field count (Rc<BTreeMap>)
+        Value::Struct(s) => Ok(Value::Int(s.len() as i64)),
+
+        // For keywords: get the length of the keyword name
+        Value::Keyword(kid) => {
+            // Get the keyword name from the symbol table context
+            if let Some(name) = get_keyword_name(*kid) {
+                Ok(Value::Int(name.len() as i64))
+            } else {
+                Err(format!("Unable to resolve keyword name for id {:?}", kid))
+            }
+        }
+
+        // Other types are not sequences
+        _ => Err(format!(
+            "length requires a collection type (list, string, vector, table, struct, or keyword), got {}",
+            args[0].type_name()
+        )),
+    }
 }
 
 /// Check if a collection is empty (O(1) operation for most types)
