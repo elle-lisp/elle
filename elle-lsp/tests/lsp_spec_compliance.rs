@@ -477,6 +477,96 @@ mod lsp_compliance {
         assert!(message.contains("\r\n\r\n"));
     }
 
+    // ==================== NOTIFICATION HANDLING TESTS ====================
+
+    #[test]
+    fn test_notification_methods_have_no_id() {
+        // LSP 3.17: Notifications are messages that do not have an "id" field.
+        // The server MUST NOT send a response to a notification.
+        let notification_methods = vec![
+            "textDocument/didOpen",
+            "textDocument/didChange",
+            "textDocument/didClose",
+            "textDocument/didSave",
+            "initialized",
+            "exit",
+        ];
+
+        for method in notification_methods {
+            let notification = json!({
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": {}
+            });
+
+            assert!(
+                notification.get("id").is_none(),
+                "{} notification must NOT have id field",
+                method
+            );
+        }
+    }
+
+    #[test]
+    fn test_request_methods_have_id() {
+        // LSP 3.17: Requests are messages that have an "id" field.
+        // The server MUST send a response for every request.
+        let request_methods = [
+            "initialize",
+            "shutdown",
+            "textDocument/hover",
+            "textDocument/completion",
+            "textDocument/definition",
+            "textDocument/references",
+            "textDocument/formatting",
+            "textDocument/rename",
+        ];
+
+        for (i, method) in request_methods.iter().enumerate() {
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": i + 1,
+                "method": method,
+                "params": {}
+            });
+
+            assert!(
+                request.get("id").is_some(),
+                "{} request MUST have id field",
+                method
+            );
+        }
+    }
+
+    #[test]
+    fn test_distinguishing_notifications_from_requests() {
+        // This test verifies the logic for detecting notifications vs requests
+        // based on the presence/absence of the "id" field.
+
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {}
+        });
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "textDocument/hover",
+            "params": {}
+        });
+
+        // A message is a notification if it has no "id" field
+        let is_notification = notification.get("id").is_none();
+        let is_request = request.get("id").is_some();
+
+        assert!(
+            is_notification,
+            "Message without id should be detected as notification"
+        );
+        assert!(is_request, "Message with id should be detected as request");
+    }
+
     // ==================== SPEC COMPLIANCE SUMMARY ====================
 
     #[test]

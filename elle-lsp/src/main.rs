@@ -51,14 +51,18 @@ fn main() {
 
         let message = String::from_utf8_lossy(&buf);
         if let Ok(request) = serde_json::from_str::<Value>(&message) {
+            // LSP spec: Notifications have no "id" field and must NOT receive a response.
+            // Requests have an "id" field and MUST receive a response.
             let (response, notifications) = handle_request(&request, &mut compiler_state);
 
-            // Send response
-            let body = response.to_string();
-            let _ = write!(stdout, "Content-Length: {}\r\n\r\n{}", body.len(), body);
-            let _ = stdout.flush();
+            // Only send response for requests (not notifications)
+            if request.get("id").is_some() {
+                let body = response.to_string();
+                let _ = write!(stdout, "Content-Length: {}\r\n\r\n{}", body.len(), body);
+                let _ = stdout.flush();
+            }
 
-            // Send notifications (e.g., diagnostics)
+            // Send notifications (e.g., diagnostics) - these are server-initiated
             for notification in notifications {
                 let body = notification.to_string();
                 let _ = write!(stdout, "Content-Length: {}\r\n\r\n{}", body.len(), body);
