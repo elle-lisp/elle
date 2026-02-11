@@ -13,7 +13,7 @@
 use super::codegen::IrEmitter;
 use super::compiler_v2::IrValue;
 use super::scoping::ScopeManager;
-use super::stack_allocator::StackAllocator;
+use super::stack_allocator::{SlotType, StackAllocator};
 use crate::compiler::ast::Expr;
 use crate::symbol::SymbolTable;
 use crate::value::Value;
@@ -141,18 +141,24 @@ impl ExprCompilerV3Stack {
             // Bind the symbol in the current scope
             let (depth, index) = ctx.scope_manager.bind(*sym_id);
 
+            // Determine slot type from the compiled value
+            let slot_type = match binding_val {
+                IrValue::I64(_) => SlotType::I64,
+                IrValue::F64(_) => SlotType::F64,
+            };
+
             // Allocate a stack slot for this binding
-            let (slot, _offset) = ctx.stack_allocator.allocate(ctx.builder, depth, index)?;
+            let (slot, _offset) =
+                ctx.stack_allocator
+                    .allocate(ctx.builder, depth, index, slot_type)?;
 
             // Store the value in the stack slot
             match binding_val {
                 IrValue::I64(v) => {
                     ctx.builder.ins().stack_store(v, slot, 0);
                 }
-                IrValue::F64(_v) => {
-                    // For now, we don't support storing f64 values on the stack
-                    // Phase 6+ will add proper float handling
-                    return Err("Float variables not yet supported in stack storage".to_string());
+                IrValue::F64(v) => {
+                    ctx.builder.ins().stack_store(v, slot, 0);
                 }
             }
         }

@@ -7,7 +7,7 @@ use super::branching::BranchManager;
 use super::codegen::IrEmitter;
 use super::context::JITContext;
 use super::scoping::ScopeManager;
-use super::stack_allocator::StackAllocator;
+use super::stack_allocator::{SlotType, StackAllocator};
 use crate::compiler::ast::Expr;
 use crate::symbol::SymbolTable;
 use crate::value::Value;
@@ -160,13 +160,21 @@ impl ExprCompiler {
         depth: usize,
         index: usize,
     ) -> Result<IrValue, String> {
-        let slot = ctx
+        let (slot, slot_type) = ctx
             .stack_allocator
-            .get(depth, index)
+            .get_with_type(depth, index)
             .ok_or_else(|| format!("Variable not allocated at depth={}, index={}", depth, index))?;
 
-        let value = ctx.builder.ins().stack_load(types::I64, slot, 0);
-        Ok(IrValue::I64(value))
+        match slot_type {
+            SlotType::I64 => {
+                let value = ctx.builder.ins().stack_load(types::I64, slot, 0);
+                Ok(IrValue::I64(value))
+            }
+            SlotType::F64 => {
+                let value = ctx.builder.ins().stack_load(types::F64, slot, 0);
+                Ok(IrValue::F64(value))
+            }
+        }
     }
 
     /// Compile a set! expression (store to stack)
@@ -181,20 +189,37 @@ impl ExprCompiler {
         let compiled_value = Self::compile_expr_block(ctx, value)?;
 
         // Get the stack slot (must already be allocated)
-        let slot = ctx.stack_allocator.get(depth, index).ok_or_else(|| {
-            format!(
-                "Cannot set! unbound variable at depth={}, index={}",
-                depth, index
-            )
-        })?;
+        let (slot, slot_type) =
+            ctx.stack_allocator
+                .get_with_type(depth, index)
+                .ok_or_else(|| {
+                    format!(
+                        "Cannot set! unbound variable at depth={}, index={}",
+                        depth, index
+                    )
+                })?;
 
-        // Store the value
-        match compiled_value {
-            IrValue::I64(v) => {
+        match (compiled_value, slot_type) {
+            (IrValue::I64(v), SlotType::I64) => {
                 ctx.builder.ins().stack_store(v, slot, 0);
-                Ok(IrValue::I64(v)) // set! returns the value
+                Ok(IrValue::I64(v))
             }
-            IrValue::F64(_) => Err("Float variables not yet supported in set!".to_string()),
+            (IrValue::F64(v), SlotType::F64) => {
+                ctx.builder.ins().stack_store(v, slot, 0);
+                Ok(IrValue::F64(v))
+            }
+            (IrValue::I64(v), SlotType::F64) => {
+                // Convert i64 to f64
+                let converted = ctx.builder.ins().fcvt_from_sint(types::F64, v);
+                ctx.builder.ins().stack_store(converted, slot, 0);
+                Ok(IrValue::F64(converted))
+            }
+            (IrValue::F64(v), SlotType::I64) => {
+                // Convert f64 to i64 (truncate)
+                let converted = ctx.builder.ins().fcvt_to_sint(types::I64, v);
+                ctx.builder.ins().stack_store(converted, slot, 0);
+                Ok(IrValue::I64(converted))
+            }
         }
     }
 
@@ -328,17 +353,24 @@ impl ExprCompiler {
 
             // Bind in scope and allocate stack slot
             let (depth, index) = ctx.scope_manager.bind(*sym_id);
-            let (_slot, _) = ctx.stack_allocator.allocate(ctx.builder, depth, index)?;
 
-            // Store value
+            // Determine slot type from the compiled value
+            let slot_type = match binding_val {
+                IrValue::I64(_) => SlotType::I64,
+                IrValue::F64(_) => SlotType::F64,
+            };
+
+            let (slot, _) = ctx
+                .stack_allocator
+                .allocate(ctx.builder, depth, index, slot_type)?;
+
+            // Store value with correct type
             match binding_val {
                 IrValue::I64(v) => {
-                    let slot = ctx.stack_allocator.get(depth, index).unwrap();
                     ctx.builder.ins().stack_store(v, slot, 0);
                 }
-                IrValue::F64(_) => {
-                    ctx.scope_manager.pop_scope().ok();
-                    return Err("Float let bindings not yet supported".to_string());
+                IrValue::F64(v) => {
+                    ctx.builder.ins().stack_store(v, slot, 0);
                 }
             }
         }
@@ -350,6 +382,28 @@ impl ExprCompiler {
         ctx.scope_manager.pop_scope().map_err(|e| e.to_string())?;
 
         Ok(result)
+    }
+
+    /// Determine the slot type for a list of values (for for-loop iteration)
+    fn determine_list_slot_type(elements: &[Value]) -> Result<SlotType, String> {
+        if elements.is_empty() {
+            return Ok(SlotType::I64); // Default for empty lists
+        }
+
+        let first_is_float = matches!(&elements[0], Value::Float(_));
+
+        for elem in elements.iter().skip(1) {
+            let is_float = matches!(elem, Value::Float(_));
+            if is_float != first_is_float {
+                return Err("Mixed int/float elements in for loop not yet supported".to_string());
+            }
+        }
+
+        Ok(if first_is_float {
+            SlotType::F64
+        } else {
+            SlotType::I64
+        })
     }
 
     /// Try to compile a For loop expression
@@ -382,26 +436,38 @@ impl ExprCompiler {
                     }
                 }
 
+                // Determine the slot type for the loop variable
+                let slot_type = Self::determine_list_slot_type(&elements)?;
+
                 // Push loop scope
                 ctx.scope_manager.push_scope();
 
-                // Bind loop variable and allocate stack slot
+                // Bind loop variable and allocate stack slot with correct type
                 let (depth, index) = ctx.scope_manager.bind(var);
-                let (_slot, _) = ctx.stack_allocator.allocate(ctx.builder, depth, index)?;
+                let (slot, _) =
+                    ctx.stack_allocator
+                        .allocate(ctx.builder, depth, index, slot_type)?;
 
                 let mut result = IrValue::I64(ctx.builder.ins().iconst(types::I64, 0));
 
                 for elem in elements {
-                    // Compile the element value
-                    let elem_val = match &elem {
-                        Value::Nil => IrValue::I64(ctx.builder.ins().iconst(types::I64, 0)),
-                        Value::Bool(b) => IrValue::I64(
-                            ctx.builder.ins().iconst(types::I64, if *b { 1 } else { 0 }),
-                        ),
-                        Value::Int(i) => IrValue::I64(ctx.builder.ins().iconst(types::I64, *i)),
-                        Value::Float(_f) => {
-                            ctx.scope_manager.pop_scope().ok();
-                            return Err("Float elements in for loop not yet supported".to_string());
+                    // Compile and store the element value
+                    match (&elem, slot_type) {
+                        (Value::Nil, SlotType::I64) => {
+                            let v = ctx.builder.ins().iconst(types::I64, 0);
+                            ctx.builder.ins().stack_store(v, slot, 0);
+                        }
+                        (Value::Bool(b), SlotType::I64) => {
+                            let v = ctx.builder.ins().iconst(types::I64, if *b { 1 } else { 0 });
+                            ctx.builder.ins().stack_store(v, slot, 0);
+                        }
+                        (Value::Int(i), SlotType::I64) => {
+                            let v = ctx.builder.ins().iconst(types::I64, *i);
+                            ctx.builder.ins().stack_store(v, slot, 0);
+                        }
+                        (Value::Float(f), SlotType::F64) => {
+                            let v = ctx.builder.ins().f64const(*f);
+                            ctx.builder.ins().stack_store(v, slot, 0);
                         }
                         _ => {
                             ctx.scope_manager.pop_scope().ok();
@@ -410,15 +476,6 @@ impl ExprCompiler {
                                 elem
                             ));
                         }
-                    };
-
-                    // Store element in loop variable's stack slot
-                    match elem_val {
-                        IrValue::I64(v) => {
-                            let slot = ctx.stack_allocator.get(depth, index).unwrap();
-                            ctx.builder.ins().stack_store(v, slot, 0);
-                        }
-                        IrValue::F64(_) => unreachable!(),
                     }
 
                     // Compile body (can now reference the loop variable)
@@ -933,7 +990,10 @@ mod tests {
         let mut ctx = CompileContext::new(&mut builder, &symbols);
 
         // Allocate a variable at depth 0, index 0
-        let (slot, _) = ctx.stack_allocator.allocate(ctx.builder, 0, 0).unwrap();
+        let (slot, _) = ctx
+            .stack_allocator
+            .allocate(ctx.builder, 0, 0, SlotType::I64)
+            .unwrap();
         let const_val = ctx.builder.ins().iconst(types::I64, 42);
         ctx.builder.ins().stack_store(const_val, slot, 0);
 
@@ -962,7 +1022,10 @@ mod tests {
         let mut ctx = CompileContext::new(&mut builder, &symbols);
 
         // Allocate a variable at depth 0, index 0
-        let (slot, _) = ctx.stack_allocator.allocate(ctx.builder, 0, 0).unwrap();
+        let (slot, _) = ctx
+            .stack_allocator
+            .allocate(ctx.builder, 0, 0, SlotType::I64)
+            .unwrap();
         let const_val = ctx.builder.ins().iconst(types::I64, 10);
         ctx.builder.ins().stack_store(const_val, slot, 0);
 
@@ -1216,6 +1279,76 @@ mod tests {
         assert!(
             result.is_ok(),
             "Failed to compile for loop with variable: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_compile_let_with_float() {
+        use crate::symbol::SymbolTable;
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut func = ir::Function::new();
+        func.signature.params.push(AbiParam::new(types::I64));
+        func.signature.returns.push(AbiParam::new(types::I64));
+        let mut builder = FunctionBuilder::new(&mut func, &mut builder_ctx);
+        let block = builder.create_block();
+        builder.switch_to_block(block);
+        builder.seal_block(block);
+
+        let mut symbols = SymbolTable::new();
+        let x_sym = symbols.intern("x");
+
+        // Test: (let ((x 3.14159265358979)) x)
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let result = ExprCompiler::compile_expr_block(
+            &mut ctx,
+            &Expr::Let {
+                bindings: vec![(x_sym, Expr::Literal(Value::Float(std::f64::consts::PI)))],
+                body: Box::new(Expr::Var(x_sym, 1, 0)),
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "Failed to compile let with float: {:?}",
+            result.err()
+        );
+        assert!(matches!(result.unwrap(), IrValue::F64(_)));
+    }
+
+    #[test]
+    fn test_compile_for_loop_float_elements() {
+        use crate::symbol::SymbolTable;
+        use crate::value::cons;
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut func = ir::Function::new();
+        func.signature.params.push(AbiParam::new(types::I64));
+        func.signature.returns.push(AbiParam::new(types::I64));
+        let mut builder = FunctionBuilder::new(&mut func, &mut builder_ctx);
+        let block = builder.create_block();
+        builder.switch_to_block(block);
+        builder.seal_block(block);
+
+        let mut symbols = SymbolTable::new();
+        let x_sym = symbols.intern("x");
+
+        // Test: (for x '(1.0 2.0 3.0) x)
+        let literal_list = cons(
+            Value::Float(1.0),
+            cons(Value::Float(2.0), cons(Value::Float(3.0), Value::Nil)),
+        );
+
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let result = ExprCompiler::compile_expr_block(
+            &mut ctx,
+            &Expr::For {
+                var: x_sym,
+                iter: Box::new(Expr::Literal(literal_list)),
+                body: Box::new(Expr::Var(x_sym, 1, 0)),
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "Failed to compile for loop with floats: {:?}",
             result.err()
         );
     }
