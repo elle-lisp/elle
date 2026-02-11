@@ -344,3 +344,23 @@ pub fn prim_number_to_string(args: &[Value]) -> Result<Value, String> {
         _ => Err("number->string requires a number".to_string()),
     }
 }
+
+// ============ SCHEME-STYLE CONVERSION ALIASES ============
+
+/// Convert string to integer (Scheme-style name)
+/// `(string->int str)`
+pub fn prim_string_to_int(args: &[Value]) -> Result<Value, String> {
+    prim_to_int(args)
+}
+
+/// Convert string to float (Scheme-style name)
+/// `(string->float str)`
+pub fn prim_string_to_float(args: &[Value]) -> Result<Value, String> {
+    prim_to_float(args)
+}
+
+/// Convert any value to string (Scheme-style name)
+/// `(any->string val)`
+pub fn prim_any_to_string(args: &[Value]) -> Result<Value, String> {
+    prim_to_string(args)
+}

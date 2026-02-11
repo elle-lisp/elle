@@ -117,3 +117,7 @@ mod repl_exit_codes {
 mod deep_tail_recursion {
     include!("deep_tail_recursion.rs");
 }
+
+mod naming_consistency {
+    include!("naming_consistency.rs");
+}
