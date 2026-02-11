@@ -22,6 +22,7 @@ use super::file_io::{
 use super::introspection::{
     prim_condition_backtrace, prim_condition_field, prim_condition_matches_type, prim_exception_id,
 };
+use super::jit::{prim_jit_compilable_p, prim_jit_compile, prim_jit_compiled_p};
 use super::json::{prim_json_parse, prim_json_serialize, prim_json_serialize_pretty};
 use super::list::{
     prim_append, prim_cons, prim_drop, prim_empty, prim_first, prim_last, prim_length, prim_list,
@@ -357,6 +358,11 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
         "json-serialize-pretty",
         prim_json_serialize_pretty,
     );
+
+    // JIT compilation
+    register_fn(vm, symbols, "jit-compile", prim_jit_compile);
+    register_fn(vm, symbols, "jit-compiled?", prim_jit_compiled_p);
+    register_fn(vm, symbols, "jit-compilable?", prim_jit_compilable_p);
 }
 
 /// Register a primitive function with the VM

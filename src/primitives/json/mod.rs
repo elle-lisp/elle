@@ -341,6 +341,7 @@ mod tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![]),
+            source_ast: None,
         }));
         assert!(serialize_value(&closure).is_err());
 

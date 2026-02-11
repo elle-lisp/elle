@@ -88,6 +88,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             Err("Cannot serialize keyword without symbol table context".to_string())
         }
         Value::Closure(_) => Err("Cannot serialize closures to JSON".to_string()),
+        Value::JitClosure(_) => Err("Cannot serialize JIT closures to JSON".to_string()),
         Value::NativeFn(_) => Err("Cannot serialize native functions to JSON".to_string()),
         Value::Symbol(_) => Err("Cannot serialize symbols to JSON".to_string()),
         Value::LibHandle(_) => Err("Cannot serialize library handles to JSON".to_string()),
@@ -205,6 +206,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             Err("Cannot serialize keyword without symbol table context".to_string())
         }
         Value::Closure(_) => Err("Cannot serialize closures to JSON".to_string()),
+        Value::JitClosure(_) => Err("Cannot serialize JIT closures to JSON".to_string()),
         Value::NativeFn(_) => Err("Cannot serialize native functions to JSON".to_string()),
         Value::Symbol(_) => Err("Cannot serialize symbols to JSON".to_string()),
         Value::LibHandle(_) => Err("Cannot serialize library handles to JSON".to_string()),

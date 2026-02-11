@@ -272,6 +272,86 @@ impl VM {
                             self.call_depth -= 1;
                             result
                         }
+                        Value::JitClosure(jit_closure) => {
+                            // Validate argument count
+                            match jit_closure.arity {
+                                crate::value::Arity::Exact(n) => {
+                                    if args.len() != n {
+                                        return Err(format!(
+                                            "JIT closure expects {} arguments, got {}",
+                                            n,
+                                            args.len()
+                                        ));
+                                    }
+                                }
+                                crate::value::Arity::AtLeast(n) => {
+                                    if args.len() < n {
+                                        return Err(format!(
+                                            "JIT closure expects at least {} arguments, got {}",
+                                            n,
+                                            args.len()
+                                        ));
+                                    }
+                                }
+                                crate::value::Arity::Range(min, max) => {
+                                    if args.len() < min || args.len() > max {
+                                        return Err(format!(
+                                            "JIT closure expects {}-{} arguments, got {}",
+                                            min,
+                                            max,
+                                            args.len()
+                                        ));
+                                    }
+                                }
+                            }
+
+                            // For now, fall back to the source closure if available
+                            // In a full implementation, we would call the native code here
+                            if let Some(ref source) = jit_closure.source {
+                                // Fall back to interpreted execution of the source closure
+                                self.call_depth += 1;
+                                if self.call_depth > 1000 {
+                                    return Err("Stack overflow".to_string());
+                                }
+
+                                // Create a new environment that includes:
+                                // [captured_vars..., parameters..., locally_defined_cells...]
+                                let mut new_env = Vec::new();
+                                new_env.extend((*source.env).iter().cloned());
+                                new_env.extend(args.clone());
+
+                                // Calculate number of locally-defined variables
+                                let num_params = match source.arity {
+                                    crate::value::Arity::Exact(n) => n,
+                                    crate::value::Arity::AtLeast(n) => n,
+                                    crate::value::Arity::Range(min, _) => min,
+                                };
+                                let num_locally_defined = source
+                                    .num_locals
+                                    .saturating_sub(num_params + source.num_captures);
+
+                                // Add empty cells for locally-defined variables
+                                for _ in 0..num_locally_defined {
+                                    let empty_cell = Value::Cell(std::rc::Rc::new(
+                                        std::cell::RefCell::new(Box::new(Value::Nil)),
+                                    ));
+                                    new_env.push(empty_cell);
+                                }
+
+                                let new_env_rc = std::rc::Rc::new(new_env);
+
+                                let result = self.execute_bytecode(
+                                    &source.bytecode,
+                                    &source.constants,
+                                    Some(&new_env_rc),
+                                )?;
+
+                                self.call_depth -= 1;
+                                result
+                            } else {
+                                return Err("JIT closure has no fallback source".to_string());
+                            }
+                        }
                         _ => return Err(format!("Cannot call {:?}", func)),
                     };
 
@@ -332,6 +412,80 @@ impl VM {
                             // Return a dummy value - the outer loop will detect the pending tail call
                             // and execute it instead of returning this value
                             return Ok(Value::Nil);
+                        }
+                        Value::JitClosure(jit_closure) => {
+                            // Validate argument count
+                            match jit_closure.arity {
+                                crate::value::Arity::Exact(n) => {
+                                    if args.len() != n {
+                                        return Err(format!(
+                                            "JIT closure expects {} arguments, got {}",
+                                            n,
+                                            args.len()
+                                        ));
+                                    }
+                                }
+                                crate::value::Arity::AtLeast(n) => {
+                                    if args.len() < n {
+                                        return Err(format!(
+                                            "JIT closure expects at least {} arguments, got {}",
+                                            n,
+                                            args.len()
+                                        ));
+                                    }
+                                }
+                                crate::value::Arity::Range(min, max) => {
+                                    if args.len() < min || args.len() > max {
+                                        return Err(format!(
+                                            "JIT closure expects {}-{} arguments, got {}",
+                                            min,
+                                            max,
+                                            args.len()
+                                        ));
+                                    }
+                                }
+                            }
+
+                            // For now, fall back to the source closure if available
+                            if let Some(ref source) = jit_closure.source {
+                                // Build proper environment: captures + args + locals (same as Call)
+                                self.tail_call_env_cache.clear();
+                                self.tail_call_env_cache
+                                    .extend((*source.env).iter().cloned());
+                                self.tail_call_env_cache.extend(args);
+
+                                // Calculate number of locally-defined variables
+                                let num_params = match source.arity {
+                                    crate::value::Arity::Exact(n) => n,
+                                    crate::value::Arity::AtLeast(n) => n,
+                                    crate::value::Arity::Range(min, _) => min,
+                                };
+                                let num_locally_defined = source
+                                    .num_locals
+                                    .saturating_sub(num_params + source.num_captures);
+
+                                // Add empty cells for locally-defined variables
+                                for _ in 0..num_locally_defined {
+                                    let empty_cell = Value::Cell(std::rc::Rc::new(
+                                        std::cell::RefCell::new(Box::new(Value::Nil)),
+                                    ));
+                                    self.tail_call_env_cache.push(empty_cell);
+                                }
+
+                                let new_env_rc = std::rc::Rc::new(self.tail_call_env_cache.clone());
+
+                                // Store the tail call information to be executed in the outer loop
+                                self.pending_tail_call = Some((
+                                    (*source.bytecode).clone(),
+                                    (*source.constants).clone(),
+                                    new_env_rc,
+                                ));
+
+                                // Return a dummy value - the outer loop will detect the pending tail call
+                                return Ok(Value::Nil);
+                            } else {
+                                return Err("JIT closure has no fallback source".to_string());
+                            }
                         }
                         _ => return Err(format!("Cannot call {:?}", func)),
                     };

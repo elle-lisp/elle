@@ -8,6 +8,7 @@ pub mod file_io;
 pub mod higher_order;
 pub mod higher_order_def;
 pub mod introspection;
+pub mod jit;
 pub mod json;
 pub mod list;
 pub mod logic;

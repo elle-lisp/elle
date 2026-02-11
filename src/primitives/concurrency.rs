@@ -44,6 +44,9 @@ fn is_value_sendable(value: &Value) -> bool {
         // Closures are safe if their captured environment is safe
         Value::Closure(closure) => closure.env.iter().all(is_value_sendable),
 
+        // JIT closures are safe if their captured environment is safe
+        Value::JitClosure(jc) => jc.env.iter().all(is_value_sendable),
+
         // Unsafe: mutable tables
         Value::Table(_) => false,
 
