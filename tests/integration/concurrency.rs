@@ -374,3 +374,123 @@ fn test_sleep_non_numeric() {
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("number"));
 }
+
+#[test]
+fn test_spawn_jit_closure_with_source() {
+    // Test spawning a JIT-compiled closure that has a source closure
+    // We create a closure, then manually create a JitClosure with a source
+    let result = eval(
+        r#"
+        (let ((x 42))
+          (let ((closure (lambda () x)))
+            (let ((handle (spawn closure)))
+              (join handle))))
+        "#,
+    );
+
+    match result {
+        Ok(Value::Int(n)) => assert_eq!(n, 42),
+        Ok(v) => panic!("Expected integer 42, got {:?}", v),
+        Err(e) => panic!("Unexpected error: {}", e),
+    }
+}
+
+#[test]
+fn test_spawn_jit_closure_with_computation() {
+    // Test spawning a closure that performs computation
+    let result = eval(
+        r#"
+        (let ((a 10) (b 20))
+          (let ((closure (lambda () (+ a b))))
+            (let ((handle (spawn closure)))
+              (join handle))))
+        "#,
+    );
+
+    match result {
+        Ok(Value::Int(n)) => assert_eq!(n, 30),
+        Ok(v) => panic!("Expected integer 30, got {:?}", v),
+        Err(e) => panic!("Unexpected error: {}", e),
+    }
+}
+
+#[test]
+fn test_spawn_jit_closure_with_string_capture() {
+    // Test spawning a closure that captures a string
+    let result = eval(
+        r#"
+        (let ((msg "hello from jit thread"))
+          (let ((closure (lambda () msg)))
+            (let ((handle (spawn closure)))
+              (join handle))))
+        "#,
+    );
+
+    match result {
+        Ok(Value::String(s)) => assert_eq!(s.as_ref(), "hello from jit thread"),
+        Ok(v) => panic!("Expected string, got {:?}", v),
+        Err(e) => panic!("Unexpected error: {}", e),
+    }
+}
+
+#[test]
+fn test_spawn_jit_closure_with_vector_capture() {
+    // Test spawning a closure that captures a vector
+    let result = eval(
+        r#"
+        (let ((v [10 20 30]))
+          (let ((closure (lambda () v)))
+            (let ((handle (spawn closure)))
+              (join handle))))
+        "#,
+    );
+
+    match result {
+        Ok(Value::Vector(vec)) => {
+            assert_eq!(vec.len(), 3);
+            assert!(matches!(&vec[0], Value::Int(10)));
+            assert!(matches!(&vec[1], Value::Int(20)));
+            assert!(matches!(&vec[2], Value::Int(30)));
+        }
+        Ok(v) => panic!("Expected vector, got {:?}", v),
+        Err(e) => panic!("Unexpected error: {}", e),
+    }
+}
+
+#[test]
+fn test_spawn_jit_closure_with_multiple_captures() {
+    // Test spawning a closure that captures multiple values
+    let result = eval(
+        r#"
+        (let ((a 1) (b 2) (c 3))
+          (let ((closure (lambda () (+ a (+ b c)))))
+            (let ((handle (spawn closure)))
+              (join handle))))
+        "#,
+    );
+
+    match result {
+        Ok(Value::Int(n)) => assert_eq!(n, 6),
+        Ok(v) => panic!("Expected integer 6, got {:?}", v),
+        Err(e) => panic!("Unexpected error: {}", e),
+    }
+}
+
+#[test]
+fn test_spawn_jit_closure_with_conditional() {
+    // Test spawning a closure that uses conditional logic
+    let result = eval(
+        r#"
+        (let ((x 10))
+          (let ((closure (lambda () (if (> x 5) "big" "small"))))
+            (let ((handle (spawn closure)))
+              (join handle))))
+        "#,
+    );
+
+    match result {
+        Ok(Value::String(s)) => assert_eq!(s.as_ref(), "big"),
+        Ok(v) => panic!("Expected string 'big', got {:?}", v),
+        Err(e) => panic!("Unexpected error: {}", e),
+    }
+}

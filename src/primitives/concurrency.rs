@@ -74,6 +74,88 @@ fn is_value_sendable(value: &Value) -> bool {
     }
 }
 
+/// Helper function to spawn a closure in a new thread
+/// Extracts closure data, validates sendability, and executes in a fresh VM
+fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> {
+    // Check that all captured values are sendable
+    for (i, captured) in closure.env.iter().enumerate() {
+        if !is_value_sendable(captured) {
+            return Err(format!(
+                "spawn: closure captures mutable or unsafe value at position {} ({})",
+                i,
+                captured.type_name()
+            ));
+        }
+    }
+
+    // Also check constants for sendability
+    for (i, constant) in closure.constants.iter().enumerate() {
+        if !is_value_sendable(constant) {
+            return Err(format!(
+                "spawn: closure has non-sendable constant at position {} ({})",
+                i,
+                constant.type_name()
+            ));
+        }
+    }
+
+    // Extract and wrap the closure data for thread safety
+    let bytecode_data: Vec<u8> = (*closure.bytecode).clone();
+    let constants_data: Vec<SendValue> = closure
+        .constants
+        .iter()
+        .map(|v| SendValue::new(v.clone()))
+        .collect();
+    let env_data: Vec<SendValue> = closure
+        .env
+        .iter()
+        .map(|v| SendValue::new(v.clone()))
+        .collect();
+
+    // Create a holder for the result
+    // We wrap the result in SendValue to make it Send
+    let result_holder: Arc<Mutex<Option<Result<SendValue, String>>>> = Arc::new(Mutex::new(None));
+    let result_clone = result_holder.clone();
+
+    // Spawn the thread
+    let _handle = std::thread::spawn(move || {
+        // Create a fresh VM with primitives registered
+        let mut vm = VM::new();
+        let mut symbols = SymbolTable::new();
+        // Register primitives so they're available in the spawned thread
+        register_primitives(&mut vm, &mut symbols);
+
+        // Convert SendValue back to Value for the VM's execute_bytecode
+        let bytecode_rc = Rc::new(bytecode_data);
+        let constants_rc = Rc::new(
+            constants_data
+                .into_iter()
+                .map(|sv| sv.into_value())
+                .collect::<Vec<_>>(),
+        );
+        let env_rc = Rc::new(
+            env_data
+                .into_iter()
+                .map(|sv| sv.into_value())
+                .collect::<Vec<_>>(),
+        );
+
+        let result = vm.execute_bytecode(&bytecode_rc, &constants_rc, Some(&env_rc));
+
+        // Store the result, wrapping it in SendValue
+        if let Ok(mut holder) = result_clone.lock() {
+            *holder = Some(result.map(SendValue::new));
+        }
+    });
+
+    // Return a thread handle with the result holder
+    let thread_handle = ThreadHandle {
+        result: result_holder,
+    };
+
+    Ok(Value::ThreadHandle(thread_handle))
+}
+
 /// Spawns a new thread that executes a closure with captured immutable values
 /// (spawn closure)
 ///
@@ -84,81 +166,28 @@ fn is_value_sendable(value: &Value) -> bool {
 ///
 /// The spawned thread gets a fresh VM with only primitives registered.
 /// The closure's bytecode is compiled and executed in that VM.
+///
+/// For JIT-compiled closures, falls back to the source closure for thread-safe execution.
 pub fn prim_spawn(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!("spawn: expected 1 argument, got {}", args.len()));
     }
 
     match &args[0] {
-        Value::Closure(closure) => {
-            // Check that all captured values are sendable
-            for (i, captured) in closure.env.iter().enumerate() {
-                if !is_value_sendable(captured) {
-                    return Err(format!(
-                        "spawn: closure captures mutable or unsafe value at position {} ({})",
-                        i,
-                        captured.type_name()
-                    ));
-                }
+        Value::Closure(closure) => spawn_closure_impl(closure),
+
+        Value::JitClosure(jit_closure) => {
+            // Fall back to the source closure for thread-safe execution
+            match &jit_closure.source {
+                Some(source) => spawn_closure_impl(source),
+                None => Err(
+                    "spawn: JitClosure has no source closure for thread execution. \
+                     JIT-compiled closures must retain their source to be spawned."
+                        .to_string(),
+                ),
             }
-
-            // Extract and wrap the closure data for thread safety
-            let bytecode_data: Vec<u8> = (*closure.bytecode).clone();
-            let constants_data: Vec<SendValue> = closure
-                .constants
-                .iter()
-                .map(|v| SendValue::new(v.clone()))
-                .collect();
-            let env_data: Vec<SendValue> = closure
-                .env
-                .iter()
-                .map(|v| SendValue::new(v.clone()))
-                .collect();
-
-            // Create a holder for the result
-            // We wrap the result in SendValue to make it Send
-            let result_holder: Arc<Mutex<Option<Result<SendValue, String>>>> =
-                Arc::new(Mutex::new(None));
-            let result_clone = result_holder.clone();
-
-            // Spawn the thread
-            let _handle = std::thread::spawn(move || {
-                // Create a fresh VM with primitives registered
-                let mut vm = VM::new();
-                let mut symbols = SymbolTable::new();
-                // Register primitives so they're available in the spawned thread
-                register_primitives(&mut vm, &mut symbols);
-
-                // Convert SendValue back to Value for the VM's execute_bytecode
-                let bytecode_rc = Rc::new(bytecode_data);
-                let constants_rc = Rc::new(
-                    constants_data
-                        .into_iter()
-                        .map(|sv| sv.into_value())
-                        .collect::<Vec<_>>(),
-                );
-                let env_rc = Rc::new(
-                    env_data
-                        .into_iter()
-                        .map(|sv| sv.into_value())
-                        .collect::<Vec<_>>(),
-                );
-
-                let result = vm.execute_bytecode(&bytecode_rc, &constants_rc, Some(&env_rc));
-
-                // Store the result, wrapping it in SendValue
-                if let Ok(mut holder) = result_clone.lock() {
-                    *holder = Some(result.map(SendValue::new));
-                }
-            });
-
-            // Return a thread handle with the result holder
-            let thread_handle = ThreadHandle {
-                result: result_holder,
-            };
-
-            Ok(Value::ThreadHandle(thread_handle))
         }
+
         Value::NativeFn(_) => {
             Err("spawn: native functions cannot be spawned. Use closures instead.".to_string())
         }
