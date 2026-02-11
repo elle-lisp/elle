@@ -25,7 +25,43 @@ impl VM {
     ///
     /// This is used internally for closure execution and by spawn/join primitives
     /// to execute closures in spawned threads.
+    ///
+    /// This function handles tail calls without recursion by using a loop-based approach.
+    /// When a tail call is encountered, instead of recursively calling execute_bytecode,
+    /// we store the tail call information and loop back to execute it.
     pub fn execute_bytecode(
+        &mut self,
+        bytecode: &[u8],
+        constants: &[Value],
+        closure_env: Option<&Rc<Vec<Value>>>,
+    ) -> Result<Value, String> {
+        // Outer loop to handle tail calls without recursion
+        let mut current_bytecode = bytecode.to_vec();
+        let mut current_constants = constants.to_vec();
+        let mut current_env = closure_env.cloned();
+
+        loop {
+            let result = self.execute_bytecode_inner(
+                &current_bytecode,
+                &current_constants,
+                current_env.as_ref(),
+            )?;
+
+            // Check if there's a pending tail call
+            if let Some((tail_bytecode, tail_constants, tail_env)) = self.pending_tail_call.take() {
+                current_bytecode = tail_bytecode;
+                current_constants = tail_constants;
+                current_env = Some(tail_env);
+                // Continue the loop to execute the tail call
+            } else {
+                // No pending tail call, return the result
+                return Ok(result);
+            }
+        }
+    }
+
+    /// Inner execution loop that handles all instructions except tail calls
+    fn execute_bytecode_inner(
         &mut self,
         bytecode: &[u8],
         constants: &[Value],
@@ -258,9 +294,11 @@ impl VM {
                         }
                         Value::Closure(closure) => {
                             // Build proper environment: captures + args + locals (same as Call)
-                            let mut new_env = Vec::new();
-                            new_env.extend((*closure.env).iter().cloned());
-                            new_env.extend(args);
+                            // Reuse the cached environment vector to avoid repeated allocations
+                            self.tail_call_env_cache.clear();
+                            self.tail_call_env_cache
+                                .extend((*closure.env).iter().cloned());
+                            self.tail_call_env_cache.extend(args);
 
                             // Calculate number of locally-defined variables
                             let num_params = match closure.arity {
@@ -277,18 +315,23 @@ impl VM {
                                 let empty_cell = Value::Cell(std::rc::Rc::new(
                                     std::cell::RefCell::new(Box::new(Value::Nil)),
                                 ));
-                                new_env.push(empty_cell);
+                                self.tail_call_env_cache.push(empty_cell);
                             }
 
-                            let new_env_rc = std::rc::Rc::new(new_env);
+                            let new_env_rc = std::rc::Rc::new(self.tail_call_env_cache.clone());
 
-                            // Use closure's own constants table (not parent's)
+                            // Store the tail call information to be executed in the outer loop
+                            // instead of recursively calling execute_bytecode
                             // Don't increment call_depth — this is the tail call optimization
-                            return self.execute_bytecode(
-                                &closure.bytecode,
-                                &closure.constants,
-                                Some(&new_env_rc),
-                            );
+                            self.pending_tail_call = Some((
+                                (*closure.bytecode).clone(),
+                                (*closure.constants).clone(),
+                                new_env_rc,
+                            ));
+
+                            // Return a dummy value - the outer loop will detect the pending tail call
+                            // and execute it instead of returning this value
+                            return Ok(Value::Nil);
                         }
                         _ => return Err(format!("Cannot call {:?}", func)),
                     };

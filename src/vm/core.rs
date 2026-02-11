@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 type StackVec = SmallVec<[Value; 256]>;
+type TailCallInfo = (Vec<u8>, Vec<Value>, Rc<Vec<Value>>);
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {
@@ -38,6 +39,8 @@ pub struct VM {
     pub handling_exception: bool,        // True if we're currently in exception handler code
     pub closure_call_counts: std::collections::HashMap<*const u8, usize>, // Track closure call frequencies for JIT
     pub location_map: LocationMap, // Bytecode instruction index → source location mapping
+    pub tail_call_env_cache: Vec<Value>, // Reusable environment vector for tail calls to avoid repeated allocations
+    pub pending_tail_call: Option<TailCallInfo>, // (bytecode, constants, env) for pending tail call
 }
 
 /// Exception type hierarchy (baked into VM for inheritance checking)
@@ -96,6 +99,8 @@ impl VM {
             handling_exception: false,
             closure_call_counts: std::collections::HashMap::new(),
             location_map: LocationMap::new(),
+            tail_call_env_cache: Vec::with_capacity(256),
+            pending_tail_call: None,
         }
     }
 
