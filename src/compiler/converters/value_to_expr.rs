@@ -14,6 +14,7 @@ pub fn value_to_expr(value: &Value, symbols: &mut SymbolTable) -> Result<Expr, S
     let mut expr = value_to_expr_with_scope(value, symbols, &mut Vec::new())?;
     super::super::capture_resolution::resolve_captures(&mut expr);
     mark_tail_calls(&mut expr, true);
+    super::super::optimize::optimize(&mut expr, symbols);
     Ok(expr)
 }
 

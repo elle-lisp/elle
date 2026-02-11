@@ -12,6 +12,7 @@ pub mod jit_executor;
 pub mod jit_wrapper;
 pub mod linter;
 pub mod macros;
+pub mod optimize;
 pub mod patterns;
 pub mod scope;
 pub mod symbol_index;

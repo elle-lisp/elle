@@ -121,3 +121,7 @@ mod deep_tail_recursion {
 mod naming_consistency {
     include!("naming_consistency.rs");
 }
+
+mod peephole_optimization {
+    include!("peephole_optimization.rs");
+}
