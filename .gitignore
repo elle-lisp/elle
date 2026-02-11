@@ -1,0 +1,8 @@
+/target
+/elle-lint/target
+/elle-lsp/target
+site/
+
+# Profiling data
+perf.data
+perf.data.old
