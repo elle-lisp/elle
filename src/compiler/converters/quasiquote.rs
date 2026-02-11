@@ -144,6 +144,7 @@ fn build_quasiquote_expr(
 
         // Cannot quote these
         Value::Closure(_)
+        | Value::JitClosure(_)
         | Value::NativeFn(_)
         | Value::LibHandle(_)
         | Value::CHandle(_)

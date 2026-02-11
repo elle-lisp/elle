@@ -977,6 +977,14 @@ impl Compiler {
         // Note: env is empty here, actual capturing happens at runtime via MakeClosure instruction
         // num_locals includes: parameters + captures + locally-defined variables
         // The environment layout will be: [captures..., parameters..., locals...]
+
+        // Store the original AST for JIT compilation
+        let source_ast = Some(Rc::new(crate::value::JitLambda {
+            params: params.to_vec(),
+            body: Box::new(body.clone()),
+            captures: captures.to_vec(),
+        }));
+
         let closure = Closure {
             bytecode: Rc::new(lambda_compiler.bytecode.instructions),
             arity: crate::value::Arity::Exact(params.len()),
@@ -984,6 +992,7 @@ impl Compiler {
             num_locals: params.len() + captures.len() + locals.len(),
             num_captures: captures.len(),
             constants: Rc::new(lambda_compiler.bytecode.constants),
+            source_ast,
         };
 
         let idx = self.bytecode.add_constant(Value::Closure(Rc::new(closure)));

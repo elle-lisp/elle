@@ -91,6 +91,7 @@ fn format_value(
             format_cons(&cons_rc.first, &cons_rc.rest, indent, config, symbol_table)
         }
         Value::Closure(_) => "#<closure>".to_string(),
+        Value::JitClosure(_) => "#<jit-closure>".to_string(),
         Value::NativeFn(_) => "#<native-fn>".to_string(),
         Value::LibHandle(_) => "#<lib-handle>".to_string(),
         Value::CHandle(_) => "#<c-handle>".to_string(),

@@ -1,4 +1,5 @@
 pub mod condition;
+use crate::compiler::ast::Expr;
 pub use condition::Condition;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -84,6 +85,20 @@ impl Cons {
     }
 }
 
+/// Source AST for JIT compilation of closures
+///
+/// Stores the original AST of a lambda expression to enable on-demand
+/// JIT compilation via the `jit-compile` primitive.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JitLambda {
+    /// Parameter symbols
+    pub params: Vec<SymbolId>,
+    /// Body expression (the AST)
+    pub body: Box<Expr>,
+    /// Captured variable info: (symbol_id, depth, index)
+    pub captures: Vec<(SymbolId, usize, usize)>,
+}
+
 /// Closure with captured environment
 #[derive(Debug, Clone, PartialEq)]
 pub struct Closure {
@@ -93,6 +108,8 @@ pub struct Closure {
     pub num_locals: usize,
     pub num_captures: usize, // Number of captured variables (for env layout)
     pub constants: Rc<Vec<Value>>,
+    /// Original AST for JIT compilation (None if not available)
+    pub source_ast: Option<Rc<JitLambda>>,
 }
 
 /// FFI library handle
@@ -112,6 +129,39 @@ impl CHandle {
     /// Create a new C handle
     pub fn new(ptr: *const std::ffi::c_void, id: u32) -> Self {
         CHandle { ptr, id }
+    }
+}
+
+/// JIT-compiled closure with native code
+///
+/// Represents a closure that has been compiled to native machine code
+/// via the `jit-compile` primitive. The code_ptr points to native code
+/// that can be called directly for performance.
+#[derive(Clone)]
+pub struct JitClosure {
+    /// Function pointer to compiled native code
+    /// Signature: fn(args: &[Value], env: &[Value]) -> Result<Value, String>
+    pub code_ptr: *const u8,
+    /// Captured environment (same as regular Closure)
+    pub env: Rc<Vec<Value>>,
+    /// Arity for argument validation
+    pub arity: Arity,
+    /// Original closure for fallback/debugging (optional)
+    pub source: Option<Rc<Closure>>,
+    /// Unique ID for this compiled function (for cache management)
+    pub func_id: u64,
+}
+
+impl fmt::Debug for JitClosure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<jit-closure id={}>", self.func_id)
+    }
+}
+
+impl PartialEq for JitClosure {
+    fn eq(&self, _other: &Self) -> bool {
+        // JIT closures are never equal (like regular closures)
+        false
     }
 }
 
@@ -205,6 +255,7 @@ pub enum Value {
     Table(Rc<RefCell<BTreeMap<TableKey, Value>>>), // Mutable table
     Struct(Rc<BTreeMap<TableKey, Value>>),         // Immutable struct
     Closure(Rc<Closure>),
+    JitClosure(Rc<JitClosure>),
     NativeFn(NativeFn),
     // FFI types
     LibHandle(LibHandle),
@@ -234,6 +285,7 @@ impl PartialEq for Value {
             (Value::Table(_), Value::Table(_)) => false, // Tables are mutable, never equal
             (Value::Struct(a), Value::Struct(b)) => a == b,
             (Value::Closure(_), Value::Closure(_)) => false, // Closures are never equal
+            (Value::JitClosure(_), Value::JitClosure(_)) => false, // JIT closures are never equal
             (Value::NativeFn(_), Value::NativeFn(_)) => false, // Functions are never equal
             (Value::LibHandle(a), Value::LibHandle(b)) => a == b,
             (Value::CHandle(a), Value::CHandle(b)) => a == b,
@@ -318,6 +370,16 @@ impl Value {
         }
     }
 
+    pub fn as_jit_closure(&self) -> Result<&Rc<JitClosure>, String> {
+        match self {
+            Value::JitClosure(jc) => Ok(jc),
+            _ => Err(format!(
+                "Type error: expected jit-closure, got {}",
+                self.type_name()
+            )),
+        }
+    }
+
     pub fn as_table(&self) -> Result<&Rc<RefCell<BTreeMap<TableKey, Value>>>, String> {
         match self {
             Value::Table(table) => Ok(table),
@@ -381,6 +443,7 @@ impl Value {
             Value::Table(_) => "table",
             Value::Struct(_) => "struct",
             Value::Closure(_) => "closure",
+            Value::JitClosure(_) => "jit-closure",
             Value::NativeFn(_) => "native-function",
             Value::LibHandle(_) => "library-handle",
             Value::CHandle(_) => "c-handle",
@@ -450,6 +513,7 @@ impl fmt::Debug for Value {
                 write!(f, ">")
             }
             Value::Closure(_) => write!(f, "<closure>"),
+            Value::JitClosure(jc) => write!(f, "{:?}", jc),
             Value::NativeFn(_) => write!(f, "<native-fn>"),
             Value::LibHandle(h) => write!(f, "<library-handle:{}>", h.0),
             Value::CHandle(h) => write!(f, "<c-handle:{}>", h.id),
