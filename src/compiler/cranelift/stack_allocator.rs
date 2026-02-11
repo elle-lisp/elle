@@ -8,12 +8,18 @@ use cranelift::codegen::ir::{StackSlot, StackSlotData, StackSlotKind};
 use cranelift::prelude::*;
 use std::collections::HashMap;
 
+/// Type of value stored in a stack slot
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotType {
+    I64,
+    F64,
+}
+
 /// Allocates and manages stack slots for variables
 #[derive(Debug)]
 pub struct StackAllocator {
-    /// Maps (depth, index) -> (StackSlot, allocated size in bytes)
-    /// We track size to support both i64 and f64 values
-    slot_map: HashMap<(usize, usize), StackSlot>,
+    /// Maps (depth, index) -> (StackSlot, SlotType)
+    slot_map: HashMap<(usize, usize), (StackSlot, SlotType)>,
     /// Total bytes allocated for all slots
     total_size: u32,
 }
@@ -34,11 +40,12 @@ impl StackAllocator {
         builder: &mut FunctionBuilder,
         depth: usize,
         index: usize,
+        slot_type: SlotType,
     ) -> Result<(StackSlot, u32), String> {
         let key = (depth, index);
 
         // Check if already allocated
-        if let Some(slot) = self.slot_map.get(&key) {
+        if let Some((slot, _)) = self.slot_map.get(&key) {
             // Get the offset for this slot
             let offset = self.get_offset(depth, index)?;
             return Ok((*slot, offset));
@@ -51,12 +58,17 @@ impl StackAllocator {
         let offset = self.total_size;
         self.total_size += 8;
 
-        self.slot_map.insert(key, slot);
+        self.slot_map.insert(key, (slot, slot_type));
         Ok((slot, offset))
     }
 
     /// Get an existing stack slot
     pub fn get(&self, depth: usize, index: usize) -> Option<StackSlot> {
+        self.slot_map.get(&(depth, index)).map(|(slot, _)| *slot)
+    }
+
+    /// Get an existing stack slot with its type
+    pub fn get_with_type(&self, depth: usize, index: usize) -> Option<(StackSlot, SlotType)> {
         self.slot_map.get(&(depth, index)).copied()
     }
 
