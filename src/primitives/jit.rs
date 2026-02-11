@@ -1,12 +1,12 @@
 //! JIT compilation primitives
 
 use crate::compiler::cranelift::jit_compile::is_jit_compilable;
-use crate::value::Value;
+use crate::value::{TableKey, Value};
+use std::collections::BTreeMap;
+use std::rc::Rc;
 
 #[cfg(test)]
 use crate::value::{Arity, JitClosure};
-#[cfg(test)]
-use std::rc::Rc;
 
 /// (jit-compile closure) -> jit-closure or original closure
 ///
@@ -92,6 +92,71 @@ pub fn prim_jit_compilable_p(args: &[Value]) -> Result<Value, String> {
     }
 }
 
+/// (jit-stats) -> struct
+///
+/// Returns statistics about JIT compilation.
+/// Returns a struct with the following fields:
+/// - compiled-functions: Number of functions compiled to native code
+/// - jit-enabled: Whether JIT compilation is available
+///
+/// Note: Currently returns basic statistics. Full statistics tracking
+/// would require integration with the VM's JIT executor.
+pub fn prim_jit_stats(args: &[Value]) -> Result<Value, String> {
+    if !args.is_empty() {
+        return Err(format!(
+            "jit-stats: expected 0 arguments, got {}",
+            args.len()
+        ));
+    }
+
+    let mut stats = BTreeMap::new();
+
+    // For now, we return basic statistics that don't require VM access.
+    // In a full implementation with VM integration, we would:
+    // 1. Access the JIT executor from the VM
+    // 2. Query the JITContext for compiled functions count
+    // 3. Track compilation attempts and failures
+    // 4. Report cache statistics
+    //
+    // Currently, we return a struct indicating JIT is available but
+    // with placeholder values. The actual statistics would be populated
+    // when jit-stats is called as a special form with VM access.
+
+    // Check if JIT is available (we can always compile, but success depends on code)
+    let jit_enabled = true;
+
+    stats.insert(
+        TableKey::String("compiled-functions".to_string()),
+        Value::Int(0),
+    );
+    stats.insert(
+        TableKey::String("total-compilations".to_string()),
+        Value::Int(0),
+    );
+    stats.insert(
+        TableKey::String("failed-compilations".to_string()),
+        Value::Int(0),
+    );
+    stats.insert(TableKey::String("cache-hits".to_string()), Value::Int(0));
+    stats.insert(TableKey::String("cache-misses".to_string()), Value::Int(0));
+    stats.insert(TableKey::String("hot-closures".to_string()), Value::Int(0));
+    stats.insert(
+        TableKey::String("native-code-bytes".to_string()),
+        Value::Int(0),
+    );
+    stats.insert(
+        TableKey::String("compilation-time-ms".to_string()),
+        Value::Int(0),
+    );
+    stats.insert(
+        TableKey::String("jit-enabled".to_string()),
+        Value::Bool(jit_enabled),
+    );
+
+    // Return as immutable struct
+    Ok(Value::Struct(Rc::new(stats)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +224,57 @@ mod tests {
     fn test_jit_compiled_p_wrong_arg_count() {
         let result = prim_jit_compiled_p(&[Value::Int(1), Value::Int(2)]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_jit_stats_returns_struct() {
+        let result = prim_jit_stats(&[]).unwrap();
+        assert!(matches!(result, Value::Struct(_)));
+    }
+
+    #[test]
+    fn test_jit_stats_no_args() {
+        let result = prim_jit_stats(&[Value::Int(1)]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_jit_stats_has_expected_fields() {
+        let result = prim_jit_stats(&[]).unwrap();
+        if let Value::Struct(s) = result {
+            assert!(s.contains_key(&TableKey::String("compiled-functions".to_string())));
+            assert!(s.contains_key(&TableKey::String("total-compilations".to_string())));
+            assert!(s.contains_key(&TableKey::String("failed-compilations".to_string())));
+            assert!(s.contains_key(&TableKey::String("cache-hits".to_string())));
+            assert!(s.contains_key(&TableKey::String("cache-misses".to_string())));
+            assert!(s.contains_key(&TableKey::String("hot-closures".to_string())));
+            assert!(s.contains_key(&TableKey::String("native-code-bytes".to_string())));
+            assert!(s.contains_key(&TableKey::String("compilation-time-ms".to_string())));
+            assert!(s.contains_key(&TableKey::String("jit-enabled".to_string())));
+        } else {
+            panic!("Expected struct");
+        }
+    }
+
+    #[test]
+    fn test_jit_stats_jit_enabled_is_bool() {
+        let result = prim_jit_stats(&[]).unwrap();
+        if let Value::Struct(s) = result {
+            let jit_enabled = s.get(&TableKey::String("jit-enabled".to_string()));
+            assert!(matches!(jit_enabled, Some(Value::Bool(true))));
+        } else {
+            panic!("Expected struct");
+        }
+    }
+
+    #[test]
+    fn test_jit_stats_compiled_functions_is_int() {
+        let result = prim_jit_stats(&[]).unwrap();
+        if let Value::Struct(s) = result {
+            let compiled = s.get(&TableKey::String("compiled-functions".to_string()));
+            assert!(matches!(compiled, Some(Value::Int(0))));
+        } else {
+            panic!("Expected struct");
+        }
     }
 }
