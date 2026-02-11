@@ -12,6 +12,7 @@ use std::collections::HashMap;
 /// Reserved words that cannot be used as symbol names
 const RESERVED_WORDS: &[&str] = &[
     "define",
+    "fn",
     "lambda",
     "if",
     "cond",

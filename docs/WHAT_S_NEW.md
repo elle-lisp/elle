@@ -4,6 +4,21 @@ A summary of recent additions and improvements to the Elle language.
 
 ## Recent Additions
 
+### `fn` Keyword
+
+The `fn` keyword is now the preferred way to create anonymous functions:
+
+```lisp
+; New style (preferred)
+(define add (fn (a b) (+ a b)))
+(map (fn (x) (* x 2)) '(1 2 3))
+
+; Old style (still works as alias)
+(define add (lambda (a b) (+ a b)))
+```
+
+The `lambda` keyword remains available as an alias for backward compatibility.
+
 ### Exception Handling (try-catch-finally)
 
 Elle now provides comprehensive exception handling with the `try-catch-finally` construct:
@@ -57,7 +72,7 @@ Beyond simple exceptions, Elle provides a sophisticated condition system for han
   (field "unknown"))
 
 (define-handler :validation-error
-  (lambda (c)
+  (fn (c)
     (display "Error in ")
     (display (condition-get c 'field))
     (newline)))
@@ -203,7 +218,7 @@ Elle supports functional programming with powerful higher-order functions:
 Apply a function to each element:
 
 ```lisp
-(map (lambda (x) (* x 2)) (list 1 2 3))     ⟹ (2 4 6)
+(map (fn (x) (* x 2)) (list 1 2 3))     ⟹ (2 4 6)
 (map string-upcase (list "a" "b" "c"))      ⟹ ("A" "B" "C")
 (map abs (list -1 -2 3 -4))                 ⟹ (1 2 3 4)
 ```
@@ -213,9 +228,9 @@ Apply a function to each element:
 Select elements matching a predicate:
 
 ```lisp
-(filter (lambda (x) (> x 2)) (list 1 2 3 4))  ⟹ (3 4)
+(filter (fn (x) (> x 2)) (list 1 2 3 4))  ⟹ (3 4)
 (filter even? (list 1 2 3 4 5 6))             ⟹ (2 4 6)
-(filter (lambda (s) (> (string-length s) 3)) 
+(filter (fn (s) (> (string-length s) 3)) 
   (list "hi" "hello" "world" "a"))            ⟹ ("hello" "world")
 ```
 
@@ -224,9 +239,9 @@ Select elements matching a predicate:
 Accumulate a result:
 
 ```lisp
-(fold (lambda (acc x) (+ acc x)) 0 (list 1 2 3 4))  ⟹ 10
-(fold (lambda (acc x) (cons x acc)) nil (list 1 2 3)) ⟹ (3 2 1)
-(fold (lambda (acc s) (string-append acc " " s)) 
+(fold (fn (acc x) (+ acc x)) 0 (list 1 2 3 4))  ⟹ 10
+(fold (fn (acc x) (cons x acc)) nil (list 1 2 3)) ⟹ (3 2 1)
+(fold (fn (acc s) (string-append acc " " s)) 
   "" (list "hello" "world"))                        ⟹ " hello world"
 ```
 
@@ -236,7 +251,7 @@ Call a function with arguments from a list:
 
 ```lisp
 (apply + (list 1 2 3))                 ⟹ 6
-(apply (lambda (a b c) (+ a b c)) 
+(apply (fn (a b c) (+ a b c)) 
   (list 10 20 30))                     ⟹ 60
 ```
 
@@ -359,12 +374,12 @@ Call a function with arguments from a list:
 
 ```lisp
 ; Create and run a thread
-(spawn (lambda ()
+(spawn (fn ()
   (display "Running in thread")
   (newline)))
 
 ; Create and wait for result
-(define t (spawn (lambda () (+ 2 2))))
+(define t (spawn (fn () (+ 2 2))))
 (join t)  ⟹ 4
 
 ; Sleep current thread
@@ -465,7 +480,7 @@ If upgrading from pre-exception-handling versions:
 ```lisp
 (catch-condition :validation-error
   (validate x)
-  (lambda (c)
+  (fn (c)
     (display "Error: ")
     (display (condition-get c 'message))))
 ```
@@ -476,6 +491,7 @@ If upgrading from pre-exception-handling versions:
 
 | Feature | Version | Status |
 |---------|---------|--------|
+| fn keyword | Recent | Stable |
 | try-catch-finally | Recent | Stable |
 | Condition system | Recent | Stable |
 | Exception objects | Recent | Stable |

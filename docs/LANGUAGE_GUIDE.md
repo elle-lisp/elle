@@ -321,15 +321,15 @@ Elle uses functional iteration rather than imperative loops. Use higher-order fu
 
 ```lisp
 ; Process each element
-(map (lambda (x) (* x 2)) (list 1 2 3))
+(map (fn (x) (* x 2)) (list 1 2 3))
 ⟹ (2 4 6)
 
 ; Select matching elements
-(filter (lambda (x) (> x 2)) (list 1 2 3 4))
+(filter (fn (x) (> x 2)) (list 1 2 3 4))
 ⟹ (3 4)
 
 ; Accumulate a result
-(fold (lambda (acc x) (+ acc x)) 0 (list 1 2 3 4))
+(fold (fn (acc x) (+ acc x)) 0 (list 1 2 3 4))
 ⟹ 10
 ```
 
@@ -414,7 +414,7 @@ The condition system allows defining custom signal types with handlers:
   (field "The field that failed"))
 
 (define-handler :validation-error
-  (lambda (condition)
+  (fn (condition)
     (display "Validation error in ")
     (display (condition-get condition 'field))
     (display ": ")
@@ -443,7 +443,7 @@ Use `catch-condition` to intercept specific conditions:
   (signal :validation-error
     :message "Invalid format"
     :field "username"))
-  (lambda (condition)
+  (fn (condition)
     (display "Handled validation error")
     (newline)))
 ```
@@ -454,10 +454,10 @@ Register multiple handlers for same signal - they're called in order:
 
 ```lisp
 (define-handler :validation-error
-  (lambda (c) (display "Handler 1") (newline)))
+  (fn (c) (display "Handler 1") (newline)))
 
 (define-handler :validation-error
-  (lambda (c) (display "Handler 2") (newline)))
+  (fn (c) (display "Handler 2") (newline)))
 
 (signal :validation-error
   :message "Test"
@@ -477,7 +477,7 @@ Catch all conditions with a generic handler:
 ```lisp
 (condition-catch
   (signal :some-error :data 42)
-  (lambda (condition-type condition-data)
+  (fn (condition-type condition-data)
     (display "Caught: ")
     (display condition-type)
     (newline)))
@@ -489,14 +489,14 @@ Catch all conditions with a generic handler:
 
 ### Defining Functions
 
-Functions are defined with `lambda` or `define`:
+Functions are defined with `fn` or `define`:
 
 ```lisp
-; Lambda expression
-(lambda (x y) (+ x y))
+; Function expression
+(fn (x y) (+ x y))
 
-; Named function (define creates a variable bound to lambda)
-(define add (lambda (x y) (+ x y)))
+; Named function (define creates a variable bound to fn)
+(define add (fn (x y) (+ x y)))
 
 ; Shorthand
 (define (add x y) (+ x y))
@@ -504,13 +504,15 @@ Functions are defined with `lambda` or `define`:
 (add 3 4) ⟹ 7
 ```
 
+Note: `lambda` is available as an alias for `fn` for backward compatibility.
+
 ### Closures
 
 Functions close over their definition environment:
 
 ```lisp
 (define (make-adder n)
-  (lambda (x) (+ x n)))
+  (fn (x) (+ x n)))
 
 (define add-5 (make-adder 5))
 (add-5 10) ⟹ 15
@@ -524,10 +526,10 @@ Functions close over their definition environment:
 `map` applies a function to each element of a list:
 
 ```lisp
-(map (lambda (x) (* x 2)) (list 1 2 3))
+(map (fn (x) (* x 2)) (list 1 2 3))
 ⟹ (2 4 6)
 
-(map (lambda (x) (> x 2)) (list 1 2 3 4))
+(map (fn (x) (> x 2)) (list 1 2 3 4))
 ⟹ (#f #f #t #t)
 ```
 
@@ -536,10 +538,10 @@ Functions close over their definition environment:
 `filter` selects elements that satisfy a predicate:
 
 ```lisp
-(filter (lambda (x) (> x 2)) (list 1 2 3 4))
+(filter (fn (x) (> x 2)) (list 1 2 3 4))
 ⟹ (3 4)
 
-(filter (lambda (x) (even? x)) (list 1 2 3 4 5 6))
+(filter (fn (x) (even? x)) (list 1 2 3 4 5 6))
 ⟹ (2 4 6)
 ```
 
@@ -548,10 +550,10 @@ Functions close over their definition environment:
 `fold` (also called reduce) accumulates a result:
 
 ```lisp
-(fold (lambda (acc x) (+ acc x)) 0 (list 1 2 3 4))
+(fold (fn (acc x) (+ acc x)) 0 (list 1 2 3 4))
 ⟹ 10
 
-(fold (lambda (acc x) (cons x acc)) nil (list 1 2 3))
+(fold (fn (acc x) (cons x acc)) nil (list 1 2 3))
 ⟹ (3 2 1)
 ```
 
@@ -762,10 +764,10 @@ e                  ⟹ 2.71828...
 ### Concurrency
 
 ```lisp
-(spawn (lambda () (display "Hello from thread") (newline)))
-; Creates a new thread and runs the lambda
+(spawn (fn () (display "Hello from thread") (newline)))
+; Creates a new thread and runs the function
 
-(define t (spawn (lambda () (+ 2 2))))
+(define t (spawn (fn () (+ 2 2))))
 (join t)          ; Wait for thread to complete, returns its result
 
 (sleep 1000)      ; Sleep for 1000 milliseconds
@@ -818,7 +820,7 @@ Macros transform code at compile time:
 
 ```lisp
 (define-macro when
-  (lambda (test body)
+  (fn (test body)
     `(if ,test ,body nil)))
 
 (when (> 10 5)
@@ -844,7 +846,7 @@ Functions capture their definition environment:
 ```lisp
 (define (make-counter)
   (define count 0)
-  (lambda ()
+  (fn ()
     (set! count (+ count 1))
     count))
 
@@ -901,7 +903,7 @@ Use `map`, `filter`, and `fold` for clear data transformations:
 
 ```lisp
 ; Clear intent
-(map (lambda (x) (+ x 1)) (list 1 2 3))
+(map (fn (x) (+ x 1)) (list 1 2 3))
 
 ; More concise with existing functions
 (map abs (list -1 -2 -3))
@@ -914,7 +916,7 @@ Use the condition system for expected error cases:
 ```lisp
 (catch-condition :validation-error
   (validate-user-input username)
-  (lambda (c)
+  (fn (c)
     (display "Invalid: ")
     (display (condition-get c 'message))
     (newline)))

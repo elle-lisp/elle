@@ -126,10 +126,10 @@ Elle uses functional iteration patterns rather than imperative loops. Process co
 **Examples:**
 
 ```lisp
-(map (lambda (x) (* x 2)) (list 1 2 3))
+(map (fn (x) (* x 2)) (list 1 2 3))
 ⟹ (2 4 6)
 
-(map (lambda (s) (string-upcase s)) (list "a" "b" "c"))
+(map (fn (s) (string-upcase s)) (list "a" "b" "c"))
 ⟹ ("A" "B" "C")
 
 (map abs (list -1 -2 3 -4))
@@ -145,13 +145,13 @@ Elle uses functional iteration patterns rather than imperative loops. Process co
 **Examples:**
 
 ```lisp
-(filter (lambda (x) (> x 2)) (list 1 2 3 4))
+(filter (fn (x) (> x 2)) (list 1 2 3 4))
 ⟹ (3 4)
 
 (filter even? (list 1 2 3 4 5 6))
 ⟹ (2 4 6)
 
-(filter (lambda (s) (> (string-length s) 3))
+(filter (fn (s) (> (string-length s) 3))
   (list "hi" "hello" "ok" "world"))
 ⟹ ("hello" "world")
 ```
@@ -165,13 +165,13 @@ Elle uses functional iteration patterns rather than imperative loops. Process co
 **Examples:**
 
 ```lisp
-(fold (lambda (acc x) (+ acc x)) 0 (list 1 2 3 4))
+(fold (fn (acc x) (+ acc x)) 0 (list 1 2 3 4))
 ⟹ 10
 
-(fold (lambda (acc x) (cons x acc)) nil (list 1 2 3))
+(fold (fn (acc x) (cons x acc)) nil (list 1 2 3))
 ⟹ (3 2 1)
 
-(fold (lambda (acc s) (string-append acc " " s))
+(fold (fn (acc s) (string-append acc " " s))
   "" (list "hello" "world"))
 ⟹ " hello world"
 ```
@@ -182,14 +182,14 @@ Process data through multiple transformations:
 
 ```lisp
 ; Double all even numbers
-(map (lambda (x) (* x 2))
+(map (fn (x) (* x 2))
   (filter even? (list 1 2 3 4 5 6)))
 ⟹ (4 8 12)
 
 ; Sum of squares of positive numbers
-(fold (lambda (acc x) (+ acc (* x x)))
+(fold (fn (acc x) (+ acc (* x x)))
   0
-  (filter (lambda (x) (> x 0)) (list -2 3 -1 4 -5)))
+  (filter (fn (x) (> x 0)) (list -2 3 -1 4 -5)))
 ⟹ 25 (3² + 4²)
 ```
 
@@ -362,7 +362,7 @@ Register a handler for a condition with `define-handler`:
 
 ```lisp
 (define-handler :condition-name
-  (lambda (condition)
+  (fn (condition)
     handler-body))
 ```
 
@@ -370,13 +370,13 @@ Multiple handlers can be registered for the same condition - they're called in o
 
 ```lisp
 (define-handler :validation-error
-  (lambda (c)
+  (fn (c)
     (display "Handler 1: ")
     (display (condition-get c 'message))
     (newline)))
 
 (define-handler :validation-error
-  (lambda (c)
+  (fn (c)
     (display "Handler 2: ")
     (display (condition-get c 'field))
     (newline)))
@@ -415,7 +415,7 @@ Use `catch-condition` to intercept a specific condition:
 ```lisp
 (catch-condition :condition-name
   (signal-body)
-  (lambda (condition)
+  (fn (condition)
     handler-body))
 ```
 
@@ -426,7 +426,7 @@ Use `catch-condition` to intercept a specific condition:
   (signal :validation-error
     :message "Invalid input"
     :field "username")
-  (lambda (c)
+  (fn (c)
     (display "Caught and handled: ")
     (display (condition-get c 'message'))
     (newline)))
@@ -439,7 +439,7 @@ Use `condition-catch` to handle any condition:
 ```lisp
 (condition-catch
   (signal-body)
-  (lambda (condition-type condition-data)
+  (fn (condition-type condition-data)
     handler-body))
 ```
 
@@ -450,7 +450,7 @@ Use `condition-catch` to handle any condition:
   (begin
     (signal :validation-error :message "Bad email")
     (signal :network-error :message "No connection"))
-  (lambda (type data)
+  (fn (type data)
     (display "Caught ")
     (display type)
     (display ": ")
@@ -482,7 +482,7 @@ Access condition fields with `condition-get`:
 
 ; Register handlers
 (define-handler :validation-error
-  (lambda (c)
+  (fn (c)
     (display "VALIDATION ERROR: ")
     (display (condition-get c 'field))
     (display " - ")
@@ -490,7 +490,7 @@ Access condition fields with `condition-get`:
     (newline)))
 
 (define-handler :validation-error
-  (lambda (c)
+  (fn (c)
     (display "  (constraint: ")
     (display (condition-get c 'constraint))
     (display ")")
@@ -546,9 +546,9 @@ Prefer `map`, `filter`, and `fold` for processing collections:
 
 ```lisp
 ; Good: Clear intent, composable
-(define doubled (map (lambda (x) (* x 2)) (list 1 2 3)))
+(define doubled (map (fn (x) (* x 2)) (list 1 2 3)))
 (define evens (filter even? (list 1 2 3 4 5 6)))
-(define sum (fold (lambda (acc x) (+ acc x)) 0 (list 1 2 3)))
+(define sum (fold (fn (acc x) (+ acc x)) 0 (list 1 2 3)))
 
 ; Less idiomatic: Manual recursion (still valid)
 (define (sum-list lst)
@@ -589,12 +589,12 @@ If you open resources, ensure cleanup code runs:
 ; Good: Handle specific conditions
 (catch-condition :network-error
   (fetch-data)
-  (lambda (c)
+  (fn (c)
     (retry (condition-get c 'url))))
 
 (catch-condition :validation-error
   (validate-input)
-  (lambda (c)
+  (fn (c)
     (prompt-user-to-fix (condition-get c 'field))))
 
 ; Less good: Generic exception handling
@@ -613,9 +613,9 @@ Chain functional operations for clarity:
 
 ```lisp
 ; Get square of all positive even numbers
-(map (lambda (x) (* x x))
+(map (fn (x) (* x x))
   (filter even?
-    (filter (lambda (x) (> x 0))
+    (filter (fn (x) (> x 0))
       (list -2 1 2 3 -4 5 6))))
 ⟹ (4 36)
 ```

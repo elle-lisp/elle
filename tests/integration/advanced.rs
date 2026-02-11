@@ -223,9 +223,9 @@ fn test_phase5_feature_availability() {
     assert!(eval("(expand-macro '(x 1 2))").is_err()); // x is not a macro
     assert!(eval("(macro? 'x)").is_ok());
     // spawn now requires a closure, not a native function
-    assert!(eval("(spawn (lambda () 42))").is_ok());
+    assert!(eval("(spawn (fn () 42))").is_ok());
     // join requires a thread handle, not a string
-    assert!(eval("(join (spawn (lambda () 42)))").is_ok());
+    assert!(eval("(join (spawn (fn () 42)))").is_ok());
     assert!(eval("(sleep 0)").is_ok());
     assert!(eval("(current-thread-id)").is_ok());
     assert!(eval("(debug-print 42)").is_ok());

@@ -8,7 +8,7 @@
 
 ;; Escape HTML special characters
 (define html-escape
-  (lambda (str)
+  (fn (str)
     ;; Handle nil or non-string values
     (if (nil? str)
       ""
@@ -23,18 +23,18 @@
           (string-replace s4 "'" "&#39;"))))))
 
 ;; Find delimiter in text starting from character position
-(define find-closing-helper (lambda (text pos tlen delimiter dlen)
+(define find-closing-helper (fn (text pos tlen delimiter dlen)
   (if (> (+ pos dlen) tlen)
     nil
     (if (= (substring text pos (+ pos dlen)) delimiter)
       pos
       (find-closing-helper text (+ pos 1) tlen delimiter dlen)))))
 
-(define find-closing (lambda (text start delimiter)
+(define find-closing (fn (text start delimiter)
   (find-closing-helper text start (string-length text) delimiter (string-length delimiter))))
 
 ;; Convert markdown links [text](url) to HTML anchor tags
-(define format-links-rec (lambda (remaining result)
+(define format-links-rec (fn (remaining result)
   (if (= (string-length remaining) 0)
     result
     (begin
@@ -62,12 +62,12 @@
                     after
                     (string-append result before "<a href=\"" link-url "\">" link-text "</a>"))))))))))))
 
-(define format-links (lambda (text)
+(define format-links (fn (text)
   (format-links-rec text "")))
 
 ;; Format inline markdown: **bold**, *italic*, `code`
 ;; Uses string-split to avoid UTF-8 boundary issues
-(define format-inline (lambda (text)
+(define format-inline (fn (text)
   (begin
     ;; First, escape HTML characters
     (define escaped (html-escape text))
@@ -75,7 +75,7 @@
     ;; Then handle **bold** by splitting and rejoining
     (define parts-bold (string-split escaped "**"))
     (define format-bold
-      (lambda (parts result is-bold)
+      (fn (parts result is-bold)
         (if (nil? parts)
           result
           (begin
@@ -91,7 +91,7 @@
     ;; Then handle *italic* by splitting and rejoining
     (define parts-italic (string-split after-bold "*"))
     (define format-italic
-      (lambda (parts result is-italic)
+      (fn (parts result is-italic)
         (if (nil? parts)
           result
           (begin
@@ -107,7 +107,7 @@
     ;; Then handle `code` by splitting and rejoining
     (define parts-code (string-split after-italic "`"))
     (define format-code
-      (lambda (parts result is-code)
+      (fn (parts result is-code)
         (if (nil? parts)
           result
           (begin
@@ -127,7 +127,7 @@
 ;; ============================================================================
 
 (define generate-css
-  (lambda ()
+  (fn ()
     "/* Elle Documentation Site Stylesheet */
 
 :root {
@@ -433,14 +433,14 @@ tbody tr:nth-child(even) {
 
 ;; Render a paragraph block
 (define render-paragraph
-  (lambda (block)
+  (fn (block)
     (begin
       (define text (get block "text"))
       (string-append "<p>" (format-inline text) "</p>"))))
 
 ;; Render a code block
 (define render-code
-  (lambda (block)
+  (fn (block)
     (begin
       (define text (get block "text"))
       (define language (get block "language"))
@@ -451,7 +451,7 @@ tbody tr:nth-child(even) {
 
 ;; Render a list block using fold
 (define render-list
-  (lambda (block)
+  (fn (block)
     (begin
       (define items (get block "items"))
       (define ordered (get block "ordered"))
@@ -459,7 +459,7 @@ tbody tr:nth-child(even) {
       ;; Use fold to concatenate all rendered list items
       (define rendered-items
         (fold
-          (lambda (acc item)
+          (fn (acc item)
             (string-append acc "<li>" (format-inline item) "</li>"))
           ""
           items))
@@ -470,14 +470,14 @@ tbody tr:nth-child(even) {
 
 ;; Render a blockquote block
 (define render-blockquote
-  (lambda (block)
+  (fn (block)
     (begin
       (define text (get block "text"))
       (string-append "<blockquote>" (format-inline text) "</blockquote>"))))
 
 ;; Render a table block using fold
 (define render-table
-  (lambda (block)
+  (fn (block)
     (begin
       (define headers (get block "headers"))
       (define rows (get block "rows"))
@@ -485,16 +485,16 @@ tbody tr:nth-child(even) {
       ;; Render header cells using fold
       (define rendered-headers
         (fold
-          (lambda (acc header)
+          (fn (acc header)
             (string-append acc "<th>" (html-escape header) "</th>"))
           ""
           headers))
       
       ;; Render row cells using fold
       (define render-row-cells
-        (lambda (cells)
+        (fn (cells)
           (fold
-            (lambda (acc cell)
+            (fn (acc cell)
               (string-append acc "<td>" (html-escape cell) "</td>"))
             ""
             cells)))
@@ -502,7 +502,7 @@ tbody tr:nth-child(even) {
       ;; Render all rows using fold
       (define rendered-rows
         (fold
-          (lambda (acc row)
+          (fn (acc row)
             (string-append acc "<tr>" (render-row-cells row) "</tr>"))
           ""
           rows))
@@ -516,7 +516,7 @@ tbody tr:nth-child(even) {
 
 ;; Render a note/callout block
 (define render-note
-  (lambda (block)
+  (fn (block)
     (begin
       (define text (get block "text"))
       (define kind (get block "kind"))
@@ -527,7 +527,7 @@ tbody tr:nth-child(even) {
 
 ;; Main dispatcher
 (define render-block
-  (lambda (block)
+  (fn (block)
     (begin
       (define type (get block "type"))
       (cond
@@ -542,7 +542,7 @@ tbody tr:nth-child(even) {
 
 ;; Render blocks in a section
 (define render-blocks-in-section
-  (lambda (blocks result)
+  (fn (blocks result)
     (if (nil? blocks)
       result
       (begin
@@ -553,7 +553,7 @@ tbody tr:nth-child(even) {
 
 ;; Render a heading block (nested heading within content)
 (define render-heading
-  (lambda (block)
+  (fn (block)
     (begin
       (define level (get block "level"))
       (define content (get block "content"))
@@ -563,7 +563,7 @@ tbody tr:nth-child(even) {
 
 ;; Render a section with heading and content blocks
 (define render-section
-  (lambda (section)
+  (fn (section)
     (begin
       (define heading (get section "heading"))
       (define level (get section "level"))
@@ -575,9 +575,9 @@ tbody tr:nth-child(even) {
 
 ;; Render all sections using fold
 (define render-sections
-  (lambda (sections)
+  (fn (sections)
     (fold
-      (lambda (acc section)
+      (fn (acc section)
         (string-append acc (render-section section)))
       ""
       sections)))
@@ -588,7 +588,7 @@ tbody tr:nth-child(even) {
 
 ;; Render navigation items
 (define render-nav-items
-  (lambda (items current-slug result)
+  (fn (items current-slug result)
     (if (nil? items)
       result
       (begin
@@ -604,12 +604,12 @@ tbody tr:nth-child(even) {
 
 ;; Generate navigation HTML
 (define generate-nav
-  (lambda (nav-items current-slug)
+  (fn (nav-items current-slug)
     (render-nav-items nav-items current-slug "")))
 
 ;; Generate the full HTML page
 (define generate-page
-  (lambda (site page nav css body)
+  (fn (site page nav css body)
     (begin
       (define site-title (get site "title"))
       (define page-title (get page "title"))
@@ -669,7 +669,7 @@ tbody tr:nth-child(even) {
 
 ;; Process each page
 (define process-pages
-  (lambda (all-nav-items current-nav-items)
+  (fn (all-nav-items current-nav-items)
     (if (nil? current-nav-items)
       (begin
         (display "Done!")

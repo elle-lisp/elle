@@ -8,7 +8,7 @@
 
 ;; A safe wrapper that returns -1 on division by zero
 (define safe-divide
-  (lambda (a b)
+  (fn (a b)
     (try 
       (/ a b)
       (catch e -1))))
@@ -65,13 +65,13 @@ exc2
 
 ;; Function that handles exceptions at multiple levels
 (define compute-safe
-  (lambda (x)
+  (fn (x)
     (try 
       (/ 100 x)
       (catch e 0))))
 
 (define wrapper-func
-  (lambda (x)
+  (fn (x)
     (try 
       (compute-safe x)
       (catch e -1))))
@@ -111,10 +111,10 @@ state
 ;;; 8. Exception Handling with Lambda Functions
 ;;; ============================================================================
 
-;; Exception handling inside lambda expressions
-(define handler1 (lambda () (try (/ 10 0) (catch e 999))))
-(define handler2 (lambda () (try (/ 20 0) (catch e 888))))
-(define handler3 (lambda () (try (/ 30 0) (catch e 777))))
+;; Exception handling inside fn expressions
+(define handler1 (fn () (try (/ 10 0) (catch e 999))))
+(define handler2 (fn () (try (/ 20 0) (catch e 888))))
+(define handler3 (fn () (try (/ 30 0) (catch e 777))))
 
 ;; Call each handler
 (handler1)

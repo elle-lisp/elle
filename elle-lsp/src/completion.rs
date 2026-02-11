@@ -81,7 +81,12 @@ pub fn get_completions(
         // Control flow
         ("if", SymbolKind::Builtin, "Conditional expression"),
         ("define", SymbolKind::Builtin, "Define variable"),
-        ("lambda", SymbolKind::Builtin, "Create function"),
+        ("fn", SymbolKind::Builtin, "Create function"),
+        (
+            "lambda",
+            SymbolKind::Builtin,
+            "Create function (alias for fn)",
+        ),
         ("let", SymbolKind::Builtin, "Local binding"),
         ("begin", SymbolKind::Builtin, "Sequential execution"),
         // Type checking

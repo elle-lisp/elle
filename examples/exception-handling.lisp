@@ -107,7 +107,7 @@ result3
 
 ;; Safe operation that handles errors gracefully using hierarchy
 (define safe-error-handler
-  (lambda (x y)
+  (fn (x y)
     "Demonstrates error handling at different levels"
     (if (= y 0)
       (begin
@@ -125,7 +125,7 @@ result3
 
 ;; Safe arithmetic chain with error hierarchy
 (define safe-complex-calc
-  (lambda (a b c)
+  (fn (a b c)
     "Complex calculation that could fail at multiple levels"
     (if (= c 0)
       0
@@ -194,7 +194,7 @@ result-inheritance-2  ;; Should return 400 ((15+25) * (100/5))
 
 ;; Example: Safe operation that provides detailed error information
 (define safe-divide-with-details
-  (lambda (dividend divisor)
+  (fn (dividend divisor)
     "Safely divide, providing detailed error info on failure"
     (if (= divisor 0)
       ;; In a full handler-case, we could:
@@ -257,7 +257,7 @@ result-inheritance-2  ;; Should return 400 ((15+25) * (100/5))
 
 ;; More complex safe arithmetic with better error handling
 (define safe-complex-operation
-  (lambda (a b c)
+  (fn (a b c)
     "Demonstrate safe operation with potential multiple failures"
     (if (= b 0)
       0  ;; Protect against division by zero

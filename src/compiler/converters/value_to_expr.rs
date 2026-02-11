@@ -148,7 +148,7 @@ pub fn value_to_expr_with_scope(
                         Ok(Expr::Block(exprs?))
                     }
 
-                    "lambda" => convert_lambda(&list, symbols, scope_stack),
+                    "fn" | "lambda" => convert_lambda(&list, symbols, scope_stack),
 
                     "define" => {
                         if list.len() != 3 {

@@ -25,7 +25,7 @@ fn eval(input: &str) -> Result<Value, String> {
 fn test_tail_recursion_moderate_depth() {
     let code = r#"(begin
       (define count-down
-        (lambda (n)
+        (fn (n)
           (if (<= n 0)
             0
             (count-down (- n 1)))))
@@ -45,7 +45,7 @@ fn test_tail_recursion_moderate_depth() {
 fn test_tail_recursion_deep() {
     let code = r#"(begin
       (define count-down
-        (lambda (n)
+        (fn (n)
           (if (<= n 0)
             0
             (count-down (- n 1)))))
@@ -65,7 +65,7 @@ fn test_tail_recursion_deep() {
 fn test_tail_recursion_very_deep() {
     let code = r#"(begin
       (define count-down
-        (lambda (n)
+        (fn (n)
           (if (<= n 0)
             0
             (count-down (- n 1)))))
@@ -85,7 +85,7 @@ fn test_tail_recursion_very_deep() {
 fn test_tail_recursion_with_accumulator() {
     let code = r#"(begin
       (define sum-down
-        (lambda (n acc)
+        (fn (n acc)
           (if (<= n 0)
             acc
             (sum-down (- n 1) (+ acc n)))))
@@ -106,7 +106,7 @@ fn test_tail_recursion_with_accumulator() {
 fn test_tail_recursion_accumulator_deep() {
     let code = r#"(begin
       (define sum-down
-        (lambda (n acc)
+        (fn (n acc)
           (if (<= n 0)
             acc
             (sum-down (- n 1) (+ acc n)))))
@@ -127,8 +127,8 @@ fn test_tail_recursion_accumulator_deep() {
 fn test_tail_recursion_with_captures() {
     let code = r#"(begin
       (define make-countdown
-        (lambda (limit)
-          (lambda (n)
+        (fn (limit)
+          (fn (n)
             (if (<= n 0)
               limit
               ((make-countdown limit) (- n 1))))))
@@ -150,7 +150,7 @@ fn test_tail_recursion_with_captures() {
 fn test_tail_recursion_with_locals() {
     let code = r#"(begin
       (define process
-        (lambda (n)
+        (fn (n)
           (if (<= n 0)
             0
             (let ((x (+ n 1)))
@@ -171,7 +171,7 @@ fn test_tail_recursion_with_locals() {
 fn test_tail_recursion_locals_deep() {
     let code = r#"(begin
       (define process
-        (lambda (n)
+        (fn (n)
           (if (<= n 0)
             0
             (let ((x (+ n 1)))
@@ -192,7 +192,7 @@ fn test_tail_recursion_locals_deep() {
 fn test_tail_recursion_multiple_params() {
     let code = r#"(begin
       (define countdown-pair
-        (lambda (a b)
+        (fn (a b)
           (if (and (<= a 0) (<= b 0))
             (list a b)
             (if (<= a 0)
@@ -216,7 +216,7 @@ fn test_tail_recursion_multiple_params() {
 fn test_tail_recursion_multiple_params_deep() {
     let code = r#"(begin
       (define countdown-pair
-        (lambda (a b)
+        (fn (a b)
           (if (and (<= a 0) (<= b 0))
             (list a b)
             (if (<= a 0)
@@ -240,7 +240,7 @@ fn test_tail_recursion_multiple_params_deep() {
 fn test_tail_recursion_conditional() {
     let code = r#"(begin
       (define process-conditional
-        (lambda (n)
+        (fn (n)
           (if (<= n 0)
             "done"
             (if (= (mod n 2) 0)
@@ -262,7 +262,7 @@ fn test_tail_recursion_conditional() {
 fn test_tail_recursion_conditional_deep() {
     let code = r#"(begin
       (define process-conditional
-        (lambda (n)
+        (fn (n)
           (if (<= n 0)
             "done"
             (if (= (mod n 2) 0)
@@ -284,7 +284,7 @@ fn test_tail_recursion_conditional_deep() {
 fn test_tail_recursion_list_accumulation() {
     let code = r#"(begin
       (define build-list
-        (lambda (n acc)
+        (fn (n acc)
           (if (<= n 0)
             acc
             (build-list (- n 1) (cons n acc)))))
@@ -304,7 +304,7 @@ fn test_tail_recursion_list_accumulation() {
 fn test_tail_recursion_list_accumulation_deep() {
     let code = r#"(begin
       (define build-list
-        (lambda (n acc)
+        (fn (n acc)
           (if (<= n 0)
             acc
             (build-list (- n 1) (cons n acc)))))
@@ -323,8 +323,8 @@ fn test_tail_recursion_list_accumulation_deep() {
 #[test]
 fn test_mutual_tail_recursion_moderate() {
     let code = r#"(begin
-      (define is-even (lambda (n) (if (= n 0) #t (is-odd (- n 1)))))
-      (define is-odd (lambda (n) (if (= n 0) #f (is-even (- n 1)))))
+      (define is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
+      (define is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
       (list (is-even 1000) (is-odd 999)))"#;
 
     let result = eval(code);
@@ -342,8 +342,8 @@ fn test_mutual_tail_recursion_moderate() {
 #[test]
 fn test_mutual_tail_recursion_deep() {
     let code = r#"(begin
-      (define is-even (lambda (n) (if (= n 0) #t (is-odd (- n 1)))))
-      (define is-odd (lambda (n) (if (= n 0) #f (is-even (- n 1)))))
+      (define is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
+      (define is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
       (list (is-even 10000) (is-odd 9999)))"#;
 
     let result = eval(code);

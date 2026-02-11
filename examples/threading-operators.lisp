@@ -12,7 +12,7 @@
 ; Example: (->> 5 (+ 10) (* 2)) expands to (* 2 (+ 10 5)) = 30
 
 (define demo-thread-first
-  (lambda ()
+  (fn ()
     (display "=== Thread-First (->) Examples ===")
     (newline)
     
@@ -60,7 +60,7 @@
 )
 
 (define demo-thread-last
-  (lambda ()
+  (fn ()
     (display "=== Thread-Last (->>) Examples ===")
     (newline)
     
@@ -108,7 +108,7 @@
 )
 
 (define demo-comparison
-  (lambda ()
+  (fn ()
     (display "=== Thread-First vs Thread-Last Comparison ===")
     (newline)
     
@@ -149,7 +149,7 @@
 )
 
 (define main
-  (lambda ()
+  (fn ()
     (demo-thread-first)
     (demo-thread-last)
     (demo-comparison)

@@ -19,13 +19,13 @@
 (newline)
 
 (define is-even
-  (lambda (n)
+  (fn (n)
     (if (= n 0)
       #t
       (is-odd (- n 1)))))
 
 (define is-odd
-  (lambda (n)
+  (fn (n)
     (if (= n 0)
       #f
       (is-even (- n 1)))))
@@ -63,7 +63,7 @@
 (newline)
 
 (define count-down-a
-  (lambda (n)
+  (fn (n)
     (if (= n 0)
       (display "A: Done!")
       (begin
@@ -73,7 +73,7 @@
         (count-down-b (- n 1))))))
 
 (define count-down-b
-  (lambda (n)
+  (fn (n)
     (if (= n 0)
       (display "B: Done!")
       (begin
@@ -97,7 +97,7 @@
 (newline)
 
 (define process-words
-  (lambda (words)
+  (fn (words)
     (if (= (length words) 0)
       ""
       (string-append
@@ -106,7 +106,7 @@
         (process-separators (rest words))))))
 
 (define process-separators
-  (lambda (words)
+  (fn (words)
     (if (= (length words) 0)
       ""
       (string-append
@@ -129,11 +129,11 @@
 (newline)
 
 (define factorial
-  (lambda (n)
+  (fn (n)
     (factorial-helper n 1)))
 
 (define factorial-helper
-  (lambda (n acc)
+  (fn (n acc)
     (if (= n 0)
       acc
       (factorial-helper (- n 1) (* acc n)))))
@@ -157,19 +157,19 @@
 (newline)
 
 (define func-a
-  (lambda (n)
+  (fn (n)
     (if (= n 0)
       "A-done"
       (func-b (- n 1)))))
 
 (define func-b
-  (lambda (n)
+  (fn (n)
     (if (= n 0)
       "B-done"
       (func-c (- n 1)))))
 
 (define func-c
-  (lambda (n)
+  (fn (n)
     (if (= n 0)
       "C-done"
       (func-a (- n 1)))))
@@ -190,11 +190,11 @@
 (newline)
 
 (define separate-numbers
-  (lambda (nums)
+  (fn (nums)
     (separate-helper nums (list) (list))))
 
 (define separate-helper
-  (lambda (nums evens odds)
+  (fn (nums evens odds)
     (if (= (length nums) 0)
       (list evens odds)
       (if (= (mod (first nums) 2) 0)
@@ -223,13 +223,13 @@
 (newline)
 
 (define step-x
-  (lambda (n)
+  (fn (n)
     (if (= n 0)
       "X"
       (step-y (- n 1)))))
 
 (define step-y
-  (lambda (n)
+  (fn (n)
     (if (= n 0)
       "Y"
       (step-x (- n 1)))))

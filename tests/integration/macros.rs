@@ -222,7 +222,7 @@ fn test_macro_predicate_returns_true_for_macro() {
 #[test]
 fn test_macro_predicate_returns_false_for_function() {
     let mut eval = StatefulEval::new();
-    eval.eval("(define test-fn (lambda (x) x))").unwrap();
+    eval.eval("(define test-fn (fn (x) x))").unwrap();
     let result = eval.eval("(macro? 'test-fn)");
     assert!(result.is_ok(), "macro? should succeed: {:?}", result);
     assert_eq!(result.unwrap(), Value::Bool(false));
