@@ -113,3 +113,7 @@ mod error_reporting {
 mod repl_exit_codes {
     include!("repl_exit_codes.rs");
 }
+
+mod deep_tail_recursion {
+    include!("deep_tail_recursion.rs");
+}
