@@ -1,7 +1,7 @@
 use elle::compiler::converters::value_to_expr;
 use elle::ffi::primitives::context::set_symbol_table;
 use elle::ffi_primitives;
-use elle::primitives::{clear_macro_symbol_table, set_macro_symbol_table};
+use elle::primitives::{clear_macro_symbol_table, set_length_symbol_table, set_macro_symbol_table};
 use elle::repl::Repl;
 use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, VM};
 use rustyline::error::ReadlineError;
@@ -433,6 +433,9 @@ fn main() {
 
     // Set symbol table context for macro primitives
     set_macro_symbol_table(&mut symbols as *mut SymbolTable);
+
+    // Set symbol table context for length primitive
+    set_length_symbol_table(&mut symbols as *mut SymbolTable);
 
     // Check for command-line arguments
     let args: Vec<String> = env::args().collect();
