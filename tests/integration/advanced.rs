@@ -1,6 +1,7 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
 use elle::compiler::value_to_expr;
 use elle::ffi_primitives;
+use elle::primitives::{clear_macro_symbol_table, set_macro_symbol_table};
 use elle::{compile, read_str, register_primitives, SymbolTable, Value, VM};
 
 fn eval(input: &str) -> Result<Value, String> {
@@ -11,6 +12,9 @@ fn eval(input: &str) -> Result<Value, String> {
     // Set VM context for module loading and FFI
     ffi_primitives::set_vm_context(&mut vm as *mut VM);
 
+    // Set symbol table context for macro primitives
+    set_macro_symbol_table(&mut symbols as *mut SymbolTable);
+
     let value = read_str(input, &mut symbols)?;
     let expr = value_to_expr(&value, &mut symbols)?;
     let bytecode = compile(&expr);
@@ -18,6 +22,7 @@ fn eval(input: &str) -> Result<Value, String> {
 
     // Clear context
     ffi_primitives::clear_vm_context();
+    clear_macro_symbol_table();
 
     result
 }
@@ -45,8 +50,9 @@ fn test_add_module_path_integration() {
 
 #[test]
 fn test_macro_primitives_integration() {
-    // Test expand-macro
-    assert!(eval("(expand-macro 'test)").is_ok());
+    // Test expand-macro with a quoted list (macro call form)
+    // This should error because test is not a macro
+    assert!(eval("(expand-macro '(test 1 2))").is_err());
 
     // Test macro?
     assert_eq!(eval("(macro? 'some-name)").unwrap(), Value::Bool(false));
@@ -176,9 +182,10 @@ fn test_module_and_arithmetic_combination() {
 
 #[test]
 fn test_expand_macro_with_symbols() {
-    // expand-macro with quoted symbol
-    assert!(eval("(expand-macro '+)").is_ok());
-    assert!(eval("(expand-macro 'list)").is_ok());
+    // expand-macro with quoted list (macro call form)
+    // These should error because + and list are not macros
+    assert!(eval("(expand-macro '(+ 1 2))").is_err());
+    assert!(eval("(expand-macro '(list 1 2))").is_err());
 }
 
 #[test]
@@ -212,7 +219,8 @@ fn test_phase5_feature_availability() {
     // Verify all Phase 5 primitives are registered
     assert!(eval("(import-file \"test-modules/test.lisp\")").is_ok());
     assert!(eval("(add-module-path \".\")").is_ok());
-    assert!(eval("(expand-macro 'x)").is_ok());
+    // expand-macro requires a quoted list (macro call form)
+    assert!(eval("(expand-macro '(x 1 2))").is_err()); // x is not a macro
     assert!(eval("(macro? 'x)").is_ok());
     // spawn now requires a closure, not a native function
     assert!(eval("(spawn (lambda () 42))").is_ok());
