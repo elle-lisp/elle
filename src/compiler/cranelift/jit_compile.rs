@@ -119,27 +119,166 @@ pub fn compile_closure(
 
 /// Compile a lambda body to native code
 ///
-/// NOTE: This is a simplified implementation for Phase 3.
-/// Full Cranelift integration requires refactoring JITContext to avoid
-/// simultaneous mutable borrows of ctx.ctx and ctx.builder_ctx.
+/// Creates a Cranelift function with signature:
+/// fn(args_ptr: i64, args_len: i64, env_ptr: i64) -> i64
+///
+/// Where:
+/// - args_ptr: pointer to array of argument values (as i64)
+/// - args_len: number of arguments
+/// - env_ptr: pointer to array of captured values (as i64)
+/// - return: encoded result value (as i64)
 fn compile_lambda_body(
-    _jit_context: &Rc<RefCell<JITContext>>,
-    _func_name: &str,
-    _params: &[SymbolId],
-    _body: &Expr,
-    _captures: &[(SymbolId, usize, usize)],
+    jit_context: &Rc<RefCell<JITContext>>,
+    func_name: &str,
+    params: &[SymbolId],
+    body: &Expr,
+    captures: &[(SymbolId, usize, usize)],
 ) -> Result<*const u8, String> {
-    // For Phase 3, we return a null pointer to indicate that
-    // the JIT compilation infrastructure is in place but not yet
-    // fully implemented. In a full implementation, this would:
-    //
-    // 1. Create a Cranelift function signature
-    // 2. Build IR for the lambda body
-    // 3. Compile to native code
-    // 4. Return a function pointer
-    //
-    // The infrastructure is ready for this in Phase 4-6.
-    Ok(std::ptr::null())
+    use cranelift::prelude::*;
+    use cranelift_module::Module;
+
+    // Step 1-3: Create function signature and declare it
+    let func_id = {
+        let mut ctx = jit_context.borrow_mut();
+
+        // 1. Create function signature: fn(args_ptr, args_len, env_ptr) -> i64
+        let mut sig = ctx.module.make_signature();
+        sig.params.push(AbiParam::new(types::I64)); // args_ptr
+        sig.params.push(AbiParam::new(types::I64)); // args_len
+        sig.params.push(AbiParam::new(types::I64)); // env_ptr
+        sig.returns.push(AbiParam::new(types::I64)); // return value
+
+        // 2. Declare the function
+        let func_id = ctx
+            .module
+            .declare_function(func_name, cranelift_module::Linkage::Local, &sig)
+            .map_err(|e| format!("Failed to declare function: {}", e))?;
+
+        // 3. Set up function context
+        ctx.ctx.func.signature = sig.clone();
+
+        func_id
+    };
+
+    // Step 4-8: Build the function body
+    // We need to be careful with borrows here - FunctionBuilder borrows ctx.ctx.func and ctx.builder_ctx
+    // while CompileContext borrows ctx.module. We'll use unsafe to work around the borrow checker.
+    unsafe {
+        let ctx_ptr = jit_context.as_ptr();
+        let ctx = &mut *ctx_ptr;
+
+        let mut builder = FunctionBuilder::new(&mut ctx.ctx.func, &mut ctx.builder_ctx);
+
+        // Create entry block with parameters
+        let entry_block = builder.create_block();
+        builder.append_block_param(entry_block, types::I64); // args_ptr
+        builder.append_block_param(entry_block, types::I64); // args_len
+        builder.append_block_param(entry_block, types::I64); // env_ptr
+        builder.switch_to_block(entry_block);
+        builder.seal_block(entry_block);
+
+        // Get the function parameters
+        let block_params = builder.block_params(entry_block).to_vec();
+        let args_ptr = block_params[0];
+        let _args_len = block_params[1];
+        let env_ptr = block_params[2];
+
+        // Create compilation context with scope and stack management
+        let mut scope_manager = super::scoping::ScopeManager::new();
+        let mut stack_allocator = super::stack_allocator::StackAllocator::new();
+
+        scope_manager.push_scope();
+
+        // Bind captures first (they come from env_ptr)
+        for (i, (sym_id, _, _)) in captures.iter().enumerate() {
+            let (depth, index) = scope_manager.bind(*sym_id);
+            let offset = (i * 8) as i32;
+
+            // Load capture from env array: env_ptr[i]
+            let cap_val = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), env_ptr, offset);
+
+            // Allocate stack slot and store
+            let (slot, _) = stack_allocator.allocate(
+                &mut builder,
+                depth,
+                index,
+                super::stack_allocator::SlotType::I64,
+            )?;
+            builder.ins().stack_store(cap_val, slot, 0);
+        }
+
+        // Bind parameters (they come from args_ptr)
+        for (i, sym_id) in params.iter().enumerate() {
+            let (depth, index) = scope_manager.bind(*sym_id);
+            let offset = (i * 8) as i32;
+
+            // Load param from args array: args_ptr[i]
+            let arg_val = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), args_ptr, offset);
+
+            // Allocate stack slot and store
+            let (slot, _) = stack_allocator.allocate(
+                &mut builder,
+                depth,
+                index,
+                super::stack_allocator::SlotType::I64,
+            )?;
+            builder.ins().stack_store(arg_val, slot, 0);
+        }
+
+        // Compile the body expression
+        let symbols = crate::symbol::SymbolTable::new();
+        let mut compile_ctx =
+            super::compiler::CompileContext::new(&mut builder, &symbols, &mut ctx.module);
+        compile_ctx.scope_manager = scope_manager;
+        compile_ctx.stack_allocator = stack_allocator;
+
+        let result = super::compiler::ExprCompiler::compile_expr_block(&mut compile_ctx, body)?;
+
+        // Return the result
+        let return_val = match result {
+            super::compiler::IrValue::I64(v) => v,
+            super::compiler::IrValue::F64(_v) => {
+                // TODO: Encode float as its bit representation (i64)
+                // For now, return 0
+                compile_ctx.builder.ins().iconst(types::I64, 0)
+            }
+        };
+        compile_ctx.builder.ins().return_(&[return_val]);
+
+        // Drop compile_ctx to release the borrow on builder
+        drop(compile_ctx);
+        builder.finalize();
+    }
+
+    // Step 9-11: Define, finalize, and get code pointer
+    unsafe {
+        let ctx_ptr = jit_context.as_ptr();
+        let ctx = &mut *ctx_ptr;
+
+        // 9. Define the function in the module
+        ctx.module
+            .define_function(func_id, &mut ctx.ctx)
+            .map_err(|e| format!("Failed to define function: {}", e))?;
+
+        // 10. Clear context for next use
+        ctx.ctx.clear();
+
+        // 11. Finalize and get code pointer
+        ctx.module
+            .finalize_definitions()
+            .map_err(|e| format!("Failed to finalize: {}", e))?;
+
+        let code_ptr = ctx.module.get_finalized_function(func_id);
+
+        // Store in functions map for tracking
+        ctx.functions.insert(func_name.to_string(), code_ptr);
+
+        Ok(code_ptr)
+    }
 }
 
 /// Compile an expression to Cranelift IR
@@ -299,5 +438,50 @@ mod tests {
     #[test]
     fn test_compile_result_error() {
         let _result = CompileResult::Error("test error".to_string());
+    }
+
+    #[test]
+    fn test_compile_lambda_body_simple_literal() {
+        // Test compiling a simple lambda that returns a literal
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let jit_context = Rc::new(RefCell::new(
+            super::super::context::JITContext::new().expect("Failed to create JIT context"),
+        ));
+
+        let body = Expr::Literal(Value::Int(42));
+        let params = vec![];
+        let captures = vec![];
+
+        let result = compile_lambda_body(&jit_context, "test_literal", &params, &body, &captures);
+        assert!(result.is_ok(), "Failed to compile lambda: {:?}", result);
+        assert!(
+            !result.unwrap().is_null(),
+            "Code pointer should not be null"
+        );
+    }
+
+    #[test]
+    fn test_compile_lambda_body_with_parameter() {
+        // Test compiling a lambda that uses a parameter
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let jit_context = Rc::new(RefCell::new(
+            super::super::context::JITContext::new().expect("Failed to create JIT context"),
+        ));
+
+        // (fn (x) x) - identity function
+        let body = Expr::Var(SymbolId(1), 1, 0);
+        let params = vec![SymbolId(1)];
+        let captures = vec![];
+
+        let result = compile_lambda_body(&jit_context, "test_param", &params, &body, &captures);
+        assert!(result.is_ok(), "Failed to compile lambda: {:?}", result);
+        assert!(
+            !result.unwrap().is_null(),
+            "Code pointer should not be null"
+        );
     }
 }
