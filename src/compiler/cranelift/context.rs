@@ -1,5 +1,6 @@
 // Cranelift JIT context and module management
 
+use super::runtime_helpers::{jit_car, jit_cdr, jit_is_nil};
 use cranelift::codegen::Context;
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
@@ -25,7 +26,13 @@ impl JITContext {
         let isa = isa_builder
             .finish(flags)
             .map_err(|e| format!("Failed to build ISA: {}", e))?;
-        let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+
+        // Register runtime helper functions
+        builder.symbol("jit_is_nil", jit_is_nil as *const u8);
+        builder.symbol("jit_car", jit_car as *const u8);
+        builder.symbol("jit_cdr", jit_cdr as *const u8);
+
         let module = JITModule::new(builder);
 
         Ok(JITContext {

@@ -41,6 +41,7 @@ pub mod phase14_milestone;
 pub mod phase15_milestone;
 pub mod primitives;
 pub mod profiler;
+pub mod runtime_helpers;
 pub mod scoping;
 pub mod stack_allocator;
 pub mod tests;

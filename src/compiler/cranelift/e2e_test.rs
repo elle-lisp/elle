@@ -12,7 +12,10 @@ mod tests {
 
     fn test_compilation_no_panic(expr: &Expr, name: &str) {
         use crate::compiler::cranelift::compiler::CompileContext;
+        use crate::compiler::cranelift::context::JITContext;
         use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = cranelift::codegen::ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -25,7 +28,7 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(&mut ctx, expr);
 
         // Should not panic and should successfully compile
