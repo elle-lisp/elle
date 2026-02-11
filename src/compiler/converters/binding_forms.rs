@@ -16,7 +16,7 @@ pub fn convert_lambda(
     use super::value_to_expr::value_to_expr_with_scope;
 
     if list.len() < 3 {
-        return Err("lambda requires at least 2 arguments".to_string());
+        return Err("fn requires at least 2 arguments".to_string());
     }
 
     let params = list[1].list_to_vec()?;

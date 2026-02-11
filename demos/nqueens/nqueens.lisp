@@ -4,7 +4,7 @@
 ; Tests Elle's handling of recursion, list operations, and result accumulation.
 
 (define check-safe-helper
-  (lambda (col remaining row-offset)
+  (fn (col remaining row-offset)
     (if (empty? remaining)
       #t
       (let ((placed-col (first remaining)))
@@ -14,13 +14,13 @@
           (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
 
 (define safe?
-  (lambda (col queens)
+  (fn (col queens)
     "Check if column col is safe given previously placed queens.
      queens = list of columns from previous rows, most recent first."
     (check-safe-helper col queens 1)))
 
 (define try-cols-helper
-  (lambda (n col queens row)
+  (fn (n col queens row)
     "Helper to try all columns for a given row."
     (if (= col n)
       (list)
@@ -36,7 +36,7 @@
         (try-cols-helper n (+ col 1) queens row)))))
 
 (define solve-helper
-  (lambda (n row queens)
+  (fn (n row queens)
     "Recursive backtracking solver.
      Base case (row == n): All queens placed -> one solution found
      Recursive case: Try each column, recurse, accumulate solutions"
@@ -47,12 +47,12 @@
       (try-cols-helper n 0 queens row))))
 
 (define solve-nqueens
-  (lambda (n)
+  (fn (n)
     "Return list of solutions. Each solution is a list of column positions."
     (solve-helper n 0 (list))))
 
 (define benchmark
-  (lambda (n)
+  (fn (n)
     (display "Solving N-Queens for N=")
     (display n)
     (display "... ")

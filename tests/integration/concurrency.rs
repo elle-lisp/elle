@@ -49,7 +49,7 @@ fn test_spawn_closure_with_immutable_capture() {
     let result = eval(
         r#"
         (let ((x 42))
-          (let ((handle (spawn (lambda () x))))
+          (let ((handle (spawn (fn () x))))
             (join handle)))
         "#,
     );
@@ -67,7 +67,7 @@ fn test_spawn_closure_with_string_capture() {
     let result = eval(
         r#"
         (let ((msg "hello from thread"))
-          (let ((handle (spawn (lambda () msg))))
+          (let ((handle (spawn (fn () msg))))
             (join handle)))
         "#,
     );
@@ -85,7 +85,7 @@ fn test_spawn_closure_with_vector_capture() {
     let result = eval(
         r#"
         (let ((v [1 2 3]))
-          (let ((handle (spawn (lambda () v))))
+          (let ((handle (spawn (fn () v))))
             (join handle)))
         "#,
     );
@@ -108,7 +108,7 @@ fn test_spawn_closure_computation() {
     let result = eval(
         r#"
         (let ((x 10) (y 20))
-          (let ((handle (spawn (lambda () (+ x y)))))
+          (let ((handle (spawn (fn () (+ x y)))))
             (join handle)))
         "#,
     );
@@ -130,7 +130,7 @@ fn test_spawn_rejects_mutable_table_capture() {
     let result = eval(
         r#"
         (let ((t (table)))
-          (spawn (lambda () t)))
+          (spawn (fn () t)))
         "#,
     );
 
@@ -166,7 +166,7 @@ fn test_spawn_wrong_arity() {
 #[test]
 fn test_spawn_wrong_arity_two_args() {
     // Test spawn with two arguments
-    let result = eval("(spawn (lambda () 1) 2)");
+    let result = eval("(spawn (fn () 1) 2)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("1 argument"));
 }
@@ -205,7 +205,7 @@ fn test_spawn_closure_with_multiple_captures() {
     let result = eval(
         r#"
         (let ((a 1) (b 2) (c 3))
-          (let ((handle (spawn (lambda () (+ a (+ b c))))))
+          (let ((handle (spawn (fn () (+ a (+ b c))))))
             (join handle)))
         "#,
     );
@@ -229,7 +229,7 @@ fn test_spawn_closure_with_nil_capture() {
     let result = eval(
         r#"
         (let ((n nil))
-          (let ((handle (spawn (lambda () n))))
+          (let ((handle (spawn (fn () n))))
             (join handle)))
         "#,
     );
@@ -247,7 +247,7 @@ fn test_spawn_closure_with_float_capture() {
     let result = eval(
         r#"
          (let ((f 3.14159))
-           (let ((handle (spawn (lambda () f))))
+           (let ((handle (spawn (fn () f))))
              (join handle)))
          "#,
     );
@@ -265,7 +265,7 @@ fn test_spawn_closure_with_list_capture() {
     let result = eval(
         r#"
         (let ((lst (list 1 2 3)))
-          (let ((handle (spawn (lambda () lst))))
+          (let ((handle (spawn (fn () lst))))
             (join handle)))
         "#,
     );
@@ -284,7 +284,7 @@ fn test_spawn_closure_no_captures() {
     // Test spawning a closure with no captures
     let result = eval(
         r#"
-        (let ((handle (spawn (lambda () 42))))
+        (let ((handle (spawn (fn () 42))))
           (join handle))
         "#,
     );
@@ -302,7 +302,7 @@ fn test_spawn_closure_with_conditional() {
     let result = eval(
         r#"
         (let ((x 10))
-          (let ((handle (spawn (lambda () (if (> x 5) "big" "small")))))
+          (let ((handle (spawn (fn () (if (> x 5) "big" "small")))))
             (join handle)))
         "#,
     );
@@ -382,7 +382,7 @@ fn test_spawn_jit_closure_with_source() {
     let result = eval(
         r#"
         (let ((x 42))
-          (let ((closure (lambda () x)))
+          (let ((closure (fn () x)))
             (let ((handle (spawn closure)))
               (join handle))))
         "#,
@@ -401,7 +401,7 @@ fn test_spawn_jit_closure_with_computation() {
     let result = eval(
         r#"
         (let ((a 10) (b 20))
-          (let ((closure (lambda () (+ a b))))
+          (let ((closure (fn () (+ a b))))
             (let ((handle (spawn closure)))
               (join handle))))
         "#,
@@ -420,7 +420,7 @@ fn test_spawn_jit_closure_with_string_capture() {
     let result = eval(
         r#"
         (let ((msg "hello from jit thread"))
-          (let ((closure (lambda () msg)))
+          (let ((closure (fn () msg)))
             (let ((handle (spawn closure)))
               (join handle))))
         "#,
@@ -439,7 +439,7 @@ fn test_spawn_jit_closure_with_vector_capture() {
     let result = eval(
         r#"
         (let ((v [10 20 30]))
-          (let ((closure (lambda () v)))
+          (let ((closure (fn () v)))
             (let ((handle (spawn closure)))
               (join handle))))
         "#,
@@ -463,7 +463,7 @@ fn test_spawn_jit_closure_with_multiple_captures() {
     let result = eval(
         r#"
         (let ((a 1) (b 2) (c 3))
-          (let ((closure (lambda () (+ a (+ b c)))))
+          (let ((closure (fn () (+ a (+ b c)))))
             (let ((handle (spawn closure)))
               (join handle))))
         "#,
@@ -482,7 +482,7 @@ fn test_spawn_jit_closure_with_conditional() {
     let result = eval(
         r#"
         (let ((x 10))
-          (let ((closure (lambda () (if (> x 5) "big" "small"))))
+          (let ((closure (fn () (if (> x 5) "big" "small"))))
             (let ((handle (spawn closure)))
               (join handle))))
         "#,

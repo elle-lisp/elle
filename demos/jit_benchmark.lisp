@@ -6,7 +6,7 @@
 ; - Begin sequences
 
 (define if-loop
-  (lambda (n)
+  (fn (n)
     "Lots of if expressions with literals"
     (if (> n 0)
       (begin
@@ -16,7 +16,7 @@
       0)))
 
 (define nested-conditions
-  (lambda (n)
+  (fn (n)
     "Multiple nested if conditions"
     (if (> n 0)
       (begin
@@ -31,7 +31,7 @@
       0)))
 
 (define literal-test
-  (lambda (n acc)
+  (fn (n acc)
     "Simple literal recursion"
     (if (= n 0)
       acc

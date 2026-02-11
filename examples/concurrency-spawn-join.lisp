@@ -19,7 +19,7 @@
 (newline)
 
 (let ((x 10) (y 20))
-  (let ((handle (spawn (lambda () (+ x y)))))
+  (let ((handle (spawn (fn () (+ x y)))))
     (let ((result (join handle)))
       (display "Result of (+ 10 20) in thread: ")
       (display result)
@@ -29,9 +29,9 @@
 (display "Example 2: Multiple threads computing in parallel")
 (newline)
 
-(let ((h1 (spawn (lambda () (* 2 3))))
-      (h2 (spawn (lambda () (* 4 5))))
-      (h3 (spawn (lambda () (* 6 7)))))
+(let ((h1 (spawn (fn () (* 2 3))))
+      (h2 (spawn (fn () (* 4 5))))
+      (h3 (spawn (fn () (* 6 7)))))
   (let ((r1 (join h1))
         (r2 (join h2))
         (r3 (join h3)))
@@ -49,7 +49,7 @@
 
 (let ((name "Alice")
       (age 30))
-  (let ((handle (spawn (lambda () 
+  (let ((handle (spawn (fn () 
                          (string-append "Hello, " name "! You are " (string age) " years old.")))))
     (display (join handle))
     (newline)))
@@ -59,7 +59,7 @@
 (newline)
 
 (let ((numbers [1 2 3 4 5]))
-  (let ((handle (spawn (lambda () 
+  (let ((handle (spawn (fn () 
                          (let ((sum (+ 1 (+ 2 (+ 3 (+ 4 5))))))
                            sum)))))
     (display "Sum of [1 2 3 4 5]: ")
@@ -71,7 +71,7 @@
 (newline)
 
 (let ((threshold 50))
-  (let ((handle (spawn (lambda () 
+  (let ((handle (spawn (fn () 
                          (if (> threshold 40)
                              "threshold is high"
                              "threshold is low")))))
@@ -83,7 +83,7 @@
 (newline)
 
 (let ((multiplier 3))
-  (let ((handle (spawn (lambda () 
+  (let ((handle (spawn (fn () 
                          (* 7 multiplier)))))
     (display "7 * 3 = ")
     (display (join handle))
@@ -94,8 +94,8 @@
 (newline)
 
 (let ((x 100))
-  (let ((h1 (spawn (lambda () x)))
-        (h2 (spawn (lambda () (+ x 50)))))
+  (let ((h1 (spawn (fn () x)))
+        (h2 (spawn (fn () (+ x 50)))))
     (display "Captured value: ")
     (display (join h1))
     (newline)
@@ -107,7 +107,7 @@
 (display "Example 8: Using sleep with threads")
 (newline)
 
-(let ((handle (spawn (lambda () 
+(let ((handle (spawn (fn () 
                        (begin
                          (display "Thread started")
                          (newline)
@@ -130,7 +130,7 @@
 (display (current-thread-id))
 (newline)
 
-(let ((handle (spawn (lambda () (current-thread-id)))))
+(let ((handle (spawn (fn () (current-thread-id)))))
   (display "Spawned thread ID: ")
   (display (join handle))
   (newline))
@@ -140,7 +140,7 @@
 (newline)
 
 (let ((a 2) (b 3) (c 4) (d 5))
-  (let ((handle (spawn (lambda () 
+  (let ((handle (spawn (fn () 
                          (+ (* a b) (* c d))))))
     (display "Result of (+ (* 2 3) (* 4 5)): ")
     (display (join handle))

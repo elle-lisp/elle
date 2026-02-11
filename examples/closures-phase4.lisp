@@ -16,10 +16,10 @@
 (display "--------------------------------")
 (newline)
 
-;; Before Phase 4, define inside lambda didn't work properly.
+;; Before Phase 4, define inside fn didn't work properly.
 ;; Now local variables are stored as cells in the closure environment.
 (define compute
-  (lambda ()
+  (fn ()
     (begin
       (define x 10)
       (define y 20)
@@ -40,9 +40,9 @@
 (display "--------------------------------")
 (newline)
 
-;; set! now works on locally-defined variables inside lambda bodies
+;; set! now works on locally-defined variables inside fn bodies
 (define mutate-test
-  (lambda ()
+  (fn ()
     (begin
       (define x 0)
       (set! x 42)
@@ -63,12 +63,12 @@
 (display "--------------------------------")
 (newline)
 
-;; A locally-defined variable can be captured by a nested lambda
+;; A locally-defined variable can be captured by a nested fn
 (define make-adder
-  (lambda (base)
+  (fn (base)
     (begin
       (define offset 10)
-      (lambda (x) (+ base offset x)))))
+      (fn (x) (+ base offset x)))))
 
 (define add-with-offset (make-adder 100))
 
@@ -90,10 +90,10 @@
 ;; The classic closure counter pattern: a factory that returns
 ;; a closure sharing mutable state via a cell
 (define make-counter
-  (lambda ()
+  (fn ()
     (begin
       (define count 0)
-      (lambda ()
+      (fn ()
         (begin
           (set! count (+ count 1))
           count)))))
@@ -147,10 +147,10 @@
 
 ;; An accumulator that adds values to a running total
 (define make-accumulator
-  (lambda (initial)
+  (fn (initial)
     (begin
       (define total initial)
-      (lambda (amount)
+      (fn (amount)
         (begin
           (set! total (+ total amount))
           total)))))
@@ -177,9 +177,9 @@
 (newline)
 
 ;; This was the original bug from issue #106:
-;; set! inside a lambda body used to fail with "Undefined global variable"
+;; set! inside a fn body used to fail with "Undefined global variable"
 (define sum-to-n
-  (lambda (n)
+  (fn (n)
     (begin
       (define result 0)
       (define i 1)
@@ -208,12 +208,12 @@
 ;; (getter and setter pattern)
 ;; We return multiple closures from one factory using a list.
 (define make-box
-  (lambda (initial)
+  (fn (initial)
     (begin
       (define value initial)
       (list
-        (lambda () value)                          ;; getter
-        (lambda (new-val) (set! value new-val))))))  ;; setter
+        (fn () value)                          ;; getter
+        (fn (new-val) (set! value new-val))))))  ;; setter
 
 (define box (make-box 0))
 (define box-get (first box))
@@ -240,7 +240,7 @@
 (newline)
 (display "Phase 4 enables shared mutable captures via cell boxing:")
 (newline)
-(display "  • Local variables in lambda bodies - define inside lambdas")
+(display "  • Local variables in fn bodies - define inside lambdas")
 (newline)
 (display "  • Mutation with set! - modify locally-defined variables")
 (newline)

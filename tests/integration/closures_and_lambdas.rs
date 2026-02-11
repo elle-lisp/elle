@@ -22,32 +22,32 @@ fn eval(input: &str) -> Result<Value, String> {
 
 #[test]
 fn test_lambda_creation_identity() {
-    // Create a simple identity lambda
-    let result = eval("(lambda (x) x)");
+    // Create a simple identity fn
+    let result = eval("(fn (x) x)");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
 
 #[test]
 fn test_lambda_creation_single_arg() {
-    // Create lambda with single parameter
-    let result = eval("(lambda (x) (+ x 1))");
+    // Create fn with single parameter
+    let result = eval("(fn (x) (+ x 1))");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
 
 #[test]
 fn test_lambda_creation_multiple_args() {
-    // Create lambda with multiple parameters
-    let result = eval("(lambda (a b c) (+ a b c))");
+    // Create fn with multiple parameters
+    let result = eval("(fn (a b c) (+ a b c))");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
 
 #[test]
 fn test_lambda_creation_no_args() {
-    // Create lambda with no parameters
-    let result = eval("(lambda () 42)");
+    // Create fn with no parameters
+    let result = eval("(fn () 42)");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
@@ -55,7 +55,7 @@ fn test_lambda_creation_no_args() {
 #[test]
 fn test_lambda_with_complex_body() {
     // Lambda with complex body expressions
-    let result = eval("(lambda (x) (if (> x 0) (* x 2) (- x)))");
+    let result = eval("(fn (x) (if (> x 0) (* x 2) (- x)))");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
@@ -67,22 +67,22 @@ fn test_lambda_with_complex_body() {
 #[test]
 fn test_lambda_parameter_names() {
     // Different parameter names should parse correctly
-    assert!(eval("(lambda (x) x)").is_ok());
-    assert!(eval("(lambda (value) value)").is_ok());
-    assert!(eval("(lambda (my-var) my-var)").is_ok());
+    assert!(eval("(fn (x) x)").is_ok());
+    assert!(eval("(fn (value) value)").is_ok());
+    assert!(eval("(fn (my-var) my-var)").is_ok());
 }
 
 #[test]
 fn test_lambda_many_parameters() {
     // Lambda with many parameters
-    let result = eval("(lambda (a b c d e f g h i j) (+ a b c d e f g h i j))");
+    let result = eval("(fn (a b c d e f g h i j) (+ a b c d e f g h i j))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_parameter_shadowing() {
     // Parameter names shadow outer scope
-    let result = eval("(begin (define x 10) (lambda (x) x))");
+    let result = eval("(begin (define x 10) (fn (x) x))");
     assert!(result.is_ok());
 }
 
@@ -92,31 +92,31 @@ fn test_lambda_parameter_shadowing() {
 
 #[test]
 fn test_nested_lambda_double() {
-    // Lambda returning lambda (curried function)
-    let result = eval("(lambda (x) (lambda (y) (+ x y)))");
+    // Lambda returning fn (curried function)
+    let result = eval("(fn (x) (fn (y) (+ x y)))");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
 
 #[test]
 fn test_nested_lambda_triple() {
-    // Triple nested lambda
-    let result = eval("(lambda (a) (lambda (b) (lambda (c) (+ a b c))))");
+    // Triple nested fn
+    let result = eval("(fn (a) (fn (b) (fn (c) (+ a b c))))");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
 
 #[test]
 fn test_nested_lambda_in_expression() {
-    // Nested lambda within conditional
-    let result = eval("(lambda (x) (if (> x 0) (lambda (y) (+ x y)) (lambda (y) (- x y))))");
+    // Nested fn within conditional
+    let result = eval("(fn (x) (if (> x 0) (fn (y) (+ x y)) (fn (y) (- x y))))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_nested_lambda_in_list() {
     // Lambda creating a list of lambdas
-    let result = eval("(lambda (x) (list (lambda (y) (+ x y)) (lambda (y) (* x y))))");
+    let result = eval("(fn (x) (list (fn (y) (+ x y)) (fn (y) (* x y))))");
     assert!(result.is_ok());
 }
 
@@ -127,14 +127,14 @@ fn test_nested_lambda_in_list() {
 #[test]
 fn test_closure_captures_defined_variable() {
     // Closure should capture variables from outer scope
-    let result = eval("(begin (define x 10) (lambda (y) (+ x y)))");
+    let result = eval("(begin (define x 10) (fn (y) (+ x y)))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_closure_captures_multiple_variables() {
     // Closure capturing multiple outer variables
-    let result = eval("(begin (define a 1) (define b 2) (lambda (c) (+ a b c)))");
+    let result = eval("(begin (define a 1) (define b 2) (fn (c) (+ a b c)))");
     assert!(result.is_ok());
 }
 
@@ -144,17 +144,17 @@ fn test_closure_in_nested_scope() {
     let result = eval(
         "(begin (define outer 100) \
          (begin (define inner 50) \
-          (lambda (x) (+ outer inner x))))",
+          (fn (x) (+ outer inner x))))",
     );
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_closure_captures_previous_lambda() {
-    // Lambda can reference another lambda
+    // Lambda can reference another fn
     let result = eval(
-        "(begin (define adder (lambda (x) (lambda (y) (+ x y)))) \
-         (lambda (z) z))",
+        "(begin (define adder (fn (x) (fn (y) (+ x y)))) \
+         (fn (z) z))",
     );
     assert!(result.is_ok());
 }
@@ -165,16 +165,16 @@ fn test_closure_captures_previous_lambda() {
 
 #[test]
 fn test_define_lambda_identity() {
-    // Define a lambda as a variable
-    let result = eval("(begin (define id (lambda (x) x)) id)");
+    // Define a fn as a variable
+    let result = eval("(begin (define id (fn (x) x)) id)");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
 
 #[test]
 fn test_define_lambda_arithmetic() {
-    // Define arithmetic lambda
-    let result = eval("(begin (define double (lambda (x) (* x 2))) double)");
+    // Define arithmetic fn
+    let result = eval("(begin (define double (fn (x) (* x 2))) double)");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
@@ -184,8 +184,8 @@ fn test_define_multiple_lambdas() {
     // Define multiple lambdas
     let result = eval(
         "(begin \
-         (define inc (lambda (x) (+ x 1))) \
-         (define dec (lambda (x) (- x 1))) \
+         (define inc (fn (x) (+ x 1))) \
+         (define dec (fn (x) (- x 1))) \
          (list inc dec))",
     );
     assert!(result.is_ok());
@@ -198,21 +198,21 @@ fn test_define_multiple_lambdas() {
 #[test]
 fn test_lambda_with_if() {
     // Lambda using if-then-else
-    let result = eval("(lambda (x) (if (> x 0) x (- x)))");
+    let result = eval("(fn (x) (if (> x 0) x (- x)))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_with_nested_if() {
     // Lambda with nested conditionals
-    let result = eval("(lambda (x y) (if (> x 0) (if (> y 0) 1 -1) (if (> y 0) -1 1)))");
+    let result = eval("(fn (x y) (if (> x 0) (if (> y 0) 1 -1) (if (> y 0) -1 1)))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_returning_boolean() {
     // Lambda that returns boolean based on condition
-    let result = eval("(lambda (x) (> x 0))");
+    let result = eval("(fn (x) (> x 0))");
     assert!(result.is_ok());
 }
 
@@ -223,28 +223,28 @@ fn test_lambda_returning_boolean() {
 #[test]
 fn test_lambda_operating_on_list() {
     // Lambda taking a list as parameter
-    let result = eval("(lambda (lst) (first lst))");
+    let result = eval("(fn (lst) (first lst))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_constructing_list() {
     // Lambda that constructs a list
-    let result = eval("(lambda (a b c) (list a b c))");
+    let result = eval("(fn (a b c) (list a b c))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_with_cons() {
     // Lambda using cons operation
-    let result = eval("(lambda (x lst) (cons x lst))");
+    let result = eval("(fn (x lst) (cons x lst))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_with_length() {
     // Lambda computing list length
-    let result = eval("(lambda (lst) (length lst))");
+    let result = eval("(fn (lst) (length lst))");
     assert!(result.is_ok());
 }
 
@@ -258,7 +258,7 @@ fn test_closure_environment_persistence() {
     let result = eval(
         "(begin \
          (define x 10) \
-         (define closure (lambda (y) (+ x y))) \
+         (define closure (fn (y) (+ x y))) \
          (begin (define x 20) closure))",
     );
     assert!(result.is_ok());
@@ -270,9 +270,9 @@ fn test_multiple_closures_independent_environments() {
     let result = eval(
         "(begin \
          (define x 1) \
-         (define f1 (lambda (y) (+ x y))) \
+         (define f1 (fn (y) (+ x y))) \
          (define x 2) \
-         (define f2 (lambda (y) (+ x y))) \
+         (define f2 (fn (y) (+ x y))) \
          (list f1 f2))",
     );
     assert!(result.is_ok());
@@ -284,12 +284,12 @@ fn test_multiple_closures_independent_environments() {
 
 #[test]
 fn test_closure_factory_pattern() {
-    // Lambda factory - create reusable lambda generators
+    // Lambda factory - create reusable fn generators
     let result = eval(
         "(begin \
          (define make-multiplier \
-           (lambda (factor) \
-             (lambda (x) (* factor x)))) \
+           (fn (factor) \
+             (fn (x) (* factor x)))) \
          make-multiplier)",
     );
     // The factory itself should be creatable even if calling it may have limitations
@@ -299,7 +299,7 @@ fn test_closure_factory_pattern() {
 #[test]
 fn test_closure_chaining() {
     // Chain of nested lambdas - can create curried function structure
-    let result = eval("(lambda (a) (lambda (b) (lambda (c) (+ a b c))))");
+    let result = eval("(fn (a) (fn (b) (fn (c) (+ a b c))))");
     assert!(result.is_ok());
 }
 
@@ -310,7 +310,7 @@ fn test_closure_with_state_capture() {
         "(begin \
          (define base 100) \
          (define multiplier 2) \
-         (lambda (x) (+ base (* multiplier x))))",
+         (fn (x) (+ base (* multiplier x))))",
     );
     assert!(result.is_ok());
 }
@@ -321,21 +321,21 @@ fn test_closure_with_state_capture() {
 
 #[test]
 fn test_lambda_returns_closure_type() {
-    // Verify that lambda always returns a Closure value
-    let result1 = eval("(lambda () 1)");
+    // Verify that fn always returns a Closure value
+    let result1 = eval("(fn () 1)");
     assert!(matches!(result1.unwrap(), Value::Closure(_)));
 
-    let result2 = eval("(lambda (x) x)");
+    let result2 = eval("(fn (x) x)");
     assert!(matches!(result2.unwrap(), Value::Closure(_)));
 
-    let result3 = eval("(lambda (a b c) (+ a b c))");
+    let result3 = eval("(fn (a b c) (+ a b c))");
     assert!(matches!(result3.unwrap(), Value::Closure(_)));
 }
 
 #[test]
 fn test_defined_lambda_is_closure() {
     // Lambda stored in variable should be a Closure
-    let result = eval("(begin (define f (lambda (x) x)) f)");
+    let result = eval("(begin (define f (fn (x) x)) f)");
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
 
@@ -346,21 +346,21 @@ fn test_defined_lambda_is_closure() {
 #[test]
 fn test_lambda_constant_body() {
     // Lambda with just a constant
-    let result = eval("(lambda (x) 42)");
+    let result = eval("(fn (x) 42)");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_quoted_list_body() {
     // Lambda with quoted list as body
-    let result = eval("(lambda (x) '(1 2 3))");
+    let result = eval("(fn (x) '(1 2 3))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_arithmetic_expression_body() {
     // Lambda with arithmetic expression
-    let result = eval("(lambda (x y z) (+ (* x 2) (- y 1) (/ z 2)))");
+    let result = eval("(fn (x y z) (+ (* x 2) (- y 1) (/ z 2)))");
     assert!(result.is_ok());
 }
 
@@ -371,7 +371,7 @@ fn test_lambda_arithmetic_expression_body() {
 #[test]
 fn test_lambda_in_list() {
     // Lambda stored in a list
-    let result = eval("(list (lambda (x) x) (lambda (y) y))");
+    let result = eval("(list (fn (x) x) (fn (y) y))");
     assert!(result.is_ok());
     let list = result.unwrap().list_to_vec().unwrap();
     assert_eq!(list.len(), 2);
@@ -382,7 +382,7 @@ fn test_lambda_in_list() {
 #[test]
 fn test_lambda_in_begin_block() {
     // Lambda in begin block
-    let result = eval("(begin (define x 1) (lambda (y) (+ x y)))");
+    let result = eval("(begin (define x 1) (fn (y) (+ x y)))");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
@@ -390,7 +390,7 @@ fn test_lambda_in_begin_block() {
 #[test]
 fn test_lambda_in_if_consequent() {
     // Lambda as consequent of if
-    let result = eval("(if #t (lambda (x) x) (lambda (x) (- x)))");
+    let result = eval("(if #t (fn (x) x) (fn (x) (- x)))");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
@@ -398,7 +398,7 @@ fn test_lambda_in_if_consequent() {
 #[test]
 fn test_lambda_in_if_alternate() {
     // Lambda as alternate of if
-    let result = eval("(if #f (lambda (x) x) (lambda (x) (- x)))");
+    let result = eval("(if #f (fn (x) x) (fn (x) (- x)))");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), Value::Closure(_)));
 }
@@ -410,7 +410,7 @@ fn test_lambda_in_if_alternate() {
 #[test]
 fn test_closure_string_representation() {
     // Closure should have a reasonable string representation
-    let result = eval("(lambda (x) x)");
+    let result = eval("(fn (x) x)");
     let closure_str = format!("{}", result.unwrap());
     assert_eq!(closure_str, "<closure>");
 }
@@ -418,7 +418,7 @@ fn test_closure_string_representation() {
 #[test]
 fn test_closure_in_list_display() {
     // Closure in list should display properly
-    let result = eval("(list (lambda (x) x) 42)");
+    let result = eval("(list (fn (x) x) 42)");
     assert!(result.is_ok());
     let list = result.unwrap().list_to_vec().unwrap();
     assert_eq!(list.len(), 2);
@@ -434,7 +434,7 @@ fn test_lambda_parameter_scope() {
     let result = eval(
         "(begin \
          (define x 100) \
-         (lambda (x) x))",
+         (fn (x) x))",
     );
     assert!(result.is_ok());
 }
@@ -445,7 +445,7 @@ fn test_lambda_captures_free_variables() {
     let result = eval(
         "(begin \
          (define free-var 50) \
-         (lambda (param) (+ free-var param)))",
+         (fn (param) (+ free-var param)))",
     );
     assert!(result.is_ok());
 }
@@ -453,7 +453,7 @@ fn test_lambda_captures_free_variables() {
 #[test]
 fn test_lambda_doesnt_capture_undefined() {
     // Lambda referencing undefined should fail to compile
-    let result = eval("(lambda (x) undefined-var)");
+    let result = eval("(fn (x) undefined-var)");
     // May or may not error depending on implementation
     let _ = result;
 }
@@ -468,7 +468,7 @@ fn test_lambda_with_inner_define() {
     let result = eval(
         "(begin \
          (define x 5) \
-         (lambda (y) (+ x y)))",
+         (fn (y) (+ x y)))",
     );
     assert!(result.is_ok());
 }
@@ -480,7 +480,7 @@ fn test_multiple_nested_lambdas_with_defines() {
         "(begin \
          (define level1 10) \
          (define level2 20) \
-         (lambda (x) (lambda (y) (+ level1 level2 x y))))",
+         (fn (x) (fn (y) (+ level1 level2 x y))))",
     );
     assert!(result.is_ok());
 }
@@ -492,21 +492,21 @@ fn test_multiple_nested_lambdas_with_defines() {
 #[test]
 fn test_lambda_with_arithmetic_primitives() {
     // Lambda body using arithmetic primitives
-    let result = eval("(lambda (x) (+ x 1))");
+    let result = eval("(fn (x) (+ x 1))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_with_comparison_primitives() {
     // Lambda body using comparison primitives
-    let result = eval("(lambda (x) (> x 0))");
+    let result = eval("(fn (x) (> x 0))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_lambda_with_list_primitives() {
     // Lambda body using list primitives
-    let result = eval("(lambda (lst) (cons 1 lst))");
+    let result = eval("(fn (lst) (cons 1 lst))");
     assert!(result.is_ok());
 }
 
@@ -519,7 +519,7 @@ fn test_curried_addition() {
     // Implement curried addition
     let result = eval(
         "(begin \
-         (define add-curried (lambda (a) (lambda (b) (+ a b)))) \
+         (define add-curried (fn (a) (fn (b) (+ a b)))) \
          add-curried)",
     );
     assert!(result.is_ok());
@@ -528,14 +528,14 @@ fn test_curried_addition() {
 #[test]
 fn test_function_composition_pattern() {
     // Pattern for composing functions - define the pattern itself
-    let result = eval("(lambda (f g) (lambda (x) (f (g x))))");
+    let result = eval("(fn (f g) (fn (x) (f (g x))))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_predicate_creator() {
     // Create predicates as closures - define the factory pattern
-    let result = eval("(lambda (n) (lambda (x) (> x n)))");
+    let result = eval("(fn (n) (fn (x) (> x n)))");
     assert!(result.is_ok());
 }
 
@@ -546,21 +546,21 @@ fn test_predicate_creator() {
 #[test]
 fn test_lambda_missing_body() {
     // Lambda without body should error
-    let result = eval("(lambda (x))");
+    let result = eval("(fn (x))");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_lambda_missing_parameters() {
     // Lambda without parameter list should error
-    let result = eval("(lambda 42)");
+    let result = eval("(fn 42)");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_lambda_non_list_parameters() {
     // Lambda parameters must be a list
-    let result = eval("(lambda x x)");
+    let result = eval("(fn x x)");
     assert!(result.is_err());
 }
 
@@ -570,14 +570,10 @@ fn test_lambda_non_list_parameters() {
 
 #[test]
 fn test_deeply_nested_lambdas() {
-    // Very deeply nested lambda
+    // Very deeply nested fn
     let mut lambda_expr = String::from("(+ a b)");
     for i in (0..10).rev() {
-        lambda_expr = format!(
-            "(lambda ({}) {})",
-            char::from_u32(97 + i).unwrap(),
-            lambda_expr
-        );
+        lambda_expr = format!("(fn ({}) {})", char::from_u32(97 + i).unwrap(), lambda_expr);
     }
     let result = eval(&lambda_expr);
     assert!(result.is_ok());
@@ -585,14 +581,14 @@ fn test_deeply_nested_lambdas() {
 
 #[test]
 fn test_many_lambda_definitions() {
-    // Create multiple lambda definitions in sequence
+    // Create multiple fn definitions in sequence
     let result = eval(
         "(begin \
-         (define f0 (lambda (x) (+ x 0))) \
-         (define f1 (lambda (x) (+ x 1))) \
-         (define f2 (lambda (x) (+ x 2))) \
-         (define f3 (lambda (x) (+ x 3))) \
-         (define f4 (lambda (x) (+ x 4))) \
+         (define f0 (fn (x) (+ x 0))) \
+         (define f1 (fn (x) (+ x 1))) \
+         (define f2 (fn (x) (+ x 2))) \
+         (define f3 (fn (x) (+ x 3))) \
+         (define f4 (fn (x) (+ x 4))) \
          (list f0 f1 f2 f3 f4))",
     );
     assert!(result.is_ok());
@@ -607,14 +603,14 @@ fn test_many_lambda_definitions() {
 #[test]
 fn test_accumulator_closure_pattern() {
     // Create an accumulator using closure - define the factory pattern
-    let result = eval("(lambda (initial) (lambda (x) (+ initial x)))");
+    let result = eval("(fn (initial) (fn (x) (+ initial x)))");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_partial_application_pattern() {
     // Partial application of functions - curried multiplication
-    let result = eval("(lambda (a) (lambda (b) (* a b)))");
+    let result = eval("(fn (a) (fn (b) (* a b)))");
     assert!(result.is_ok());
 }
 
@@ -623,7 +619,7 @@ fn test_conditional_logic_in_closure() {
     // Complex conditional logic in closure
     let result = eval(
         "(begin \
-         (define max-of-3 (lambda (a b c) \
+         (define max-of-3 (fn (a b c) \
            (if (> a b) \
              (if (> a c) a c) \
              (if (> b c) b c)))) \
@@ -652,7 +648,7 @@ fn test_let_binding_multiple_vars() {
 
 #[test]
 fn test_let_binding_global_shadowing() {
-    // Let-binding shadows global variable (via lambda transformation)
+    // Let-binding shadows global variable (via fn transformation)
     let result = eval(
         "(begin
           (define x 100)
@@ -667,7 +663,7 @@ fn test_let_binding_function_scope() {
     // Let-binding works with functions
     let result = eval(
         "(begin
-          (define double (lambda (x) (* x 2)))
+          (define double (fn (x) (* x 2)))
           (let ((x 5))
             (double x)))",
     );
@@ -694,7 +690,7 @@ fn test_let_binding_with_global_access() {
 fn test_closure_returning_closure_called() {
     // make-adder pattern: create and immediately use
     let code = r#"
-        (((lambda (x) (lambda (y) (+ x y))) 10) 20)
+        (((fn (x) (fn (y) (+ x y))) 10) 20)
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(30));
 }
@@ -705,7 +701,7 @@ fn test_two_level_closure_call() {
     let code = r#"
         (begin
           (define x 100)
-          ((lambda (a) ((lambda (b) (+ x a b)) 2)) 1))
+          ((fn (a) ((fn (b) (+ x a b)) 2)) 1))
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(103));
 }
@@ -716,7 +712,7 @@ fn test_set_in_nested_closure() {
     let code = r#"
         (begin
           (define counter 0)
-          (define inc (lambda () (begin (set! counter (+ counter 1)) counter)))
+          (define inc (fn () (begin (set! counter (+ counter 1)) counter)))
           (inc)
           (inc)
           (inc))
@@ -726,11 +722,11 @@ fn test_set_in_nested_closure() {
 
 #[test]
 fn test_set_local_variable_in_lambda() {
-    // set! on a local variable inside a lambda should work
+    // set! on a local variable inside a fn should work
     // This is the test case from issue #106
     let code = r#"
          (begin
-           (define test (lambda ()
+           (define test (fn ()
              (begin
                (define x 0)
                (set! x 42)
@@ -745,7 +741,7 @@ fn test_make_adder_pattern() {
     // Classic make-adder: define, then call
     let code = r#"
         (begin
-          (define make-adder (lambda (x) (lambda (y) (+ x y))))
+          (define make-adder (fn (x) (fn (y) (+ x y))))
           (define add5 (make-adder 5))
           (add5 10))
     "#;
@@ -756,16 +752,16 @@ fn test_make_adder_pattern() {
 fn test_triple_nested_closure_execution() {
     // Three levels of nesting
     let code = r#"
-        ((((lambda (a) (lambda (b) (lambda (c) (+ a b c)))) 1) 2) 3)
+        ((((fn (a) (fn (b) (fn (c) (+ a b c)))) 1) 2) 3)
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(6));
 }
 
 #[test]
 fn test_closure_captures_multiple_from_same_scope() {
-    // Inner lambda captures two variables from the same outer lambda
+    // Inner fn captures two variables from the same outer fn
     let code = r#"
-        ((lambda (x y) ((lambda (z) (+ x y z)) 3)) 1 2)
+        ((fn (x y) ((fn (z) (+ x y z)) 3)) 1 2)
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(6));
 }
@@ -774,7 +770,7 @@ fn test_closure_captures_multiple_from_same_scope() {
 fn test_closure_with_let_and_capture() {
     // let-binding inside a closure that captures from outer scope
     let code = r#"
-        ((lambda (x)
+        ((fn (x)
            (let ((y (* x 2)))
              (+ x y)))
          5)
@@ -788,7 +784,7 @@ fn test_closure_global_still_works() {
     let code = r#"
         (begin
           (define g 100)
-          ((lambda (x) (+ g x)) 5))
+          ((fn (x) (+ g x)) 5))
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(105));
 }
@@ -798,7 +794,7 @@ fn test_multiple_closures_from_same_factory() {
     // Create multiple closures from the same factory, each with different captured values
     let code = r#"
         (begin
-          (define make-adder (lambda (x) (lambda (y) (+ x y))))
+          (define make-adder (fn (x) (fn (y) (+ x y))))
           (define add3 (make-adder 3))
           (define add7 (make-adder 7))
           (+ (add3 10) (add7 10)))
@@ -811,18 +807,18 @@ fn test_closure_captures_closure() {
     // A closure that captures another closure and calls it
     let code = r#"
         (begin
-          (define f (lambda (x) (+ x 1)))
-          ((lambda (g) (g 10)) f))
+          (define f (fn (x) (+ x 1)))
+          ((fn (g) (g 10)) f))
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(11));
 }
 
 #[test]
 fn test_immediately_invoked_nested_lambda() {
-    // Immediately invoked lambda inside another lambda
+    // Immediately invoked fn inside another fn
     let code = r#"
-        ((lambda (x)
-           ((lambda (y) (+ x y)) (* x 2)))
+        ((fn (x)
+           ((fn (y) (+ x y)) (* x 2)))
          5)
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(15));
@@ -841,9 +837,9 @@ fn test_let_closure_escape() {
     // This tests that let-bound variables are properly captured by closures.
     let code = r#"
         (begin
-          (define make-fn (lambda ()
+          (define make-fn (fn ()
             (let ((x 42))
-              (lambda () x))))
+              (fn () x))))
           (define f (make-fn))
           (f))
     "#;
@@ -855,7 +851,7 @@ fn test_let_with_closure_capture() {
     // let-bound variables should be capturable by closures
     let code = r#"
         (let ((x 5) (y 10))
-          (lambda () (+ x y)))
+          (fn () (+ x y)))
     "#;
     let result = eval(code).unwrap();
     assert!(matches!(result, Value::Closure(_)));
@@ -886,9 +882,9 @@ fn test_nested_let_closure_escape() {
     // Nested let scopes with closure escape
     let code = r#"
          (begin
-           (define make-adder (lambda (base)
+           (define make-adder (fn (base)
              (let ((b base))
-               (lambda (x)
+               (fn (x)
                  (+ b x)))))
            (define add5 (make-adder 5))
            (add5 3))
@@ -902,9 +898,9 @@ fn test_nested_let_closure_escape() {
 
 #[test]
 fn test_map_with_inline_lambda() {
-    // Test map with an inline lambda closure
+    // Test map with an inline fn closure
     let code = r#"
-        (map (lambda (x) (* x 2)) (list 1 2 3))
+        (map (fn (x) (* x 2)) (list 1 2 3))
     "#;
     let result = eval(code).unwrap();
     // Result should be (2 4 6)
@@ -920,7 +916,7 @@ fn test_map_with_defined_closure() {
     // Test map with a previously defined closure
     let code = r#"
         (begin
-          (define double (lambda (x) (* x 2)))
+          (define double (fn (x) (* x 2)))
           (map double (list 1 2 3)))
     "#;
     let result = eval(code).unwrap();
@@ -937,7 +933,7 @@ fn test_map_with_closure_capturing_variable() {
     let code = r#"
         (begin
           (define multiplier 3)
-          (map (lambda (x) (* x multiplier)) (list 1 2 3)))
+          (map (fn (x) (* x multiplier)) (list 1 2 3)))
     "#;
     let result = eval(code).unwrap();
     let list = result.list_to_vec().unwrap();
@@ -949,9 +945,9 @@ fn test_map_with_closure_capturing_variable() {
 
 #[test]
 fn test_filter_with_inline_lambda() {
-    // Test filter with an inline lambda closure
+    // Test filter with an inline fn closure
     let code = r#"
-        (filter (lambda (x) (> x 2)) (list 1 2 3 4 5))
+        (filter (fn (x) (> x 2)) (list 1 2 3 4 5))
     "#;
     let result = eval(code).unwrap();
     // Result should be (3 4 5)
@@ -968,7 +964,7 @@ fn test_filter_with_closure_capturing_threshold() {
     let code = r#"
         (begin
           (define threshold 2)
-          (filter (lambda (x) (> x threshold)) (list 1 2 3 4 5)))
+          (filter (fn (x) (> x threshold)) (list 1 2 3 4 5)))
     "#;
     let result = eval(code).unwrap();
     let list = result.list_to_vec().unwrap();
@@ -980,9 +976,9 @@ fn test_filter_with_closure_capturing_threshold() {
 
 #[test]
 fn test_fold_with_inline_lambda() {
-    // Test fold with an inline lambda closure
+    // Test fold with an inline fn closure
     let code = r#"
-        (fold (lambda (acc x) (+ acc x)) 0 (list 1 2 3))
+        (fold (fn (acc x) (+ acc x)) 0 (list 1 2 3))
     "#;
     let result = eval(code).unwrap();
     assert_eq!(result, Value::Int(6));
@@ -994,7 +990,7 @@ fn test_fold_with_closure_capturing_initial_value() {
     let code = r#"
         (begin
           (define initial 10)
-          (fold (lambda (acc x) (+ acc x)) initial (list 1 2 3)))
+          (fold (fn (acc x) (+ acc x)) initial (list 1 2 3)))
     "#;
     let result = eval(code).unwrap();
     assert_eq!(result, Value::Int(16));
@@ -1004,7 +1000,7 @@ fn test_fold_with_closure_capturing_initial_value() {
 fn test_fold_with_multiplication() {
     // Test fold for computing factorial-like product
     let code = r#"
-        (fold (lambda (acc x) (* acc x)) 1 (list 2 3 4))
+        (fold (fn (acc x) (* acc x)) 1 (list 2 3 4))
     "#;
     let result = eval(code).unwrap();
     assert_eq!(result, Value::Int(24));
@@ -1014,7 +1010,7 @@ fn test_fold_with_multiplication() {
 fn test_nested_map_with_closures() {
     // Test nested map calls with closures
     let code = r#"
-        (map (lambda (x) (map (lambda (y) (* x y)) (list 1 2))) (list 1 2))
+        (map (fn (x) (map (fn (y) (* x y)) (list 1 2))) (list 1 2))
     "#;
     let result = eval(code).unwrap();
     let outer = result.list_to_vec().unwrap();
@@ -1035,7 +1031,7 @@ fn test_nested_map_with_closures() {
 fn test_map_filter_composition() {
     // Test composing map and filter with closures
     let code = r#"
-        (map (lambda (x) (* x 2)) (filter (lambda (x) (> x 2)) (list 1 2 3 4 5)))
+        (map (fn (x) (* x 2)) (filter (fn (x) (> x 2)) (list 1 2 3 4 5)))
     "#;
     let result = eval(code).unwrap();
     // Filter: (1 2 3 4 5) -> (3 4 5)
@@ -1052,7 +1048,7 @@ fn test_map_with_native_function() {
     // Test that map still works with closures (we removed native function registration)
     let code = r#"
         (begin
-          (define inc (lambda (x) (+ x 1)))
+          (define inc (fn (x) (+ x 1)))
           (map inc (list 1 2 3)))
     "#;
     let result = eval(code).unwrap();
@@ -1067,7 +1063,7 @@ fn test_map_with_native_function() {
 fn test_fold_string_concatenation_with_closure() {
     // Test fold for string operations
     let code = r#"
-         (fold (lambda (acc x) (string-append acc x)) "" (list "a" "b" "c"))
+         (fold (fn (acc x) (string-append acc x)) "" (list "a" "b" "c"))
      "#;
     let result = eval(code).unwrap();
     assert_eq!(result, Value::String(Rc::from("abc")));
@@ -1084,7 +1080,7 @@ fn test_closure_with_local_define_and_arithmetic() {
     // The simplest case that triggers the bug
     let code = r#"
         (begin
-          (define make-counter (lambda ()
+          (define make-counter (fn ()
             (begin
               (define count 0)
               (set! count (+ count 1))
@@ -1099,10 +1095,10 @@ fn test_closure_accumulator_with_arithmetic() {
     // Classic accumulator pattern from the issue
     let code = r#"
         (begin
-          (define make-accumulator (lambda ()
+          (define make-accumulator (fn ()
             (begin
               (define total 0)
-              (lambda (x)
+              (fn (x)
                 (begin
                   (set! total (+ total x))
                   total)))))
@@ -1117,10 +1113,10 @@ fn test_closure_accumulator_multiple_calls() {
     // Verify state is maintained across invocations
     let code = r#"
         (begin
-          (define make-accumulator (lambda ()
+          (define make-accumulator (fn ()
             (begin
               (define total 0)
-              (lambda (x)
+              (fn (x)
                 (begin
                   (set! total (+ total x))
                   total)))))
@@ -1138,13 +1134,61 @@ fn test_nested_closure_with_local_arithmetic() {
     // Nested closures with local variables
     let code = r#"
         (begin
-          (define make-adder (lambda (base)
+          (define make-adder (fn (base)
             (begin
               (define offset 10)
-              (lambda (x)
+              (fn (x)
                 (+ base offset x)))))
           (define add-with-offset (make-adder 100))
           (add-with-offset 5))
     "#;
     assert_eq!(eval(code).unwrap(), Value::Int(115));
+}
+
+// ============================================================================
+// SECTION: Lambda Alias Compatibility Tests
+// ============================================================================
+
+#[test]
+fn test_lambda_alias_works() {
+    // Ensure lambda still works as an alias for fn
+    let result = eval("((lambda (x) (+ x 1)) 5)");
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), Value::Int(6));
+}
+
+#[test]
+fn test_fn_and_lambda_equivalent() {
+    // Both fn and lambda should produce identical results
+    let fn_result = eval("((fn (x y) (+ x y)) 3 4)");
+    let lambda_result = eval("((lambda (x y) (+ x y)) 3 4)");
+    assert_eq!(fn_result, lambda_result);
+    assert_eq!(fn_result.unwrap(), Value::Int(7));
+}
+
+#[test]
+fn test_lambda_in_define() {
+    // lambda should work in define statements
+    let result = eval("(begin (define add (lambda (a b) (+ a b))) (add 10 20))");
+    assert_eq!(result.unwrap(), Value::Int(30));
+}
+
+#[test]
+fn test_lambda_in_map() {
+    // lambda should work with higher-order functions
+    let result = eval("(map (lambda (x) (* x 2)) (list 1 2 3))");
+    assert!(result.is_ok());
+    let val = result.unwrap();
+    let list = val.list_to_vec().unwrap();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[0], Value::Int(2));
+    assert_eq!(list[1], Value::Int(4));
+    assert_eq!(list[2], Value::Int(6));
+}
+
+#[test]
+fn test_lambda_closure_capture() {
+    // lambda should properly capture variables
+    let result = eval("(begin (define x 10) ((lambda (y) (+ x y)) 5))");
+    assert_eq!(result.unwrap(), Value::Int(15));
 }
