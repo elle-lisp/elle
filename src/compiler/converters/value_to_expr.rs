@@ -258,7 +258,8 @@ pub fn value_to_expr_with_scope(
                         };
 
                         // Store macro body as source code for later expansion
-                        let body_str = format!("{}", list[3]);
+                        // Convert the value back to source code using the symbol table
+                        let body_str = value_to_source(&list[3], symbols);
 
                         // Register the macro in the symbol table
                         use crate::symbol::MacroDef;
@@ -268,8 +269,9 @@ pub fn value_to_expr_with_scope(
                             body: body_str,
                         });
 
-                        let body =
-                            Box::new(value_to_expr_with_scope(&list[3], symbols, scope_stack)?);
+                        // Don't compile the macro body - it will be expanded at call time
+                        // The body is stored as source code in the MacroDef
+                        let body = Box::new(Expr::Literal(Value::Nil));
 
                         Ok(Expr::DefMacro { name, params, body })
                     }
@@ -544,5 +546,49 @@ pub fn mark_tail_calls(expr: &mut Expr, in_tail: bool) {
         }
         // Leaf nodes and others — nothing to do
         _ => {}
+    }
+}
+
+/// Convert a value back to source code using the symbol table
+fn value_to_source(value: &Value, symbols: &SymbolTable) -> String {
+    match value {
+        Value::Nil => "nil".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Int(n) => n.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Symbol(id) => {
+            // Look up the symbol name in the symbol table
+            symbols
+                .name(*id)
+                .unwrap_or(&format!("Symbol({})", id.0))
+                .to_string()
+        }
+        Value::Keyword(id) => {
+            format!(":{}", id.0)
+        }
+        Value::String(s) => {
+            format!("\"{}\"", s)
+        }
+        Value::Cons(_) => {
+            // Convert list to source code
+            if let Ok(list_vec) = value.list_to_vec() {
+                let items: Vec<String> = list_vec
+                    .iter()
+                    .map(|v| value_to_source(v, symbols))
+                    .collect();
+                format!("({})", items.join(" "))
+            } else {
+                // Improper list
+                format!("{:?}", value)
+            }
+        }
+        Value::Vector(vec) => {
+            let items: Vec<String> = vec.iter().map(|v| value_to_source(v, symbols)).collect();
+            format!("[{}]", items.join(" "))
+        }
+        _ => {
+            // For other types, use debug representation
+            format!("{:?}", value)
+        }
     }
 }

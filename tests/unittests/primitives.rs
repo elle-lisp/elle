@@ -1,8 +1,9 @@
 // DEFENSE: Primitives are the building blocks - must be correct
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
-use elle::value::{list, Closure, Value};
+use elle::value::{list, Closure, Cons, Value};
 use elle::vm::VM;
+use std::rc::Rc;
 
 fn setup() -> (VM, SymbolTable) {
     let mut vm = VM::new();
@@ -1408,19 +1409,39 @@ fn test_add_module_path_with_vm_context() {
 
 #[test]
 fn test_expand_macro_primitive() {
+    use elle::primitives::{clear_macro_symbol_table, set_macro_symbol_table};
+
     let (vm, mut symbols) = setup();
     let expand = get_primitive(&vm, &mut symbols, "expand-macro");
 
-    let test_val = Value::String("test-macro".into());
-    let result = call_primitive(&expand, std::slice::from_ref(&test_val));
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), test_val);
+    // Set the symbol table context for macro primitives
+    set_macro_symbol_table(&mut symbols as *mut SymbolTable);
+
+    // Test with a quoted list (macro call form)
+    let macro_name = symbols.intern("test-macro");
+    let arg = Value::Int(42);
+    let form = Value::Cons(Rc::new(Cons::new(
+        Value::Symbol(macro_name),
+        Value::Cons(Rc::new(Cons::new(arg, Value::Nil))),
+    )));
+
+    let result = call_primitive(&expand, std::slice::from_ref(&form));
+    // Should error because test-macro is not defined as a macro
+    assert!(result.is_err());
+
+    // Clear the context
+    clear_macro_symbol_table();
 }
 
 #[test]
 fn test_is_macro_primitive() {
+    use elle::primitives::{clear_macro_symbol_table, set_macro_symbol_table};
+
     let (vm, mut symbols) = setup();
     let is_macro = get_primitive(&vm, &mut symbols, "macro?");
+
+    // Set the symbol table context for macro primitives
+    set_macro_symbol_table(&mut symbols as *mut SymbolTable);
 
     let sym_id = symbols.intern("some-symbol");
     let result = call_primitive(&is_macro, &[Value::Symbol(sym_id)]);
@@ -1430,6 +1451,9 @@ fn test_is_macro_primitive() {
     let result = call_primitive(&is_macro, &[Value::Int(42)]);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), Value::Bool(false));
+
+    // Clear the context
+    clear_macro_symbol_table();
 }
 
 #[test]
