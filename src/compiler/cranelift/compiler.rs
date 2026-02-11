@@ -12,6 +12,7 @@ use crate::compiler::ast::Expr;
 use crate::symbol::SymbolTable;
 use crate::value::Value;
 use cranelift::prelude::*;
+use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
 /// Represents a compiled expression value in CLIF IR
@@ -25,20 +26,26 @@ pub enum IrValue {
 }
 
 /// Compilation context for JIT code generation with variable support
-pub struct CompileContext<'a, 'b> {
+pub struct CompileContext<'a, 'b, 'c> {
     pub builder: &'a mut FunctionBuilder<'b>,
     pub symbols: &'a SymbolTable,
     pub scope_manager: ScopeManager,
     pub stack_allocator: StackAllocator,
+    pub module: &'c mut JITModule,
 }
 
-impl<'a, 'b> CompileContext<'a, 'b> {
-    pub fn new(builder: &'a mut FunctionBuilder<'b>, symbols: &'a SymbolTable) -> Self {
+impl<'a, 'b, 'c> CompileContext<'a, 'b, 'c> {
+    pub fn new(
+        builder: &'a mut FunctionBuilder<'b>,
+        symbols: &'a SymbolTable,
+        module: &'c mut JITModule,
+    ) -> Self {
         CompileContext {
             builder,
             symbols,
             scope_manager: ScopeManager::new(),
             stack_allocator: StackAllocator::new(),
+            module,
         }
     }
 }
@@ -88,7 +95,7 @@ impl ExprCompiler {
         builder.seal_block(entry_block);
 
         // Create compilation context with scope/stack support
-        let mut compile_ctx = CompileContext::new(&mut builder, symbols);
+        let mut compile_ctx = CompileContext::new(&mut builder, symbols, &mut ctx.module);
 
         // Compile the expression
         let result = Self::compile_expr_block(&mut compile_ctx, expr)?;
@@ -488,10 +495,128 @@ impl ExprCompiler {
                 Ok(result)
             }
             _ => {
-                // Runtime-computed iterables require variable binding support
-                Err("For loops over computed iterables not yet supported in JIT (requires runtime list operations)".to_string())
+                // Runtime-computed iterables - compile the iterable expression and use runtime helpers
+                Self::compile_for_runtime(ctx, var, iter, body)
             }
         }
+    }
+
+    /// Compile a for loop over a runtime-computed iterable
+    /// Uses runtime helper functions (jit_car, jit_cdr, jit_is_nil) to iterate
+    fn compile_for_runtime(
+        ctx: &mut CompileContext,
+        var: crate::value::SymbolId,
+        iter: &Expr,
+        body: &Expr,
+    ) -> Result<IrValue, String> {
+        // 1. Compile the iterable expression
+        let list_val = Self::compile_expr_block(ctx, iter)?;
+        let list_i64 = match list_val {
+            IrValue::I64(v) => v,
+            _ => return Err("For loop iterable must evaluate to I64".to_string()),
+        };
+
+        // 2. Create loop blocks
+        let header_block = ctx.builder.create_block();
+        let body_block = ctx.builder.create_block();
+        let exit_block = ctx.builder.create_block();
+
+        // 3. Push scope and allocate loop variable
+        ctx.scope_manager.push_scope();
+        let (depth, index) = ctx.scope_manager.bind(var);
+        let (var_slot, _) =
+            ctx.stack_allocator
+                .allocate(ctx.builder, depth, index, SlotType::I64)?;
+
+        // 4. Allocate slot for list iterator pointer
+        use cranelift::codegen::ir::StackSlotData;
+        use cranelift::codegen::ir::StackSlotKind;
+        let iter_slot = ctx
+            .builder
+            .create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8));
+
+        // Store initial list value
+        ctx.builder.ins().stack_store(list_i64, iter_slot, 0);
+
+        // Jump to header
+        ctx.builder.ins().jump(header_block, &[]);
+
+        // 5. Header block: check if list is nil
+        ctx.builder.switch_to_block(header_block);
+        // Don't seal yet - back edge from body
+
+        let current_list = ctx.builder.ins().stack_load(types::I64, iter_slot, 0);
+
+        // Call jit_is_nil
+        let is_nil_result = Self::call_helper(ctx, "jit_is_nil", current_list)?;
+
+        let zero = ctx.builder.ins().iconst(types::I64, 0);
+        let is_nil = ctx.builder.ins().icmp(IntCC::NotEqual, is_nil_result, zero);
+        ctx.builder
+            .ins()
+            .brif(is_nil, exit_block, &[], body_block, &[]);
+
+        // 6. Body block
+        ctx.builder.switch_to_block(body_block);
+        ctx.builder.seal_block(body_block);
+
+        // Get car (current element)
+        let current = ctx.builder.ins().stack_load(types::I64, iter_slot, 0);
+        let car_val = Self::call_helper(ctx, "jit_car", current)?;
+
+        // Store in loop variable
+        ctx.builder.ins().stack_store(car_val, var_slot, 0);
+
+        // Compile body
+        let _body_result = Self::compile_expr_block(ctx, body)?;
+
+        // Get cdr (advance iterator)
+        let current_for_cdr = ctx.builder.ins().stack_load(types::I64, iter_slot, 0);
+        let cdr_val = Self::call_helper(ctx, "jit_cdr", current_for_cdr)?;
+        ctx.builder.ins().stack_store(cdr_val, iter_slot, 0);
+
+        // Jump back to header
+        ctx.builder.ins().jump(header_block, &[]);
+
+        // Seal header after back-edge
+        ctx.builder.seal_block(header_block);
+
+        // 7. Exit block
+        ctx.builder.switch_to_block(exit_block);
+        ctx.builder.seal_block(exit_block);
+
+        ctx.scope_manager.pop_scope().map_err(|e| e.to_string())?;
+
+        Ok(IrValue::I64(ctx.builder.ins().iconst(types::I64, 0)))
+    }
+
+    /// Call a runtime helper function (jit_is_nil, jit_car, jit_cdr)
+    fn call_helper(
+        ctx: &mut CompileContext,
+        name: &str,
+        arg: cranelift::prelude::Value,
+    ) -> Result<cranelift::prelude::Value, String> {
+        use cranelift_module::Linkage;
+
+        // Create signature: fn(i64) -> i64
+        let mut sig = ctx.module.make_signature();
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+
+        // Declare the imported function
+        let func_id = ctx
+            .module
+            .declare_function(name, Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare helper '{}': {:?}", name, e))?;
+
+        // Get function reference for this function
+        let func_ref = ctx.module.declare_func_in_func(func_id, ctx.builder.func);
+
+        // Emit the call
+        let call = ctx.builder.ins().call(func_ref, &[arg]);
+
+        // Return the result
+        Ok(ctx.builder.inst_results(call)[0])
     }
 
     /// Try to compile a While loop expression
@@ -949,11 +1074,15 @@ impl ExprCompiler {
 
 #[cfg(test)]
 mod tests {
+    use super::super::context::JITContext;
     use super::*;
     use cranelift::codegen::ir;
 
     #[test]
     fn test_compile_expr_block_literal() {
+        use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -963,9 +1092,8 @@ mod tests {
         builder.switch_to_block(block);
         builder.seal_block(block);
 
-        use crate::symbol::SymbolTable;
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(&mut ctx, &Expr::Literal(Value::Int(42)));
         assert!(
             result.is_ok(),
@@ -977,6 +1105,8 @@ mod tests {
     #[test]
     fn test_compile_var_reference() {
         use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -987,7 +1117,7 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
 
         // Allocate a variable at depth 0, index 0
         let (slot, _) = ctx
@@ -1009,6 +1139,8 @@ mod tests {
     #[test]
     fn test_compile_set() {
         use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1019,7 +1151,7 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
 
         // Allocate a variable at depth 0, index 0
         let (slot, _) = ctx
@@ -1043,6 +1175,8 @@ mod tests {
     #[test]
     fn test_compile_expr_block_begin() {
         use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1053,7 +1187,7 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::Begin(vec![
@@ -1071,6 +1205,8 @@ mod tests {
     #[test]
     fn test_compile_while_loop() {
         use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1085,7 +1221,7 @@ mod tests {
 
         // Test: (while (< 0 10) 42)
         // A while loop with a condition and a body
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::While {
@@ -1107,6 +1243,8 @@ mod tests {
     #[test]
     fn test_compile_for_loop_empty_list() {
         use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1121,7 +1259,7 @@ mod tests {
 
         // Test: (for item nil item)
         // For loop over empty list should compile and return nil
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {
@@ -1142,6 +1280,8 @@ mod tests {
     fn test_compile_for_loop_literal_cons() {
         use crate::symbol::SymbolTable;
         use crate::value::cons;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1161,7 +1301,7 @@ mod tests {
             cons(Value::Int(2), cons(Value::Int(3), Value::Nil)),
         );
 
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {
@@ -1181,6 +1321,8 @@ mod tests {
     #[test]
     fn test_compile_for_loop_computed_iterable() {
         use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1192,31 +1334,32 @@ mod tests {
 
         let mut symbols = SymbolTable::new();
         let item_sym = symbols.intern("item");
-        let list_sym = symbols.intern("list");
 
-        // Test: (for item (get-list) item)
-        // For loops over computed/variable iterables should fail
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        // Test: (for item (begin list) item)
+        // For loops over computed iterables (like function calls) should now work
+        // We use a begin expression to simulate a computed iterable
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {
                 var: item_sym,
-                iter: Box::new(Expr::GlobalVar(list_sym)), // Variable reference, not literal
+                iter: Box::new(Expr::Begin(vec![Expr::Literal(Value::Nil)])), // Computed iterable
                 body: Box::new(Expr::Literal(Value::Int(0))),
             },
         );
-        // Should fail for computed iterables
+        // Should now succeed for computed iterables
         assert!(
-            result.is_err(),
-            "For loop should not compile for computed iterables"
+            result.is_ok(),
+            "For loop should compile for computed iterables: {:?}",
+            result.err()
         );
-        let err_msg = result.err().unwrap();
-        assert!(err_msg.contains("computed iterables"));
     }
 
     #[test]
     fn test_compile_let_with_var_access() {
         use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1230,7 +1373,7 @@ mod tests {
         let x_sym = symbols.intern("x");
 
         // Test: (let ((x 42)) x)
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::Let {
@@ -1249,6 +1392,8 @@ mod tests {
     fn test_compile_for_loop_with_variable() {
         use crate::symbol::SymbolTable;
         use crate::value::cons;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1267,7 +1412,7 @@ mod tests {
             cons(Value::Int(2), cons(Value::Int(3), Value::Nil)),
         );
 
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {
@@ -1286,6 +1431,8 @@ mod tests {
     #[test]
     fn test_compile_let_with_float() {
         use crate::symbol::SymbolTable;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1299,7 +1446,7 @@ mod tests {
         let x_sym = symbols.intern("x");
 
         // Test: (let ((x 3.14159265358979)) x)
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::Let {
@@ -1319,6 +1466,8 @@ mod tests {
     fn test_compile_for_loop_float_elements() {
         use crate::symbol::SymbolTable;
         use crate::value::cons;
+
+        let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
         func.signature.params.push(AbiParam::new(types::I64));
@@ -1337,7 +1486,7 @@ mod tests {
             cons(Value::Float(2.0), cons(Value::Float(3.0), Value::Nil)),
         );
 
-        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {
