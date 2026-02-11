@@ -1067,8 +1067,84 @@ fn test_map_with_native_function() {
 fn test_fold_string_concatenation_with_closure() {
     // Test fold for string operations
     let code = r#"
-        (fold (lambda (acc x) (string-append acc x)) "" (list "a" "b" "c"))
-    "#;
+         (fold (lambda (acc x) (string-append acc x)) "" (list "a" "b" "c"))
+     "#;
     let result = eval(code).unwrap();
     assert_eq!(result, Value::String(Rc::from("abc")));
+}
+
+// ============================================================================
+// SECTION: Closure Arithmetic Operations (Issue #172)
+// ============================================================================
+// These tests verify that closures with local definitions and arithmetic
+// operations on captured/local variables work correctly.
+
+#[test]
+fn test_closure_with_local_define_and_arithmetic() {
+    // The simplest case that triggers the bug
+    let code = r#"
+        (begin
+          (define make-counter (lambda ()
+            (begin
+              (define count 0)
+              (set! count (+ count 1))
+              count)))
+          (make-counter))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(1));
+}
+
+#[test]
+fn test_closure_accumulator_with_arithmetic() {
+    // Classic accumulator pattern from the issue
+    let code = r#"
+        (begin
+          (define make-accumulator (lambda ()
+            (begin
+              (define total 0)
+              (lambda (x)
+                (begin
+                  (set! total (+ total x))
+                  total)))))
+          (define acc (make-accumulator))
+          (acc 10))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(10));
+}
+
+#[test]
+fn test_closure_accumulator_multiple_calls() {
+    // Verify state is maintained across invocations
+    let code = r#"
+        (begin
+          (define make-accumulator (lambda ()
+            (begin
+              (define total 0)
+              (lambda (x)
+                (begin
+                  (set! total (+ total x))
+                  total)))))
+          (define acc (make-accumulator))
+          (begin
+            (acc 10)
+            (acc 20)
+            (acc 5)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(35));
+}
+
+#[test]
+fn test_nested_closure_with_local_arithmetic() {
+    // Nested closures with local variables
+    let code = r#"
+        (begin
+          (define make-adder (lambda (base)
+            (begin
+              (define offset 10)
+              (lambda (x)
+                (+ base offset x)))))
+          (define add-with-offset (make-adder 100))
+          (add-with-offset 5))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(115));
 }
