@@ -305,9 +305,34 @@ impl VM {
                                 }
                             }
 
-                            // For now, fall back to the source closure if available
-                            // In a full implementation, we would call the native code here
-                            if let Some(ref source) = jit_closure.source {
+                            // Check if we have real native code
+                            if !jit_closure.code_ptr.is_null() {
+                                // Call native code!
+                                unsafe {
+                                    // Prepare args array
+                                    let args_encoded: Vec<i64> =
+                                        args.iter().map(encode_value_for_jit).collect();
+
+                                    // Prepare env array (captures)
+                                    let env_encoded: Vec<i64> =
+                                        jit_closure.env.iter().map(encode_value_for_jit).collect();
+
+                                    // Cast to function pointer
+                                    // Signature: fn(args_ptr: i64, args_len: i64, env_ptr: i64) -> i64
+                                    let func: extern "C" fn(i64, i64, i64) -> i64 =
+                                        std::mem::transmute(jit_closure.code_ptr);
+
+                                    // Call it
+                                    let result_encoded = func(
+                                        args_encoded.as_ptr() as i64,
+                                        args_encoded.len() as i64,
+                                        env_encoded.as_ptr() as i64,
+                                    );
+
+                                    // Decode result
+                                    decode_jit_result(result_encoded)?
+                                }
+                            } else if let Some(ref source) = jit_closure.source {
                                 // Fall back to interpreted execution of the source closure
                                 self.call_depth += 1;
                                 if self.call_depth > 1000 {
@@ -446,8 +471,33 @@ impl VM {
                                 }
                             }
 
-                            // For now, fall back to the source closure if available
-                            if let Some(ref source) = jit_closure.source {
+                            // Check if we have real native code
+                            if !jit_closure.code_ptr.is_null() {
+                                // Call native code directly (tail call optimization)
+                                return unsafe {
+                                    // Prepare args array
+                                    let args_encoded: Vec<i64> =
+                                        args.iter().map(encode_value_for_jit).collect();
+
+                                    // Prepare env array (captures)
+                                    let env_encoded: Vec<i64> =
+                                        jit_closure.env.iter().map(encode_value_for_jit).collect();
+
+                                    // Cast to function pointer
+                                    let func: extern "C" fn(i64, i64, i64) -> i64 =
+                                        std::mem::transmute(jit_closure.code_ptr);
+
+                                    // Call it
+                                    let result_encoded = func(
+                                        args_encoded.as_ptr() as i64,
+                                        args_encoded.len() as i64,
+                                        env_encoded.as_ptr() as i64,
+                                    );
+
+                                    // Decode result
+                                    decode_jit_result(result_encoded)
+                                };
+                            } else if let Some(ref source) = jit_closure.source {
                                 // Build proper environment: captures + args + locals (same as Call)
                                 self.tail_call_env_cache.clear();
                                 self.tail_call_env_cache
@@ -754,4 +804,28 @@ impl VM {
             }
         }
     }
+}
+
+/// Encode a Value for passing to JIT code
+fn encode_value_for_jit(value: &Value) -> i64 {
+    match value {
+        Value::Nil => 0,
+        Value::Bool(false) => 0,
+        Value::Bool(true) => 1,
+        Value::Int(n) => *n,
+        // For heap values, we pass the pointer
+        // IMPORTANT: The value must be kept alive during JIT execution!
+        other => {
+            // This is unsafe - we're passing a raw pointer
+            // The caller must ensure the Value lives long enough
+            other as *const Value as i64
+        }
+    }
+}
+
+/// Decode a result from JIT code back to Value
+fn decode_jit_result(encoded: i64) -> Result<Value, String> {
+    // For now, assume integer result
+    // TODO: Need type information to properly decode
+    Ok(Value::Int(encoded))
 }
