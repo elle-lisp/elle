@@ -6,6 +6,8 @@
 use super::branching::BranchManager;
 use super::codegen::IrEmitter;
 use super::context::JITContext;
+use super::scoping::ScopeManager;
+use super::stack_allocator::StackAllocator;
 use crate::compiler::ast::Expr;
 use crate::symbol::SymbolTable;
 use crate::value::Value;
@@ -20,6 +22,25 @@ pub enum IrValue {
     I64(cranelift::prelude::Value),
     /// An f64 SSA value (unboxed float)
     F64(cranelift::prelude::Value),
+}
+
+/// Compilation context for JIT code generation with variable support
+pub struct CompileContext<'a, 'b> {
+    pub builder: &'a mut FunctionBuilder<'b>,
+    pub symbols: &'a SymbolTable,
+    pub scope_manager: ScopeManager,
+    pub stack_allocator: StackAllocator,
+}
+
+impl<'a, 'b> CompileContext<'a, 'b> {
+    pub fn new(builder: &'a mut FunctionBuilder<'b>, symbols: &'a SymbolTable) -> Self {
+        CompileContext {
+            builder,
+            symbols,
+            scope_manager: ScopeManager::new(),
+            stack_allocator: StackAllocator::new(),
+        }
+    }
 }
 
 /// Expression compiler
@@ -66,8 +87,11 @@ impl ExprCompiler {
         builder.switch_to_block(entry_block);
         builder.seal_block(entry_block);
 
+        // Create compilation context with scope/stack support
+        let mut compile_ctx = CompileContext::new(&mut builder, symbols);
+
         // Compile the expression
-        let result = Self::compile_expr_block(&mut builder, expr, symbols)?;
+        let result = Self::compile_expr_block(&mut compile_ctx, expr)?;
 
         // Convert the compiled value to i64 for return
         let return_val = match result {
@@ -75,11 +99,13 @@ impl ExprCompiler {
             IrValue::F64(_v) => {
                 // TODO: Encode float as its bit representation (i64)
                 // For now, return 0
-                builder.ins().iconst(types::I64, 0)
+                compile_ctx.builder.ins().iconst(types::I64, 0)
             }
         };
-        builder.ins().return_(&[return_val]);
+        compile_ctx.builder.ins().return_(&[return_val]);
 
+        // Drop the context to release the mutable borrow on builder
+        drop(compile_ctx);
         builder.finalize();
 
         ctx.define_function(func_id)?;
@@ -90,36 +116,35 @@ impl ExprCompiler {
 
     /// Compile an expression within a builder block
     /// Returns an IrValue (Cranelift SSA value)
-    pub fn compile_expr_block(
-        builder: &mut FunctionBuilder,
-        expr: &Expr,
-        symbols: &SymbolTable,
-    ) -> Result<IrValue, String> {
+    pub fn compile_expr_block(ctx: &mut CompileContext, expr: &Expr) -> Result<IrValue, String> {
         match expr {
-            Expr::Literal(val) => Self::compile_literal(builder, val),
-            Expr::Begin(exprs) => Self::compile_begin(builder, exprs, symbols),
-            Expr::If { cond, then, else_ } => Self::compile_if(builder, cond, then, else_, symbols),
-            Expr::Cond { clauses, else_body } => {
-                Self::try_compile_cond(builder, clauses, else_body, symbols)
-            }
+            Expr::Literal(val) => Self::compile_literal(ctx, val),
+            Expr::Var(sym_id, depth, index) => Self::compile_var(ctx, *sym_id, *depth, *index),
+            Expr::Set {
+                var,
+                depth,
+                index,
+                value,
+            } => Self::compile_set(ctx, *var, *depth, *index, value),
+            Expr::Begin(exprs) => Self::compile_begin(ctx, exprs),
+            Expr::If { cond, then, else_ } => Self::compile_if(ctx, cond, then, else_),
+            Expr::Cond { clauses, else_body } => Self::try_compile_cond(ctx, clauses, else_body),
             // Try to compile And/Or with shortcircuiting
-            Expr::And(exprs) => Self::try_compile_and(builder, exprs, symbols),
-            Expr::Or(exprs) => Self::try_compile_or(builder, exprs, symbols),
+            Expr::And(exprs) => Self::try_compile_and(ctx, exprs),
+            Expr::Or(exprs) => Self::try_compile_or(ctx, exprs),
             // Try to compile Let bindings
-            Expr::Let { bindings, body } => Self::try_compile_let(builder, bindings, body, symbols),
+            Expr::Let { bindings, body } => Self::try_compile_let(ctx, bindings, body),
             // Try to compile While loops
-            Expr::While { cond, body } => Self::try_compile_while(builder, cond, body, symbols),
+            Expr::While { cond, body } => Self::try_compile_while(ctx, cond, body),
             // Try to compile For loops
-            Expr::For { var, iter, body } => {
-                Self::try_compile_for(builder, *var, iter, body, symbols)
-            }
+            Expr::For { var, iter, body } => Self::try_compile_for(ctx, *var, iter, body),
             // Try to compile binary operations with integer operands
             Expr::Call { func, args, .. } if args.len() == 2 => {
-                Self::try_compile_binop(builder, func, args, symbols)
+                Self::try_compile_binop(ctx, func, args)
             }
             // Try to compile unary operations like empty?
             Expr::Call { func, args, .. } if args.len() == 1 => {
-                Self::try_compile_unary_op(builder, func, args, symbols)
+                Self::try_compile_unary_op(ctx, func, args)
             }
             _ => Err(format!(
                 "Expression type not yet supported in JIT: {:?}",
@@ -128,153 +153,203 @@ impl ExprCompiler {
         }
     }
 
+    /// Compile a variable reference (load from stack)
+    fn compile_var(
+        ctx: &mut CompileContext,
+        _sym_id: crate::value::SymbolId,
+        depth: usize,
+        index: usize,
+    ) -> Result<IrValue, String> {
+        let slot = ctx
+            .stack_allocator
+            .get(depth, index)
+            .ok_or_else(|| format!("Variable not allocated at depth={}, index={}", depth, index))?;
+
+        let value = ctx.builder.ins().stack_load(types::I64, slot, 0);
+        Ok(IrValue::I64(value))
+    }
+
+    /// Compile a set! expression (store to stack)
+    fn compile_set(
+        ctx: &mut CompileContext,
+        _var: crate::value::SymbolId,
+        depth: usize,
+        index: usize,
+        value: &Expr,
+    ) -> Result<IrValue, String> {
+        // Compile the value expression
+        let compiled_value = Self::compile_expr_block(ctx, value)?;
+
+        // Get the stack slot (must already be allocated)
+        let slot = ctx.stack_allocator.get(depth, index).ok_or_else(|| {
+            format!(
+                "Cannot set! unbound variable at depth={}, index={}",
+                depth, index
+            )
+        })?;
+
+        // Store the value
+        match compiled_value {
+            IrValue::I64(v) => {
+                ctx.builder.ins().stack_store(v, slot, 0);
+                Ok(IrValue::I64(v)) // set! returns the value
+            }
+            IrValue::F64(_) => Err("Float variables not yet supported in set!".to_string()),
+        }
+    }
+
     /// Try to compile a Cond expression (multi-way conditional)
     fn try_compile_cond(
-        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext,
         clauses: &[(Expr, Expr)],
         else_body: &Option<Box<Expr>>,
-        symbols: &SymbolTable,
     ) -> Result<IrValue, String> {
         if clauses.is_empty() {
             // No clauses - return else body or nil
             if let Some(else_expr) = else_body {
-                return Self::compile_expr_block(builder, else_expr, symbols);
+                return Self::compile_expr_block(ctx, else_expr);
             } else {
-                return Ok(IrValue::I64(builder.ins().iconst(types::I64, 0))); // nil
+                return Ok(IrValue::I64(ctx.builder.ins().iconst(types::I64, 0)));
+                // nil
             }
         }
 
         // Create blocks for each clause + one for end
         let mut clause_blocks = Vec::new();
         for _ in 0..clauses.len() {
-            clause_blocks.push(builder.create_block());
+            clause_blocks.push(ctx.builder.create_block());
         }
-        let end_block = builder.create_block();
+        let end_block = ctx.builder.create_block();
 
-        let zero = builder.ins().iconst(types::I64, 0);
+        let zero = ctx.builder.ins().iconst(types::I64, 0);
 
         // Evaluate first condition
         let (first_cond, first_body) = &clauses[0];
-        let cond_val = Self::compile_expr_block(builder, first_cond, symbols)?;
+        let cond_val = Self::compile_expr_block(ctx, first_cond)?;
         let cond_i64 = match cond_val {
             IrValue::I64(v) => v,
             _ => return Err("Cond condition must be I64".to_string()),
         };
 
-        let is_true = builder.ins().icmp(IntCC::NotEqual, cond_i64, zero);
+        let is_true = ctx.builder.ins().icmp(IntCC::NotEqual, cond_i64, zero);
 
         // Jump to first body if true, else to second clause or else block
         let next_block = if clauses.len() > 1 {
             clause_blocks[1]
         } else if else_body.is_some() {
-            let else_eval_block = builder.create_block();
-            builder.switch_to_block(else_eval_block);
-            builder.seal_block(else_eval_block);
+            let else_eval_block = ctx.builder.create_block();
+            ctx.builder.switch_to_block(else_eval_block);
+            ctx.builder.seal_block(else_eval_block);
             if let Some(else_expr) = else_body {
-                let else_val = Self::compile_expr_block(builder, else_expr, symbols)?;
-                let else_i64 = Self::ir_value_to_i64(builder, else_val)?;
-                builder.ins().jump(end_block, &[else_i64]);
+                let else_val = Self::compile_expr_block(ctx, else_expr)?;
+                let else_i64 = Self::ir_value_to_i64(ctx.builder, else_val)?;
+                ctx.builder.ins().jump(end_block, &[else_i64]);
             } else {
-                builder.ins().jump(end_block, &[zero]);
+                ctx.builder.ins().jump(end_block, &[zero]);
             }
             else_eval_block
         } else {
             end_block
         };
 
-        builder
+        ctx.builder
             .ins()
             .brif(is_true, clause_blocks[0], &[], next_block, &[]);
 
         // Compile first clause body
-        builder.switch_to_block(clause_blocks[0]);
-        builder.seal_block(clause_blocks[0]);
-        let first_body_val = Self::compile_expr_block(builder, first_body, symbols)?;
-        let first_body_i64 = Self::ir_value_to_i64(builder, first_body_val)?;
-        builder.ins().jump(end_block, &[first_body_i64]);
+        ctx.builder.switch_to_block(clause_blocks[0]);
+        ctx.builder.seal_block(clause_blocks[0]);
+        let first_body_val = Self::compile_expr_block(ctx, first_body)?;
+        let first_body_i64 = Self::ir_value_to_i64(ctx.builder, first_body_val)?;
+        ctx.builder.ins().jump(end_block, &[first_body_i64]);
 
         // Compile remaining clauses
         for i in 1..clauses.len() {
-            builder.switch_to_block(clause_blocks[i]);
-            builder.seal_block(clause_blocks[i]);
+            ctx.builder.switch_to_block(clause_blocks[i]);
+            ctx.builder.seal_block(clause_blocks[i]);
 
             let (cond, body) = &clauses[i];
-            let cond_val = Self::compile_expr_block(builder, cond, symbols)?;
+            let cond_val = Self::compile_expr_block(ctx, cond)?;
             let cond_i64 = match cond_val {
                 IrValue::I64(v) => v,
                 _ => return Err("Cond condition must be I64".to_string()),
             };
 
-            let is_true = builder.ins().icmp(IntCC::NotEqual, cond_i64, zero);
+            let is_true = ctx.builder.ins().icmp(IntCC::NotEqual, cond_i64, zero);
 
             let next_block = if i + 1 < clauses.len() {
                 clause_blocks[i + 1]
             } else if else_body.is_some() {
-                let else_eval_block = builder.create_block();
-                builder.switch_to_block(else_eval_block);
-                builder.seal_block(else_eval_block);
+                let else_eval_block = ctx.builder.create_block();
+                ctx.builder.switch_to_block(else_eval_block);
+                ctx.builder.seal_block(else_eval_block);
                 if let Some(else_expr) = else_body {
-                    let else_val = Self::compile_expr_block(builder, else_expr, symbols)?;
-                    let else_i64 = Self::ir_value_to_i64(builder, else_val)?;
-                    builder.ins().jump(end_block, &[else_i64]);
+                    let else_val = Self::compile_expr_block(ctx, else_expr)?;
+                    let else_i64 = Self::ir_value_to_i64(ctx.builder, else_val)?;
+                    ctx.builder.ins().jump(end_block, &[else_i64]);
                 } else {
-                    builder.ins().jump(end_block, &[zero]);
+                    ctx.builder.ins().jump(end_block, &[zero]);
                 }
                 else_eval_block
             } else {
                 end_block
             };
 
-            builder
+            ctx.builder
                 .ins()
                 .brif(is_true, clause_blocks[i], &[], next_block, &[]);
 
-            builder.switch_to_block(clause_blocks[i]);
-            builder.seal_block(clause_blocks[i]);
-            let body_val = Self::compile_expr_block(builder, body, symbols)?;
-            let body_i64 = Self::ir_value_to_i64(builder, body_val)?;
-            builder.ins().jump(end_block, &[body_i64]);
+            ctx.builder.switch_to_block(clause_blocks[i]);
+            ctx.builder.seal_block(clause_blocks[i]);
+            let body_val = Self::compile_expr_block(ctx, body)?;
+            let body_i64 = Self::ir_value_to_i64(ctx.builder, body_val)?;
+            ctx.builder.ins().jump(end_block, &[body_i64]);
         }
 
-        builder.switch_to_block(end_block);
-        builder.seal_block(end_block);
-        let param = builder.block_params(end_block)[0];
+        ctx.builder.switch_to_block(end_block);
+        ctx.builder.seal_block(end_block);
+        let param = ctx.builder.block_params(end_block)[0];
 
         Ok(IrValue::I64(param))
     }
 
     /// Try to compile a Let expression
-    /// Note: This only works for Let that doesn't refer to Var/GlobalVar
     fn try_compile_let(
-        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext,
         bindings: &[(crate::value::SymbolId, Expr)],
         body: &Expr,
-        symbols: &SymbolTable,
     ) -> Result<IrValue, String> {
-        // For now, we only support Let with constant bindings (no Var/GlobalVar references)
-        // and where body doesn't reference the bindings via Var indices
-        // This is a limitation of the current JIT approach which doesn't track local var bindings
+        // Push a new scope
+        ctx.scope_manager.push_scope();
 
-        // We could extend this to track bindings in a map, but for now just reject
-        // Let expressions that have non-literal bindings
-        for (_sym, binding_expr) in bindings {
-            match binding_expr {
-                Expr::Literal(_) => {
-                    // OK - constant binding
+        // Compile each binding
+        for (sym_id, binding_expr) in bindings {
+            let binding_val = Self::compile_expr_block(ctx, binding_expr)?;
+
+            // Bind in scope and allocate stack slot
+            let (depth, index) = ctx.scope_manager.bind(*sym_id);
+            let (_slot, _) = ctx.stack_allocator.allocate(ctx.builder, depth, index)?;
+
+            // Store value
+            match binding_val {
+                IrValue::I64(v) => {
+                    let slot = ctx.stack_allocator.get(depth, index).unwrap();
+                    ctx.builder.ins().stack_store(v, slot, 0);
                 }
-                _ => {
-                    // Reject - would need tracking
-                    return Err(
-                        "Let bindings with non-literal values not yet supported in JIT".to_string(),
-                    );
+                IrValue::F64(_) => {
+                    ctx.scope_manager.pop_scope().ok();
+                    return Err("Float let bindings not yet supported".to_string());
                 }
             }
         }
 
-        // For Let with only constant bindings where body doesn't reference them,
-        // just compile the body (since the bindings don't affect it in JIT)
-        // This is actually a missed optimization, but safe
-        Self::compile_expr_block(builder, body, symbols)
+        // Compile body
+        let result = Self::compile_expr_block(ctx, body)?;
+
+        // Pop scope
+        ctx.scope_manager.pop_scope().map_err(|e| e.to_string())?;
+
+        Ok(result)
     }
 
     /// Try to compile a For loop expression
@@ -283,21 +358,19 @@ impl ExprCompiler {
     /// Supports: For loops over literal lists (unrolled at compile time)
     /// Not supported: For loops over runtime-computed iterables (requires variable binding)
     fn try_compile_for(
-        builder: &mut FunctionBuilder,
-        _var: crate::value::SymbolId,
+        ctx: &mut CompileContext,
+        var: crate::value::SymbolId,
         iter: &Expr,
         body: &Expr,
-        symbols: &SymbolTable,
     ) -> Result<IrValue, String> {
         // Check if the iterable is a literal list that we can unroll
         match iter {
             Expr::Literal(Value::Nil) => {
                 // Empty list - for loop body never executes, return nil
-                Ok(IrValue::I64(builder.ins().iconst(types::I64, 0)))
+                Ok(IrValue::I64(ctx.builder.ins().iconst(types::I64, 0)))
             }
             Expr::Literal(Value::Cons(cons_rc)) => {
-                // Unroll the for loop over a literal cons list
-                // Convert cons to vector to get all elements
+                // Collect elements from literal cons list
                 let mut elements = Vec::new();
                 let mut current = (**cons_rc).clone();
                 loop {
@@ -309,21 +382,57 @@ impl ExprCompiler {
                     }
                 }
 
-                // For each element, compile the body with a let binding
-                // Note: We can't actually bind the variable in the compiled code
-                // without variable storage support, so we just compile the body
-                // multiple times as a proof of concept
-                let mut result = IrValue::I64(builder.ins().iconst(types::I64, 0)); // nil
-                for _elem in elements {
-                    // Compile body for each element
-                    // In a full implementation, we'd substitute the element value
-                    result = Self::compile_expr_block(builder, body, symbols)?;
+                // Push loop scope
+                ctx.scope_manager.push_scope();
+
+                // Bind loop variable and allocate stack slot
+                let (depth, index) = ctx.scope_manager.bind(var);
+                let (_slot, _) = ctx.stack_allocator.allocate(ctx.builder, depth, index)?;
+
+                let mut result = IrValue::I64(ctx.builder.ins().iconst(types::I64, 0));
+
+                for elem in elements {
+                    // Compile the element value
+                    let elem_val = match &elem {
+                        Value::Nil => IrValue::I64(ctx.builder.ins().iconst(types::I64, 0)),
+                        Value::Bool(b) => IrValue::I64(
+                            ctx.builder.ins().iconst(types::I64, if *b { 1 } else { 0 }),
+                        ),
+                        Value::Int(i) => IrValue::I64(ctx.builder.ins().iconst(types::I64, *i)),
+                        Value::Float(_f) => {
+                            ctx.scope_manager.pop_scope().ok();
+                            return Err("Float elements in for loop not yet supported".to_string());
+                        }
+                        _ => {
+                            ctx.scope_manager.pop_scope().ok();
+                            return Err(format!(
+                                "Unsupported element type in for loop: {:?}",
+                                elem
+                            ));
+                        }
+                    };
+
+                    // Store element in loop variable's stack slot
+                    match elem_val {
+                        IrValue::I64(v) => {
+                            let slot = ctx.stack_allocator.get(depth, index).unwrap();
+                            ctx.builder.ins().stack_store(v, slot, 0);
+                        }
+                        IrValue::F64(_) => unreachable!(),
+                    }
+
+                    // Compile body (can now reference the loop variable)
+                    result = Self::compile_expr_block(ctx, body)?;
                 }
+
+                // Pop loop scope
+                ctx.scope_manager.pop_scope().map_err(|e| e.to_string())?;
+
                 Ok(result)
             }
             _ => {
                 // Runtime-computed iterables require variable binding support
-                Err("For loops over computed iterables not yet supported in JIT (requires runtime variable binding)".to_string())
+                Err("For loops over computed iterables not yet supported in JIT (requires runtime list operations)".to_string())
             }
         }
     }
@@ -331,67 +440,62 @@ impl ExprCompiler {
     /// Try to compile a While loop expression
     /// (while cond body) - executes body repeatedly while cond is truthy, returns nil
     fn try_compile_while(
-        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext,
         cond: &Expr,
         body: &Expr,
-        symbols: &SymbolTable,
     ) -> Result<IrValue, String> {
         // Create blocks: header (check condition), body_block (execute), exit
-        let header_block = builder.create_block();
-        let body_block = builder.create_block();
-        let exit_block = builder.create_block();
+        let header_block = ctx.builder.create_block();
+        let body_block = ctx.builder.create_block();
+        let exit_block = ctx.builder.create_block();
 
         // Jump to header to start loop
-        builder.ins().jump(header_block, &[]);
+        ctx.builder.ins().jump(header_block, &[]);
 
         // Header block: evaluate condition and branch
-        builder.switch_to_block(header_block);
+        ctx.builder.switch_to_block(header_block);
         // Don't seal yet - we'll add predecessors from body_block
 
-        let cond_val = Self::compile_expr_block(builder, cond, symbols)?;
+        let cond_val = Self::compile_expr_block(ctx, cond)?;
         let cond_i64 = match cond_val {
             IrValue::I64(v) => v,
             _ => return Err("While condition must evaluate to I64".to_string()),
         };
 
-        let zero = builder.ins().iconst(types::I64, 0);
-        let is_true = builder.ins().icmp(IntCC::NotEqual, cond_i64, zero);
-        builder
+        let zero = ctx.builder.ins().iconst(types::I64, 0);
+        let is_true = ctx.builder.ins().icmp(IntCC::NotEqual, cond_i64, zero);
+        ctx.builder
             .ins()
             .brif(is_true, body_block, &[], exit_block, &[]);
 
         // Body block: execute body and jump back to header
-        builder.switch_to_block(body_block);
-        builder.seal_block(body_block);
+        ctx.builder.switch_to_block(body_block);
+        ctx.builder.seal_block(body_block);
 
-        let _body_val = Self::compile_expr_block(builder, body, symbols)?;
+        let _body_val = Self::compile_expr_block(ctx, body)?;
         // Note: we discard the body value (while loops return nil)
-        builder.ins().jump(header_block, &[]);
+        ctx.builder.ins().jump(header_block, &[]);
 
         // Now seal header after we've added the back-edge from body
-        builder.seal_block(header_block);
+        ctx.builder.seal_block(header_block);
 
         // Exit block: return nil
-        builder.switch_to_block(exit_block);
-        builder.seal_block(exit_block);
+        ctx.builder.switch_to_block(exit_block);
+        ctx.builder.seal_block(exit_block);
 
-        let nil_val = builder.ins().iconst(types::I64, 0);
+        let nil_val = ctx.builder.ins().iconst(types::I64, 0);
         Ok(IrValue::I64(nil_val))
     }
 
     /// Try to compile an And expression with shortcircuiting
     /// (and expr1 expr2 expr3 ...) => returns first falsy value or last value
-    fn try_compile_and(
-        builder: &mut FunctionBuilder,
-        exprs: &[Expr],
-        symbols: &SymbolTable,
-    ) -> Result<IrValue, String> {
+    fn try_compile_and(ctx: &mut CompileContext, exprs: &[Expr]) -> Result<IrValue, String> {
         if exprs.is_empty() {
-            return Ok(IrValue::I64(builder.ins().iconst(types::I64, 1))); // (and) => true
+            return Ok(IrValue::I64(ctx.builder.ins().iconst(types::I64, 1))); // (and) => true
         }
 
         if exprs.len() == 1 {
-            return Self::compile_expr_block(builder, &exprs[0], symbols);
+            return Self::compile_expr_block(ctx, &exprs[0]);
         }
 
         // For multi-argument and, we need control flow for proper short-circuiting
@@ -400,14 +504,14 @@ impl ExprCompiler {
         let mut phi_values = Vec::new();
 
         for _ in 0..exprs.len() {
-            eval_blocks.push(builder.create_block());
+            eval_blocks.push(ctx.builder.create_block());
         }
-        let end_block = builder.create_block();
+        let end_block = ctx.builder.create_block();
 
-        let zero = builder.ins().iconst(types::I64, 0);
+        let zero = ctx.builder.ins().iconst(types::I64, 0);
 
         // Start with first expression
-        let first_val = Self::compile_expr_block(builder, &exprs[0], symbols)?;
+        let first_val = Self::compile_expr_block(ctx, &exprs[0])?;
         let first_i64 = match first_val {
             IrValue::I64(v) => v,
             _ => return Err("And on non-I64 values not supported".to_string()),
@@ -416,21 +520,21 @@ impl ExprCompiler {
 
         // Check if first is false (equal to 0), if so jump to end with that value
         // Otherwise continue to next expression
-        let is_false = builder.ins().icmp(IntCC::Equal, first_i64, zero);
+        let is_false = ctx.builder.ins().icmp(IntCC::Equal, first_i64, zero);
         if exprs.len() > 1 {
-            builder
+            ctx.builder
                 .ins()
                 .brif(is_false, end_block, &[first_i64], eval_blocks[1], &[]);
         } else {
-            builder.ins().jump(end_block, &[first_i64]);
+            ctx.builder.ins().jump(end_block, &[first_i64]);
         }
 
         // Evaluate remaining expressions
         for i in 1..exprs.len() {
-            builder.switch_to_block(eval_blocks[i]);
-            builder.seal_block(eval_blocks[i]);
+            ctx.builder.switch_to_block(eval_blocks[i]);
+            ctx.builder.seal_block(eval_blocks[i]);
 
-            let val = Self::compile_expr_block(builder, &exprs[i], symbols)?;
+            let val = Self::compile_expr_block(ctx, &exprs[i])?;
             let val_i64 = match val {
                 IrValue::I64(v) => v,
                 _ => return Err("And on non-I64 values not supported".to_string()),
@@ -439,40 +543,40 @@ impl ExprCompiler {
 
             // If this is not the last expression, check if value is false
             if i < exprs.len() - 1 {
-                let is_false = builder.ins().icmp(IntCC::Equal, val_i64, zero);
+                let is_false = ctx.builder.ins().icmp(IntCC::Equal, val_i64, zero);
                 if i + 1 < eval_blocks.len() {
-                    builder
-                        .ins()
-                        .brif(is_false, end_block, &[val_i64], eval_blocks[i + 1], &[]);
+                    ctx.builder.ins().brif(
+                        is_false,
+                        end_block,
+                        &[val_i64],
+                        eval_blocks[i + 1],
+                        &[],
+                    );
                 } else {
-                    builder.ins().jump(end_block, &[val_i64]);
+                    ctx.builder.ins().jump(end_block, &[val_i64]);
                 }
             } else {
                 // Last expression - jump to end with its value
-                builder.ins().jump(end_block, &[val_i64]);
+                ctx.builder.ins().jump(end_block, &[val_i64]);
             }
         }
 
-        builder.switch_to_block(end_block);
-        builder.seal_block(end_block);
-        let param = builder.block_params(end_block)[0];
+        ctx.builder.switch_to_block(end_block);
+        ctx.builder.seal_block(end_block);
+        let param = ctx.builder.block_params(end_block)[0];
 
         Ok(IrValue::I64(param))
     }
 
     /// Try to compile an Or expression with shortcircuiting
     /// (or expr1 expr2 expr3 ...) => returns first truthy value or last value
-    fn try_compile_or(
-        builder: &mut FunctionBuilder,
-        exprs: &[Expr],
-        symbols: &SymbolTable,
-    ) -> Result<IrValue, String> {
+    fn try_compile_or(ctx: &mut CompileContext, exprs: &[Expr]) -> Result<IrValue, String> {
         if exprs.is_empty() {
-            return Ok(IrValue::I64(builder.ins().iconst(types::I64, 0))); // (or) => false
+            return Ok(IrValue::I64(ctx.builder.ins().iconst(types::I64, 0))); // (or) => false
         }
 
         if exprs.len() == 1 {
-            return Self::compile_expr_block(builder, &exprs[0], symbols);
+            return Self::compile_expr_block(ctx, &exprs[0]);
         }
 
         // For multi-argument or, we need control flow for proper short-circuiting
@@ -480,14 +584,14 @@ impl ExprCompiler {
         let mut phi_values = Vec::new();
 
         for _ in 0..exprs.len() {
-            eval_blocks.push(builder.create_block());
+            eval_blocks.push(ctx.builder.create_block());
         }
-        let end_block = builder.create_block();
+        let end_block = ctx.builder.create_block();
 
-        let zero = builder.ins().iconst(types::I64, 0);
+        let zero = ctx.builder.ins().iconst(types::I64, 0);
 
         // Start with first expression
-        let first_val = Self::compile_expr_block(builder, &exprs[0], symbols)?;
+        let first_val = Self::compile_expr_block(ctx, &exprs[0])?;
         let first_i64 = match first_val {
             IrValue::I64(v) => v,
             _ => return Err("Or on non-I64 values not supported".to_string()),
@@ -496,21 +600,21 @@ impl ExprCompiler {
 
         // Check if first is true (not equal to 0), if so jump to end with that value
         // Otherwise continue to next expression
-        let is_true = builder.ins().icmp(IntCC::NotEqual, first_i64, zero);
+        let is_true = ctx.builder.ins().icmp(IntCC::NotEqual, first_i64, zero);
         if exprs.len() > 1 {
-            builder
+            ctx.builder
                 .ins()
                 .brif(is_true, end_block, &[first_i64], eval_blocks[1], &[]);
         } else {
-            builder.ins().jump(end_block, &[first_i64]);
+            ctx.builder.ins().jump(end_block, &[first_i64]);
         }
 
         // Evaluate remaining expressions
         for i in 1..exprs.len() {
-            builder.switch_to_block(eval_blocks[i]);
-            builder.seal_block(eval_blocks[i]);
+            ctx.builder.switch_to_block(eval_blocks[i]);
+            ctx.builder.seal_block(eval_blocks[i]);
 
-            let val = Self::compile_expr_block(builder, &exprs[i], symbols)?;
+            let val = Self::compile_expr_block(ctx, &exprs[i])?;
             let val_i64 = match val {
                 IrValue::I64(v) => v,
                 _ => return Err("Or on non-I64 values not supported".to_string()),
@@ -519,37 +623,36 @@ impl ExprCompiler {
 
             // If this is not the last expression, check if value is true
             if i < exprs.len() - 1 {
-                let is_true = builder.ins().icmp(IntCC::NotEqual, val_i64, zero);
+                let is_true = ctx.builder.ins().icmp(IntCC::NotEqual, val_i64, zero);
                 if i + 1 < eval_blocks.len() {
-                    builder
+                    ctx.builder
                         .ins()
                         .brif(is_true, end_block, &[val_i64], eval_blocks[i + 1], &[]);
                 } else {
-                    builder.ins().jump(end_block, &[val_i64]);
+                    ctx.builder.ins().jump(end_block, &[val_i64]);
                 }
             } else {
                 // Last expression - jump to end with its value
-                builder.ins().jump(end_block, &[val_i64]);
+                ctx.builder.ins().jump(end_block, &[val_i64]);
             }
         }
 
-        builder.switch_to_block(end_block);
-        builder.seal_block(end_block);
-        let param = builder.block_params(end_block)[0];
+        ctx.builder.switch_to_block(end_block);
+        ctx.builder.seal_block(end_block);
+        let param = ctx.builder.block_params(end_block)[0];
 
         Ok(IrValue::I64(param))
     }
 
     /// Try to compile a unary operation (like empty?, abs)
     fn try_compile_unary_op(
-        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext,
         func: &Expr,
         args: &[Expr],
-        symbols: &SymbolTable,
     ) -> Result<IrValue, String> {
         // Extract operator name from function
         let op_name = match func {
-            Expr::Literal(Value::Symbol(sym_id)) => symbols.name(*sym_id),
+            Expr::Literal(Value::Symbol(sym_id)) => ctx.symbols.name(*sym_id),
             _ => None,
         };
 
@@ -559,7 +662,7 @@ impl ExprCompiler {
         };
 
         // Compile the argument
-        let arg = Self::compile_expr_block(builder, &args[0], symbols)?;
+        let arg = Self::compile_expr_block(ctx, &args[0])?;
 
         // Perform the unary operation
         match op_name {
@@ -569,9 +672,9 @@ impl ExprCompiler {
                 match arg {
                     IrValue::I64(val) => {
                         // Check if value is nil (0)
-                        let zero = builder.ins().iconst(types::I64, 0);
+                        let zero = ctx.builder.ins().iconst(types::I64, 0);
                         let result =
-                            builder
+                            ctx.builder
                                 .ins()
                                 .icmp(cranelift::prelude::IntCC::Equal, val, zero);
                         Ok(IrValue::I64(result))
@@ -583,10 +686,10 @@ impl ExprCompiler {
                 // Absolute value: if x < 0 then -x else x
                 match arg {
                     IrValue::I64(val) => {
-                        let zero = builder.ins().iconst(types::I64, 0);
-                        let is_negative = builder.ins().icmp(IntCC::SignedLessThan, val, zero);
-                        let negated = builder.ins().ineg(val);
-                        let result = builder.ins().select(is_negative, negated, val);
+                        let zero = ctx.builder.ins().iconst(types::I64, 0);
+                        let is_negative = ctx.builder.ins().icmp(IntCC::SignedLessThan, val, zero);
+                        let negated = ctx.builder.ins().ineg(val);
+                        let result = ctx.builder.ins().select(is_negative, negated, val);
                         Ok(IrValue::I64(result))
                     }
                     _ => Err("abs on non-I64 not supported".to_string()),
@@ -596,9 +699,9 @@ impl ExprCompiler {
                 // nil? is same as empty?
                 match arg {
                     IrValue::I64(val) => {
-                        let zero = builder.ins().iconst(types::I64, 0);
+                        let zero = ctx.builder.ins().iconst(types::I64, 0);
                         let result =
-                            builder
+                            ctx.builder
                                 .ins()
                                 .icmp(cranelift::prelude::IntCC::Equal, val, zero);
                         Ok(IrValue::I64(result))
@@ -610,9 +713,9 @@ impl ExprCompiler {
                 // Logical NOT
                 match arg {
                     IrValue::I64(val) => {
-                        let zero = builder.ins().iconst(types::I64, 0);
+                        let zero = ctx.builder.ins().iconst(types::I64, 0);
                         let result =
-                            builder
+                            ctx.builder
                                 .ins()
                                 .icmp(cranelift::prelude::IntCC::Equal, val, zero);
                         Ok(IrValue::I64(result))
@@ -627,14 +730,13 @@ impl ExprCompiler {
     /// Try to compile a binary operation
     /// Only works for operations on literal integers
     fn try_compile_binop(
-        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext,
         func: &Expr,
         args: &[Expr],
-        symbols: &SymbolTable,
     ) -> Result<IrValue, String> {
         // Extract operator name from function
         let op_name = match func {
-            Expr::Literal(Value::Symbol(sym_id)) => symbols.name(*sym_id),
+            Expr::Literal(Value::Symbol(sym_id)) => ctx.symbols.name(*sym_id),
             _ => None,
         };
 
@@ -644,37 +746,37 @@ impl ExprCompiler {
         };
 
         // Compile the arguments
-        let left = Self::compile_expr_block(builder, &args[0], symbols)?;
-        let right = Self::compile_expr_block(builder, &args[1], symbols)?;
+        let left = Self::compile_expr_block(ctx, &args[0])?;
+        let right = Self::compile_expr_block(ctx, &args[1])?;
 
         // Perform the binary operation
         match (left, right) {
             (IrValue::I64(l), IrValue::I64(r)) => {
                 let result = match op_name {
-                    "+" => IrEmitter::emit_add_int(builder, l, r),
-                    "-" => IrEmitter::emit_sub_int(builder, l, r),
-                    "*" => IrEmitter::emit_mul_int(builder, l, r),
-                    "/" => IrEmitter::emit_sdiv_int(builder, l, r),
-                    "=" => IrEmitter::emit_eq_int(builder, l, r),
-                    "<" => IrEmitter::emit_lt_int(builder, l, r),
-                    ">" => IrEmitter::emit_gt_int(builder, l, r),
+                    "+" => IrEmitter::emit_add_int(ctx.builder, l, r),
+                    "-" => IrEmitter::emit_sub_int(ctx.builder, l, r),
+                    "*" => IrEmitter::emit_mul_int(ctx.builder, l, r),
+                    "/" => IrEmitter::emit_sdiv_int(ctx.builder, l, r),
+                    "=" => IrEmitter::emit_eq_int(ctx.builder, l, r),
+                    "<" => IrEmitter::emit_lt_int(ctx.builder, l, r),
+                    ">" => IrEmitter::emit_gt_int(ctx.builder, l, r),
                     "<=" => {
                         // <= is (not (>))
-                        let gt_result = IrEmitter::emit_gt_int(builder, l, r);
-                        let zero = builder.ins().iconst(types::I64, 0);
-                        builder.ins().icmp(IntCC::Equal, gt_result, zero)
+                        let gt_result = IrEmitter::emit_gt_int(ctx.builder, l, r);
+                        let zero = ctx.builder.ins().iconst(types::I64, 0);
+                        ctx.builder.ins().icmp(IntCC::Equal, gt_result, zero)
                     }
                     ">=" => {
                         // >= is (not (<))
-                        let lt_result = IrEmitter::emit_lt_int(builder, l, r);
-                        let zero = builder.ins().iconst(types::I64, 0);
-                        builder.ins().icmp(IntCC::Equal, lt_result, zero)
+                        let lt_result = IrEmitter::emit_lt_int(ctx.builder, l, r);
+                        let zero = ctx.builder.ins().iconst(types::I64, 0);
+                        ctx.builder.ins().icmp(IntCC::Equal, lt_result, zero)
                     }
                     "!=" | "neq" => {
                         // != is (not (=))
-                        let eq_result = IrEmitter::emit_eq_int(builder, l, r);
-                        let zero = builder.ins().iconst(types::I64, 0);
-                        builder.ins().icmp(IntCC::Equal, eq_result, zero)
+                        let eq_result = IrEmitter::emit_eq_int(ctx.builder, l, r);
+                        let zero = ctx.builder.ins().iconst(types::I64, 0);
+                        ctx.builder.ins().icmp(IntCC::Equal, eq_result, zero)
                     }
                     _ => return Err(format!("Unknown binary operator: {}", op_name)),
                 };
@@ -685,26 +787,26 @@ impl ExprCompiler {
     }
 
     /// Compile a literal value to CLIF IR
-    fn compile_literal(builder: &mut FunctionBuilder, val: &Value) -> Result<IrValue, String> {
+    fn compile_literal(ctx: &mut CompileContext, val: &Value) -> Result<IrValue, String> {
         match val {
             Value::Nil => {
                 // Nil is encoded as 0i64
-                let ir_val = IrEmitter::emit_nil(builder);
+                let ir_val = IrEmitter::emit_nil(ctx.builder);
                 Ok(IrValue::I64(ir_val))
             }
             Value::Bool(b) => {
                 // Bool is encoded as 0 (false) or 1 (true)
-                let ir_val = IrEmitter::emit_bool(builder, *b);
+                let ir_val = IrEmitter::emit_bool(ctx.builder, *b);
                 Ok(IrValue::I64(ir_val))
             }
             Value::Int(i) => {
                 // Int is emitted directly
-                let ir_val = IrEmitter::emit_int(builder, *i);
+                let ir_val = IrEmitter::emit_int(ctx.builder, *i);
                 Ok(IrValue::I64(ir_val))
             }
             Value::Float(f) => {
                 // Float is emitted as f64
-                let ir_val = IrEmitter::emit_float(builder, *f);
+                let ir_val = IrEmitter::emit_float(ctx.builder, *f);
                 Ok(IrValue::F64(ir_val))
             }
             _ => Err(format!(
@@ -715,28 +817,23 @@ impl ExprCompiler {
     }
 
     /// Compile a begin (sequence) expression
-    fn compile_begin(
-        builder: &mut FunctionBuilder,
-        exprs: &[Expr],
-        symbols: &SymbolTable,
-    ) -> Result<IrValue, String> {
-        let mut result = IrValue::I64(IrEmitter::emit_nil(builder));
+    fn compile_begin(ctx: &mut CompileContext, exprs: &[Expr]) -> Result<IrValue, String> {
+        let mut result = IrValue::I64(IrEmitter::emit_nil(ctx.builder));
         for expr in exprs {
-            result = Self::compile_expr_block(builder, expr, symbols)?;
+            result = Self::compile_expr_block(ctx, expr)?;
         }
         Ok(result)
     }
 
     /// Compile an if expression with proper conditional branching
     fn compile_if(
-        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext,
         cond: &Expr,
         then_expr: &Expr,
         else_expr: &Expr,
-        symbols: &SymbolTable,
     ) -> Result<IrValue, String> {
         // Compile the condition expression
-        let cond_val = Self::compile_expr_block(builder, cond, symbols)?;
+        let cond_val = Self::compile_expr_block(ctx, cond)?;
 
         // Extract i64 value from condition (floats would need conversion)
         let cond_i64 = match cond_val {
@@ -749,30 +846,30 @@ impl ExprCompiler {
         };
 
         // Create branch blocks
-        let (then_block, else_block, join_block) = BranchManager::create_if_blocks(builder);
+        let (then_block, else_block, join_block) = BranchManager::create_if_blocks(ctx.builder);
 
         // Emit the conditional branch
-        BranchManager::emit_if_cond(builder, cond_i64, then_block, else_block);
+        BranchManager::emit_if_cond(ctx.builder, cond_i64, then_block, else_block);
 
         // Compile then branch
-        builder.switch_to_block(then_block);
-        builder.seal_block(then_block);
-        let then_val = Self::compile_expr_block(builder, then_expr, symbols)?;
-        let then_i64 = Self::ir_value_to_i64(builder, then_val)?;
-        BranchManager::jump_to_join(builder, join_block, then_i64);
+        ctx.builder.switch_to_block(then_block);
+        ctx.builder.seal_block(then_block);
+        let then_val = Self::compile_expr_block(ctx, then_expr)?;
+        let then_i64 = Self::ir_value_to_i64(ctx.builder, then_val)?;
+        BranchManager::jump_to_join(ctx.builder, join_block, then_i64);
 
         // Compile else branch
-        builder.switch_to_block(else_block);
-        builder.seal_block(else_block);
-        let else_val = Self::compile_expr_block(builder, else_expr, symbols)?;
-        let else_i64 = Self::ir_value_to_i64(builder, else_val)?;
-        BranchManager::jump_to_join(builder, join_block, else_i64);
+        ctx.builder.switch_to_block(else_block);
+        ctx.builder.seal_block(else_block);
+        let else_val = Self::compile_expr_block(ctx, else_expr)?;
+        let else_i64 = Self::ir_value_to_i64(ctx.builder, else_val)?;
+        BranchManager::jump_to_join(ctx.builder, join_block, else_i64);
 
         // Set up join block and get the result value
-        BranchManager::setup_join_block_for_value(join_block, builder);
-        builder.switch_to_block(join_block);
-        builder.seal_block(join_block);
-        let result_i64 = BranchManager::get_join_value(builder, join_block);
+        BranchManager::setup_join_block_for_value(join_block, ctx.builder);
+        ctx.builder.switch_to_block(join_block);
+        ctx.builder.seal_block(join_block);
+        let result_i64 = BranchManager::get_join_value(ctx.builder, join_block);
 
         Ok(IrValue::I64(result_i64))
     }
@@ -811,11 +908,8 @@ mod tests {
 
         use crate::symbol::SymbolTable;
         let symbols = SymbolTable::new();
-        let result = ExprCompiler::compile_expr_block(
-            &mut builder,
-            &Expr::Literal(Value::Int(42)),
-            &symbols,
-        );
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let result = ExprCompiler::compile_expr_block(&mut ctx, &Expr::Literal(Value::Int(42)));
         assert!(
             result.is_ok(),
             "Failed to compile integer literal: {:?}",
@@ -824,7 +918,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_expr_block_bool() {
+    fn test_compile_var_reference() {
         use crate::symbol::SymbolTable;
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut func = ir::Function::new();
@@ -836,16 +930,51 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let result = ExprCompiler::compile_expr_block(
-            &mut builder,
-            &Expr::Literal(Value::Bool(true)),
-            &symbols,
-        );
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
+
+        // Allocate a variable at depth 0, index 0
+        let (slot, _) = ctx.stack_allocator.allocate(ctx.builder, 0, 0).unwrap();
+        let const_val = ctx.builder.ins().iconst(types::I64, 42);
+        ctx.builder.ins().stack_store(const_val, slot, 0);
+
+        // Now try to reference it
+        let result = ExprCompiler::compile_var(&mut ctx, crate::value::SymbolId(0), 0, 0);
         assert!(
             result.is_ok(),
-            "Failed to compile boolean literal: {:?}",
+            "Failed to compile variable reference: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_compile_set() {
+        use crate::symbol::SymbolTable;
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut func = ir::Function::new();
+        func.signature.params.push(AbiParam::new(types::I64));
+        func.signature.returns.push(AbiParam::new(types::I64));
+        let mut builder = FunctionBuilder::new(&mut func, &mut builder_ctx);
+        let block = builder.create_block();
+        builder.switch_to_block(block);
+        builder.seal_block(block);
+
+        let symbols = SymbolTable::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
+
+        // Allocate a variable at depth 0, index 0
+        let (slot, _) = ctx.stack_allocator.allocate(ctx.builder, 0, 0).unwrap();
+        let const_val = ctx.builder.ins().iconst(types::I64, 10);
+        ctx.builder.ins().stack_store(const_val, slot, 0);
+
+        // Now try to set it
+        let result = ExprCompiler::compile_set(
+            &mut ctx,
+            crate::value::SymbolId(0),
+            0,
+            0,
+            &Expr::Literal(Value::Int(99)),
+        );
+        assert!(result.is_ok(), "Failed to compile set!: {:?}", result.err());
     }
 
     #[test]
@@ -861,13 +990,13 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
         let result = ExprCompiler::compile_expr_block(
-            &mut builder,
+            &mut ctx,
             &Expr::Begin(vec![
                 Expr::Literal(Value::Int(1)),
                 Expr::Literal(Value::Int(2)),
             ]),
-            &symbols,
         );
         assert!(
             result.is_ok(),
@@ -893,8 +1022,9 @@ mod tests {
 
         // Test: (while (< 0 10) 42)
         // A while loop with a condition and a body
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
         let result = ExprCompiler::compile_expr_block(
-            &mut builder,
+            &mut ctx,
             &Expr::While {
                 cond: Box::new(Expr::Call {
                     func: Box::new(Expr::Literal(Value::Symbol(lt_sym))),
@@ -903,7 +1033,6 @@ mod tests {
                 }),
                 body: Box::new(Expr::Literal(Value::Int(42))),
             },
-            &symbols,
         );
         assert!(
             result.is_ok(),
@@ -929,14 +1058,14 @@ mod tests {
 
         // Test: (for item nil item)
         // For loop over empty list should compile and return nil
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
         let result = ExprCompiler::compile_expr_block(
-            &mut builder,
+            &mut ctx,
             &Expr::For {
                 var: item_sym,
                 iter: Box::new(Expr::Literal(Value::Nil)),
                 body: Box::new(Expr::Literal(Value::Int(0))),
             },
-            &symbols,
         );
         // Should succeed for empty list
         assert!(
@@ -969,14 +1098,14 @@ mod tests {
             cons(Value::Int(2), cons(Value::Int(3), Value::Nil)),
         );
 
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
         let result = ExprCompiler::compile_expr_block(
-            &mut builder,
+            &mut ctx,
             &Expr::For {
                 var: item_sym,
                 iter: Box::new(Expr::Literal(literal_list)),
                 body: Box::new(Expr::Literal(Value::Int(42))),
             },
-            &symbols,
         );
         // Should succeed for literal list
         assert!(
@@ -1004,14 +1133,14 @@ mod tests {
 
         // Test: (for item (get-list) item)
         // For loops over computed/variable iterables should fail
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
         let result = ExprCompiler::compile_expr_block(
-            &mut builder,
+            &mut ctx,
             &Expr::For {
                 var: item_sym,
                 iter: Box::new(Expr::GlobalVar(list_sym)), // Variable reference, not literal
                 body: Box::new(Expr::Literal(Value::Int(0))),
             },
-            &symbols,
         );
         // Should fail for computed iterables
         assert!(
@@ -1020,5 +1149,74 @@ mod tests {
         );
         let err_msg = result.err().unwrap();
         assert!(err_msg.contains("computed iterables"));
+    }
+
+    #[test]
+    fn test_compile_let_with_var_access() {
+        use crate::symbol::SymbolTable;
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut func = ir::Function::new();
+        func.signature.params.push(AbiParam::new(types::I64));
+        func.signature.returns.push(AbiParam::new(types::I64));
+        let mut builder = FunctionBuilder::new(&mut func, &mut builder_ctx);
+        let block = builder.create_block();
+        builder.switch_to_block(block);
+        builder.seal_block(block);
+
+        let mut symbols = SymbolTable::new();
+        let x_sym = symbols.intern("x");
+
+        // Test: (let ((x 42)) x)
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let result = ExprCompiler::compile_expr_block(
+            &mut ctx,
+            &Expr::Let {
+                bindings: vec![(x_sym, Expr::Literal(Value::Int(42)))],
+                body: Box::new(Expr::Var(x_sym, 1, 0)),
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "Failed to compile let with var access: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_compile_for_loop_with_variable() {
+        use crate::symbol::SymbolTable;
+        use crate::value::cons;
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut func = ir::Function::new();
+        func.signature.params.push(AbiParam::new(types::I64));
+        func.signature.returns.push(AbiParam::new(types::I64));
+        let mut builder = FunctionBuilder::new(&mut func, &mut builder_ctx);
+        let block = builder.create_block();
+        builder.switch_to_block(block);
+        builder.seal_block(block);
+
+        let mut symbols = SymbolTable::new();
+        let x_sym = symbols.intern("x");
+
+        // Test: (for x '(1 2 3) x)
+        let literal_list = cons(
+            Value::Int(1),
+            cons(Value::Int(2), cons(Value::Int(3), Value::Nil)),
+        );
+
+        let mut ctx = CompileContext::new(&mut builder, &symbols);
+        let result = ExprCompiler::compile_expr_block(
+            &mut ctx,
+            &Expr::For {
+                var: x_sym,
+                iter: Box::new(Expr::Literal(literal_list)),
+                body: Box::new(Expr::Var(x_sym, 1, 0)),
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "Failed to compile for loop with variable: {:?}",
+            result.err()
+        );
     }
 }
