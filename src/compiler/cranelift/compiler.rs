@@ -832,9 +832,10 @@ impl ExprCompiler {
         func: &Expr,
         args: &[Expr],
     ) -> Result<IrValue, String> {
-        // Extract operator name from function
+        // Extract operator name from function (either GlobalVar or Literal Symbol)
         let op_name = match func {
             Expr::Literal(Value::Symbol(sym_id)) => ctx.symbols.name(*sym_id),
+            Expr::GlobalVar(sym_id) => ctx.symbols.name(*sym_id),
             _ => None,
         };
 
@@ -855,10 +856,12 @@ impl ExprCompiler {
                     IrValue::I64(val) => {
                         // Check if value is nil (0)
                         let zero = ctx.builder.ins().iconst(types::I64, 0);
-                        let result =
+                        let cmp_result =
                             ctx.builder
                                 .ins()
                                 .icmp(cranelift::prelude::IntCC::Equal, val, zero);
+                        // Extend i8 boolean to i64
+                        let result = ctx.builder.ins().uextend(types::I64, cmp_result);
                         Ok(IrValue::I64(result))
                     }
                     _ => Err("empty? on non-I64 not supported".to_string()),
@@ -882,10 +885,12 @@ impl ExprCompiler {
                 match arg {
                     IrValue::I64(val) => {
                         let zero = ctx.builder.ins().iconst(types::I64, 0);
-                        let result =
+                        let cmp_result =
                             ctx.builder
                                 .ins()
                                 .icmp(cranelift::prelude::IntCC::Equal, val, zero);
+                        // Extend i8 boolean to i64
+                        let result = ctx.builder.ins().uextend(types::I64, cmp_result);
                         Ok(IrValue::I64(result))
                     }
                     _ => Err("nil? on non-I64 not supported".to_string()),
@@ -896,10 +901,12 @@ impl ExprCompiler {
                 match arg {
                     IrValue::I64(val) => {
                         let zero = ctx.builder.ins().iconst(types::I64, 0);
-                        let result =
+                        let cmp_result =
                             ctx.builder
                                 .ins()
                                 .icmp(cranelift::prelude::IntCC::Equal, val, zero);
+                        // Extend i8 boolean to i64
+                        let result = ctx.builder.ins().uextend(types::I64, cmp_result);
                         Ok(IrValue::I64(result))
                     }
                     _ => Err("not on non-I64 not supported".to_string()),
@@ -916,9 +923,10 @@ impl ExprCompiler {
         func: &Expr,
         args: &[Expr],
     ) -> Result<IrValue, String> {
-        // Extract operator name from function
+        // Extract operator name from function (either GlobalVar or Literal Symbol)
         let op_name = match func {
             Expr::Literal(Value::Symbol(sym_id)) => ctx.symbols.name(*sym_id),
+            Expr::GlobalVar(sym_id) => ctx.symbols.name(*sym_id),
             _ => None,
         };
 
@@ -946,19 +954,22 @@ impl ExprCompiler {
                         // <= is (not (>))
                         let gt_result = IrEmitter::emit_gt_int(ctx.builder, l, r);
                         let zero = ctx.builder.ins().iconst(types::I64, 0);
-                        ctx.builder.ins().icmp(IntCC::Equal, gt_result, zero)
+                        let result = ctx.builder.ins().icmp(IntCC::Equal, gt_result, zero);
+                        ctx.builder.ins().uextend(types::I64, result)
                     }
                     ">=" => {
                         // >= is (not (<))
                         let lt_result = IrEmitter::emit_lt_int(ctx.builder, l, r);
                         let zero = ctx.builder.ins().iconst(types::I64, 0);
-                        ctx.builder.ins().icmp(IntCC::Equal, lt_result, zero)
+                        let result = ctx.builder.ins().icmp(IntCC::Equal, lt_result, zero);
+                        ctx.builder.ins().uextend(types::I64, result)
                     }
                     "!=" | "neq" => {
                         // != is (not (=))
                         let eq_result = IrEmitter::emit_eq_int(ctx.builder, l, r);
                         let zero = ctx.builder.ins().iconst(types::I64, 0);
-                        ctx.builder.ins().icmp(IntCC::Equal, eq_result, zero)
+                        let result = ctx.builder.ins().icmp(IntCC::Equal, eq_result, zero);
+                        ctx.builder.ins().uextend(types::I64, result)
                     }
                     _ => return Err(format!("Unknown binary operator: {}", op_name)),
                 };
@@ -1030,6 +1041,10 @@ impl ExprCompiler {
         // Create branch blocks
         let (then_block, else_block, join_block) = BranchManager::create_if_blocks(ctx.builder);
 
+        // IMPORTANT: Set up join block parameter BEFORE any jumps to it
+        // The jumps pass a value argument, so the block must have a parameter to receive it
+        BranchManager::setup_join_block_for_value(join_block, ctx.builder);
+
         // Emit the conditional branch
         BranchManager::emit_if_cond(ctx.builder, cond_i64, then_block, else_block);
 
@@ -1047,8 +1062,7 @@ impl ExprCompiler {
         let else_i64 = Self::ir_value_to_i64(ctx.builder, else_val)?;
         BranchManager::jump_to_join(ctx.builder, join_block, else_i64);
 
-        // Set up join block and get the result value
-        BranchManager::setup_join_block_for_value(join_block, ctx.builder);
+        // Switch to join block and get the result value
         ctx.builder.switch_to_block(join_block);
         ctx.builder.seal_block(join_block);
         let result_i64 = BranchManager::get_join_value(ctx.builder, join_block);

@@ -108,33 +108,42 @@ impl IrEmitter {
     }
 
     /// Emit CLIF IR for integer less-than comparison
+    /// Returns i64 (0 for false, 1 for true)
     pub fn emit_lt_int(
         builder: &mut FunctionBuilder,
         left: cranelift::prelude::Value,
         right: cranelift::prelude::Value,
     ) -> cranelift::prelude::Value {
         let cond = IntCC::SignedLessThan;
-        builder.ins().icmp(cond, left, right)
+        let result = builder.ins().icmp(cond, left, right);
+        // Extend i8 boolean result to i64
+        builder.ins().uextend(types::I64, result)
     }
 
     /// Emit CLIF IR for integer greater-than comparison
+    /// Returns i64 (0 for false, 1 for true)
     pub fn emit_gt_int(
         builder: &mut FunctionBuilder,
         left: cranelift::prelude::Value,
         right: cranelift::prelude::Value,
     ) -> cranelift::prelude::Value {
         let cond = IntCC::SignedGreaterThan;
-        builder.ins().icmp(cond, left, right)
+        let result = builder.ins().icmp(cond, left, right);
+        // Extend i8 boolean result to i64
+        builder.ins().uextend(types::I64, result)
     }
 
     /// Emit CLIF IR for integer equality comparison
+    /// Returns i64 (0 for false, 1 for true)
     pub fn emit_eq_int(
         builder: &mut FunctionBuilder,
         left: cranelift::prelude::Value,
         right: cranelift::prelude::Value,
     ) -> cranelift::prelude::Value {
         let cond = IntCC::Equal;
-        builder.ins().icmp(cond, left, right)
+        let result = builder.ins().icmp(cond, left, right);
+        // Extend i8 boolean result to i64
+        builder.ins().uextend(types::I64, result)
     }
 
     /// Emit CLIF IR for float less-than comparison

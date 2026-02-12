@@ -1,12 +1,63 @@
 //! JIT compilation primitives
 
-use crate::compiler::cranelift::jit_compile::is_jit_compilable;
+use crate::compiler::cranelift::context::JITContext;
+use crate::compiler::cranelift::jit_compile::{compile_closure, is_jit_compilable, CompileResult};
+use crate::symbol::SymbolTable;
 use crate::value::{TableKey, Value};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(test)]
 use crate::value::{Arity, JitClosure};
+
+thread_local! {
+    /// Thread-local storage for JIT context
+    static JIT_CONTEXT: RefCell<Option<Rc<RefCell<JITContext>>>> = const { RefCell::new(None) };
+    /// Thread-local storage for symbol table
+    static SYMBOL_TABLE: RefCell<Option<*mut SymbolTable>> = const { RefCell::new(None) };
+}
+
+/// Statistics counters for JIT compilation (global, shared across threads)
+static COMPILED_FUNCTIONS: AtomicU64 = AtomicU64::new(0);
+static TOTAL_COMPILATIONS: AtomicU64 = AtomicU64::new(0);
+static FAILED_COMPILATIONS: AtomicU64 = AtomicU64::new(0);
+
+/// Initialize the JIT context for primitives
+///
+/// Creates a new JIT context if one doesn't exist.
+/// Must be called before using jit-compile.
+pub fn init_jit_context() {
+    JIT_CONTEXT.with(|ctx| {
+        let mut ctx = ctx.borrow_mut();
+        if ctx.is_none() {
+            if let Ok(jit_ctx) = JITContext::new() {
+                *ctx = Some(Rc::new(RefCell::new(jit_ctx)));
+            }
+        }
+    });
+}
+
+/// Set the symbol table context for JIT primitives
+///
+/// # Safety
+/// The pointer must remain valid for the duration of use.
+pub fn set_jit_symbol_table(symbols: *mut SymbolTable) {
+    SYMBOL_TABLE.with(|st| {
+        *st.borrow_mut() = Some(symbols);
+    });
+}
+
+/// Clear the JIT context
+pub fn clear_jit_context() {
+    JIT_CONTEXT.with(|ctx| {
+        *ctx.borrow_mut() = None;
+    });
+    SYMBOL_TABLE.with(|st| {
+        *st.borrow_mut() = None;
+    });
+}
 
 /// (jit-compile closure) -> jit-closure or original closure
 ///
@@ -43,18 +94,54 @@ pub fn prim_jit_compile(args: &[Value]) -> Result<Value, String> {
         return Ok(args[0].clone());
     }
 
-    // For now, we don't have a JIT context available in primitives.
-    // The proper solution would be to make jit-compile a special form in the VM,
-    // but for Phase 4, we'll return the original closure.
-    // This allows the infrastructure to be tested without full JIT compilation.
-    //
-    // In a full implementation, we would:
-    // 1. Get the JIT context from thread-local storage
-    // 2. Call compile_closure()
-    // 3. Return the JitClosure on success
-    //
-    // For now, just return the original closure to indicate "not compiled"
-    Ok(args[0].clone())
+    // Try to compile using thread-local JIT context
+    let result = JIT_CONTEXT.with(|ctx_cell| {
+        let ctx_opt = ctx_cell.borrow();
+        match &*ctx_opt {
+            Some(jit_ctx) => {
+                // Get symbol table
+                SYMBOL_TABLE.with(|st_cell| {
+                    let st_ptr = st_cell.borrow();
+                    match *st_ptr {
+                        Some(symbols_ptr) => {
+                            // SAFETY: Caller ensures pointer validity via set_jit_symbol_table
+                            let symbols = unsafe { &*symbols_ptr };
+                            TOTAL_COMPILATIONS.fetch_add(1, Ordering::Relaxed);
+                            Some(compile_closure(closure, jit_ctx, symbols))
+                        }
+                        None => {
+                            // No symbol table, try with empty one
+                            let symbols = SymbolTable::new();
+                            TOTAL_COMPILATIONS.fetch_add(1, Ordering::Relaxed);
+                            Some(compile_closure(closure, jit_ctx, &symbols))
+                        }
+                    }
+                })
+            }
+            None => None,
+        }
+    });
+
+    match result {
+        Some(CompileResult::Success(jit_closure)) => {
+            COMPILED_FUNCTIONS.fetch_add(1, Ordering::Relaxed);
+            Ok(Value::JitClosure(Rc::new(jit_closure)))
+        }
+        Some(CompileResult::NotCompilable(_reason)) => {
+            // Not compilable, return original closure silently
+            Ok(args[0].clone())
+        }
+        Some(CompileResult::Error(e)) => {
+            FAILED_COMPILATIONS.fetch_add(1, Ordering::Relaxed);
+            // Compilation error - still return original closure for graceful degradation
+            eprintln!("JIT compilation failed: {}", e);
+            Ok(args[0].clone())
+        }
+        None => {
+            // No JIT context available, return original closure
+            Ok(args[0].clone())
+        }
+    }
 }
 
 /// (jit-compiled? value) -> bool
@@ -98,9 +185,6 @@ pub fn prim_jit_compilable_p(args: &[Value]) -> Result<Value, String> {
 /// Returns a struct with the following fields:
 /// - compiled-functions: Number of functions compiled to native code
 /// - jit-enabled: Whether JIT compilation is available
-///
-/// Note: Currently returns basic statistics. Full statistics tracking
-/// would require integration with the VM's JIT executor.
 pub fn prim_jit_stats(args: &[Value]) -> Result<Value, String> {
     if !args.is_empty() {
         return Err(format!(
@@ -111,32 +195,27 @@ pub fn prim_jit_stats(args: &[Value]) -> Result<Value, String> {
 
     let mut stats = BTreeMap::new();
 
-    // For now, we return basic statistics that don't require VM access.
-    // In a full implementation with VM integration, we would:
-    // 1. Access the JIT executor from the VM
-    // 2. Query the JITContext for compiled functions count
-    // 3. Track compilation attempts and failures
-    // 4. Report cache statistics
-    //
-    // Currently, we return a struct indicating JIT is available but
-    // with placeholder values. The actual statistics would be populated
-    // when jit-stats is called as a special form with VM access.
+    // Check if JIT context is available
+    let jit_enabled = JIT_CONTEXT.with(|ctx| ctx.borrow().is_some());
 
-    // Check if JIT is available (we can always compile, but success depends on code)
-    let jit_enabled = true;
+    // Get actual statistics from atomic counters
+    let compiled = COMPILED_FUNCTIONS.load(Ordering::Relaxed) as i64;
+    let total = TOTAL_COMPILATIONS.load(Ordering::Relaxed) as i64;
+    let failed = FAILED_COMPILATIONS.load(Ordering::Relaxed) as i64;
 
     stats.insert(
         TableKey::String("compiled-functions".to_string()),
-        Value::Int(0),
+        Value::Int(compiled),
     );
     stats.insert(
         TableKey::String("total-compilations".to_string()),
-        Value::Int(0),
+        Value::Int(total),
     );
     stats.insert(
         TableKey::String("failed-compilations".to_string()),
-        Value::Int(0),
+        Value::Int(failed),
     );
+    // These could be tracked with more infrastructure
     stats.insert(TableKey::String("cache-hits".to_string()), Value::Int(0));
     stats.insert(TableKey::String("cache-misses".to_string()), Value::Int(0));
     stats.insert(TableKey::String("hot-closures".to_string()), Value::Int(0));
@@ -261,7 +340,8 @@ mod tests {
         let result = prim_jit_stats(&[]).unwrap();
         if let Value::Struct(s) = result {
             let jit_enabled = s.get(&TableKey::String("jit-enabled".to_string()));
-            assert!(matches!(jit_enabled, Some(Value::Bool(true))));
+            // jit-enabled is a bool (may be true or false depending on context initialization)
+            assert!(matches!(jit_enabled, Some(Value::Bool(_))));
         } else {
             panic!("Expected struct");
         }
