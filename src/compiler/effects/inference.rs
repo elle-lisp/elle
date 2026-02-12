@@ -201,8 +201,8 @@ impl EffectContext {
         }
     }
 
-    /// Infer the effect of calling a function
-    fn infer_call_effect(&self, func: &Expr, args: &[Expr]) -> Effect {
+    /// Infer the effect of calling a function (public for CPS transform)
+    pub fn infer_call_effect(&self, func: &Expr, args: &[Expr]) -> Effect {
         match func {
             Expr::GlobalVar(sym_id) => {
                 match self.known_effects.get(sym_id) {
