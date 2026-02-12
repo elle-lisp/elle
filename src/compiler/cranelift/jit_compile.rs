@@ -207,7 +207,7 @@ fn compile_lambda_body(
 
         let mut builder = FunctionBuilder::new(&mut ctx.ctx.func, &mut ctx.builder_ctx);
 
-        // Create entry block with parameters
+        // Create entry block with parameters (receives args_ptr, args_len, env_ptr)
         let entry_block = builder.create_block();
         builder.append_block_param(entry_block, types::I64); // args_ptr
         builder.append_block_param(entry_block, types::I64); // args_len
@@ -220,6 +220,28 @@ fn compile_lambda_body(
         let args_ptr = block_params[0];
         let _args_len = block_params[1];
         let env_ptr = block_params[2];
+
+        // Create body block with block parameters for each function argument
+        // This enables tail call optimization by jumping to this block with new argument values
+        let body_block = builder.create_block();
+        for _ in 0..params.len() {
+            builder.append_block_param(body_block, types::I64);
+        }
+
+        // In entry block: load arguments and jump to body block
+        let mut arg_values = Vec::new();
+        for (i, _sym_id) in params.iter().enumerate() {
+            let offset = (i * 8) as i32;
+            let arg_val = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), args_ptr, offset);
+            arg_values.push(arg_val);
+        }
+        builder.ins().jump(body_block, &arg_values);
+
+        // Switch to body block and set up scope/stack
+        builder.switch_to_block(body_block);
+        // Don't seal body_block yet - it may have back-edges from self-recursive tail calls
 
         // Create compilation context with scope and stack management
         // NOTE: Do NOT push_scope() here - the AST expects depth=0 for the lambda's scope
@@ -247,15 +269,11 @@ fn compile_lambda_body(
             builder.ins().stack_store(cap_val, slot, 0);
         }
 
-        // Bind parameters (they come from args_ptr)
+        // Bind parameters (they now come from body_block parameters)
+        let body_block_params = builder.block_params(body_block).to_vec();
         for (i, sym_id) in params.iter().enumerate() {
             let (depth, index) = scope_manager.bind(*sym_id);
-            let offset = (i * 8) as i32;
-
-            // Load param from args array: args_ptr[i]
-            let arg_val = builder
-                .ins()
-                .load(types::I64, MemFlags::new(), args_ptr, offset);
+            let arg_val = body_block_params[i];
 
             // Allocate stack slot and store
             let (slot, _) = stack_allocator.allocate(
@@ -278,6 +296,12 @@ fn compile_lambda_body(
         compile_ctx.scope_manager = scope_manager;
         compile_ctx.stack_allocator = stack_allocator;
 
+        // Set up function context for tail call optimization
+        compile_ctx.func_ctx = Some(super::compiler::JitFunctionContext {
+            body_block,
+            current_function_name: Some(func_name.to_string()),
+        });
+
         let result = super::compiler::ExprCompiler::compile_expr_block(&mut compile_ctx, body)?;
 
         // Return the result
@@ -293,6 +317,10 @@ fn compile_lambda_body(
 
         // Drop compile_ctx to release the borrow on builder
         drop(compile_ctx);
+
+        // Seal body_block after compilation (now all jumps to it are emitted)
+        builder.seal_block(body_block);
+
         builder.finalize();
     }
 
