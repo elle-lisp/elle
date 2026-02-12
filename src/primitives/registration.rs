@@ -42,6 +42,7 @@ use super::math::{
 use super::meta::prim_gensym;
 use super::module_loading::{prim_add_module_path, prim_import_file};
 use super::package::{prim_package_info, prim_package_version};
+use super::process::prim_exit;
 use super::signaling::{prim_error, prim_signal, prim_warn};
 use super::string::{
     prim_any_to_string, prim_char_at, prim_number_to_string, prim_string_append,
@@ -324,6 +325,9 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "join", prim_join);
     register_fn(vm, symbols, "sleep", prim_sleep);
     register_fn(vm, symbols, "current-thread-id", prim_current_thread_id);
+
+    // Process control
+    register_fn(vm, symbols, "exit", prim_exit);
 
     // Debugging and profiling primitives
     register_fn(vm, symbols, "debug-print", prim_debug_print);
