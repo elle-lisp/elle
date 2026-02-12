@@ -144,6 +144,10 @@ fn optimize_length_zero_check(expr: &mut Expr, symbols: &SymbolTable) {
         | Expr::GlobalVar(_)
         | Expr::Import { .. }
         | Expr::ModuleRef { .. } => {}
+
+        Expr::Yield(expr) => {
+            optimize_length_zero_check(expr, symbols);
+        }
     }
 }
 

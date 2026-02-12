@@ -76,6 +76,7 @@ pub fn is_jit_compilable(expr: &Expr) -> bool {
         Expr::Module { .. } => false,
         Expr::Import { .. } => false,
         Expr::ModuleRef { .. } => false,
+        Expr::Yield { .. } => false, // Yield requires CPS transformation
     }
 }
 

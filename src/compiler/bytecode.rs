@@ -154,6 +154,9 @@ pub enum Instruction {
 
     /// Invoke a restart by name (restart_name_id u16)
     InvokeRestart,
+
+    /// Yield from coroutine (suspends execution)
+    Yield,
 }
 
 /// Inline cache entry for function lookups

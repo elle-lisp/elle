@@ -258,6 +258,13 @@ impl Compiler {
                 // This case should never be reached, but we handle it for exhaustiveness
                 panic!("Xor expression should be transformed to a function call");
             }
+
+            Expr::Yield(expr) => {
+                // Compile the expression to yield
+                self.compile_expr(expr, false);
+                // Emit yield instruction
+                self.bytecode.emit(Instruction::Yield);
+            }
         }
     }
 

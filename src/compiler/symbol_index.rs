@@ -376,6 +376,10 @@ impl SymbolExtractor {
             Expr::Import { .. } | Expr::ModuleRef { .. } => {
                 // Module references are handled elsewhere
             }
+
+            Expr::Yield(expr) => {
+                self.walk_expr(expr, loc, index, symbols);
+            }
         }
     }
 

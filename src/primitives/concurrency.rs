@@ -71,6 +71,9 @@ fn is_value_sendable(value: &Value) -> bool {
                 false
             }
         }
+
+        // Coroutines are not sendable (contain closures with mutable state)
+        Value::Coroutine(_) => false,
     }
 }
 

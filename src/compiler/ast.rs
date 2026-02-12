@@ -170,6 +170,10 @@ pub enum Expr {
 
     /// Xor operator (exclusive or, all args must be evaluated)
     Xor(Vec<Expr>),
+
+    /// Yield expression - suspends coroutine execution
+    /// (yield value) - yields value and suspends
+    Yield(Box<Expr>),
 }
 
 /// Pattern for pattern matching

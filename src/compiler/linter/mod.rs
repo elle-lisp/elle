@@ -213,6 +213,10 @@ impl Linter {
                     self.check_expr(e, loc, symbol_table);
                 }
             }
+
+            Expr::Yield(expr) => {
+                self.check_expr(expr, loc, symbol_table);
+            }
         }
     }
 
