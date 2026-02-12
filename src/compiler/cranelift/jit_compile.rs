@@ -46,12 +46,23 @@ pub fn is_jit_compilable(expr: &Expr) -> bool {
         Expr::And(exprs) | Expr::Or(exprs) | Expr::Xor(exprs) => {
             exprs.iter().all(is_jit_compilable)
         }
+        // Set is supported (mutation of local variables)
+        Expr::Set { value, .. } => is_jit_compilable(value),
+        // Cond is supported
+        Expr::Cond { clauses, else_body } => {
+            clauses
+                .iter()
+                .all(|(c, b)| is_jit_compilable(c) && is_jit_compilable(b))
+                && else_body
+                    .as_ref()
+                    .map(|e| is_jit_compilable(e))
+                    .unwrap_or(true)
+        }
+        // Check if Call is a supported primitive operation
+        Expr::Call { func, args, .. } => is_jit_compilable_call(func, args),
         // These are NOT compilable yet:
         Expr::Lambda { .. } => false, // Nested lambdas need more work
-        Expr::Call { .. } => false,   // Function calls need runtime support
         Expr::Letrec { .. } => false,
-        Expr::Set { .. } => false,   // Mutation needs cell handling
-        Expr::Cond { .. } => false,  // Cond needs more work
         Expr::Match { .. } => false, // Pattern matching needs more work
         Expr::Try { .. } => false,   // Exception handling needs more work
         Expr::Throw { .. } => false,
@@ -68,13 +79,37 @@ pub fn is_jit_compilable(expr: &Expr) -> bool {
     }
 }
 
+/// Check if a Call expression can be JIT compiled
+fn is_jit_compilable_call(func: &Expr, args: &[Expr]) -> bool {
+    // The function must be a symbol (either GlobalVar or Literal(Symbol))
+    let is_symbol_func = matches!(
+        func,
+        Expr::GlobalVar(_) | Expr::Literal(crate::value::Value::Symbol(_))
+    );
+
+    if !is_symbol_func {
+        return false;
+    }
+
+    // All arguments must be compilable
+    if !args.iter().all(is_jit_compilable) {
+        return false;
+    }
+
+    // We can't fully check the operator name without a symbol table,
+    // but we trust that if it's a symbol with 1-2 args and
+    // all args are compilable, the compiler will try to handle it.
+    // The compiler will fail gracefully if the op isn't supported.
+    matches!(args.len(), 1 | 2)
+}
+
 /// Compile a closure to native code
 ///
 /// Returns CompileResult indicating success, not-compilable, or error.
 pub fn compile_closure(
     closure: &Closure,
     jit_context: &Rc<RefCell<JITContext>>,
-    _symbols: &SymbolTable,
+    symbols: &SymbolTable,
 ) -> CompileResult {
     // 1. Check if source AST is available
     let jit_lambda = match &closure.source_ast {
@@ -100,6 +135,7 @@ pub fn compile_closure(
         &jit_lambda.params,
         &jit_lambda.body,
         &jit_lambda.captures,
+        symbols,
     ) {
         Ok(ptr) => ptr,
         Err(e) => return CompileResult::Error(e),
@@ -133,6 +169,7 @@ fn compile_lambda_body(
     params: &[SymbolId],
     body: &Expr,
     captures: &[(SymbolId, usize, usize)],
+    symbols: &SymbolTable,
 ) -> Result<*const u8, String> {
     use cranelift::prelude::*;
     use cranelift_module::Module;
@@ -184,10 +221,10 @@ fn compile_lambda_body(
         let env_ptr = block_params[2];
 
         // Create compilation context with scope and stack management
+        // NOTE: Do NOT push_scope() here - the AST expects depth=0 for the lambda's scope
+        // (the converter uses depth=0 for the current lambda's parameters)
         let mut scope_manager = super::scoping::ScopeManager::new();
         let mut stack_allocator = super::stack_allocator::StackAllocator::new();
-
-        scope_manager.push_scope();
 
         // Bind captures first (they come from env_ptr)
         for (i, (sym_id, _, _)) in captures.iter().enumerate() {
@@ -230,9 +267,8 @@ fn compile_lambda_body(
         }
 
         // Compile the body expression
-        let symbols = crate::symbol::SymbolTable::new();
         let mut compile_ctx =
-            super::compiler::CompileContext::new(&mut builder, &symbols, &mut ctx.module);
+            super::compiler::CompileContext::new(&mut builder, symbols, &mut ctx.module);
         compile_ctx.scope_manager = scope_manager;
         compile_ctx.stack_allocator = stack_allocator;
 
@@ -262,7 +298,7 @@ fn compile_lambda_body(
         // 9. Define the function in the module
         ctx.module
             .define_function(func_id, &mut ctx.ctx)
-            .map_err(|e| format!("Failed to define function: {}", e))?;
+            .map_err(|e| format!("Failed to define function: {:?}", e))?;
 
         // 10. Clear context for next use
         ctx.ctx.clear();
@@ -398,14 +434,15 @@ mod tests {
     }
 
     #[test]
-    fn test_is_jit_compilable_set_not_compilable() {
+    fn test_is_jit_compilable_set_is_compilable() {
+        // Set expressions with compilable values are now compilable
         let expr = Expr::Set {
             var: SymbolId(1),
             depth: 0,
             index: 0,
             value: Box::new(Expr::Literal(Value::Int(1))),
         };
-        assert!(!is_jit_compilable(&expr));
+        assert!(is_jit_compilable(&expr));
     }
 
     #[test]
@@ -453,8 +490,16 @@ mod tests {
         let body = Expr::Literal(Value::Int(42));
         let params = vec![];
         let captures = vec![];
+        let symbols = crate::symbol::SymbolTable::new();
 
-        let result = compile_lambda_body(&jit_context, "test_literal", &params, &body, &captures);
+        let result = compile_lambda_body(
+            &jit_context,
+            "test_literal",
+            &params,
+            &body,
+            &captures,
+            &symbols,
+        );
         assert!(result.is_ok(), "Failed to compile lambda: {:?}", result);
         assert!(
             !result.unwrap().is_null(),
@@ -473,11 +518,20 @@ mod tests {
         ));
 
         // (fn (x) x) - identity function
-        let body = Expr::Var(SymbolId(1), 1, 0);
+        // Note: depth=0 because parameters are in the lambda's base scope
+        let body = Expr::Var(SymbolId(1), 0, 0);
         let params = vec![SymbolId(1)];
         let captures = vec![];
+        let symbols = crate::symbol::SymbolTable::new();
 
-        let result = compile_lambda_body(&jit_context, "test_param", &params, &body, &captures);
+        let result = compile_lambda_body(
+            &jit_context,
+            "test_param",
+            &params,
+            &body,
+            &captures,
+            &symbols,
+        );
         assert!(result.is_ok(), "Failed to compile lambda: {:?}", result);
         assert!(
             !result.unwrap().is_null(),
