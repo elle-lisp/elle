@@ -147,6 +147,7 @@ fn build_quasiquote_expr(
         Value::Closure(_)
         | Value::JitClosure(_)
         | Value::NativeFn(_)
+        | Value::VmAwareFn(_)
         | Value::LibHandle(_)
         | Value::CHandle(_)
         | Value::Exception(_)

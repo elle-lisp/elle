@@ -73,6 +73,10 @@ impl Arity {
 /// Native function type
 pub type NativeFn = fn(&[Value]) -> Result<Value, String>;
 
+/// VM-aware native function type (needs access to VM for execution)
+/// This is used for primitives like coroutine-resume that need to execute bytecode
+pub type VmAwareFn = fn(&[Value], &mut crate::vm::VM) -> Result<Value, String>;
+
 /// Cons cell for list construction
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cons {
@@ -304,6 +308,7 @@ pub enum Value {
     Closure(Rc<Closure>),
     JitClosure(Rc<JitClosure>),
     NativeFn(NativeFn),
+    VmAwareFn(VmAwareFn),
     // FFI types
     LibHandle(LibHandle),
     CHandle(CHandle),
@@ -336,6 +341,7 @@ impl PartialEq for Value {
             (Value::Closure(_), Value::Closure(_)) => false, // Closures are never equal
             (Value::JitClosure(_), Value::JitClosure(_)) => false, // JIT closures are never equal
             (Value::NativeFn(_), Value::NativeFn(_)) => false, // Functions are never equal
+            (Value::VmAwareFn(_), Value::VmAwareFn(_)) => false, // VM-aware functions are never equal
             (Value::LibHandle(a), Value::LibHandle(b)) => a == b,
             (Value::CHandle(a), Value::CHandle(b)) => a == b,
             (Value::Exception(a), Value::Exception(b)) => a == b,
@@ -495,6 +501,7 @@ impl Value {
             Value::Closure(_) => "closure",
             Value::JitClosure(_) => "jit-closure",
             Value::NativeFn(_) => "native-function",
+            Value::VmAwareFn(_) => "vm-aware-function",
             Value::LibHandle(_) => "library-handle",
             Value::CHandle(_) => "c-handle",
             Value::Exception(_) => "exception",
@@ -566,6 +573,7 @@ impl fmt::Debug for Value {
             Value::Closure(_) => write!(f, "<closure>"),
             Value::JitClosure(jc) => write!(f, "{:?}", jc),
             Value::NativeFn(_) => write!(f, "<native-fn>"),
+            Value::VmAwareFn(_) => write!(f, "<vm-aware-fn>"),
             Value::LibHandle(h) => write!(f, "<library-handle:{}>", h.0),
             Value::CHandle(h) => write!(f, "<c-handle:{}>", h.id),
             Value::Exception(exc) => write!(f, "<exception: {}>", exc.message),

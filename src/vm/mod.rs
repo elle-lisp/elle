@@ -187,6 +187,7 @@ impl VM {
                                 Err(e) => return Err(e),
                             }
                         }
+                        Value::VmAwareFn(f) => f(&args, self)?,
                         Value::Closure(closure) => {
                             self.call_depth += 1;
                             if self.call_depth > 1000 {
@@ -396,6 +397,9 @@ impl VM {
                     match func {
                         Value::NativeFn(f) => {
                             return f(&args);
+                        }
+                        Value::VmAwareFn(f) => {
+                            return f(&args, self);
                         }
                         Value::Closure(closure) => {
                             // Build proper environment: captures + args + locals (same as Call)

@@ -93,6 +93,7 @@ fn format_value(
         Value::Closure(_) => "#<closure>".to_string(),
         Value::JitClosure(_) => "#<jit-closure>".to_string(),
         Value::NativeFn(_) => "#<native-fn>".to_string(),
+        Value::VmAwareFn(_) => "#<vm-aware-fn>".to_string(),
         Value::LibHandle(_) => "#<lib-handle>".to_string(),
         Value::CHandle(_) => "#<c-handle>".to_string(),
         Value::Exception(_) => "#<exception>".to_string(),

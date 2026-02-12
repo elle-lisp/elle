@@ -9,6 +9,11 @@ use super::arithmetic::{
 };
 use super::comparison::{prim_eq, prim_ge, prim_gt, prim_le, prim_lt};
 use super::concurrency::{prim_current_thread_id, prim_join, prim_sleep, prim_spawn};
+use super::coroutines::{
+    prim_coroutine_done, prim_coroutine_next, prim_coroutine_resume, prim_coroutine_status,
+    prim_coroutine_to_iterator, prim_coroutine_value, prim_is_coroutine, prim_make_coroutine,
+    prim_yield_from,
+};
 use super::debug::{prim_debug_print, prim_memory_usage, prim_profile, prim_trace};
 use super::display::{prim_display, prim_newline};
 use super::exception::{prim_exception, prim_exception_data, prim_exception_message, prim_throw};
@@ -370,6 +375,24 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "jit-compiled?", prim_jit_compiled_p);
     register_fn(vm, symbols, "jit-compilable?", prim_jit_compilable_p);
     register_fn(vm, symbols, "jit-stats", prim_jit_stats);
+
+    // Coroutine primitives (Phase 6)
+    register_fn(vm, symbols, "make-coroutine", prim_make_coroutine);
+    register_fn(vm, symbols, "coroutine-status", prim_coroutine_status);
+    register_fn(vm, symbols, "coroutine-done?", prim_coroutine_done);
+    register_fn(vm, symbols, "coroutine-value", prim_coroutine_value);
+    register_fn(vm, symbols, "coroutine?", prim_is_coroutine);
+
+    // VM-aware coroutine primitives (Phase 6)
+    register_vm_aware_fn(vm, symbols, "coroutine-resume", prim_coroutine_resume);
+    register_vm_aware_fn(vm, symbols, "yield-from", prim_yield_from);
+    register_fn(
+        vm,
+        symbols,
+        "coroutine->iterator",
+        prim_coroutine_to_iterator,
+    );
+    register_vm_aware_fn(vm, symbols, "coroutine-next", prim_coroutine_next);
 }
 
 /// Register a primitive function with the VM
@@ -381,4 +404,15 @@ fn register_fn(
 ) {
     let sym_id = symbols.intern(name);
     vm.set_global(sym_id.0, Value::NativeFn(func));
+}
+
+/// Register a VM-aware primitive function with the VM
+fn register_vm_aware_fn(
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+    name: &str,
+    func: fn(&[Value], &mut VM) -> Result<Value, String>,
+) {
+    let sym_id = symbols.intern(name);
+    vm.set_global(sym_id.0, Value::VmAwareFn(func));
 }
