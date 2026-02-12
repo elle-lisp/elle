@@ -10,7 +10,7 @@ use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, VM}
 use rustyline::error::ReadlineError;
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
 fn print_welcome() {
     println!("Elle v0.1.0 - Lisp Interpreter (type (help) for commands)");
@@ -152,7 +152,7 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
                 // Execute
                 match vm.execute(&bytecode) {
                     Ok(result) => {
-                        if !result.is_nil() {
+                        if !result.is_nil() && std::io::stdout().is_terminal() {
                             println!("⟹ {:?}", result);
                         }
                     }
@@ -239,7 +239,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                         // Execute
                         match vm.execute(&bytecode) {
                             Ok(result) => {
-                                if !result.is_nil() {
+                                if !result.is_nil() && std::io::stdout().is_terminal() {
                                     println!("⟹ {:?}", result);
                                 }
                             }
@@ -366,7 +366,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                 // Execute
                 match vm.execute(&bytecode) {
                     Ok(result) => {
-                        if !result.is_nil() {
+                        if !result.is_nil() && std::io::stdout().is_terminal() {
                             println!("⟹ {:?}", result);
                         }
                     }
