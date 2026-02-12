@@ -1,13 +1,14 @@
 use super::super::ast::Expr;
+use super::ScopeEntry;
 use crate::symbol::SymbolTable;
-use crate::value::{SymbolId, Value};
+use crate::value::Value;
 
 /// Expand a quasiquote form with support for unquote and unquote-splicing
 /// Quasiquote recursively quotes all forms except those wrapped in unquote/unquote-splicing
 pub fn expand_quasiquote(
     value: &Value,
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
     // For now, implement quasiquote as a simple transformation:
     // `(a ,x ,@y b) becomes (list 'a x y 'b)
@@ -20,7 +21,7 @@ pub fn expand_quasiquote(
 fn build_quasiquote_expr(
     value: &Value,
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
     depth: usize,
 ) -> Result<Expr, String> {
     // Import the value_to_expr_with_scope function from parent module

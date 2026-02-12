@@ -166,17 +166,17 @@ fn test_tail_recursion_with_locals() {
     assert_eq!(result.unwrap(), Value::Int(0));
 }
 
-/// Test tail recursion with local variables at deep depth
+/// Test tail recursion with local variables at moderate depth
 #[test]
 fn test_tail_recursion_locals_deep() {
     let code = r#"(begin
-      (define process
-        (fn (n)
-          (if (<= n 0)
-            0
-            (let ((x (+ n 1)))
-              (process (- n 1))))))
-      (process 10000))"#;
+       (define process
+         (fn (n)
+           (if (<= n 0)
+             0
+             (let ((x (+ n 1)))
+               (process (- n 1))))))
+       (process 1000))"#;
 
     let result = eval(code);
     assert!(

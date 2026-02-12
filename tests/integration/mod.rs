@@ -125,3 +125,7 @@ mod naming_consistency {
 mod peephole_optimization {
     include!("peephole_optimization.rs");
 }
+
+mod let_semantics {
+    include!("let_semantics.rs");
+}

@@ -1,6 +1,7 @@
 use super::super::ast::Expr;
+use super::ScopeEntry;
 use crate::symbol::SymbolTable;
-use crate::value::{SymbolId, Value};
+use crate::value::Value;
 
 /// Handle thread-first macro: (-> value form1 form2 ...)
 /// Inserts value as the FIRST argument to each form
@@ -8,7 +9,7 @@ use crate::value::{SymbolId, Value};
 pub fn handle_thread_first(
     list: &[Value],
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
     use super::value_to_expr::value_to_expr_with_scope;
 
@@ -55,7 +56,7 @@ pub fn handle_thread_first(
 pub fn handle_thread_last(
     list: &[Value],
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
     use super::value_to_expr::value_to_expr_with_scope;
 

@@ -1,6 +1,7 @@
 use super::super::ast::Expr;
+use super::ScopeEntry;
 use crate::symbol::SymbolTable;
-use crate::value::{SymbolId, Value};
+use crate::value::Value;
 
 /// Helper function to convert handler-case expressions
 /// Extracted to reduce stack frame size of value_to_expr_with_scope
@@ -8,7 +9,7 @@ use crate::value::{SymbolId, Value};
 pub fn convert_handler_case(
     list: &[Value],
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
     use super::value_to_expr::value_to_expr_with_scope;
 
@@ -74,7 +75,7 @@ pub fn convert_handler_case(
 pub fn convert_handler_bind(
     list: &[Value],
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
     use super::value_to_expr::value_to_expr_with_scope;
 
@@ -134,7 +135,7 @@ pub fn convert_handler_bind(
 pub fn convert_try(
     list: &[Value],
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
     use super::value_to_expr::value_to_expr_with_scope;
 

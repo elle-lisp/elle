@@ -5,13 +5,15 @@ use super::control_flow::{convert_cond, convert_match_expr};
 use super::exception_handling::{convert_handler_bind, convert_handler_case, convert_try};
 use super::quasiquote::expand_quasiquote;
 use super::threading::{handle_thread_first, handle_thread_last};
+use super::{ScopeEntry, ScopeType};
 use crate::symbol::SymbolTable;
-use crate::value::{SymbolId, Value};
+use crate::value::Value;
 
 /// Simple value-to-expr conversion for bootstrap
 /// This is a simple tree-walking approach before full macro expansion
 pub fn value_to_expr(value: &Value, symbols: &mut SymbolTable) -> Result<Expr, String> {
-    let mut expr = value_to_expr_with_scope(value, symbols, &mut Vec::new())?;
+    let mut scope_stack: Vec<ScopeEntry> = Vec::new();
+    let mut expr = value_to_expr_with_scope(value, symbols, &mut scope_stack)?;
     super::super::capture_resolution::resolve_captures(&mut expr);
     mark_tail_calls(&mut expr, true);
     super::super::optimize::optimize(&mut expr, symbols);
@@ -19,11 +21,11 @@ pub fn value_to_expr(value: &Value, symbols: &mut SymbolTable) -> Result<Expr, S
 }
 
 /// Convert a value to an expression, tracking local variable scopes
-/// The scope_stack contains local bindings (as Vec for ordering) at each nesting level
+/// The scope_stack contains local bindings (as ScopeEntry for ordering) at each nesting level
 pub fn value_to_expr_with_scope(
     value: &Value,
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
     match value {
         Value::Nil
@@ -36,15 +38,40 @@ pub fn value_to_expr_with_scope(
 
         Value::Symbol(id) => {
             // Check if the symbol is a local binding by walking up the scope stack
-            for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
-                if let Some(local_index) = scope.iter().position(|sym| sym == id) {
-                    // Found in local scope - use Var with appropriate depth and index
-                    // depth represents how many function scopes up the variable is defined:
-                    // 0 = current lambda's parameters
-                    // 1 = enclosing lambda's parameters
-                    // etc.
-                    let actual_depth = scope_stack.len() - 1 - reverse_idx;
-                    return Ok(Expr::Var(*id, actual_depth, local_index));
+            // Note: enumerate().rev() gives us (original_idx, value) pairs in reverse order
+            // so idx IS the original position in scope_stack
+            for (idx, scope_entry) in scope_stack.iter().enumerate().rev() {
+                if let Some(local_index) = scope_entry.symbols.iter().position(|sym| sym == id) {
+                    // idx is the actual position in scope_stack where the variable was found
+                    // depth is the distance from the top of the stack (used for lambda scoping)
+                    let depth = scope_stack.len() - 1 - idx;
+
+                    if scope_entry.scope_type == ScopeType::Let {
+                        // Let-bound variable found. Check if there's a lambda scope between
+                        // here (current position) and the let scope. If so, we need to capture
+                        // this variable in the lambda, so use Var. Otherwise, use GlobalVar
+                        // for direct runtime scope stack access.
+                        let mut has_intervening_lambda = false;
+                        for scope in scope_stack.iter().skip(idx + 1) {
+                            if scope.scope_type == ScopeType::Function {
+                                has_intervening_lambda = true;
+                                break;
+                            }
+                        }
+
+                        if has_intervening_lambda {
+                            // Inside a lambda that's nested within the let scope
+                            // Use Var so the variable gets captured by the lambda
+                            return Ok(Expr::Var(*id, idx, local_index));
+                        } else {
+                            // No intervening lambda - directly access via runtime scope stack
+                            return Ok(Expr::GlobalVar(*id));
+                        }
+                    } else {
+                        // Lambda parameters and captures use Var (closure environment)
+                        // depth represents how many function scopes up the variable is defined
+                        return Ok(Expr::Var(*id, depth, local_index));
+                    }
                 }
             }
             // Not found in any local scope - treat as global
@@ -162,9 +189,9 @@ pub fn value_to_expr_with_scope(
                         // it can be found. More importantly, it makes the variable available to
                         // subsequent expressions in the same scope.
                         if !scope_stack.is_empty() {
-                            let scope = scope_stack.last_mut().unwrap();
-                            if !scope.contains(&name) {
-                                scope.push(name);
+                            let scope_entry = scope_stack.last_mut().unwrap();
+                            if !scope_entry.symbols.contains(&name) {
+                                scope_entry.symbols.push(name);
                             }
                         }
 
@@ -192,8 +219,10 @@ pub fn value_to_expr_with_scope(
                         let mut depth = 0;
                         let mut index = usize::MAX; // Use MAX to signal global variable
 
-                        for (reverse_idx, scope) in scope_stack.iter().enumerate().rev() {
-                            if let Some(local_index) = scope.iter().position(|sym| sym == &var) {
+                        for (reverse_idx, scope_entry) in scope_stack.iter().enumerate().rev() {
+                            if let Some(local_index) =
+                                scope_entry.symbols.iter().position(|sym| sym == &var)
+                            {
                                 depth = scope_stack.len() - 1 - reverse_idx;
                                 index = local_index;
                                 break;
