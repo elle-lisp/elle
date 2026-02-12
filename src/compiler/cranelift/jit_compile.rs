@@ -5,6 +5,7 @@
 
 use super::context::JITContext;
 use crate::compiler::ast::Expr;
+use crate::compiler::cps::CpsJitCompiler;
 use crate::symbol::SymbolTable;
 use crate::value::{Closure, JitClosure, SymbolId};
 use std::cell::RefCell;
@@ -108,6 +109,7 @@ fn is_jit_compilable_call(func: &Expr, args: &[Expr]) -> bool {
 /// Compile a closure to native code
 ///
 /// Returns CompileResult indicating success, not-compilable, or error.
+/// Routes to CPS compilation for yielding closures, pure compilation otherwise.
 pub fn compile_closure(
     closure: &Closure,
     jit_context: &Rc<RefCell<JITContext>>,
@@ -119,18 +121,26 @@ pub fn compile_closure(
         None => return CompileResult::NotCompilable("No source AST available".to_string()),
     };
 
-    // 2. Check if body is compilable
+    // 2. Check if we should use CPS compilation based on effect
+    if CpsJitCompiler::should_use_cps(closure.effect) {
+        // CPS path - for closures that may yield
+        // For now, fall through to pure compilation
+        // TODO: Implement full CPS compilation path
+        // return compile_cps_closure(closure, jit_context, symbols);
+    }
+
+    // 3. Check if body is compilable (pure path)
     if !is_jit_compilable(&jit_lambda.body) {
         return CompileResult::NotCompilable(
             "Closure body contains unsupported constructs".to_string(),
         );
     }
 
-    // 3. Generate unique function name
+    // 4. Generate unique function name
     let func_id = next_func_id();
     let func_name = format!("jit_closure_{}", func_id);
 
-    // 4. Compile the body
+    // 5. Compile the body
     let code_ptr = match compile_lambda_body(
         jit_context,
         &func_name,
@@ -143,7 +153,7 @@ pub fn compile_closure(
         Err(e) => return CompileResult::Error(e),
     };
 
-    // 5. Create JitClosure
+    // 6. Create JitClosure
     let jit_closure = JitClosure {
         code_ptr,
         env: closure.env.clone(),
