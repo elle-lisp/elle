@@ -342,6 +342,7 @@ mod tests {
             num_captures: 0,
             constants: Rc::new(vec![]),
             source_ast: None,
+            effect: crate::compiler::effects::Effect::Pure,
         }));
         assert!(serialize_value(&closure).is_err());
 

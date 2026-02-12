@@ -1,5 +1,6 @@
 pub mod condition;
 use crate::compiler::ast::Expr;
+use crate::compiler::effects::Effect;
 pub use condition::Condition;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -97,6 +98,8 @@ pub struct JitLambda {
     pub body: Box<Expr>,
     /// Captured variable info: (symbol_id, depth, index)
     pub captures: Vec<(SymbolId, usize, usize)>,
+    /// Effect of the lambda body
+    pub effect: Effect,
 }
 
 /// Closure with captured environment
@@ -110,6 +113,15 @@ pub struct Closure {
     pub constants: Rc<Vec<Value>>,
     /// Original AST for JIT compilation (None if not available)
     pub source_ast: Option<Rc<JitLambda>>,
+    /// Effect of the closure body
+    pub effect: Effect,
+}
+
+impl Closure {
+    /// Get the effect of this closure
+    pub fn effect(&self) -> Effect {
+        self.effect
+    }
 }
 
 /// FFI library handle
@@ -150,6 +162,8 @@ pub struct JitClosure {
     pub source: Option<Rc<Closure>>,
     /// Unique ID for this compiled function (for cache management)
     pub func_id: u64,
+    /// Effect of the closure body
+    pub effect: Effect,
 }
 
 impl fmt::Debug for JitClosure {
@@ -162,6 +176,13 @@ impl PartialEq for JitClosure {
     fn eq(&self, _other: &Self) -> bool {
         // JIT closures are never equal (like regular closures)
         false
+    }
+}
+
+impl JitClosure {
+    /// Get the effect of this JIT closure
+    pub fn effect(&self) -> Effect {
+        self.effect
     }
 }
 

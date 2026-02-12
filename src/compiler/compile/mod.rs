@@ -3,7 +3,9 @@ mod utils;
 use super::analysis::analyze_mutated_vars;
 use super::ast::Expr;
 use super::bytecode::{Bytecode, Instruction};
+use super::effects::EffectContext;
 use crate::error::LocationMap;
+use crate::symbol::SymbolTable;
 use crate::value::{Closure, SymbolId, Value};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -18,6 +20,9 @@ struct Compiler {
     lambda_locals: Vec<SymbolId>,
     lambda_captures_len: usize,
     lambda_params_len: usize,
+    // Phase 2: Symbol table and effect context for effect inference
+    symbol_table: Option<Rc<SymbolTable>>,
+    effect_context: EffectContext,
 }
 
 impl Compiler {
@@ -29,6 +34,21 @@ impl Compiler {
             lambda_locals: Vec::new(),
             lambda_captures_len: 0,
             lambda_params_len: 0,
+            symbol_table: None,
+            effect_context: EffectContext::new(),
+        }
+    }
+
+    fn with_symbols(symbol_table: Rc<SymbolTable>) -> Self {
+        Compiler {
+            bytecode: Bytecode::new(),
+            symbols: HashMap::new(),
+            scope_depth: 0,
+            lambda_locals: Vec::new(),
+            lambda_captures_len: 0,
+            lambda_params_len: 0,
+            symbol_table: Some(symbol_table.clone()),
+            effect_context: EffectContext::with_symbols(&symbol_table),
         }
     }
 
@@ -967,7 +987,15 @@ impl Compiler {
         // The closure environment layout is: [captures..., parameters..., locals...]
         // Each local is pre-allocated as a cell in the environment
         // We NO LONGER use PushScope/PopScope for lambda bodies - all variables are in closure_env
-        let mut lambda_compiler = Compiler::new();
+
+        // Phase 2: Infer the effect of the lambda body
+        let effect = self.effect_context.infer_lambda_effect(body);
+
+        let mut lambda_compiler = if let Some(ref symbol_table) = self.symbol_table {
+            Compiler::with_symbols(symbol_table.clone())
+        } else {
+            Compiler::new()
+        };
         lambda_compiler.scope_depth = 0; // NOT inside a scope (Phase 4: no scope_stack for lambdas)
         lambda_compiler.lambda_locals = locals.to_vec();
         lambda_compiler.lambda_captures_len = captures.len();
@@ -989,6 +1017,7 @@ impl Compiler {
             params: params.to_vec(),
             body: Box::new(body.clone()),
             captures: captures.to_vec(),
+            effect,
         }));
 
         let closure = Closure {
@@ -999,6 +1028,7 @@ impl Compiler {
             num_captures: captures.len(),
             constants: Rc::new(lambda_compiler.bytecode.constants),
             source_ast,
+            effect,
         };
 
         let idx = self.bytecode.add_constant(Value::Closure(Rc::new(closure)));
@@ -1166,6 +1196,14 @@ pub fn compile(expr: &Expr) -> Bytecode {
     compiler.finish()
 }
 
+/// Compile an expression to bytecode with symbol table for effect inference
+pub fn compile_with_symbols(expr: &Expr, symbols: Rc<SymbolTable>) -> Bytecode {
+    let mut compiler = Compiler::with_symbols(symbols);
+    compiler.compile_expr(expr, true);
+    compiler.bytecode.emit(Instruction::Return);
+    compiler.finish()
+}
+
 /// Compile an expression to bytecode with source location metadata
 ///
 /// Returns a tuple of (bytecode, location_map) where the location_map
@@ -1180,4 +1218,361 @@ pub fn compile_with_metadata(
     let bytecode = compile(expr);
     let location_map = LocationMap::new(); // Empty for now - phase 2 will populate this
     (bytecode, location_map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::Value;
+
+    #[test]
+    fn test_compile_pure_lambda() {
+        // (fn (x) (+ x 1))
+        let params = vec![crate::value::SymbolId(1)];
+        let body = Box::new(Expr::Call {
+            func: Box::new(Expr::GlobalVar(crate::value::SymbolId(2))), // +
+            args: vec![
+                Expr::Var(crate::value::SymbolId(1), 0, 0),
+                Expr::Literal(Value::Int(1)),
+            ],
+            tail: false,
+        });
+
+        let expr = Expr::Lambda {
+            params: params.clone(),
+            body: body.clone(),
+            captures: vec![],
+            locals: vec![],
+        };
+
+        let bytecode = compile(&expr);
+        // Should compile without errors
+        assert!(!bytecode.instructions.is_empty());
+    }
+
+    #[test]
+    fn test_compile_with_symbols_infers_effect() {
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let x_sym = symbols.intern("x");
+        let plus_sym = symbols.intern("+");
+
+        // (fn (x) (+ x 1))
+        let params = vec![x_sym];
+        let body = Box::new(Expr::Call {
+            func: Box::new(Expr::GlobalVar(plus_sym)),
+            args: vec![Expr::Var(x_sym, 0, 0), Expr::Literal(Value::Int(1))],
+            tail: false,
+        });
+
+        let expr = Expr::Lambda {
+            params: params.clone(),
+            body: body.clone(),
+            captures: vec![],
+            locals: vec![],
+        };
+
+        let bytecode = compile_with_symbols(&expr, Rc::new(symbols));
+        // Should compile without errors
+        assert!(!bytecode.instructions.is_empty());
+    }
+
+    #[test]
+    fn test_closure_stores_effect() {
+        // Create a simple lambda and verify the closure stores the effect
+        let params = vec![crate::value::SymbolId(1)];
+        let body = Box::new(Expr::Literal(Value::Int(42)));
+
+        let expr = Expr::Lambda {
+            params: params.clone(),
+            body: body.clone(),
+            captures: vec![],
+            locals: vec![],
+        };
+
+        let bytecode = compile(&expr);
+        // The closure should be stored as a constant
+        assert!(!bytecode.constants.is_empty());
+
+        // Find the closure constant
+        let closure_found = bytecode
+            .constants
+            .iter()
+            .any(|v| matches!(v, Value::Closure(_)));
+        assert!(closure_found, "Closure should be stored as a constant");
+    }
+
+    #[test]
+    fn test_nested_lambda_effect() {
+        // ((fn (x) (fn (y) (+ x y))) 1)
+        let x_sym = crate::value::SymbolId(1);
+        let y_sym = crate::value::SymbolId(2);
+        let plus_sym = crate::value::SymbolId(3);
+
+        let inner_lambda = Expr::Lambda {
+            params: vec![y_sym],
+            body: Box::new(Expr::Call {
+                func: Box::new(Expr::GlobalVar(plus_sym)),
+                args: vec![
+                    Expr::Var(x_sym, 1, 0), // x from outer scope
+                    Expr::Var(y_sym, 0, 0), // y from inner scope
+                ],
+                tail: false,
+            }),
+            captures: vec![(x_sym, 1, 0)],
+            locals: vec![],
+        };
+
+        let outer_lambda = Expr::Lambda {
+            params: vec![x_sym],
+            body: Box::new(inner_lambda),
+            captures: vec![],
+            locals: vec![],
+        };
+
+        let bytecode = compile(&outer_lambda);
+        assert!(!bytecode.instructions.is_empty());
+    }
+
+    #[test]
+    fn test_lambda_with_locals() {
+        // (fn (x) (define y 1) (+ x y))
+        let x_sym = crate::value::SymbolId(1);
+        let y_sym = crate::value::SymbolId(2);
+        let plus_sym = crate::value::SymbolId(3);
+
+        let body = Box::new(Expr::Begin(vec![
+            Expr::Define {
+                name: y_sym,
+                value: Box::new(Expr::Literal(Value::Int(1))),
+            },
+            Expr::Call {
+                func: Box::new(Expr::GlobalVar(plus_sym)),
+                args: vec![Expr::Var(x_sym, 0, 0), Expr::Var(y_sym, 0, 1)],
+                tail: false,
+            },
+        ]));
+
+        let expr = Expr::Lambda {
+            params: vec![x_sym],
+            body,
+            captures: vec![],
+            locals: vec![y_sym],
+        };
+
+        let bytecode = compile(&expr);
+        assert!(!bytecode.instructions.is_empty());
+    }
+
+    #[test]
+    fn test_pure_function_effect_inference() {
+        // Test that a simple arithmetic function is inferred as Pure
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let x_sym = symbols.intern("x");
+        let plus_sym = symbols.intern("+");
+
+        // (fn (x) (+ x 1))
+        let expr = Expr::Lambda {
+            params: vec![x_sym],
+            body: Box::new(Expr::Call {
+                func: Box::new(Expr::GlobalVar(plus_sym)),
+                args: vec![Expr::Var(x_sym, 0, 0), Expr::Literal(Value::Int(1))],
+                tail: false,
+            }),
+            captures: vec![],
+            locals: vec![],
+        };
+
+        let bytecode = compile_with_symbols(&expr, Rc::new(symbols));
+
+        // Find the closure constant
+        let closure = bytecode.constants.iter().find_map(|v| {
+            if let Value::Closure(c) = v {
+                Some(c.clone())
+            } else {
+                None
+            }
+        });
+
+        assert!(closure.is_some(), "Closure should be stored as a constant");
+        let closure = closure.unwrap();
+
+        // Verify the effect is Pure
+        assert_eq!(
+            closure.effect,
+            crate::compiler::effects::Effect::Pure,
+            "Simple arithmetic function should be Pure"
+        );
+    }
+
+    #[test]
+    fn test_nested_function_effect_inference() {
+        // Test that a function calling another pure function is inferred as Pure
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let x_sym = symbols.intern("x");
+        let abs_sym = symbols.intern("abs");
+        let plus_sym = symbols.intern("+");
+
+        // (fn (x) (+ (abs x) 1))
+        let expr = Expr::Lambda {
+            params: vec![x_sym],
+            body: Box::new(Expr::Call {
+                func: Box::new(Expr::GlobalVar(plus_sym)),
+                args: vec![
+                    Expr::Call {
+                        func: Box::new(Expr::GlobalVar(abs_sym)),
+                        args: vec![Expr::Var(x_sym, 0, 0)],
+                        tail: false,
+                    },
+                    Expr::Literal(Value::Int(1)),
+                ],
+                tail: false,
+            }),
+            captures: vec![],
+            locals: vec![],
+        };
+
+        let bytecode = compile_with_symbols(&expr, Rc::new(symbols));
+
+        let closure = bytecode.constants.iter().find_map(|v| {
+            if let Value::Closure(c) = v {
+                Some(c.clone())
+            } else {
+                None
+            }
+        });
+
+        assert!(closure.is_some());
+        let closure = closure.unwrap();
+        assert_eq!(
+            closure.effect,
+            crate::compiler::effects::Effect::Pure,
+            "Nested pure function calls should be Pure"
+        );
+    }
+
+    #[test]
+    fn test_closure_effect_propagation() {
+        // Test that effect is stored in both JitLambda and Closure
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let x_sym = symbols.intern("x");
+        let plus_sym = symbols.intern("+");
+
+        let expr = Expr::Lambda {
+            params: vec![x_sym],
+            body: Box::new(Expr::Call {
+                func: Box::new(Expr::GlobalVar(plus_sym)),
+                args: vec![Expr::Var(x_sym, 0, 0), Expr::Literal(Value::Int(1))],
+                tail: false,
+            }),
+            captures: vec![],
+            locals: vec![],
+        };
+
+        let bytecode = compile_with_symbols(&expr, Rc::new(symbols));
+
+        let closure = bytecode
+            .constants
+            .iter()
+            .find_map(|v| {
+                if let Value::Closure(c) = v {
+                    Some(c.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("Closure should exist");
+
+        // Check that effect is in the Closure
+        assert_eq!(closure.effect, crate::compiler::effects::Effect::Pure);
+
+        // Check that effect is also in the JitLambda (source_ast)
+        if let Some(jit_lambda) = &closure.source_ast {
+            assert_eq!(jit_lambda.effect, crate::compiler::effects::Effect::Pure);
+        }
+    }
+
+    #[test]
+    fn test_lambda_with_captures_effect() {
+        // Test that a lambda with captures still infers effect correctly
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let x_sym = symbols.intern("x");
+        let y_sym = symbols.intern("y");
+        let plus_sym = symbols.intern("+");
+
+        // (fn (y) (+ x y)) where x is captured
+        let expr = Expr::Lambda {
+            params: vec![y_sym],
+            body: Box::new(Expr::Call {
+                func: Box::new(Expr::GlobalVar(plus_sym)),
+                args: vec![
+                    Expr::Var(x_sym, 1, 0), // x from outer scope
+                    Expr::Var(y_sym, 0, 0), // y from this scope
+                ],
+                tail: false,
+            }),
+            captures: vec![(x_sym, 1, 0)],
+            locals: vec![],
+        };
+
+        let bytecode = compile_with_symbols(&expr, Rc::new(symbols));
+
+        let closure = bytecode
+            .constants
+            .iter()
+            .find_map(|v| {
+                if let Value::Closure(c) = v {
+                    Some(c.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("Closure should exist");
+
+        assert_eq!(closure.effect, crate::compiler::effects::Effect::Pure);
+        assert_eq!(closure.num_captures, 1);
+    }
+
+    #[test]
+    fn test_lambda_with_locals_effect() {
+        // Test that a lambda with locally-defined variables infers effect correctly
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let x_sym = symbols.intern("x");
+        let y_sym = symbols.intern("y");
+        let plus_sym = symbols.intern("+");
+
+        // (fn (x) (define y 1) (+ x y))
+        let expr = Expr::Lambda {
+            params: vec![x_sym],
+            body: Box::new(Expr::Begin(vec![
+                Expr::Define {
+                    name: y_sym,
+                    value: Box::new(Expr::Literal(Value::Int(1))),
+                },
+                Expr::Call {
+                    func: Box::new(Expr::GlobalVar(plus_sym)),
+                    args: vec![Expr::Var(x_sym, 0, 0), Expr::Var(y_sym, 0, 1)],
+                    tail: false,
+                },
+            ])),
+            captures: vec![],
+            locals: vec![y_sym],
+        };
+
+        let bytecode = compile_with_symbols(&expr, Rc::new(symbols));
+
+        let closure = bytecode
+            .constants
+            .iter()
+            .find_map(|v| {
+                if let Value::Closure(c) = v {
+                    Some(c.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("Closure should exist");
+
+        assert_eq!(closure.effect, crate::compiler::effects::Effect::Pure);
+        assert_eq!(closure.num_locals, 2); // x (param) + y (local)
+    }
 }
