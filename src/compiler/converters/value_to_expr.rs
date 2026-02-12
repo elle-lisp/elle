@@ -264,6 +264,16 @@ pub fn value_to_expr_with_scope(
                         })
                     }
 
+                    "yield" => {
+                        // Syntax: (yield <value>)
+                        // Yield suspends coroutine execution and returns a value
+                        if list.len() != 2 {
+                            return Err("yield requires exactly one argument".to_string());
+                        }
+                        let expr = value_to_expr_with_scope(&list[1], symbols, scope_stack)?;
+                        Ok(Expr::Yield(Box::new(expr)))
+                    }
+
                     "defmacro" | "define-macro" => {
                         // Syntax: (defmacro name (params...) body)
                         //      or (define-macro name (params...) body)

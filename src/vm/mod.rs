@@ -778,6 +778,12 @@ impl VM {
                     // Invoke a restart by name
                     let _restart_name_id = self.read_u16(bytecode, &mut ip);
                 }
+
+                Instruction::Yield => {
+                    // TODO: Implement yield for coroutines
+                    // For now, just return an error indicating yield is not yet implemented
+                    return Err("Yield instruction not yet implemented in VM".to_string());
+                }
             }
 
             // Phase 9a: Exception interrupt mechanism

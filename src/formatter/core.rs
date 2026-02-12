@@ -99,6 +99,7 @@ fn format_value(
         Value::Condition(_) => "#<condition>".to_string(),
         Value::ThreadHandle(_) => "#<thread-handle>".to_string(),
         Value::Cell(_) => "#<cell>".to_string(),
+        Value::Coroutine(_) => "#<coroutine>".to_string(),
     }
 }
 

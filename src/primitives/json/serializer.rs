@@ -101,6 +101,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             let inner = cell.borrow();
             serialize_value(&inner)
         }
+        Value::Coroutine(_) => Err("Cannot serialize coroutines to JSON".to_string()),
     }
 }
 
@@ -219,5 +220,6 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             let inner = cell.borrow();
             serialize_value_pretty(&inner, indent_level)
         }
+        Value::Coroutine(_) => Err("Cannot serialize coroutines to JSON".to_string()),
     }
 }

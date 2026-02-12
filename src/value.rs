@@ -249,6 +249,32 @@ pub struct ThreadHandle {
     pub(crate) result: Arc<Mutex<Option<Result<SendValue, String>>>>,
 }
 
+/// Coroutine state
+#[derive(Debug, Clone)]
+pub enum CoroutineState {
+    /// Coroutine has not started
+    Created,
+    /// Coroutine is running
+    Running,
+    /// Coroutine is suspended (yielded)
+    Suspended,
+    /// Coroutine has completed
+    Done,
+    /// Coroutine encountered an error
+    Error(String),
+}
+
+/// A coroutine value
+#[derive(Debug, Clone)]
+pub struct Coroutine {
+    /// The coroutine's closure
+    pub closure: Rc<Closure>,
+    /// Current state
+    pub state: CoroutineState,
+    /// Last yielded value (if suspended)
+    pub yielded_value: Option<Value>,
+}
+
 impl fmt::Debug for ThreadHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ThreadHandle")
@@ -289,6 +315,8 @@ pub enum Value {
     ThreadHandle(ThreadHandle),
     // Shared mutable cell for captured variables across closures
     Cell(Rc<RefCell<Box<Value>>>),
+    // Coroutines (suspendable computations)
+    Coroutine(Rc<Coroutine>),
 }
 
 impl PartialEq for Value {
@@ -314,6 +342,7 @@ impl PartialEq for Value {
             (Value::Condition(a), Value::Condition(b)) => a == b,
             (Value::ThreadHandle(a), Value::ThreadHandle(b)) => a == b,
             (Value::Cell(_), Value::Cell(_)) => false, // Cells are mutable, never equal
+            (Value::Coroutine(_), Value::Coroutine(_)) => false, // Coroutines are never equal
             _ => false,
         }
     }
@@ -472,6 +501,7 @@ impl Value {
             Value::Condition(_) => "condition",
             Value::ThreadHandle(_) => "thread-handle",
             Value::Cell(_) => "cell",
+            Value::Coroutine(_) => "coroutine",
         }
     }
 }
@@ -542,6 +572,7 @@ impl fmt::Debug for Value {
             Value::Condition(cond) => write!(f, "<condition: id={}>", cond.exception_id),
             Value::ThreadHandle(_) => write!(f, "<thread-handle>"),
             Value::Cell(_) => write!(f, "<cell>"),
+            Value::Coroutine(_) => write!(f, "<coroutine>"),
         }
     }
 }

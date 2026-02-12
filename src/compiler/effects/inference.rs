@@ -195,6 +195,9 @@ impl EffectContext {
             | Expr::Module { .. }
             | Expr::Import { .. }
             | Expr::ModuleRef { .. } => Effect::Pure,
+
+            // Yield: always yields, plus the effect of the yielded expression
+            Expr::Yield(expr) => Effect::combine(Effect::Yields, self.infer(expr)),
         }
     }
 
