@@ -1,6 +1,7 @@
 pub mod arithmetic;
 pub mod comparison;
 pub mod concurrency;
+pub mod coroutines;
 pub mod debug;
 pub mod display;
 pub mod exception;

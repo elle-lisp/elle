@@ -53,6 +53,9 @@ fn is_value_sendable(value: &Value) -> bool {
         // Unsafe: native functions (contain function pointers)
         Value::NativeFn(_) => false,
 
+        // Unsafe: VM-aware functions (contain function pointers)
+        Value::VmAwareFn(_) => false,
+
         // Unsafe: FFI handles
         Value::LibHandle(_) | Value::CHandle(_) => false,
 
