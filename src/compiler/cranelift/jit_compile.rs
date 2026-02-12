@@ -149,6 +149,7 @@ pub fn compile_closure(
         arity: closure.arity,
         source: Some(Rc::new(closure.clone())),
         func_id,
+        effect: closure.effect,
     };
 
     CompileResult::Success(jit_closure)
@@ -497,6 +498,7 @@ mod tests {
             arity: Arity::Exact(0),
             source: None,
             func_id: 1,
+            effect: crate::compiler::effects::Effect::Pure,
         };
         let _result = CompileResult::Success(jc);
     }

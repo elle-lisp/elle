@@ -6,6 +6,7 @@ pub mod capture_resolution;
 pub mod compile;
 pub mod converters;
 pub mod cranelift;
+pub mod effects;
 pub mod exception_registry;
 pub mod jit_coordinator;
 pub mod jit_executor;
