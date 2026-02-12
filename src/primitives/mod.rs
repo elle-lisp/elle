@@ -19,6 +19,7 @@ pub mod meta;
 pub mod module_init;
 pub mod module_loading;
 pub mod package;
+pub mod process;
 pub mod registration;
 pub mod signaling;
 pub mod string;
