@@ -13,6 +13,7 @@ mod tests {
     fn test_compilation_no_panic(expr: &Expr, name: &str) {
         use crate::compiler::cranelift::compiler::CompileContext;
         use crate::compiler::cranelift::context::JITContext;
+        use crate::compiler::cranelift::PrimitiveRegistry;
         use crate::symbol::SymbolTable;
 
         let mut jit_ctx = JITContext::new().expect("Failed to create JIT context");
@@ -28,7 +29,8 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(&mut ctx, expr);
 
         // Should not panic and should successfully compile

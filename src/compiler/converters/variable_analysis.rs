@@ -1,4 +1,5 @@
 use super::super::ast::{Expr, Pattern};
+use super::ScopeEntry;
 use crate::value::SymbolId;
 
 /// Extract all variable bindings from a pattern
@@ -36,7 +37,7 @@ pub fn extract_pattern_variables(pattern: &Pattern) -> Vec<SymbolId> {
 pub fn pre_register_defines(
     body_vals: &[crate::value::Value],
     symbols: &crate::symbol::SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) {
     use crate::value::Value;
 
@@ -51,9 +52,9 @@ pub fn pre_register_defines(
                         "define" => {
                             if inner_list.len() == 3 {
                                 if let Ok(def_name) = inner_list[1].as_symbol() {
-                                    if let Some(scope) = scope_stack.last_mut() {
-                                        if !scope.contains(&def_name) {
-                                            scope.push(def_name);
+                                    if let Some(scope_entry) = scope_stack.last_mut() {
+                                        if !scope_entry.symbols.contains(&def_name) {
+                                            scope_entry.symbols.push(def_name);
                                         }
                                     }
                                 }

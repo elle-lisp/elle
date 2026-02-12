@@ -97,10 +97,11 @@ fn is_jit_compilable_call(func: &Expr, args: &[Expr]) -> bool {
     }
 
     // We can't fully check the operator name without a symbol table,
-    // but we trust that if it's a symbol with 1-2 args and
-    // all args are compilable, the compiler will try to handle it.
+    // but we trust that if it's a symbol and all args are compilable,
+    // the compiler will try to handle it (either as a primitive or intrinsic).
     // The compiler will fail gracefully if the op isn't supported.
-    matches!(args.len(), 1 | 2)
+    // Note: We removed the args.len() restriction to allow primitives with any arity
+    true
 }
 
 /// Compile a closure to native code
@@ -267,8 +268,13 @@ fn compile_lambda_body(
         }
 
         // Compile the body expression
-        let mut compile_ctx =
-            super::compiler::CompileContext::new(&mut builder, symbols, &mut ctx.module);
+        let primitives = super::primitive_registry::PrimitiveRegistry::new();
+        let mut compile_ctx = super::compiler::CompileContext::new(
+            &mut builder,
+            symbols,
+            &mut ctx.module,
+            &primitives,
+        );
         compile_ctx.scope_manager = scope_manager;
         compile_ctx.stack_allocator = stack_allocator;
 
@@ -536,6 +542,44 @@ mod tests {
         assert!(
             !result.unwrap().is_null(),
             "Code pointer should not be null"
+        );
+    }
+
+    #[test]
+    fn test_is_jit_compilable_primitive_call() {
+        // Test that calls to primitives are now compilable
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let first_sym = symbols.intern("first");
+
+        let expr = Expr::Call {
+            func: Box::new(Expr::GlobalVar(first_sym)),
+            args: vec![Expr::Literal(Value::Nil)],
+            tail: false,
+        };
+
+        // This should now be compilable (previously would have failed due to arity check)
+        assert!(
+            is_jit_compilable(&expr),
+            "Primitive call should be compilable"
+        );
+    }
+
+    #[test]
+    fn test_is_jit_compilable_multi_arg_primitive() {
+        // Test that calls to multi-arg primitives are compilable
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let cons_sym = symbols.intern("cons");
+
+        let expr = Expr::Call {
+            func: Box::new(Expr::GlobalVar(cons_sym)),
+            args: vec![Expr::Literal(Value::Int(1)), Expr::Literal(Value::Nil)],
+            tail: false,
+        };
+
+        // This should be compilable
+        assert!(
+            is_jit_compilable(&expr),
+            "Multi-arg primitive call should be compilable"
         );
     }
 }

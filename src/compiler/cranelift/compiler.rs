@@ -32,6 +32,7 @@ pub struct CompileContext<'a, 'b, 'c> {
     pub scope_manager: ScopeManager,
     pub stack_allocator: StackAllocator,
     pub module: &'c mut JITModule,
+    pub primitives: &'a super::primitive_registry::PrimitiveRegistry,
 }
 
 impl<'a, 'b, 'c> CompileContext<'a, 'b, 'c> {
@@ -39,6 +40,7 @@ impl<'a, 'b, 'c> CompileContext<'a, 'b, 'c> {
         builder: &'a mut FunctionBuilder<'b>,
         symbols: &'a SymbolTable,
         module: &'c mut JITModule,
+        primitives: &'a super::primitive_registry::PrimitiveRegistry,
     ) -> Self {
         CompileContext {
             builder,
@@ -46,6 +48,7 @@ impl<'a, 'b, 'c> CompileContext<'a, 'b, 'c> {
             scope_manager: ScopeManager::new(),
             stack_allocator: StackAllocator::new(),
             module,
+            primitives,
         }
     }
 }
@@ -94,8 +97,12 @@ impl ExprCompiler {
         builder.switch_to_block(entry_block);
         builder.seal_block(entry_block);
 
+        // Create primitive registry
+        let primitives = super::primitive_registry::PrimitiveRegistry::new();
+
         // Create compilation context with scope/stack support
-        let mut compile_ctx = CompileContext::new(&mut builder, symbols, &mut ctx.module);
+        let mut compile_ctx =
+            CompileContext::new(&mut builder, symbols, &mut ctx.module, &primitives);
 
         // Compile the expression
         let result = Self::compile_expr_block(&mut compile_ctx, expr)?;
@@ -145,13 +152,28 @@ impl ExprCompiler {
             Expr::While { cond, body } => Self::try_compile_while(ctx, cond, body),
             // Try to compile For loops
             Expr::For { var, iter, body } => Self::try_compile_for(ctx, *var, iter, body),
-            // Try to compile binary operations with integer operands
-            Expr::Call { func, args, .. } if args.len() == 2 => {
-                Self::try_compile_binop(ctx, func, args)
-            }
-            // Try to compile unary operations like empty?
-            Expr::Call { func, args, .. } if args.len() == 1 => {
-                Self::try_compile_unary_op(ctx, func, args)
+            // Try to compile calls to registered primitives
+            Expr::Call { func, args, .. } => {
+                // First, try to get the function name
+                let func_name = match func.as_ref() {
+                    Expr::GlobalVar(sym_id) => ctx.symbols.name(*sym_id),
+                    Expr::Literal(Value::Symbol(sym_id)) => ctx.symbols.name(*sym_id),
+                    _ => None,
+                };
+
+                // Check if it's a registered primitive
+                if let Some(name) = func_name {
+                    if let Some(prim) = ctx.primitives.get(name) {
+                        return Self::compile_primitive_call(ctx, prim, args);
+                    }
+                }
+
+                // Fall back to existing handling (intrinsics for 1-2 args)
+                match args.len() {
+                    2 => Self::try_compile_binop(ctx, func, args),
+                    1 => Self::try_compile_unary_op(ctx, func, args),
+                    _ => Err(format!("Call with {} args not supported", args.len())),
+                }
             }
             _ => Err(format!(
                 "Expression type not yet supported in JIT: {:?}",
@@ -1084,11 +1106,66 @@ impl ExprCompiler {
             }
         }
     }
+
+    /// Compile a call to a registered primitive
+    fn compile_primitive_call(
+        ctx: &mut CompileContext,
+        prim: &super::primitive_registry::PrimitiveEntry,
+        args: &[Expr],
+    ) -> Result<IrValue, String> {
+        use cranelift_module::Module;
+
+        // 1. Allocate stack space for arguments array
+        let args_size = args.len() * 8; // 8 bytes per i64
+        let args_slot =
+            ctx.builder
+                .create_sized_stack_slot(cranelift::prelude::StackSlotData::new(
+                    cranelift::prelude::StackSlotKind::ExplicitSlot,
+                    args_size as u32,
+                ));
+
+        // 2. Compile each argument and store in the array
+        for (i, arg) in args.iter().enumerate() {
+            let val = Self::compile_expr_block(ctx, arg)?;
+            let val_i64 = Self::ir_value_to_i64(ctx.builder, val)?;
+            ctx.builder
+                .ins()
+                .stack_store(val_i64, args_slot, (i * 8) as i32);
+        }
+
+        // 3. Get pointer to args array
+        let args_ptr = ctx.builder.ins().stack_addr(types::I64, args_slot, 0);
+
+        // 4. Load the primitive function address
+        let func_addr = ctx
+            .builder
+            .ins()
+            .iconst(types::I64, prim.func_ptr as usize as i64);
+
+        // 5. Create the call signature: fn(i64, usize) -> i64
+        let mut sig = ctx.module.make_signature();
+        sig.params.push(AbiParam::new(types::I64)); // args_ptr
+        sig.params.push(AbiParam::new(types::I64)); // args_len
+        sig.returns.push(AbiParam::new(types::I64)); // result
+        let sig_ref = ctx.builder.import_signature(sig);
+
+        // 6. Call the primitive
+        let args_len = ctx.builder.ins().iconst(types::I64, args.len() as i64);
+        let call = ctx
+            .builder
+            .ins()
+            .call_indirect(sig_ref, func_addr, &[args_ptr, args_len]);
+
+        // 7. Get the result
+        let result = ctx.builder.inst_results(call)[0];
+        Ok(IrValue::I64(result))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::context::JITContext;
+    use super::super::PrimitiveRegistry;
     use super::*;
     use cranelift::codegen::ir;
 
@@ -1107,7 +1184,8 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(&mut ctx, &Expr::Literal(Value::Int(42)));
         assert!(
             result.is_ok(),
@@ -1131,7 +1209,8 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
 
         // Allocate a variable at depth 0, index 0
         let (slot, _) = ctx
@@ -1165,7 +1244,8 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
 
         // Allocate a variable at depth 0, index 0
         let (slot, _) = ctx
@@ -1201,7 +1281,8 @@ mod tests {
         builder.seal_block(block);
 
         let symbols = SymbolTable::new();
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::Begin(vec![
@@ -1235,7 +1316,8 @@ mod tests {
 
         // Test: (while (< 0 10) 42)
         // A while loop with a condition and a body
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::While {
@@ -1273,7 +1355,8 @@ mod tests {
 
         // Test: (for item nil item)
         // For loop over empty list should compile and return nil
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {
@@ -1315,7 +1398,8 @@ mod tests {
             cons(Value::Int(2), cons(Value::Int(3), Value::Nil)),
         );
 
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {
@@ -1352,7 +1436,8 @@ mod tests {
         // Test: (for item (begin list) item)
         // For loops over computed iterables (like function calls) should now work
         // We use a begin expression to simulate a computed iterable
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {
@@ -1387,7 +1472,8 @@ mod tests {
         let x_sym = symbols.intern("x");
 
         // Test: (let ((x 42)) x)
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::Let {
@@ -1426,7 +1512,8 @@ mod tests {
             cons(Value::Int(2), cons(Value::Int(3), Value::Nil)),
         );
 
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {
@@ -1460,7 +1547,8 @@ mod tests {
         let x_sym = symbols.intern("x");
 
         // Test: (let ((x 3.14159265358979)) x)
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::Let {
@@ -1500,7 +1588,8 @@ mod tests {
             cons(Value::Float(2.0), cons(Value::Float(3.0), Value::Nil)),
         );
 
-        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module);
+        let primitives = PrimitiveRegistry::new();
+        let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::For {

@@ -1,7 +1,8 @@
 use super::super::ast::Expr;
 use super::variable_analysis::extract_pattern_variables;
+use super::{ScopeEntry, ScopeType};
 use crate::symbol::SymbolTable;
-use crate::value::{SymbolId, Value};
+use crate::value::Value;
 
 /// Helper function to convert match expressions
 /// Extracted to reduce stack frame size of value_to_expr_with_scope
@@ -9,7 +10,7 @@ use crate::value::{SymbolId, Value};
 pub fn convert_match_expr(
     list: &[Value],
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
     use super::value_to_expr::value_to_expr_with_scope;
 
@@ -49,7 +50,10 @@ pub fn convert_match_expr(
                 let result = if !pattern_vars.is_empty() {
                     // Add pattern variables to scope for parsing the body
                     let mut new_scope_stack = scope_stack.clone();
-                    new_scope_stack.push(pattern_vars.clone());
+                    new_scope_stack.push(ScopeEntry {
+                        symbols: pattern_vars.clone(),
+                        scope_type: ScopeType::Function,
+                    });
 
                     // Parse the result in the new scope
                     let body_expr =
@@ -90,7 +94,7 @@ pub fn convert_match_expr(
 pub fn convert_cond(
     list: &[Value],
     symbols: &mut SymbolTable,
-    scope_stack: &mut Vec<Vec<SymbolId>>,
+    scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
     use super::value_to_expr::value_to_expr_with_scope;
 

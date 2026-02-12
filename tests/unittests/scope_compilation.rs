@@ -127,21 +127,20 @@ fn test_let_binding_scope() {
     let value = read_str(code, &mut symbols).expect("Failed to parse let");
     let expr = value_to_expr(&value, &mut symbols).expect("Failed to convert to expression");
 
-    // let gets converted to a lambda call
+    // let produces Expr::Let directly
     match expr {
-        Expr::Call { func, args, .. } => {
-            // func should be a lambda
-            match *func {
-                Expr::Lambda { params, .. } => {
-                    // Parameters are the let-bound variables
-                    assert_eq!(params.len(), 1); // x
+        Expr::Let { bindings, body } => {
+            // bindings should have one entry for x
+            assert_eq!(bindings.len(), 1);
+            // body should be (+ x 1)
+            match *body {
+                Expr::Call { .. } => {
+                    // Correct - body is a function call
                 }
-                _ => panic!("Expected Lambda as let conversion"),
+                _ => panic!("Expected Call in let body"),
             }
-            // args should be the binding expressions
-            assert_eq!(args.len(), 1); // (5)
         }
-        _ => panic!("Expected Call expression from let conversion"),
+        _ => panic!("Expected Let expression"),
     }
 }
 
@@ -223,20 +222,30 @@ fn test_let_star_sequential_binding() {
     let value = read_str(code, &mut symbols).expect("Failed to parse let*");
     let expr = value_to_expr(&value, &mut symbols).expect("Failed to convert to expression");
 
-    // Should be a Call (lambda transformation)
+    // let* produces nested Expr::Let forms
     match expr {
-        Expr::Call { func, args, .. } => {
-            // func should be lambda with two parameters
-            match *func {
-                Expr::Lambda { params, .. } => {
-                    assert_eq!(params.len(), 2); // x and y
+        Expr::Let { bindings, body } => {
+            // First let should have one binding (x)
+            assert_eq!(bindings.len(), 1);
+            // Body should be another Let (for y)
+            match *body {
+                Expr::Let {
+                    bindings: inner_bindings,
+                    body: inner_body,
+                } => {
+                    assert_eq!(inner_bindings.len(), 1);
+                    // Inner body should be (+ x y)
+                    match *inner_body {
+                        Expr::Call { .. } => {
+                            // Correct
+                        }
+                        _ => panic!("Expected Call in inner let body"),
+                    }
                 }
-                _ => panic!("Expected Lambda"),
+                _ => panic!("Expected nested Let"),
             }
-            // args should be two expressions: 1 and (+ x 1)
-            assert_eq!(args.len(), 2);
         }
-        _ => panic!("Expected Call expression"),
+        _ => panic!("Expected Let expression"),
     }
 }
 

@@ -873,23 +873,29 @@ impl Compiler {
 
     /// Compile a let binding expression with proper scope isolation
     fn compile_let(&mut self, bindings: &[(SymbolId, Expr)], body: &Expr, tail: bool) {
-        // Let-bindings create a local scope with proper isolation
-        // NOTE: Currently, let-bindings are transformed to lambda calls at the converter stage
-        // (see src/compiler/converters.rs), so this code is never reached in normal execution.
-        // This implementation is preserved for future direct let-binding compilation.
+        // Let-bindings create a local scope with proper parallel binding semantics.
+        // All binding expressions are evaluated BEFORE any variables are defined,
+        // so bindings cannot see each other (only outer scope).
 
-        // Push a Let scope
+        // First, compile ALL binding expressions (values go on stack)
+        // This happens BEFORE the let scope is pushed, so bindings see outer scope only
+        for (_var, expr) in bindings {
+            self.compile_expr(expr, false);
+        }
+
+        // Now push the Let scope
         self.bytecode.emit(Instruction::PushScope);
         self.bytecode.emit_byte(4); // ScopeType::Let = 4
 
-        // Compile and store each binding in the local scope
-        for (var, expr) in bindings {
-            // Compile the binding expression
-            self.compile_expr(expr, false);
-            // Define the variable in the let scope
+        // Define all variables in reverse order (since values are on stack in LIFO order)
+        // Stack has: [val1, val2, val3, ...] with val_n on top
+        // We define in reverse so that var_n gets val_n, var_(n-1) gets val_(n-1), etc.
+        for (var, _expr) in bindings.iter().rev() {
             let idx = self.bytecode.add_constant(Value::Symbol(*var));
             self.bytecode.emit(Instruction::DefineLocal);
             self.bytecode.emit_u16(idx);
+            // DefineLocal pushes the value back, but we don't need it
+            self.bytecode.emit(Instruction::Pop);
         }
 
         // Compile the body in the let scope
@@ -1018,6 +1024,9 @@ impl Compiler {
                 .filter(|sym| mutated_vars.contains(sym))
                 .collect();
 
+            // Sentinel value for let-bound variables that need to be captured from scope stack
+            const SCOPE_CAPTURE: usize = usize::MAX - 1;
+
             // Emit captured values onto the stack (in order)
             // These will be stored in the closure's environment by the VM
             for (sym, depth, index) in captures {
@@ -1027,6 +1036,17 @@ impl Compiler {
                     let sym_idx = self.bytecode.add_constant(Value::Symbol(*sym));
                     self.bytecode.emit(Instruction::LoadConst);
                     self.bytecode.emit_u16(sym_idx);
+                } else if *index == SCOPE_CAPTURE {
+                    // This is a let-bound variable - load its VALUE from the scope stack
+                    // at closure creation time (when the let scope is still active)
+                    let sym_idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                    self.bytecode.emit(Instruction::LoadGlobal);
+                    self.bytecode.emit_u16(sym_idx);
+
+                    // If this variable is mutated in the lambda body, wrap it in a cell
+                    if mutated_captures.contains(sym) {
+                        self.bytecode.emit(Instruction::MakeCell);
+                    }
                 } else {
                     // This is a local variable from an outer scope
                     // Load it using LoadUpvalueRaw with the resolved depth and index
