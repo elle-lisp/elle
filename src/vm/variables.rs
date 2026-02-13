@@ -1,5 +1,6 @@
 use super::core::VM;
-use crate::value::Value;
+use crate::value::{Condition, Value};
+use std::rc::Rc;
 
 pub fn handle_load_global(
     vm: &mut VM,
@@ -23,7 +24,15 @@ pub fn handle_load_global(
             // Cells created by the box primitive should remain as cells
             vm.stack.push(val.clone());
         } else {
-            return Err(format!("Undefined global variable: {:?}", sym_id));
+            // Signal undefined-variable exception (ID 5)
+            let mut cond = Condition::new(5);
+            cond.set_field(0, Value::Symbol(sym_id)); // Store the symbol
+            if let Some(loc) = vm.current_source_loc.clone() {
+                cond.location = Some(loc);
+            }
+            vm.current_exception = Some(Rc::new(cond));
+            vm.stack.push(Value::Nil); // Push placeholder
+            return Ok(());
         }
     } else {
         return Err("LoadGlobal expects symbol constant".to_string());
@@ -110,7 +119,15 @@ pub fn handle_load_upvalue(
                     if let Some(global_val) = vm.globals.get(&sym.0) {
                         vm.stack.push(global_val.clone());
                     } else {
-                        return Err(format!("Undefined global variable: {:?}", sym));
+                        // Signal undefined-variable exception (ID 5)
+                        let mut cond = Condition::new(5);
+                        cond.set_field(0, Value::Symbol(sym)); // Store the symbol
+                        if let Some(loc) = vm.current_source_loc.clone() {
+                            cond.location = Some(loc);
+                        }
+                        vm.current_exception = Some(Rc::new(cond));
+                        vm.stack.push(Value::Nil); // Push placeholder
+                        return Ok(());
                     }
                 }
                 _ => {

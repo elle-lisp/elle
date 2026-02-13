@@ -21,6 +21,50 @@ impl VM {
         self.execute_bytecode(&bytecode.instructions, &bytecode.constants, None)
     }
 
+    /// Check arity and set exception if mismatch
+    /// Returns true if arity is OK, false if there's a mismatch (exception is set)
+    fn check_arity(&mut self, arity: &crate::value::Arity, arg_count: usize) -> bool {
+        match arity {
+            crate::value::Arity::Exact(n) => {
+                if arg_count != *n {
+                    let mut cond = crate::value::Condition::new(6);
+                    cond.set_field(0, Value::Int(*n as i64));
+                    cond.set_field(1, Value::Int(arg_count as i64));
+                    if let Some(loc) = self.current_source_loc.clone() {
+                        cond.location = Some(loc);
+                    }
+                    self.current_exception = Some(std::rc::Rc::new(cond));
+                    return false;
+                }
+            }
+            crate::value::Arity::AtLeast(n) => {
+                if arg_count < *n {
+                    let mut cond = crate::value::Condition::new(6);
+                    cond.set_field(0, Value::Int(*n as i64));
+                    cond.set_field(1, Value::Int(arg_count as i64));
+                    if let Some(loc) = self.current_source_loc.clone() {
+                        cond.location = Some(loc);
+                    }
+                    self.current_exception = Some(std::rc::Rc::new(cond));
+                    return false;
+                }
+            }
+            crate::value::Arity::Range(min, max) => {
+                if arg_count < *min || arg_count > *max {
+                    let mut cond = crate::value::Condition::new(6);
+                    cond.set_field(0, Value::Int(*min as i64));
+                    cond.set_field(1, Value::Int(arg_count as i64));
+                    if let Some(loc) = self.current_source_loc.clone() {
+                        cond.location = Some(loc);
+                    }
+                    self.current_exception = Some(std::rc::Rc::new(cond));
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     /// Execute raw bytecode with optional closure environment
     ///
     /// This is used internally for closure execution and by spawn/join primitives
@@ -215,135 +259,79 @@ impl VM {
                             }
 
                             // Validate argument count
-                            match closure.arity {
-                                crate::value::Arity::Exact(n) => {
-                                    if args.len() != n {
-                                        return Err(format!(
-                                            "Function expects {} arguments, got {}",
-                                            n,
-                                            args.len()
-                                        ));
-                                    }
-                                }
-                                crate::value::Arity::AtLeast(n) => {
-                                    if args.len() < n {
-                                        return Err(format!(
-                                            "Function expects at least {} arguments, got {}",
-                                            n,
-                                            args.len()
-                                        ));
-                                    }
-                                }
-                                crate::value::Arity::Range(min, max) => {
-                                    if args.len() < min || args.len() > max {
-                                        return Err(format!(
-                                            "Function expects {}-{} arguments, got {}",
-                                            min,
-                                            max,
-                                            args.len()
-                                        ));
-                                    }
-                                }
-                            }
-
-                            // Create a new environment that includes:
-                            // [captured_vars..., parameters..., locally_defined_cells...]
-                            // The closure's env contains captured variables
-                            // We append the arguments as parameters
-                            // We append empty cells for locally-defined variables (Phase 4)
-                            let mut new_env = Vec::new();
-                            new_env.extend((*closure.env).iter().cloned());
-                            new_env.extend(args.clone());
-
-                            // Calculate number of locally-defined variables
-                            let num_params = match closure.arity {
-                                crate::value::Arity::Exact(n) => n,
-                                crate::value::Arity::AtLeast(n) => n,
-                                crate::value::Arity::Range(min, _) => min,
-                            };
-                            let num_locally_defined = closure
-                                .num_locals
-                                .saturating_sub(num_params + closure.num_captures);
-
-                            // Add empty LocalCells for locally-defined variables
-                            // These will be initialized when define statements execute
-                            // LocalCell is auto-unwrapped by LoadUpvalue (unlike user Cell)
-                            for _ in 0..num_locally_defined {
-                                let empty_cell = Value::LocalCell(std::rc::Rc::new(
-                                    std::cell::RefCell::new(Box::new(Value::Nil)),
-                                ));
-                                new_env.push(empty_cell);
-                            }
-
-                            let new_env_rc = std::rc::Rc::new(new_env);
-
-                            // If we're in a coroutine context, use coroutine-aware execution
-                            // that can handle yields from called functions
-                            if self.in_coroutine() {
-                                let result = self.execute_bytecode_coroutine(
-                                    &closure.bytecode,
-                                    &closure.constants,
-                                    Some(&new_env_rc),
-                                )?;
-
+                            if !self.check_arity(&closure.arity, args.len()) {
                                 self.call_depth -= 1;
-
-                                // If the called function yielded, propagate it up
-                                match result {
-                                    VmResult::Done(v) => {
-                                        self.stack.push(v);
-                                    }
-                                    VmResult::Yielded(v) => {
-                                        // Propagate yield - the caller will handle it
-                                        return Ok(VmResult::Yielded(v));
-                                    }
-                                }
+                                self.stack.push(Value::Nil);
                             } else {
-                                let result = self.execute_bytecode(
-                                    &closure.bytecode,
-                                    &closure.constants,
-                                    Some(&new_env_rc),
-                                )?;
+                                // Create a new environment that includes:
+                                // [captured_vars..., parameters..., locally_defined_cells...]
+                                // The closure's env contains captured variables
+                                // We append the arguments as parameters
+                                // We append empty cells for locally-defined variables (Phase 4)
+                                let mut new_env = Vec::new();
+                                new_env.extend((*closure.env).iter().cloned());
+                                new_env.extend(args.clone());
 
-                                self.call_depth -= 1;
-                                self.stack.push(result);
+                                // Calculate number of locally-defined variables
+                                let num_params = match closure.arity {
+                                    crate::value::Arity::Exact(n) => n,
+                                    crate::value::Arity::AtLeast(n) => n,
+                                    crate::value::Arity::Range(min, _) => min,
+                                };
+                                let num_locally_defined = closure
+                                    .num_locals
+                                    .saturating_sub(num_params + closure.num_captures);
+
+                                // Add empty LocalCells for locally-defined variables
+                                // These will be initialized when define statements execute
+                                // LocalCell is auto-unwrapped by LoadUpvalue (unlike user Cell)
+                                for _ in 0..num_locally_defined {
+                                    let empty_cell = Value::LocalCell(std::rc::Rc::new(
+                                        std::cell::RefCell::new(Box::new(Value::Nil)),
+                                    ));
+                                    new_env.push(empty_cell);
+                                }
+
+                                let new_env_rc = std::rc::Rc::new(new_env);
+
+                                // If we're in a coroutine context, use coroutine-aware execution
+                                // that can handle yields from called functions
+                                if self.in_coroutine() {
+                                    let result = self.execute_bytecode_coroutine(
+                                        &closure.bytecode,
+                                        &closure.constants,
+                                        Some(&new_env_rc),
+                                    )?;
+
+                                    self.call_depth -= 1;
+
+                                    // If the called function yielded, propagate it up
+                                    match result {
+                                        VmResult::Done(v) => {
+                                            self.stack.push(v);
+                                        }
+                                        VmResult::Yielded(v) => {
+                                            // Propagate yield - the caller will handle it
+                                            return Ok(VmResult::Yielded(v));
+                                        }
+                                    }
+                                } else {
+                                    let result = self.execute_bytecode(
+                                        &closure.bytecode,
+                                        &closure.constants,
+                                        Some(&new_env_rc),
+                                    )?;
+
+                                    self.call_depth -= 1;
+                                    self.stack.push(result);
+                                }
                             }
                         }
                         Value::JitClosure(jit_closure) => {
                             // Validate argument count
-                            match jit_closure.arity {
-                                crate::value::Arity::Exact(n) => {
-                                    if args.len() != n {
-                                        return Err(format!(
-                                            "JIT closure expects {} arguments, got {}",
-                                            n,
-                                            args.len()
-                                        ));
-                                    }
-                                }
-                                crate::value::Arity::AtLeast(n) => {
-                                    if args.len() < n {
-                                        return Err(format!(
-                                            "JIT closure expects at least {} arguments, got {}",
-                                            n,
-                                            args.len()
-                                        ));
-                                    }
-                                }
-                                crate::value::Arity::Range(min, max) => {
-                                    if args.len() < min || args.len() > max {
-                                        return Err(format!(
-                                            "JIT closure expects {}-{} arguments, got {}",
-                                            min,
-                                            max,
-                                            args.len()
-                                        ));
-                                    }
-                                }
-                            }
-
-                            // Check if we have real native code
-                            if !jit_closure.code_ptr.is_null() {
+                            if !self.check_arity(&jit_closure.arity, args.len()) {
+                                self.stack.push(Value::Nil);
+                            } else if !jit_closure.code_ptr.is_null() {
                                 // Call native code!
                                 let result = unsafe {
                                     // Prepare args array
@@ -459,6 +447,31 @@ impl VM {
                             return f(&args, self).map(VmResult::Done);
                         }
                         Value::Closure(closure) => {
+                            // Validate argument count
+                            if !self.check_arity(&closure.arity, args.len()) {
+                                // Exception was set, check it before returning
+                                if self.current_exception.is_some()
+                                    && !self.handling_exception
+                                    && self.exception_handlers.is_empty()
+                                {
+                                    // No handler for this exception - propagate as error
+                                    if let Some(exc) = &self.current_exception {
+                                        let details =
+                                            if let Some(Value::Symbol(sym_id)) = exc.get_field(0) {
+                                                format!(" (SymbolId({}))", sym_id.0)
+                                            } else {
+                                                String::new()
+                                            };
+                                        return Err(format!(
+                                            "Unhandled exception: {}{}",
+                                            exc.exception_id, details
+                                        ));
+                                    }
+                                    return Err("Unhandled exception".to_string());
+                                }
+                                return Ok(VmResult::Done(Value::Nil));
+                            }
+
                             // Build proper environment: captures + args + locals (same as Call)
                             // Reuse the cached environment vector to avoid repeated allocations
                             self.tail_call_env_cache.clear();
@@ -501,39 +514,29 @@ impl VM {
                         }
                         Value::JitClosure(jit_closure) => {
                             // Validate argument count
-                            match jit_closure.arity {
-                                crate::value::Arity::Exact(n) => {
-                                    if args.len() != n {
+                            if !self.check_arity(&jit_closure.arity, args.len()) {
+                                // Exception was set, check it before returning
+                                if self.current_exception.is_some()
+                                    && !self.handling_exception
+                                    && self.exception_handlers.is_empty()
+                                {
+                                    // No handler for this exception - propagate as error
+                                    if let Some(exc) = &self.current_exception {
+                                        let details =
+                                            if let Some(Value::Symbol(sym_id)) = exc.get_field(0) {
+                                                format!(" (SymbolId({}))", sym_id.0)
+                                            } else {
+                                                String::new()
+                                            };
                                         return Err(format!(
-                                            "JIT closure expects {} arguments, got {}",
-                                            n,
-                                            args.len()
+                                            "Unhandled exception: {}{}",
+                                            exc.exception_id, details
                                         ));
                                     }
+                                    return Err("Unhandled exception".to_string());
                                 }
-                                crate::value::Arity::AtLeast(n) => {
-                                    if args.len() < n {
-                                        return Err(format!(
-                                            "JIT closure expects at least {} arguments, got {}",
-                                            n,
-                                            args.len()
-                                        ));
-                                    }
-                                }
-                                crate::value::Arity::Range(min, max) => {
-                                    if args.len() < min || args.len() > max {
-                                        return Err(format!(
-                                            "JIT closure expects {}-{} arguments, got {}",
-                                            min,
-                                            max,
-                                            args.len()
-                                        ));
-                                    }
-                                }
-                            }
-
-                            // Check if we have real native code
-                            if !jit_closure.code_ptr.is_null() {
+                                return Ok(VmResult::Done(Value::Nil));
+                            } else if !jit_closure.code_ptr.is_null() {
                                 // Call native code directly (tail call optimization)
                                 return unsafe {
                                     // Prepare args array
@@ -890,7 +893,16 @@ impl VM {
                 } else {
                     // No handler for this exception - propagate as error
                     if let Some(exc) = &self.current_exception {
-                        return Err(format!("Unhandled exception: {}", exc.exception_id));
+                        // Include field 0 info if it contains a symbol (for undefined-variable)
+                        let details = if let Some(Value::Symbol(sym_id)) = exc.get_field(0) {
+                            format!(" (SymbolId({}))", sym_id.0)
+                        } else {
+                            String::new()
+                        };
+                        return Err(format!(
+                            "Unhandled exception: {}{}",
+                            exc.exception_id, details
+                        ));
                     }
                     return Err("Unhandled exception".to_string());
                 }

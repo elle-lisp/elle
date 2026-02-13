@@ -52,6 +52,7 @@ pub struct VM {
     pub tail_call_env_cache: Vec<Value>, // Reusable environment vector for tail calls to avoid repeated allocations
     pub pending_tail_call: Option<TailCallInfo>, // (bytecode, constants, env) for pending tail call
     pub coroutine_stack: Vec<Rc<RefCell<Coroutine>>>, // Stack of active coroutines
+    pub current_source_loc: Option<crate::reader::SourceLoc>, // Current top-level form's location
 }
 
 /// Exception type hierarchy (baked into VM for inheritance checking)
@@ -113,6 +114,7 @@ impl VM {
             tail_call_env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
             coroutine_stack: Vec::new(),
+            current_source_loc: None,
         }
     }
 
@@ -132,6 +134,16 @@ impl VM {
     /// Get the location map for bytecode instruction lookups
     pub fn get_location_map(&self) -> &LocationMap {
         &self.location_map
+    }
+
+    /// Set the current source location for error reporting
+    pub fn set_current_source_loc(&mut self, loc: Option<crate::reader::SourceLoc>) {
+        self.current_source_loc = loc.clone();
+    }
+
+    /// Get the current source location
+    pub fn get_current_source_loc(&self) -> Option<&crate::reader::SourceLoc> {
+        self.current_source_loc.as_ref()
     }
 
     /// Record a closure call and return whether it's "hot" (called 10+ times)
