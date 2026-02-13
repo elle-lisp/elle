@@ -360,7 +360,19 @@ fn execute_coroutine_cps(
 
     // Create interpreter and evaluate
     let mut interpreter = CpsInterpreter::new(vm, env_rc.clone());
-    let initial_action = interpreter.eval(&cps_body)?;
+    let initial_action = match interpreter.eval(&cps_body) {
+        Ok(action) => action,
+        Err(e) => {
+            // If eval fails, we need to clean up the coroutine state
+            // Pop coroutine from stack
+            vm.coroutine_stack.pop();
+
+            // Update coroutine state to Error
+            let mut borrowed = co.borrow_mut();
+            borrowed.state = CoroutineState::Error(e.clone());
+            return Err(e);
+        }
+    };
 
     // Run trampoline
     let mut trampoline = Trampoline::new();

@@ -53,6 +53,19 @@ fn eval(input: &str) -> Result<Value, String> {
     vm.execute(&bytecode)
 }
 
+/// Helper to collect integers from a cons list
+fn collect_list_ints(value: &Value) -> Vec<i64> {
+    let mut result = Vec::new();
+    let mut current = value;
+    while let Value::Cons(cons) = current {
+        if let Value::Int(n) = cons.first {
+            result.push(n);
+        }
+        current = &cons.rest;
+    }
+    result
+}
+
 // ============================================================================
 // 1. BASIC YIELD/RESUME TESTS
 // ============================================================================
@@ -504,6 +517,264 @@ fn test_closure_captured_var_after_resume_issue_258() {
         }
         Err(e) => panic!("Should not error: {}", e),
         other => panic!("Expected cons pair, got {:?}", other),
+    }
+}
+
+// ============================================================================
+// 14. ISSUE #259 REGRESSION TESTS - STATE MANAGEMENT
+// ============================================================================
+
+#[test]
+fn test_interleaved_coroutines_issue_259() {
+    // Regression test for issue #259: Coroutine reports "already running" incorrectly
+    // Interleaved resume operations on different coroutines should work correctly.
+    // Each coroutine should maintain independent state.
+    let result = eval(
+        r#"
+        (define make-counter (fn (start)
+          (fn ()
+            (yield start)
+            (yield (+ start 1))
+            (yield (+ start 2)))))
+        (define co-100 (make-coroutine (make-counter 100)))
+        (define co-200 (make-coroutine (make-counter 200)))
+        (list
+          (coroutine-resume co-100)
+          (coroutine-resume co-200)
+          (coroutine-resume co-100)
+          (coroutine-resume co-200)
+          (coroutine-resume co-100)
+          (coroutine-resume co-200))
+        "#,
+    );
+    match result {
+        Ok(Value::Cons(cons)) => {
+            // Should get: 100, 200, 101, 201, 102, 202
+            let values: Vec<i64> = collect_list_ints(&Value::Cons(cons));
+            assert_eq!(
+                values,
+                vec![100, 200, 101, 201, 102, 202],
+                "Interleaved coroutines should maintain independent state"
+            );
+        }
+        Err(e) => panic!("Interleaved coroutines should not error: {}", e),
+        other => panic!("Expected list, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_coroutine_status_suspended_after_yield() {
+    // Verify coroutine is in Suspended state (not Running) after yield
+    let result = eval(
+        r#"
+        (define gen (fn () (yield 1) (yield 2)))
+        (define co (make-coroutine gen))
+        (coroutine-resume co)
+        (coroutine-status co)
+        "#,
+    );
+    assert_eq!(
+        result.unwrap(),
+        Value::String("suspended".into()),
+        "Coroutine should be suspended after yield, not running"
+    );
+}
+
+#[test]
+fn test_coroutine_state_after_error_during_resume() {
+    // If an error occurs during coroutine execution after a yield,
+    // the state should transition to Error, not stay Running.
+    let result = eval(
+        r#"
+        (define bad-gen (fn ()
+          (yield 1)
+          (/ 1 0)))
+        (define co (make-coroutine bad-gen))
+        (coroutine-resume co)
+        (coroutine-resume co)
+        "#,
+    );
+    // The second resume should error (division by zero)
+    assert!(result.is_err(), "Division by zero should cause error");
+}
+
+#[test]
+fn test_coroutine_state_error_not_running_after_failure() {
+    // After a coroutine fails, its state should be "error", not "running"
+    // This is important: if state stays "running", subsequent operations will
+    // incorrectly report "Coroutine is already running"
+    let result = eval(
+        r#"
+        (define bad-gen (fn ()
+          (yield 1)
+          (undefined-variable-that-does-not-exist)))
+        (define co (make-coroutine bad-gen))
+        (coroutine-resume co)
+        (define resume-result
+          (try
+            (coroutine-resume co)
+            (catch (e) 'caught-error)))
+        (coroutine-status co)
+        "#,
+    );
+    // Status should be "error", not "running"
+    match result {
+        Ok(Value::String(s)) => {
+            assert_eq!(
+                s.as_ref(),
+                "error",
+                "Coroutine state should be 'error' after failure, not 'running'"
+            );
+        }
+        Ok(other) => panic!("Expected string status, got {:?}", other),
+        Err(e) => {
+            // If the error propagates, that's also acceptable behavior
+            // as long as the coroutine doesn't report "already running" on retry
+            assert!(
+                !e.contains("already running"),
+                "Should not report 'already running': {}",
+                e
+            );
+        }
+    }
+}
+
+#[test]
+fn test_multiple_coroutines_independent_state() {
+    // Multiple coroutines should have completely independent state
+    let result = eval(
+        r#"
+        (define gen1 (fn () (yield 'a) (yield 'b)))
+        (define gen2 (fn () (yield 'x) (yield 'y)))
+        (define co1 (make-coroutine gen1))
+        (define co2 (make-coroutine gen2))
+        (list
+          (coroutine-status co1)
+          (coroutine-status co2)
+          (coroutine-resume co1)
+          (coroutine-status co1)
+          (coroutine-status co2)
+          (coroutine-resume co2)
+          (coroutine-status co1)
+          (coroutine-status co2))
+        "#,
+    );
+    match result {
+        Ok(Value::Cons(_)) => {
+            // Test passes if no "already running" error occurs
+        }
+        Err(e) => {
+            assert!(
+                !e.contains("already running"),
+                "Independent coroutines should not interfere: {}",
+                e
+            );
+            panic!("Unexpected error: {}", e);
+        }
+        other => panic!("Expected list, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_nested_coroutine_resume_from_coroutine() {
+    // A coroutine that resumes another coroutine should work correctly
+    // and not cause state confusion between the two
+    let result = eval(
+        r#"
+        (define inner-gen (fn () (yield 10) (yield 20)))
+        (define outer-gen (fn ()
+          (define inner-co (make-coroutine inner-gen))
+          (yield (+ 1 (coroutine-resume inner-co)))
+          (yield (+ 1 (coroutine-resume inner-co)))))
+        (define outer-co (make-coroutine outer-gen))
+        (list
+          (coroutine-resume outer-co)
+          (coroutine-resume outer-co))
+        "#,
+    );
+    match result {
+        Ok(Value::Cons(cons)) => {
+            assert_eq!(cons.first, Value::Int(11), "First should be 10+1=11");
+            if let Value::Cons(rest) = &cons.rest {
+                assert_eq!(rest.first, Value::Int(21), "Second should be 20+1=21");
+            } else {
+                panic!("Expected cons in rest");
+            }
+        }
+        Err(e) => {
+            assert!(
+                !e.contains("already running"),
+                "Nested coroutine resume should not cause 'already running': {}",
+                e
+            );
+            panic!("Unexpected error: {}", e);
+        }
+        other => panic!("Expected list, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_coroutine_state_not_stuck_running_on_cps_error() {
+    // Regression test for issue #259: State stuck as "running" after CPS eval error
+    //
+    // In the CPS execution path, if interpreter.eval() fails before the trampoline
+    // runs, the coroutine state can get stuck as "running" because the error
+    // return bypasses the state update logic.
+    //
+    // This test attempts to trigger such an error by using an undefined variable
+    // at the start of a yielding coroutine (before any yield executes).
+    // The key is that we try to resume again - if the state is stuck as "running",
+    // we'll get "Coroutine is already running" error instead of the original error.
+    let result = eval(
+        r#"
+        (define bad-start-gen (fn ()
+          (+ undefined-at-start 1)
+          (yield 1)))
+        (define co (make-coroutine bad-start-gen))
+        (define first-result
+          (try
+            (coroutine-resume co)
+            (catch (e) 'first-error)))
+        (define second-result
+          (try
+            (coroutine-resume co)
+            (catch (e) e)))
+        (list first-result second-result)
+        "#,
+    );
+    match result {
+        Ok(Value::Cons(cons)) => {
+            // First element should be 'first-error (the caught error)
+            // Second element should NOT be "Coroutine is already running"
+            // If it is, that means the state is stuck as "running"
+            if let Value::Cons(rest) = &cons.rest {
+                match &rest.first {
+                    Value::String(s) => {
+                        assert!(
+                            !s.contains("already running"),
+                            "Coroutine state should not be stuck as 'running' after error, got: {}",
+                            s
+                        );
+                    }
+                    Value::Symbol(_) => {
+                        // This is fine - the error was caught as a symbol
+                    }
+                    _other => {
+                        // Some other error type, which is fine
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            // If error propagates, the test still passes as long as we can verify
+            // that it's not "already running"
+            assert!(
+                !e.contains("already running"),
+                "Error should not be 'already running': {}",
+                e
+            );
+        }
+        other => panic!("Expected list, got {:?}", other),
     }
 }
 
