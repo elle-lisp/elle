@@ -1195,3 +1195,115 @@ fn test_multiple_coroutines_independent() {
         _ => panic!("Expected cons pair"),
     }
 }
+
+// ============================================================================
+// 15. ISSUE #260 REGRESSION TESTS - QUOTED SYMBOLS IN YIELD
+// ============================================================================
+
+#[test]
+fn test_yield_quoted_symbol_issue_260() {
+    // Regression test for issue #260: Quoted symbols in yield treated as variable references
+    // When a coroutine yields a quoted symbol like 'a, it should yield the symbol
+    // as a value, not attempt to look it up as a variable.
+    let result = eval(
+        r#"
+        (define gen-sym (fn () (yield 'a) (yield 'b) (yield 'c)))
+        (define co (make-coroutine gen-sym))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co)
+          (coroutine-resume co))
+        "#,
+    );
+    match result {
+        Ok(Value::Cons(cons)) => {
+            // All yielded values should be symbols
+            assert!(
+                matches!(cons.first, Value::Symbol(_)),
+                "First yield should be symbol 'a"
+            );
+            if let Value::Cons(rest1) = &cons.rest {
+                assert!(
+                    matches!(rest1.first, Value::Symbol(_)),
+                    "Second yield should be symbol 'b"
+                );
+                if let Value::Cons(rest2) = &rest1.rest {
+                    assert!(
+                        matches!(rest2.first, Value::Symbol(_)),
+                        "Third yield should be symbol 'c"
+                    );
+                }
+            }
+        }
+        Err(e) => panic!("Yielding quoted symbols should not error: {}", e),
+        other => panic!("Expected list, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_yield_quoted_symbol_is_value_not_variable() {
+    // Verify that yielded symbols are actual symbol values that can be
+    // tested with symbol? predicate, not variable lookups
+    let result = eval(
+        r#"
+        (define gen (fn () (yield 'test-symbol)))
+        (define co (make-coroutine gen))
+        (define result (coroutine-resume co))
+        (symbol? result)
+        "#,
+    );
+    assert_eq!(
+        result.unwrap(),
+        Value::Bool(true),
+        "Yielded quoted symbol should be a symbol value"
+    );
+}
+
+#[test]
+fn test_yield_various_literal_types() {
+    // Test that various literal types can be yielded without being
+    // misinterpreted as variable references
+    let result = eval(
+        r#"
+        (define gen (fn ()
+          (yield 'symbol-val)
+          (yield 42)
+          (yield "string")
+          (yield #t)
+          (yield nil)))
+        (define co (make-coroutine gen))
+        (list
+          (symbol? (coroutine-resume co))
+          (number? (coroutine-resume co))
+          (string? (coroutine-resume co))
+          (coroutine-resume co)
+          (coroutine-resume co))
+        "#,
+    );
+    match result {
+        Ok(Value::Cons(cons)) => {
+            assert_eq!(cons.first, Value::Bool(true), "First should be symbol");
+        }
+        Err(e) => panic!("Yielding literals should not error: {}", e),
+        other => panic!("Expected list, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_yield_quoted_list() {
+    // Quoted lists should also be yielded as values, not evaluated
+    let result = eval(
+        r#"
+        (define gen (fn () (yield '(1 2 3))))
+        (define co (make-coroutine gen))
+        (coroutine-resume co)
+        "#,
+    );
+    match result {
+        Ok(Value::Cons(_)) => {
+            // Success - yielded a list
+        }
+        Err(e) => panic!("Yielding quoted list should not error: {}", e),
+        other => panic!("Expected list, got {:?}", other),
+    }
+}

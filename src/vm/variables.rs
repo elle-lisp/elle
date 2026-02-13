@@ -114,24 +114,9 @@ pub fn handle_load_upvalue(
                     let inner = cell_rc.borrow().clone();
                     vm.stack.push(*inner);
                 }
-                Value::Symbol(sym) => {
-                    // This is a global variable reference - load it from the global scope
-                    if let Some(global_val) = vm.globals.get(&sym.0) {
-                        vm.stack.push(global_val.clone());
-                    } else {
-                        // Signal undefined-variable exception (ID 5)
-                        let mut cond = Condition::new(5);
-                        cond.set_field(0, Value::Symbol(sym)); // Store the symbol
-                        if let Some(loc) = vm.current_source_loc.clone() {
-                            cond.location = Some(loc);
-                        }
-                        vm.current_exception = Some(Rc::new(cond));
-                        vm.stack.push(Value::Nil); // Push placeholder
-                        return Ok(());
-                    }
-                }
                 _ => {
-                    // Everything else (including user Cell) pushed as-is
+                    // Everything else (including symbols and user Cell) pushed as-is
+                    // Symbols in the environment are literal symbol values, not variable references
                     vm.stack.push(val);
                 }
             }

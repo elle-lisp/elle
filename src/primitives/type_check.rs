@@ -18,6 +18,14 @@ pub fn prim_is_pair(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Bool(matches!(args[0], Value::Cons(_))))
 }
 
+/// Check if value is a list (nil or cons cell)
+pub fn prim_is_list(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 1 {
+        return Err("list? requires exactly 1 argument".to_string());
+    }
+    Ok(Value::Bool(matches!(args[0], Value::Nil | Value::Cons(_))))
+}
+
 /// Check if value is a number
 pub fn prim_is_number(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
