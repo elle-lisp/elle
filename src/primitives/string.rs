@@ -1,5 +1,6 @@
 //! String manipulation primitives
 use crate::value::Value;
+use crate::vm::VM;
 use std::rc::Rc;
 
 /// Get the length of a string
@@ -363,4 +364,31 @@ pub fn prim_string_to_float(args: &[Value]) -> Result<Value, String> {
 /// `(any->string val)`
 pub fn prim_any_to_string(args: &[Value]) -> Result<Value, String> {
     prim_to_string(args)
+}
+
+/// Convert symbol to string
+/// `(symbol->string sym)`
+pub fn prim_symbol_to_string(args: &[Value], _vm: &mut VM) -> Result<Value, String> {
+    if args.len() != 1 {
+        return Err("symbol->string requires exactly 1 argument".to_string());
+    }
+
+    match &args[0] {
+        Value::Symbol(id) => {
+            // SAFETY: The symbol table is set in main.rs before any code execution
+            unsafe {
+                if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
+                    let symbols = &*symbols_ptr;
+                    if let Some(name) = symbols.name(*id) {
+                        Ok(Value::String(Rc::from(name)))
+                    } else {
+                        Err(format!("Symbol ID {} not found in symbol table", id.0))
+                    }
+                } else {
+                    Err("Symbol table not available".to_string())
+                }
+            }
+        }
+        _ => Err("symbol->string requires a symbol".to_string()),
+    }
 }
