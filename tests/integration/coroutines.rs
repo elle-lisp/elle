@@ -453,6 +453,60 @@ fn test_coroutine_captures_mutable_state() {
     assert_eq!(result.unwrap(), Value::Int(1));
 }
 
+#[test]
+fn test_closure_captured_var_after_resume_issue_258() {
+    // Regression test for issue #258: Closure environment not restored after yield/resume
+    // When a coroutine's closure captures variables from an outer scope,
+    // those captured variables must remain accessible after yield and resume.
+    //
+    // The make-counter function returns a closure that captures 'start'.
+    // The inner closure becomes the coroutine and must access 'start'
+    // across multiple yield/resume cycles.
+    let result = eval(
+        r#"
+        (define make-counter (fn (start)
+          (fn ()
+            (yield start)
+            (yield (+ start 1))
+            (yield (+ start 2)))))
+        (define co-100 (make-coroutine (make-counter 100)))
+        (list
+          (coroutine-resume co-100)
+          (coroutine-resume co-100)
+          (coroutine-resume co-100))
+        "#,
+    );
+    match result {
+        Ok(Value::Cons(cons)) => {
+            assert_eq!(
+                cons.first,
+                Value::Int(100),
+                "First yield should be start (100)"
+            );
+            if let Value::Cons(rest1) = &cons.rest {
+                assert_eq!(
+                    rest1.first,
+                    Value::Int(101),
+                    "Second yield should be start+1 (101)"
+                );
+                if let Value::Cons(rest2) = &rest1.rest {
+                    assert_eq!(
+                        rest2.first,
+                        Value::Int(102),
+                        "Third yield should be start+2 (102)"
+                    );
+                } else {
+                    panic!("Expected cons for third element");
+                }
+            } else {
+                panic!("Expected cons for second element");
+            }
+        }
+        Err(e) => panic!("Should not error: {}", e),
+        other => panic!("Expected cons pair, got {:?}", other),
+    }
+}
+
 // ============================================================================
 // 8. ERROR HANDLING TESTS
 // ============================================================================

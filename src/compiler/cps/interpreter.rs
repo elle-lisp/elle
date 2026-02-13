@@ -104,22 +104,29 @@ impl<'a> CpsInterpreter<'a> {
         match expr {
             CpsExpr::Literal(v) => Ok(Action::done(v.clone())),
 
-            CpsExpr::Var { sym, depth, index } => {
-                // Look up by index in environment
-                if *depth == 0 {
-                    let env = self.env.borrow();
-                    if *index < env.len() {
-                        let val = env[*index].clone();
-                        drop(env);
-                        // Unwrap LocalCell if needed
-                        let unwrapped = unwrap_local_cell(val);
-                        return Ok(Action::done(unwrapped));
-                    }
+            CpsExpr::Var {
+                sym,
+                depth: _,
+                index,
+            } => {
+                // In CPS execution, the environment is flat - all captures, params, and locals
+                // are at their assigned indices. The 'depth' field is a bytecode compiler
+                // artifact for nested scope resolution that doesn't apply here.
+                let env = self.env.borrow();
+                if *index < env.len() {
+                    let val = env[*index].clone();
+                    drop(env);
+                    // Unwrap LocalCell if needed
+                    let unwrapped = unwrap_local_cell(val);
+                    Ok(Action::done(unwrapped))
+                } else {
+                    let env_len = env.len();
+                    drop(env);
+                    Err(format!(
+                        "Variable index {} out of bounds (env size: {}, sym: {:?})",
+                        index, env_len, sym
+                    ))
                 }
-                Err(format!(
-                    "Variable not found: {:?} at depth={}, index={}",
-                    sym, depth, index
-                ))
             }
 
             CpsExpr::GlobalVar(sym) => {
@@ -536,24 +543,20 @@ impl<'a> CpsInterpreter<'a> {
         match expr {
             Expr::Literal(v) => Ok(v.clone()),
 
-            Expr::Var(_sym, depth, index) => {
-                // Check closure environment
-                if *depth == 0 {
-                    let env = self.env.borrow();
-                    if *index < env.len() {
-                        let val = env[*index].clone();
-                        drop(env);
-                        return Ok(unwrap_local_cell(val));
-                    }
+            Expr::Var(sym, _depth, index) => {
+                // In CPS execution, environment is flat. Check env first, then globals.
+                let env = self.env.borrow();
+                if *index < env.len() {
+                    let val = env[*index].clone();
+                    drop(env);
+                    return Ok(unwrap_local_cell(val));
                 }
-                // Check globals as fallback
-                if let Some(val) = self.vm.globals.get(&_sym.0) {
+                drop(env);
+                // Fall back to globals (for cases where variable resolution differs)
+                if let Some(val) = self.vm.globals.get(&sym.0) {
                     return Ok(val.clone());
                 }
-                Err(format!(
-                    "Variable not found at depth={}, index={}",
-                    depth, index
-                ))
+                Err(format!("Variable {:?} not found at index {}", sym, index))
             }
 
             Expr::GlobalVar(sym) => {
