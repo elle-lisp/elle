@@ -10,10 +10,10 @@ pub mod stack;
 pub mod types;
 pub mod variables;
 
-pub use core::{is_exception_subclass, CallFrame, VM};
+pub use core::{is_exception_subclass, CallFrame, VmResult, VM};
 
 use crate::compiler::bytecode::{Bytecode, Instruction};
-use crate::value::Value;
+use crate::value::{CoroutineContext, CoroutineState, Value};
 use std::rc::Rc;
 
 impl VM {
@@ -55,19 +55,26 @@ impl VM {
                 // Continue the loop to execute the tail call
             } else {
                 // No pending tail call, return the result
-                return Ok(result);
+                return match result {
+                    VmResult::Done(v) => Ok(v),
+                    VmResult::Yielded(_) => {
+                        // Yield should be handled by coroutine_resume, not here
+                        Err("Unexpected yield outside coroutine context".to_string())
+                    }
+                };
             }
         }
     }
 
     /// Inner execution loop that handles all instructions except tail calls
-    fn execute_bytecode_inner(
+    fn execute_bytecode_inner_with_ip(
         &mut self,
         bytecode: &[u8],
         constants: &[Value],
         closure_env: Option<&Rc<Vec<Value>>>,
-    ) -> Result<Value, String> {
-        let mut ip = 0;
+        start_ip: usize,
+    ) -> Result<VmResult, String> {
+        let mut ip = start_ip;
         let mut instruction_count = 0;
         const MAX_INSTRUCTIONS: usize = 100000; // Safety limit to prevent infinite loops
 
@@ -154,7 +161,8 @@ impl VM {
                 }
 
                 Instruction::Return => {
-                    return control::handle_return(self);
+                    let value = control::handle_return(self)?;
+                    return Ok(VmResult::Done(value));
                 }
 
                 // Call instructions (complex, handled inline)
@@ -168,9 +176,9 @@ impl VM {
                     }
                     args.reverse();
 
-                    let result = match func {
+                    match func {
                         Value::NativeFn(f) => {
-                            match f(&args) {
+                            let result = match f(&args) {
                                 Ok(val) => val,
                                 Err(msg) if msg == "Division by zero" => {
                                     // Create a division-by-zero exception
@@ -185,9 +193,13 @@ impl VM {
                                     Value::Nil
                                 }
                                 Err(e) => return Err(e),
-                            }
+                            };
+                            self.stack.push(result);
                         }
-                        Value::VmAwareFn(f) => f(&args, self)?,
+                        Value::VmAwareFn(f) => {
+                            let result = f(&args, self)?;
+                            self.stack.push(result);
+                        }
                         Value::Closure(closure) => {
                             self.call_depth += 1;
                             if self.call_depth > 1000 {
@@ -253,10 +265,11 @@ impl VM {
                                 .num_locals
                                 .saturating_sub(num_params + closure.num_captures);
 
-                            // Add empty cells for locally-defined variables
+                            // Add empty LocalCells for locally-defined variables
                             // These will be initialized when define statements execute
+                            // LocalCell is auto-unwrapped by LoadUpvalue (unlike user Cell)
                             for _ in 0..num_locally_defined {
-                                let empty_cell = Value::Cell(std::rc::Rc::new(
+                                let empty_cell = Value::LocalCell(std::rc::Rc::new(
                                     std::cell::RefCell::new(Box::new(Value::Nil)),
                                 ));
                                 new_env.push(empty_cell);
@@ -264,14 +277,37 @@ impl VM {
 
                             let new_env_rc = std::rc::Rc::new(new_env);
 
-                            let result = self.execute_bytecode(
-                                &closure.bytecode,
-                                &closure.constants,
-                                Some(&new_env_rc),
-                            )?;
+                            // If we're in a coroutine context, use coroutine-aware execution
+                            // that can handle yields from called functions
+                            if self.in_coroutine() {
+                                let result = self.execute_bytecode_coroutine(
+                                    &closure.bytecode,
+                                    &closure.constants,
+                                    Some(&new_env_rc),
+                                )?;
 
-                            self.call_depth -= 1;
-                            result
+                                self.call_depth -= 1;
+
+                                // If the called function yielded, propagate it up
+                                match result {
+                                    VmResult::Done(v) => {
+                                        self.stack.push(v);
+                                    }
+                                    VmResult::Yielded(v) => {
+                                        // Propagate yield - the caller will handle it
+                                        return Ok(VmResult::Yielded(v));
+                                    }
+                                }
+                            } else {
+                                let result = self.execute_bytecode(
+                                    &closure.bytecode,
+                                    &closure.constants,
+                                    Some(&new_env_rc),
+                                )?;
+
+                                self.call_depth -= 1;
+                                self.stack.push(result);
+                            }
                         }
                         Value::JitClosure(jit_closure) => {
                             // Validate argument count
@@ -309,7 +345,7 @@ impl VM {
                             // Check if we have real native code
                             if !jit_closure.code_ptr.is_null() {
                                 // Call native code!
-                                unsafe {
+                                let result = unsafe {
                                     // Prepare args array
                                     let args_encoded: Vec<i64> =
                                         args.iter().map(encode_value_for_jit).collect();
@@ -332,7 +368,8 @@ impl VM {
 
                                     // Decode result
                                     decode_jit_result(result_encoded)?
-                                }
+                                };
+                                self.stack.push(result);
                             } else if let Some(ref source) = jit_closure.source {
                                 // Fall back to interpreted execution of the source closure
                                 self.call_depth += 1;
@@ -356,9 +393,9 @@ impl VM {
                                     .num_locals
                                     .saturating_sub(num_params + source.num_captures);
 
-                                // Add empty cells for locally-defined variables
+                                // Add empty LocalCells for locally-defined variables
                                 for _ in 0..num_locally_defined {
-                                    let empty_cell = Value::Cell(std::rc::Rc::new(
+                                    let empty_cell = Value::LocalCell(std::rc::Rc::new(
                                         std::cell::RefCell::new(Box::new(Value::Nil)),
                                     ));
                                     new_env.push(empty_cell);
@@ -366,22 +403,42 @@ impl VM {
 
                                 let new_env_rc = std::rc::Rc::new(new_env);
 
-                                let result = self.execute_bytecode(
-                                    &source.bytecode,
-                                    &source.constants,
-                                    Some(&new_env_rc),
-                                )?;
+                                // If we're in a coroutine context, use coroutine-aware execution
+                                if self.in_coroutine() {
+                                    let result = self.execute_bytecode_coroutine(
+                                        &source.bytecode,
+                                        &source.constants,
+                                        Some(&new_env_rc),
+                                    )?;
 
-                                self.call_depth -= 1;
-                                result
+                                    self.call_depth -= 1;
+
+                                    // If the called function yielded, propagate it up
+                                    match result {
+                                        VmResult::Done(v) => {
+                                            self.stack.push(v);
+                                        }
+                                        VmResult::Yielded(v) => {
+                                            // Propagate yield - the caller will handle it
+                                            return Ok(VmResult::Yielded(v));
+                                        }
+                                    }
+                                } else {
+                                    let result = self.execute_bytecode(
+                                        &source.bytecode,
+                                        &source.constants,
+                                        Some(&new_env_rc),
+                                    )?;
+
+                                    self.call_depth -= 1;
+                                    self.stack.push(result);
+                                }
                             } else {
                                 return Err("JIT closure has no fallback source".to_string());
                             }
                         }
                         _ => return Err(format!("Cannot call {:?}", func)),
-                    };
-
-                    self.stack.push(result);
+                    }
                 }
 
                 Instruction::TailCall => {
@@ -396,10 +453,10 @@ impl VM {
 
                     match func {
                         Value::NativeFn(f) => {
-                            return f(&args);
+                            return f(&args).map(VmResult::Done);
                         }
                         Value::VmAwareFn(f) => {
-                            return f(&args, self);
+                            return f(&args, self).map(VmResult::Done);
                         }
                         Value::Closure(closure) => {
                             // Build proper environment: captures + args + locals (same as Call)
@@ -419,9 +476,9 @@ impl VM {
                                 .num_locals
                                 .saturating_sub(num_params + closure.num_captures);
 
-                            // Add empty cells for locally-defined variables
+                            // Add empty LocalCells for locally-defined variables
                             for _ in 0..num_locally_defined {
-                                let empty_cell = Value::Cell(std::rc::Rc::new(
+                                let empty_cell = Value::LocalCell(std::rc::Rc::new(
                                     std::cell::RefCell::new(Box::new(Value::Nil)),
                                 ));
                                 self.tail_call_env_cache.push(empty_cell);
@@ -440,7 +497,7 @@ impl VM {
 
                             // Return a dummy value - the outer loop will detect the pending tail call
                             // and execute it instead of returning this value
-                            return Ok(Value::Nil);
+                            return Ok(VmResult::Done(Value::Nil));
                         }
                         Value::JitClosure(jit_closure) => {
                             // Validate argument count
@@ -499,7 +556,7 @@ impl VM {
                                     );
 
                                     // Decode result
-                                    decode_jit_result(result_encoded)
+                                    decode_jit_result(result_encoded).map(VmResult::Done)
                                 };
                             } else if let Some(ref source) = jit_closure.source {
                                 // Build proper environment: captures + args + locals (same as Call)
@@ -518,9 +575,9 @@ impl VM {
                                     .num_locals
                                     .saturating_sub(num_params + source.num_captures);
 
-                                // Add empty cells for locally-defined variables
+                                // Add empty LocalCells for locally-defined variables
                                 for _ in 0..num_locally_defined {
-                                    let empty_cell = Value::Cell(std::rc::Rc::new(
+                                    let empty_cell = Value::LocalCell(std::rc::Rc::new(
                                         std::cell::RefCell::new(Box::new(Value::Nil)),
                                     ));
                                     self.tail_call_env_cache.push(empty_cell);
@@ -536,7 +593,7 @@ impl VM {
                                 ));
 
                                 // Return a dummy value - the outer loop will detect the pending tail call
-                                return Ok(Value::Nil);
+                                return Ok(VmResult::Done(Value::Nil));
                             } else {
                                 return Err("JIT closure has no fallback source".to_string());
                             }
@@ -784,9 +841,45 @@ impl VM {
                 }
 
                 Instruction::Yield => {
-                    // TODO: Implement yield for coroutines
-                    // For now, just return an error indicating yield is not yet implemented
-                    return Err("Yield instruction not yet implemented in VM".to_string());
+                    // 1. Pop the value to yield
+                    let yielded_value = self.stack.pop().ok_or("Stack underflow on yield")?;
+
+                    // 2. Check we're in a coroutine context
+                    let coroutine = match self.current_coroutine() {
+                        Some(co) => co.clone(),
+                        None => return Err("yield used outside of coroutine".to_string()),
+                    };
+
+                    // 3. Save execution context
+                    // The stack contains locals at the bottom and operands on top
+                    // We need to save it so we can restore when resuming
+                    let saved_context = CoroutineContext {
+                        ip, // Current IP (will resume at next instruction)
+                        stack: self.stack.iter().cloned().collect(),
+                        locals: vec![],      // Locals are on the stack, not separate
+                        call_frames: vec![], // TODO: save call frames if we support nested calls in coroutines
+                    };
+
+                    let bytecode_hex: String = bytecode
+                        .iter()
+                        .map(|b| format!("{:02x}", b))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    eprintln!(
+                        "DEBUG Yield: saving context with ip={}, yielded_value={:?}, bytecode={}, bytecode_len={}",
+                        ip, yielded_value, bytecode_hex, bytecode.len()
+                    );
+
+                    // 4. Update coroutine state
+                    {
+                        let mut co = coroutine.borrow_mut();
+                        co.state = CoroutineState::Suspended;
+                        co.yielded_value = Some(yielded_value.clone());
+                        co.saved_context = Some(saved_context);
+                    }
+
+                    // 5. Return the yielded value
+                    return Ok(VmResult::Yielded(yielded_value));
                 }
             }
 
@@ -811,6 +904,56 @@ impl VM {
                     }
                     return Err("Unhandled exception".to_string());
                 }
+            }
+        }
+    }
+
+    /// Wrapper that calls execute_bytecode_inner_with_ip with start_ip = 0
+    fn execute_bytecode_inner(
+        &mut self,
+        bytecode: &[u8],
+        constants: &[Value],
+        closure_env: Option<&Rc<Vec<Value>>>,
+    ) -> Result<VmResult, String> {
+        self.execute_bytecode_inner_with_ip(bytecode, constants, closure_env, 0)
+    }
+
+    /// Execute bytecode starting from a specific instruction pointer
+    /// Used for resuming coroutines from where they yielded
+    pub fn execute_bytecode_from_ip(
+        &mut self,
+        bytecode: &[u8],
+        constants: &[Value],
+        closure_env: Option<&Rc<Vec<Value>>>,
+        start_ip: usize,
+    ) -> Result<VmResult, String> {
+        self.execute_bytecode_inner_with_ip(bytecode, constants, closure_env, start_ip)
+    }
+
+    /// Execute bytecode returning VmResult (for coroutine execution)
+    pub fn execute_bytecode_coroutine(
+        &mut self,
+        bytecode: &[u8],
+        constants: &[Value],
+        closure_env: Option<&Rc<Vec<Value>>>,
+    ) -> Result<VmResult, String> {
+        let mut current_bytecode = bytecode.to_vec();
+        let mut current_constants = constants.to_vec();
+        let mut current_env = closure_env.cloned();
+
+        loop {
+            let result = self.execute_bytecode_inner(
+                &current_bytecode,
+                &current_constants,
+                current_env.as_ref(),
+            )?;
+
+            if let Some((tail_bytecode, tail_constants, tail_env)) = self.pending_tail_call.take() {
+                current_bytecode = tail_bytecode;
+                current_constants = tail_constants;
+                current_env = Some(tail_env);
+            } else {
+                return Ok(result);
             }
         }
     }

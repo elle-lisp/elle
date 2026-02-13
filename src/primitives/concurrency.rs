@@ -66,7 +66,7 @@ fn is_value_sendable(value: &Value) -> bool {
         Value::ThreadHandle(_) => false,
 
         // Cells are safe if their contents are sendable
-        Value::Cell(cell) => {
+        Value::Cell(cell) | Value::LocalCell(cell) => {
             if let Ok(val) = cell.try_borrow() {
                 is_value_sendable(&val)
             } else {

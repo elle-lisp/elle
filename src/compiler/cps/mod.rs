@@ -10,12 +10,14 @@
 //! - JIT compilation: native code generation for CPS expressions
 //! - Mixed calls: native code calling CPS functions
 //! - Continuation pool: efficient continuation allocation
+//! - Interpreter: tree-walking interpreter for CPS expressions
 
 mod action;
 mod arena;
 mod cont_pool;
 mod continuation;
 mod cps_expr;
+mod interpreter;
 pub mod jit;
 mod jit_action;
 mod mixed_calls;
@@ -30,6 +32,7 @@ pub use cont_pool::{
 };
 pub use continuation::Continuation;
 pub use cps_expr::CpsExpr;
+pub use interpreter::CpsInterpreter;
 pub use jit::CpsJitCompiler;
 pub use jit_action::{ActionTag, JitAction};
 pub use mixed_calls::{jit_call_cps_function, jit_is_suspended_coroutine, jit_resume_coroutine};

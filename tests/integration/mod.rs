@@ -129,3 +129,7 @@ mod peephole_optimization {
 mod let_semantics {
     include!("let_semantics.rs");
 }
+
+mod coroutines {
+    include!("coroutines.rs");
+}

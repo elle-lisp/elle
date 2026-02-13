@@ -46,7 +46,8 @@ pub extern "C" fn jit_is_suspended_coroutine(value: i64) -> i64 {
     let decoded = decode_value_for_jit(value);
     match decoded {
         Value::Coroutine(ref c) => {
-            if matches!(c.state, crate::value::CoroutineState::Suspended) {
+            let borrowed = c.borrow();
+            if matches!(borrowed.state, crate::value::CoroutineState::Suspended) {
                 1
             } else {
                 0

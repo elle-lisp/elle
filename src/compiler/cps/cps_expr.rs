@@ -23,6 +23,8 @@ pub enum CpsExpr {
     Yield {
         /// Expression to evaluate and yield
         value: Box<CpsExpr>,
+        /// Continuation to resume with after yield
+        continuation: Rc<Continuation>,
     },
 
     /// Call a function that may yield
@@ -194,6 +196,7 @@ mod tests {
     fn test_yield_is_not_pure() {
         let expr = CpsExpr::Yield {
             value: Box::new(CpsExpr::literal(Value::Int(1))),
+            continuation: Continuation::done(),
         };
         assert!(!expr.is_pure());
         assert!(expr.is_yield());

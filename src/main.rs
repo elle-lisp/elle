@@ -10,7 +10,7 @@ use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, VM}
 use rustyline::error::ReadlineError;
 use std::env;
 use std::fs;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Read, Write};
 
 fn print_welcome() {
     println!("Elle v0.1.0 - Lisp Interpreter (type (help) for commands)");
@@ -58,6 +58,15 @@ fn print_help() {
     println!();
 }
 
+fn run_stdin(vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
+    let mut contents = String::new();
+    io::stdin()
+        .read_to_string(&mut contents)
+        .map_err(|e| format!("Failed to read stdin: {}", e))?;
+
+    run_source(&contents, "<stdin>", vm, symbols)
+}
+
 fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
     let mut contents =
         fs::read_to_string(filename).map_err(|e| format!("Failed to read file: {}", e))?;
@@ -67,6 +76,17 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
         contents = contents.lines().skip(1).collect::<Vec<_>>().join("\n");
     }
 
+    run_source(&contents, filename, vm, symbols)
+}
+
+/// Run Elle source code from a string.
+/// Only prints non-nil results.
+fn run_source(
+    contents: &str,
+    source_name: &str,
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+) -> Result<(), String> {
     let mut had_parse_error = false;
     let mut had_runtime_error = false;
     let mut had_compilation_error = false;
@@ -74,14 +94,14 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
     // First pass: collect all top-level definitions to pre-register them
     // This allows recursive functions to reference themselves
     {
-        let mut lexer = elle::reader::Lexer::new(&contents);
+        let mut lexer = elle::reader::Lexer::new(contents);
         let mut temp_tokens = Vec::new();
         let mut temp_locations = Vec::new();
         loop {
             match lexer.next_token_with_loc() {
                 Ok(Some(mut token_with_loc)) => {
                     // Set the file name in the location
-                    token_with_loc.loc.file = filename.to_string();
+                    token_with_loc.loc.file = source_name.to_string();
                     temp_tokens.push(elle::reader::OwnedToken::from(token_with_loc.token));
                     temp_locations.push(token_with_loc.loc);
                 }
@@ -117,14 +137,14 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
     }
 
     // Second pass: execute all expressions
-    let mut lexer = elle::reader::Lexer::new(&contents);
+    let mut lexer = elle::reader::Lexer::new(contents);
     let mut tokens = Vec::new();
     let mut locations = Vec::new();
     loop {
         match lexer.next_token_with_loc() {
             Ok(Some(mut token_with_loc)) => {
                 // Set the file name in the location
-                token_with_loc.loc.file = filename.to_string();
+                token_with_loc.loc.file = source_name.to_string();
                 tokens.push(elle::reader::OwnedToken::from(token_with_loc.token));
                 locations.push(token_with_loc.loc);
             }
@@ -152,7 +172,9 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
                 // Execute
                 match vm.execute(&bytecode) {
                     Ok(result) => {
-                        if !result.is_nil() && std::io::stdout().is_terminal() {
+                        // Only print non-nil results (even in stdin mode)
+                        // This avoids printing nil for side-effect functions like display
+                        if !result.is_nil() {
                             println!("⟹ {:?}", result);
                         }
                     }
@@ -239,7 +261,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                         // Execute
                         match vm.execute(&bytecode) {
                             Ok(result) => {
-                                if !result.is_nil() && std::io::stdout().is_terminal() {
+                                if !result.is_nil() {
                                     println!("⟹ {:?}", result);
                                 }
                             }
@@ -366,7 +388,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                 // Execute
                 match vm.execute(&bytecode) {
                     Ok(result) => {
-                        if !result.is_nil() && std::io::stdout().is_terminal() {
+                        if !result.is_nil() {
                             println!("⟹ {:?}", result);
                         }
                     }
@@ -449,11 +471,15 @@ fn main() {
     let mut had_errors = false;
     let mut use_jit = false;
     let mut files = Vec::new();
+    let mut read_stdin = false;
 
     // Parse flags and files
     for arg in &args[1..] {
         if arg == "--jit" {
             use_jit = true;
+        } else if arg == "-" {
+            // `-` means read from stdin
+            read_stdin = true;
         } else if !arg.starts_with('-') {
             files.push(arg.as_str());
         }
@@ -463,7 +489,13 @@ fn main() {
         eprintln!("Elle: JIT mode enabled (experimental)");
     }
 
-    if !files.is_empty() {
+    if read_stdin {
+        // Read from stdin (piped input)
+        if let Err(e) = run_stdin(&mut vm, &mut symbols) {
+            eprintln!("Error: {}", e);
+            had_errors = true;
+        }
+    } else if !files.is_empty() {
         // Run file(s)
         for filename in files {
             if let Err(e) = run_file(filename, &mut vm, &mut symbols) {

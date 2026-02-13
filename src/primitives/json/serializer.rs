@@ -97,7 +97,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         Value::Exception(_) => Err("Cannot serialize exceptions to JSON".to_string()),
         Value::Condition(_) => Err("Cannot serialize conditions to JSON".to_string()),
         Value::ThreadHandle(_) => Err("Cannot serialize thread handles to JSON".to_string()),
-        Value::Cell(cell) => {
+        Value::Cell(cell) | Value::LocalCell(cell) => {
             // Dereference the cell and serialize the inner value
             let inner = cell.borrow();
             serialize_value(&inner)
@@ -217,7 +217,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         Value::Exception(_) => Err("Cannot serialize exceptions to JSON".to_string()),
         Value::Condition(_) => Err("Cannot serialize conditions to JSON".to_string()),
         Value::ThreadHandle(_) => Err("Cannot serialize thread handles to JSON".to_string()),
-        Value::Cell(cell) => {
+        Value::Cell(cell) | Value::LocalCell(cell) => {
             // Dereference the cell and serialize the inner value
             let inner = cell.borrow();
             serialize_value_pretty(&inner, indent_level)

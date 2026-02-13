@@ -268,6 +268,23 @@ pub enum CoroutineState {
     Error(String),
 }
 
+/// Saved call frame for coroutine resumption
+#[derive(Debug, Clone)]
+pub struct CoroutineCallFrame {
+    pub return_ip: usize,
+    pub base_pointer: usize,
+    pub closure: Rc<Closure>,
+}
+
+/// Saved execution context for suspended coroutines
+#[derive(Debug, Clone)]
+pub struct CoroutineContext {
+    pub ip: usize,                            // Instruction pointer
+    pub stack: Vec<Value>,                    // Operand stack snapshot
+    pub locals: Vec<Value>,                   // Local variables
+    pub call_frames: Vec<CoroutineCallFrame>, // Call stack
+}
+
 /// A coroutine value
 #[derive(Debug, Clone)]
 pub struct Coroutine {
@@ -277,6 +294,27 @@ pub struct Coroutine {
     pub state: CoroutineState,
     /// Last yielded value (if suspended)
     pub yielded_value: Option<Value>,
+    /// Saved execution context for resumption (bytecode path)
+    pub saved_context: Option<CoroutineContext>,
+    /// Saved CPS continuation for resumption (CPS path)
+    pub saved_continuation: Option<Rc<crate::compiler::cps::Continuation>>,
+    /// Saved execution environment for CPS resumption
+    /// This preserves local variables across yields
+    pub saved_env: Option<Rc<Vec<Value>>>,
+}
+
+impl Coroutine {
+    /// Create a new coroutine from a closure
+    pub fn new(closure: Rc<Closure>) -> Self {
+        Coroutine {
+            closure,
+            state: CoroutineState::Created,
+            yielded_value: None,
+            saved_context: None,
+            saved_continuation: None,
+            saved_env: None,
+        }
+    }
 }
 
 impl fmt::Debug for ThreadHandle {
@@ -320,8 +358,11 @@ pub enum Value {
     ThreadHandle(ThreadHandle),
     // Shared mutable cell for captured variables across closures
     Cell(Rc<RefCell<Box<Value>>>),
+    // Internal cell for locally-defined variables (auto-unwrapped by LoadUpvalue)
+    // This is distinct from Cell which is user-created via `box` and NOT auto-unwrapped
+    LocalCell(Rc<RefCell<Box<Value>>>),
     // Coroutines (suspendable computations)
-    Coroutine(Rc<Coroutine>),
+    Coroutine(Rc<RefCell<Coroutine>>),
 }
 
 impl PartialEq for Value {
@@ -348,6 +389,7 @@ impl PartialEq for Value {
             (Value::Condition(a), Value::Condition(b)) => a == b,
             (Value::ThreadHandle(a), Value::ThreadHandle(b)) => a == b,
             (Value::Cell(_), Value::Cell(_)) => false, // Cells are mutable, never equal
+            (Value::LocalCell(_), Value::LocalCell(_)) => false, // LocalCells are mutable, never equal
             (Value::Coroutine(_), Value::Coroutine(_)) => false, // Coroutines are never equal
             _ => false,
         }
@@ -508,6 +550,7 @@ impl Value {
             Value::Condition(_) => "condition",
             Value::ThreadHandle(_) => "thread-handle",
             Value::Cell(_) => "cell",
+            Value::LocalCell(_) => "cell", // LocalCell appears as "cell" to users
             Value::Coroutine(_) => "coroutine",
         }
     }
@@ -580,7 +623,14 @@ impl fmt::Debug for Value {
             Value::Condition(cond) => write!(f, "<condition: id={}>", cond.exception_id),
             Value::ThreadHandle(_) => write!(f, "<thread-handle>"),
             Value::Cell(_) => write!(f, "<cell>"),
-            Value::Coroutine(_) => write!(f, "<coroutine>"),
+            Value::LocalCell(_) => write!(f, "<local-cell>"),
+            Value::Coroutine(co) => {
+                if let Ok(borrowed) = co.try_borrow() {
+                    write!(f, "<coroutine:{:?}>", borrowed.state)
+                } else {
+                    write!(f, "<coroutine:borrowed>")
+                }
+            }
         }
     }
 }
@@ -628,5 +678,89 @@ mod tests {
         assert!(Value::Bool(true).is_truthy());
         assert!(!Value::Bool(false).is_truthy());
         assert!(!Value::Nil.is_truthy());
+    }
+}
+
+#[cfg(test)]
+mod coroutine_tests {
+    use super::*;
+    use crate::compiler::effects::Effect;
+
+    #[test]
+    fn test_coroutine_context_creation() {
+        let ctx = CoroutineContext {
+            ip: 42,
+            stack: vec![Value::Int(1), Value::Int(2)],
+            locals: vec![Value::Nil],
+            call_frames: vec![],
+        };
+        assert_eq!(ctx.ip, 42);
+        assert_eq!(ctx.stack.len(), 2);
+        assert_eq!(ctx.locals.len(), 1);
+    }
+
+    #[test]
+    fn test_coroutine_refcell_mutation() {
+        // Create a minimal closure for testing
+        let closure = Rc::new(Closure {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Exact(0),
+            env: Rc::new(vec![]),
+            num_locals: 0,
+            num_captures: 0,
+            constants: Rc::new(vec![Value::Nil]),
+            source_ast: None,
+            effect: Effect::Pure,
+        });
+
+        let co = Coroutine::new(closure);
+        let co_ref = Rc::new(RefCell::new(co));
+        let value = Value::Coroutine(co_ref.clone());
+
+        // Verify we can mutate through RefCell
+        {
+            let mut borrowed = co_ref.borrow_mut();
+            borrowed.state = CoroutineState::Running;
+        }
+
+        // Verify mutation persisted
+        match &value {
+            Value::Coroutine(c) => {
+                assert!(matches!(c.borrow().state, CoroutineState::Running));
+            }
+            _ => panic!("Expected coroutine"),
+        }
+    }
+
+    #[test]
+    fn test_coroutine_saved_context() {
+        let closure = Rc::new(Closure {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Exact(0),
+            env: Rc::new(vec![]),
+            num_locals: 0,
+            num_captures: 0,
+            constants: Rc::new(vec![Value::Nil]),
+            source_ast: None,
+            effect: Effect::Pure,
+        });
+
+        let mut co = Coroutine::new(closure.clone());
+        assert!(co.saved_context.is_none());
+
+        // Simulate saving context on yield
+        co.saved_context = Some(CoroutineContext {
+            ip: 10,
+            stack: vec![Value::Int(42)],
+            locals: vec![],
+            call_frames: vec![CoroutineCallFrame {
+                return_ip: 5,
+                base_pointer: 0,
+                closure: closure.clone(),
+            }],
+        });
+
+        assert!(co.saved_context.is_some());
+        assert_eq!(co.saved_context.as_ref().unwrap().ip, 10);
     }
 }

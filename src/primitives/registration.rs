@@ -7,6 +7,7 @@ use super::arithmetic::{
     prim_abs, prim_add, prim_div, prim_even, prim_max, prim_min, prim_mod, prim_mul, prim_odd,
     prim_rem, prim_sub,
 };
+use super::cell::{prim_box, prim_box_set, prim_cell_p, prim_unbox};
 use super::comparison::{prim_eq, prim_ge, prim_gt, prim_le, prim_lt};
 use super::concurrency::{prim_current_thread_id, prim_join, prim_sleep, prim_spawn};
 use super::coroutines::{
@@ -379,6 +380,12 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "jit-compiled?", prim_jit_compiled_p);
     register_fn(vm, symbols, "jit-compilable?", prim_jit_compilable_p);
     register_fn(vm, symbols, "jit-stats", prim_jit_stats);
+
+    // Cell/Box primitives (mutable storage)
+    register_fn(vm, symbols, "box", prim_box);
+    register_fn(vm, symbols, "unbox", prim_unbox);
+    register_fn(vm, symbols, "box-set!", prim_box_set);
+    register_fn(vm, symbols, "cell?", prim_cell_p);
 
     // Coroutine primitives (Phase 6)
     register_fn(vm, symbols, "make-coroutine", prim_make_coroutine);
