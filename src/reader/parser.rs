@@ -42,6 +42,11 @@ impl Reader {
         })
     }
 
+    /// Get the current source location (public API)
+    pub fn get_current_location(&self) -> SourceLoc {
+        self.current_location()
+    }
+
     fn advance(&mut self) -> Option<OwnedToken> {
         let token = self.current().cloned();
         self.pos += 1;

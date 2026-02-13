@@ -4,7 +4,9 @@
 //! - An exception ID (for fast matching)
 //! - Field values (structured data about the condition)
 //! - Optional backtrace (for debugging)
+//! - Optional source location (for error reporting)
 
+use crate::reader::SourceLoc;
 use crate::value::Value;
 use std::collections::HashMap;
 use std::fmt;
@@ -18,6 +20,8 @@ pub struct Condition {
     pub fields: HashMap<u32, Value>,
     /// Optional backtrace for debugging
     pub backtrace: Option<String>,
+    /// Optional source location for error reporting
+    pub location: Option<SourceLoc>,
 }
 
 impl Condition {
@@ -27,6 +31,7 @@ impl Condition {
             exception_id,
             fields: HashMap::new(),
             backtrace: None,
+            location: None,
         }
     }
 
@@ -46,6 +51,12 @@ impl Condition {
         self
     }
 
+    /// Set source location information
+    pub fn with_location(mut self, loc: SourceLoc) -> Self {
+        self.location = Some(loc);
+        self
+    }
+
     /// Check if this condition is of a specific type (including inheritance)
     pub fn is_instance_of(&self, exception_id: u32) -> bool {
         self.exception_id == exception_id
@@ -54,8 +65,10 @@ impl Condition {
 
 impl PartialEq for Condition {
     fn eq(&self, other: &Self) -> bool {
-        // Conditions are equal if they have the same ID and field values
-        self.exception_id == other.exception_id && self.fields == other.fields
+        // Conditions are equal if they have the same ID, field values, and location
+        self.exception_id == other.exception_id
+            && self.fields == other.fields
+            && self.location == other.location
     }
 }
 

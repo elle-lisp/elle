@@ -133,3 +133,7 @@ mod let_semantics {
 mod coroutines {
     include!("coroutines.rs");
 }
+
+mod catchable_exceptions {
+    include!("catchable_exceptions.rs");
+}
