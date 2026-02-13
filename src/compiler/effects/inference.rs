@@ -216,19 +216,22 @@ impl EffectContext {
                             Effect::Pure // Conservative default
                         }
                     }
-                    None => Effect::Pure, // Unknown function, assume pure
+                    // Unknown global function - assume pure
+                    // At runtime, we register effects from VM globals, so unknown
+                    // functions are likely builtins that weren't registered
+                    None => Effect::Pure,
                 }
             }
             Expr::Var(sym_id, _, _) => self
                 .local_effects
                 .get(sym_id)
                 .copied()
-                .unwrap_or(Effect::Pure),
+                .unwrap_or(Effect::Yields), // Unknown local variable, assume may yield (conservative)
             Expr::Lambda { body, .. } => {
                 // Inline lambda - infer its body's effect
                 self.infer(body)
             }
-            _ => Effect::Pure,
+            _ => Effect::Yields, // Unknown expression, assume may yield (conservative)
         }
     }
 

@@ -84,7 +84,7 @@ impl CpsJitCompiler {
             }
 
             CpsExpr::Let {
-                var: _var,
+                index: _index,
                 init: _init,
                 body: _body,
             } => {
@@ -120,7 +120,7 @@ impl CpsJitCompiler {
             }
 
             CpsExpr::For {
-                var: _var,
+                index: _index,
                 iter: _iter,
                 body: _body,
                 continuation: _continuation,
@@ -158,6 +158,7 @@ impl CpsJitCompiler {
                 params: _params,
                 body: _body,
                 captures: _captures,
+                num_locals: _num_locals,
             } => {
                 // Compile lambda
                 Ok(())

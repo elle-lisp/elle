@@ -298,9 +298,9 @@ pub struct Coroutine {
     pub saved_context: Option<CoroutineContext>,
     /// Saved CPS continuation for resumption (CPS path)
     pub saved_continuation: Option<Rc<crate::compiler::cps::Continuation>>,
-    /// Saved execution environment for CPS resumption
+    /// Saved execution environment for CPS resumption (shared mutable)
     /// This preserves local variables across yields
-    pub saved_env: Option<Rc<Vec<Value>>>,
+    pub saved_env: Option<Rc<RefCell<Vec<Value>>>>,
 }
 
 impl Coroutine {

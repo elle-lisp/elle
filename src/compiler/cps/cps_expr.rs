@@ -49,8 +49,8 @@ pub enum CpsExpr {
 
     /// Let binding
     Let {
-        /// Variable being bound
-        var: SymbolId,
+        /// Index in environment where value is stored
+        index: usize,
         /// Initializer expression
         init: Box<CpsExpr>,
         /// Body expression
@@ -89,8 +89,8 @@ pub enum CpsExpr {
 
     /// For loop (may yield in body)
     For {
-        /// Loop variable
-        var: SymbolId,
+        /// Index in environment where loop variable is stored
+        index: usize,
         /// Iterator expression
         iter: Box<CpsExpr>,
         /// Body expression
@@ -143,6 +143,8 @@ pub enum CpsExpr {
         params: Vec<SymbolId>,
         body: Box<CpsExpr>,
         captures: Vec<(SymbolId, usize, usize)>,
+        /// Total number of locals needed (captures + params + local vars)
+        num_locals: usize,
     },
 
     /// Return a value (for internal use)

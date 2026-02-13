@@ -8,37 +8,62 @@ use super::{Continuation, CpsExpr};
 use crate::compiler::ast::Expr;
 use crate::compiler::effects::{Effect, EffectContext};
 use crate::value::{SymbolId, Value};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// CPS transformer
 pub struct CpsTransformer<'a> {
     /// Effect context for determining which expressions yield
     effect_ctx: &'a EffectContext,
+    /// Next local variable index (for index-based locals)
+    next_local_index: usize,
+    /// Map from SymbolId to CPS index for current scope
+    local_indices: HashMap<SymbolId, usize>,
 }
 
 impl<'a> CpsTransformer<'a> {
     /// Create a new CPS transformer
     pub fn new(effect_ctx: &'a EffectContext) -> Self {
-        Self { effect_ctx }
+        Self {
+            effect_ctx,
+            next_local_index: 0,
+            local_indices: HashMap::new(),
+        }
+    }
+
+    /// Create a new CPS transformer with initial local index
+    /// Used when transforming lambda bodies where captures and params are already allocated
+    pub fn with_initial_index(effect_ctx: &'a EffectContext, initial_index: usize) -> Self {
+        Self {
+            effect_ctx,
+            next_local_index: initial_index,
+            local_indices: HashMap::new(),
+        }
     }
 
     /// Transform an expression to CPS form
     ///
     /// If the expression is pure, it's wrapped in CpsExpr::Pure.
     /// If it may yield, it's fully CPS-transformed.
-    pub fn transform(&self, expr: &Expr, cont: Rc<Continuation>) -> CpsExpr {
+    pub fn transform(&mut self, expr: &Expr, cont: Rc<Continuation>) -> CpsExpr {
         // Always check for specific expression types that need transformation
         // even if they're pure (like function calls)
         match expr {
             Expr::Call { .. }
             | Expr::Yield(_)
             | Expr::Let { .. }
+            | Expr::Define { .. }
             | Expr::Begin(_)
             | Expr::If { .. }
             | Expr::While { .. }
-            | Expr::Lambda { .. } => {
+            | Expr::Lambda { .. }
+            | Expr::Var(..)
+            | Expr::GlobalVar(_)
+            | Expr::Literal(_) => {
                 // These expressions always go through transform_yielding
                 // which handles both pure and yielding cases
+                // Note: Var, GlobalVar, and Literal are included to ensure
+                // they get proper CPS representation instead of being wrapped in Pure
                 self.transform_yielding(expr, cont)
             }
             _ => {
@@ -54,7 +79,7 @@ impl<'a> CpsTransformer<'a> {
     }
 
     /// Transform a pure expression (wrap it, don't transform)
-    fn transform_pure(&self, expr: &Expr, cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_pure(&mut self, expr: &Expr, cont: Rc<Continuation>) -> CpsExpr {
         // For pure expressions, we just wrap them
         // The continuation will be applied after evaluation
         CpsExpr::Pure {
@@ -64,7 +89,7 @@ impl<'a> CpsTransformer<'a> {
     }
 
     /// Transform a yielding expression to CPS
-    fn transform_yielding(&self, expr: &Expr, cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_yielding(&mut self, expr: &Expr, cont: Rc<Continuation>) -> CpsExpr {
         match expr {
             // D1: Yield expression
             Expr::Yield(value_expr) => self.transform_yield(value_expr, cont),
@@ -79,14 +104,39 @@ impl<'a> CpsTransformer<'a> {
             // Literals are always pure
             Expr::Literal(v) => CpsExpr::Literal(v.clone()),
 
-            // Variables are pure
-            Expr::Var(sym, depth, index) => CpsExpr::Var {
-                sym: *sym,
-                depth: *depth,
-                index: *index,
-            },
+            // Variables - check if CPS-local (from let/for)
+            Expr::Var(sym, depth, index) => {
+                if let Some(&cps_index) = self.local_indices.get(sym) {
+                    // CPS-local variable - use CPS index
+                    CpsExpr::Var {
+                        sym: *sym,
+                        depth: 0, // CPS locals are always depth 0
+                        index: cps_index,
+                    }
+                } else {
+                    // Not a CPS local - use original indices (for captures, params)
+                    CpsExpr::Var {
+                        sym: *sym,
+                        depth: *depth,
+                        index: *index,
+                    }
+                }
+            }
 
-            Expr::GlobalVar(sym) => CpsExpr::GlobalVar(*sym),
+            Expr::GlobalVar(sym) => {
+                // Check if this is actually a CPS-local variable (from let/for)
+                // This happens when let-bound variables are represented as GlobalVar
+                // in the AST (for bytecode VM's scope stack lookup)
+                if let Some(&cps_index) = self.local_indices.get(sym) {
+                    CpsExpr::Var {
+                        sym: *sym,
+                        depth: 0,
+                        index: cps_index,
+                    }
+                } else {
+                    CpsExpr::GlobalVar(*sym)
+                }
+            }
 
             // D4: Let binding
             Expr::Let { bindings, body } => self.transform_let(bindings, body, cont),
@@ -125,6 +175,9 @@ impl<'a> CpsTransformer<'a> {
                 ..
             } => self.transform_lambda(params, body, captures, cont),
 
+            // Internal define - treat like a let binding
+            Expr::Define { name, value } => self.transform_define(*name, value, cont),
+
             // Other expressions - treat as pure for now
             _ => CpsExpr::Pure {
                 expr: expr.clone(),
@@ -134,7 +187,7 @@ impl<'a> CpsTransformer<'a> {
     }
 
     /// D1: Transform yield expression
-    fn transform_yield(&self, value_expr: &Expr, cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_yield(&mut self, value_expr: &Expr, cont: Rc<Continuation>) -> CpsExpr {
         // (yield e) becomes a Yield CPS expression
         // The value is evaluated, then yielded
         // The continuation is captured for resumption
@@ -146,7 +199,7 @@ impl<'a> CpsTransformer<'a> {
     }
 
     /// D2: Transform function call
-    fn transform_call(&self, func: &Expr, args: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_call(&mut self, func: &Expr, args: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
         // Check if the function may yield
         let func_effect = self.infer_call_effect(func, args);
 
@@ -181,7 +234,7 @@ impl<'a> CpsTransformer<'a> {
 
     /// D4: Transform let binding
     fn transform_let(
-        &self,
+        &mut self,
         bindings: &[(SymbolId, Expr)],
         body: &Expr,
         cont: Rc<Continuation>,
@@ -195,16 +248,20 @@ impl<'a> CpsTransformer<'a> {
 
         let init_effect = self.effect_ctx.infer(init);
 
+        // Allocate index for this binding and register mapping
+        let index = self.next_local_index;
+        self.next_local_index += 1;
+        self.local_indices.insert(*var, index);
+
         if init_effect.may_yield() {
             // Yielding initializer - need CPS
             // Transform init with a continuation that binds the result
             let body_clone = body.clone();
             let cont_clone = cont.clone();
-            let var_copy = *var;
 
             // Create continuation for after init evaluates
             let init_cont = Rc::new(Continuation::LetBinding {
-                var: var_copy,
+                var: *var,
                 remaining_bindings: rest.clone(),
                 bound_values: vec![],
                 body: Box::new(body_clone),
@@ -218,15 +275,43 @@ impl<'a> CpsTransformer<'a> {
             let body_cps = self.transform_let(&rest, body, cont);
 
             CpsExpr::Let {
-                var: *var,
+                index,
                 init: Box::new(init_cps),
                 body: Box::new(body_cps),
             }
         }
     }
 
+    /// Transform internal define (similar to let, but no body - just returns the value)
+    fn transform_define(
+        &mut self,
+        name: SymbolId,
+        value: &Expr,
+        _cont: Rc<Continuation>,
+    ) -> CpsExpr {
+        // Allocate index for this binding and register mapping
+        let index = self.next_local_index;
+        self.next_local_index += 1;
+        self.local_indices.insert(name, index);
+
+        // Transform the value expression
+        let value_cps = self.transform(value, Continuation::done());
+
+        // Create a let that binds the value and returns it
+        // The body just returns the bound value
+        CpsExpr::Let {
+            index,
+            init: Box::new(value_cps),
+            body: Box::new(CpsExpr::Var {
+                sym: name,
+                depth: 0,
+                index,
+            }),
+        }
+    }
+
     /// D4: Transform sequence (begin)
-    fn transform_sequence(&self, exprs: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_sequence(&mut self, exprs: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
         if exprs.is_empty() {
             return CpsExpr::Literal(Value::Nil);
         }
@@ -262,7 +347,7 @@ impl<'a> CpsTransformer<'a> {
 
     /// D4: Transform if expression
     fn transform_if(
-        &self,
+        &mut self,
         cond: &Expr,
         then_branch: &Expr,
         else_branch: &Expr,
@@ -298,7 +383,7 @@ impl<'a> CpsTransformer<'a> {
     }
 
     /// D5: Transform while loop
-    fn transform_while(&self, cond: &Expr, body: &Expr, cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_while(&mut self, cond: &Expr, body: &Expr, cont: Rc<Continuation>) -> CpsExpr {
         let cond_effect = self.effect_ctx.infer(cond);
         let body_effect = self.effect_ctx.infer(body);
 
@@ -326,44 +411,65 @@ impl<'a> CpsTransformer<'a> {
 
     /// Transform lambda
     fn transform_lambda(
-        &self,
+        &mut self,
         params: &[SymbolId],
         body: &Expr,
         captures: &[(SymbolId, usize, usize)],
-        _cont: Rc<Continuation>,
+        cont: Rc<Continuation>,
     ) -> CpsExpr {
         let body_effect = self.effect_ctx.infer(body);
 
         if body_effect.is_pure() {
-            // Pure lambda - no transform needed
-            CpsExpr::Lambda {
-                params: params.to_vec(),
-                body: Box::new(CpsExpr::Pure {
-                    expr: body.clone(),
-                    continuation: Continuation::done(),
-                }),
-                captures: captures.to_vec(),
+            // Pure lambda - keep as pure expression
+            // The lambda will be compiled to bytecode and executed normally
+            CpsExpr::Pure {
+                expr: Expr::Lambda {
+                    params: params.to_vec(),
+                    body: Box::new(body.clone()),
+                    captures: captures.to_vec(),
+                    locals: vec![], // Locals will be computed by the compiler
+                },
+                continuation: cont,
             }
         } else {
             // Yielding lambda - transform body
+            // Save current state
+            let saved_index = self.next_local_index;
+            let saved_locals = std::mem::take(&mut self.local_indices);
+
+            // New scope: [captures..., params..., locals...]
+            self.next_local_index = captures.len() + params.len();
+
+            // Register params in local_indices
+            for (i, param) in params.iter().enumerate() {
+                self.local_indices.insert(*param, captures.len() + i);
+            }
+
             let body_cps = self.transform(body, Continuation::done());
+            let num_locals = self.next_local_index;
+
+            // Restore state
+            self.next_local_index = saved_index;
+            self.local_indices = saved_locals;
+
             CpsExpr::Lambda {
                 params: params.to_vec(),
                 body: Box::new(body_cps),
                 captures: captures.to_vec(),
+                num_locals,
             }
         }
     }
 
     /// D4: Transform block expression
-    fn transform_block(&self, exprs: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_block(&mut self, exprs: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
         // Same as sequence but for Block variant
         self.transform_sequence(exprs, cont)
     }
 
     /// D5: Transform for loop
     fn transform_for(
-        &self,
+        &mut self,
         var: SymbolId,
         iter: &Expr,
         body: &Expr,
@@ -372,8 +478,14 @@ impl<'a> CpsTransformer<'a> {
         let iter_effect = self.effect_ctx.infer(iter);
         let body_effect = self.effect_ctx.infer(body);
 
+        // Allocate index for loop variable and register mapping
+        let index = self.next_local_index;
+        self.next_local_index += 1;
+        self.local_indices.insert(var, index);
+
         if iter_effect.is_pure() && body_effect.is_pure() {
             // Pure for loop - no transform needed
+            // Note: We still allocate the index but the Pure wrapper handles it
             CpsExpr::Pure {
                 expr: Expr::For {
                     var,
@@ -388,7 +500,7 @@ impl<'a> CpsTransformer<'a> {
             let body_cps = self.transform(body, Continuation::done());
 
             CpsExpr::For {
-                var,
+                index,
                 iter: Box::new(iter_cps),
                 body: Box::new(body_cps),
                 continuation: cont,
@@ -397,7 +509,7 @@ impl<'a> CpsTransformer<'a> {
     }
 
     /// Transform and expression
-    fn transform_and(&self, exprs: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_and(&mut self, exprs: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
         let any_yields = exprs.iter().any(|e| self.effect_ctx.infer(e).may_yield());
 
         if !any_yields {
@@ -407,10 +519,10 @@ impl<'a> CpsTransformer<'a> {
             }
         } else {
             // Transform each expression
-            let cps_exprs: Vec<CpsExpr> = exprs
-                .iter()
-                .map(|e| self.transform(e, Continuation::done()))
-                .collect();
+            let mut cps_exprs = Vec::with_capacity(exprs.len());
+            for e in exprs {
+                cps_exprs.push(self.transform(e, Continuation::done()));
+            }
 
             CpsExpr::And {
                 exprs: cps_exprs,
@@ -420,7 +532,7 @@ impl<'a> CpsTransformer<'a> {
     }
 
     /// Transform or expression
-    fn transform_or(&self, exprs: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_or(&mut self, exprs: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
         let any_yields = exprs.iter().any(|e| self.effect_ctx.infer(e).may_yield());
 
         if !any_yields {
@@ -429,10 +541,10 @@ impl<'a> CpsTransformer<'a> {
                 continuation: cont,
             }
         } else {
-            let cps_exprs: Vec<CpsExpr> = exprs
-                .iter()
-                .map(|e| self.transform(e, Continuation::done()))
-                .collect();
+            let mut cps_exprs = Vec::with_capacity(exprs.len());
+            for e in exprs {
+                cps_exprs.push(self.transform(e, Continuation::done()));
+            }
 
             CpsExpr::Or {
                 exprs: cps_exprs,
@@ -443,7 +555,7 @@ impl<'a> CpsTransformer<'a> {
 
     /// Transform cond expression
     fn transform_cond(
-        &self,
+        &mut self,
         clauses: &[(Expr, Expr)],
         else_body: Option<&Expr>,
         cont: Rc<Continuation>,
@@ -463,15 +575,12 @@ impl<'a> CpsTransformer<'a> {
                 continuation: cont,
             }
         } else {
-            let cps_clauses: Vec<(CpsExpr, CpsExpr)> = clauses
-                .iter()
-                .map(|(c, b)| {
-                    (
-                        self.transform(c, Continuation::done()),
-                        self.transform(b, cont.clone()),
-                    )
-                })
-                .collect();
+            let mut cps_clauses = Vec::with_capacity(clauses.len());
+            for (c, b) in clauses {
+                let cond_cps = self.transform(c, Continuation::done());
+                let body_cps = self.transform(b, cont.clone());
+                cps_clauses.push((cond_cps, body_cps));
+            }
 
             let cps_else = else_body.map(|e| Box::new(self.transform(e, cont.clone())));
 
@@ -496,7 +605,7 @@ mod tests {
     #[test]
     fn test_transform_literal() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Literal(Value::Int(42));
         let result = transformer.transform(&expr, Continuation::done());
@@ -507,7 +616,7 @@ mod tests {
     #[test]
     fn test_transform_yield() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Yield(Box::new(Expr::Literal(Value::Int(1))));
         let result = transformer.transform(&expr, Continuation::done());
@@ -520,7 +629,7 @@ mod tests {
         let mut symbols = SymbolTable::new();
         let plus = symbols.intern("+");
         let ctx = EffectContext::with_symbols(&symbols);
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Call {
             func: Box::new(Expr::GlobalVar(plus)),
@@ -539,7 +648,7 @@ mod tests {
     #[test]
     fn test_transform_pure_if() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::If {
             cond: Box::new(Expr::Literal(Value::Bool(true))),
@@ -554,7 +663,7 @@ mod tests {
     #[test]
     fn test_transform_yielding_if() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::If {
             cond: Box::new(Expr::Literal(Value::Bool(true))),
@@ -575,7 +684,7 @@ mod tests {
         let mut symbols = SymbolTable::new();
         let x = symbols.intern("x");
         let ctx = EffectContext::with_symbols(&symbols);
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::For {
             var: x,
@@ -592,7 +701,7 @@ mod tests {
         let mut symbols = SymbolTable::new();
         let x = symbols.intern("x");
         let ctx = EffectContext::with_symbols(&symbols);
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::For {
             var: x,
@@ -611,7 +720,7 @@ mod tests {
     #[test]
     fn test_transform_pure_and() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::And(vec![
             Expr::Literal(Value::Bool(true)),
@@ -625,7 +734,7 @@ mod tests {
     #[test]
     fn test_transform_yielding_and() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::And(vec![
             Expr::Literal(Value::Bool(true)),
@@ -643,7 +752,7 @@ mod tests {
     #[test]
     fn test_transform_pure_or() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Or(vec![
             Expr::Literal(Value::Bool(true)),
@@ -657,7 +766,7 @@ mod tests {
     #[test]
     fn test_transform_yielding_or() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Or(vec![
             Expr::Literal(Value::Bool(true)),
@@ -675,7 +784,7 @@ mod tests {
     #[test]
     fn test_transform_pure_cond() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Cond {
             clauses: vec![(
@@ -692,7 +801,7 @@ mod tests {
     #[test]
     fn test_transform_yielding_cond() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Cond {
             clauses: vec![(
@@ -713,7 +822,7 @@ mod tests {
     #[test]
     fn test_transform_block() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Block(vec![
             Expr::Literal(Value::Int(1)),
@@ -727,7 +836,7 @@ mod tests {
     #[test]
     fn test_transform_yielding_block() {
         let ctx = make_ctx();
-        let transformer = CpsTransformer::new(&ctx);
+        let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Block(vec![
             Expr::Literal(Value::Int(1)),

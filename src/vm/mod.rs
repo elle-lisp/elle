@@ -860,16 +860,6 @@ impl VM {
                         call_frames: vec![], // TODO: save call frames if we support nested calls in coroutines
                     };
 
-                    let bytecode_hex: String = bytecode
-                        .iter()
-                        .map(|b| format!("{:02x}", b))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    eprintln!(
-                        "DEBUG Yield: saving context with ip={}, yielded_value={:?}, bytecode={}, bytecode_len={}",
-                        ip, yielded_value, bytecode_hex, bytecode.len()
-                    );
-
                     // 4. Update coroutine state
                     {
                         let mut co = coroutine.borrow_mut();
