@@ -144,7 +144,7 @@ pub extern "C" fn jit_load_global(sym_id: i64) -> i64 {
     if let Some(val) = vm.scope_stack.get(sym_id_u32) {
         // Handle cells (for mutable captures)
         match val {
-            Value::Cell(cell_rc) => {
+            Value::Cell(cell_rc) | Value::LocalCell(cell_rc) => {
                 let cell_ref = cell_rc.borrow();
                 return encode_value_for_jit(&cell_ref);
             }
@@ -155,7 +155,7 @@ pub extern "C" fn jit_load_global(sym_id: i64) -> i64 {
     // Fall back to global scope
     if let Some(val) = vm.globals.get(&sym_id_u32) {
         match val {
-            Value::Cell(cell_rc) => {
+            Value::Cell(cell_rc) | Value::LocalCell(cell_rc) => {
                 let cell_ref = cell_rc.borrow();
                 encode_value_for_jit(&cell_ref)
             }

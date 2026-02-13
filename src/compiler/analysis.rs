@@ -162,6 +162,18 @@ pub fn analyze_capture_usage(
             }
         }
 
+        Expr::Yield(expr) => {
+            used_vars.extend(analyze_capture_usage(expr, local_bindings, candidates));
+        }
+
+        Expr::Throw { value } => {
+            used_vars.extend(analyze_capture_usage(value, local_bindings, candidates));
+        }
+
+        Expr::Quote(expr) | Expr::Quasiquote(expr) | Expr::Unquote(expr) => {
+            used_vars.extend(analyze_capture_usage(expr, local_bindings, candidates));
+        }
+
         _ => {
             // Other expression types don't affect usage
         }
@@ -323,8 +335,22 @@ pub fn analyze_free_vars(expr: &Expr, local_bindings: &HashSet<SymbolId>) -> Has
             }
         }
 
+        Expr::Yield(expr) => {
+            free_vars.extend(analyze_free_vars(expr, local_bindings));
+        }
+
+        Expr::Throw { value } => {
+            free_vars.extend(analyze_free_vars(value, local_bindings));
+        }
+
+        Expr::Quote(expr) | Expr::Quasiquote(expr) | Expr::Unquote(expr) => {
+            // Quote/Quasiquote/Unquote expressions don't evaluate their contents normally
+            // but we should still analyze them for completeness
+            free_vars.extend(analyze_free_vars(expr, local_bindings));
+        }
+
         _ => {
-            // Other expression types (Quote, Quasiquote, Module, etc.) don't affect free vars
+            // Other expression types (Module, Import, etc.) don't affect free vars
         }
     }
 

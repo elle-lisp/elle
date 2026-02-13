@@ -60,6 +60,47 @@ pub enum Continuation {
         /// The continuation function to apply
         cont_fn: Rc<dyn Fn(Value) -> crate::compiler::cps::Action + 'static>,
     },
+
+    /// Continue evaluating a CPS sequence after a yield
+    /// This is used when a yield happens in the middle of a sequence
+    CpsSequence {
+        /// Remaining CPS expressions to evaluate
+        remaining: Vec<crate::compiler::cps::CpsExpr>,
+        /// Continuation after all expressions are done
+        next: Rc<Continuation>,
+    },
+
+    /// Continue a while loop after a yield in the body
+    CpsWhile {
+        /// Condition expression
+        cond: Box<crate::compiler::cps::CpsExpr>,
+        /// Body expression
+        body: Box<crate::compiler::cps::CpsExpr>,
+        /// Continuation after loop exits
+        next: Rc<Continuation>,
+    },
+
+    /// Continue the rest of a while loop body, then continue the loop
+    /// This is used when a yield happens in the middle of the body
+    CpsWhileBody {
+        /// Continuation for the rest of the body
+        body_cont: Rc<Continuation>,
+        /// Condition expression for the loop
+        cond: Box<crate::compiler::cps::CpsExpr>,
+        /// Body expression for the loop
+        body: Box<crate::compiler::cps::CpsExpr>,
+        /// Continuation after loop exits
+        next: Rc<Continuation>,
+    },
+
+    /// Continue with yield_cont first, then evaluate remaining expressions
+    /// This is used when a yield happens inside a construct (like while) that's inside a sequence
+    CpsSequenceAfterYield {
+        /// Continuation from the yield (e.g., CpsWhile to continue a loop)
+        yield_cont: Rc<Continuation>,
+        /// Continuation for remaining expressions in the sequence
+        remaining_cont: Rc<Continuation>,
+    },
 }
 
 impl fmt::Debug for Continuation {
@@ -103,6 +144,37 @@ impl fmt::Debug for Continuation {
             Continuation::Apply { .. } => {
                 write!(f, "Continuation::Apply {{ cont_fn: <function> }}")
             }
+            Continuation::CpsSequence { remaining, next } => f
+                .debug_struct("Continuation::CpsSequence")
+                .field("remaining_count", &remaining.len())
+                .field("next", next)
+                .finish(),
+            Continuation::CpsWhile {
+                cond: _,
+                body: _,
+                next,
+            } => f
+                .debug_struct("Continuation::CpsWhile")
+                .field("next", next)
+                .finish(),
+            Continuation::CpsWhileBody {
+                body_cont,
+                cond: _,
+                body: _,
+                next,
+            } => f
+                .debug_struct("Continuation::CpsWhileBody")
+                .field("body_cont", body_cont)
+                .field("next", next)
+                .finish(),
+            Continuation::CpsSequenceAfterYield {
+                yield_cont,
+                remaining_cont,
+            } => f
+                .debug_struct("Continuation::CpsSequenceAfterYield")
+                .field("yield_cont", yield_cont)
+                .field("remaining_cont", remaining_cont)
+                .finish(),
         }
     }
 }

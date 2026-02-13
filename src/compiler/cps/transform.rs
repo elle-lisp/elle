@@ -134,13 +134,14 @@ impl<'a> CpsTransformer<'a> {
     }
 
     /// D1: Transform yield expression
-    fn transform_yield(&self, value_expr: &Expr, _cont: Rc<Continuation>) -> CpsExpr {
+    fn transform_yield(&self, value_expr: &Expr, cont: Rc<Continuation>) -> CpsExpr {
         // (yield e) becomes a Yield CPS expression
         // The value is evaluated, then yielded
         // The continuation is captured for resumption
         let value_cps = self.transform(value_expr, Continuation::done());
         CpsExpr::Yield {
             value: Box::new(value_cps),
+            continuation: cont,
         }
     }
 
@@ -245,9 +246,11 @@ impl<'a> CpsTransformer<'a> {
             }
         } else {
             // Some yield - transform to CPS sequence
+            // Each expression is transformed with the outer continuation
+            // The interpreter will handle capturing remaining expressions on yield
             let cps_exprs: Vec<CpsExpr> = exprs
                 .iter()
-                .map(|e| self.transform(e, Continuation::done()))
+                .map(|e| self.transform(e, cont.clone()))
                 .collect();
 
             CpsExpr::Sequence {

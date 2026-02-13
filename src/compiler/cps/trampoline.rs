@@ -5,6 +5,7 @@
 
 use super::{Action, Continuation};
 use crate::value::Value;
+use crate::vm::VM;
 use std::rc::Rc;
 
 /// Result of trampoline execution
@@ -205,12 +206,393 @@ impl Trampoline {
                 // Apply the continuation function
                 cont_fn(value)
             }
+
+            Continuation::CpsSequence { .. } => {
+                // CpsSequence requires VM access - this shouldn't be called
+                // from the non-VM path
+                Action::error("CpsSequence continuation requires VM access")
+            }
+
+            Continuation::CpsWhile { .. } => {
+                // CpsWhile requires VM access - this shouldn't be called
+                // from the non-VM path
+                Action::error("CpsWhile continuation requires VM access")
+            }
+
+            Continuation::CpsWhileBody { .. } => {
+                // CpsWhileBody requires VM access - this shouldn't be called
+                // from the non-VM path
+                Action::error("CpsWhileBody continuation requires VM access")
+            }
+
+            Continuation::CpsSequenceAfterYield { .. } => {
+                // CpsSequenceAfterYield requires VM access - this shouldn't be called
+                // from the non-VM path
+                Action::error("CpsSequenceAfterYield continuation requires VM access")
+            }
         }
     }
 
     /// Get the number of steps taken in the last run
     pub fn step_count(&self) -> usize {
         self.step_count
+    }
+
+    /// Run the trampoline with VM access for function calls
+    ///
+    /// This variant allows the trampoline to execute function calls
+    /// by delegating to the VM.
+    pub fn run_with_vm(
+        &mut self,
+        initial_action: Action,
+        vm: &mut VM,
+        env: &Rc<Vec<Value>>,
+    ) -> TrampolineResult {
+        let mut current_action = initial_action;
+        self.step_count = 0;
+
+        loop {
+            self.step_count += 1;
+
+            if self.step_count > self.config.max_steps {
+                return TrampolineResult::Error(format!(
+                    "Trampoline exceeded max steps ({})",
+                    self.config.max_steps
+                ));
+            }
+
+            match current_action {
+                Action::Done(value) => {
+                    return TrampolineResult::Done(value);
+                }
+
+                Action::Return {
+                    value,
+                    continuation,
+                } => {
+                    current_action = self.apply_continuation_with_vm(value, continuation, vm, env);
+                }
+
+                Action::Yield {
+                    value,
+                    continuation,
+                } => {
+                    return TrampolineResult::Suspended {
+                        value,
+                        continuation,
+                    };
+                }
+
+                Action::Call {
+                    func,
+                    args,
+                    continuation,
+                } => {
+                    // Execute call via VM
+                    match call_value_with_vm(&func, &args, vm) {
+                        Ok(result) => {
+                            current_action = Action::return_value(result, continuation);
+                        }
+                        Err(e) => return TrampolineResult::Error(e),
+                    }
+                }
+
+                Action::TailCall { func, args } => {
+                    // Execute tail call via VM
+                    match call_value_with_vm(&func, &args, vm) {
+                        Ok(result) => {
+                            current_action = Action::done(result);
+                        }
+                        Err(e) => return TrampolineResult::Error(e),
+                    }
+                }
+
+                Action::Error(msg) => {
+                    return TrampolineResult::Error(msg);
+                }
+            }
+        }
+    }
+
+    /// Apply a value to a continuation with VM access
+    fn apply_continuation_with_vm(
+        &mut self,
+        value: Value,
+        cont: Rc<Continuation>,
+        vm: &mut VM,
+        env: &Rc<Vec<Value>>,
+    ) -> Action {
+        match cont.as_ref() {
+            Continuation::Done => Action::Done(value),
+
+            Continuation::CallReturn { saved_env: _, next } => {
+                // Restore environment and continue
+                Action::return_value(value, next.clone())
+            }
+
+            Continuation::Apply { cont_fn } => {
+                // Apply the continuation function
+                cont_fn(value)
+            }
+
+            Continuation::CpsSequence { remaining, next } => {
+                // Resume evaluating remaining CPS expressions
+                // The 'value' is the resume value (ignored for sequences)
+                if remaining.is_empty() {
+                    // No more expressions - continue with next continuation
+                    Action::return_value(value, next.clone())
+                } else {
+                    // Evaluate remaining expressions
+                    let mut interpreter = super::CpsInterpreter::new(vm, env.clone());
+
+                    // Evaluate expressions one by one
+                    for (i, expr) in remaining.iter().enumerate() {
+                        match interpreter.eval(expr) {
+                            Ok(action) => {
+                                match action {
+                                    Action::Done(_) => {
+                                        // Continue to next expression
+                                        // If this is the last expression, return with next continuation
+                                        if i == remaining.len() - 1 {
+                                            if let Action::Done(val) = action {
+                                                return Action::return_value(val, next.clone());
+                                            }
+                                        }
+                                    }
+                                    Action::Yield {
+                                        value,
+                                        continuation: _,
+                                    } => {
+                                        // Yield happened - capture remaining expressions
+                                        let new_remaining = remaining[i + 1..].to_vec();
+
+                                        let resume_cont = if new_remaining.is_empty() {
+                                            // No more expressions after this yield
+                                            next.clone()
+                                        } else {
+                                            // Create new CpsSequence for remaining
+                                            Rc::new(Continuation::CpsSequence {
+                                                remaining: new_remaining,
+                                                next: next.clone(),
+                                            })
+                                        };
+
+                                        return Action::yield_value(value, resume_cont);
+                                    }
+                                    other => return other,
+                                }
+                            }
+                            Err(e) => return Action::error(e),
+                        }
+                    }
+
+                    // Should not reach here
+                    Action::return_value(Value::Nil, next.clone())
+                }
+            }
+
+            Continuation::CpsWhile { cond, body, next } => {
+                // Resume a while loop after a yield in the body
+                // The 'value' is the resume value (ignored)
+                let mut interpreter = super::CpsInterpreter::new(vm, env.clone());
+
+                loop {
+                    // Evaluate condition
+                    match interpreter.eval(cond) {
+                        Ok(action) => {
+                            match action {
+                                Action::Done(cond_val)
+                                | Action::Return {
+                                    value: cond_val, ..
+                                } => {
+                                    if !cond_val.is_truthy() {
+                                        // Loop condition is false - exit loop
+                                        return Action::return_value(Value::Nil, next.clone());
+                                    }
+                                }
+                                Action::Yield {
+                                    value,
+                                    continuation: _,
+                                } => {
+                                    // Yield in condition - capture while state
+                                    let while_cont = Rc::new(Continuation::CpsWhile {
+                                        cond: cond.clone(),
+                                        body: body.clone(),
+                                        next: next.clone(),
+                                    });
+                                    return Action::yield_value(value, while_cont);
+                                }
+                                other => return other,
+                            }
+                        }
+                        Err(e) => return Action::error(e),
+                    }
+
+                    // Evaluate body
+                    match interpreter.eval(body) {
+                        Ok(action) => {
+                            match action {
+                                Action::Done(_) | Action::Return { .. } => {
+                                    // Body completed, continue loop
+                                }
+                                Action::Yield {
+                                    value,
+                                    continuation: body_cont,
+                                } => {
+                                    // Yield in body - capture while state with body continuation
+                                    let resume_cont = if body_cont.is_done() {
+                                        // Body is done after yield, continue with while loop
+                                        Rc::new(Continuation::CpsWhile {
+                                            cond: cond.clone(),
+                                            body: body.clone(),
+                                            next: next.clone(),
+                                        })
+                                    } else {
+                                        // Body has more to do, then continue with while loop
+                                        Rc::new(Continuation::CpsWhileBody {
+                                            body_cont,
+                                            cond: cond.clone(),
+                                            body: body.clone(),
+                                            next: next.clone(),
+                                        })
+                                    };
+                                    return Action::yield_value(value, resume_cont);
+                                }
+                                other => return other,
+                            }
+                        }
+                        Err(e) => return Action::error(e),
+                    }
+                }
+            }
+
+            Continuation::CpsWhileBody {
+                body_cont,
+                cond,
+                body,
+                next,
+            } => {
+                // Resume the rest of the while loop body, then continue the loop
+                // First, apply the body continuation
+                let mut body_result =
+                    self.apply_continuation_with_vm(value, body_cont.clone(), vm, env);
+
+                // Keep applying continuations until we get Done, Yield, or Error
+                loop {
+                    match body_result {
+                        Action::Done(_) => {
+                            // Body completed, continue with while loop
+                            let while_cont = Rc::new(Continuation::CpsWhile {
+                                cond: cond.clone(),
+                                body: body.clone(),
+                                next: next.clone(),
+                            });
+                            return Action::return_value(Value::Nil, while_cont);
+                        }
+                        Action::Return {
+                            value: val,
+                            continuation: cont,
+                        } => {
+                            // More continuations to apply
+                            body_result = self.apply_continuation_with_vm(val, cont, vm, env);
+                        }
+                        Action::Yield {
+                            value,
+                            continuation: new_body_cont,
+                        } => {
+                            // Another yield in body - capture state
+                            let resume_cont = if new_body_cont.is_done() {
+                                Rc::new(Continuation::CpsWhile {
+                                    cond: cond.clone(),
+                                    body: body.clone(),
+                                    next: next.clone(),
+                                })
+                            } else {
+                                Rc::new(Continuation::CpsWhileBody {
+                                    body_cont: new_body_cont,
+                                    cond: cond.clone(),
+                                    body: body.clone(),
+                                    next: next.clone(),
+                                })
+                            };
+                            return Action::yield_value(value, resume_cont);
+                        }
+                        other => return other,
+                    }
+                }
+            }
+
+            Continuation::CpsSequenceAfterYield {
+                yield_cont,
+                remaining_cont,
+            } => {
+                // First, apply the yield continuation (e.g., continue a while loop)
+                let yield_result =
+                    self.apply_continuation_with_vm(value, yield_cont.clone(), vm, env);
+
+                match yield_result {
+                    Action::Done(val) | Action::Return { value: val, .. } => {
+                        // Yield continuation completed, now evaluate remaining expressions
+                        Action::return_value(val, remaining_cont.clone())
+                    }
+                    Action::Yield {
+                        value,
+                        continuation: new_yield_cont,
+                    } => {
+                        // Another yield - chain with remaining_cont
+                        let chained_cont = Rc::new(Continuation::CpsSequenceAfterYield {
+                            yield_cont: new_yield_cont,
+                            remaining_cont: remaining_cont.clone(),
+                        });
+                        Action::yield_value(value, chained_cont)
+                    }
+                    other => other,
+                }
+            }
+
+            // For other continuation types, fall back to the basic apply
+            _ => self.apply_continuation(value, cont),
+        }
+    }
+}
+
+/// Call a value as a function with the given arguments using the VM
+fn call_value_with_vm(func: &Value, args: &[Value], vm: &mut VM) -> Result<Value, String> {
+    match func {
+        Value::Closure(closure) => {
+            // Build environment
+            let mut new_env = Vec::new();
+            new_env.extend((*closure.env).iter().cloned());
+            new_env.extend(args.iter().cloned());
+
+            // Add local cells
+            let num_params = match closure.arity {
+                crate::value::Arity::Exact(n) => n,
+                crate::value::Arity::AtLeast(n) => n,
+                crate::value::Arity::Range(min, _) => min,
+            };
+            let num_locally_defined = closure
+                .num_locals
+                .saturating_sub(num_params + closure.num_captures);
+
+            for _ in 0..num_locally_defined {
+                let empty_cell = Value::LocalCell(std::rc::Rc::new(std::cell::RefCell::new(
+                    Box::new(Value::Nil),
+                )));
+                new_env.push(empty_cell);
+            }
+
+            let env_rc = std::rc::Rc::new(new_env);
+
+            // Execute
+            vm.execute_bytecode(&closure.bytecode, &closure.constants, Some(&env_rc))
+        }
+
+        Value::NativeFn(f) => f(args),
+
+        Value::VmAwareFn(f) => f(args, vm),
+
+        _ => Err(format!("Cannot call {}", func.type_name())),
     }
 }
 

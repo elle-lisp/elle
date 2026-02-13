@@ -7,22 +7,18 @@ use std::rc::Rc;
 pub fn make_coroutine(closure: Value) -> Result<Value, String> {
     match closure {
         Value::Closure(c) => {
-            let coroutine = Coroutine {
-                closure: c,
-                state: CoroutineState::Created,
-                yielded_value: None,
-            };
-            Ok(Value::Coroutine(Rc::new(coroutine)))
+            let coroutine = Coroutine::new(c);
+            Ok(Value::Coroutine(Rc::new(std::cell::RefCell::new(
+                coroutine,
+            ))))
         }
         Value::JitClosure(jc) => {
             // Convert JitClosure to Closure for coroutine
             if let Some(source) = &jc.source {
-                let coroutine = Coroutine {
-                    closure: source.clone(),
-                    state: CoroutineState::Created,
-                    yielded_value: None,
-                };
-                Ok(Value::Coroutine(Rc::new(coroutine)))
+                let coroutine = Coroutine::new(source.clone());
+                Ok(Value::Coroutine(Rc::new(std::cell::RefCell::new(
+                    coroutine,
+                ))))
             } else {
                 Err("JitClosure has no source for coroutine".to_string())
             }
@@ -35,7 +31,8 @@ pub fn make_coroutine(closure: Value) -> Result<Value, String> {
 pub fn coroutine_status(coroutine: &Value) -> Result<Value, String> {
     match coroutine {
         Value::Coroutine(c) => {
-            let status = match &c.state {
+            let borrowed = c.borrow();
+            let status = match &borrowed.state {
                 CoroutineState::Created => "created",
                 CoroutineState::Running => "running",
                 CoroutineState::Suspended => "suspended",
@@ -51,7 +48,10 @@ pub fn coroutine_status(coroutine: &Value) -> Result<Value, String> {
 /// Check if a coroutine is done
 pub fn coroutine_done(coroutine: &Value) -> Result<bool, String> {
     match coroutine {
-        Value::Coroutine(c) => Ok(matches!(c.state, CoroutineState::Done)),
+        Value::Coroutine(c) => {
+            let borrowed = c.borrow();
+            Ok(matches!(borrowed.state, CoroutineState::Done))
+        }
         _ => Err("Not a coroutine".to_string()),
     }
 }
@@ -59,7 +59,10 @@ pub fn coroutine_done(coroutine: &Value) -> Result<bool, String> {
 /// Get the last yielded value from a coroutine
 pub fn coroutine_value(coroutine: &Value) -> Result<Value, String> {
     match coroutine {
-        Value::Coroutine(c) => Ok(c.yielded_value.clone().unwrap_or(Value::Nil)),
+        Value::Coroutine(c) => {
+            let borrowed = c.borrow();
+            Ok(borrowed.yielded_value.clone().unwrap_or(Value::Nil))
+        }
         _ => Err("Not a coroutine".to_string()),
     }
 }
@@ -90,7 +93,8 @@ mod tests {
         assert!(result.is_ok());
 
         if let Value::Coroutine(c) = result.unwrap() {
-            assert!(matches!(c.state, CoroutineState::Created));
+            let borrowed = c.borrow();
+            assert!(matches!(borrowed.state, CoroutineState::Created));
         } else {
             panic!("Expected coroutine");
         }

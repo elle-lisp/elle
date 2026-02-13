@@ -1145,6 +1145,42 @@ fn test_nested_closure_with_local_arithmetic() {
     assert_eq!(eval(code).unwrap(), Value::Int(115));
 }
 
+#[test]
+fn test_set_on_captured_parameter() {
+    // This is the pattern from scope_explained.lisp that fails
+    // The closure captures a function parameter and mutates it with set!
+    let code = r#"
+        (begin
+          (define make-counter (fn (start)
+            (fn ()
+              (begin
+                (set! start (+ start 1))
+                start))))
+          (define counter1 (make-counter 10))
+          (counter1))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(11));
+}
+
+#[test]
+fn test_set_on_captured_parameter_multiple_calls() {
+    // Verify state is maintained across invocations when capturing a parameter
+    let code = r#"
+        (begin
+          (define make-counter (fn (start)
+            (fn ()
+              (begin
+                (set! start (+ start 1))
+                start))))
+          (define counter1 (make-counter 10))
+          (begin
+            (counter1)
+            (counter1)
+            (counter1)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::Int(13));
+}
+
 // ============================================================================
 // SECTION: Lambda Alias Compatibility Tests
 // ============================================================================

@@ -1,14 +1,24 @@
 use crate::error::LocationMap;
 use crate::ffi::FFISubsystem;
-use crate::value::{Condition, Value};
+use crate::value::{Condition, Coroutine, CoroutineContext, Value};
 use crate::vm::scope::ScopeStack;
 use smallvec::SmallVec;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
 type StackVec = SmallVec<[Value; 256]>;
 type TailCallInfo = (Vec<u8>, Vec<Value>, Rc<Vec<Value>>);
+
+/// Result of VM execution - can be normal completion or a yield
+#[derive(Debug, Clone)]
+pub enum VmResult {
+    /// Normal completion with a value
+    Done(Value),
+    /// Coroutine yielded with a value
+    Yielded(Value),
+}
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {
@@ -41,6 +51,7 @@ pub struct VM {
     pub location_map: LocationMap, // Bytecode instruction index → source location mapping
     pub tail_call_env_cache: Vec<Value>, // Reusable environment vector for tail calls to avoid repeated allocations
     pub pending_tail_call: Option<TailCallInfo>, // (bytecode, constants, env) for pending tail call
+    pub coroutine_stack: Vec<Rc<RefCell<Coroutine>>>, // Stack of active coroutines
 }
 
 /// Exception type hierarchy (baked into VM for inheritance checking)
@@ -101,6 +112,7 @@ impl VM {
             location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
+            coroutine_stack: Vec::new(),
         }
     }
 
@@ -236,10 +248,207 @@ impl VM {
     pub fn ffi_mut(&mut self) -> &mut FFISubsystem {
         &mut self.ffi
     }
+
+    /// Enter a coroutine context (push onto coroutine stack)
+    pub fn enter_coroutine(&mut self, co: Rc<RefCell<Coroutine>>) {
+        self.coroutine_stack.push(co);
+    }
+
+    /// Exit a coroutine context (pop from coroutine stack)
+    pub fn exit_coroutine(&mut self) -> Option<Rc<RefCell<Coroutine>>> {
+        self.coroutine_stack.pop()
+    }
+
+    /// Get the currently executing coroutine, if any
+    pub fn current_coroutine(&self) -> Option<&Rc<RefCell<Coroutine>>> {
+        self.coroutine_stack.last()
+    }
+
+    /// Check if we're currently inside a coroutine
+    pub fn in_coroutine(&self) -> bool {
+        !self.coroutine_stack.is_empty()
+    }
+
+    /// Resume execution from a saved coroutine context
+    ///
+    /// This restores the saved state and continues execution from where
+    /// the coroutine yielded. The resume_value becomes the result of the
+    /// yield expression.
+    pub fn resume_from_context(
+        &mut self,
+        context: CoroutineContext,
+        resume_value: Value,
+        bytecode: &[u8],
+        constants: &[Value],
+    ) -> Result<VmResult, String> {
+        // Save current state
+        let saved_stack = std::mem::take(&mut self.stack);
+
+        // Restore coroutine's state
+        self.stack = context.stack.into();
+
+        // Push the resume value (this is what the yield expression evaluates to)
+        self.stack.push(resume_value);
+
+        // Get the closure env from the current coroutine
+        let (closure_env, num_locals, num_captures) = {
+            let co = self
+                .current_coroutine()
+                .ok_or("resume_from_context called outside coroutine")?;
+            let co_ref = co.borrow();
+            (
+                co_ref.closure.env.clone(),
+                co_ref.closure.num_locals,
+                co_ref.closure.num_captures,
+            )
+        };
+        if context.ip < bytecode.len() {
+            let instr_byte = bytecode[context.ip];
+            let bytecode_hex: String = bytecode
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(" ");
+            eprintln!(
+                "DEBUG resume_from_context: bytecode len={}, constants len={}, ip={}, instr_byte={}, bytecode={}",
+                bytecode.len(),
+                constants.len(),
+                context.ip,
+                instr_byte,
+                bytecode_hex
+            );
+        } else {
+            eprintln!(
+                "DEBUG resume_from_context: bytecode len={}, constants len={}, ip={} (OUT OF BOUNDS)",
+                bytecode.len(),
+                constants.len(),
+                context.ip
+            );
+        }
+
+        // Set up the environment for the coroutine
+        // The closure environment contains: [captures..., parameters..., locals...]
+        // We need to allocate space for locals if they haven't been allocated yet
+        let mut env = (*closure_env).clone();
+
+        // Calculate number of locally-defined variables
+        // num_locals = params.len() + captures.len() + locals.len()
+        // Since a coroutine has no parameters, we need to allocate space for all locals
+        let num_locally_defined = num_locals.saturating_sub(num_captures);
+
+        // Add empty LocalCells for locally-defined variables if not already present
+        for _ in env.len()..num_captures + num_locally_defined {
+            let empty_cell = Value::LocalCell(std::rc::Rc::new(std::cell::RefCell::new(Box::new(
+                Value::Nil,
+            ))));
+            env.push(empty_cell);
+        }
+
+        let env_rc = std::rc::Rc::new(env);
+
+        // Execute from saved IP with the closure's environment
+        let result = self.execute_bytecode_from_ip(bytecode, constants, Some(&env_rc), context.ip);
+
+        // Restore our state (in case we need to continue after coroutine completes)
+        self.stack = saved_stack;
+
+        result
+    }
 }
 
 impl Default for VM {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod coroutine_vm_tests {
+    use super::*;
+    use crate::compiler::effects::Effect;
+    use crate::value::{Arity, Closure};
+
+    #[test]
+    fn test_vm_coroutine_stack_operations() {
+        let mut vm = VM::new();
+
+        // Initially not in coroutine
+        assert!(!vm.in_coroutine());
+        assert!(vm.current_coroutine().is_none());
+
+        // Create a test coroutine
+        let closure = Rc::new(Closure {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Exact(0),
+            env: Rc::new(vec![]),
+            num_locals: 0,
+            num_captures: 0,
+            constants: Rc::new(vec![]),
+            source_ast: None,
+            effect: Effect::Pure,
+        });
+        let co = Rc::new(RefCell::new(Coroutine::new(closure)));
+
+        // Enter coroutine
+        vm.enter_coroutine(co.clone());
+        assert!(vm.in_coroutine());
+        assert!(vm.current_coroutine().is_some());
+
+        // Exit coroutine
+        let exited = vm.exit_coroutine();
+        assert!(exited.is_some());
+        assert!(!vm.in_coroutine());
+    }
+
+    #[test]
+    fn test_vm_nested_coroutines() {
+        let mut vm = VM::new();
+
+        let make_co = || {
+            let closure = Rc::new(Closure {
+                bytecode: Rc::new(vec![]),
+                arity: Arity::Exact(0),
+                env: Rc::new(vec![]),
+                num_locals: 0,
+                num_captures: 0,
+                constants: Rc::new(vec![]),
+                source_ast: None,
+                effect: Effect::Pure,
+            });
+            Rc::new(RefCell::new(Coroutine::new(closure)))
+        };
+
+        let co1 = make_co();
+        let co2 = make_co();
+
+        vm.enter_coroutine(co1.clone());
+        vm.enter_coroutine(co2.clone());
+
+        // Should be at co2
+        assert!(Rc::ptr_eq(vm.current_coroutine().unwrap(), &co2));
+
+        vm.exit_coroutine();
+
+        // Should be at co1
+        assert!(Rc::ptr_eq(vm.current_coroutine().unwrap(), &co1));
+
+        vm.exit_coroutine();
+        assert!(!vm.in_coroutine());
+    }
+
+    #[test]
+    fn test_vm_result_enum() {
+        let done = VmResult::Done(Value::Int(42));
+        let yielded = VmResult::Yielded(Value::Int(100));
+
+        match done {
+            VmResult::Done(Value::Int(n)) => assert_eq!(n, 42),
+            _ => panic!("Expected Done"),
+        }
+
+        match yielded {
+            VmResult::Yielded(Value::Int(n)) => assert_eq!(n, 100),
+            _ => panic!("Expected Yielded"),
+        }
     }
 }

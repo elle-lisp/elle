@@ -57,7 +57,10 @@ impl CpsJitCompiler {
                 Ok(())
             }
 
-            CpsExpr::Yield { value: _value } => {
+            CpsExpr::Yield {
+                value: _value,
+                continuation: _continuation,
+            } => {
                 // Compile value, create Yield action
                 Ok(())
             }

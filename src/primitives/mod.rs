@@ -1,4 +1,5 @@
 pub mod arithmetic;
+pub mod cell;
 pub mod comparison;
 pub mod concurrency;
 pub mod coroutines;
