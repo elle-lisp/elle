@@ -302,30 +302,6 @@ impl VM {
                 co_ref.closure.num_captures,
             )
         };
-        if context.ip < bytecode.len() {
-            let instr_byte = bytecode[context.ip];
-            let bytecode_hex: String = bytecode
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<Vec<_>>()
-                .join(" ");
-            eprintln!(
-                "DEBUG resume_from_context: bytecode len={}, constants len={}, ip={}, instr_byte={}, bytecode={}",
-                bytecode.len(),
-                constants.len(),
-                context.ip,
-                instr_byte,
-                bytecode_hex
-            );
-        } else {
-            eprintln!(
-                "DEBUG resume_from_context: bytecode len={}, constants len={}, ip={} (OUT OF BOUNDS)",
-                bytecode.len(),
-                constants.len(),
-                context.ip
-            );
-        }
-
         // Set up the environment for the coroutine
         // The closure environment contains: [captures..., parameters..., locals...]
         // We need to allocate space for locals if they haven't been allocated yet

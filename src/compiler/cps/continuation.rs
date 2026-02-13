@@ -2,6 +2,7 @@
 
 use crate::compiler::ast::Expr;
 use crate::value::{SymbolId, Value};
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
@@ -49,10 +50,19 @@ pub enum Continuation {
 
     /// Continue after a function call returns
     CallReturn {
-        /// Environment to restore after call
-        saved_env: Rc<Vec<Value>>,
+        /// Environment to restore after call (shared mutable)
+        saved_env: Rc<RefCell<Vec<Value>>>,
         /// Continuation after processing return value
         next: Rc<Continuation>,
+    },
+
+    /// Resume with saved environment
+    /// Used to restore environment when resuming from yield
+    WithEnv {
+        /// Environment to restore
+        env: Rc<RefCell<Vec<Value>>>,
+        /// Inner continuation to apply
+        inner: Rc<Continuation>,
     },
 
     /// Apply a value to a continuation (for CPS-transformed code)
@@ -174,6 +184,11 @@ impl fmt::Debug for Continuation {
                 .debug_struct("Continuation::CpsSequenceAfterYield")
                 .field("yield_cont", yield_cont)
                 .field("remaining_cont", remaining_cont)
+                .finish(),
+            Continuation::WithEnv { env, inner } => f
+                .debug_struct("Continuation::WithEnv")
+                .field("env_len", &env.borrow().len())
+                .field("inner", inner)
                 .finish(),
         }
     }

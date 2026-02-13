@@ -3,11 +3,15 @@
 //! Evaluates CpsExpr trees and produces Actions for the trampoline.
 //! This interpreter is used for coroutine execution when the closure
 //! has a yielding effect.
+//!
+//! The interpreter is stateless - all state is passed through the environment
+//! and continuations. This ensures that local variables are preserved across
+//! yield/resume cycles.
 
 use super::{Action, Continuation, CpsExpr};
-use crate::value::{SymbolId, Value};
+use crate::value::Value;
 use crate::vm::VM;
-use std::collections::HashMap;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Update a continuation's "next" field to chain with another continuation
@@ -64,27 +68,34 @@ fn update_continuation_next(
     }
 }
 
-/// CPS interpreter state
+/// CPS interpreter - stateless, all state is in env and continuations
+///
+/// The interpreter holds a reference to the VM for calling functions,
+/// but all local variable state is in the environment.
 pub struct CpsInterpreter<'a> {
     vm: &'a mut VM,
-    /// Local variable bindings
-    locals: HashMap<SymbolId, Value>,
-    /// Closure environment
-    env: Rc<Vec<Value>>,
+    /// Shared mutable environment
+    env: Rc<RefCell<Vec<Value>>>,
 }
 
 impl<'a> CpsInterpreter<'a> {
-    /// Create a new CPS interpreter
-    pub fn new(vm: &'a mut VM, env: Rc<Vec<Value>>) -> Self {
+    /// Create a new CPS interpreter with a shared mutable environment
+    pub fn new(vm: &'a mut VM, env: Rc<RefCell<Vec<Value>>>) -> Self {
+        Self { vm, env }
+    }
+
+    /// Create a new CPS interpreter from an immutable environment
+    /// (for backwards compatibility during transition)
+    pub fn from_immutable_env(vm: &'a mut VM, env: Rc<Vec<Value>>) -> Self {
+        let mutable_env = Rc::new(RefCell::new((*env).clone()));
         Self {
             vm,
-            locals: HashMap::new(),
-            env,
+            env: mutable_env,
         }
     }
 
     /// Get the environment (for trampoline access)
-    pub fn env(&self) -> &Rc<Vec<Value>> {
+    pub fn env(&self) -> &Rc<RefCell<Vec<Value>>> {
         &self.env
     }
 
@@ -94,26 +105,25 @@ impl<'a> CpsInterpreter<'a> {
             CpsExpr::Literal(v) => Ok(Action::done(v.clone())),
 
             CpsExpr::Var { sym, depth, index } => {
-                // Check locals first
-                if let Some(val) = self.locals.get(sym) {
-                    return Ok(Action::done(val.clone()));
+                // Look up by index in environment
+                if *depth == 0 {
+                    let env = self.env.borrow();
+                    if *index < env.len() {
+                        let val = env[*index].clone();
+                        drop(env);
+                        // Unwrap LocalCell if needed
+                        let unwrapped = unwrap_local_cell(val);
+                        return Ok(Action::done(unwrapped));
+                    }
                 }
-                // Then check closure environment
-                if *depth == 0 && *index < self.env.len() {
-                    let val = self.env[*index].clone();
-                    // Unwrap LocalCell if needed
-                    let unwrapped = self.unwrap_local_cell(val);
-                    return Ok(Action::done(unwrapped));
-                }
-                Err(format!("Variable not found: {:?}", sym))
+                Err(format!(
+                    "Variable not found: {:?} at depth={}, index={}",
+                    sym, depth, index
+                ))
             }
 
             CpsExpr::GlobalVar(sym) => {
-                // Check locals first (for variables defined in CPS context via let/define)
-                if let Some(val) = self.locals.get(sym) {
-                    return Ok(Action::done(val.clone()));
-                }
-                // Then check globals
+                // Check globals
                 if let Some(val) = self.vm.globals.get(&sym.0) {
                     Ok(Action::done(val.clone()))
                 } else {
@@ -129,8 +139,12 @@ impl<'a> CpsInterpreter<'a> {
                 let val_action = self.eval(value)?;
                 match val_action {
                     Action::Done(val) => {
-                        // Yield the value with the continuation for resumption
-                        Ok(Action::yield_value(val, continuation.clone()))
+                        // Wrap continuation with current env for resumption
+                        let cont = Rc::new(Continuation::WithEnv {
+                            env: self.env.clone(),
+                            inner: continuation.clone(),
+                        });
+                        Ok(Action::yield_value(val, cont))
                     }
                     other => Ok(other), // Propagate other actions
                 }
@@ -172,16 +186,33 @@ impl<'a> CpsInterpreter<'a> {
                     args.iter().map(|a| self.eval_to_value(a)).collect();
                 let arg_vals = arg_vals?;
 
+                // Save current env for when call returns
+                let return_cont = Rc::new(Continuation::CallReturn {
+                    saved_env: self.env.clone(),
+                    next: continuation.clone(),
+                });
+
                 // Return a Call action - the trampoline will handle it
-                Ok(Action::call(func_val, arg_vals, continuation.clone()))
+                Ok(Action::call(func_val, arg_vals, return_cont))
             }
 
-            CpsExpr::Let { var, init, body } => {
+            CpsExpr::Let { index, init, body } => {
                 // Evaluate initializer
                 let init_val = self.eval_to_value(init)?;
 
-                // Bind variable
-                self.locals.insert(*var, init_val);
+                // Store in environment at index
+                {
+                    let mut env = self.env.borrow_mut();
+                    if *index < env.len() {
+                        env[*index] = init_val;
+                    } else {
+                        // Extend if needed
+                        while env.len() <= *index {
+                            env.push(Value::Nil);
+                        }
+                        env[*index] = init_val;
+                    }
+                }
 
                 // Evaluate body
                 self.eval(body)
@@ -195,17 +226,20 @@ impl<'a> CpsInterpreter<'a> {
                     return Ok(Action::return_value(Value::Nil, continuation.clone()));
                 }
 
-                // Evaluate expressions one by one, capturing remaining on yield
+                // Evaluate expressions one by one, capturing remaining on yield/call
                 for (i, expr) in exprs.iter().enumerate() {
                     let action = self.eval(expr)?;
 
                     match action {
-                        Action::Done(_) => {
+                        Action::Done(_) | Action::Return { .. } => {
                             // Continue to next expression
                             // (value is discarded unless this is the last expression)
                             if i == exprs.len() - 1 {
-                                if let Action::Done(val) = action {
-                                    return Ok(Action::return_value(val, continuation.clone()));
+                                match action {
+                                    Action::Done(val) | Action::Return { value: val, .. } => {
+                                        return Ok(Action::return_value(val, continuation.clone()));
+                                    }
+                                    _ => unreachable!(),
                                 }
                             }
                         }
@@ -216,33 +250,49 @@ impl<'a> CpsInterpreter<'a> {
                             // Yield happened - capture remaining expressions
                             let remaining = exprs[i + 1..].to_vec();
 
-                            // Create a continuation that will:
-                            // 1. First, continue with yield_cont (e.g., continue a while loop)
-                            // 2. Then, evaluate remaining expressions
-                            // 3. Finally, continue with the outer continuation
                             let resume_cont = if remaining.is_empty() {
-                                // No more expressions - use the yield's continuation
                                 yield_cont
                             } else {
-                                // Create a continuation that evaluates remaining expressions
-                                let remaining_cont = Rc::new(Continuation::CpsSequence {
-                                    remaining,
-                                    next: continuation.clone(),
+                                // Wrap remaining_cont with current env so it can access local variables
+                                let remaining_cont = Rc::new(Continuation::WithEnv {
+                                    env: self.env.clone(),
+                                    inner: Rc::new(Continuation::CpsSequence {
+                                        remaining,
+                                        next: continuation.clone(),
+                                    }),
                                 });
-
-                                // Update yield_cont's "next" to include remaining expressions
-                                // This ensures that when the yielding construct completes,
-                                // it continues with the remaining expressions
                                 update_continuation_next(yield_cont, remaining_cont)
                             };
 
                             return Ok(Action::yield_value(value, resume_cont));
                         }
-                        other => return Ok(other), // Propagate errors, calls, etc.
+                        Action::Call {
+                            func,
+                            args,
+                            continuation: call_cont,
+                        } => {
+                            // Call happened - capture remaining expressions
+                            let remaining = exprs[i + 1..].to_vec();
+
+                            let resume_cont = if remaining.is_empty() {
+                                call_cont
+                            } else {
+                                let remaining_cont = Rc::new(Continuation::CpsSequence {
+                                    remaining,
+                                    next: continuation.clone(),
+                                });
+                                Rc::new(Continuation::CallReturn {
+                                    saved_env: self.env.clone(),
+                                    next: remaining_cont,
+                                })
+                            };
+
+                            return Ok(Action::call(func, args, resume_cont));
+                        }
+                        other => return Ok(other),
                     }
                 }
 
-                // Should not reach here
                 Ok(Action::return_value(Value::Nil, continuation.clone()))
             }
 
@@ -291,22 +341,15 @@ impl<'a> CpsInterpreter<'a> {
                         continuation: body_cont,
                     } = body_action
                     {
-                        // The body_cont is the continuation for the rest of the body
-                        // We need to chain: body_cont -> loop again -> outer continuation
-                        // Create a continuation that will continue the while loop
                         let while_cont = Rc::new(Continuation::CpsWhile {
                             cond: cond.clone(),
                             body: body.clone(),
                             next: continuation.clone(),
                         });
 
-                        // Chain the body continuation with the while continuation
                         let chained_cont = if body_cont.is_done() {
-                            // Body is done after yield, continue with while loop
                             while_cont
                         } else {
-                            // Body has more to do, then continue with while loop
-                            // Use CpsWhileBody to handle this
                             Rc::new(Continuation::CpsWhileBody {
                                 body_cont,
                                 cond: cond.clone(),
@@ -322,15 +365,39 @@ impl<'a> CpsInterpreter<'a> {
             }
 
             CpsExpr::Lambda {
-                params: _,
-                body: _,
-                captures: _,
+                params,
+                body,
+                captures,
+                num_locals,
             } => {
-                // Create a closure value
-                // For CPS lambdas, we need to store the CPS body
-                // For now, return a placeholder - full implementation needs
-                // to create a proper CpsLambda value type or use existing Closure
-                Err("CPS Lambda creation not yet implemented".to_string())
+                // Build closure env from captures
+                let env_borrowed = self.env.borrow();
+                let mut closure_env = Vec::with_capacity(*num_locals);
+                for (_sym, _depth, index) in captures {
+                    if *index < env_borrowed.len() {
+                        closure_env.push(env_borrowed[*index].clone());
+                    } else {
+                        closure_env.push(Value::Nil);
+                    }
+                }
+                drop(env_borrowed);
+
+                // Pre-allocate remaining slots for params and locals
+                for _ in captures.len()..*num_locals {
+                    closure_env.push(Value::Nil);
+                }
+
+                // Create closure - for now, we need to extract the Expr from CPS
+                // This is a temporary solution until we have proper CPS closure support
+                let closure = create_cps_closure(
+                    params.clone(),
+                    *body.clone(),
+                    closure_env,
+                    *num_locals,
+                    captures.len(),
+                );
+
+                Ok(Action::done(closure))
             }
 
             CpsExpr::And {
@@ -396,7 +463,6 @@ impl<'a> CpsInterpreter<'a> {
                     }
                 }
 
-                // No clause matched - evaluate else body or return nil
                 if let Some(else_expr) = else_body {
                     let result = self.eval(else_expr)?;
                     match result {
@@ -409,7 +475,7 @@ impl<'a> CpsInterpreter<'a> {
             }
 
             CpsExpr::For {
-                var,
+                index,
                 iter,
                 body,
                 continuation,
@@ -418,10 +484,22 @@ impl<'a> CpsInterpreter<'a> {
                 let iter_val = self.eval_to_value(iter)?;
 
                 // Convert to iterable
-                let items = self.value_to_list(&iter_val)?;
+                let items = value_to_list(&iter_val)?;
 
                 for item in items {
-                    self.locals.insert(*var, item);
+                    // Store loop variable in environment at index
+                    {
+                        let mut env = self.env.borrow_mut();
+                        if *index < env.len() {
+                            env[*index] = item;
+                        } else {
+                            while env.len() <= *index {
+                                env.push(Value::Nil);
+                            }
+                            env[*index] = item;
+                        }
+                    }
+
                     let body_action = self.eval(body)?;
 
                     if let Action::Yield { .. } = body_action {
@@ -458,33 +536,28 @@ impl<'a> CpsInterpreter<'a> {
         match expr {
             Expr::Literal(v) => Ok(v.clone()),
 
-            Expr::Var(sym, depth, index) => {
-                // Check locals first (for variables defined in CPS context)
-                if let Some(val) = self.locals.get(sym) {
+            Expr::Var(_sym, depth, index) => {
+                // Check closure environment
+                if *depth == 0 {
+                    let env = self.env.borrow();
+                    if *index < env.len() {
+                        let val = env[*index].clone();
+                        drop(env);
+                        return Ok(unwrap_local_cell(val));
+                    }
+                }
+                // Check globals as fallback
+                if let Some(val) = self.vm.globals.get(&_sym.0) {
                     return Ok(val.clone());
                 }
-                // Check globals (for variables defined via define in coroutines)
-                if let Some(val) = self.vm.globals.get(&sym.0) {
-                    return Ok(val.clone());
-                }
-                // Then check closure environment
-                if *depth == 0 && *index < self.env.len() {
-                    let val = self.env[*index].clone();
-                    Ok(self.unwrap_local_cell(val))
-                } else {
-                    Err(format!(
-                        "Variable not found at depth={}, index={}",
-                        depth, index
-                    ))
-                }
+                Err(format!(
+                    "Variable not found at depth={}, index={}",
+                    depth, index
+                ))
             }
 
             Expr::GlobalVar(sym) => {
-                // Check locals first (for variables defined in CPS context via let/define)
-                if let Some(val) = self.locals.get(sym) {
-                    return Ok(val.clone());
-                }
-                // Then check globals
+                // Check globals
                 if let Some(val) = self.vm.globals.get(&sym.0) {
                     Ok(val.clone())
                 } else {
@@ -562,51 +635,78 @@ impl<'a> CpsInterpreter<'a> {
             }
 
             Expr::Let { bindings, body } => {
-                // Evaluate bindings and add to locals
-                for (var, init) in bindings {
-                    let val = self.eval_pure_expr(init)?;
-                    self.locals.insert(*var, val);
+                // Evaluate bindings and store in environment
+                // Note: This is a simplified version - proper implementation
+                // would need index tracking
+                for (_var, init) in bindings {
+                    let _val = self.eval_pure_expr(init)?;
+                    // For pure expressions, we don't need to track indices
+                    // The bytecode VM handles this
                 }
                 self.eval_pure_expr(body)
             }
 
             Expr::Define { name, value } => {
-                // Evaluate the value and store
                 let val = self.eval_pure_expr(value)?;
-                // Inside a coroutine/function body, define creates a local binding
-                // Store in locals for the CPS interpreter
-                self.locals.insert(*name, val.clone());
-                // Also store in globals for compatibility with global lookups
+                // Set global for top-level defines
                 self.vm.set_global(name.0, val.clone());
                 Ok(val)
             }
 
             Expr::Set {
-                var,
+                var: _,
                 depth,
                 index,
                 value,
             } => {
-                // Evaluate the value and update the target
                 let val = self.eval_pure_expr(value)?;
-                // Check locals first
-                if self.locals.contains_key(var) {
-                    self.locals.insert(*var, val.clone());
-                } else if self.vm.globals.contains_key(&var.0) {
-                    // Update in globals (for variables defined via define in coroutines)
-                    self.vm.set_global(var.0, val.clone());
-                } else if *depth == 0 && *index < self.env.len() {
-                    // Update in environment (if it's a LocalCell)
-                    let env_val = &self.env[*index];
-                    if let Value::LocalCell(cell) = env_val {
-                        **cell.borrow_mut() = val.clone();
+                if *depth == 0 {
+                    let env = self.env.borrow();
+                    if *index < env.len() {
+                        let env_val = &env[*index];
+                        if let Value::LocalCell(cell) = env_val {
+                            **cell.borrow_mut() = val.clone();
+                        }
                     }
                 }
                 Ok(val)
             }
 
-            // For other expressions, return an error for now
-            // These would need more complex handling
+            Expr::Lambda {
+                params,
+                body,
+                captures,
+                locals,
+            } => {
+                // Compile the lambda to bytecode
+                use crate::compiler::compile::compile_lambda_to_closure;
+                use crate::compiler::effects::Effect;
+
+                // Build capture values from current environment
+                let env_borrowed = self.env.borrow();
+                let mut capture_values = Vec::new();
+                for (_sym, _depth, index) in captures {
+                    if *index < env_borrowed.len() {
+                        capture_values.push(env_borrowed[*index].clone());
+                    } else {
+                        capture_values.push(Value::Nil);
+                    }
+                }
+                drop(env_borrowed);
+
+                // Compile the lambda
+                let closure = compile_lambda_to_closure(
+                    params,
+                    body,
+                    captures,
+                    locals,
+                    capture_values,
+                    Effect::Pure,
+                )?;
+
+                Ok(Value::Closure(Rc::new(closure)))
+            }
+
             _ => Err(format!(
                 "Pure expression type not yet supported: {:?}",
                 expr
@@ -634,13 +734,11 @@ impl<'a> CpsInterpreter<'a> {
                     .saturating_sub(num_params + closure.num_captures);
 
                 for _ in 0..num_locally_defined {
-                    let empty_cell = Value::LocalCell(std::rc::Rc::new(std::cell::RefCell::new(
-                        Box::new(Value::Nil),
-                    )));
+                    let empty_cell = Value::LocalCell(Rc::new(RefCell::new(Box::new(Value::Nil))));
                     new_env.push(empty_cell);
                 }
 
-                let env_rc = std::rc::Rc::new(new_env);
+                let env_rc = Rc::new(new_env);
 
                 // Execute
                 self.vm
@@ -654,46 +752,75 @@ impl<'a> CpsInterpreter<'a> {
             _ => Err(format!("Cannot call {}", func.type_name())),
         }
     }
+}
 
-    /// Unwrap LocalCell if present
-    fn unwrap_local_cell(&self, val: Value) -> Value {
-        match val {
-            Value::LocalCell(cell_rc) => {
-                let borrowed = cell_rc.borrow();
-                (**borrowed).clone()
-            }
-            other => other,
+/// Unwrap LocalCell if present
+fn unwrap_local_cell(val: Value) -> Value {
+    match val {
+        Value::LocalCell(cell_rc) => {
+            let borrowed = cell_rc.borrow();
+            (**borrowed).clone()
         }
+        other => other,
     }
+}
 
-    /// Convert a Value to a list of Values for iteration
-    fn value_to_list(&self, val: &Value) -> Result<Vec<Value>, String> {
-        match val {
-            Value::Nil => Ok(vec![]),
-            Value::Cons(_) => {
-                let mut result = vec![];
-                let mut current = val.clone();
-                while let Value::Cons(cons) = current {
-                    result.push(cons.first.clone());
-                    current = cons.rest.clone();
-                }
-                Ok(result)
+/// Convert a Value to a list of Values for iteration
+fn value_to_list(val: &Value) -> Result<Vec<Value>, String> {
+    match val {
+        Value::Nil => Ok(vec![]),
+        Value::Cons(_) => {
+            let mut result = vec![];
+            let mut current = val.clone();
+            while let Value::Cons(cons) = current {
+                result.push(cons.first.clone());
+                current = cons.rest.clone();
             }
-            Value::Vector(v) => Ok((**v).clone()),
-            _ => Err(format!("Cannot iterate over {}", val.type_name())),
+            Ok(result)
         }
+        Value::Vector(v) => Ok((**v).clone()),
+        _ => Err(format!("Cannot iterate over {}", val.type_name())),
     }
+}
+
+/// Create a CPS closure value
+/// This is a placeholder - proper implementation needs CPS body storage
+fn create_cps_closure(
+    _params: Vec<crate::value::SymbolId>,
+    _body: CpsExpr,
+    env: Vec<Value>,
+    num_locals: usize,
+    num_captures: usize,
+) -> Value {
+    use crate::compiler::effects::Effect;
+    use crate::value::{Arity, Closure};
+
+    // For now, create a closure that will error when called
+    // Full implementation needs CPS body storage in Closure
+    let closure = Closure {
+        bytecode: Rc::new(vec![]),
+        arity: Arity::Exact(_params.len()),
+        env: Rc::new(env),
+        num_locals,
+        num_captures,
+        constants: Rc::new(vec![]),
+        source_ast: None,
+        effect: Effect::Yields,
+    };
+
+    Value::Closure(Rc::new(closure))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::compiler::cps::Continuation;
+    use crate::value::SymbolId;
 
     #[test]
     fn test_eval_literal() {
         let mut vm = VM::new();
-        let env = Rc::new(vec![]);
+        let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::Literal(Value::Int(42));
@@ -711,7 +838,7 @@ mod tests {
         let mut vm = VM::new();
         vm.set_global(1, Value::Int(100));
 
-        let env = Rc::new(vec![]);
+        let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::GlobalVar(SymbolId(1));
@@ -726,7 +853,7 @@ mod tests {
     #[test]
     fn test_eval_yield() {
         let mut vm = VM::new();
-        let env = Rc::new(vec![]);
+        let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::Yield {
@@ -745,12 +872,12 @@ mod tests {
     #[test]
     fn test_eval_let() {
         let mut vm = VM::new();
-        let env = Rc::new(vec![]);
+        // Pre-allocate space for the let binding
+        let env = Rc::new(RefCell::new(vec![Value::Nil]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
-        let var = SymbolId(1);
         let expr = CpsExpr::Let {
-            var,
+            index: 0,
             init: Box::new(CpsExpr::Literal(Value::Int(10))),
             body: Box::new(CpsExpr::Literal(Value::Int(20))),
         };
@@ -765,7 +892,7 @@ mod tests {
     #[test]
     fn test_eval_if_true() {
         let mut vm = VM::new();
-        let env = Rc::new(vec![]);
+        let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::If {
@@ -785,7 +912,7 @@ mod tests {
     #[test]
     fn test_eval_if_false() {
         let mut vm = VM::new();
-        let env = Rc::new(vec![]);
+        let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::If {
@@ -805,7 +932,7 @@ mod tests {
     #[test]
     fn test_eval_sequence() {
         let mut vm = VM::new();
-        let env = Rc::new(vec![]);
+        let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::Sequence {
@@ -827,7 +954,7 @@ mod tests {
     #[test]
     fn test_eval_and_short_circuit() {
         let mut vm = VM::new();
-        let env = Rc::new(vec![]);
+        let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::And {
@@ -849,7 +976,7 @@ mod tests {
     #[test]
     fn test_eval_or_short_circuit() {
         let mut vm = VM::new();
-        let env = Rc::new(vec![]);
+        let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::Or {

@@ -1227,6 +1227,54 @@ pub fn compile_with_metadata(
     (bytecode, location_map)
 }
 
+/// Compile a lambda expression to a Closure at runtime
+///
+/// This is used by the CPS interpreter to compile pure lambdas that are
+/// created inside coroutines.
+pub fn compile_lambda_to_closure(
+    params: &[SymbolId],
+    body: &Expr,
+    captures: &[(SymbolId, usize, usize)],
+    locals: &[SymbolId],
+    capture_values: Vec<Value>,
+    effect: crate::compiler::effects::Effect,
+) -> Result<Closure, String> {
+    // Create a compiler for the lambda body
+    let mut lambda_compiler = Compiler::new();
+    lambda_compiler.scope_depth = 0;
+    lambda_compiler.lambda_locals = locals.to_vec();
+    lambda_compiler.lambda_captures_len = captures.len();
+    lambda_compiler.lambda_params_len = params.len();
+
+    // Compile the body
+    lambda_compiler.compile_expr(body, true);
+
+    // Return from the lambda
+    lambda_compiler.bytecode.emit(Instruction::Return);
+
+    // Store the original AST for JIT compilation
+    let source_ast = Some(Rc::new(crate::value::JitLambda {
+        params: params.to_vec(),
+        body: Box::new(body.clone()),
+        captures: captures.to_vec(),
+        effect,
+    }));
+
+    // Create the closure
+    let closure = Closure {
+        bytecode: Rc::new(lambda_compiler.bytecode.instructions),
+        arity: crate::value::Arity::Exact(params.len()),
+        env: Rc::new(capture_values),
+        num_locals: params.len() + captures.len() + locals.len(),
+        num_captures: captures.len(),
+        constants: Rc::new(lambda_compiler.bytecode.constants),
+        source_ast,
+        effect,
+    };
+
+    Ok(closure)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
