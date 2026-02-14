@@ -4,6 +4,37 @@ A summary of recent additions and improvements to the Elle language.
 
 ## Recent Additions
 
+### Empty List `()` is Now Truthy
+
+Elle now treats the empty list `()` as truthy, matching Janet and all modern Lisps (Scheme, Clojure, Racket, Dylan):
+
+```lisp
+; Empty list is truthy
+(if () "truthy" "falsy")  ⟹ "truthy"
+
+; Only #f is falsy
+(if #f "truthy" "falsy")  ⟹ "falsy"
+
+; nil (which is the empty list) is truthy
+(if nil "truthy" "falsy") ⟹ "truthy"
+
+; Use nil? to check for empty list
+(if (nil? x) "empty" "not empty")
+```
+
+**Truthiness Table:**
+| Value | Truthy? |
+|-------|---------|
+| `#f` | ✗ No |
+| `()` / `nil` | ✓ Yes |
+| `0` | ✓ Yes |
+| `""` | ✓ Yes |
+| Any other value | ✓ Yes |
+
+This simplifies Elle's semantics: **only `#f` is falsy**. This aligns with Janet's design and modern Lisp conventions.
+
+## Recent Additions
+
 ### `fn` Keyword
 
 The `fn` keyword is now the preferred way to create anonymous functions:
@@ -230,7 +261,7 @@ Select elements matching a predicate:
 ```lisp
 (filter (fn (x) (> x 2)) (list 1 2 3 4))  ⟹ (3 4)
 (filter even? (list 1 2 3 4 5 6))             ⟹ (2 4 6)
-(filter (fn (s) (> (string-length s) 3)) 
+(filter (fn (s) (> (length s) 3)) 
   (list "hi" "hello" "world" "a"))            ⟹ ("hello" "world")
 ```
 
@@ -269,7 +300,7 @@ Call a function with arguments from a list:
 ### String Analysis
 
 ```lisp
-(string-length "hello")           ⟹ 5
+(length "hello")           ⟹ 5
 (string-contains? "hello" "ell")  ⟹ #t
 (string-starts-with? "hello" "he")⟹ #t
 (string-ends-with? "hello" "lo")  ⟹ #t
@@ -311,7 +342,7 @@ Call a function with arguments from a list:
 (has-key? t "x")     ⟹ #f (now deleted)
 (keys t)             ⟹ ("y" "z")
 (values t)           ⟹ (20 30)
-(table-length t)     ⟹ 2
+(length t)     ⟹ 2
 ```
 
 ### Structs (Immutable Hash Maps)
@@ -324,14 +355,14 @@ Call a function with arguments from a list:
 (struct-has? s2 "c")        ⟹ #t
 (struct-keys s)             ⟹ ("a" "b")
 (struct-values s)           ⟹ (1 2)
-(struct-length s)           ⟹ 2
+(length s)           ⟹ 2
 ```
 
 ### Vectors
 
 ```lisp
 (define v [1 2 3])
-(vector-length v)    ⟹ 3
+(length v)           ⟹ 3
 (vector-ref v 1)     ⟹ 2
 (vector-set! v 0 99) ⟹ [99 2 3]
 ```
@@ -411,12 +442,12 @@ All type predicates end with `?`:
 Get the type name as a keyword:
 
 ```lisp
-(type 42)     ⟹ :int
-(type 3.14)   ⟹ :float
-(type "hello")⟹ :string
-(type #t)     ⟹ :bool
-(type 'x)     ⟹ :symbol
-(type (list))⟹ :pair
+(type-of 42)     ⟹ :integer
+(type-of 3.14)   ⟹ :float
+(type-of "hello")⟹ :string
+(type-of #t)     ⟹ :boolean
+(type-of 'x)     ⟹ :symbol
+(type-of (list)) ⟹ :pair
 ```
 
 ---

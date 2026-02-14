@@ -92,7 +92,7 @@ fn test_module_system_defined_modules() {
     // Test that modules are properly defined and accessible
     assert!(eval("(+ 1 2)").is_ok()); // From math module
     assert!(eval("(length (list))").is_ok()); // From list module
-    assert!(eval("(string-length \"\")").is_ok()); // From string module
+    assert!(eval("(length \"\")").is_ok()); // From string module
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn test_module_namespace_isolation() {
     // All these should work without conflict
     assert!(eval("(length (list 1 2))").is_ok());
     assert!(eval("(+ 1 2)").is_ok());
-    assert!(eval("(string-length \"x\")").is_ok());
+    assert!(eval("(length \"x\")").is_ok());
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn test_module_qualified_symbol_resolution() {
 fn test_module_export_availability() {
     // Exported symbols from modules should be available
     assert!(eval("(length (list 1 2 3))").is_ok());
-    assert!(eval("(string-length \"hello\")").is_ok());
+    assert!(eval("(length \"hello\")").is_ok());
     assert!(eval("(+ 1 2)").is_ok());
 }
 
@@ -196,7 +196,7 @@ fn test_module_list_operations() {
 #[test]
 fn test_module_string_operations() {
     // Test all string module operations
-    assert!(eval("(string-length \"\")").is_ok());
+    assert!(eval("(length \"\")").is_ok());
     assert!(eval("(string-append \"\" \"\")").is_ok());
     assert!(eval("(string-upcase \"\")").is_ok());
 }
@@ -270,7 +270,7 @@ fn test_nested_module_operations() {
     // Test operations across module boundaries
     assert!(eval("(length (list 1 2 3))").is_ok());
     assert!(eval("(+ 1 2)").is_ok());
-    assert!(eval("(string-length (string-append \"a\" \"b\"))").is_ok());
+    assert!(eval("(length (string-append \"a\" \"b\"))").is_ok());
 }
 
 #[test]

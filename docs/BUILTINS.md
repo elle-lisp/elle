@@ -589,22 +589,6 @@ This document provides comprehensive documentation for all built-in primitives i
 
 ## String Operations
 
-### `string-length` (String Length)
-
-**Semantics**: Returns the number of characters in a string.
-
-**Usage**:
-```lisp
-(string-length "hello")
-⟹ 5
-
-(string-length "")
-⟹ 0
-
-(string-length "world!")
-⟹ 6
-```
-
 ### `string-append` (Concatenate Strings)
 
 **Semantics**: Concatenates multiple strings.
@@ -836,26 +820,26 @@ This document provides comprehensive documentation for all built-in primitives i
 
 ## Type Operations
 
-### `type` (Get Type)
+### `type-of` (Get Type)
 
-**Semantics**: Returns string name of value's type.
+**Semantics**: Returns keyword name of value's type.
 
 **Usage**:
 ```lisp
-(type 5)
-⟹ "int"
+(type-of 5)
+⟹ :integer
 
-(type 3.14)
-⟹ "float"
+(type-of 3.14)
+⟹ :float
 
-(type "hello")
-⟹ "string"
+(type-of "hello")
+⟹ :string
 
-(type (list 1 2))
-⟹ "list"
+(type-of (list 1 2))
+⟹ :pair
 
-(type nil)
-⟹ "nil"
+(type-of nil)
+⟹ :nil
 ```
 
 ### `nil?` (Is Nil)
@@ -1151,20 +1135,11 @@ e
 **Usage**:
 ```lisp
 (define v (vector 1 2 3 4 5))
-(vector-length v)
+(length v)
 ⟹ 5
 ```
 
-### `vector-length` (Vector Length)
-
-**Semantics**: Returns number of elements in vector.
-
-**Usage**:
-```lisp
-(define v (vector 10 20 30))
-(vector-length v)
-⟹ 3
-```
+**Note**: Use `length` (polymorphic) instead of `vector-length` for getting vector length.
 
 ### `vector-ref` (Vector Reference)
 
@@ -1262,17 +1237,6 @@ Tables are mutable hash maps. Keys and values can be any type.
 ⟹ #f
 ```
 
-### `table-length` (Table Size)
-
-**Semantics**: Returns number of key-value pairs.
-
-**Usage**:
-```lisp
-(define t (table 1 2 3 4 5 6))
-(table-length t)
-⟹ 3
-```
-
 ### `keys` (Get All Keys)
 
 **Semantics**: Returns list of all keys in table.
@@ -1365,17 +1329,6 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 (struct-has? s "age")
 ⟹ #f
-```
-
-### `struct-length` (Struct Size)
-
-**Semantics**: Returns number of key-value pairs.
-
-**Usage**:
-```lisp
-(define s (struct "a" 1 "b" 2 "c" 3))
-(struct-length s)
-⟹ 3
 ```
 
 ### `struct-keys` (Get All Keys)

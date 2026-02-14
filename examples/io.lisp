@@ -1,12 +1,18 @@
 #!/usr/bin/elle
-;; File I/O Example - Comprehensive Demonstration
-;; This example showcases all file I/O primitives available in Elle
+;; I/O Operations - Comprehensive Demonstration
+;; This example showcases all I/O primitives available in Elle
 ;; 
 ;; Note: Uses relative paths (./elle_example_*) to work in any environment,
 ;; including CI systems.
 
+(import-file "./examples/assertions.lisp")
+
 (begin
-  (display "=== File I/O Operations in Elle ===")
+  ;; Cleanup from previous runs
+  (define cleanup-files (list "./elle_example_basic.txt" "./elle_example_copy.txt" "./elle_example_renamed.txt" "./elle_example_lines.txt" "./elle_example_config.txt"))
+  (define cleanup-dirs (list "./elle_example_dir" "./elle_example_data" "./elle_example_archive"))
+  
+  (display "=== I/O Operations in Elle ===")
   (newline)
   (newline)
 
@@ -26,6 +32,7 @@
   (display "Read from file: ")
   (display content)
   (newline)
+  (assert-equal content "Hello, Elle!" "I/O: spit/slurp basic read-write")
   (newline)
 
   ;; Part 2: File Existence Checking
@@ -35,12 +42,16 @@
   (newline)
 
   (display "Does file exist? ")
-  (display (file-exists? temp-file))
-  (newline)
+  (let ((exists (file-exists? temp-file)))
+    (display exists)
+    (newline)
+    (assert-true exists "I/O: file-exists? returns true for created file"))
 
   (display "Does nonexistent file exist? ")
-  (display (file-exists? "./this_does_not_exist_12345.txt"))
-  (newline)
+  (let ((not-exists (file-exists? "./this_does_not_exist_12345.txt")))
+    (display not-exists)
+    (newline)
+    (assert-true (not not-exists) "I/O: file-exists? returns false for nonexistent file"))
   (newline)
 
   ;; Part 3: File Properties and Information
@@ -50,17 +61,23 @@
   (newline)
 
   (display "File size: ")
-  (display (file-size temp-file))
-  (display " bytes")
-  (newline)
+  (let ((size (file-size temp-file)))
+    (display size)
+    (display " bytes")
+    (newline)
+    (assert-equal size 12 "I/O: file-size returns 12 for 'Hello, Elle!'"))
 
   (display "Is file? ")
-  (display (file? temp-file))
-  (newline)
+  (let ((is-file (file? temp-file)))
+    (display is-file)
+    (newline)
+    (assert-true is-file "I/O: file? returns true for file"))
 
   (display "Is directory? ")
-  (display (directory? "."))
-  (newline)
+  (let ((is-dir (directory? ".")))
+    (display is-dir)
+    (newline)
+    (assert-true is-dir "I/O: directory? returns true for directory"))
   (newline)
 
   ;; Part 4: Appending to Files
@@ -72,8 +89,10 @@
   (append-file temp-file "\nThis is appended content.")
   (display "Appended more content. New content:")
   (newline)
-  (display (slurp temp-file))
-  (newline)
+   (let ((appended-content (slurp temp-file)))
+     (display appended-content)
+     (newline)
+     (assert-true (> (length appended-content) 12) "I/O: appended content is longer"))
   (newline)
 
   ;; Part 5: File Copying
@@ -88,8 +107,10 @@
   (display copied-file)
   (newline)
   (display "Copy exists? ")
-  (display (file-exists? copied-file))
-  (newline)
+  (let ((copy-exists (file-exists? copied-file)))
+    (display copy-exists)
+    (newline)
+    (assert-true copy-exists "I/O: copy-file creates new file"))
   (newline)
 
   ;; Part 6: File Renaming
@@ -104,11 +125,15 @@
   (display renamed-file)
   (newline)
   (display "Old name exists? ")
-  (display (file-exists? copied-file))
-  (newline)
+  (let ((old-exists (file-exists? copied-file)))
+    (display old-exists)
+    (newline)
+    (assert-true (not old-exists) "I/O: rename-file removes old name"))
   (display "New name exists? ")
-  (display (file-exists? renamed-file))
-  (newline)
+  (let ((new-exists (file-exists? renamed-file)))
+    (display new-exists)
+    (newline)
+    (assert-true new-exists "I/O: rename-file creates new name"))
   (newline)
 
   ;; Part 7: Path Operations
@@ -161,8 +186,10 @@
   (newline)
 
   (display "Directory exists? ")
-  (display (directory? test-dir))
-  (newline)
+  (let ((dir-exists (directory? test-dir)))
+    (display dir-exists)
+    (newline)
+    (assert-true dir-exists "I/O: create-directory creates directory"))
   (newline)
 
   ;; Part 9: Reading Files Line by Line
@@ -179,6 +206,7 @@
   (define lines (read-lines lines-file))
   (display lines)
   (newline)
+  (assert-equal (length lines) 3 "I/O: read-lines returns 3 lines")
   (newline)
 
   ;; Part 10: Directory Listing
@@ -194,8 +222,10 @@
 
   (display "Files in directory:")
   (newline)
-  (display (list-directory test-dir))
-  (newline)
+  (let ((dir-list (list-directory test-dir)))
+    (display dir-list)
+    (newline)
+    (assert-true (> (length dir-list) 0) "I/O: list-directory returns files"))
   (newline)
 
   ;; Part 11: Working Directory Operations
@@ -204,9 +234,11 @@
   (display "---")
   (newline)
 
-  (display "Current directory: ")
-  (display (current-directory))
-  (newline)
+   (display "Current directory: ")
+   (let ((cwd (current-directory)))
+     (display cwd)
+     (newline)
+     (assert-true (> (length cwd) 0) "I/O: current-directory returns valid path"))
   (newline)
 
   ;; Part 12: Practical Example - Config File Handling
@@ -225,8 +257,10 @@
   ;; Read and display config
   (display "Current config:")
   (newline)
-  (display (slurp config-file))
-  (newline)
+   (define config-content (slurp config-file))
+   (display config-content)
+   (newline)
+   (assert-true (> (length config-content) 0) "I/O: config file has content")
 
   ;; Append new settings
   (append-file config-file "debug=true\nverbose=false\n")
@@ -236,8 +270,10 @@
   ;; Read updated version
   (display "Updated config:")
   (newline)
-  (display (slurp config-file))
-  (newline)
+   (define updated-config (slurp config-file))
+   (display updated-config)
+   (newline)
+   (assert-true (> (length updated-config) (length config-content)) "I/O: updated config is longer")
   (newline)
 
   ;; Part 13: File Organization Example
@@ -270,8 +306,10 @@
   (display archived)
   (newline)
   (display "Archived file exists? ")
-  (display (file-exists? archived))
-  (newline)
+  (let ((archived-exists (file-exists? archived)))
+    (display archived-exists)
+    (newline)
+    (assert-true archived-exists "I/O: archived file exists after copy"))
   (newline)
 
   ;; Part 14: Error Handling and Edge Cases
@@ -334,7 +372,7 @@
   (newline)
 
   ;; Summary
-  (display "=== Summary of File I/O Functions ===")
+  (display "=== Summary of I/O Functions ===")
   (newline)
   (newline)
 
@@ -402,5 +440,7 @@
   (newline)
   (newline)
 
-  (display "=== File I/O Example Complete ===")
+  (display "=== I/O Example Complete ===")
+  (newline)
+  (display "=== I/O Assertions Complete ===")
   (newline))

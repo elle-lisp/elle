@@ -233,7 +233,7 @@ fn test_language_completeness_all_primitives() {
     assert!(eval("(length (list))").is_ok());
     assert!(eval("(append (list) (list))").is_ok());
     // Strings
-    assert!(eval("(string-length \"\")").is_ok());
+    assert!(eval("(length \"\")").is_ok());
     assert!(eval("(string-append \"\" \"\")").is_ok());
 }
 

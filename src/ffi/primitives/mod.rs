@@ -19,7 +19,9 @@ pub use callbacks::{
     prim_make_c_callback_wrapper,
 };
 pub use calling::{prim_call_c_function, prim_call_c_function_wrapper};
-pub use context::{clear_vm_context, get_vm_context, register_ffi_primitives, set_vm_context};
+pub use context::{
+    clear_vm_context, get_vm_context, register_ffi_primitives, set_symbol_table, set_vm_context,
+};
 pub use enums::{prim_define_enum, prim_define_enum_wrapper};
 pub use handlers::{
     prim_clear_custom_handlers, prim_clear_custom_handlers_wrapper, prim_custom_handler_registered,

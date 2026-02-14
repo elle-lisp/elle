@@ -309,29 +309,52 @@ pub fn value_to_expr_with_scope(
                         Ok(Expr::While { cond, body })
                     }
 
-                    "for" => {
-                        // Syntax: (for var iter body)
-                        // Also supports: (for var in iter body) for clarity
+                    "forever" => {
+                        // Syntax: (forever body...)
+                        // Expands to: (while #t body...)
+                        if list.len() < 2 {
+                            return Err("forever requires at least 1 argument (body)".to_string());
+                        }
+                        // Combine all body expressions into a single expression
+                        let body = if list.len() == 2 {
+                            // Single body expression
+                            Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?)
+                        } else {
+                            // Multiple body expressions - wrap in begin
+                            let body_exprs: Result<Vec<Expr>, String> = list[1..]
+                                .iter()
+                                .map(|expr| value_to_expr_with_scope(expr, symbols, scope_stack))
+                                .collect();
+                            Box::new(Expr::Begin(body_exprs?))
+                        };
+                        // Create a while loop with #t as the condition
+                        let cond = Box::new(Expr::Literal(Value::Bool(true)));
+                        Ok(Expr::While { cond, body })
+                    }
+
+                    "each" => {
+                        // Syntax: (each var iter body)
+                        // Also supports: (each var in iter body) for clarity
                         if list.len() < 4 || list.len() > 5 {
                             return Err(
-                                "for requires 3 or 4 arguments (var [in] iter body)".to_string()
+                                "each requires 3 or 4 arguments (var [in] iter body)".to_string()
                             );
                         }
 
                         let var = list[1].as_symbol()?;
                         let (iter_expr, body_expr) = if list.len() == 4 {
-                            // (for var iter body)
+                            // (each var iter body)
                             (&list[2], &list[3])
                         } else {
-                            // (for var in iter body)
+                            // (each var in iter body)
                             if let Value::Symbol(in_sym) = &list[2] {
                                 if let Some("in") = symbols.name(*in_sym) {
                                     (&list[3], &list[4])
                                 } else {
-                                    return Err("for loop syntax: (for var iter body) or (for var in iter body)".to_string());
+                                    return Err("each loop syntax: (each var iter body) or (each var in iter body)".to_string());
                                 }
                             } else {
-                                return Err("for loop syntax: (for var iter body) or (for var in iter body)".to_string());
+                                return Err("each loop syntax: (each var iter body) or (each var in iter body)".to_string());
                             }
                         };
 

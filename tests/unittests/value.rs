@@ -38,10 +38,10 @@ fn test_truthiness() {
     assert!(Value::Float(0.0).is_truthy());
     assert!(Value::Bool(true).is_truthy());
     assert!(cons(Value::Int(1), Value::Nil).is_truthy());
+    assert!(Value::Nil.is_truthy()); // Empty list is truthy (matching Janet/modern Lisps)
 
     // Falsy values
     assert!(!Value::Bool(false).is_truthy());
-    assert!(!Value::Nil.is_truthy());
 }
 
 #[test]

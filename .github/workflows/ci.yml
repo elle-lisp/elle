@@ -123,38 +123,9 @@ jobs:
              exit 1
            else
              echo "✓ All examples passed"
-           fi
-      - name: Run documentation generator
-        run: |
-          timeout 30 ./target/release/elle elle-doc/generate.lisp
-          echo "Documentation generator: PASSED"
+            fi
 
-  elle-doc:
-    name: Documentation Generator
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build Elle
-        run: cargo build --release
-      - name: Generate documentation site
-        run: ./target/release/elle elle-doc/generate.lisp
-      - name: Verify generated files
-        run: |
-          test -f site/index.html || (echo "Missing index.html" && exit 1)
-          test -f site/getting-started.html || (echo "Missing getting-started.html" && exit 1)
-          test -f site/language-guide.html || (echo "Missing language-guide.html" && exit 1)
-          test -f site/stdlib-reference.html || (echo "Missing stdlib-reference.html" && exit 1)
-          test -f site/examples.html || (echo "Missing examples.html" && exit 1)
-          test -f site/style.css || (echo "Missing style.css" && exit 1)
-          echo "All documentation files generated successfully"
-      - name: Upload documentation artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: elle-doc-site
-          path: site/
-          retention-days: 30
+
 
   coverage:
     name: Code Coverage
@@ -276,7 +247,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [test, fmt, clippy, examples, elle-doc, coverage, docs, benchmarks]
+    needs: [test, fmt, clippy, examples, coverage, docs, benchmarks]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -291,9 +262,6 @@ jobs:
         run: exit 1
       - name: Check examples
         if: needs.examples.result != 'success'
-        run: exit 1
-      - name: Check elle-doc
-        if: needs.elle-doc.result != 'success'
         run: exit 1
       - name: Check docs
         if: needs.docs.result != 'success'

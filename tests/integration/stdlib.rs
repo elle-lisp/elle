@@ -31,7 +31,7 @@ fn test_stdlib_list_module_integration() {
 #[test]
 fn test_stdlib_string_module_integration() {
     // Test string module functions
-    assert!(eval("(string-length \"hello\")").is_ok());
+    assert!(eval("(length \"hello\")").is_ok());
     assert!(eval("(string-upcase \"hello\")").is_ok());
     assert!(eval("(string-downcase \"HELLO\")").is_ok());
 }
@@ -112,8 +112,8 @@ fn test_list_take_drop() {
 #[test]
 fn test_string_operations_basic() {
     // Test string functions
-    assert_eq!(eval("(string-length \"hello\")").unwrap(), Value::Int(5));
-    assert_eq!(eval("(string-length \"\")").unwrap(), Value::Int(0));
+    assert_eq!(eval("(length \"hello\")").unwrap(), Value::Int(5));
+    assert_eq!(eval("(length \"\")").unwrap(), Value::Int(0));
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn test_stdlib_with_custom_operations() {
 #[test]
 fn test_list_and_string_together() {
     // Combine list and string operations
-    assert!(eval("(string-length (string-append \"a\" \"b\"))").is_ok());
+    assert!(eval("(length (string-append \"a\" \"b\"))").is_ok());
 }
 
 #[test]
@@ -359,7 +359,7 @@ fn test_list_operations_chain() {
 #[test]
 fn test_string_operations_chain() {
     // Chain string operations
-    assert!(eval("(string-length (string-upcase \"hello\"))").is_ok());
+    assert!(eval("(length (string-upcase \"hello\"))").is_ok());
 }
 
 #[test]
@@ -372,6 +372,6 @@ fn test_math_operations_chain() {
 fn test_all_stdlib_modules_available() {
     // Verify stdlib functions are available
     assert!(eval("(length (list 1))").is_ok());
-    assert!(eval("(string-length \"x\")").is_ok());
+    assert!(eval("(length \"x\")").is_ok());
     assert!(eval("(+ 1 2)").is_ok());
 }

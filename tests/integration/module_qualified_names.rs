@@ -77,7 +77,7 @@ fn test_qualified_builtin_rest() {
 #[test]
 fn test_qualified_string_operations() {
     // Test qualified string functions
-    let result = ModuleQualifiedNamesTest::eval(r#"(string-length "hello")"#).unwrap();
+    let result = ModuleQualifiedNamesTest::eval(r#"(length "hello")"#).unwrap();
     assert_eq!(result, elle::value::Value::Int(5));
 }
 

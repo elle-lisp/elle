@@ -175,17 +175,17 @@ fn test_while_loop_parsing() {
     }
 }
 
-/// Test for loop parsing
+/// Test each loop parsing
 #[test]
 fn test_for_loop_parsing() {
     let mut symbols = SymbolTable::new();
 
-    // Test: (for item items body) - should parse correctly
-    let code = "(for item (list 1 2 3) (print item))";
-    let value = read_str(code, &mut symbols).expect("Failed to parse for loop");
+    // Test: (each item items body) - should parse correctly
+    let code = "(each item (list 1 2 3) (print item))";
+    let value = read_str(code, &mut symbols).expect("Failed to parse each loop");
     let expr = value_to_expr(&value, &mut symbols).expect("Failed to convert to expression");
 
-    // Should be a For expression
+    // Should be a For expression (internal representation)
     match expr {
         Expr::For { var, iter, body } => {
             // var should be the symbol 'item'

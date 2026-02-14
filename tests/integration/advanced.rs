@@ -12,8 +12,9 @@ fn eval(input: &str) -> Result<Value, String> {
     // Set VM context for module loading and FFI
     ffi_primitives::set_vm_context(&mut vm as *mut VM);
 
-    // Set symbol table context for macro primitives
+    // Set symbol table context for macro primitives and module loading
     set_macro_symbol_table(&mut symbols as *mut SymbolTable);
+    ffi_primitives::set_symbol_table(&mut symbols as *mut SymbolTable);
 
     let value = read_str(input, &mut symbols)?;
     let expr = value_to_expr(&value, &mut symbols)?;

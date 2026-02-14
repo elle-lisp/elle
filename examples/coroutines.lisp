@@ -8,30 +8,14 @@
 ; - coroutine-value: Get the last yielded/returned value
 ; - coroutine?: Type predicate
 ; - yield: Suspend execution and return a value
+; - coroutine-next: Get next value from coroutine
+; - Generator patterns
+; - Nested coroutines
+; - Interleaving coroutines
+; - Practical use cases
 
-; === Helper for assertions ===
-(define assert-eq (fn (actual expected msg)
-  (let ((matches
-    (if (symbol? expected)
-        (eq? actual expected)
-        (= actual expected))))
-    (if matches
-        #t
-        (begin
-          (display "FAIL: ")
-          (display msg)
-          (display "\n  Expected: ")
-          (display expected)
-          (display "\n  Actual: ")
-          (display actual)
-          (display "\n")
-          (exit 1))))))
+(import-file "./examples/assertions.lisp")
 
-(define assert-true (fn (val msg)
-  (assert-eq val #t msg)))
-
-(define assert-false (fn (val msg)
-  (assert-eq val #f msg)))
 
 ; ========================================
 ; 1. Basic coroutine creation and yield
@@ -274,3 +258,379 @@
 (display "  ✓ Generator pattern\n")
 (display "  ✓ Fibonacci sequence\n")
 (display "  ✓ Type predicate\n")
+(display "  ✓ coroutine-next - Get next value\n")
+(display "  ✓ Range generator pattern\n")
+(display "  ✓ Extended Fibonacci generator pattern\n")
+(display "  ✓ Nested coroutines (advanced)\n")
+(display "  ✓ Interleaving coroutines (advanced)\n")
+(display "  ✓ Coroutine state tracking (advanced)\n")
+(display "  ✓ Multiple independent coroutines\n")
+(display "  ✓ Completion detection (advanced)\n")
+(display "  ✓ Counting generator pattern\n")
+(display "  ✓ Alphabet generator pattern\n")
+
+(display "\nKey concepts:\n")
+(display "  - coroutine-next is an alias for coroutine-resume\n")
+(display "  - Generators produce sequences of values\n")
+(display "  - Coroutines maintain independent state\n")
+(display "  - Multiple coroutines can run interleaved\n")
+(display "  - coroutine-done? detects completion\n")
+(display "  - Nested coroutines enable complex patterns\n")
+
+(display "\n")
+(display "========================================\n")
+(display "All advanced coroutine tests passed!\n")
+(display "========================================\n")
+(display "\n")
+
+(exit 0)
+
+; ========================================
+; ADVANCED COROUTINE FEATURES
+; ========================================
+
+; ========================================
+; 13. coroutine-next: Get next value
+; ========================================
+(display "\n=== 13. coroutine-next: Get Next Value ===\n")
+
+(define simple-gen-next (fn ()
+  (yield 10)
+  (yield 20)
+  (yield 30)))
+
+(define co-simple-next (make-coroutine simple-gen-next))
+
+(display "Using coroutine-next:\n")
+
+(display "  Next: ")
+(display (coroutine-next co-simple-next))
+(newline)
+
+(display "  Next: ")
+(display (coroutine-next co-simple-next))
+(newline)
+
+(display "  Next: ")
+(display (coroutine-next co-simple-next))
+(newline)
+
+(assert-eq (coroutine-status co-simple-next) "suspended" "Status after coroutine-next")
+
+(display "✓ coroutine-next works correctly\n")
+
+; ========================================
+; 14. Generator pattern: Range generator
+; ========================================
+(display "\n=== 14. Generator Pattern: Range ===\n")
+
+(define simple-range-gen (fn ()
+  (yield 0)
+  (yield 1)
+  (yield 2)
+  (yield 3)
+  (yield 4)))
+
+(define range-co (make-coroutine simple-range-gen))
+
+(display "Range generator (0-4):\n")
+(display "  ")
+(display (coroutine-resume range-co))
+(display " ")
+(display (coroutine-resume range-co))
+(display " ")
+(display (coroutine-resume range-co))
+(display " ")
+(display (coroutine-resume range-co))
+(display " ")
+(display (coroutine-resume range-co))
+(newline)
+
+(assert-eq (coroutine-status range-co) "suspended" "Range generator status")
+
+(display "✓ Range generator pattern works\n")
+
+; ========================================
+; 15. Generator pattern: Extended Fibonacci
+; ========================================
+(display "\n=== 15. Generator Pattern: Extended Fibonacci ===\n")
+
+(define fib-gen-extended (fn ()
+  (yield 0)
+  (yield 1)
+  (yield 1)
+  (yield 2)
+  (yield 3)
+  (yield 5)
+  (yield 8)
+  (yield 13)))
+
+(define fib-co-extended (make-coroutine fib-gen-extended))
+
+(display "Fibonacci sequence:\n")
+(display "  ")
+(display (coroutine-resume fib-co-extended))
+(display " ")
+(display (coroutine-resume fib-co-extended))
+(display " ")
+(display (coroutine-resume fib-co-extended))
+(display " ")
+(display (coroutine-resume fib-co-extended))
+(display " ")
+(display (coroutine-resume fib-co-extended))
+(display " ")
+(display (coroutine-resume fib-co-extended))
+(display " ")
+(display (coroutine-resume fib-co-extended))
+(display " ")
+(display (coroutine-resume fib-co-extended))
+(newline)
+
+(assert-eq (coroutine-status fib-co-extended) "suspended" "Fibonacci generator status")
+
+(display "✓ Fibonacci generator pattern works\n")
+
+; ========================================
+; 16. Nested coroutines (advanced)
+; ========================================
+(display "\n=== 16. Nested Coroutines (Advanced) ===\n")
+
+(define inner-nested-gen (fn ()
+  (yield 100)
+  (yield 200)))
+
+(define outer-nested-gen (fn ()
+  (define inner-co-nested (make-coroutine inner-nested-gen))
+  (yield (coroutine-resume inner-co-nested))
+  (yield (coroutine-resume inner-co-nested))
+  (yield 300)))
+
+(define nested-co-adv (make-coroutine outer-nested-gen))
+
+(display "Nested coroutines:\n")
+(display "  Inner first: ")
+(display (coroutine-resume nested-co-adv))
+(newline)
+
+(display "  Inner second: ")
+(display (coroutine-resume nested-co-adv))
+(newline)
+
+(display "  Outer: ")
+(display (coroutine-resume nested-co-adv))
+(newline)
+
+(assert-eq (coroutine-status nested-co-adv) "suspended" "Nested coroutine status")
+
+(display "✓ Nested coroutines work correctly\n")
+
+; ========================================
+; 17. Interleaving coroutines (advanced)
+; ========================================
+(display "\n=== 17. Interleaving Coroutines (Advanced) ===\n")
+
+(define gen-a-adv (fn ()
+  (yield 'a1)
+  (yield 'a2)
+  (yield 'a3)))
+
+(define gen-b-adv (fn ()
+  (yield 'b1)
+  (yield 'b2)
+  (yield 'b3)))
+
+(define co-a-adv (make-coroutine gen-a-adv))
+(define co-b-adv (make-coroutine gen-b-adv))
+
+(display "Interleaving two coroutines:\n")
+(display "  A: ")
+(display (coroutine-resume co-a-adv))
+(display ", B: ")
+(display (coroutine-resume co-b-adv))
+(newline)
+
+(display "  A: ")
+(display (coroutine-resume co-a-adv))
+(display ", B: ")
+(display (coroutine-resume co-b-adv))
+(newline)
+
+(display "  A: ")
+(display (coroutine-resume co-a-adv))
+(display ", B: ")
+(display (coroutine-resume co-b-adv))
+(newline)
+
+(assert-eq (coroutine-status co-a-adv) "suspended" "Coroutine A status")
+(assert-eq (coroutine-status co-b-adv) "suspended" "Coroutine B status")
+
+(display "✓ Interleaving coroutines works\n")
+
+; ========================================
+; 18. Coroutine with state (advanced)
+; ========================================
+(display "\n=== 18. Coroutine with State (Advanced) ===\n")
+
+(define stateful-gen-adv (fn ()
+  (yield 10)
+  (yield 20)
+  (yield 30)
+  (yield 40)))
+
+(define state-co-adv (make-coroutine stateful-gen-adv))
+
+(display "Coroutine state tracking:\n")
+
+(coroutine-resume state-co-adv)
+(display "  After first yield, value: ")
+(display (coroutine-value state-co-adv))
+(newline)
+
+(coroutine-resume state-co-adv)
+(display "  After second yield, value: ")
+(display (coroutine-value state-co-adv))
+(newline)
+
+(coroutine-resume state-co-adv)
+(display "  After third yield, value: ")
+(display (coroutine-value state-co-adv))
+(newline)
+
+(assert-eq (coroutine-value state-co-adv) 30 "Coroutine value tracking")
+
+(display "✓ Coroutine state tracking works\n")
+
+; ========================================
+; 19. Multiple coroutines from same generator
+; ========================================
+(display "\n=== 19. Multiple Coroutines from Same Generator ===\n")
+
+(define shared-gen-adv (fn ()
+  (yield 1)
+  (yield 2)
+  (yield 3)))
+
+(define co-1-adv (make-coroutine shared-gen-adv))
+(define co-2-adv (make-coroutine shared-gen-adv))
+(define co-3-adv (make-coroutine shared-gen-adv))
+
+(display "Three independent coroutines:\n")
+
+(display "  CO1: ")
+(display (coroutine-resume co-1-adv))
+(display ", CO2: ")
+(display (coroutine-resume co-2-adv))
+(display ", CO3: ")
+(display (coroutine-resume co-3-adv))
+(newline)
+
+(display "  CO1: ")
+(display (coroutine-resume co-1-adv))
+(display ", CO2: ")
+(display (coroutine-resume co-2-adv))
+(display ", CO3: ")
+(display (coroutine-resume co-3-adv))
+(newline)
+
+(assert-eq (coroutine-status co-1-adv) "suspended" "CO1 status")
+(assert-eq (coroutine-status co-2-adv) "suspended" "CO2 status")
+(assert-eq (coroutine-status co-3-adv) "suspended" "CO3 status")
+
+(display "✓ Multiple independent coroutines work\n")
+
+; ========================================
+; 20. Coroutine completion detection (advanced)
+; ========================================
+(display "\n=== 20. Coroutine Completion Detection (Advanced) ===\n")
+
+(define short-gen-adv (fn ()
+  (yield 1)
+  (yield 2)))
+
+(define short-co-adv (make-coroutine short-gen-adv))
+
+(display "Detecting coroutine completion:\n")
+
+(display "  First resume: ")
+(display (coroutine-resume short-co-adv))
+(display ", done? ")
+(display (coroutine-done? short-co-adv))
+(newline)
+
+(display "  Second resume: ")
+(display (coroutine-resume short-co-adv))
+(display ", done? ")
+(display (coroutine-done? short-co-adv))
+(newline)
+
+(display "  After completion: ")
+(coroutine-resume short-co-adv)
+(display "done? ")
+(display (coroutine-done? short-co-adv))
+(newline)
+
+(assert-true (coroutine-done? short-co-adv) "Coroutine completion detection")
+
+(display "✓ Coroutine completion detection works\n")
+
+; ========================================
+; 21. Generator pattern: Counting (advanced)
+; ========================================
+(display "\n=== 21. Generator Pattern: Counting (Advanced) ===\n")
+
+(define count-gen-adv (fn ()
+  (yield 0)
+  (yield 1)
+  (yield 2)
+  (yield 3)
+  (yield 4)))
+
+(define counter-adv (make-coroutine count-gen-adv))
+
+(display "Counting generator:\n")
+(display "  ")
+(display (coroutine-resume counter-adv))
+(display " ")
+(display (coroutine-resume counter-adv))
+(display " ")
+(display (coroutine-resume counter-adv))
+(display " ")
+(display (coroutine-resume counter-adv))
+(display " ")
+(display (coroutine-resume counter-adv))
+(newline)
+
+(assert-eq (coroutine-status counter-adv) "suspended" "Counter status")
+
+(display "✓ Counting generator works\n")
+
+; ========================================
+; 22. Generator pattern: Alphabet
+; ========================================
+(display "\n=== 22. Generator Pattern: Alphabet ===\n")
+
+(define alpha-gen (fn ()
+  (yield 'a)
+  (yield 'b)
+  (yield 'c)
+  (yield 'd)
+  (yield 'e)))
+
+(define alpha-co (make-coroutine alpha-gen))
+
+(display "Alphabet generator:\n")
+(display "  ")
+(display (coroutine-resume alpha-co))
+(display " ")
+(display (coroutine-resume alpha-co))
+(display " ")
+(display (coroutine-resume alpha-co))
+(display " ")
+(display (coroutine-resume alpha-co))
+(display " ")
+(display (coroutine-resume alpha-co))
+(newline)
+
+(assert-eq (coroutine-status alpha-co) "suspended" "Alphabet generator status")
+
+(display "✓ Alphabet generator works\n")

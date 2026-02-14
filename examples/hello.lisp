@@ -1,3 +1,4 @@
+#!/usr/bin/env elle
 ; Simple hello world example
-(display "Hello from Elle!")
+(display "Hello, World!")
 (newline)

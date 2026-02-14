@@ -22,13 +22,13 @@ impl ScopeEval {
     }
 }
 
-// === For-loop variable scoping ===
+// === Each-loop variable scoping ===
 
 #[test]
 fn test_for_loop_variable_not_in_global_scope() {
-    // After a for loop, the loop variable should not be accessible
+    // After an each loop, the loop variable should not be accessible
     let mut eval = ScopeEval::new();
-    eval.eval("(for x (list 1 2 3) (+ x 1))").unwrap();
+    eval.eval("(each x (list 1 2 3) (+ x 1))").unwrap();
     let result = eval.eval("x");
     assert!(
         result.is_err(),
@@ -40,7 +40,7 @@ fn test_for_loop_variable_not_in_global_scope() {
 fn test_for_loop_variable_accessible_in_body() {
     let mut eval = ScopeEval::new();
     eval.eval("(define result 0)").unwrap();
-    eval.eval("(for x (list 1 2 3) (set! result (+ result x)))")
+    eval.eval("(each x (list 1 2 3) (set! result (+ result x)))")
         .unwrap();
     assert_eq!(eval.eval("result").unwrap(), Value::Int(6));
 }
@@ -49,7 +49,7 @@ fn test_for_loop_variable_accessible_in_body() {
 fn test_for_loop_does_not_clobber_outer_variable() {
     let mut eval = ScopeEval::new();
     eval.eval("(define x 999)").unwrap();
-    eval.eval("(for x (list 1 2 3) (+ x 1))").unwrap();
+    eval.eval("(each x (list 1 2 3) (+ x 1))").unwrap();
     assert_eq!(eval.eval("x").unwrap(), Value::Int(999));
 }
 
@@ -71,7 +71,7 @@ fn test_define_in_while_loop_is_local() {
 #[test]
 fn test_define_in_for_loop_is_local() {
     let mut eval = ScopeEval::new();
-    eval.eval("(for x (list 1 2 3) (define y (* x 10)))")
+    eval.eval("(each x (list 1 2 3) (define y (* x 10)))")
         .unwrap();
     let result = eval.eval("y");
     assert!(
@@ -177,7 +177,7 @@ fn test_while_loop_still_works() {
 fn test_for_loop_accumulation_still_works() {
     let mut eval = ScopeEval::new();
     eval.eval("(define result 0)").unwrap();
-    eval.eval("(for i (list 1 2 3) (set! result (+ result i)))")
+    eval.eval("(each i (list 1 2 3) (set! result (+ result i)))")
         .unwrap();
     assert_eq!(eval.eval("result").unwrap(), Value::Int(6));
 }

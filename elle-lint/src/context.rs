@@ -148,20 +148,19 @@ pub fn builtin_arity(name: &str) -> Option<usize> {
         "pow" => Some(2),
         "min" | "max" => Some(2),
         // String operations
-        "string-length" | "string-upcase" | "string-downcase" => Some(1),
+        "string-upcase" | "string-downcase" => Some(1),
         "string-append" => Some(2),
         "substring" => Some(3),
         "string-index" => Some(2),
         "char-at" => Some(2),
         // Type operations
-        "type" => Some(1),
+        "type-of" => Some(1),
         "int" | "float" | "string" => Some(1),
         // Logic
         "not" => Some(1),
         "if" => Some(3),
         // Vector operations
         "vector" => None, // Variadic
-        "vector-length" => Some(1),
         "vector-ref" => Some(2),
         "vector-set!" => Some(3),
         // Special forms

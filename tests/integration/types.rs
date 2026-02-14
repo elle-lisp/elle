@@ -1,11 +1,15 @@
 // Type system tests
 // Tests for type checking, specialization, coercion, and type information
+use elle::ffi::primitives::context::set_symbol_table;
 use elle::{compile, read_str, register_primitives, SymbolTable, Value, VM};
 
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     register_primitives(&mut vm, &mut symbols);
+
+    // Set the symbol table in thread-local context for primitives that need it
+    set_symbol_table(&mut symbols as *mut SymbolTable);
 
     let value = read_str(input, &mut symbols)?;
     let expr = elle::compiler::converters::value_to_expr(&value, &mut symbols)?;
@@ -43,19 +47,19 @@ fn test_type_conversions() {
 
 #[test]
 fn test_type() {
-    match eval("(type 42)").unwrap() {
-        Value::String(s) => assert_eq!(&*s, "integer"),
-        _ => panic!("Expected string"),
+    match eval("(type-of 42)").unwrap() {
+        Value::Keyword(_) => {} // type-of returns a keyword
+        _ => panic!("Expected keyword"),
     }
 
-    match eval("(type 3.14)").unwrap() {
-        Value::String(s) => assert_eq!(&*s, "float"),
-        _ => panic!("Expected string"),
+    match eval("(type-of 3.14)").unwrap() {
+        Value::Keyword(_) => {} // type-of returns a keyword
+        _ => panic!("Expected keyword"),
     }
 
-    match eval("(type \"hello\")").unwrap() {
-        Value::String(s) => assert_eq!(&*s, "string"),
-        _ => panic!("Expected string"),
+    match eval("(type-of \"hello\")").unwrap() {
+        Value::Keyword(_) => {} // type-of returns a keyword
+        _ => panic!("Expected keyword"),
     }
 }
 

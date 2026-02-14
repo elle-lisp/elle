@@ -1,6 +1,8 @@
 #!/usr/bin/env elle
 ;; JSON parsing and serialization examples
 
+(import-file "./examples/assertions.lisp")
+
 ;; Example 1: Parse various JSON types
 (display "=== Example 1: Parsing JSON ===")
 (newline)
@@ -9,26 +11,31 @@
 (display "Parsed null: ")
 (display json-null)
 (newline)
+(assert-eq json-null nil "json-parse null returns nil")
 
 (define json-bool (json-parse "true"))
 (display "Parsed true: ")
 (display json-bool)
 (newline)
+(assert-true (eq? json-bool (json-parse "true")) "json-parse true returns true")
 
 (define json-int (json-parse "42"))
 (display "Parsed 42: ")
 (display json-int)
 (newline)
+(assert-eq json-int 42 "json-parse 42 returns 42")
 
 (define json-float (json-parse "3.14"))
 (display "Parsed 3.14: ")
 (display json-float)
 (newline)
+(assert-eq json-float 3.14 "json-parse 3.14 returns 3.14")
 
 (define json-string (json-parse "\"hello world\""))
 (display "Parsed string: ")
 (display json-string)
 (newline)
+(assert-eq json-string "hello world" "json-parse string returns correct value")
 
 ;; Example 2: Parse arrays
 (display "\n=== Example 2: Parsing Arrays ===")
@@ -38,11 +45,16 @@
 (display "Parsed array: ")
 (display json-array)
 (newline)
+(assert-eq (length json-array) 5 "Array has 5 elements")
+(assert-eq (nth 0 json-array) 1 "First array element is 1")
+(assert-eq (nth 4 json-array) 5 "Last array element is 5")
 
 (define mixed-array (json-parse "[1, \"two\", true, null, 3.14]"))
 (display "Mixed array: ")
 (display mixed-array)
 (newline)
+(assert-eq (length mixed-array) 5 "Mixed array has 5 elements")
+(assert-eq (nth 1 mixed-array) "two" "Second element is string 'two'")
 
 ;; Example 3: Parse objects
 (display "\n=== Example 3: Parsing Objects ===")
@@ -58,11 +70,13 @@
 (display "Name from object: ")
 (display name)
 (newline)
+(assert-eq name "Alice" "Object field 'name' is 'Alice'")
 
 (define age (get json-obj "age"))
 (display "Age from object: ")
 (display age)
 (newline)
+(assert-eq age 30 "Object field 'age' is 30")
 
 ;; Example 4: Nested structures
 (display "\n=== Example 4: Nested Structures ===")
@@ -83,24 +97,117 @@
 (newline)
 
 (define serialized-bool (json-serialize #t))
-(display "Serialized #t: ")
+(display "Serialized true: ")
 (display serialized-bool)
 (newline)
+(assert-eq serialized-bool "true" "json-serialize true returns 'true'")
 
 (define serialized-int (json-serialize 42))
 (display "Serialized 42: ")
 (display serialized-int)
 (newline)
+(assert-eq serialized-int "42" "json-serialize 42 returns '42'")
 
 (define serialized-float (json-serialize 3.14))
 (display "Serialized 3.14: ")
 (display serialized-float)
 (newline)
+(assert-eq serialized-float "3.14" "json-serialize 3.14 returns '3.14'")
 
 (define serialized-string (json-serialize "hello"))
 (display "Serialized string: ")
 (display serialized-string)
 (newline)
+(assert-eq serialized-string "\"hello\"" "json-serialize string returns quoted string")
+
+;; Example 5b: Elle Booleans vs JSON Booleans
+(display "\n=== Example 5b: Elle Booleans vs JSON Booleans ===")
+(newline)
+
+;; Test Elle native booleans with JSON operations
+(display "Testing Elle native booleans (#t, #f):")
+(newline)
+
+(define elle-true #t)
+(define elle-false #f)
+
+(define serialized-elle-true (json-serialize elle-true))
+(display "Serialized Elle #t: ")
+(display serialized-elle-true)
+(newline)
+(assert-eq serialized-elle-true "true" "Elle bool #t serializes to JSON 'true'")
+
+(define serialized-elle-false (json-serialize elle-false))
+(display "Serialized Elle #f: ")
+(display serialized-elle-false)
+(newline)
+(assert-eq serialized-elle-false "false" "Elle bool #f serializes to JSON 'false'")
+
+;; Test JSON-parsed booleans
+(display "\nTesting JSON-parsed booleans:")
+(newline)
+
+(define json-true (json-parse "true"))
+(define json-false (json-parse "false"))
+
+(display "Parsed JSON true: ")
+(display json-true)
+(newline)
+(assert-true (eq? json-true (json-parse "true")) "JSON-parsed true values are equal")
+
+(display "Parsed JSON false: ")
+(display json-false)
+(newline)
+(assert-true (eq? json-false (json-parse "false")) "JSON-parsed false values are equal")
+
+;; Test round-trip: parse -> serialize
+(display "\nTesting round-trip (parse -> serialize):")
+(newline)
+
+(define roundtrip-true (json-serialize (json-parse "true")))
+(display "Round-trip true: ")
+(display roundtrip-true)
+(newline)
+(assert-eq roundtrip-true "true" "JSON true round-trips correctly")
+
+(define roundtrip-false (json-serialize (json-parse "false")))
+(display "Round-trip false: ")
+(display roundtrip-false)
+(newline)
+(assert-eq roundtrip-false "false" "JSON false round-trips correctly")
+
+;; Test interoperability: Elle bools and JSON-parsed bools serialize identically
+(display "\nTesting interoperability (Elle bools vs JSON-parsed bools):")
+(newline)
+
+(define mixed-list-bools (list elle-true json-false elle-false json-true))
+(define serialized-mixed-bools (json-serialize mixed-list-bools))
+(display "Mixed list (Elle and JSON bools): ")
+(display serialized-mixed-bools)
+(newline)
+(assert-eq serialized-mixed-bools "[true,false,false,true]" "Mixed Elle and JSON bools serialize identically")
+
+;; Test that Elle #t and JSON-parsed true serialize the same way
+(define elle-true-serialized (json-serialize #t))
+(define json-true-serialized (json-serialize (json-parse "true")))
+(display "Elle #t serialized: ")
+(display elle-true-serialized)
+(newline)
+(display "JSON true serialized: ")
+(display json-true-serialized)
+(newline)
+(assert-eq elle-true-serialized json-true-serialized "Elle #t and JSON true serialize identically")
+
+;; Test that Elle #f and JSON-parsed false serialize the same way
+(define elle-false-serialized (json-serialize #f))
+(define json-false-serialized (json-serialize (json-parse "false")))
+(display "Elle #f serialized: ")
+(display elle-false-serialized)
+(newline)
+(display "JSON false serialized: ")
+(display json-false-serialized)
+(newline)
+(assert-eq elle-false-serialized json-false-serialized "Elle #f and JSON false serialize identically")
 
 ;; Example 6: Serialize lists as arrays
 (display "\n=== Example 6: Serializing Lists ===")
@@ -111,12 +218,14 @@
 (display "Serialized list: ")
 (display serialized-list)
 (newline)
+(assert-eq serialized-list "[1,2,3,4,5]" "json-serialize list returns JSON array")
 
 (define mixed-list (list 1 "two" #t nil 3.14))
 (define serialized-mixed (json-serialize mixed-list))
 (display "Serialized mixed list: ")
 (display serialized-mixed)
 (newline)
+(assert-eq serialized-mixed "[1,\"two\",true,null,3.14]" "json-serialize mixed list returns correct JSON")
 
 ;; Example 7: Serialize tables as objects
 (display "\n=== Example 7: Serializing Tables ===")

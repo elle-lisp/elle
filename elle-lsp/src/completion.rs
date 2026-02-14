@@ -92,7 +92,6 @@ pub fn get_completions(
         // Type checking
         ("type", SymbolKind::Builtin, "Get type of value"),
         // String operations
-        ("string-length", SymbolKind::Builtin, "Get string length"),
         ("string-append", SymbolKind::Builtin, "Append strings"),
     ];
 

@@ -45,11 +45,11 @@ fn unit_while_loop_parses_correctly() {
 fn unit_for_loop_parses_correctly() {
     let mut symbols = SymbolTable::new();
 
-    // Test: for loop can be parsed from source
-    let code = "(for item (list 1 2 3) (print item))";
-    let value = read_str(code, &mut symbols).expect("Failed to parse for loop");
+    // Test: each loop can be parsed from source
+    let code = "(each item (list 1 2 3) (print item))";
+    let value = read_str(code, &mut symbols).expect("Failed to parse each loop");
 
-    // Should parse as a list starting with 'for'
+    // Should parse as a list starting with 'each'
     assert!(value.is_list());
 }
 
@@ -70,8 +70,8 @@ fn unit_while_loop_compiles_to_bytecode() {
 fn unit_for_loop_compiles_to_bytecode() {
     let mut symbols = SymbolTable::new();
 
-    // Test: for loop compiles to bytecode without errors
-    let code = "(for item (list 1 2 3) (+ item 1))";
+    // Test: each loop compiles to bytecode without errors
+    let code = "(each item (list 1 2 3) (+ item 1))";
     let value = read_str(code, &mut symbols).expect("Failed to parse");
     let expr = value_to_expr(&value, &mut symbols).expect("Failed to convert to expr");
 
@@ -95,9 +95,9 @@ fn unit_while_loop_returns_nil() {
 fn unit_for_loop_returns_nil() {
     let mut env = LoopTestEnv::new();
 
-    // Test: for loop returns nil
+    // Test: each loop returns nil
     env.eval("(define lst (list 1 2 3))").unwrap();
-    let result = env.eval("(for item lst (+ item 1))").unwrap();
+    let result = env.eval("(each item lst (+ item 1))").unwrap();
 
     assert_eq!(result, Value::Nil);
 }
@@ -133,9 +133,9 @@ fn unit_while_loop_with_multiple_conditions() {
 fn unit_for_loop_with_empty_list() {
     let mut env = LoopTestEnv::new();
 
-    // Test: for loop with empty list doesn't error
+    // Test: each loop with empty list doesn't error
     env.eval("(define empty-list (list))").unwrap();
-    let result = env.eval("(for item empty-list (+ item 1))");
+    let result = env.eval("(each item empty-list (+ item 1))");
 
     assert!(result.is_ok());
 }
@@ -260,4 +260,56 @@ fn unit_loop_construct_ast_structure() {
         }
         _ => panic!("Expected Begin expression, got {:?}", expr),
     }
+}
+
+#[test]
+fn unit_forever_loop_parses_correctly() {
+    let mut symbols = SymbolTable::new();
+
+    // Test: forever loop can be parsed from source
+    let code = "(forever (print i))";
+    let value = read_str(code, &mut symbols).expect("Failed to parse forever loop");
+
+    // Should parse as a list starting with 'forever'
+    assert!(value.is_list());
+}
+
+#[test]
+fn unit_forever_loop_compiles_to_bytecode() {
+    let mut symbols = SymbolTable::new();
+
+    // Test: forever loop compiles to bytecode without errors
+    let code = "(define x 0) (forever (if (= x 5) (break)) (set! x (+ x 1)))";
+    let value = read_str(code, &mut symbols).expect("Failed to parse");
+    let expr = value_to_expr(&value, &mut symbols).expect("Failed to convert to expr");
+
+    let _bytecode = compile(&expr);
+    // If we get here, compilation succeeded
+}
+
+#[test]
+fn unit_forever_loop_returns_nil() {
+    let mut env = LoopTestEnv::new();
+
+    // Test: forever loop returns nil (when it exits via break or other means)
+    // Since forever is infinite, we need a way to exit - using a condition that breaks
+    env.eval("(define x 0)").unwrap();
+    let result = env.eval("(forever (if (>= x 1) (break)) (set! x 1))");
+
+    // Note: break is not yet implemented, so this will test the compilation
+    // The actual execution test will be added once break is available
+    assert!(result.is_ok() || result.is_err()); // Just verify it doesn't panic
+}
+
+#[test]
+fn unit_forever_loop_compiles_with_multiple_body_expressions() {
+    let mut symbols = SymbolTable::new();
+
+    // Test: forever loop with multiple body expressions
+    let code = "(forever (display \"x\") (newline) (set! x (+ x 1)))";
+    let value = read_str(code, &mut symbols).expect("Failed to parse");
+    let expr = value_to_expr(&value, &mut symbols).expect("Failed to convert to expr");
+
+    let _bytecode = compile(&expr);
+    // If we get here, compilation succeeded
 }

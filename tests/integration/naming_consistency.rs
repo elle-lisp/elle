@@ -390,7 +390,7 @@ fn test_table_mutation_with_bang_syntax() {
 fn test_struct_immutability_preserved() {
     let code = r#"
         (let ((s (struct 'a 1)))
-          (let ((s2 (struct-put s 'b 2)))
+          (let ((s2 (put s 'b 2)))
             (list
               (has-key? s 'b)
               (has-key? s2 'b))))

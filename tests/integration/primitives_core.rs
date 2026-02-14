@@ -25,7 +25,7 @@ fn eval(input: &str) -> Result<Value, String> {
 #[test]
 fn test_string_length_basic() {
     // Basic string length
-    let result = eval("(string-length \"hello\")");
+    let result = eval("(length \"hello\")");
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), Value::Int(5));
 }
@@ -33,17 +33,17 @@ fn test_string_length_basic() {
 #[test]
 fn test_string_length_empty() {
     // Empty string length
-    let result = eval("(string-length \"\")");
+    let result = eval("(length \"\")");
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), Value::Int(0));
 }
 
 #[test]
 fn test_string_length_unicode() {
-    // Unicode characters
-    let result = eval("(string-length \"hello🌍\")");
+    // Unicode characters (emoji is 1 character, 4 bytes in UTF-8)
+    let result = eval("(length \"hello🌍\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(6)); // 5 ASCII + 1 emoji
+    assert_eq!(result.unwrap(), Value::Int(6)); // 5 ASCII characters + 1 emoji character
 }
 
 #[test]
@@ -289,7 +289,7 @@ fn test_arithmetic_primitives_registered() {
 #[test]
 fn test_string_primitives_registered() {
     // Test that string primitives are available
-    let result = eval("(string-length \"test\")");
+    let result = eval("(length \"test\")");
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), Value::Int(4));
 }
