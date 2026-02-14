@@ -137,3 +137,7 @@ mod coroutines {
 mod catchable_exceptions {
     include!("catchable_exceptions.rs");
 }
+
+mod lexical_scope {
+    include!("lexical_scope.rs");
+}

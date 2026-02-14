@@ -174,23 +174,15 @@ impl SymbolExtractor {
         match expr {
             Expr::Literal(_) => {}
 
-            Expr::Var(sym, _, _) => {
+            Expr::Var(var_ref) => {
                 if let Some(source_loc) = loc {
-                    index
-                        .symbol_usages
-                        .entry(*sym)
-                        .or_default()
-                        .push(source_loc.clone());
-                }
-            }
-
-            Expr::GlobalVar(sym) => {
-                if let Some(source_loc) = loc {
-                    index
-                        .symbol_usages
-                        .entry(*sym)
-                        .or_default()
-                        .push(source_loc.clone());
+                    if let crate::binding::VarRef::Global { sym } = var_ref {
+                        index
+                            .symbol_usages
+                            .entry(*sym)
+                            .or_default()
+                            .push(source_loc.clone());
+                    }
                 }
             }
 

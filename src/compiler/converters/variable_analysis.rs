@@ -108,23 +108,49 @@ pub fn adjust_var_indices(
     }
 
     match expr {
-        Expr::Var(sym_id, _depth, index) => {
-            // Variables are adjusted based on their scope:
-            // 1. Captures: map to position in captures list (0..captures.len()-1)
-            // 2. Parameters: map to captures.len() + position
-            // 3. Locals: map to captures.len() + params.len() + position
-            if let Some(cap_pos) = capture_map.get(sym_id) {
-                // This variable is a capture - map to its position in the captures list
-                *index = *cap_pos;
-            } else if let Some(param_pos) = param_map.get(sym_id) {
-                // This variable is a parameter - map to captures.len() + position
-                *index = captures.len() + param_pos;
-            } else if let Some(local_pos) = locals_map.get(sym_id) {
-                // This variable is defined locally within lambda body
-                // Map to captures.len() + params.len() + position
-                *index = captures.len() + params.len() + local_pos;
+        Expr::Var(varref) => {
+            use crate::binding::VarRef;
+            // Adjust VarRef indices based on the closure environment layout.
+            // The closure environment is [captures..., parameters..., locals...]
+            match varref {
+                VarRef::Upvalue { sym, index, .. } => {
+                    // Upvalues need to be mapped to their position in the captures array.
+                    // Look up the symbol in the capture map to get the correct index.
+                    if let Some(&cap_pos) = capture_map.get(sym) {
+                        *index = cap_pos;
+                    }
+                    // If not found in captures, it might be a global that was incorrectly
+                    // marked as upvalue - leave the index as-is
+                }
+                VarRef::Local { index } => {
+                    // Local variables in the current lambda need to be adjusted.
+                    // The index was set during parsing based on the scope stack position.
+                    // We need to map it to the closure environment layout:
+                    // [captures..., parameters..., locals...]
+                    //
+                    // During parsing, local_index was the position in the scope's symbol list.
+                    // We need to determine if this is a parameter or a locally-defined variable.
+                    //
+                    // For now, we assume the index is already correct for parameters
+                    // (they're at positions 0..params.len()-1 in the scope).
+                    // We adjust by adding captures.len() to account for the closure layout.
+                    *index += captures.len();
+                }
+                VarRef::LetBound { sym } => {
+                    // If this let-bound variable is captured, convert to Upvalue
+                    if let Some(&cap_pos) = capture_map.get(sym) {
+                        *varref = VarRef::Upvalue {
+                            sym: *sym,
+                            index: cap_pos,
+                            is_param: false,
+                        };
+                    }
+                    // Otherwise leave as LetBound for runtime lookup
+                }
+                VarRef::Global { .. } => {
+                    // Globals don't need adjustment
+                }
             }
-            // If not found in any map, it's likely a global or error - leave as is
         }
         Expr::If { cond, then, else_ } => {
             adjust_var_indices(cond, captures, params, locals);
@@ -156,10 +182,37 @@ pub fn adjust_var_indices(
                 adjust_var_indices(arg, captures, params, locals);
             }
         }
-        Expr::Lambda { .. } => {
-            // Don't adjust nested lambda bodies at all - they have already been fully processed
-            // with their own capture scopes, parameters, and indices when they were parsed.
-            // Recursing into them would incorrectly adjust already-correct indices.
+        Expr::Lambda {
+            captures: nested_captures,
+            ..
+        } => {
+            // Adjust upvalue indices in nested lambda captures to match the enclosing
+            // closure's environment layout. The captures were created with indices from
+            // the enclosing scope's symbol list, but they need to be adjusted to match
+            // the enclosing closure's environment layout: [captures..., parameters..., locals...]
+            for capture_info in nested_captures.iter_mut() {
+                if let crate::binding::VarRef::Upvalue { sym, index, .. } = &mut capture_info.source
+                {
+                    // Look up this symbol in the enclosing closure's environment
+                    // The enclosing closure's environment layout is [captures..., parameters..., locals...]
+
+                    // First, check if it's in the captures list
+                    if let Some(&cap_pos) = capture_map.get(sym) {
+                        *index = cap_pos;
+                    } else if let Some(param_pos) = params.iter().position(|p| p == sym) {
+                        // It's a parameter of the enclosing closure
+                        *index = captures.len() + param_pos;
+                    } else if let Some(local_pos) = locals.iter().position(|l| l == sym) {
+                        // It's a locally-defined variable of the enclosing closure
+                        *index = captures.len() + params.len() + local_pos;
+                    }
+                    // If not found in any of these, leave the index as-is (it might be a global)
+                }
+            }
+
+            // DO NOT recursively adjust the nested lambda's body here!
+            // The nested lambda's body was already adjusted when the nested lambda was parsed.
+            // Adjusting it again would cause indices to be incremented multiple times.
         }
         Expr::Let { bindings, body } => {
             for (_, expr) in bindings {
@@ -173,19 +226,32 @@ pub fn adjust_var_indices(
             }
             adjust_var_indices(body, captures, params, locals);
         }
-        Expr::Set {
-            var,
-            depth: _,
-            index,
-            value,
-        } => {
-            // Remap the target variable index, same as Expr::Var
-            if let Some(cap_pos) = capture_map.get(var) {
-                *index = *cap_pos;
-            } else if let Some(param_pos) = param_map.get(var) {
-                *index = captures.len() + param_pos;
-            } else if let Some(local_pos) = locals_map.get(var) {
-                *index = captures.len() + params.len() + local_pos;
+        Expr::Set { target, value } => {
+            use crate::binding::VarRef;
+            // Adjust the target VarRef just like we do for Expr::Var
+            match target {
+                VarRef::Upvalue { sym, index, .. } => {
+                    if let Some(&cap_pos) = capture_map.get(sym) {
+                        *index = cap_pos;
+                    }
+                }
+                VarRef::Local { index } => {
+                    // Local variables need to be adjusted by adding captures.len()
+                    *index += captures.len();
+                }
+                VarRef::LetBound { sym } => {
+                    // If this let-bound variable is captured, convert to Upvalue
+                    if let Some(&cap_pos) = capture_map.get(sym) {
+                        *target = VarRef::Upvalue {
+                            sym: *sym,
+                            index: cap_pos,
+                            is_param: false,
+                        };
+                    }
+                }
+                VarRef::Global { .. } => {
+                    // Globals don't need adjustment
+                }
             }
             adjust_var_indices(value, captures, params, locals);
         }
@@ -233,6 +299,9 @@ pub fn adjust_var_indices(
         }
         Expr::DefMacro { body, .. } => {
             adjust_var_indices(body, captures, params, locals);
+        }
+        Expr::Yield(value) => {
+            adjust_var_indices(value, captures, params, locals);
         }
         // Literals, GlobalVar, etc. don't need adjustment
         _ => {}

@@ -48,6 +48,7 @@ pub fn convert_match_expr(
                 // If there are pattern variables, wrap the body in a lambda
                 // that binds them to the matched value
                 let result = if !pattern_vars.is_empty() {
+                    let num_vars = pattern_vars.len();
                     // Add pattern variables to scope for parsing the body
                     let mut new_scope_stack = scope_stack.clone();
                     new_scope_stack.push(ScopeEntry {
@@ -65,7 +66,8 @@ pub fn convert_match_expr(
                         params: pattern_vars,
                         body: Box::new(body_expr),
                         captures: Vec::new(),
-                        locals: Vec::new(),
+                        num_locals: num_vars,
+                        locals: vec![],
                     }
                 } else {
                     // No variables to bind

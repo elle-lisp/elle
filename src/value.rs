@@ -100,8 +100,8 @@ pub struct JitLambda {
     pub params: Vec<SymbolId>,
     /// Body expression (the AST)
     pub body: Box<Expr>,
-    /// Captured variable info: (symbol_id, depth, index)
-    pub captures: Vec<(SymbolId, usize, usize)>,
+    /// Captured variable symbols (just the IDs, resolution happens at compile time)
+    pub captures: Vec<SymbolId>,
     /// Effect of the lambda body
     pub effect: Effect,
 }
