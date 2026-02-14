@@ -6,6 +6,7 @@ use super::exception_handling::{convert_handler_bind, convert_handler_case, conv
 use super::quasiquote::expand_quasiquote;
 use super::threading::{handle_thread_first, handle_thread_last};
 use super::{ScopeEntry, ScopeType};
+use crate::binding::VarRef;
 use crate::symbol::SymbolTable;
 use crate::value::Value;
 
@@ -38,19 +39,12 @@ pub fn value_to_expr_with_scope(
 
         Value::Symbol(id) => {
             // Check if the symbol is a local binding by walking up the scope stack
-            // Note: enumerate().rev() gives us (original_idx, value) pairs in reverse order
-            // so idx IS the original position in scope_stack
             for (idx, scope_entry) in scope_stack.iter().enumerate().rev() {
                 if let Some(local_index) = scope_entry.symbols.iter().position(|sym| sym == id) {
-                    // idx is the actual position in scope_stack where the variable was found
-                    // depth is the distance from the top of the stack (used for lambda scoping)
                     let depth = scope_stack.len() - 1 - idx;
 
                     if scope_entry.scope_type == ScopeType::Let {
-                        // Let-bound variable found. Check if there's a lambda scope between
-                        // here (current position) and the let scope. If so, we need to capture
-                        // this variable in the lambda, so use Var. Otherwise, use GlobalVar
-                        // for direct runtime scope stack access.
+                        // Let-bound variable
                         let mut has_intervening_lambda = false;
                         for scope in scope_stack.iter().skip(idx + 1) {
                             if scope.scope_type == ScopeType::Function {
@@ -60,22 +54,26 @@ pub fn value_to_expr_with_scope(
                         }
 
                         if has_intervening_lambda {
-                            // Inside a lambda that's nested within the let scope
-                            // Use Var so the variable gets captured by the lambda
-                            return Ok(Expr::Var(*id, idx, local_index));
+                            // Inside a lambda that needs to capture this variable
+                            return Ok(Expr::Var(VarRef::upvalue(*id, local_index, false)));
                         } else {
-                            // No intervening lambda - directly access via runtime scope stack
-                            return Ok(Expr::GlobalVar(*id));
+                            // Direct access to let-bound variable - use symbol for scope stack lookup
+                            return Ok(Expr::Var(VarRef::let_bound(*id)));
                         }
                     } else {
-                        // Lambda parameters and captures use Var (closure environment)
-                        // depth represents how many function scopes up the variable is defined
-                        return Ok(Expr::Var(*id, depth, local_index));
+                        // Lambda parameter or capture
+                        if depth == 0 {
+                            // Current lambda's scope
+                            return Ok(Expr::Var(VarRef::local(local_index)));
+                        } else {
+                            // Outer lambda's scope - needs capture
+                            return Ok(Expr::Var(VarRef::upvalue(*id, local_index, false)));
+                        }
                     }
                 }
             }
             // Not found in any local scope - treat as global
-            Ok(Expr::GlobalVar(*id))
+            Ok(Expr::Var(VarRef::global(*id)))
         }
 
         Value::Cons(_) => {
@@ -106,8 +104,7 @@ pub fn value_to_expr_with_scope(
                             // Check if the symbol is exported from the module
                             if module_def.exports.contains(&name_sym) {
                                 // Return as a qualified global reference
-                                // We use GlobalVar but could add a QualifiedVar variant if needed
-                                Ok(Expr::GlobalVar(name_sym))
+                                Ok(Expr::Var(VarRef::global(name_sym)))
                             } else {
                                 Err(format!(
                                     "Symbol '{}' not exported from module '{}'",
@@ -215,28 +212,10 @@ pub fn value_to_expr_with_scope(
                         let value =
                             Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
 
-                        // Look up the variable in the scope stack to determine depth and index
-                        let mut depth = 0;
-                        let mut index = usize::MAX; // Use MAX to signal global variable
+                        // Look up the variable in the scope stack to create VarRef
+                        let target = lookup_var_for_set(var, scope_stack);
 
-                        for (reverse_idx, scope_entry) in scope_stack.iter().enumerate().rev() {
-                            if let Some(local_index) =
-                                scope_entry.symbols.iter().position(|sym| sym == &var)
-                            {
-                                depth = scope_stack.len() - 1 - reverse_idx;
-                                index = local_index;
-                                break;
-                            }
-                        }
-
-                        // If not found in local scopes (index == usize::MAX), it's a global variable set
-
-                        Ok(Expr::Set {
-                            var,
-                            depth,
-                            index,
-                            value,
-                        })
+                        Ok(Expr::Set { target, value })
                     }
 
                     "try" => convert_try(&list, symbols, scope_stack),
@@ -255,7 +234,7 @@ pub fn value_to_expr_with_scope(
                             return Err("throw requires exactly 1 argument".to_string());
                         }
                         // Compile as a regular function call to the throw primitive
-                        let func = Box::new(Expr::GlobalVar(first.as_symbol()?));
+                        let func = Box::new(Expr::Var(VarRef::global(first.as_symbol()?)));
                         let args = vec![value_to_expr_with_scope(&list[1], symbols, scope_stack)?];
                         Ok(Expr::Call {
                             func,
@@ -402,7 +381,7 @@ pub fn value_to_expr_with_scope(
                             return Ok(Expr::Literal(Value::Bool(false))); // (xor) => false
                         }
 
-                        let func = Box::new(Expr::GlobalVar(symbols.intern("xor")));
+                        let func = Box::new(Expr::Var(VarRef::global(symbols.intern("xor"))));
                         let args: Result<Vec<_>, _> = list[1..]
                             .iter()
                             .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
@@ -587,6 +566,42 @@ pub fn mark_tail_calls(expr: &mut Expr, in_tail: bool) {
         // Leaf nodes and others — nothing to do
         _ => {}
     }
+}
+
+/// Look up a variable for set! and return the appropriate VarRef
+fn lookup_var_for_set(var: crate::value::SymbolId, scope_stack: &[ScopeEntry]) -> VarRef {
+    for (idx, scope_entry) in scope_stack.iter().enumerate().rev() {
+        if let Some(local_index) = scope_entry.symbols.iter().position(|sym| sym == &var) {
+            if scope_entry.scope_type == ScopeType::Let {
+                // Let-bound variable - check for intervening lambda
+                let mut has_intervening_lambda = false;
+                for scope in scope_stack.iter().skip(idx + 1) {
+                    if scope.scope_type == ScopeType::Function {
+                        has_intervening_lambda = true;
+                        break;
+                    }
+                }
+
+                if has_intervening_lambda {
+                    // Inside a lambda that captures this variable
+                    return VarRef::upvalue(var, local_index, false);
+                } else {
+                    // Direct access to let-bound variable
+                    return VarRef::let_bound(var);
+                }
+            } else {
+                // Function scope variable
+                let depth = scope_stack.len() - 1 - idx;
+                if depth == 0 {
+                    return VarRef::local(local_index);
+                } else {
+                    return VarRef::upvalue(var, local_index, false);
+                }
+            }
+        }
+    }
+    // Not found in local scopes - it's global
+    VarRef::global(var)
 }
 
 /// Convert a value back to source code using the symbol table

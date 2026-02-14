@@ -1,5 +1,13 @@
+use crate::binding::VarRef;
 use crate::reader::SourceLoc;
 use crate::value::{SymbolId, Value};
+
+/// Information about a captured variable, including where to find it
+#[derive(Debug, Clone, PartialEq)]
+pub struct CaptureInfo {
+    pub sym: SymbolId,
+    pub source: VarRef,
+}
 
 /// AST representation after macro expansion and analysis
 #[derive(Debug, Clone, PartialEq)]
@@ -27,11 +35,8 @@ pub enum Expr {
     /// Literal value
     Literal(Value),
 
-    /// Variable reference (symbol, depth, index)
-    Var(SymbolId, usize, usize),
-
-    /// Global variable reference
-    GlobalVar(SymbolId),
+    /// Variable reference - fully resolved at compile time
+    Var(VarRef),
 
     /// If expression
     If {
@@ -41,11 +46,9 @@ pub enum Expr {
     },
 
     /// Cond expression (multi-way conditional)
-    /// Evaluates each condition in order until one is true
-    /// Each clause is (condition body...)
     Cond {
-        clauses: Vec<(Expr, Expr)>,   // (condition, body) pairs
-        else_body: Option<Box<Expr>>, // Optional else clause
+        clauses: Vec<(Expr, Expr)>,
+        else_body: Option<Box<Expr>>,
     },
 
     /// Begin (sequence of expressions)
@@ -65,8 +68,10 @@ pub enum Expr {
     Lambda {
         params: Vec<SymbolId>,
         body: Box<Expr>,
-        captures: Vec<(SymbolId, usize, usize)>,
-        locals: Vec<SymbolId>, // Locally-defined variables in the lambda body
+        captures: Vec<CaptureInfo>,
+        num_locals: usize,
+        /// Locally-defined variable symbols (from define statements in body)
+        locals: Vec<SymbolId>,
     },
 
     /// Let binding
@@ -81,21 +86,16 @@ pub enum Expr {
         body: Box<Expr>,
     },
 
-    /// Set! (mutation)
-    Set {
-        var: SymbolId,
-        depth: usize,
-        index: usize,
-        value: Box<Expr>,
-    },
+    /// Set! (mutation) - target is a VarRef
+    Set { target: VarRef, value: Box<Expr> },
 
-    /// Define (top-level only)
+    /// Define (top-level or local)
     Define { name: SymbolId, value: Box<Expr> },
 
     /// While loop
     While { cond: Box<Expr>, body: Box<Expr> },
 
-    /// For loop (for element in list, execute body)
+    /// For loop
     For {
         var: SymbolId,
         iter: Box<Expr>,
@@ -112,34 +112,32 @@ pub enum Expr {
     /// Try-catch exception handling
     Try {
         body: Box<Expr>,
-        catch: Option<(SymbolId, Box<Expr>)>, // variable name and handler
+        catch: Option<(SymbolId, Box<Expr>)>,
         finally: Option<Box<Expr>>,
     },
 
     /// Throw exception
     Throw { value: Box<Expr> },
 
-    /// Handler-case: immediate stack unwinding on exception
-    /// (handler-case protected-code (type1 (var1) handler1) (type2 (var2) handler2) ...)
+    /// Handler-case
     HandlerCase {
         body: Box<Expr>,
-        handlers: Vec<(u32, SymbolId, Box<Expr>)>, // (exception_id, variable, handler_code)
+        handlers: Vec<(u32, SymbolId, Box<Expr>)>,
     },
 
-    /// Handler-bind: non-unwinding handler attachment
-    /// (handler-bind ((type handler-fn) ...) protected-code)
+    /// Handler-bind
     HandlerBind {
-        handlers: Vec<(u32, Box<Expr>)>, // (exception_id, handler_function)
+        handlers: Vec<(u32, Box<Expr>)>,
         body: Box<Expr>,
     },
 
-    /// Quote expression (prevents evaluation)
+    /// Quote expression
     Quote(Box<Expr>),
 
-    /// Quasiquote expression (quote with unquote support)
+    /// Quasiquote expression
     Quasiquote(Box<Expr>),
 
-    /// Unquote expression (inside quasiquote)
+    /// Unquote expression
     Unquote(Box<Expr>),
 
     /// Define macro
@@ -159,42 +157,34 @@ pub enum Expr {
     /// Import module
     Import { module: SymbolId },
 
-    /// Module-qualified name (e.g., math:add)
+    /// Module-qualified name
     ModuleRef { module: SymbolId, name: SymbolId },
 
-    /// And operator (short-circuit evaluation)
+    /// And operator (short-circuit)
     And(Vec<Expr>),
 
-    /// Or operator (short-circuit evaluation)
+    /// Or operator (short-circuit)
     Or(Vec<Expr>),
 
-    /// Xor operator (exclusive or, all args must be evaluated)
+    /// Xor operator
     Xor(Vec<Expr>),
 
-    /// Yield expression - suspends coroutine execution
-    /// (yield value) - yields value and suspends
+    /// Yield expression
     Yield(Box<Expr>),
 }
 
 /// Pattern for pattern matching
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
-    /// Match any value (wildcard)
     Wildcard,
-    /// Match specific literal
     Literal(Value),
-    /// Match variable and bind it
     Var(SymbolId),
-    /// Match nil
     Nil,
-    /// Match list with head and tail: (h . t)
     Cons {
         head: Box<Pattern>,
         tail: Box<Pattern>,
     },
-    /// Match list with specific elements
     List(Vec<Pattern>),
-    /// Guard pattern: pattern with condition
     Guard {
         pattern: Box<Pattern>,
         condition: Box<Expr>,

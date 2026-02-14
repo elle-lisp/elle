@@ -33,8 +33,7 @@ pub enum CompileResult {
 pub fn is_jit_compilable(expr: &Expr) -> bool {
     match expr {
         Expr::Literal(_) => true,
-        Expr::Var(_, _, _) => true,
-        Expr::GlobalVar(_) => true,
+        Expr::Var(_) => true,
         Expr::Begin(exprs) | Expr::Block(exprs) => exprs.iter().all(is_jit_compilable),
         Expr::If {
             cond, then, else_, ..
@@ -83,10 +82,11 @@ pub fn is_jit_compilable(expr: &Expr) -> bool {
 
 /// Check if a Call expression can be JIT compiled
 fn is_jit_compilable_call(func: &Expr, args: &[Expr]) -> bool {
-    // The function must be a symbol (either GlobalVar or Literal(Symbol))
+    // The function must be a symbol (either Var(Global) or Literal(Symbol))
     let is_symbol_func = matches!(
         func,
-        Expr::GlobalVar(_) | Expr::Literal(crate::value::Value::Symbol(_))
+        Expr::Var(crate::binding::VarRef::Global { .. })
+            | Expr::Literal(crate::value::Value::Symbol(_))
     );
 
     if !is_symbol_func {
@@ -141,12 +141,20 @@ pub fn compile_closure(
     let func_name = format!("jit_closure_{}", func_id);
 
     // 5. Compile the body
+    // Convert captures from Vec<SymbolId> to Vec<(SymbolId, usize, usize)>
+    let captures_tuple: Vec<(SymbolId, usize, usize)> = jit_lambda
+        .captures
+        .iter()
+        .enumerate()
+        .map(|(i, sym)| (*sym, 0, i))
+        .collect();
+
     let code_ptr = match compile_lambda_body(
         jit_context,
         &func_name,
         &jit_lambda.params,
         &jit_lambda.body,
-        &jit_lambda.captures,
+        &captures_tuple,
         symbols,
     ) {
         Ok(ptr) => ptr,
@@ -394,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_is_jit_compilable_var() {
-        let expr = Expr::Var(SymbolId(1), 0, 0);
+        let expr = Expr::Var(crate::binding::VarRef::local(0));
         assert!(is_jit_compilable(&expr));
     }
 
@@ -423,6 +431,7 @@ mod tests {
             params: vec![],
             body: Box::new(Expr::Literal(Value::Int(1))),
             captures: vec![],
+            num_locals: 0,
             locals: vec![],
         };
         assert!(!is_jit_compilable(&expr));
@@ -483,9 +492,7 @@ mod tests {
     fn test_is_jit_compilable_set_is_compilable() {
         // Set expressions with compilable values are now compilable
         let expr = Expr::Set {
-            var: SymbolId(1),
-            depth: 0,
-            index: 0,
+            target: crate::binding::VarRef::local(0),
             value: Box::new(Expr::Literal(Value::Int(1))),
         };
         assert!(is_jit_compilable(&expr));
@@ -565,8 +572,8 @@ mod tests {
         ));
 
         // (fn (x) x) - identity function
-        // Note: depth=0 because parameters are in the lambda's base scope
-        let body = Expr::Var(SymbolId(1), 0, 0);
+        // Note: index=0 because parameters are in the lambda's base scope
+        let body = Expr::Var(crate::binding::VarRef::local(0));
         let params = vec![SymbolId(1)];
         let captures = vec![];
         let symbols = crate::symbol::SymbolTable::new();
@@ -593,7 +600,7 @@ mod tests {
         let first_sym = symbols.intern("first");
 
         let expr = Expr::Call {
-            func: Box::new(Expr::GlobalVar(first_sym)),
+            func: Box::new(Expr::Var(crate::binding::VarRef::global(first_sym))),
             args: vec![Expr::Literal(Value::Nil)],
             tail: false,
         };
@@ -612,7 +619,7 @@ mod tests {
         let cons_sym = symbols.intern("cons");
 
         let expr = Expr::Call {
-            func: Box::new(Expr::GlobalVar(cons_sym)),
+            func: Box::new(Expr::Var(crate::binding::VarRef::global(cons_sym))),
             args: vec![Expr::Literal(Value::Int(1)), Expr::Literal(Value::Nil)],
             tail: false,
         };

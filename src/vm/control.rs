@@ -25,9 +25,20 @@ pub fn handle_jump_if_true(bytecode: &[u8], ip: &mut usize, vm: &mut VM) -> Resu
 }
 
 pub fn handle_return(vm: &mut VM) -> Result<Value, String> {
-    vm.stack
+    let value = vm
+        .stack
         .pop()
-        .ok_or_else(|| "Stack underflow on return".to_string())
+        .ok_or_else(|| "Stack underflow on return".to_string())?;
+
+    // Unwrap LocalCell (internal cells for mutable captures)
+    // User code should never see a LocalCell - it's an implementation detail
+    match value {
+        Value::LocalCell(cell_rc) => {
+            let inner = cell_rc.borrow().clone();
+            Ok(*inner)
+        }
+        _ => Ok(value),
+    }
 }
 
 // Call and TailCall are complex and need to stay in mod.rs because they call execute_bytecode recursively

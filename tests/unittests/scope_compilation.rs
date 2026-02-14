@@ -4,6 +4,7 @@
 // and generates proper AST with scope depth and index information.
 // This is Phase 1 of the scope implementation.
 
+use elle::binding::VarRef;
 use elle::compiler::ast::Expr;
 use elle::compiler::converters::value_to_expr;
 use elle::compiler::scope::ScopeType;
@@ -46,10 +47,10 @@ fn test_lambda_variable_depth() {
     match expr {
         Expr::Lambda { params, body, .. } => {
             assert_eq!(params.len(), 1);
-            // Body should be a reference to parameter x at depth 0
+            // Body should be a reference to parameter x (local)
             match *body {
-                Expr::Var(_, depth, _) => {
-                    assert_eq!(depth, 0); // Parameter is at depth 0
+                Expr::Var(var_ref) => {
+                    assert!(matches!(var_ref, VarRef::Local { .. })); // Parameter is local
                 }
                 _ => panic!("Expected Var expression in lambda body"),
             }
@@ -77,16 +78,14 @@ fn test_nested_lambda_variable_scope() {
                 Expr::Lambda {
                     params: inner_params,
                     body: inner_body,
-                    captures,
-                    locals: _,
+                    ..
                 } => {
                     assert_eq!(inner_params.len(), 1); // (y)
-                                                       // Inner body references outer x (should be in captures)
-                    assert_eq!(captures.len(), 1);
-                    // Body is the reference to captured x
+                                                       // Inner body references outer x (should be captured)
+                                                       // Body is the reference to captured x
                     match *inner_body {
-                        Expr::Var(_, depth, _) => {
-                            assert_eq!(depth, 1); // Outer parameter is at depth 1
+                        Expr::Var(var_ref) => {
+                            assert!(matches!(var_ref, VarRef::Upvalue { .. })); // Outer parameter is captured
                         }
                         _ => panic!("Expected Var in inner lambda body"),
                     }
@@ -108,12 +107,12 @@ fn test_global_variable_reference() {
     let value = read_str(code, &mut symbols).expect("Failed to parse symbol");
     let expr = value_to_expr(&value, &mut symbols).expect("Failed to convert to expression");
 
-    // Should be a GlobalVar since + is not bound locally
+    // Should be a Var(Global) since + is not bound locally
     match expr {
-        Expr::GlobalVar(_) => {
+        Expr::Var(VarRef::Global { .. }) => {
             // Correct
         }
-        _ => panic!("Expected GlobalVar for undefined symbol"),
+        _ => panic!("Expected Var(Global) for undefined symbol"),
     }
 }
 
@@ -261,15 +260,9 @@ fn test_set_bang_depth_tracking() {
 
     // Should be a Set expression
     match expr {
-        Expr::Set {
-            var: _,
-            depth,
-            index,
-            value: _,
-        } => {
-            // Global set should have index = MAX
-            assert_eq!(index, usize::MAX);
-            assert_eq!(depth, 0); // No local scopes
+        Expr::Set { target, value: _ } => {
+            // Global set should have Global target
+            assert!(matches!(target, VarRef::Global { .. }));
         }
         _ => panic!("Expected Set expression"),
     }
@@ -291,10 +284,10 @@ fn test_variable_in_function_call() {
             assert_eq!(args.len(), 2);
             // First argument is x (undefined, so global)
             match &args[0] {
-                Expr::GlobalVar(_) => {
+                Expr::Var(VarRef::Global { .. }) => {
                     // Correct - x is not locally bound
                 }
-                _ => panic!("Expected GlobalVar for undefined x"),
+                _ => panic!("Expected Var(Global) for undefined x"),
             }
             // Second argument is 1 (literal)
             match &args[1] {
@@ -333,16 +326,16 @@ fn test_function_parameter_binding() {
                             ..
                         } => {
                             assert_eq!(body_args.len(), 2);
-                            // Both args should reference parameters (depth 0)
+                            // Both args should reference parameters (local)
                             match &body_args[0] {
-                                Expr::Var(_, depth, _) => {
-                                    assert_eq!(*depth, 0);
+                                Expr::Var(var_ref) => {
+                                    assert!(matches!(var_ref, VarRef::Local { .. }));
                                 }
                                 _ => panic!("Expected Var for x"),
                             }
                             match &body_args[1] {
-                                Expr::Var(_, depth, _) => {
-                                    assert_eq!(*depth, 0);
+                                Expr::Var(var_ref) => {
+                                    assert!(matches!(var_ref, VarRef::Local { .. }));
                                 }
                                 _ => panic!("Expected Var for y"),
                             }

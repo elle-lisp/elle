@@ -1228,3 +1228,68 @@ fn test_lambda_closure_capture() {
     let result = eval("(begin (define x 10) ((lambda (y) (+ x y)) 5))");
     assert_eq!(result.unwrap(), Value::Int(15));
 }
+
+// ============================================================================
+// SECTION 26: Closure Mutation via set!
+// ============================================================================
+
+#[test]
+fn test_closure_set_captured_variable() {
+    // Closure that mutates a captured variable via set!
+    // This tests that set! targets are properly tracked as captures
+    let result = eval(
+        "((fn () \
+           (begin \
+             (define x 0) \
+             (define setter (fn () (set! x 42))) \
+             (setter) \
+             x)))",
+    );
+    assert_eq!(result.unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_getter_setter_pattern() {
+    // Classic getter/setter pattern with closures
+    let result = eval(
+        "((fn (initial) \
+           (begin \
+             (define value initial) \
+             (define getter (fn () value)) \
+             (define setter (fn (new-val) (set! value new-val))) \
+             (setter 42) \
+             (getter))) 0)",
+    );
+    assert_eq!(result.unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_setter_only_no_getter() {
+    // Setter without getter - tests set! capture independently
+    let result = eval(
+        "((fn (initial) \
+           (begin \
+             (define value initial) \
+             (define setter (fn (x) (set! value x))) \
+             (setter 42) \
+             value)) 0)",
+    );
+    assert_eq!(result.unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_multiple_closures_sharing_mutable_state() {
+    // Multiple closures sharing and mutating the same variable
+    let result = eval(
+        "((fn () \
+           (begin \
+             (define counter 0) \
+             (define inc (fn () (set! counter (+ counter 1)))) \
+             (define get (fn () counter)) \
+             (inc) \
+             (inc) \
+             (inc) \
+             (get))))",
+    );
+    assert_eq!(result.unwrap(), Value::Int(3));
+}

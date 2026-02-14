@@ -48,12 +48,8 @@ impl Linter {
                 // No linting needed for literals
             }
 
-            Expr::Var(_, _, _) => {
+            Expr::Var(_) => {
                 // Could add undefined variable checks here
-            }
-
-            Expr::GlobalVar(_) => {
-                // Global variables are assumed to exist
             }
 
             Expr::If { cond, then, else_ } => {
@@ -90,7 +86,7 @@ impl Linter {
                     self.check_expr(arg, loc, symbol_table);
                 }
                 // Check arity if we can determine the function
-                if let Expr::GlobalVar(sym) = &**func {
+                if let Expr::Var(crate::binding::VarRef::Global { sym }) = &**func {
                     rules::check_call_arity(
                         *sym,
                         args.len(),

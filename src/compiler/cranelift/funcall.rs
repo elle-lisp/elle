@@ -178,7 +178,6 @@ impl FunctionCallCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::SymbolId;
 
     #[test]
     fn test_constant_fold_add() {
@@ -238,7 +237,10 @@ mod tests {
 
     #[test]
     fn test_extract_args_with_non_literal() {
-        let args = vec![Expr::Literal(Value::Int(1)), Expr::Var(SymbolId(0), 0, 0)];
+        let args = vec![
+            Expr::Literal(Value::Int(1)),
+            Expr::Var(crate::binding::VarRef::local(0)),
+        ];
         let result = FunctionCallCompiler::extract_constant_args(&args);
         assert!(result.is_err());
     }
@@ -250,7 +252,10 @@ mod tests {
 
         let result = FunctionCallCompiler::try_compile_call(
             &Expr::Literal(Value::Symbol(add_sym)),
-            &[Expr::Literal(Value::Int(1)), Expr::Var(SymbolId(0), 0, 0)],
+            &[
+                Expr::Literal(Value::Int(1)),
+                Expr::Var(crate::binding::VarRef::local(0)),
+            ],
             &symbol_table,
         );
         match result {

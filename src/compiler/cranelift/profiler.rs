@@ -8,11 +8,93 @@
 // - Thread-safe profiler state management
 // - Periodic profiling snapshots
 
-use crate::compiler::cranelift::advanced_optimizer::JitStats;
 use crate::value::SymbolId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// JIT compilation statistics
+#[derive(Debug, Clone)]
+pub struct JitStats {
+    /// Total expressions compiled
+    pub expressions_compiled: usize,
+    /// Functions compiled
+    pub functions_compiled: usize,
+    /// Optimization passes run
+    pub optimization_passes: usize,
+    /// Dead code eliminated
+    pub dead_code_eliminated: usize,
+    /// Constants propagated
+    pub constants_propagated: usize,
+    /// Tail calls optimized
+    pub tail_calls_optimized: usize,
+    /// Functions inlined
+    pub functions_inlined: usize,
+    /// Bytes of code generated
+    pub code_size: usize,
+    /// Call frequency tracking
+    pub call_frequencies: HashMap<SymbolId, usize>,
+}
+
+impl JitStats {
+    /// Create new statistics tracker
+    pub fn new() -> Self {
+        JitStats {
+            expressions_compiled: 0,
+            functions_compiled: 0,
+            optimization_passes: 0,
+            dead_code_eliminated: 0,
+            constants_propagated: 0,
+            tail_calls_optimized: 0,
+            functions_inlined: 0,
+            code_size: 0,
+            call_frequencies: HashMap::new(),
+        }
+    }
+
+    /// Record a compiled expression
+    pub fn record_expression(&mut self) {
+        self.expressions_compiled += 1;
+    }
+
+    /// Record a compiled function
+    pub fn record_function(&mut self) {
+        self.functions_compiled += 1;
+    }
+
+    /// Record a function call
+    pub fn record_call(&mut self, func: SymbolId) {
+        *self.call_frequencies.entry(func).or_insert(0) += 1;
+    }
+
+    /// Get call frequency for a function
+    pub fn get_call_frequency(&self, func: SymbolId) -> usize {
+        self.call_frequencies.get(&func).copied().unwrap_or(0)
+    }
+
+    /// Get total optimization statistics
+    pub fn total_optimizations(&self) -> usize {
+        self.dead_code_eliminated
+            + self.constants_propagated
+            + self.tail_calls_optimized
+            + self.functions_inlined
+    }
+
+    /// Get optimization ratio
+    pub fn optimization_ratio(&self) -> f64 {
+        if self.expressions_compiled == 0 {
+            0.0
+        } else {
+            self.total_optimizations() as f64 / self.expressions_compiled as f64
+        }
+    }
+}
+
+impl Default for JitStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Profiling event types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

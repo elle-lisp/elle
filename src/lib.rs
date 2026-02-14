@@ -35,6 +35,7 @@
 //! - SmallVec optimization to avoid heap allocation
 
 pub mod arithmetic;
+pub mod binding;
 pub mod compiler;
 pub mod error;
 pub mod ffi;

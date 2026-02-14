@@ -12,8 +12,8 @@ pub fn handle_load_global(
     if let Value::Symbol(sym_id) = constants[idx] {
         // First, check if variable exists in current scope (scope-aware lookup)
         if let Some(val) = vm.scope_stack.get(sym_id.0) {
-            // Don't automatically unwrap cells in local scope
-            // Cells created by the box primitive should remain as cells
+            // Don't automatically unwrap cells - closures need to capture the cell
+            // for shared mutable captures. Unwrapping happens at use sites.
             vm.stack.push(val);
             return Ok(());
         }

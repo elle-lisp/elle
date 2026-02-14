@@ -142,15 +142,27 @@ impl ExprCompiler {
     /// Compile an expression within a builder block
     /// Returns an IrValue (Cranelift SSA value)
     pub fn compile_expr_block(ctx: &mut CompileContext, expr: &Expr) -> Result<IrValue, String> {
+        use crate::binding::VarRef;
         match expr {
             Expr::Literal(val) => Self::compile_literal(ctx, val),
-            Expr::Var(sym_id, depth, index) => Self::compile_var(ctx, *sym_id, *depth, *index),
-            Expr::Set {
-                var,
-                depth,
-                index,
-                value,
-            } => Self::compile_set(ctx, *var, *depth, *index, value),
+            Expr::Var(var_ref) => match var_ref {
+                VarRef::Local { index } | VarRef::Upvalue { index, .. } => {
+                    let depth = ctx.scope_manager.current_depth();
+                    Self::compile_var(ctx, crate::value::SymbolId(0), depth, *index)
+                }
+                VarRef::LetBound { sym } | VarRef::Global { sym } => {
+                    Self::compile_var(ctx, *sym, 0, 0)
+                }
+            },
+            Expr::Set { target, value } => match target {
+                VarRef::Local { index } | VarRef::Upvalue { index, .. } => {
+                    let depth = ctx.scope_manager.current_depth();
+                    Self::compile_set(ctx, crate::value::SymbolId(0), depth, *index, value)
+                }
+                VarRef::LetBound { sym } | VarRef::Global { sym } => {
+                    Self::compile_set(ctx, *sym, 0, 0, value)
+                }
+            },
             Expr::Begin(exprs) => Self::compile_begin(ctx, exprs),
             Expr::If { cond, then, else_ } => Self::compile_if(ctx, cond, then, else_),
             Expr::Cond { clauses, else_body } => Self::try_compile_cond(ctx, clauses, else_body),
@@ -167,7 +179,13 @@ impl ExprCompiler {
             Expr::Call { func, args, tail } => {
                 // First, try to get the function name
                 let func_name = match func.as_ref() {
-                    Expr::GlobalVar(sym_id) => ctx.symbols.name(*sym_id).map(|s| s.to_string()),
+                    Expr::Var(var_ref) => {
+                        if let crate::binding::VarRef::Global { sym } = var_ref {
+                            ctx.symbols.name(*sym).map(|s| s.to_string())
+                        } else {
+                            None
+                        }
+                    }
                     Expr::Literal(Value::Symbol(sym_id)) => {
                         ctx.symbols.name(*sym_id).map(|s| s.to_string())
                     }
@@ -887,10 +905,16 @@ impl ExprCompiler {
         func: &Expr,
         args: &[Expr],
     ) -> Result<IrValue, String> {
-        // Extract operator name from function (either GlobalVar or Literal Symbol)
+        // Extract operator name from function (either Var or Literal Symbol)
         let op_name = match func {
             Expr::Literal(Value::Symbol(sym_id)) => ctx.symbols.name(*sym_id),
-            Expr::GlobalVar(sym_id) => ctx.symbols.name(*sym_id),
+            Expr::Var(var_ref) => {
+                if let crate::binding::VarRef::Global { sym } = var_ref {
+                    ctx.symbols.name(*sym)
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
 
@@ -978,10 +1002,16 @@ impl ExprCompiler {
         func: &Expr,
         args: &[Expr],
     ) -> Result<IrValue, String> {
-        // Extract operator name from function (either GlobalVar or Literal Symbol)
+        // Extract operator name from function (either Var or Literal Symbol)
         let op_name = match func {
             Expr::Literal(Value::Symbol(sym_id)) => ctx.symbols.name(*sym_id),
-            Expr::GlobalVar(sym_id) => ctx.symbols.name(*sym_id),
+            Expr::Var(var_ref) => {
+                if let crate::binding::VarRef::Global { sym } = var_ref {
+                    ctx.symbols.name(*sym)
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
 
@@ -1287,7 +1317,7 @@ impl ExprCompiler {
 
         // 1. Compile the function expression to get the closure value
         let callee_i64 = match func {
-            Expr::GlobalVar(sym_id) => {
+            Expr::Var(crate::binding::VarRef::Global { sym }) => {
                 // Load global variable via runtime helper
                 let helper_addr = ctx.builder.ins().iconst(
                     types::I64,
@@ -1301,7 +1331,7 @@ impl ExprCompiler {
                 let sig_ref = ctx.builder.import_signature(sig);
 
                 // Call jit_load_global
-                let sym_id_val = ctx.builder.ins().iconst(types::I64, sym_id.0 as i64);
+                let sym_id_val = ctx.builder.ins().iconst(types::I64, sym.0 as i64);
                 let call = ctx
                     .builder
                     .ins()
@@ -1682,7 +1712,7 @@ mod tests {
             &mut ctx,
             &Expr::Let {
                 bindings: vec![(x_sym, Expr::Literal(Value::Int(42)))],
-                body: Box::new(Expr::Var(x_sym, 1, 0)),
+                body: Box::new(Expr::Var(crate::binding::VarRef::local(0))),
             },
         );
         assert!(
@@ -1723,7 +1753,7 @@ mod tests {
             &Expr::For {
                 var: x_sym,
                 iter: Box::new(Expr::Literal(literal_list)),
-                body: Box::new(Expr::Var(x_sym, 1, 0)),
+                body: Box::new(Expr::Var(crate::binding::VarRef::local(0))),
             },
         );
         assert!(
@@ -1757,7 +1787,7 @@ mod tests {
             &mut ctx,
             &Expr::Let {
                 bindings: vec![(x_sym, Expr::Literal(Value::Float(std::f64::consts::PI)))],
-                body: Box::new(Expr::Var(x_sym, 1, 0)),
+                body: Box::new(Expr::Var(crate::binding::VarRef::local(0))),
             },
         );
         assert!(
@@ -1799,7 +1829,7 @@ mod tests {
             &Expr::For {
                 var: x_sym,
                 iter: Box::new(Expr::Literal(literal_list)),
-                body: Box::new(Expr::Var(x_sym, 1, 0)),
+                body: Box::new(Expr::Var(crate::binding::VarRef::local(0))),
             },
         );
         assert!(
