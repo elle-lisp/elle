@@ -95,7 +95,7 @@ pub enum Expr {
     /// While loop
     While { cond: Box<Expr>, body: Box<Expr> },
 
-    /// For loop
+    /// Each loop (iterate over collection)
     For {
         var: SymbolId,
         iter: Box<Expr>,

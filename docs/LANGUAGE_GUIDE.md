@@ -64,13 +64,13 @@ Elle supports both integers and floating-point numbers:
 1.5e-3         ; Scientific notation
 ```
 
-Use `number?` to test for numeric values. Use `type` to get the type name:
+Use `number?` to test for numeric values. Use `type-of` to get the type name:
 
 ```lisp
 (number? 42)     ⟹ #t
 (number? "hello")⟹ #f
-(type 42)        ⟹ :int
-(type 3.14)      ⟹ :float
+(type-of 42)     ⟹ :integer
+(type-of 3.14)   ⟹ :float
 ```
 
 ### Strings
@@ -80,7 +80,7 @@ Strings are immutable sequences of characters:
 ```lisp
 "hello"                    ; String literal
 "line 1\nline 2"          ; Escape sequences: \n, \t, \", \\
-(string-length "hello")   ⟹ 5
+(length "hello")          ⟹ 5
 (string-append "hello" " " "world") ⟹ "hello world"
 (substring "hello" 1 4)   ⟹ "ell"
 ```
@@ -129,7 +129,7 @@ Vectors are ordered collections optimized for random access:
 ```lisp
 [1 2 3]             ; Vector literal
 (vector 1 2 3)      ; Create vector
-(vector-length [1 2 3]) ⟹ 3
+(length [1 2 3]) ⟹ 3
 (vector-ref [1 2 3] 1) ⟹ 2
 (vector-set! [1 2 3] 0 99) ⟹ [99 2 3]
 ```
@@ -147,7 +147,7 @@ Tables are mutable hash maps:
 (has-key? tbl "x")        ; Check if key exists
 (keys tbl)                ; Get all keys
 (values tbl)              ; Get all values
-(table-length tbl)        ; Get number of entries
+(length tbl)              ; Get number of entries
 ```
 
 ### Structs
@@ -163,7 +163,7 @@ Structs are immutable hash maps:
 (struct-has? s "x")       ; Check if key exists
 (struct-keys s)           ; Get all keys
 (struct-values s)         ; Get all values
-(struct-length s)         ; Get number of entries
+(length s)                ; Get number of entries
 ```
 
 ### Type Checking Predicates
@@ -177,7 +177,7 @@ Elle provides predicate functions for type testing (all end with `?`):
 (symbol? x)       ; Is x a symbol?
 (string? x)       ; Is x a string?
 (pair? x)         ; Is x a cons cell?
-(type x)          ; Get type name as keyword
+(type-of x)       ; Get type name as keyword
 ```
 
 ---
@@ -622,7 +622,7 @@ Tables are mutable:
 (has-key? t2 "x")      ⟹ #t
 (keys t2)              ⟹ ("x" "y")
 (values t2)            ⟹ (15 20)
-(table-length t2)      ⟹ 2
+(length t2)            ⟹ 2
 ```
 
 ### Working with Structs
@@ -649,7 +649,7 @@ Structs are immutable:
 ; Querying
 (struct-keys s)           ⟹ ("a" "b")
 (struct-values s)         ⟹ (1 2)
-(struct-length s)         ⟹ 2
+(length s)                ⟹ 2
 ```
 
 ---
@@ -692,7 +692,7 @@ e                  ⟹ 2.71828...
 ### String Operations
 
 ```lisp
-(string-length "hello")            ⟹ 5
+(length "hello")                   ⟹ 5
 (string-append "hello" " " "world")⟹ "hello world"
 (string-upcase "hello")            ⟹ "HELLO"
 (string-downcase "HELLO")          ⟹ "hello"

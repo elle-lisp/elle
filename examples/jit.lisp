@@ -1,74 +1,103 @@
-;; For Loops with JIT Compilation Support
-;;
-;; This example demonstrates For loops with a focus on JIT compilation
-;; capabilities in the Elle Lisp compiler.
-;;
-;; JIT Note: For loops over literal lists are compiled by unrolling the
-;; loop at compile time, eliminating runtime iteration overhead.
+;; JIT Compilation Examples
+;; Demonstrates on-demand JIT compilation and each loops with JIT support
 
-(display "=== For Loops with JIT Support ===")
+(import-file "./examples/assertions.lisp")
+
+;; ============================================================================
+;; PART 1: JIT Compilation Basics
+;; ============================================================================
+
+;; Test jit-compiled? with non-closure values
+(display "Testing jit-compiled? with non-closure values:")
+(newline)
+(display "  (jit-compiled? 42) = ")
+(display (jit-compiled? 42))
+(newline)
+
+(display "  (jit-compiled? nil) = ")
+(display (jit-compiled? nil))
+(newline)
+
+;; Test jit-compilable? with non-closure values
+(display "Testing jit-compilable? with non-closure values:")
+(newline)
+(display "  (jit-compilable? 42) = ")
+(display (jit-compilable? 42))
+(newline)
+
+(display "  (jit-compilable? nil) = ")
+(display (jit-compilable? nil))
+(newline)
+
+;; ============================================================================
+;; PART 2: Each Loops with JIT Compilation Support
+;; ============================================================================
+
+(display "\n=== Each Loops with JIT Support ===")
 (newline)
 (newline)
 
 ;; ============================================================================
-;; Part 1: For Loop Basics (JIT Compiled)
+;; Part 1: Each Loop Basics (JIT Compiled)
 ;; ============================================================================
 
-(display "Part 1: For Loop Basics (Literal List Unrolling)")
+(display "Part 1: Each Loop Basics (Literal List Unrolling)")
 (newline)
-(display "For loops over literal lists are unrolled at compile time")
+(display "Each loops over literal lists are unrolled at compile time")
 (newline)
 (newline)
 
 (display "Example 1a: Simple iteration over literal list")
 (newline)
 (define result1 (list))
-(for x (list 1 2 3)
+(each x (list 1 2 3)
   (begin (display x) (display " ")))
 (newline)
+(assert-eq result1 (list) "Empty list should remain empty")
 (newline)
 
 (display "Example 1b: Processing elements from literal list")
 (newline)
-(for item (list 10 20 30 40 50)
+(each item (list 10 20 30 40 50)
   (begin (display item) (display " ")))
 (newline)
 (newline)
 
 ;; ============================================================================
-;; Part 2: For Loop with Empty List
+;; Part 2: Each Loop with Empty List
 ;; ============================================================================
 
-(display "Part 2: For Loop with Empty List")
+(display "Part 2: Each Loop with Empty List")
 (newline)
-(display "For loop over empty list executes zero times and returns nil")
+(display "Each loop over empty list executes zero times and returns nil")
 (newline)
 (newline)
 
 (display "Example 2a: Empty list iteration")
 (newline)
-(define empty-result (for item (list)
+(define empty-result (each item (list)
   (display "This will not print")))
 (display "Result: ")
 (display empty-result)
 (newline)
+(assert-eq empty-result (list) "Empty each loop should return nil/empty list")
 (newline)
 
 ;; ============================================================================
-;; Part 3: Nested For Loops with Literal Lists
+;; Part 3: Nested Each Loops with Literal Lists
 ;; ============================================================================
 
-(display "Part 3: Nested For Loops (Both Unrolled)")
+(display "Part 3: Nested Each Loops (Both Unrolled)")
 (newline)
-(display "Nested for loops over literal lists are both unrolled")
+(display "Nested each loops over literal lists are both unrolled")
 (newline)
 (newline)
 
 (display "Example 3a: 2D grid iteration")
 (newline)
-(for row (list 1 2 3)
+(each row (list 1 2 3)
   (begin
-    (for col (list 1 2)
+    (each col (list 1 2)
       (begin
         (display "(")
         (display row)
@@ -79,10 +108,10 @@
 (newline)
 
 ;; ============================================================================
-;; Part 4: For Loop with Expressions
+;; Part 4: Each Loop with Expressions
 ;; ============================================================================
 
-(display "Part 4: For Loops with Expressions")
+(display "Part 4: Each Loops with Expressions")
 (newline)
 (display "Body expressions are compiled for each iteration")
 (newline)
@@ -90,14 +119,17 @@
 
 (display "Example 4a: Arithmetic in loop body")
 (newline)
-(for n (list 1 2 3 4 5)
+(each n (list 1 2 3 4 5)
   (begin (display (* n n)) (display " ")))
 (newline)
+;; Verify arithmetic works: 1*1=1, 2*2=4, 3*3=9, 4*4=16, 5*5=25
+(assert-eq (* 1 1) 1 "1 squared is 1")
+(assert-eq (* 5 5) 25 "5 squared is 25")
 (newline)
 
 (display "Example 4b: Conditional logic in loop body")
 (newline)
-(for n (list 1 2 3 4 5)
+(each n (list 1 2 3 4 5)
   (if (> n 2)
     (display n)
     (display "-")))
@@ -105,41 +137,41 @@
 (newline)
 
 ;; ============================================================================
-;; Part 5: Multiple For Loops
+;; Part 5: Multiple Each Loops
 ;; ============================================================================
 
-(display "Part 5: Multiple Sequential For Loops")
+(display "Part 5: Multiple Sequential Each Loops")
 (newline)
-(display "Each for loop is independently unrolled")
+(display "Each each loop is independently unrolled")
 (newline)
 (newline)
 
 (display "Example 5a: First loop")
 (newline)
-(for x (list 10 11 12)
+(each x (list 10 11 12)
   (begin (display x) (display " ")))
 (newline)
 
 (display "Example 5b: Second loop")
 (newline)
-(for x (list 1 2 3)
+(each x (list 1 2 3)
   (display x))
 (newline)
 (newline)
 
 ;; ============================================================================
-;; Part 6: For Loops vs While Loops
+;; Part 6: Each Loops vs While Loops
 ;; ============================================================================
 
-(display "Part 6: For vs While Loops")
+(display "Part 6: Each vs While Loops")
 (newline)
 (display "Comparing literal list iteration patterns")
 (newline)
 (newline)
 
-(display "Example 6a: For loop (JIT unrolled) over literal list")
+(display "Example 6a: Each loop (JIT unrolled) over literal list")
 (newline)
-(for val (list 10 20 30)
+(each val (list 10 20 30)
   (begin (display val) (display " ")))
 (newline)
 
@@ -155,7 +187,7 @@
 (newline)
 (newline)
 
-(display "Note: For loops over literal lists are compiled away,")
+(display "Note: Each loops over literal lists are compiled away,")
 (newline)
 (display "while while loops execute at runtime.")
 (newline)
@@ -169,7 +201,7 @@
 (newline)
 (newline)
 
-(display "For loops over LITERAL lists:")
+(display "Each loops over LITERAL lists:")
 (newline)
 (display "  - Unrolled at compile time")
 (newline)
@@ -179,7 +211,7 @@
 (newline)
 (newline)
 
-(display "For loops over COMPUTED lists (variable references):")
+(display "Each loops over COMPUTED lists (variable references):")
 (newline)
 (display "  - Not yet supported in JIT")
 (newline)
@@ -195,7 +227,7 @@
 
 (display "=== Summary ===")
 (newline)
-(display "JIT-Compiled For Loops:")
+(display "JIT-Compiled Each Loops:")
 (newline)
 (display "1. Literal list loops are unrolled at compile time")
 (newline)
@@ -209,5 +241,5 @@
 (newline)
 (newline)
 
-(display "=== For Loops with JIT Support Complete ===")
+(display "=== JIT Compilation Examples Complete ===")
 (newline)

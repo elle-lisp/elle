@@ -345,13 +345,13 @@ fn test_yield_from_completion() {
 
 #[test]
 fn test_coroutine_as_iterator() {
-    // (for (x (make-coroutine (fn () (yield 1) (yield 2))))
+    // (each (x (make-coroutine (fn () (yield 1) (yield 2))))
     //   (display x))
     // Should iterate over yielded values
     let result = eval(
         r#"
         (define results (list))
-        (for (x (make-coroutine (fn () (yield 1) (yield 2))))
+        (each (x (make-coroutine (fn () (yield 1) (yield 2))))
           (set! results (cons x results)))
         results
         "#,

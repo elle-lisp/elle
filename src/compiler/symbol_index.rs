@@ -440,7 +440,6 @@ pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
         "max" => "Maximum: (max a b)",
 
         // String operations
-        "string-length" => "Get string length: (string-length s)",
         "string-upcase" => "Convert to uppercase: (string-upcase s)",
         "string-downcase" => "Convert to lowercase: (string-downcase s)",
         "string-append" => "Append strings: (string-append s1 s2)",
@@ -449,14 +448,13 @@ pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
         "char-at" => "Get character at index: (char-at s index)",
 
         // Type operations
-        "type" => "Get type of value: (type x)",
+        "type-of" => "Get type of value: (type-of x)",
 
         // Logic
         "not" => "Logical NOT: (not x)",
         "if" => "Conditional: (if condition then else)",
 
         // Vector operations
-        "vector-length" => "Get vector length: (vector-length v)",
         "vector-ref" => "Get vector element: (vector-ref v index)",
         "vector-set!" => "Set vector element: (vector-set! v index value)",
 
@@ -473,7 +471,8 @@ pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
         "lambda" => "Function definition (alias for fn): (lambda (params ...) body)",
         "match" => "Pattern matching: (match value (pattern body) ...)",
         "while" => "Loop: (while condition body)",
-        "foreach" => "Iterate: (foreach var iterable body)",
+        "each" => "Each loop: (each var iterable body) - iterate over a collection",
+        "forever" => "Infinite loop: (forever body...) - syntactic sugar for (while #t body...)",
 
         _ => return None,
     })

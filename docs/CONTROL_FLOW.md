@@ -5,10 +5,11 @@ A comprehensive guide to control flow constructs, exception handling, and the co
 ## Table of Contents
 
 1. [Conditionals](#conditionals)
-2. [Functional Iteration](#functional-iteration)
-3. [Exception Handling](#exception-handling)
-4. [The Condition System](#the-condition-system)
-5. [Control Flow Best Practices](#control-flow-best-practices)
+2. [Imperative Loops](#imperative-loops)
+3. [Functional Iteration](#functional-iteration)
+4. [Exception Handling](#exception-handling)
+5. [The Condition System](#the-condition-system)
+6. [Control Flow Best Practices](#control-flow-best-practices)
 
 ---
 
@@ -113,9 +114,74 @@ result ⟹ 30
 
 ---
 
+## Imperative Loops
+
+While Elle emphasizes functional iteration, it also provides imperative loop constructs for cases where they're more appropriate.
+
+### while - Conditional Loop
+
+`while` executes a body repeatedly as long as a condition is truthy:
+
+```lisp
+(while condition body)
+```
+
+**Examples:**
+
+```lisp
+(define counter 0)
+(while (< counter 5)
+  (begin
+    (display counter)
+    (newline)
+    (set! counter (+ counter 1))))
+⟹ nil (prints 0 1 2 3 4)
+
+(define x 100)
+(while (> x 0)
+  (set! x (/ x 2)))
+⟹ nil (x becomes 0 after repeated halving)
+```
+
+### forever - Infinite Loop
+
+`forever` creates an infinite loop that must be exited via `break` or exception:
+
+```lisp
+(forever body...)
+```
+
+`forever` is syntactic sugar for `(while #t ...)`. It's useful for event loops or server loops that run until explicitly stopped.
+
+**Examples:**
+
+```lisp
+; Simple infinite loop (would need break to exit)
+(forever
+  (display "Running...")
+  (newline))
+
+; Event loop pattern
+(define running #t)
+(forever
+  (process-event)
+  (if (not running)
+    (break)))
+
+; Multiple statements in body
+(forever
+  (display "Tick")
+  (newline)
+  (sleep 1)
+  (if should-stop
+    (break)))
+```
+
+---
+
 ## Functional Iteration
 
-Elle uses functional iteration patterns rather than imperative loops. Process collections using higher-order functions:
+Elle emphasizes functional iteration patterns for processing collections. Use higher-order functions for data transformation:
 
 ### map - Transform Each Element
 
@@ -151,7 +217,7 @@ Elle uses functional iteration patterns rather than imperative loops. Process co
 (filter even? (list 1 2 3 4 5 6))
 ⟹ (2 4 6)
 
-(filter (fn (s) (> (string-length s) 3))
+(filter (fn (s) (> (length s) 3))
   (list "hi" "hello" "ok" "world"))
 ⟹ ("hello" "world")
 ```
@@ -629,6 +695,8 @@ Chain functional operations for clarity:
 | `if` | Simple true/false choice | Any value |
 | `cond` | Multiple conditions | First true branch value |
 | `do/begin` | Multiple expressions | Last expression value |
+| `while` | Conditional loop | nil |
+| `forever` | Infinite loop (syntactic sugar for `while #t`) | nil |
 | `map` | Transform each element | New list with transformed elements |
 | `filter` | Select matching elements | New list with selected elements |
 | `fold` | Accumulate a result | Final accumulated value |

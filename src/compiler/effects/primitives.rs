@@ -54,7 +54,6 @@ pub fn register_primitive_effects(symbols: &SymbolTable, effects: &mut HashMap<S
         "integer?",
         "float?",
         // String operations
-        "string-length",
         "string-append",
         "substring",
         "string->list",

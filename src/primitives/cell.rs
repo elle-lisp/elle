@@ -69,15 +69,15 @@ pub fn prim_box_set(args: &[Value]) -> Result<Value, String> {
     }
 }
 
-/// Check if a value is a cell
+/// Check if a value is a box
 ///
-/// (cell? value) -> bool
+/// (box? value) -> bool
 ///
-/// Returns #t if the value is a cell, #f otherwise
-pub fn prim_cell_p(args: &[Value]) -> Result<Value, String> {
+/// Returns #t if the value is a box, #f otherwise
+pub fn prim_box_p(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!(
-            "cell? requires exactly 1 argument, got {}",
+            "box? requires exactly 1 argument, got {}",
             args.len()
         ));
     }

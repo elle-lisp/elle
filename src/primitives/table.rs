@@ -69,6 +69,34 @@ pub fn prim_table_del(args: &[Value]) -> Result<Value, String> {
     Ok(args[0].clone()) // Return the table itself
 }
 
+/// Polymorphic del - works on both tables and structs
+/// For tables: mutates in-place and returns the table
+/// For structs: returns a new struct without the field (immutable)
+/// `(del collection key)`
+pub fn prim_del(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 2 {
+        return Err("del requires exactly 2 arguments (collection, key)".to_string());
+    }
+
+    let key = TableKey::from_value(&args[1])?;
+
+    match &args[0] {
+        Value::Table(table) => {
+            table.borrow_mut().remove(&key);
+            Ok(args[0].clone()) // Return the mutated table
+        }
+        Value::Struct(s) => {
+            let mut new_map = (**s).clone();
+            new_map.remove(&key);
+            Ok(Value::Struct(Rc::new(new_map))) // Return new struct
+        }
+        _ => Err(format!(
+            "del requires a table or struct, got {}",
+            args[0].type_name()
+        )),
+    }
+}
+
 /// Get all keys from a table as a list
 /// (keys table)
 pub fn prim_table_keys(args: &[Value]) -> Result<Value, String> {
@@ -243,6 +271,35 @@ pub fn prim_has_key(args: &[Value]) -> Result<Value, String> {
         Value::Struct(s) => Ok(Value::Bool(s.contains_key(&key))),
         _ => Err(format!(
             "has-key? requires a table or struct, got {}",
+            args[0].type_name()
+        )),
+    }
+}
+
+/// Polymorphic put - works on both tables and structs
+/// For tables: mutates in-place and returns the table
+/// For structs: returns a new struct with the updated field (immutable)
+/// `(put collection key value)`
+pub fn prim_put(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 3 {
+        return Err("put requires exactly 3 arguments (collection, key, value)".to_string());
+    }
+
+    let key = TableKey::from_value(&args[1])?;
+    let value = args[2].clone();
+
+    match &args[0] {
+        Value::Table(table) => {
+            table.borrow_mut().insert(key, value);
+            Ok(args[0].clone()) // Return the mutated table
+        }
+        Value::Struct(s) => {
+            let mut new_map = (**s).clone();
+            new_map.insert(key, value);
+            Ok(Value::Struct(Rc::new(new_map))) // Return new struct
+        }
+        _ => Err(format!(
+            "put requires a table or struct, got {}",
             args[0].type_name()
         )),
     }

@@ -31,11 +31,11 @@
       (find-closing-helper text (+ pos 1) tlen delimiter dlen)))))
 
 (define find-closing (fn (text start delimiter)
-  (find-closing-helper text start (string-length text) delimiter (string-length delimiter))))
+  (find-closing-helper text start (length text) delimiter (length delimiter))))
 
 ;; Convert markdown links [text](url) to HTML anchor tags
 (define format-links-rec (fn (remaining result)
-  (if (= (string-length remaining) 0)
+  (if (= (length remaining) 0)
     result
     (begin
       (define open-bracket (find-closing remaining 0 "["))
@@ -44,21 +44,21 @@
         (begin
           (define before (if (> open-bracket 0) (substring remaining 0 open-bracket) ""))
           (define mid (find-closing remaining (+ open-bracket 1) "]("))
-          (if (nil? mid)
-            (format-links-rec
-              (substring remaining (+ open-bracket 1) (string-length remaining))
-              (string-append result before "["))
+           (if (nil? mid)
+             (format-links-rec
+               (substring remaining (+ open-bracket 1) (length remaining))
+               (string-append result before "["))
             (begin
               (define close-paren (find-closing remaining (+ mid 2) ")"))
-              (if (nil? close-paren)
-                (format-links-rec
-                  (substring remaining (+ open-bracket 1) (string-length remaining))
-                  (string-append result before "["))
-                (begin
-                  (define link-text (substring remaining (+ open-bracket 1) mid))
-                  (define link-url (substring remaining (+ mid 2) close-paren))
-                  (define after (substring remaining (+ close-paren 1) (string-length remaining)))
-                  (format-links-rec
+               (if (nil? close-paren)
+                 (format-links-rec
+                   (substring remaining (+ open-bracket 1) (length remaining))
+                   (string-append result before "["))
+                 (begin
+                   (define link-text (substring remaining (+ open-bracket 1) mid))
+                   (define link-url (substring remaining (+ mid 2) close-paren))
+                   (define after (substring remaining (+ close-paren 1) (length remaining)))
+                   (format-links-rec
                     after
                     (string-append result before "<a href=\"" link-url "\">" link-text "</a>"))))))))))))
 

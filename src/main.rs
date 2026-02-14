@@ -43,10 +43,10 @@ fn print_help() {
     println!("  Constants:   pi, e");
     println!("  Rounding:    floor, ceil, round");
     println!("  Integer ops: mod, remainder, even?, odd?");
-    println!("  Strings:     string-length, string-append, string-upcase, string-downcase,");
+    println!("  Strings:     string-append, string-upcase, string-downcase,");
     println!("               substring, string-index, char-at");
-    println!("  Vectors:     vector, vector-length, vector-ref, vector-set!");
-    println!("  Types:       type, int, float, string");
+    println!("  Vectors:     vector, vector-ref, vector-set!");
+    println!("  Types:       type-of, int, float, string");
     println!("  Logic:       not, if");
     println!("  I/O:         display, newline");
     println!();

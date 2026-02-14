@@ -7,7 +7,7 @@ use super::arithmetic::{
     prim_abs, prim_add, prim_div, prim_even, prim_max, prim_min, prim_mod, prim_mul, prim_odd,
     prim_rem, prim_sub,
 };
-use super::cell::{prim_box, prim_box_set, prim_cell_p, prim_unbox};
+use super::cell::{prim_box, prim_box_p, prim_box_set, prim_unbox};
 use super::comparison::{prim_eq, prim_ge, prim_gt, prim_le, prim_lt};
 use super::concurrency::{prim_current_thread_id, prim_join, prim_sleep, prim_spawn};
 use super::coroutines::{
@@ -48,24 +48,19 @@ use super::signaling::{prim_error, prim_signal, prim_warn};
 use super::string::{
     prim_any_to_string, prim_char_at, prim_number_to_string, prim_string_append,
     prim_string_contains, prim_string_downcase, prim_string_ends_with, prim_string_index,
-    prim_string_join, prim_string_length, prim_string_replace, prim_string_split,
-    prim_string_starts_with, prim_string_to_float, prim_string_to_int, prim_string_trim,
-    prim_string_upcase, prim_substring, prim_symbol_to_string, prim_to_float, prim_to_int,
-    prim_to_string,
+    prim_string_join, prim_string_replace, prim_string_split, prim_string_starts_with,
+    prim_string_to_float, prim_string_to_int, prim_string_trim, prim_string_upcase, prim_substring,
+    prim_symbol_to_string, prim_to_float, prim_to_int, prim_to_string,
 };
-use super::structs::{
-    prim_struct, prim_struct_del, prim_struct_get, prim_struct_has, prim_struct_keys,
-    prim_struct_length, prim_struct_put, prim_struct_values,
-};
+use super::structs::{prim_struct, prim_struct_del};
 use super::table::{
-    prim_get, prim_has_key, prim_keys, prim_table, prim_table_del, prim_table_length,
-    prim_table_put, prim_values,
+    prim_del, prim_get, prim_has_key, prim_keys, prim_put, prim_table, prim_values,
 };
 use super::type_check::{
     prim_is_boolean, prim_is_list, prim_is_nil, prim_is_number, prim_is_pair, prim_is_string,
-    prim_is_symbol, prim_type,
+    prim_is_symbol, prim_type_of,
 };
-use super::vector::{prim_vector, prim_vector_length, prim_vector_ref, prim_vector_set};
+use super::vector::{prim_vector, prim_vector_ref, prim_vector_set};
 
 /// Register all primitive functions with the VM
 pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
@@ -131,7 +126,6 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "abs", prim_abs);
 
     // String operations
-    register_fn(vm, symbols, "string-length", prim_string_length);
     register_fn(vm, symbols, "string-append", prim_string_append);
     register_fn(vm, symbols, "string-upcase", prim_string_upcase);
     register_fn(vm, symbols, "string-downcase", prim_string_downcase);
@@ -156,34 +150,24 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Vector operations
     register_fn(vm, symbols, "vector", prim_vector);
-    register_fn(vm, symbols, "vector-length", prim_vector_length);
     register_fn(vm, symbols, "vector-ref", prim_vector_ref);
     register_fn(vm, symbols, "vector-set!", prim_vector_set);
 
-    // Table operations (mutable) - now using polymorphic versions
+    // Table/Struct operations (polymorphic)
     register_fn(vm, symbols, "table", prim_table);
-    register_fn(vm, symbols, "get", prim_get); // Now polymorphic
-    register_fn(vm, symbols, "put", prim_table_put); // Table-specific (mutates)
-    register_fn(vm, symbols, "put!", prim_table_put); // Explicit mutation marker
-    register_fn(vm, symbols, "del", prim_table_del); // Table-specific (mutates)
-    register_fn(vm, symbols, "del!", prim_table_del); // Explicit mutation marker
-    register_fn(vm, symbols, "keys", prim_keys); // Now polymorphic
-    register_fn(vm, symbols, "values", prim_values); // Now polymorphic
-    register_fn(vm, symbols, "has-key?", prim_has_key); // Now polymorphic
-    register_fn(vm, symbols, "table-length", prim_table_length);
-
-    // Struct operations (immutable)
     register_fn(vm, symbols, "struct", prim_struct);
-    register_fn(vm, symbols, "struct-get", prim_struct_get);
-    register_fn(vm, symbols, "struct-put", prim_struct_put);
-    register_fn(vm, symbols, "struct-del", prim_struct_del);
-    register_fn(vm, symbols, "struct-keys", prim_struct_keys);
-    register_fn(vm, symbols, "struct-values", prim_struct_values);
-    register_fn(vm, symbols, "struct-has?", prim_struct_has);
-    register_fn(vm, symbols, "struct-length", prim_struct_length);
+    register_fn(vm, symbols, "get", prim_get); // Polymorphic: works on tables and structs
+    register_fn(vm, symbols, "put", prim_put); // Polymorphic: mutates tables, returns new struct
+    register_fn(vm, symbols, "put!", prim_put); // Explicit mutation marker (same as put)
+    register_fn(vm, symbols, "del", prim_del); // Polymorphic: mutates tables, returns new struct
+    register_fn(vm, symbols, "del!", prim_del); // Explicit mutation marker (same as del)
+    register_fn(vm, symbols, "keys", prim_keys); // Polymorphic: works on tables and structs
+    register_fn(vm, symbols, "values", prim_values); // Polymorphic: works on tables and structs
+    register_fn(vm, symbols, "has-key?", prim_has_key); // Polymorphic: works on tables and structs
+    register_fn(vm, symbols, "struct-del", prim_struct_del); // Deprecated: use del instead
 
     // Type info
-    register_fn(vm, symbols, "type", prim_type);
+    register_fn(vm, symbols, "type-of", prim_type_of);
 
     // Math functions
     register_fn(vm, symbols, "sqrt", prim_sqrt);
@@ -389,7 +373,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "box", prim_box);
     register_fn(vm, symbols, "unbox", prim_unbox);
     register_fn(vm, symbols, "box-set!", prim_box_set);
-    register_fn(vm, symbols, "cell?", prim_cell_p);
+    register_fn(vm, symbols, "box?", prim_box_p);
 
     // Coroutine primitives (Phase 6)
     register_fn(vm, symbols, "make-coroutine", prim_make_coroutine);

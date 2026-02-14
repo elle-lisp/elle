@@ -62,9 +62,9 @@ pub fn prim_is_boolean(args: &[Value]) -> Result<Value, String> {
 }
 
 /// Get the type name of a value as a keyword
-pub fn prim_type(args: &[Value]) -> Result<Value, String> {
+pub fn prim_type_of(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
-        return Err("type requires exactly 1 argument".to_string());
+        return Err("type-of requires exactly 1 argument".to_string());
     }
 
     let type_name = args[0].type_name();

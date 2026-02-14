@@ -404,7 +404,7 @@ impl Value {
 
     #[inline(always)]
     pub fn is_truthy(&self) -> bool {
-        !matches!(self, Value::Nil | Value::Bool(false))
+        !matches!(self, Value::Bool(false))
     }
 
     pub fn as_int(&self) -> Result<i64, String> {
@@ -676,8 +676,8 @@ mod tests {
     fn test_truthy() {
         assert!(Value::Int(0).is_truthy());
         assert!(Value::Bool(true).is_truthy());
+        assert!(Value::Nil.is_truthy()); // Empty list is truthy (matching Janet/modern Lisps)
         assert!(!Value::Bool(false).is_truthy());
-        assert!(!Value::Nil.is_truthy());
     }
 }
 
