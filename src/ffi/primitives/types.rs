@@ -9,7 +9,7 @@ pub fn parse_ctype(val: &Value) -> Result<CType, String> {
         Value::Symbol(_) => {
             // We need to look up the symbol name, but we don't have access to SymbolTable
             // For now, we'll return an error indicating this needs symbol table integration
-            Err("Symbol-based type specification not yet supported".to_string())
+            Err("Symbol-based type specification not yet supported".into())
         }
         Value::String(s) => match s.as_ref() {
             "void" => Ok(CType::Void),
@@ -30,6 +30,6 @@ pub fn parse_ctype(val: &Value) -> Result<CType, String> {
             "pointer" => Ok(CType::Pointer(Box::new(CType::Void))),
             _ => Err(format!("Unknown C type: {}", s)),
         },
-        _ => Err("Type must be a string".to_string()),
+        _ => Err("Type must be a string".into()),
     }
 }

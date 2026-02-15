@@ -20,12 +20,12 @@ use crate::ffi::types::CType;
 /// Union ID as an integer
 pub fn prim_define_c_union(_vm: &mut VM, args: &[Value]) -> Result<Value, String> {
     if args.len() != 2 {
-        return Err("define-c-union requires exactly 2 arguments".to_string());
+        return Err("define-c-union requires exactly 2 arguments".into());
     }
 
     let union_name = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("union name must be a string".to_string()),
+        _ => return Err("union name must be a string".into()),
     };
 
     // Parse fields from list: ((name type) ...)
@@ -40,12 +40,12 @@ pub fn prim_define_c_union(_vm: &mut VM, args: &[Value]) -> Result<Value, String
                     Value::Cons(cons) => {
                         let field_name = match &cons.first {
                             Value::String(n) => n.as_ref().to_string(),
-                            _ => return Err("field name must be a string".to_string()),
+                            _ => return Err("field name must be a string".into()),
                         };
 
                         let field_type = match &cons.rest {
                             Value::Cons(rest_cons) => super::types::parse_ctype(&rest_cons.first)?,
-                            _ => return Err("field must be (name type)".to_string()),
+                            _ => return Err("field must be (name type)".into()),
                         };
 
                         fields.push(UnionField {
@@ -53,16 +53,16 @@ pub fn prim_define_c_union(_vm: &mut VM, args: &[Value]) -> Result<Value, String
                             ctype: field_type,
                         });
                     }
-                    _ => return Err("each field must be a cons cell".to_string()),
+                    _ => return Err("each field must be a cons cell".into()),
                 }
             }
         }
         Value::Nil => {}
-        _ => return Err("fields must be a list".to_string()),
+        _ => return Err("fields must be a list".into()),
     }
 
     if fields.is_empty() {
-        return Err("union must have at least one field".to_string());
+        return Err("union must have at least one field".into());
     }
 
     // Calculate union size and alignment (max of all fields)
@@ -84,13 +84,15 @@ pub fn prim_define_c_union(_vm: &mut VM, args: &[Value]) -> Result<Value, String
 }
 
 /// Wrapper for prim_define_c_union that works with the primitive system.
-pub fn prim_define_c_union_wrapper(args: &[Value]) -> Result<Value, String> {
+pub fn prim_define_c_union_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
     if args.len() != 2 {
-        return Err("define-c-union requires exactly 2 arguments".to_string());
+        return Err("define-c-union requires exactly 2 arguments"
+            .to_string()
+            .into());
     }
     // This would be called with a VM in a full implementation
     // For now, we do the simple version
-    prim_define_c_union(&mut VM::new(), args)
+    prim_define_c_union(&mut VM::new(), args).map_err(|e| e.into())
 }
 
 #[cfg(test)]

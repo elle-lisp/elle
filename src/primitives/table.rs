@@ -1,4 +1,5 @@
 //! Table operations primitives (mutable hash tables)
+use crate::error::{LError, LResult};
 use crate::value::{TableKey, Value};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -6,9 +7,11 @@ use std::rc::Rc;
 
 /// Create a mutable table from key-value pairs
 /// (table key1 val1 key2 val2 ...)
-pub fn prim_table(args: &[Value]) -> Result<Value, String> {
+pub fn prim_table(args: &[Value]) -> LResult<Value> {
     if !args.len().is_multiple_of(2) {
-        return Err("table requires an even number of arguments (key-value pairs)".to_string());
+        return Err(LError::argument_error(
+            "table requires an even number of arguments (key-value pairs)",
+        ));
     }
 
     let mut map = BTreeMap::new();
@@ -23,9 +26,9 @@ pub fn prim_table(args: &[Value]) -> Result<Value, String> {
 
 /// Get a value from a table by key
 /// `(get table key [default])`
-pub fn prim_table_get(args: &[Value]) -> Result<Value, String> {
+pub fn prim_table_get(args: &[Value]) -> LResult<Value> {
     if args.len() < 2 || args.len() > 3 {
-        return Err("get requires 2 or 3 arguments (table, key, [default])".to_string());
+        return Err(LError::arity_range(2, 3, args.len()));
     }
 
     let table = args[0].as_table()?;
@@ -42,9 +45,9 @@ pub fn prim_table_get(args: &[Value]) -> Result<Value, String> {
 
 /// Put a key-value pair into a table (mutable, in-place)
 /// (put table key value)
-pub fn prim_table_put(args: &[Value]) -> Result<Value, String> {
+pub fn prim_table_put(args: &[Value]) -> LResult<Value> {
     if args.len() != 3 {
-        return Err("put requires exactly 3 arguments (table, key, value)".to_string());
+        return Err(LError::arity_mismatch(3, args.len()));
     }
 
     let table = args[0].as_table()?;
@@ -57,9 +60,9 @@ pub fn prim_table_put(args: &[Value]) -> Result<Value, String> {
 
 /// Delete a key from a table (mutable, in-place)
 /// (del table key)
-pub fn prim_table_del(args: &[Value]) -> Result<Value, String> {
+pub fn prim_table_del(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("del requires exactly 2 arguments (table, key)".to_string());
+        return Err(LError::arity_mismatch(2, args.len()));
     }
 
     let table = args[0].as_table()?;
@@ -73,9 +76,9 @@ pub fn prim_table_del(args: &[Value]) -> Result<Value, String> {
 /// For tables: mutates in-place and returns the table
 /// For structs: returns a new struct without the field (immutable)
 /// `(del collection key)`
-pub fn prim_del(args: &[Value]) -> Result<Value, String> {
+pub fn prim_del(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("del requires exactly 2 arguments (collection, key)".to_string());
+        return Err(LError::arity_mismatch(2, args.len()));
     }
 
     let key = TableKey::from_value(&args[1])?;
@@ -93,15 +96,16 @@ pub fn prim_del(args: &[Value]) -> Result<Value, String> {
         _ => Err(format!(
             "del requires a table or struct, got {}",
             args[0].type_name()
-        )),
+        )
+        .into()),
     }
 }
 
 /// Get all keys from a table as a list
 /// (keys table)
-pub fn prim_table_keys(args: &[Value]) -> Result<Value, String> {
+pub fn prim_table_keys(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("keys requires exactly 1 argument (table)".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     let table = args[0].as_table()?;
@@ -123,9 +127,9 @@ pub fn prim_table_keys(args: &[Value]) -> Result<Value, String> {
 
 /// Get all values from a table as a list
 /// (values table)
-pub fn prim_table_values(args: &[Value]) -> Result<Value, String> {
+pub fn prim_table_values(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("values requires exactly 1 argument (table)".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     let table = args[0].as_table()?;
@@ -137,9 +141,11 @@ pub fn prim_table_values(args: &[Value]) -> Result<Value, String> {
 
 /// Check if a table has a key
 /// (has-key? table key)
-pub fn prim_table_has(args: &[Value]) -> Result<Value, String> {
+pub fn prim_table_has(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("has-key? requires exactly 2 arguments (table, key)".to_string());
+        return Err("has-key? requires exactly 2 arguments (table, key)"
+            .to_string()
+            .into());
     }
 
     let table = args[0].as_table()?;
@@ -150,9 +156,9 @@ pub fn prim_table_has(args: &[Value]) -> Result<Value, String> {
 
 /// Get the number of entries in a table
 /// (length table)
-pub fn prim_table_length(args: &[Value]) -> Result<Value, String> {
+pub fn prim_table_length(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("length requires exactly 1 argument (table)".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     let table = args[0].as_table()?;
@@ -163,9 +169,9 @@ pub fn prim_table_length(args: &[Value]) -> Result<Value, String> {
 
 /// Polymorphic get - works on both tables and structs
 /// `(get collection key [default])`
-pub fn prim_get(args: &[Value]) -> Result<Value, String> {
+pub fn prim_get(args: &[Value]) -> LResult<Value> {
     if args.len() < 2 || args.len() > 3 {
-        return Err("get requires 2 or 3 arguments (collection, key, [default])".to_string());
+        return Err(LError::arity_range(2, 3, args.len()));
     }
 
     let default = if args.len() == 3 {
@@ -187,15 +193,16 @@ pub fn prim_get(args: &[Value]) -> Result<Value, String> {
         _ => Err(format!(
             "get requires a table or struct as first argument, got {}",
             args[0].type_name()
-        )),
+        )
+        .into()),
     }
 }
 
 /// Polymorphic keys - works on both tables and structs
 /// `(keys collection)`
-pub fn prim_keys(args: &[Value]) -> Result<Value, String> {
+pub fn prim_keys(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("keys requires exactly 1 argument (collection)".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     match &args[0] {
@@ -229,15 +236,16 @@ pub fn prim_keys(args: &[Value]) -> Result<Value, String> {
         _ => Err(format!(
             "keys requires a table or struct, got {}",
             args[0].type_name()
-        )),
+        )
+        .into()),
     }
 }
 
 /// Polymorphic values - works on both tables and structs
 /// `(values collection)`
-pub fn prim_values(args: &[Value]) -> Result<Value, String> {
+pub fn prim_values(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("values requires exactly 1 argument (collection)".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     match &args[0] {
@@ -253,15 +261,18 @@ pub fn prim_values(args: &[Value]) -> Result<Value, String> {
         _ => Err(format!(
             "values requires a table or struct, got {}",
             args[0].type_name()
-        )),
+        )
+        .into()),
     }
 }
 
 /// Polymorphic has-key? - works on both tables and structs
 /// `(has-key? collection key)`
-pub fn prim_has_key(args: &[Value]) -> Result<Value, String> {
+pub fn prim_has_key(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("has-key? requires exactly 2 arguments (collection, key)".to_string());
+        return Err("has-key? requires exactly 2 arguments (collection, key)"
+            .to_string()
+            .into());
     }
 
     let key = TableKey::from_value(&args[1])?;
@@ -272,7 +283,8 @@ pub fn prim_has_key(args: &[Value]) -> Result<Value, String> {
         _ => Err(format!(
             "has-key? requires a table or struct, got {}",
             args[0].type_name()
-        )),
+        )
+        .into()),
     }
 }
 
@@ -280,9 +292,9 @@ pub fn prim_has_key(args: &[Value]) -> Result<Value, String> {
 /// For tables: mutates in-place and returns the table
 /// For structs: returns a new struct with the updated field (immutable)
 /// `(put collection key value)`
-pub fn prim_put(args: &[Value]) -> Result<Value, String> {
+pub fn prim_put(args: &[Value]) -> LResult<Value> {
     if args.len() != 3 {
-        return Err("put requires exactly 3 arguments (collection, key, value)".to_string());
+        return Err(LError::arity_mismatch(3, args.len()));
     }
 
     let key = TableKey::from_value(&args[1])?;
@@ -301,6 +313,7 @@ pub fn prim_put(args: &[Value]) -> Result<Value, String> {
         _ => Err(format!(
             "put requires a table or struct, got {}",
             args[0].type_name()
-        )),
+        )
+        .into()),
     }
 }

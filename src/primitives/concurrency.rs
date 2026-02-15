@@ -1,3 +1,4 @@
+use crate::error::{LError, LResult};
 use crate::primitives::registration::register_primitives;
 use crate::symbol::SymbolTable;
 use crate::value::{SendValue, ThreadHandle, Value};
@@ -82,7 +83,7 @@ fn is_value_sendable(value: &Value) -> bool {
 
 /// Helper function to spawn a closure in a new thread
 /// Extracts closure data, validates sendability, and executes in a fresh VM
-fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> {
+fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
     // Check that all captured values are sendable
     for (i, captured) in closure.env.iter().enumerate() {
         if !is_value_sendable(captured) {
@@ -90,7 +91,8 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> 
                 "spawn: closure captures mutable or unsafe value at position {} ({})",
                 i,
                 captured.type_name()
-            ));
+            )
+            .into());
         }
     }
 
@@ -101,7 +103,8 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> 
                 "spawn: closure has non-sendable constant at position {} ({})",
                 i,
                 constant.type_name()
-            ));
+            )
+            .into());
         }
     }
 
@@ -174,9 +177,9 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> 
 /// The closure's bytecode is compiled and executed in that VM.
 ///
 /// For JIT-compiled closures, falls back to the source closure for thread-safe execution.
-pub fn prim_spawn(args: &[Value]) -> Result<Value, String> {
+pub fn prim_spawn(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!("spawn: expected 1 argument, got {}", args.len()));
+        return Err(format!("spawn: expected 1 argument, got {}", args.len()).into());
     }
 
     match &args[0] {
@@ -189,15 +192,18 @@ pub fn prim_spawn(args: &[Value]) -> Result<Value, String> {
                 None => Err(
                     "spawn: JitClosure has no source closure for thread execution. \
                      JIT-compiled closures must retain their source to be spawned."
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 ),
             }
         }
 
-        Value::NativeFn(_) => {
-            Err("spawn: native functions cannot be spawned. Use closures instead.".to_string())
-        }
-        _ => Err("spawn: argument must be a closure".to_string()),
+        Value::NativeFn(_) => Err(
+            "spawn: native functions cannot be spawned. Use closures instead."
+                .to_string()
+                .into(),
+        ),
+        _ => Err("spawn: argument must be a closure".to_string().into()),
     }
 }
 
@@ -206,9 +212,9 @@ pub fn prim_spawn(args: &[Value]) -> Result<Value, String> {
 ///
 /// Blocks until the spawned thread completes and returns the actual Value result.
 /// If the thread produced an error, that error is re-raised.
-pub fn prim_join(args: &[Value]) -> Result<Value, String> {
+pub fn prim_join(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!("join: expected 1 argument, got {}", args.len()));
+        return Err(format!("join: expected 1 argument, got {}", args.len()).into());
     }
 
     match &args[0] {
@@ -225,52 +231,52 @@ pub fn prim_join(args: &[Value]) -> Result<Value, String> {
                         return result
                             .as_ref()
                             .map(|send_val| send_val.clone().into_value())
-                            .map_err(|e| e.clone());
+                            .map_err(|e| LError::from(e.clone()));
                     }
                 }
 
                 attempts += 1;
                 if attempts >= MAX_ATTEMPTS {
-                    return Err("join: thread did not complete in time".to_string());
+                    return Err("join: thread did not complete in time".to_string().into());
                 }
 
                 // Sleep briefly to avoid busy-waiting
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
         }
-        _ => Err("join: argument must be a thread handle".to_string()),
+        _ => Err("join: argument must be a thread handle".to_string().into()),
     }
 }
 
 /// Sleeps for the specified number of seconds
 /// (sleep seconds)
-pub fn prim_sleep(args: &[Value]) -> Result<Value, String> {
+pub fn prim_sleep(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!("sleep: expected 1 argument, got {}", args.len()));
+        return Err(format!("sleep: expected 1 argument, got {}", args.len()).into());
     }
 
     match &args[0] {
         Value::Int(n) => {
             if *n < 0 {
-                return Err("sleep: duration must be non-negative".to_string());
+                return Err("sleep: duration must be non-negative".to_string().into());
             }
             std::thread::sleep(std::time::Duration::from_secs(*n as u64));
             Ok(Value::Nil)
         }
         Value::Float(f) => {
             if *f < 0.0 {
-                return Err("sleep: duration must be non-negative".to_string());
+                return Err("sleep: duration must be non-negative".to_string().into());
             }
             std::thread::sleep(std::time::Duration::from_secs_f64(*f));
             Ok(Value::Nil)
         }
-        _ => Err("sleep: argument must be a number".to_string()),
+        _ => Err("sleep: argument must be a number".to_string().into()),
     }
 }
 
 /// Returns the ID of the current thread
 /// (current-thread-id)
-pub fn prim_current_thread_id(_args: &[Value]) -> Result<Value, String> {
+pub fn prim_current_thread_id(_args: &[Value]) -> LResult<Value> {
     let thread_id = std::thread::current().id();
     Ok(Value::String(format!("{:?}", thread_id).into()))
 }

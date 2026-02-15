@@ -50,17 +50,17 @@ impl TypeHandler for ClosureHandler {
 /// - priority: Integer priority (higher = first to try)
 pub fn prim_define_custom_handler(vm: &VM, args: &[Value]) -> Result<Value, String> {
     if args.len() != 4 {
-        return Err("define-custom-handler requires exactly 4 arguments".to_string());
+        return Err("define-custom-handler requires exactly 4 arguments".into());
     }
 
     let name = match &args[0] {
         Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".to_string()),
+        _ => return Err("Handler name must be a string".into()),
     };
 
     let _priority = match &args[3] {
         Value::Int(p) => *p as i32,
-        _ => return Err("Priority must be an integer".to_string()),
+        _ => return Err("Priority must be an integer".into()),
     };
 
     // Note: args[1] is elle_to_c_fn and args[2] is c_to_elle_fn
@@ -84,12 +84,12 @@ pub fn prim_define_custom_handler(vm: &VM, args: &[Value]) -> Result<Value, Stri
 /// - name: String name of the handler to remove
 pub fn prim_unregister_custom_handler(vm: &VM, args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
-        return Err("unregister-custom-handler requires exactly 1 argument".to_string());
+        return Err("unregister-custom-handler requires exactly 1 argument".into());
     }
 
     let name = match &args[0] {
         Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".to_string()),
+        _ => return Err("Handler name must be a string".into()),
     };
 
     let type_id = TypeId::new(name);
@@ -124,12 +124,12 @@ pub fn prim_list_custom_handlers(vm: &VM, _args: &[Value]) -> Result<Value, Stri
 /// - name: String name of the handler
 pub fn prim_custom_handler_registered(vm: &VM, args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
-        return Err("custom-handler-registered? requires exactly 1 argument".to_string());
+        return Err("custom-handler-registered? requires exactly 1 argument".into());
     }
 
     let name = match &args[0] {
         Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".to_string()),
+        _ => return Err("Handler name must be a string".into()),
     };
 
     let type_id = TypeId::new(name);
@@ -148,19 +148,19 @@ pub fn prim_clear_custom_handlers(vm: &VM, _args: &[Value]) -> Result<Value, Str
 
 // Wrapper functions for context-aware calls
 
-pub fn prim_define_custom_handler_wrapper(args: &[Value]) -> Result<Value, String> {
+pub fn prim_define_custom_handler_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
     if args.len() != 4 {
-        return Err("define-custom-handler requires exactly 4 arguments".to_string());
+        return Err("define-custom-handler requires exactly 4 arguments".into());
     }
 
     let name = match &args[0] {
         Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".to_string()),
+        _ => return Err("Handler name must be a string".into()),
     };
 
     let _priority = match &args[3] {
         Value::Int(p) => *p as i32,
-        _ => return Err("Priority must be an integer".to_string()),
+        _ => return Err("Priority must be an integer".into()),
     };
 
     // Note: args[1] is elle_to_c_fn and args[2] is c_to_elle_fn
@@ -182,14 +182,14 @@ pub fn prim_define_custom_handler_wrapper(args: &[Value]) -> Result<Value, Strin
     Ok(Value::Nil)
 }
 
-pub fn prim_unregister_custom_handler_wrapper(args: &[Value]) -> Result<Value, String> {
+pub fn prim_unregister_custom_handler_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
     if args.len() != 1 {
-        return Err("unregister-custom-handler requires exactly 1 argument".to_string());
+        return Err("unregister-custom-handler requires exactly 1 argument".into());
     }
 
     let name = match &args[0] {
         Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".to_string()),
+        _ => return Err("Handler name must be a string".into()),
     };
 
     let type_id = TypeId::new(name);
@@ -203,7 +203,7 @@ pub fn prim_unregister_custom_handler_wrapper(args: &[Value]) -> Result<Value, S
     Ok(Value::Nil)
 }
 
-pub fn prim_list_custom_handlers_wrapper(_args: &[Value]) -> Result<Value, String> {
+pub fn prim_list_custom_handlers_wrapper(_args: &[Value]) -> crate::error::LResult<Value> {
     let vm_ptr = super::context::get_vm_context().ok_or("FFI not initialized")?;
     unsafe {
         let vm = &*vm_ptr;
@@ -222,14 +222,14 @@ pub fn prim_list_custom_handlers_wrapper(_args: &[Value]) -> Result<Value, Strin
     }
 }
 
-pub fn prim_custom_handler_registered_wrapper(args: &[Value]) -> Result<Value, String> {
+pub fn prim_custom_handler_registered_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
     if args.len() != 1 {
-        return Err("custom-handler-registered? requires exactly 1 argument".to_string());
+        return Err("custom-handler-registered? requires exactly 1 argument".into());
     }
 
     let name = match &args[0] {
         Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".to_string()),
+        _ => return Err("Handler name must be a string".into()),
     };
 
     let type_id = TypeId::new(name);
@@ -242,7 +242,7 @@ pub fn prim_custom_handler_registered_wrapper(args: &[Value]) -> Result<Value, S
     }
 }
 
-pub fn prim_clear_custom_handlers_wrapper(_args: &[Value]) -> Result<Value, String> {
+pub fn prim_clear_custom_handlers_wrapper(_args: &[Value]) -> crate::error::LResult<Value> {
     let vm_ptr = super::context::get_vm_context().ok_or("FFI not initialized")?;
     unsafe {
         let vm = &*vm_ptr;

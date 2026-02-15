@@ -15,17 +15,17 @@ use crate::vm::VM;
 /// - lib-path: Path to compiled library
 pub fn prim_load_header_with_lib(_vm: &mut VM, args: &[Value]) -> Result<Value, String> {
     if args.len() != 2 {
-        return Err("load-header-with-lib requires exactly 2 arguments".to_string());
+        return Err("load-header-with-lib requires exactly 2 arguments".into());
     }
 
     let header_path = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("header-path must be a string".to_string()),
+        _ => return Err("header-path must be a string".into()),
     };
 
     let lib_path = match &args[1] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("lib-path must be a string".to_string()),
+        _ => return Err("lib-path must be a string".into()),
     };
 
     // Parse header
@@ -45,12 +45,12 @@ pub fn prim_load_header_with_lib(_vm: &mut VM, args: &[Value]) -> Result<Value, 
 /// Defines a C enum type in Elle.
 pub fn prim_define_enum(_vm: &mut VM, args: &[Value]) -> Result<Value, String> {
     if args.len() != 2 {
-        return Err("define-enum requires exactly 2 arguments".to_string());
+        return Err("define-enum requires exactly 2 arguments".into());
     }
 
     let enum_name = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("enum name must be a string".to_string()),
+        _ => return Err("enum name must be a string".into()),
     };
 
     // Parse variants from list
@@ -65,25 +65,25 @@ pub fn prim_define_enum(_vm: &mut VM, args: &[Value]) -> Result<Value, String> {
                     Value::Cons(cons) => {
                         let name = match &cons.first {
                             Value::String(n) => n.as_ref().to_string(),
-                            _ => return Err("variant name must be a string".to_string()),
+                            _ => return Err("variant name must be a string".into()),
                         };
 
                         let value = match &cons.rest {
                             Value::Cons(rest_cons) => match &rest_cons.first {
                                 Value::Int(n) => *n,
-                                _ => return Err("variant value must be an integer".to_string()),
+                                _ => return Err("variant value must be an integer".into()),
                             },
-                            _ => return Err("variant must be (name value)".to_string()),
+                            _ => return Err("variant must be (name value)".into()),
                         };
 
                         variants.push(EnumVariant { name, value });
                     }
-                    _ => return Err("each variant must be a cons cell".to_string()),
+                    _ => return Err("each variant must be a cons cell".into()),
                 }
             }
         }
         Value::Nil => {}
-        _ => return Err("variants must be a list".to_string()),
+        _ => return Err("variants must be a list".into()),
     }
 
     // Create enum layout
@@ -96,19 +96,19 @@ pub fn prim_define_enum(_vm: &mut VM, args: &[Value]) -> Result<Value, String> {
     Ok(Value::Int(enum_id.0 as i64))
 }
 
-pub fn prim_load_header_with_lib_wrapper(args: &[Value]) -> Result<Value, String> {
+pub fn prim_load_header_with_lib_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
     if args.len() != 2 {
-        return Err("load-header-with-lib requires exactly 2 arguments".to_string());
+        return Err("load-header-with-lib requires exactly 2 arguments".into());
     }
 
     let header_path = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("header-path must be a string".to_string()),
+        _ => return Err("header-path must be a string".into()),
     };
 
     let lib_path = match &args[1] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("lib-path must be a string".to_string()),
+        _ => return Err("lib-path must be a string".into()),
     };
 
     // Parse header
@@ -122,14 +122,14 @@ pub fn prim_load_header_with_lib_wrapper(args: &[Value]) -> Result<Value, String
     Ok(Value::String(lib_path.into()))
 }
 
-pub fn prim_define_enum_wrapper(args: &[Value]) -> Result<Value, String> {
+pub fn prim_define_enum_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
     if args.len() != 2 {
-        return Err("define-enum requires exactly 2 arguments".to_string());
+        return Err("define-enum requires exactly 2 arguments".into());
     }
 
     let enum_name = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("enum name must be a string".to_string()),
+        _ => return Err("enum name must be a string".into()),
     };
 
     // Parse variants from list
@@ -144,25 +144,25 @@ pub fn prim_define_enum_wrapper(args: &[Value]) -> Result<Value, String> {
                     Value::Cons(cons) => {
                         let name = match &cons.first {
                             Value::String(n) => n.as_ref().to_string(),
-                            _ => return Err("variant name must be a string".to_string()),
+                            _ => return Err("variant name must be a string".into()),
                         };
 
                         let value = match &cons.rest {
                             Value::Cons(rest_cons) => match &rest_cons.first {
                                 Value::Int(n) => *n,
-                                _ => return Err("variant value must be an integer".to_string()),
+                                _ => return Err("variant value must be an integer".into()),
                             },
-                            _ => return Err("variant must be (name value)".to_string()),
+                            _ => return Err("variant must be (name value)".into()),
                         };
 
                         variants.push(EnumVariant { name, value });
                     }
-                    _ => return Err("each variant must be a cons cell".to_string()),
+                    _ => return Err("each variant must be a cons cell".into()),
                 }
             }
         }
         Value::Nil => {}
-        _ => return Err("variants must be a list".to_string()),
+        _ => return Err("variants must be a list".into()),
     }
 
     // Create enum layout

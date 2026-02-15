@@ -371,7 +371,7 @@ fn test_division_by_zero_creates_condition() {
     let result = eval("(/ 10 0)");
     assert!(result.is_err());
     let err_msg = result.unwrap_err();
-    assert_eq!(err_msg, "Division by zero");
+    assert_eq!(err_msg, "Error: Division by zero");
 }
 
 #[test]
@@ -401,7 +401,7 @@ fn test_condition_creation_on_division_by_zero() {
     let result = eval("(/ 10 0)");
     assert!(result.is_err());
     let err_msg = result.unwrap_err();
-    assert_eq!(err_msg, "Division by zero");
+    assert_eq!(err_msg, "Error: Division by zero");
 }
 
 #[test]

@@ -1,13 +1,18 @@
 //! Struct operations primitives (immutable hash maps)
+use crate::error::LResult;
 use crate::value::{TableKey, Value};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 /// Create an immutable struct from key-value pairs
 /// (struct key1 val1 key2 val2 ...)
-pub fn prim_struct(args: &[Value]) -> Result<Value, String> {
+pub fn prim_struct(args: &[Value]) -> LResult<Value> {
     if !args.len().is_multiple_of(2) {
-        return Err("struct requires an even number of arguments (key-value pairs)".to_string());
+        return Err(
+            "struct requires an even number of arguments (key-value pairs)"
+                .to_string()
+                .into(),
+        );
     }
 
     let mut map = BTreeMap::new();
@@ -22,9 +27,13 @@ pub fn prim_struct(args: &[Value]) -> Result<Value, String> {
 
 /// Get a value from a struct by key
 /// `(struct-get struct key [default])`
-pub fn prim_struct_get(args: &[Value]) -> Result<Value, String> {
+pub fn prim_struct_get(args: &[Value]) -> LResult<Value> {
     if args.len() < 2 || args.len() > 3 {
-        return Err("struct-get requires 2 or 3 arguments (struct, key, [default])".to_string());
+        return Err(
+            "struct-get requires 2 or 3 arguments (struct, key, [default])"
+                .to_string()
+                .into(),
+        );
     }
 
     let s = args[0].as_struct()?;
@@ -40,9 +49,13 @@ pub fn prim_struct_get(args: &[Value]) -> Result<Value, String> {
 
 /// Create a new struct with an updated key-value pair (immutable)
 /// (struct-put struct key value) returns a new struct
-pub fn prim_struct_put(args: &[Value]) -> Result<Value, String> {
+pub fn prim_struct_put(args: &[Value]) -> LResult<Value> {
     if args.len() != 3 {
-        return Err("struct-put requires exactly 3 arguments (struct, key, value)".to_string());
+        return Err(
+            "struct-put requires exactly 3 arguments (struct, key, value)"
+                .to_string()
+                .into(),
+        );
     }
 
     let s = args[0].as_struct()?;
@@ -56,9 +69,11 @@ pub fn prim_struct_put(args: &[Value]) -> Result<Value, String> {
 
 /// Create a new struct without a key (immutable)
 /// (struct-del struct key) returns a new struct
-pub fn prim_struct_del(args: &[Value]) -> Result<Value, String> {
+pub fn prim_struct_del(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("struct-del requires exactly 2 arguments (struct, key)".to_string());
+        return Err("struct-del requires exactly 2 arguments (struct, key)"
+            .to_string()
+            .into());
     }
 
     let s = args[0].as_struct()?;
@@ -71,9 +86,11 @@ pub fn prim_struct_del(args: &[Value]) -> Result<Value, String> {
 
 /// Get all keys from a struct as a list
 /// (struct-keys struct)
-pub fn prim_struct_keys(args: &[Value]) -> Result<Value, String> {
+pub fn prim_struct_keys(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("struct-keys requires exactly 1 argument (struct)".to_string());
+        return Err("struct-keys requires exactly 1 argument (struct)"
+            .to_string()
+            .into());
     }
 
     let s = args[0].as_struct()?;
@@ -94,9 +111,11 @@ pub fn prim_struct_keys(args: &[Value]) -> Result<Value, String> {
 
 /// Get all values from a struct as a list
 /// (struct-values struct)
-pub fn prim_struct_values(args: &[Value]) -> Result<Value, String> {
+pub fn prim_struct_values(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("struct-values requires exactly 1 argument (struct)".to_string());
+        return Err("struct-values requires exactly 1 argument (struct)"
+            .to_string()
+            .into());
     }
 
     let s = args[0].as_struct()?;
@@ -106,9 +125,11 @@ pub fn prim_struct_values(args: &[Value]) -> Result<Value, String> {
 
 /// Check if a struct has a key
 /// (struct-has? struct key)
-pub fn prim_struct_has(args: &[Value]) -> Result<Value, String> {
+pub fn prim_struct_has(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("struct-has? requires exactly 2 arguments (struct, key)".to_string());
+        return Err("struct-has? requires exactly 2 arguments (struct, key)"
+            .to_string()
+            .into());
     }
 
     let s = args[0].as_struct()?;
@@ -119,9 +140,11 @@ pub fn prim_struct_has(args: &[Value]) -> Result<Value, String> {
 
 /// Get the number of entries in a struct
 /// (struct-length struct)
-pub fn prim_struct_length(args: &[Value]) -> Result<Value, String> {
+pub fn prim_struct_length(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("struct-length requires exactly 1 argument (struct)".to_string());
+        return Err("struct-length requires exactly 1 argument (struct)"
+            .to_string()
+            .into());
     }
 
     let s = args[0].as_struct()?;

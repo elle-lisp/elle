@@ -1,4 +1,5 @@
 //! JIT compilation primitives
+use crate::error::LResult;
 
 use crate::compiler::cranelift::context::JITContext;
 use crate::compiler::cranelift::jit_compile::{compile_closure, is_jit_compilable, CompileResult};
@@ -66,12 +67,9 @@ pub fn clear_jit_context() {
 /// is not possible (e.g., unsupported constructs in the body).
 ///
 /// Errors only on actual compilation failures, not on "not compilable" cases.
-pub fn prim_jit_compile(args: &[Value]) -> Result<Value, String> {
+pub fn prim_jit_compile(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!(
-            "jit-compile: expected 1 argument, got {}",
-            args.len()
-        ));
+        return Err(format!("jit-compile: expected 1 argument, got {}", args.len()).into());
     }
 
     let closure = match &args[0] {
@@ -81,10 +79,9 @@ pub fn prim_jit_compile(args: &[Value]) -> Result<Value, String> {
             return Ok(args[0].clone());
         }
         _ => {
-            return Err(format!(
-                "jit-compile: expected closure, got {}",
-                args[0].type_name()
-            ))
+            return Err(
+                format!("jit-compile: expected closure, got {}", args[0].type_name()).into(),
+            )
         }
     };
 
@@ -147,12 +144,9 @@ pub fn prim_jit_compile(args: &[Value]) -> Result<Value, String> {
 /// (jit-compiled? value) -> bool
 ///
 /// Returns true if the value is a JIT-compiled closure.
-pub fn prim_jit_compiled_p(args: &[Value]) -> Result<Value, String> {
+pub fn prim_jit_compiled_p(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!(
-            "jit-compiled?: expected 1 argument, got {}",
-            args.len()
-        ));
+        return Err(format!("jit-compiled?: expected 1 argument, got {}", args.len()).into());
     }
 
     Ok(Value::Bool(matches!(args[0], Value::JitClosure(_))))
@@ -161,12 +155,9 @@ pub fn prim_jit_compiled_p(args: &[Value]) -> Result<Value, String> {
 /// (jit-compilable? closure) -> bool
 ///
 /// Returns true if the closure can be JIT compiled.
-pub fn prim_jit_compilable_p(args: &[Value]) -> Result<Value, String> {
+pub fn prim_jit_compilable_p(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!(
-            "jit-compilable?: expected 1 argument, got {}",
-            args.len()
-        ));
+        return Err(format!("jit-compilable?: expected 1 argument, got {}", args.len()).into());
     }
 
     match &args[0] {
@@ -185,12 +176,9 @@ pub fn prim_jit_compilable_p(args: &[Value]) -> Result<Value, String> {
 /// Returns a struct with the following fields:
 /// - compiled-functions: Number of functions compiled to native code
 /// - jit-enabled: Whether JIT compilation is available
-pub fn prim_jit_stats(args: &[Value]) -> Result<Value, String> {
+pub fn prim_jit_stats(args: &[Value]) -> LResult<Value> {
     if !args.is_empty() {
-        return Err(format!(
-            "jit-stats: expected 0 arguments, got {}",
-            args.len()
-        ));
+        return Err(format!("jit-stats: expected 0 arguments, got {}", args.len()).into());
     }
 
     let mut stats = BTreeMap::new();

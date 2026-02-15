@@ -1,21 +1,20 @@
+use crate::error::{LError, LResult};
 use crate::value::Value;
 
 /// Import a module file
-pub fn prim_import_file(args: &[Value]) -> Result<Value, String> {
+pub fn prim_import_file(args: &[Value]) -> LResult<Value> {
     // (import-file "path/to/module.elle")
     // Loads and compiles a .elle file as a module
     if args.len() != 1 {
-        return Err(format!(
-            "import-file: expected 1 argument, got {}",
-            args.len()
-        ));
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     match &args[0] {
         Value::String(path) => {
             // Get VM context for file loading
-            let vm_ptr = crate::ffi_primitives::get_vm_context()
-                .ok_or("VM context not initialized for module loading")?;
+            let vm_ptr = crate::ffi_primitives::get_vm_context().ok_or_else(|| {
+                LError::runtime_error("VM context not initialized for module loading")
+            })?;
 
             unsafe {
                 let vm = &mut *vm_ptr;
@@ -29,13 +28,17 @@ pub fn prim_import_file(args: &[Value]) -> Result<Value, String> {
                 vm.mark_module_loaded(path.to_string());
 
                 // Get the caller's symbol table context
-                let symbols_ptr = crate::ffi_primitives::context::get_symbol_table()
-                    .ok_or("Symbol table context not initialized for module loading")?;
+                let symbols_ptr =
+                    crate::ffi_primitives::context::get_symbol_table().ok_or_else(|| {
+                        LError::runtime_error(
+                            "Symbol table context not initialized for module loading",
+                        )
+                    })?;
 
                 // Read and compile the file
                 let path_str = path.as_ref();
                 std::fs::read_to_string(path_str)
-                    .map_err(|e| format!("Failed to read module file '{}': {}", path_str, e))
+                    .map_err(|e| LError::file_read_error(path_str, e.to_string()))
                     .and_then(|contents| {
                         // Parse all forms in the module using the caller's symbol table
                         let symbols = &mut *symbols_ptr;
@@ -55,10 +58,10 @@ pub fn prim_import_file(args: &[Value]) -> Result<Value, String> {
                                 }
                                 Ok(None) => break,
                                 Err(e) => {
-                                    return Err(format!(
+                                    return Err(LError::runtime_error(format!(
                                         "Failed to tokenize module '{}': {}",
                                         path_str, e
-                                    ))
+                                    )))
                                 }
                             }
                         }
@@ -75,21 +78,24 @@ pub fn prim_import_file(args: &[Value]) -> Result<Value, String> {
                                     // Compile and execute using the caller's symbol table
                                     let expr = crate::compiler::value_to_expr(&value, symbols)
                                         .map_err(|e| {
-                                            format!(
+                                            LError::compile_error(format!(
                                                 "Failed to compile module '{}': {}",
                                                 path_str, e
-                                            )
+                                            ))
                                         })?;
                                     let bytecode = crate::compile(&expr);
                                     vm.execute(&bytecode).map_err(|e| {
-                                        format!("Failed to execute module '{}': {}", path_str, e)
+                                        LError::runtime_error(format!(
+                                            "Failed to execute module '{}': {}",
+                                            path_str, e
+                                        ))
                                     })?;
                                 }
                                 Err(e) => {
-                                    return Err(format!(
+                                    return Err(LError::runtime_error(format!(
                                         "Failed to parse module '{}': {}",
                                         path_str, e
-                                    ));
+                                    )));
                                 }
                             }
                         }
@@ -99,26 +105,24 @@ pub fn prim_import_file(args: &[Value]) -> Result<Value, String> {
                     .map(|_| Value::Bool(true))
             }
         }
-        _ => Err("import-file: argument must be a string".to_string()),
+        _ => Err(LError::type_mismatch("string", args[0].type_name())),
     }
 }
 
 /// Add a directory to the module search path
-pub fn prim_add_module_path(args: &[Value]) -> Result<Value, String> {
+pub fn prim_add_module_path(args: &[Value]) -> LResult<Value> {
     // (add-module-path "path")
     // Adds a directory to the module search path
     if args.len() != 1 {
-        return Err(format!(
-            "add-module-path: expected 1 argument, got {}",
-            args.len()
-        ));
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     match &args[0] {
         Value::String(path) => {
             // Get VM context
-            let vm_ptr = crate::ffi_primitives::get_vm_context()
-                .ok_or("VM context not initialized for module loading")?;
+            let vm_ptr = crate::ffi_primitives::get_vm_context().ok_or_else(|| {
+                LError::runtime_error("VM context not initialized for module loading")
+            })?;
 
             unsafe {
                 let vm = &mut *vm_ptr;
@@ -126,6 +130,6 @@ pub fn prim_add_module_path(args: &[Value]) -> Result<Value, String> {
                 Ok(Value::Nil)
             }
         }
-        _ => Err("add-module-path: argument must be a string".to_string()),
+        _ => Err(LError::type_mismatch("string", args[0].type_name())),
     }
 }

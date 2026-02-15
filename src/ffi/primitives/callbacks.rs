@@ -71,9 +71,9 @@ pub fn prim_free_callback(_vm: &mut VM, args: &[Value]) -> Result<Value, String>
     }
 }
 
-pub fn prim_make_c_callback_wrapper(args: &[Value]) -> Result<Value, String> {
+pub fn prim_make_c_callback_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
     if args.len() != 3 {
-        return Err("make-c-callback requires exactly 3 arguments".to_string());
+        return Err("make-c-callback requires exactly 3 arguments".into());
     }
 
     let closure = &args[0];
@@ -88,7 +88,7 @@ pub fn prim_make_c_callback_wrapper(args: &[Value]) -> Result<Value, String> {
                 .map(parse_ctype)
                 .collect::<Result<Vec<_>, _>>()?
         }
-        _ => return Err("arg-types must be a list".to_string()),
+        _ => return Err("arg-types must be a list".into()),
     };
 
     // Parse return type
@@ -100,27 +100,30 @@ pub fn prim_make_c_callback_wrapper(args: &[Value]) -> Result<Value, String> {
     // Register the closure with the callback registry
     let closure_rc = Rc::new(closure.clone());
     if !register_callback(cb_id, closure_rc) {
-        return Err(format!("Failed to register callback with ID {}", cb_id));
+        return Err(format!("Failed to register callback with ID {}", cb_id).into());
     }
 
     // Return callback ID as integer
     Ok(Value::Int(cb_id as i64))
 }
 
-pub fn prim_free_callback_wrapper(args: &[Value]) -> Result<Value, String> {
+/// (free-callback callback-id) -> nil
+///
+/// Frees a callback by ID, unregistering it and cleaning up.
+pub fn prim_free_callback_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
     if args.len() != 1 {
-        return Err("free-callback requires exactly 1 argument".to_string());
+        return Err("free-callback requires exactly 1 argument".into());
     }
 
     let cb_id = match &args[0] {
         Value::Int(id) => *id as u32,
-        _ => return Err("callback-id must be an integer".to_string()),
+        _ => return Err("callback-id must be an integer".into()),
     };
 
     // Unregister the callback from the registry
     if unregister_callback(cb_id) {
         Ok(Value::Nil)
     } else {
-        Err(format!("Callback with ID {} not found", cb_id))
+        Err(format!("Callback with ID {} not found", cb_id).into())
     }
 }

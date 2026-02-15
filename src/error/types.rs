@@ -1,15 +1,40 @@
 //! Error type definitions for Elle
 
+use crate::reader::SourceLoc;
 use std::error::Error as StdError;
 use std::fmt;
 
-/// Comprehensive typed error enum for Elle
-///
-/// Replaces generic `Result<T, String>` errors with specific error types
-/// for better error handling and context.
+/// Stack frame for error traces
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EllError {
-    // Type-related errors
+pub struct StackFrame {
+    pub function_name: Option<String>,
+    pub location: Option<SourceLoc>,
+}
+
+/// Source of stack trace — supports deferred capture
+#[derive(Debug, Clone, Default)]
+pub enum TraceSource {
+    /// No trace available
+    #[default]
+    None,
+    /// Captured from bytecode VM
+    Vm(Vec<StackFrame>),
+    /// Captured from CPS continuation chain (future)
+    Cps(Vec<StackFrame>),
+}
+
+/// Unified error type for Elle
+#[derive(Debug, Clone)]
+pub struct LError {
+    pub kind: ErrorKind,
+    pub location: Option<SourceLoc>,
+    pub trace: TraceSource,
+}
+
+/// Categorized error kinds
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ErrorKind {
+    // Type errors
     TypeMismatch {
         expected: String,
         got: String,
@@ -18,29 +43,41 @@ pub enum EllError {
         name: String,
     },
 
-    // Argument-related errors
+    // Arity errors
     ArityMismatch {
         expected: usize,
+        got: usize,
+    },
+    ArityAtLeast {
+        minimum: usize,
+        got: usize,
+    },
+    ArityRange {
+        min: usize,
+        max: usize,
         got: usize,
     },
     ArgumentError {
         message: String,
     },
 
-    // Index-related errors
+    // Index errors
     IndexOutOfBounds {
         index: isize,
         length: usize,
     },
 
-    // Arithmetic errors
+    // Arithmetic
     DivisionByZero,
+    NumericOverflow {
+        operation: String,
+    },
     InvalidNumericOperation {
         operation: String,
         reason: String,
     },
 
-    // FFI-related errors
+    // FFI
     FFIError {
         operation: String,
         message: String,
@@ -57,7 +94,7 @@ pub enum EllError {
         message: String,
     },
 
-    // Compiler errors
+    // Compiler
     SyntaxError {
         message: String,
         line: Option<usize>,
@@ -72,7 +109,7 @@ pub enum EllError {
         message: String,
     },
 
-    // Runtime errors
+    // Runtime
     RuntimeError {
         message: String,
     },
@@ -88,7 +125,7 @@ pub enum EllError {
         message: String,
     },
 
-    // File/IO errors
+    // IO
     FileNotFound {
         path: String,
     },
@@ -97,53 +134,47 @@ pub enum EllError {
         reason: String,
     },
 
-    // Generic error for fallback
+    // Fallback
     Generic {
         message: String,
     },
 }
 
-impl fmt::Display for EllError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.description())
-    }
-}
+/// Result type alias
+pub type LResult<T> = Result<T, LError>;
 
-impl StdError for EllError {}
-
-/// Conversion from EllError to String for compatibility
-impl From<EllError> for String {
-    fn from(err: EllError) -> String {
-        err.description()
-    }
-}
-
-/// Conversion from String to EllError for fallback
-impl From<String> for EllError {
-    fn from(msg: String) -> Self {
-        EllError::Generic { message: msg }
-    }
-}
-
-impl From<&str> for EllError {
-    fn from(msg: &str) -> Self {
-        EllError::Generic {
-            message: msg.to_string(),
+impl LError {
+    /// Create a new error with just a kind
+    pub fn new(kind: ErrorKind) -> Self {
+        LError {
+            kind,
+            location: None,
+            trace: TraceSource::None,
         }
     }
-}
 
-impl EllError {
-    /// Get a human-readable description of the error
+    /// Add location information
+    pub fn with_location(mut self, loc: SourceLoc) -> Self {
+        self.location = Some(loc);
+        self
+    }
+
+    /// Add trace information
+    pub fn with_trace(mut self, trace: TraceSource) -> Self {
+        self.trace = trace;
+        self
+    }
+
+    /// Get a human-readable description
     pub fn description(&self) -> String {
-        match self {
-            EllError::TypeMismatch { expected, got } => {
+        match &self.kind {
+            ErrorKind::TypeMismatch { expected, got } => {
                 format!("Type error: expected {}, got {}", expected, got)
             }
-            EllError::UndefinedVariable { name } => {
+            ErrorKind::UndefinedVariable { name } => {
                 format!("Reference error: undefined variable '{}'", name)
             }
-            EllError::ArityMismatch { expected, got } => {
+            ErrorKind::ArityMismatch { expected, got } => {
                 format!(
                     "Argument error: expected {} argument{}, got {}",
                     expected,
@@ -151,49 +182,116 @@ impl EllError {
                     got
                 )
             }
-            EllError::IndexOutOfBounds { index, length } => {
+            ErrorKind::ArityAtLeast { minimum, got } => {
+                format!(
+                    "Argument error: expected at least {} argument{}, got {}",
+                    minimum,
+                    if *minimum == 1 { "" } else { "s" },
+                    got
+                )
+            }
+            ErrorKind::ArityRange { min, max, got } => {
+                format!(
+                    "Argument error: expected {}-{} arguments, got {}",
+                    min, max, got
+                )
+            }
+            ErrorKind::IndexOutOfBounds { index, length } => {
                 format!(
                     "Index error: index {} out of bounds for length {}",
                     index, length
                 )
             }
-            EllError::DivisionByZero => "Arithmetic error: division by zero".to_string(),
-            EllError::InvalidNumericOperation { operation, reason } => {
+            ErrorKind::DivisionByZero => "Arithmetic error: division by zero".to_string(),
+            ErrorKind::NumericOverflow { operation } => {
+                format!("Arithmetic error: overflow in {}", operation)
+            }
+            ErrorKind::InvalidNumericOperation { operation, reason } => {
                 format!("Arithmetic error in {}: {}", operation, reason)
             }
-            EllError::FFIError { operation, message } => {
+            ErrorKind::FFIError { operation, message } => {
                 format!("FFI error in {}: {}", operation, message)
             }
-            EllError::LibraryNotFound { path } => {
+            ErrorKind::LibraryNotFound { path } => {
                 format!("Library not found: {}", path)
             }
-            EllError::SymbolNotFound { library, symbol } => {
+            ErrorKind::SymbolNotFound { library, symbol } => {
                 format!("Symbol '{}' not found in library '{}'", symbol, library)
             }
-            EllError::FFITypeError { ctype, message } => {
+            ErrorKind::FFITypeError { ctype, message } => {
                 format!("FFI type error for {}: {}", ctype, message)
             }
-            EllError::SyntaxError { message, line } => match line {
+            ErrorKind::SyntaxError { message, line } => match line {
                 Some(l) => format!("Syntax error at line {}: {}", l, message),
                 None => format!("Syntax error: {}", message),
             },
-            EllError::CompileError { message } => format!("Compile error: {}", message),
-            EllError::MacroError { message } => format!("Macro error: {}", message),
-            EllError::PatternError { message } => format!("Pattern error: {}", message),
-            EllError::RuntimeError { message } => format!("Runtime error: {}", message),
-            EllError::ExecutionError { message } => format!("Execution error: {}", message),
-            EllError::UncaughtException { message } => {
+            ErrorKind::CompileError { message } => format!("Compile error: {}", message),
+            ErrorKind::MacroError { message } => format!("Macro error: {}", message),
+            ErrorKind::PatternError { message } => format!("Pattern error: {}", message),
+            ErrorKind::RuntimeError { message } => format!("Runtime error: {}", message),
+            ErrorKind::ExecutionError { message } => format!("Execution error: {}", message),
+            ErrorKind::UncaughtException { message } => {
                 format!("Uncaught exception: {}", message)
             }
-            EllError::ExceptionInFinally { message } => {
+            ErrorKind::ExceptionInFinally { message } => {
                 format!("Exception in finally clause: {}", message)
             }
-            EllError::FileNotFound { path } => format!("File not found: {}", path),
-            EllError::FileReadError { path, reason } => {
+            ErrorKind::FileNotFound { path } => format!("File not found: {}", path),
+            ErrorKind::FileReadError { path, reason } => {
                 format!("Failed to read file {}: {}", path, reason)
             }
-            EllError::ArgumentError { message } => format!("Argument error: {}", message),
-            EllError::Generic { message } => format!("Error: {}", message),
+            ErrorKind::ArgumentError { message } => format!("Argument error: {}", message),
+            ErrorKind::Generic { message } => format!("Error: {}", message),
         }
+    }
+}
+
+impl fmt::Display for LError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Show description, then location if present, then trace if present
+        write!(f, "{}", self.description())?;
+        if let Some(ref loc) = self.location {
+            write!(f, "\n  at {}", loc)?;
+        }
+        match &self.trace {
+            TraceSource::None => {}
+            TraceSource::Vm(frames) | TraceSource::Cps(frames) => {
+                for frame in frames {
+                    write!(f, "\n    in ")?;
+                    if let Some(ref name) = frame.function_name {
+                        write!(f, "{}", name)?;
+                    } else {
+                        write!(f, "<anonymous>")?;
+                    }
+                    if let Some(ref loc) = frame.location {
+                        write!(f, " at {}", loc)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl StdError for LError {}
+
+// Compatibility conversions
+impl From<LError> for String {
+    fn from(err: LError) -> String {
+        err.description()
+    }
+}
+
+impl From<String> for LError {
+    fn from(msg: String) -> Self {
+        LError::new(ErrorKind::Generic { message: msg })
+    }
+}
+
+impl From<&str> for LError {
+    fn from(msg: &str) -> Self {
+        LError::new(ErrorKind::Generic {
+            message: msg.to_string(),
+        })
     }
 }

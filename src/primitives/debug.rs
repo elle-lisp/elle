@@ -1,13 +1,11 @@
+use crate::error::LResult;
 use crate::value::{list, Value};
 
 /// Prints a value with debug information
 /// (debug-print value)
-pub fn prim_debug_print(args: &[Value]) -> Result<Value, String> {
+pub fn prim_debug_print(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!(
-            "debug-print: expected 1 argument, got {}",
-            args.len()
-        ));
+        return Err(format!("debug-print: expected 1 argument, got {}", args.len()).into());
     }
 
     eprintln!("[DEBUG] {:?}", args[0]);
@@ -16,9 +14,9 @@ pub fn prim_debug_print(args: &[Value]) -> Result<Value, String> {
 
 /// Traces execution with a label
 /// (trace name value)
-pub fn prim_trace(args: &[Value]) -> Result<Value, String> {
+pub fn prim_trace(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err(format!("trace: expected 2 arguments, got {}", args.len()));
+        return Err(format!("trace: expected 2 arguments, got {}", args.len()).into());
     }
 
     match &args[0] {
@@ -30,15 +28,17 @@ pub fn prim_trace(args: &[Value]) -> Result<Value, String> {
             eprintln!("[TRACE] {:?}: {:?}", label_id, args[1]);
             Ok(args[1].clone())
         }
-        _ => Err("trace: first argument must be a string or symbol".to_string()),
+        _ => Err("trace: first argument must be a string or symbol"
+            .to_string()
+            .into()),
     }
 }
 
 /// Times the execution of a thunk
 /// (profile thunk)
-pub fn prim_profile(args: &[Value]) -> Result<Value, String> {
+pub fn prim_profile(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!("profile: expected 1 argument, got {}", args.len()));
+        return Err(format!("profile: expected 1 argument, got {}", args.len()).into());
     }
 
     // In production, would time execution of closure
@@ -47,14 +47,14 @@ pub fn prim_profile(args: &[Value]) -> Result<Value, String> {
         Value::Closure(_) | Value::NativeFn(_) => {
             Ok(Value::String("profiling-not-yet-implemented".into()))
         }
-        _ => Err("profile: argument must be a function".to_string()),
+        _ => Err("profile: argument must be a function".to_string().into()),
     }
 }
 
 /// Returns memory usage statistics
 /// (memory-usage)
 /// Returns a list: (rss-bytes virtual-bytes)
-pub fn prim_memory_usage(_args: &[Value]) -> Result<Value, String> {
+pub fn prim_memory_usage(_args: &[Value]) -> LResult<Value> {
     let (rss_bytes, virtual_bytes) = get_memory_usage();
     Ok(list(vec![
         Value::Int(rss_bytes as i64),

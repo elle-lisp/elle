@@ -9,41 +9,46 @@ mod serializer;
 pub use parser::JsonParser;
 pub use serializer::{escape_json_string, serialize_value, serialize_value_pretty};
 
+use crate::error::{LError, LResult};
 use crate::value::Value;
 use std::rc::Rc;
 
 /// Parse a JSON string into Elle values
-pub fn prim_json_parse(args: &[Value]) -> Result<Value, String> {
+pub fn prim_json_parse(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("json-parse requires exactly 1 argument".to_string());
+        return Err("json-parse requires exactly 1 argument".to_string().into());
     }
 
     let json_str = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("json-parse requires a string argument".to_string()),
+        _ => return Err("json-parse requires a string argument".to_string().into()),
     };
 
     let mut parser = JsonParser::new(json_str);
-    parser.parse()
+    parser.parse().map_err(LError::from)
 }
 
 /// Serialize an Elle value to compact JSON
-pub fn prim_json_serialize(args: &[Value]) -> Result<Value, String> {
+pub fn prim_json_serialize(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("json-serialize requires exactly 1 argument".to_string());
+        return Err("json-serialize requires exactly 1 argument"
+            .to_string()
+            .into());
     }
 
-    let json_str = serialize_value(&args[0])?;
+    let json_str = serialize_value(&args[0]).map_err(LError::from)?;
     Ok(Value::String(Rc::from(json_str)))
 }
 
 /// Serialize an Elle value to pretty-printed JSON with 2-space indentation
-pub fn prim_json_serialize_pretty(args: &[Value]) -> Result<Value, String> {
+pub fn prim_json_serialize_pretty(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("json-serialize-pretty requires exactly 1 argument".to_string());
+        return Err("json-serialize-pretty requires exactly 1 argument"
+            .to_string()
+            .into());
     }
 
-    let json_str = serialize_value_pretty(&args[0], 0)?;
+    let json_str = serialize_value_pretty(&args[0], 0).map_err(LError::from)?;
     Ok(Value::String(Rc::from(json_str)))
 }
 

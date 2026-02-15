@@ -1,3 +1,4 @@
+use crate::error::LResult;
 use crate::ffi_primitives;
 use crate::symbol::SymbolTable;
 use crate::value::Value;
@@ -399,7 +400,7 @@ fn register_fn(
     vm: &mut VM,
     symbols: &mut SymbolTable,
     name: &str,
-    func: fn(&[Value]) -> Result<Value, String>,
+    func: fn(&[Value]) -> LResult<Value>,
 ) {
     let sym_id = symbols.intern(name);
     vm.set_global(sym_id.0, Value::NativeFn(func));
@@ -410,7 +411,7 @@ fn register_vm_aware_fn(
     vm: &mut VM,
     symbols: &mut SymbolTable,
     name: &str,
-    func: fn(&[Value], &mut VM) -> Result<Value, String>,
+    func: fn(&[Value], &mut VM) -> LResult<Value>,
 ) {
     let sym_id = symbols.intern(name);
     vm.set_global(sym_id.0, Value::VmAwareFn(func));

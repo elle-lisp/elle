@@ -13,6 +13,7 @@ use crate::compiler::cps::{
     Action, Continuation, CpsInterpreter, CpsTransformer, Trampoline, TrampolineResult,
 };
 use crate::compiler::effects::EffectContext;
+use crate::error::LResult;
 use crate::value::{Coroutine, CoroutineState, Value};
 use crate::vm::{VmResult, VM};
 use std::cell::RefMut;
@@ -21,12 +22,13 @@ use std::rc::Rc;
 /// F1: Create a coroutine from a function
 ///
 /// (make-coroutine fn) -> coroutine
-pub fn prim_make_coroutine(args: &[Value]) -> Result<Value, String> {
+pub fn prim_make_coroutine(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
         return Err(format!(
             "make-coroutine requires exactly 1 argument, got {}",
             args.len()
-        ));
+        )
+        .into());
     }
 
     match &args[0] {
@@ -43,25 +45,27 @@ pub fn prim_make_coroutine(args: &[Value]) -> Result<Value, String> {
                     coroutine,
                 ))))
             } else {
-                Err("JitClosure has no source for coroutine".to_string())
+                Err("JitClosure has no source for coroutine".to_string().into())
             }
         }
         other => Err(format!(
             "make-coroutine requires a function, got {}",
             other.type_name()
-        )),
+        )
+        .into()),
     }
 }
 
 /// F3: Get the status of a coroutine
 ///
 /// (coroutine-status co) -> string
-pub fn prim_coroutine_status(args: &[Value]) -> Result<Value, String> {
+pub fn prim_coroutine_status(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
         return Err(format!(
             "coroutine-status requires exactly 1 argument, got {}",
             args.len()
-        ));
+        )
+        .into());
     }
 
     match &args[0] {
@@ -79,42 +83,49 @@ pub fn prim_coroutine_status(args: &[Value]) -> Result<Value, String> {
         other => Err(format!(
             "coroutine-status requires a coroutine, got {}",
             other.type_name()
-        )),
+        )
+        .into()),
     }
 }
 
 /// Check if a coroutine is done
 ///
 /// (coroutine-done? co) -> bool
-pub fn prim_coroutine_done(args: &[Value]) -> Result<Value, String> {
+pub fn prim_coroutine_done(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
         return Err(format!(
             "coroutine-done? requires exactly 1 argument, got {}",
             args.len()
-        ));
+        )
+        .into());
     }
 
     match &args[0] {
         Value::Coroutine(co) => {
             let borrowed = co.borrow();
-            Ok(Value::Bool(matches!(borrowed.state, CoroutineState::Done)))
+            Ok(Value::Bool(matches!(
+                borrowed.state,
+                CoroutineState::Done | CoroutineState::Error(_)
+            )))
         }
         other => Err(format!(
             "coroutine-done? requires a coroutine, got {}",
             other.type_name()
-        )),
+        )
+        .into()),
     }
 }
 
 /// Get the last yielded value from a coroutine
 ///
 /// (coroutine-value co) -> value
-pub fn prim_coroutine_value(args: &[Value]) -> Result<Value, String> {
+pub fn prim_coroutine_value(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
         return Err(format!(
             "coroutine-value requires exactly 1 argument, got {}",
             args.len()
-        ));
+        )
+        .into());
     }
 
     match &args[0] {
@@ -125,19 +136,17 @@ pub fn prim_coroutine_value(args: &[Value]) -> Result<Value, String> {
         other => Err(format!(
             "coroutine-value requires a coroutine, got {}",
             other.type_name()
-        )),
+        )
+        .into()),
     }
 }
 
 /// Check if a value is a coroutine
 ///
 /// (coroutine? val) -> bool
-pub fn prim_is_coroutine(args: &[Value]) -> Result<Value, String> {
+pub fn prim_is_coroutine(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!(
-            "coroutine? requires exactly 1 argument, got {}",
-            args.len()
-        ));
+        return Err(format!("coroutine? requires exactly 1 argument, got {}", args.len()).into());
     }
 
     Ok(Value::Bool(matches!(args[0], Value::Coroutine(_))))
@@ -151,12 +160,13 @@ pub fn prim_is_coroutine(args: &[Value]) -> Result<Value, String> {
 /// Resumes execution of a suspended coroutine.
 /// If the coroutine yields, returns the yielded value.
 /// If the coroutine completes, returns the final value.
-pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> Result<Value, String> {
+pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
     if args.is_empty() || args.len() > 2 {
         return Err(format!(
             "coroutine-resume requires 1 or 2 arguments, got {}",
             args.len()
-        ));
+        )
+        .into());
     }
 
     let resume_value = args.get(1).cloned().unwrap_or(Value::Nil);
@@ -245,7 +255,7 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> Result<Value, Strin
                         }
                         Err(e) => {
                             borrowed.state = CoroutineState::Error(e.clone());
-                            Err(e)
+                            Err(e.into())
                         }
                     }
                 }
@@ -292,19 +302,22 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> Result<Value, Strin
                         }
                         Err(e) => {
                             borrowed.state = CoroutineState::Error(e.clone());
-                            Err(e)
+                            Err(e.into())
                         }
                     }
                 }
-                CoroutineState::Running => Err("Coroutine is already running".to_string()),
-                CoroutineState::Done => Err("Cannot resume completed coroutine".to_string()),
-                CoroutineState::Error(e) => Err(format!("Cannot resume errored coroutine: {}", e)),
+                CoroutineState::Running => Err("Coroutine is already running".to_string().into()),
+                CoroutineState::Done => Err("Cannot resume completed coroutine".to_string().into()),
+                CoroutineState::Error(e) => {
+                    Err(format!("Cannot resume errored coroutine: {}", e).into())
+                }
             }
         }
         other => Err(format!(
             "coroutine-resume requires a coroutine, got {}",
             other.type_name()
-        )),
+        )
+        .into()),
     }
 }
 
@@ -315,7 +328,7 @@ fn execute_coroutine_cps(
     co: Rc<std::cell::RefCell<Coroutine>>,
     mut borrowed: RefMut<Coroutine>,
     vm: &mut VM,
-) -> Result<Value, String> {
+) -> LResult<Value> {
     borrowed.state = CoroutineState::Running;
 
     // Get closure info
@@ -370,7 +383,7 @@ fn execute_coroutine_cps(
             // Update coroutine state to Error
             let mut borrowed = co.borrow_mut();
             borrowed.state = CoroutineState::Error(e.clone());
-            return Err(e);
+            return Err(e.into());
         }
     };
 
@@ -404,7 +417,7 @@ fn execute_coroutine_cps(
         }
         TrampolineResult::Error(e) => {
             borrowed.state = CoroutineState::Error(e.clone());
-            Err(e)
+            Err(e.into())
         }
     }
 }
@@ -418,7 +431,7 @@ fn resume_coroutine_cps(
     continuation: Rc<Continuation>,
     resume_value: Value,
     vm: &mut VM,
-) -> Result<Value, String> {
+) -> LResult<Value> {
     borrowed.state = CoroutineState::Running;
     // Use saved environment if available, otherwise create from closure's environment
     let env = borrowed.saved_env.clone().unwrap_or_else(|| {
@@ -462,7 +475,7 @@ fn resume_coroutine_cps(
         }
         TrampolineResult::Error(e) => {
             borrowed.state = CoroutineState::Error(e.clone());
-            Err(e)
+            Err(e.into())
         }
     }
 }
@@ -491,12 +504,9 @@ fn register_global_effects(effect_ctx: &mut EffectContext, vm: &VM) {
 ///
 /// Yields all values from the sub-coroutine until it completes,
 /// then returns the sub-coroutine's final value.
-pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> Result<Value, String> {
+pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!(
-            "yield-from requires exactly 1 argument, got {}",
-            args.len()
-        ));
+        return Err(format!("yield-from requires exactly 1 argument, got {}", args.len()).into());
     }
 
     match &args[0] {
@@ -516,14 +526,13 @@ pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> Result<Value, String> {
                     let borrowed = co.borrow();
                     Ok(borrowed.yielded_value.clone().unwrap_or(Value::Nil))
                 }
-                CoroutineState::Error(e) => Err(e.clone()),
-                CoroutineState::Running => Err("Sub-coroutine is already running".to_string()),
+                CoroutineState::Error(e) => Err(e.clone().into()),
+                CoroutineState::Running => {
+                    Err("Sub-coroutine is already running".to_string().into())
+                }
             }
         }
-        other => Err(format!(
-            "yield-from requires a coroutine, got {}",
-            other.type_name()
-        )),
+        other => Err(format!("yield-from requires a coroutine, got {}", other.type_name()).into()),
     }
 }
 
@@ -532,12 +541,13 @@ pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> Result<Value, String> {
 /// (coroutine->iterator co) -> iterator
 ///
 /// Creates an iterator that yields values from the coroutine.
-pub fn prim_coroutine_to_iterator(args: &[Value]) -> Result<Value, String> {
+pub fn prim_coroutine_to_iterator(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
         return Err(format!(
             "coroutine->iterator requires exactly 1 argument, got {}",
             args.len()
-        ));
+        )
+        .into());
     }
 
     match &args[0] {
@@ -549,7 +559,8 @@ pub fn prim_coroutine_to_iterator(args: &[Value]) -> Result<Value, String> {
         other => Err(format!(
             "coroutine->iterator requires a coroutine, got {}",
             other.type_name()
-        )),
+        )
+        .into()),
     }
 }
 
@@ -558,12 +569,13 @@ pub fn prim_coroutine_to_iterator(args: &[Value]) -> Result<Value, String> {
 /// (coroutine-next co) -> (value . done?)
 ///
 /// Returns a pair of (value, done-flag).
-pub fn prim_coroutine_next(args: &[Value], vm: &mut VM) -> Result<Value, String> {
+pub fn prim_coroutine_next(args: &[Value], vm: &mut VM) -> LResult<Value> {
     if args.len() != 1 {
         return Err(format!(
             "coroutine-next requires exactly 1 argument, got {}",
             args.len()
-        ));
+        )
+        .into());
     }
 
     match &args[0] {
@@ -588,7 +600,8 @@ pub fn prim_coroutine_next(args: &[Value], vm: &mut VM) -> Result<Value, String>
         other => Err(format!(
             "coroutine-next requires a coroutine, got {}",
             other.type_name()
-        )),
+        )
+        .into()),
     }
 }
 

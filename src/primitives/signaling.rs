@@ -2,20 +2,23 @@
 //!
 //! Provides signal, warn, and error functions for the condition system.
 
+use crate::error::LResult;
 use crate::value::{Condition, Value};
 use std::rc::Rc;
 
 /// Signal a condition (silent - just propagates)
-pub fn prim_signal(args: &[Value]) -> Result<Value, String> {
+pub fn prim_signal(args: &[Value]) -> LResult<Value> {
     if args.is_empty() {
-        return Err("signal requires at least 1 argument (condition ID)".to_string());
+        return Err("signal requires at least 1 argument (condition ID)"
+            .to_string()
+            .into());
     }
 
     // First arg should be the exception ID
     match &args[0] {
         Value::Int(id) => {
             if *id < 0 || *id > u32::MAX as i64 {
-                return Err(format!("Invalid exception ID: {}", id));
+                return Err(format!("Invalid exception ID: {}", id).into());
             }
 
             let mut condition = Condition::new(*id as u32);
@@ -28,18 +31,20 @@ pub fn prim_signal(args: &[Value]) -> Result<Value, String> {
 
             Ok(Value::Condition(Rc::new(condition)))
         }
-        _ => Err("signal: first argument must be an integer (exception ID)".to_string()),
+        _ => Err("signal: first argument must be an integer (exception ID)"
+            .to_string()
+            .into()),
     }
 }
 
 /// Warn about a condition (prints if unhandled)
-pub fn prim_warn(args: &[Value]) -> Result<Value, String> {
+pub fn prim_warn(args: &[Value]) -> LResult<Value> {
     // Same as signal for now - actual warning behavior would be in the handler
     prim_signal(args)
 }
 
 /// Signal an error condition (goes to debugger if unhandled)
-pub fn prim_error(args: &[Value]) -> Result<Value, String> {
+pub fn prim_error(args: &[Value]) -> LResult<Value> {
     // Same as signal for now - actual error behavior would be in the handler
     prim_signal(args)
 }
