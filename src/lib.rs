@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 //! # Elle - A High-Performance Lisp Interpreter
 //!
 //! Elle is a bytecode-compiled Lisp interpreter written in Rust with a register-based VM.

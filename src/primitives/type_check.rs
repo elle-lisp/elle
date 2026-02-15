@@ -1,35 +1,36 @@
 //! Type checking primitives
+use crate::error::{LError, LResult};
 use crate::ffi::primitives::context::get_symbol_table;
 use crate::value::Value;
 
 /// Check if value is nil
-pub fn prim_is_nil(args: &[Value]) -> Result<Value, String> {
+pub fn prim_is_nil(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("nil? requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     Ok(Value::Bool(args[0].is_nil()))
 }
 
 /// Check if value is a pair (cons cell)
-pub fn prim_is_pair(args: &[Value]) -> Result<Value, String> {
+pub fn prim_is_pair(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("pair? requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     Ok(Value::Bool(matches!(args[0], Value::Cons(_))))
 }
 
 /// Check if value is a list (nil or cons cell)
-pub fn prim_is_list(args: &[Value]) -> Result<Value, String> {
+pub fn prim_is_list(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("list? requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     Ok(Value::Bool(matches!(args[0], Value::Nil | Value::Cons(_))))
 }
 
 /// Check if value is a number
-pub fn prim_is_number(args: &[Value]) -> Result<Value, String> {
+pub fn prim_is_number(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("number? requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     Ok(Value::Bool(matches!(
         args[0],
@@ -38,33 +39,33 @@ pub fn prim_is_number(args: &[Value]) -> Result<Value, String> {
 }
 
 /// Check if value is a symbol
-pub fn prim_is_symbol(args: &[Value]) -> Result<Value, String> {
+pub fn prim_is_symbol(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("symbol? requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     Ok(Value::Bool(matches!(args[0], Value::Symbol(_))))
 }
 
 /// Check if value is a string
-pub fn prim_is_string(args: &[Value]) -> Result<Value, String> {
+pub fn prim_is_string(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("string? requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     Ok(Value::Bool(matches!(args[0], Value::String(_))))
 }
 
 /// Check if value is a boolean
-pub fn prim_is_boolean(args: &[Value]) -> Result<Value, String> {
+pub fn prim_is_boolean(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("boolean? requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     Ok(Value::Bool(matches!(args[0], Value::Bool(_))))
 }
 
 /// Get the type name of a value as a keyword
-pub fn prim_type_of(args: &[Value]) -> Result<Value, String> {
+pub fn prim_type_of(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("type-of requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     let type_name = args[0].type_name();

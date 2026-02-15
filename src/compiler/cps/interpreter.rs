@@ -803,9 +803,9 @@ impl<'a> CpsInterpreter<'a> {
                     .execute_bytecode(&closure.bytecode, &closure.constants, Some(&env_rc))
             }
 
-            Value::NativeFn(f) => f(args),
+            Value::NativeFn(f) => f(args).map_err(|e| e.into()),
 
-            Value::VmAwareFn(f) => f(args, self.vm),
+            Value::VmAwareFn(f) => f(args, self.vm).map_err(|e| e.into()),
 
             _ => Err(format!("Cannot call {}", func.type_name())),
         }

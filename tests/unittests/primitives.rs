@@ -1,4 +1,5 @@
 // DEFENSE: Primitives are the building blocks - must be correct
+use elle::error::LError;
 use elle::ffi::primitives::context::set_symbol_table;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
@@ -20,7 +21,8 @@ fn get_primitive(vm: &VM, symbols: &mut SymbolTable, name: &str) -> Value {
     vm.get_global(id.0).unwrap().clone()
 }
 
-fn call_primitive(prim: &Value, args: &[Value]) -> Result<Value, String> {
+#[allow(clippy::result_large_err)]
+fn call_primitive(prim: &Value, args: &[Value]) -> Result<Value, LError> {
     match prim {
         Value::NativeFn(f) => f(args),
         _ => panic!("Not a function"),
@@ -436,7 +438,7 @@ fn test_throw() {
     // throw with string message should produce error
     let result = call_primitive(&throw_fn, &[Value::String("Test error".into())]);
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err(), "Test error");
+    assert_eq!(result.unwrap_err().to_string(), "Error: Test error");
 }
 
 #[test]
@@ -1500,7 +1502,7 @@ fn test_join_primitive() {
     // join with invalid argument (not a thread handle)
     let result = call_primitive(&join, &[Value::String("thread-id".into())]);
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("thread handle"));
+    assert!(result.unwrap_err().to_string().contains("thread handle"));
 }
 
 #[test]

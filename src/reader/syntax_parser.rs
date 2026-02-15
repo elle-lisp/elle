@@ -1,0 +1,706 @@
+//! Parser that produces Syntax nodes instead of Value
+//!
+//! This parser is symbol-table-free and preserves source spans on every node.
+//! It does NOT:
+//! - Intern symbols (leaves them as strings)
+//! - Expand qualified symbols to (qualified-ref ...)
+//! - Desugar quote forms to lists
+//!
+//! This is a parallel implementation to the existing Value-producing parser.
+
+use super::token::{OwnedToken, SourceLoc};
+use crate::syntax::{Span, Syntax, SyntaxKind};
+
+pub struct SyntaxReader {
+    tokens: Vec<OwnedToken>,
+    locations: Vec<SourceLoc>,
+    pos: usize,
+}
+
+impl SyntaxReader {
+    pub fn new(tokens: Vec<OwnedToken>, locations: Vec<SourceLoc>) -> Self {
+        SyntaxReader {
+            tokens,
+            locations,
+            pos: 0,
+        }
+    }
+
+    fn current(&self) -> Option<&OwnedToken> {
+        self.tokens.get(self.pos)
+    }
+
+    fn current_location(&self) -> SourceLoc {
+        self.locations.get(self.pos).cloned().unwrap_or_else(|| {
+            // If we're past the end, use the last location
+            self.locations
+                .last()
+                .cloned()
+                .unwrap_or_else(SourceLoc::start)
+        })
+    }
+
+    fn advance(&mut self) -> Option<OwnedToken> {
+        let token = self.current().cloned();
+        self.pos += 1;
+        token
+    }
+
+    /// Convert a SourceLoc to a Span
+    fn source_loc_to_span(&self, loc: &SourceLoc, end_offset: usize) -> Span {
+        let file = if loc.is_unknown() {
+            None
+        } else {
+            Some(loc.file.clone())
+        };
+
+        let mut span = Span::new(0, end_offset, loc.line as u32, loc.col as u32);
+        if let Some(f) = file {
+            span = span.with_file(f);
+        }
+        span
+    }
+
+    /// Try to read a single syntax form. Returns None at EOF.
+    pub fn try_read(&mut self) -> Option<Result<Syntax, String>> {
+        let token = self.current().cloned()?;
+        let loc = self.current_location();
+        Some(self.read_one(&token, &loc))
+    }
+
+    /// Read a single syntax form. Returns error at EOF.
+    pub fn read(&mut self) -> Result<Syntax, String> {
+        match self.try_read() {
+            Some(result) => result,
+            None => {
+                let loc = self.current_location();
+                Err(format!("{}: unexpected end of input", loc.position()))
+            }
+        }
+    }
+
+    /// Read all remaining forms
+    pub fn read_all(&mut self) -> Result<Vec<Syntax>, String> {
+        let mut results = Vec::new();
+        while self.current().is_some() {
+            results.push(self.read()?);
+        }
+        Ok(results)
+    }
+
+    fn read_one(&mut self, token: &OwnedToken, loc: &SourceLoc) -> Result<Syntax, String> {
+        match token {
+            OwnedToken::LeftParen => self.read_list(loc),
+            OwnedToken::LeftBracket => self.read_vector(loc),
+            OwnedToken::LeftBrace => self.read_struct(loc),
+            OwnedToken::ListSugar => self.read_list_sugar(loc),
+
+            OwnedToken::Quote => {
+                self.advance();
+                let inner = self.read()?;
+                let start_span = self.source_loc_to_span(loc, loc.col + 1);
+                let span = start_span.merge(&inner.span);
+                Ok(Syntax::new(SyntaxKind::Quote(Box::new(inner)), span))
+            }
+            OwnedToken::Quasiquote => {
+                self.advance();
+                let inner = self.read()?;
+                let start_span = self.source_loc_to_span(loc, loc.col + 1);
+                let span = start_span.merge(&inner.span);
+                Ok(Syntax::new(SyntaxKind::Quasiquote(Box::new(inner)), span))
+            }
+            OwnedToken::Unquote => {
+                self.advance();
+                let inner = self.read()?;
+                let start_span = self.source_loc_to_span(loc, loc.col + 1);
+                let span = start_span.merge(&inner.span);
+                Ok(Syntax::new(SyntaxKind::Unquote(Box::new(inner)), span))
+            }
+            OwnedToken::UnquoteSplicing => {
+                self.advance();
+                let inner = self.read()?;
+                let start_span = self.source_loc_to_span(loc, loc.col + 2);
+                let span = start_span.merge(&inner.span);
+                Ok(Syntax::new(
+                    SyntaxKind::UnquoteSplicing(Box::new(inner)),
+                    span,
+                ))
+            }
+
+            OwnedToken::Integer(n) => {
+                let span = self.source_loc_to_span(loc, loc.col + 1);
+                self.advance();
+                Ok(Syntax::new(SyntaxKind::Int(*n), span))
+            }
+            OwnedToken::Float(f) => {
+                let span = self.source_loc_to_span(loc, loc.col + 1);
+                self.advance();
+                Ok(Syntax::new(SyntaxKind::Float(*f), span))
+            }
+            OwnedToken::String(s) => {
+                let span = self.source_loc_to_span(loc, loc.col + s.len() + 2);
+                self.advance();
+                Ok(Syntax::new(SyntaxKind::String(s.clone()), span))
+            }
+            OwnedToken::Bool(b) => {
+                let span = self.source_loc_to_span(loc, loc.col + 2);
+                self.advance();
+                Ok(Syntax::new(SyntaxKind::Bool(*b), span))
+            }
+            OwnedToken::Nil => {
+                let span = self.source_loc_to_span(loc, loc.col + 3);
+                self.advance();
+                Ok(Syntax::new(SyntaxKind::Nil, span))
+            }
+            OwnedToken::Symbol(s) => {
+                // Do NOT parse qualified symbols - leave them as-is
+                let span = self.source_loc_to_span(loc, loc.col + s.len());
+                self.advance();
+                Ok(Syntax::new(SyntaxKind::Symbol(s.clone()), span))
+            }
+            OwnedToken::Keyword(s) => {
+                let span = self.source_loc_to_span(loc, loc.col + s.len() + 1);
+                self.advance();
+                Ok(Syntax::new(SyntaxKind::Keyword(s.clone()), span))
+            }
+
+            OwnedToken::RightParen => Err(format!(
+                "{}: unexpected closing parenthesis",
+                loc.position()
+            )),
+            OwnedToken::RightBracket => {
+                Err(format!("{}: unexpected closing bracket", loc.position()))
+            }
+            OwnedToken::RightBrace => Err(format!("{}: unexpected closing brace", loc.position())),
+        }
+    }
+
+    fn read_list(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+        self.advance(); // skip (
+        let mut elements = Vec::new();
+
+        loop {
+            match self.current() {
+                None => {
+                    return Err(format!(
+                        "{}: unterminated list (missing closing paren)",
+                        start_loc.position()
+                    ));
+                }
+                Some(OwnedToken::RightParen) => {
+                    let end_loc = self.current_location();
+                    self.advance();
+                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    return Ok(Syntax::new(SyntaxKind::List(elements), span));
+                }
+                _ => elements.push(self.read()?),
+            }
+        }
+    }
+
+    fn read_vector(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+        self.advance(); // skip [
+        let mut elements = Vec::new();
+
+        loop {
+            match self.current() {
+                None => {
+                    return Err(format!(
+                        "{}: unterminated vector (missing closing bracket)",
+                        start_loc.position()
+                    ));
+                }
+                Some(OwnedToken::RightBracket) => {
+                    let end_loc = self.current_location();
+                    self.advance();
+                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    return Ok(Syntax::new(SyntaxKind::Vector(elements), span));
+                }
+                _ => elements.push(self.read()?),
+            }
+        }
+    }
+
+    fn read_struct(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+        self.advance(); // skip {
+        let mut elements = Vec::new();
+
+        loop {
+            match self.current() {
+                None => {
+                    return Err(format!(
+                        "{}: unterminated struct (missing closing brace)",
+                        start_loc.position()
+                    ));
+                }
+                Some(OwnedToken::RightBrace) => {
+                    let end_loc = self.current_location();
+                    self.advance();
+
+                    // Prepend 'struct' symbol
+                    let struct_sym = Syntax::new(
+                        SyntaxKind::Symbol("struct".to_string()),
+                        self.source_loc_to_span(start_loc, start_loc.col + 1),
+                    );
+                    elements.insert(0, struct_sym);
+
+                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    return Ok(Syntax::new(SyntaxKind::List(elements), span));
+                }
+                _ => elements.push(self.read()?),
+            }
+        }
+    }
+
+    fn read_list_sugar(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+        self.advance(); // skip @
+
+        match self.current() {
+            Some(OwnedToken::LeftBracket) => {
+                // @[...] is sugar for (list ...)
+                self.advance(); // skip [
+                let mut elements = Vec::new();
+
+                loop {
+                    match self.current() {
+                        None => {
+                            return Err(format!(
+                                "{}: unterminated list literal",
+                                start_loc.position()
+                            ));
+                        }
+                        Some(OwnedToken::RightBracket) => {
+                            let end_loc = self.current_location();
+                            self.advance();
+
+                            // Prepend 'list' symbol
+                            let list_sym = Syntax::new(
+                                SyntaxKind::Symbol("list".to_string()),
+                                self.source_loc_to_span(start_loc, start_loc.col + 1),
+                            );
+                            elements.insert(0, list_sym);
+
+                            let span = self.merge_spans(start_loc, &end_loc, &elements);
+                            return Ok(Syntax::new(SyntaxKind::List(elements), span));
+                        }
+                        _ => elements.push(self.read()?),
+                    }
+                }
+            }
+            Some(OwnedToken::LeftBrace) => {
+                // @{...} is sugar for (table ...)
+                self.advance(); // skip {
+                let mut elements = Vec::new();
+
+                loop {
+                    match self.current() {
+                        None => {
+                            return Err(format!(
+                                "{}: unterminated table literal",
+                                start_loc.position()
+                            ));
+                        }
+                        Some(OwnedToken::RightBrace) => {
+                            let end_loc = self.current_location();
+                            self.advance();
+
+                            // Prepend 'table' symbol
+                            let table_sym = Syntax::new(
+                                SyntaxKind::Symbol("table".to_string()),
+                                self.source_loc_to_span(start_loc, start_loc.col + 1),
+                            );
+                            elements.insert(0, table_sym);
+
+                            let span = self.merge_spans(start_loc, &end_loc, &elements);
+                            return Ok(Syntax::new(SyntaxKind::List(elements), span));
+                        }
+                        _ => elements.push(self.read()?),
+                    }
+                }
+            }
+            _ => Err(format!(
+                "{}: @ must be followed by [...] or {{...}}",
+                start_loc.position()
+            )),
+        }
+    }
+
+    /// Merge spans from start location to end location, or use element spans if available
+    fn merge_spans(&self, start_loc: &SourceLoc, end_loc: &SourceLoc, elements: &[Syntax]) -> Span {
+        if elements.is_empty() {
+            // Empty container - use delimiter span
+            self.source_loc_to_span(start_loc, end_loc.col + 1)
+        } else {
+            // Merge from first element to last element
+            elements[0].span.merge(&elements[elements.len() - 1].span)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reader::Lexer;
+
+    fn lex_and_parse(input: &str) -> Result<Syntax, String> {
+        let mut lexer = Lexer::new(input);
+        let mut tokens = Vec::new();
+        let mut locations = Vec::new();
+
+        while let Some(token_with_loc) = lexer.next_token_with_loc()? {
+            tokens.push(OwnedToken::from(token_with_loc.token));
+            locations.push(token_with_loc.loc);
+        }
+
+        let mut reader = SyntaxReader::new(tokens, locations);
+        reader.read()
+    }
+
+    fn lex_and_parse_all(input: &str) -> Result<Vec<Syntax>, String> {
+        let mut lexer = Lexer::new(input);
+        let mut tokens = Vec::new();
+        let mut locations = Vec::new();
+
+        while let Some(token_with_loc) = lexer.next_token_with_loc()? {
+            tokens.push(OwnedToken::from(token_with_loc.token));
+            locations.push(token_with_loc.loc);
+        }
+
+        let mut reader = SyntaxReader::new(tokens, locations);
+        reader.read_all()
+    }
+
+    // Atoms
+    #[test]
+    fn test_parse_integer() {
+        let result = lex_and_parse("42").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Int(42)));
+    }
+
+    #[test]
+    fn test_parse_float() {
+        let result = lex_and_parse("2.71").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Float(f) if (f - 2.71).abs() < 0.0001));
+    }
+
+    #[test]
+    fn test_parse_string() {
+        let result = lex_and_parse("\"hello\"").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::String(ref s) if s == "hello"));
+    }
+
+    #[test]
+    fn test_parse_bool_true() {
+        let result = lex_and_parse("#t").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Bool(true)));
+    }
+
+    #[test]
+    fn test_parse_bool_false() {
+        let result = lex_and_parse("#f").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Bool(false)));
+    }
+
+    #[test]
+    fn test_parse_nil() {
+        let result = lex_and_parse("nil").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Nil));
+    }
+
+    #[test]
+    fn test_parse_symbol() {
+        let result = lex_and_parse("foo").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "foo"));
+    }
+
+    #[test]
+    fn test_parse_qualified_symbol() {
+        // Note: The lexer treats ':' as a delimiter, so "list:length" is three tokens.
+        // This test verifies that symbols without colons are parsed correctly.
+        let result = lex_and_parse("list").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "list"));
+    }
+
+    // Lists and vectors
+    #[test]
+    fn test_parse_empty_list() {
+        let result = lex_and_parse("()").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::List(ref items) if items.is_empty()));
+    }
+
+    #[test]
+    fn test_parse_simple_list() {
+        let result = lex_and_parse("(1 2 3)").unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 3);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
+                assert!(matches!(items[2].kind, SyntaxKind::Int(3)));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_vector() {
+        let result = lex_and_parse("[]").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Vector(ref items) if items.is_empty()));
+    }
+
+    #[test]
+    fn test_parse_simple_vector() {
+        let result = lex_and_parse("[1 2 3]").unwrap();
+        match result.kind {
+            SyntaxKind::Vector(ref items) => {
+                assert_eq!(items.len(), 3);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
+                assert!(matches!(items[2].kind, SyntaxKind::Int(3)));
+            }
+            _ => panic!("Expected vector"),
+        }
+    }
+
+    // Nested structures
+    #[test]
+    fn test_parse_nested_list() {
+        let result = lex_and_parse("(1 (2 3) 4)").unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 3);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+                match items[1].kind {
+                    SyntaxKind::List(ref inner) => {
+                        assert_eq!(inner.len(), 2);
+                        assert!(matches!(inner[0].kind, SyntaxKind::Int(2)));
+                        assert!(matches!(inner[1].kind, SyntaxKind::Int(3)));
+                    }
+                    _ => panic!("Expected nested list"),
+                }
+                assert!(matches!(items[2].kind, SyntaxKind::Int(4)));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
+    fn test_parse_list_with_vector() {
+        let result = lex_and_parse("(1 [2 3] 4)").unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 3);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[1].kind, SyntaxKind::Vector(_)));
+                assert!(matches!(items[2].kind, SyntaxKind::Int(4)));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    // Quote forms
+    #[test]
+    fn test_parse_quote() {
+        let result = lex_and_parse("'x").unwrap();
+        match result.kind {
+            SyntaxKind::Quote(ref inner) => {
+                assert!(matches!(inner.kind, SyntaxKind::Symbol(ref s) if s == "x"));
+            }
+            _ => panic!("Expected quote"),
+        }
+    }
+
+    #[test]
+    fn test_parse_quasiquote() {
+        let result = lex_and_parse("`x").unwrap();
+        match result.kind {
+            SyntaxKind::Quasiquote(ref inner) => {
+                assert!(matches!(inner.kind, SyntaxKind::Symbol(ref s) if s == "x"));
+            }
+            _ => panic!("Expected quasiquote"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unquote() {
+        let result = lex_and_parse(",x").unwrap();
+        match result.kind {
+            SyntaxKind::Unquote(ref inner) => {
+                assert!(matches!(inner.kind, SyntaxKind::Symbol(ref s) if s == "x"));
+            }
+            _ => panic!("Expected unquote"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unquote_splicing() {
+        let result = lex_and_parse(",@x").unwrap();
+        match result.kind {
+            SyntaxKind::UnquoteSplicing(ref inner) => {
+                assert!(matches!(inner.kind, SyntaxKind::Symbol(ref s) if s == "x"));
+            }
+            _ => panic!("Expected unquote-splicing"),
+        }
+    }
+
+    #[test]
+    fn test_parse_quote_list() {
+        let result = lex_and_parse("'(1 2 3)").unwrap();
+        match result.kind {
+            SyntaxKind::Quote(ref inner) => {
+                assert!(matches!(inner.kind, SyntaxKind::List(ref items) if items.len() == 3));
+            }
+            _ => panic!("Expected quote"),
+        }
+    }
+
+    // Sugar forms
+    #[test]
+    fn test_parse_list_sugar() {
+        let result = lex_and_parse("@[1 2 3]").unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 4); // list symbol + 3 elements
+                assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "list"));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[2].kind, SyntaxKind::Int(2)));
+                assert!(matches!(items[3].kind, SyntaxKind::Int(3)));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
+    fn test_parse_table_sugar() {
+        let result = lex_and_parse("@{:a 1 :b 2}").unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 5); // table symbol + 4 elements
+                assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "table"));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
+    fn test_parse_struct() {
+        let result = lex_and_parse("{:a 1 :b 2}").unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 5); // struct symbol + 4 elements
+                assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "struct"));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    // Error cases
+    #[test]
+    fn test_unclosed_paren() {
+        let result = lex_and_parse("(1 2 3");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unterminated list"));
+    }
+
+    #[test]
+    fn test_unclosed_bracket() {
+        let result = lex_and_parse("[1 2 3");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unterminated vector"));
+    }
+
+    #[test]
+    fn test_unclosed_brace() {
+        let result = lex_and_parse("{:a 1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unterminated struct"));
+    }
+
+    #[test]
+    fn test_unexpected_closing_paren() {
+        let result = lex_and_parse(")");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("unexpected closing parenthesis"));
+    }
+
+    #[test]
+    fn test_unexpected_closing_bracket() {
+        let result = lex_and_parse("]");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unexpected closing bracket"));
+    }
+
+    #[test]
+    fn test_unexpected_closing_brace() {
+        let result = lex_and_parse("}");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unexpected closing brace"));
+    }
+
+    #[test]
+    fn test_list_sugar_invalid() {
+        let result = lex_and_parse("@foo");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("@ must be followed by"));
+    }
+
+    // Span preservation
+    #[test]
+    fn test_span_simple_int() {
+        let result = lex_and_parse("42").unwrap();
+        assert_eq!(result.span.line, 1);
+        assert_eq!(result.span.col, 1);
+    }
+
+    #[test]
+    fn test_span_list() {
+        let result = lex_and_parse("(1 2 3)").unwrap();
+        assert_eq!(result.span.line, 1);
+        // Span should cover the entire list
+        assert!(result.span.end > result.span.start);
+    }
+
+    #[test]
+    fn test_span_nested() {
+        let result = lex_and_parse("(1 (2 3) 4)").unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                // Inner list should have its own span
+                match items[1].kind {
+                    SyntaxKind::List(_) => {
+                        assert!(items[1].span.end > items[1].span.start);
+                    }
+                    _ => panic!("Expected nested list"),
+                }
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
+    fn test_read_all() {
+        let result = lex_and_parse_all("1 2 3").unwrap();
+        assert_eq!(result.len(), 3);
+        assert!(matches!(result[0].kind, SyntaxKind::Int(1)));
+        assert!(matches!(result[1].kind, SyntaxKind::Int(2)));
+        assert!(matches!(result[2].kind, SyntaxKind::Int(3)));
+    }
+
+    #[test]
+    fn test_read_all_mixed() {
+        let result = lex_and_parse_all("42 foo (1 2) [3 4]").unwrap();
+        assert_eq!(result.len(), 4);
+        assert!(matches!(result[0].kind, SyntaxKind::Int(42)));
+        assert!(matches!(result[1].kind, SyntaxKind::Symbol(_)));
+        assert!(matches!(result[2].kind, SyntaxKind::List(_)));
+        assert!(matches!(result[3].kind, SyntaxKind::Vector(_)));
+    }
+
+    #[test]
+    fn test_scopes_empty() {
+        let result = lex_and_parse("foo").unwrap();
+        assert_eq!(result.scopes.len(), 0);
+    }
+}

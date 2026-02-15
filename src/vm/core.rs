@@ -1,4 +1,4 @@
-use crate::error::LocationMap;
+use crate::error::{LocationMap, StackFrame};
 use crate::ffi::FFISubsystem;
 use crate::value::{Condition, Coroutine, CoroutineContext, Value};
 use crate::vm::scope::ScopeStack;
@@ -233,6 +233,43 @@ impl VM {
         format!("{}\nStack trace:\n{}", msg, trace)
     }
 
+    /// Capture current call stack as trace frames
+    pub fn capture_stack_trace(&self) -> Vec<StackFrame> {
+        self.call_stack
+            .iter()
+            .rev() // Most recent first
+            .map(|frame| {
+                let location = self.location_map.get(&frame.ip).cloned();
+                StackFrame {
+                    function_name: Some(frame.name.clone()),
+                    location,
+                }
+            })
+            .collect()
+    }
+
+    /// Wrap a string error with stack trace information
+    pub fn wrap_error(&self, error: String) -> String {
+        let trace = self.capture_stack_trace();
+        if trace.is_empty() {
+            return error;
+        }
+
+        let mut result = error;
+        for frame in &trace {
+            result.push_str("\n    in ");
+            if let Some(ref name) = frame.function_name {
+                result.push_str(name);
+            } else {
+                result.push_str("<anonymous>");
+            }
+            if let Some(ref loc) = frame.location {
+                result.push_str(&format!(" at {}", loc));
+            }
+        }
+        result
+    }
+
     #[inline(always)]
     pub fn read_u8(&self, bytecode: &[u8], ip: &mut usize) -> u8 {
         let val = bytecode[*ip];
@@ -438,5 +475,55 @@ mod coroutine_vm_tests {
             VmResult::Yielded(Value::Int(n)) => assert_eq!(n, 100),
             _ => panic!("Expected Yielded"),
         }
+    }
+
+    #[test]
+    fn test_capture_stack_trace() {
+        let mut vm = VM::new();
+
+        // Push some call frames
+        vm.push_call_frame("function_a".to_string(), 10);
+        vm.push_call_frame("function_b".to_string(), 20);
+        vm.push_call_frame("function_c".to_string(), 30);
+
+        // Capture the stack trace
+        let trace = vm.capture_stack_trace();
+
+        // Should have 3 frames in reverse order (most recent first)
+        assert_eq!(trace.len(), 3);
+        assert_eq!(trace[0].function_name, Some("function_c".to_string()));
+        assert_eq!(trace[1].function_name, Some("function_b".to_string()));
+        assert_eq!(trace[2].function_name, Some("function_a".to_string()));
+    }
+
+    #[test]
+    fn test_wrap_error_with_trace() {
+        let mut vm = VM::new();
+
+        // Push some call frames
+        vm.push_call_frame("outer".to_string(), 5);
+        vm.push_call_frame("inner".to_string(), 15);
+
+        // Wrap an error
+        let error_msg = "Something went wrong".to_string();
+        let wrapped = vm.wrap_error(error_msg);
+
+        // Should contain the original error message
+        assert!(wrapped.contains("Something went wrong"));
+        // Should contain the function names
+        assert!(wrapped.contains("inner"));
+        assert!(wrapped.contains("outer"));
+    }
+
+    #[test]
+    fn test_wrap_error_empty_stack() {
+        let vm = VM::new();
+
+        // Wrap an error with empty call stack
+        let error_msg = "Error with no context".to_string();
+        let wrapped = vm.wrap_error(error_msg.clone());
+
+        // Should just return the original error
+        assert_eq!(wrapped, error_msg);
     }
 }

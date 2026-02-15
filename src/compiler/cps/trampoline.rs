@@ -705,9 +705,9 @@ fn call_value_with_vm(func: &Value, args: &[Value], vm: &mut VM) -> Result<Value
             vm.execute_bytecode(&closure.bytecode, &closure.constants, Some(&env_rc))
         }
 
-        Value::NativeFn(f) => f(args),
+        Value::NativeFn(f) => f(args).map_err(|e| e.into()),
 
-        Value::VmAwareFn(f) => f(args, vm),
+        Value::VmAwareFn(f) => f(args, vm).map_err(|e| e.into()),
 
         _ => Err(format!("Cannot call {}", func.type_name())),
     }
@@ -759,12 +759,12 @@ fn call_value_with_vm_result(
 
         Value::NativeFn(f) => match f(args) {
             Ok(v) => Ok(crate::vm::VmResult::Done(v)),
-            Err(e) => Err(e),
+            Err(e) => Err(e.into()),
         },
 
         Value::VmAwareFn(f) => match f(args, vm) {
             Ok(v) => Ok(crate::vm::VmResult::Done(v)),
-            Err(e) => Err(e),
+            Err(e) => Err(e.into()),
         },
 
         _ => Err(format!("Cannot call {}", func.type_name())),

@@ -1,62 +1,63 @@
 //! String manipulation primitives
+use crate::error::{LError, LResult};
 use crate::value::Value;
 use crate::vm::VM;
 use std::rc::Rc;
 
 /// Get the length of a string
-pub fn prim_string_length(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_length(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("string-length requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     match &args[0] {
         Value::String(s) => Ok(Value::Int(s.chars().count() as i64)),
-        _ => Err("string-length requires a string".to_string()),
+        _ => Err(LError::type_mismatch("string", args[0].type_name())),
     }
 }
 
 /// Append multiple strings
-pub fn prim_string_append(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_append(args: &[Value]) -> LResult<Value> {
     let mut result = String::new();
     for arg in args {
         match arg {
             Value::String(s) => result.push_str(s),
-            _ => return Err("string-append requires all arguments to be strings".to_string()),
+            _ => return Err(LError::type_mismatch("string", arg.type_name())),
         }
     }
     Ok(Value::String(Rc::from(result)))
 }
 
 /// Convert string to uppercase
-pub fn prim_string_upcase(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_upcase(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("string-upcase requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     match &args[0] {
         Value::String(s) => Ok(Value::String(Rc::from(s.to_uppercase()))),
-        _ => Err("string-upcase requires a string".to_string()),
+        _ => Err(LError::type_mismatch("string", args[0].type_name())),
     }
 }
 
 /// Convert string to lowercase
-pub fn prim_string_downcase(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_downcase(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("string-downcase requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     match &args[0] {
         Value::String(s) => Ok(Value::String(Rc::from(s.to_lowercase()))),
-        _ => Err("string-downcase requires a string".to_string()),
+        _ => Err(LError::type_mismatch("string", args[0].type_name())),
     }
 }
 
 /// Get a substring
-pub fn prim_substring(args: &[Value]) -> Result<Value, String> {
+pub fn prim_substring(args: &[Value]) -> LResult<Value> {
     if args.len() < 2 || args.len() > 3 {
-        return Err("substring requires 2 or 3 arguments (string, start [, end])".to_string());
+        return Err(LError::arity_range(2, 3, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("substring requires a string as first argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[0].type_name())),
     };
 
     let start = args[1].as_int()? as usize;
@@ -68,10 +69,10 @@ pub fn prim_substring(args: &[Value]) -> Result<Value, String> {
     };
 
     if start > char_count || end > char_count || start > end {
-        return Err(format!(
+        return Err(LError::runtime_error(format!(
             "substring indices out of range: start={}, end={}, length={}",
             start, end, char_count
-        ));
+        )));
     }
 
     // Convert character indices to byte indices
@@ -85,26 +86,26 @@ pub fn prim_substring(args: &[Value]) -> Result<Value, String> {
 }
 
 /// Find the index of a character
-pub fn prim_string_index(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_index(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("string-index requires exactly 2 arguments (string, char)".to_string());
+        return Err(LError::arity_mismatch(2, args.len()));
     }
 
     let haystack = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("string-index requires a string as first argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[0].type_name())),
     };
 
     let needle = match &args[1] {
         Value::String(s) => {
             if s.chars().count() != 1 {
-                return Err(
-                    "string-index requires a single character as second argument".to_string(),
-                );
+                return Err(LError::argument_error(
+                    "string-index requires a single character as second argument",
+                ));
             }
             s.chars().next().unwrap()
         }
-        _ => return Err("string-index requires a string as second argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[1].type_name())),
     };
 
     match haystack.chars().position(|ch| ch == needle) {
@@ -114,39 +115,33 @@ pub fn prim_string_index(args: &[Value]) -> Result<Value, String> {
 }
 
 /// Get a character at an index
-pub fn prim_char_at(args: &[Value]) -> Result<Value, String> {
+pub fn prim_char_at(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("char-at requires exactly 2 arguments (string, index)".to_string());
+        return Err(LError::arity_mismatch(2, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("char-at requires a string as first argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[0].type_name())),
     };
 
     let index = args[1].as_int()? as usize;
     let char_count = s.chars().count();
 
     if index >= char_count {
-        return Err(format!(
-            "Index out of bounds: index={}, length={}",
-            index, char_count
-        ));
+        return Err(LError::index_out_of_bounds(index as isize, char_count));
     }
 
     match s.chars().nth(index) {
         Some(c) => Ok(Value::String(Rc::from(c.to_string()))),
-        None => Err(format!(
-            "Index out of bounds: index={}, length={}",
-            index, char_count
-        )),
+        None => Err(LError::index_out_of_bounds(index as isize, char_count)),
     }
 }
 
 /// Convert to integer
-pub fn prim_to_int(args: &[Value]) -> Result<Value, String> {
+pub fn prim_to_int(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("int requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     match &args[0] {
         Value::Int(n) => Ok(Value::Int(*n)),
@@ -154,15 +149,18 @@ pub fn prim_to_int(args: &[Value]) -> Result<Value, String> {
         Value::String(s) => s
             .parse::<i64>()
             .map(Value::Int)
-            .map_err(|_| "Cannot parse string as integer".to_string()),
-        _ => Err("Cannot convert to integer".to_string()),
+            .map_err(|_| LError::argument_error("Cannot parse string as integer")),
+        _ => Err(LError::type_mismatch(
+            "integer-convertible",
+            args[0].type_name(),
+        )),
     }
 }
 
 /// Convert to float
-pub fn prim_to_float(args: &[Value]) -> Result<Value, String> {
+pub fn prim_to_float(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("float requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     match &args[0] {
         Value::Int(n) => Ok(Value::Float(*n as f64)),
@@ -170,37 +168,42 @@ pub fn prim_to_float(args: &[Value]) -> Result<Value, String> {
         Value::String(s) => s
             .parse::<f64>()
             .map(Value::Float)
-            .map_err(|_| "Cannot parse string as float".to_string()),
-        _ => Err("Cannot convert to float".to_string()),
+            .map_err(|_| LError::argument_error("Cannot parse string as float")),
+        _ => Err(LError::type_mismatch(
+            "float-convertible",
+            args[0].type_name(),
+        )),
     }
 }
 
 /// Convert to string
-pub fn prim_to_string(args: &[Value]) -> Result<Value, String> {
+pub fn prim_to_string(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("string requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
     Ok(Value::String(Rc::from(args[0].to_string())))
 }
 
 /// Split string on delimiter
-pub fn prim_string_split(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_split(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("string-split requires exactly 2 arguments".to_string());
+        return Err(LError::arity_mismatch(2, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("string-split requires a string as first argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[0].type_name())),
     };
 
     let delimiter = match &args[1] {
         Value::String(d) => d.as_ref(),
-        _ => return Err("string-split requires a string as second argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[1].type_name())),
     };
 
     if delimiter.is_empty() {
-        return Err("string-split delimiter cannot be empty".to_string());
+        return Err(LError::argument_error(
+            "string-split delimiter cannot be empty",
+        ));
     }
 
     let parts: Vec<Value> = s
@@ -212,112 +215,114 @@ pub fn prim_string_split(args: &[Value]) -> Result<Value, String> {
 }
 
 /// Replace all occurrences of old with new
-pub fn prim_string_replace(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_replace(args: &[Value]) -> LResult<Value> {
     if args.len() != 3 {
-        return Err("string-replace requires exactly 3 arguments".to_string());
+        return Err(LError::arity_mismatch(3, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("string-replace requires a string as first argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[0].type_name())),
     };
 
     let old = match &args[1] {
         Value::String(o) => o.as_ref(),
-        _ => return Err("string-replace requires a string as second argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[1].type_name())),
     };
 
     if old.is_empty() {
-        return Err("string-replace search string cannot be empty".to_string());
+        return Err(LError::argument_error(
+            "string-replace search string cannot be empty",
+        ));
     }
 
     let new = match &args[2] {
         Value::String(n) => n.as_ref(),
-        _ => return Err("string-replace requires a string as third argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[2].type_name())),
     };
 
     Ok(Value::String(Rc::from(s.replace(old, new))))
 }
 
 /// Trim leading and trailing whitespace
-pub fn prim_string_trim(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_trim(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("string-trim requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     match &args[0] {
         Value::String(s) => Ok(Value::String(Rc::from(s.trim()))),
-        _ => Err("string-trim requires a string".to_string()),
+        _ => Err(LError::type_mismatch("string", args[0].type_name())),
     }
 }
 
 /// Check if string contains substring
-pub fn prim_string_contains(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_contains(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("string-contains? requires exactly 2 arguments".to_string());
+        return Err(LError::arity_mismatch(2, args.len()));
     }
 
     let haystack = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("string-contains? requires a string as first argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[0].type_name())),
     };
 
     let needle = match &args[1] {
         Value::String(n) => n.as_ref(),
-        _ => return Err("string-contains? requires a string as second argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[1].type_name())),
     };
 
     Ok(Value::Bool(haystack.contains(needle)))
 }
 
 /// Check if string starts with prefix
-pub fn prim_string_starts_with(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_starts_with(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("string-starts-with? requires exactly 2 arguments".to_string());
+        return Err(LError::arity_mismatch(2, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("string-starts-with? requires a string as first argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[0].type_name())),
     };
 
     let prefix = match &args[1] {
         Value::String(p) => p.as_ref(),
-        _ => return Err("string-starts-with? requires a string as second argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[1].type_name())),
     };
 
     Ok(Value::Bool(s.starts_with(prefix)))
 }
 
 /// Check if string ends with suffix
-pub fn prim_string_ends_with(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_ends_with(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("string-ends-with? requires exactly 2 arguments".to_string());
+        return Err(LError::arity_mismatch(2, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("string-ends-with? requires a string as first argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[0].type_name())),
     };
 
     let suffix = match &args[1] {
         Value::String(suf) => suf.as_ref(),
-        _ => return Err("string-ends-with? requires a string as second argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[1].type_name())),
     };
 
     Ok(Value::Bool(s.ends_with(suffix)))
 }
 
 /// Join list of strings with separator
-pub fn prim_string_join(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_join(args: &[Value]) -> LResult<Value> {
     if args.len() != 2 {
-        return Err("string-join requires exactly 2 arguments".to_string());
+        return Err(LError::arity_mismatch(2, args.len()));
     }
 
     let list = &args[0];
     let separator = match &args[1] {
         Value::String(s) => s.as_ref(),
-        _ => return Err("string-join requires a string as second argument".to_string()),
+        _ => return Err(LError::type_mismatch("string", args[1].type_name())),
     };
 
     let vec = list.list_to_vec()?;
@@ -326,7 +331,7 @@ pub fn prim_string_join(args: &[Value]) -> Result<Value, String> {
     for val in vec {
         match val {
             Value::String(s) => strings.push(s.to_string()),
-            _ => return Err("string-join requires a list of strings".to_string()),
+            _ => return Err(LError::type_mismatch("string", val.type_name())),
         }
     }
 
@@ -334,15 +339,15 @@ pub fn prim_string_join(args: &[Value]) -> Result<Value, String> {
 }
 
 /// Convert number to string
-pub fn prim_number_to_string(args: &[Value]) -> Result<Value, String> {
+pub fn prim_number_to_string(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("number->string requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     match &args[0] {
         Value::Int(n) => Ok(Value::String(Rc::from(n.to_string()))),
         Value::Float(f) => Ok(Value::String(Rc::from(f.to_string()))),
-        _ => Err("number->string requires a number".to_string()),
+        _ => Err(LError::type_mismatch("number", args[0].type_name())),
     }
 }
 
@@ -350,27 +355,27 @@ pub fn prim_number_to_string(args: &[Value]) -> Result<Value, String> {
 
 /// Convert string to integer (Scheme-style name)
 /// `(string->int str)`
-pub fn prim_string_to_int(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_to_int(args: &[Value]) -> LResult<Value> {
     prim_to_int(args)
 }
 
 /// Convert string to float (Scheme-style name)
 /// `(string->float str)`
-pub fn prim_string_to_float(args: &[Value]) -> Result<Value, String> {
+pub fn prim_string_to_float(args: &[Value]) -> LResult<Value> {
     prim_to_float(args)
 }
 
 /// Convert any value to string (Scheme-style name)
 /// `(any->string val)`
-pub fn prim_any_to_string(args: &[Value]) -> Result<Value, String> {
+pub fn prim_any_to_string(args: &[Value]) -> LResult<Value> {
     prim_to_string(args)
 }
 
 /// Convert symbol to string
 /// `(symbol->string sym)`
-pub fn prim_symbol_to_string(args: &[Value], _vm: &mut VM) -> Result<Value, String> {
+pub fn prim_symbol_to_string(args: &[Value], _vm: &mut VM) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("symbol->string requires exactly 1 argument".to_string());
+        return Err(LError::arity_mismatch(1, args.len()));
     }
 
     match &args[0] {
@@ -382,13 +387,16 @@ pub fn prim_symbol_to_string(args: &[Value], _vm: &mut VM) -> Result<Value, Stri
                     if let Some(name) = symbols.name(*id) {
                         Ok(Value::String(Rc::from(name)))
                     } else {
-                        Err(format!("Symbol ID {} not found in symbol table", id.0))
+                        Err(LError::runtime_error(format!(
+                            "Symbol ID {} not found in symbol table",
+                            id.0
+                        )))
                     }
                 } else {
-                    Err("Symbol table not available".to_string())
+                    Err(LError::runtime_error("Symbol table not available"))
                 }
             }
         }
-        _ => Err("symbol->string requires a symbol".to_string()),
+        _ => Err(LError::type_mismatch("symbol", args[0].type_name())),
     }
 }

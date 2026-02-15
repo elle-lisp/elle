@@ -1,6 +1,7 @@
 pub mod condition;
 use crate::compiler::ast::Expr;
 use crate::compiler::effects::Effect;
+use crate::error::{LError, LResult};
 pub use condition::Condition;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -71,11 +72,11 @@ impl Arity {
 }
 
 /// Native function type
-pub type NativeFn = fn(&[Value]) -> Result<Value, String>;
+pub type NativeFn = fn(&[Value]) -> LResult<Value>;
 
 /// VM-aware native function type (needs access to VM for execution)
 /// This is used for primitives like coroutine-resume that need to execute bytecode
-pub type VmAwareFn = fn(&[Value], &mut crate::vm::VM) -> Result<Value, String>;
+pub type VmAwareFn = fn(&[Value], &mut crate::vm::VM) -> LResult<Value>;
 
 /// Cons cell for list construction
 #[derive(Debug, Clone, PartialEq)]
@@ -202,14 +203,14 @@ pub enum TableKey {
 
 impl TableKey {
     /// Convert a Value to a TableKey if possible
-    pub fn from_value(val: &Value) -> Result<TableKey, String> {
+    pub fn from_value(val: &Value) -> LResult<TableKey> {
         match val {
             Value::Nil => Ok(TableKey::Nil),
             Value::Bool(b) => Ok(TableKey::Bool(*b)),
             Value::Int(i) => Ok(TableKey::Int(*i)),
             Value::Symbol(id) => Ok(TableKey::Symbol(*id)),
             Value::String(s) => Ok(TableKey::String(s.to_string())),
-            _ => Err(format!("Cannot use {} as table key", val.type_name())),
+            _ => Err(LError::type_mismatch("table key", val.type_name())),
         }
     }
 }
@@ -407,94 +408,67 @@ impl Value {
         !matches!(self, Value::Bool(false))
     }
 
-    pub fn as_int(&self) -> Result<i64, String> {
+    pub fn as_int(&self) -> LResult<i64> {
         match self {
             Value::Int(n) => Ok(*n),
-            _ => Err(format!(
-                "Type error: expected integer, got {}",
-                self.type_name()
-            )),
+            _ => Err(LError::type_mismatch("integer", self.type_name())),
         }
     }
 
-    pub fn as_float(&self) -> Result<f64, String> {
+    pub fn as_float(&self) -> LResult<f64> {
         match self {
             Value::Float(f) => Ok(*f),
             Value::Int(n) => Ok(*n as f64),
-            _ => Err(format!(
-                "Type error: expected number, got {}",
-                self.type_name()
-            )),
+            _ => Err(LError::type_mismatch("number", self.type_name())),
         }
     }
 
-    pub fn as_symbol(&self) -> Result<SymbolId, String> {
+    pub fn as_symbol(&self) -> LResult<SymbolId> {
         match self {
             Value::Symbol(id) => Ok(*id),
-            _ => Err(format!(
-                "Type error: expected symbol, got {}",
-                self.type_name()
-            )),
+            _ => Err(LError::type_mismatch("symbol", self.type_name())),
         }
     }
 
-    pub fn as_cons(&self) -> Result<&Rc<Cons>, String> {
+    pub fn as_cons(&self) -> LResult<&Rc<Cons>> {
         match self {
             Value::Cons(cons) => Ok(cons),
-            _ => Err(format!(
-                "Type error: expected list, got {}",
-                self.type_name()
-            )),
+            _ => Err(LError::type_mismatch("list", self.type_name())),
         }
     }
 
-    pub fn as_vector(&self) -> Result<&Rc<Vec<Value>>, String> {
+    pub fn as_vector(&self) -> LResult<&Rc<Vec<Value>>> {
         match self {
             Value::Vector(vec) => Ok(vec),
-            _ => Err(format!(
-                "Type error: expected vector, got {}",
-                self.type_name()
-            )),
+            _ => Err(LError::type_mismatch("vector", self.type_name())),
         }
     }
 
-    pub fn as_closure(&self) -> Result<&Rc<Closure>, String> {
+    pub fn as_closure(&self) -> LResult<&Rc<Closure>> {
         match self {
             Value::Closure(closure) => Ok(closure),
-            _ => Err(format!(
-                "Type error: expected closure, got {}",
-                self.type_name()
-            )),
+            _ => Err(LError::type_mismatch("closure", self.type_name())),
         }
     }
 
-    pub fn as_jit_closure(&self) -> Result<&Rc<JitClosure>, String> {
+    pub fn as_jit_closure(&self) -> LResult<&Rc<JitClosure>> {
         match self {
             Value::JitClosure(jc) => Ok(jc),
-            _ => Err(format!(
-                "Type error: expected jit-closure, got {}",
-                self.type_name()
-            )),
+            _ => Err(LError::type_mismatch("jit-closure", self.type_name())),
         }
     }
 
-    pub fn as_table(&self) -> Result<&Rc<RefCell<BTreeMap<TableKey, Value>>>, String> {
+    pub fn as_table(&self) -> LResult<&Rc<RefCell<BTreeMap<TableKey, Value>>>> {
         match self {
             Value::Table(table) => Ok(table),
-            _ => Err(format!(
-                "Type error: expected table, got {}",
-                self.type_name()
-            )),
+            _ => Err(LError::type_mismatch("table", self.type_name())),
         }
     }
 
-    pub fn as_struct(&self) -> Result<&Rc<BTreeMap<TableKey, Value>>, String> {
+    pub fn as_struct(&self) -> LResult<&Rc<BTreeMap<TableKey, Value>>> {
         match self {
             Value::Struct(s) => Ok(s),
-            _ => Err(format!(
-                "Type error: expected struct, got {}",
-                self.type_name()
-            )),
+            _ => Err(LError::type_mismatch("struct", self.type_name())),
         }
     }
 
@@ -511,7 +485,7 @@ impl Value {
     }
 
     /// Convert list to Vec
-    pub fn list_to_vec(&self) -> Result<Vec<Value>, String> {
+    pub fn list_to_vec(&self) -> LResult<Vec<Value>> {
         let mut result = Vec::new();
         let mut current = self.clone();
         loop {
@@ -521,7 +495,7 @@ impl Value {
                     result.push(cons.first.clone());
                     current = cons.rest.clone();
                 }
-                _ => return Err("Not a proper list".to_string()),
+                _ => return Err(LError::type_mismatch("proper list", self.type_name())),
             }
         }
     }

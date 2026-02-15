@@ -103,7 +103,8 @@ impl VM {
                     VmResult::Done(v) => Ok(v),
                     VmResult::Yielded(_) => {
                         // Yield should be handled by coroutine_resume, not here
-                        Err("Unexpected yield outside coroutine context".to_string())
+                        Err(self
+                            .wrap_error("Unexpected yield outside coroutine context".to_string()))
                     }
                 };
             }
@@ -130,17 +131,18 @@ impl VM {
                 } else {
                     255
                 };
-                return Err(format!(
+                let error = format!(
                     "Instruction limit exceeded at ip={} (instr={}), stack depth={}, exception={}",
                     ip,
                     instr_byte,
                     self.stack.len(),
                     self.current_exception.is_some()
-                ));
+                );
+                return Err(self.wrap_error(error));
             }
 
             if ip >= bytecode.len() {
-                return Err("Unexpected end of bytecode".to_string());
+                return Err(self.wrap_error("Unexpected end of bytecode".to_string()));
             }
 
             let instr_byte = bytecode[ip];
@@ -224,7 +226,7 @@ impl VM {
                         Value::NativeFn(f) => {
                             let result = match f(&args) {
                                 Ok(val) => val,
-                                Err(msg) if msg == "Division by zero" => {
+                                Err(e) if e.to_string().contains("Division by zero") => {
                                     // Create a division-by-zero exception
                                     let mut cond = crate::value::Condition::new(4);
                                     // Try to set dividend and divisor if we have the arguments
@@ -236,7 +238,7 @@ impl VM {
                                     // Push Nil to keep stack consistent
                                     Value::Nil
                                 }
-                                Err(e) => return Err(e),
+                                Err(e) => return Err(self.wrap_error(e.to_string())),
                             };
                             self.stack.push(result);
                         }
@@ -247,7 +249,7 @@ impl VM {
                         Value::Closure(closure) => {
                             self.call_depth += 1;
                             if self.call_depth > 1000 {
-                                return Err("Stack overflow".to_string());
+                                return Err(self.wrap_error("Stack overflow".to_string()));
                             }
 
                             // Record this closure call for profiling (only track hot closures)
@@ -362,7 +364,7 @@ impl VM {
                                 // Fall back to interpreted execution of the source closure
                                 self.call_depth += 1;
                                 if self.call_depth > 1000 {
-                                    return Err("Stack overflow".to_string());
+                                    return Err(self.wrap_error("Stack overflow".to_string()));
                                 }
 
                                 // Create a new environment that includes:
@@ -422,10 +424,11 @@ impl VM {
                                     self.stack.push(result);
                                 }
                             } else {
-                                return Err("JIT closure has no fallback source".to_string());
+                                return Err(self
+                                    .wrap_error("JIT closure has no fallback source".to_string()));
                             }
                         }
-                        _ => return Err(format!("Cannot call {:?}", func)),
+                        _ => return Err(self.wrap_error(format!("Cannot call {:?}", func))),
                     }
                 }
 
@@ -441,10 +444,12 @@ impl VM {
 
                     match func {
                         Value::NativeFn(f) => {
-                            return f(&args).map(VmResult::Done);
+                            return f(&args).map(VmResult::Done).map_err(|e| e.to_string());
                         }
                         Value::VmAwareFn(f) => {
-                            return f(&args, self).map(VmResult::Done);
+                            return f(&args, self)
+                                .map(VmResult::Done)
+                                .map_err(|e| e.to_string());
                         }
                         Value::Closure(closure) => {
                             // Validate argument count
@@ -462,12 +467,12 @@ impl VM {
                                             } else {
                                                 String::new()
                                             };
-                                        return Err(format!(
+                                        return Err(self.wrap_error(format!(
                                             "Unhandled exception: {}{}",
                                             exc.exception_id, details
-                                        ));
+                                        )));
                                     }
-                                    return Err("Unhandled exception".to_string());
+                                    return Err(self.wrap_error("Unhandled exception".to_string()));
                                 }
                                 return Ok(VmResult::Done(Value::Nil));
                             }
@@ -528,12 +533,12 @@ impl VM {
                                             } else {
                                                 String::new()
                                             };
-                                        return Err(format!(
+                                        return Err(self.wrap_error(format!(
                                             "Unhandled exception: {}{}",
                                             exc.exception_id, details
-                                        ));
+                                        )));
                                     }
-                                    return Err("Unhandled exception".to_string());
+                                    return Err(self.wrap_error("Unhandled exception".to_string()));
                                 }
                                 return Ok(VmResult::Done(Value::Nil));
                             } else if !jit_closure.code_ptr.is_null() {
@@ -598,10 +603,11 @@ impl VM {
                                 // Return a dummy value - the outer loop will detect the pending tail call
                                 return Ok(VmResult::Done(Value::Nil));
                             } else {
-                                return Err("JIT closure has no fallback source".to_string());
+                                return Err(self
+                                    .wrap_error("JIT closure has no fallback source".to_string()));
                             }
                         }
-                        _ => return Err(format!("Cannot call {:?}", func)),
+                        _ => return Err(self.wrap_error(format!("Cannot call {:?}", func))),
                     };
                 }
 
@@ -791,7 +797,9 @@ impl VM {
                     // (Normal path jumps past this via the Jump after PopHandler)
                     if self.current_exception.is_none() {
                         // This shouldn't happen, but if it does, we have a bug
-                        return Err("CheckException reached with no exception set".to_string());
+                        return Err(self.wrap_error(
+                            "CheckException reached with no exception set".to_string(),
+                        ));
                     }
                     // Exception is set, fall through to handler matching code
                 }
@@ -825,7 +833,9 @@ impl VM {
                             // For now, use globals as a simple binding mechanism
                             self.globals.insert(sym_id.0, Value::Condition(exc.clone()));
                         } else {
-                            return Err("BindException: Expected symbol in constants".to_string());
+                            return Err(self.wrap_error(
+                                "BindException: Expected symbol in constants".to_string(),
+                            ));
                         }
                     }
                 }
@@ -850,7 +860,11 @@ impl VM {
                     // 2. Check we're in a coroutine context
                     let coroutine = match self.current_coroutine() {
                         Some(co) => co.clone(),
-                        None => return Err("yield used outside of coroutine".to_string()),
+                        None => {
+                            return Err(
+                                self.wrap_error("yield used outside of coroutine".to_string())
+                            )
+                        }
                     };
 
                     // 3. Save execution context
@@ -899,12 +913,12 @@ impl VM {
                         } else {
                             String::new()
                         };
-                        return Err(format!(
+                        return Err(self.wrap_error(format!(
                             "Unhandled exception: {}{}",
                             exc.exception_id, details
-                        ));
+                        )));
                     }
-                    return Err("Unhandled exception".to_string());
+                    return Err(self.wrap_error("Unhandled exception".to_string()));
                 }
             }
         }
