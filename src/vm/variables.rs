@@ -81,12 +81,20 @@ pub fn handle_store_global(
 }
 
 pub fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) -> Result<(), String> {
+    let _depth = vm.read_u8(bytecode, ip);
     let idx = vm.read_u8(bytecode, ip) as usize;
-    let val = vm.stack.pop().ok_or("Stack underflow")?;
-    if idx >= vm.stack.len() {
-        return Err("Local variable index out of bounds".to_string());
+    let value = vm.stack.pop().ok_or("Stack underflow on StoreLocal")?;
+    let frame_base = vm.current_frame_base();
+    let abs_idx = frame_base + idx;
+    if abs_idx >= vm.stack.len() {
+        // Need to extend stack if storing to a new local
+        while vm.stack.len() <= abs_idx {
+            vm.stack.push(Value::Nil);
+        }
     }
-    vm.stack[idx] = val;
+    vm.stack[abs_idx] = value.clone();
+    // Push the value back so it can be used as the result of set!
+    vm.stack.push(value);
     Ok(())
 }
 

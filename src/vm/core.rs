@@ -24,6 +24,7 @@ pub enum VmResult {
 pub struct CallFrame {
     pub name: String,
     pub ip: usize,
+    pub frame_base: usize, // Stack index where this frame's locals start
 }
 
 #[derive(Debug, Clone)]
@@ -203,9 +204,29 @@ impl VM {
         self.loaded_modules.insert(module_path);
     }
 
+    /// Get the frame base for the current call frame
+    /// Returns 0 if no call frame (top-level execution)
+    pub fn current_frame_base(&self) -> usize {
+        self.call_stack.last().map(|f| f.frame_base).unwrap_or(0)
+    }
+
     pub fn push_call_frame(&mut self, name: String, ip: usize) {
+        let frame_base = self.stack.len(); // Current stack top becomes frame base
         self.call_depth += 1;
-        self.call_stack.push(CallFrame { name, ip });
+        self.call_stack.push(CallFrame {
+            name,
+            ip,
+            frame_base,
+        });
+    }
+
+    pub fn push_call_frame_with_base(&mut self, name: String, ip: usize, frame_base: usize) {
+        self.call_depth += 1;
+        self.call_stack.push(CallFrame {
+            name,
+            ip,
+            frame_base,
+        });
     }
 
     pub fn pop_call_frame(&mut self) {
@@ -411,6 +432,7 @@ mod coroutine_vm_tests {
             constants: Rc::new(vec![]),
             source_ast: None,
             effect: Effect::Pure,
+            cell_params_mask: 0,
         });
         let co = Rc::new(RefCell::new(Coroutine::new(closure)));
 
@@ -439,6 +461,7 @@ mod coroutine_vm_tests {
                 constants: Rc::new(vec![]),
                 source_ast: None,
                 effect: Effect::Pure,
+                cell_params_mask: 0,
             });
             Rc::new(RefCell::new(Coroutine::new(closure)))
         };

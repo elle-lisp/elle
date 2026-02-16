@@ -1105,6 +1105,7 @@ impl Compiler {
             constants: Rc::new(lambda_compiler.bytecode.constants),
             source_ast,
             effect,
+            cell_params_mask: 0, // Old compiler doesn't use this
         };
 
         let idx = self.bytecode.add_constant(Value::Closure(Rc::new(closure)));
@@ -1246,7 +1247,7 @@ impl Compiler {
         let mut pending_jumps: Vec<Vec<usize>> = Vec::new();
 
         // Compile all patterns
-        for (pattern, body_expr) in patterns {
+        for (pattern, body_expr) in patterns.iter() {
             // If we have pending jumps from the previous pattern, patch them now
             // They should jump to this position (start of this pattern check)
             if !pending_jumps.is_empty() {
@@ -1391,6 +1392,7 @@ pub fn compile_lambda_to_closure(
         constants: Rc::new(lambda_compiler.bytecode.constants),
         source_ast,
         effect,
+        cell_params_mask: 0, // Old compiler doesn't use this
     };
 
     Ok(closure)

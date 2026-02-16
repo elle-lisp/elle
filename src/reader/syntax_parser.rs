@@ -40,6 +40,18 @@ impl SyntaxReader {
         })
     }
 
+    /// Check if there are remaining tokens. Returns Some with error message if so.
+    pub fn check_exhausted(&self) -> Option<String> {
+        self.current().map(|token| {
+            let loc = self.current_location();
+            format!(
+                "{}: unexpected token after expression: {:?}",
+                loc.position(),
+                token
+            )
+        })
+    }
+
     fn advance(&mut self) -> Option<OwnedToken> {
         let token = self.current().cloned();
         self.pos += 1;

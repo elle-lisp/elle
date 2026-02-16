@@ -1,12 +1,12 @@
-use elle::compiler::converters::value_to_expr;
 use elle::ffi::primitives::context::set_symbol_table;
 use elle::ffi_primitives;
+use elle::pipeline::{compile_all_new, compile_new};
 use elle::primitives::{
     clear_jit_context, clear_macro_symbol_table, init_jit_context, set_jit_symbol_table,
     set_length_symbol_table, set_macro_symbol_table,
 };
 use elle::repl::Repl;
-use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, VM};
+use elle::{init_stdlib, register_primitives, SymbolTable, VM};
 use rustyline::error::ReadlineError;
 use std::env;
 use std::fs;
@@ -102,118 +102,47 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
 /// Only prints non-nil results.
 fn run_source(
     contents: &str,
-    source_name: &str,
+    _source_name: &str,
     vm: &mut VM,
     symbols: &mut SymbolTable,
 ) -> Result<(), String> {
-    let mut had_parse_error = false;
-    let mut had_runtime_error = false;
-    let mut had_compilation_error = false;
+    let mut had_error = false;
 
-    // First pass: collect all top-level definitions to pre-register them
-    // This allows recursive functions to reference themselves
-    {
-        let mut lexer = elle::reader::Lexer::new(contents);
-        let mut temp_tokens = Vec::new();
-        let mut temp_locations = Vec::new();
-        loop {
-            match lexer.next_token_with_loc() {
-                Ok(Some(mut token_with_loc)) => {
-                    // Set the file name in the location
-                    token_with_loc.loc.file = source_name.to_string();
-                    temp_tokens.push(elle::reader::OwnedToken::from(token_with_loc.token));
-                    temp_locations.push(token_with_loc.loc);
-                }
-                Ok(None) => break,
-                Err(_) => break,
-            }
+    // Compile all forms with new pipeline
+    let results = match compile_all_new(contents, symbols) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("✗ Compilation error: {}", e);
+            return Err(e);
+        }
+    };
+
+    // Execute each compiled form
+    for result in results {
+        // Debug: print bytecode if ELLE_DEBUG is set
+        if std::env::var("ELLE_DEBUG").is_ok() {
+            eprintln!(
+                "{}",
+                elle::compiler::format_bytecode_with_constants(
+                    &result.bytecode.instructions,
+                    &result.bytecode.constants
+                )
+            );
         }
 
-        let mut temp_reader = elle::reader::Reader::with_locations(temp_tokens, temp_locations);
-        while let Some(result) = temp_reader.try_read(symbols) {
-            match result {
-                Ok(value) => {
-                    // Check if this is a define
-                    if let Ok(list) = value.list_to_vec() {
-                        if list.len() >= 3 {
-                            if let elle::value::Value::Symbol(sym) = &list[0] {
-                                let name = symbols.name(*sym).unwrap_or("");
-                                if name == "define" {
-                                    if let Ok(def_name) = list[1].as_symbol() {
-                                        // Pre-register the symbol as nil so forward references work
-                                        vm.set_global(def_name.0, elle::value::Value::Nil);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(_) => {
-                    // Suppress error reporting in first pass; errors will be reported in second pass
-                }
-            }
-        }
-    }
-
-    // Second pass: execute all expressions
-    let mut lexer = elle::reader::Lexer::new(contents);
-    let mut tokens = Vec::new();
-    let mut locations = Vec::new();
-    loop {
-        match lexer.next_token_with_loc() {
-            Ok(Some(mut token_with_loc)) => {
-                // Set the file name in the location
-                token_with_loc.loc.file = source_name.to_string();
-                tokens.push(elle::reader::OwnedToken::from(token_with_loc.token));
-                locations.push(token_with_loc.loc);
-            }
-            Ok(None) => break,
-            Err(e) => return Err(format!("Lexer error: {}", e)),
-        }
-    }
-
-    let mut reader = elle::reader::Reader::with_locations(tokens, locations);
-    while let Some(result) = reader.try_read(symbols) {
-        match result {
-            Ok(value) => {
-                // Get the location of this top-level form before compiling
-                let form_location = reader.get_current_location();
-
-                // Compile
-                let expr = match value_to_expr(&value, symbols) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        eprintln!("✗ Compilation error: {}", e);
-                        had_compilation_error = true;
-                        continue;
-                    }
-                };
-
-                let bytecode = compile(&expr);
-
-                // Set the current source location for error reporting
-                vm.set_current_source_loc(Some(form_location));
-
-                // Execute
-                match vm.execute(&bytecode) {
-                    Ok(_result) => {
-                        // Script mode is silent except for explicit output (display, etc.)
-                    }
-                    Err(e) => {
-                        eprintln!("✗ Runtime error: {}", format_runtime_error(&e, symbols));
-                        had_runtime_error = true;
-                    }
-                }
+        match vm.execute(&result.bytecode) {
+            Ok(_) => {
+                // Script mode is silent except for explicit output (display, etc.)
             }
             Err(e) => {
-                eprintln!("✗ Parse error: {}", e);
-                had_parse_error = true;
+                eprintln!("✗ Runtime error: {}", format_runtime_error(&e, symbols));
+                had_error = true;
             }
         }
     }
 
     // Return error if any errors occurred (will exit with status 1)
-    if had_parse_error || had_runtime_error || had_compilation_error {
+    if had_error {
         Err("Errors encountered during execution".to_string())
     } else {
         Ok(())
@@ -262,28 +191,16 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                     _ => {}
                 }
 
-                // Try to parse accumulated input
-                match read_str(accumulated_input.trim(), symbols) {
-                    Ok(value) => {
+                // Try to compile accumulated input
+                match compile_new(accumulated_input.trim(), symbols) {
+                    Ok(result) => {
                         accumulated_input.clear();
 
-                        // Compile
-                        let expr = match value_to_expr(&value, symbols) {
-                            Ok(e) => e,
-                            Err(e) => {
-                                eprintln!("✗ Compilation error: {}", e);
-                                had_errors = true;
-                                continue;
-                            }
-                        };
-
-                        let bytecode = compile(&expr);
-
                         // Execute
-                        match vm.execute(&bytecode) {
-                            Ok(result) => {
-                                if !result.is_nil() {
-                                    println!("⟹ {:?}", result);
+                        match vm.execute(&result.bytecode) {
+                            Ok(value) => {
+                                if !value.is_nil() {
+                                    println!("⟹ {:?}", value);
                                 }
                             }
                             Err(e) => {
@@ -303,7 +220,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                         } else {
                             // Real parse error - extract line and column from error message
                             let err_msg = e.to_string();
-                            eprintln!("✗ Parse error: {}", err_msg);
+                            eprintln!("✗ Compilation error: {}", err_msg);
 
                             // Try to extract line and column from format like "<input>:1:3: message"
                             let (line, col) = if let Some(colon_pos) = err_msg.find(':') {
@@ -325,7 +242,12 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                                 (1, 1)
                             };
 
-                            print_error_context(accumulated_input.trim(), "parse error", line, col);
+                            print_error_context(
+                                accumulated_input.trim(),
+                                "compilation error",
+                                line,
+                                col,
+                            );
                             accumulated_input.clear();
                             had_errors = true;
                         }
@@ -389,28 +311,16 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
             _ => {}
         }
 
-        // Try to parse accumulated input
-        match read_str(trimmed, symbols) {
-            Ok(value) => {
+        // Try to compile accumulated input
+        match compile_new(trimmed, symbols) {
+            Ok(result) => {
                 accumulated_input.clear();
 
-                // Compile
-                let expr = match value_to_expr(&value, symbols) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        eprintln!("✗ Compilation error: {}", e);
-                        had_errors = true;
-                        continue;
-                    }
-                };
-
-                let bytecode = compile(&expr);
-
                 // Execute
-                match vm.execute(&bytecode) {
-                    Ok(result) => {
-                        if !result.is_nil() {
-                            println!("⟹ {:?}", result);
+                match vm.execute(&result.bytecode) {
+                    Ok(value) => {
+                        if !value.is_nil() {
+                            println!("⟹ {:?}", value);
                         }
                     }
                     Err(e) => {
@@ -429,7 +339,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                 } else {
                     // Real parse error - extract line and column from error message
                     let err_msg = e.to_string();
-                    eprintln!("✗ Parse error: {}", err_msg);
+                    eprintln!("✗ Compilation error: {}", err_msg);
 
                     // Try to extract line and column from format like "<input>:1:3: message"
                     let (line, col) = if let Some(colon_pos) = err_msg.find(':') {
@@ -450,7 +360,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                         (1, 1)
                     };
 
-                    print_error_context(trimmed, "parse error", line, col);
+                    print_error_context(trimmed, "compilation error", line, col);
                     accumulated_input.clear();
                     had_errors = true;
                 }

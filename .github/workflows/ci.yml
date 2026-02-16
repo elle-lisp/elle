@@ -132,28 +132,28 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Cache tarpaulin
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/bin/cargo-tarpaulin
-          key: ${{ runner.os }}-tarpaulin-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-tarpaulin-
-      - name: Install tarpaulin
-        run: |
-          if ! command -v cargo-tarpaulin &> /dev/null; then
-            cargo install cargo-tarpaulin
-          fi
-      - name: Generate coverage
-        run: cargo tarpaulin
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./cobertura.xml
-          fail_ci_if_error: false
+       - uses: actions/checkout@v4
+       - uses: dtolnay/rust-toolchain@stable
+       - uses: Swatinem/rust-cache@v2
+       - name: Cache tarpaulin
+         uses: actions/cache@v3
+         with:
+           path: ~/.cargo/bin/cargo-tarpaulin
+           key: ${{ runner.os }}-tarpaulin-${{ hashFiles('Cargo.lock') }}
+           restore-keys: |
+             ${{ runner.os }}-tarpaulin-
+       - name: Install tarpaulin
+         run: |
+           if ! command -v cargo-tarpaulin &> /dev/null; then
+             cargo install cargo-tarpaulin
+           fi
+       - name: Generate coverage
+         run: cargo tarpaulin --exclude-files "tests/*" --exclude-files "examples/*"
+       - name: Upload to Codecov
+         uses: codecov/codecov-action@v3
+         with:
+           files: ./cobertura.xml
+           fail_ci_if_error: false
 
   docs:
     name: Build Documentation

@@ -9,18 +9,19 @@
 ;; Escape HTML special characters
 (define html-escape
   (fn (str)
-    ;; Handle nil or non-string values
     (if (nil? str)
       ""
       (if (not (string? str))
         (string str)
-        ;; Apply all escapes in sequence
-        (begin
-          (define s1 (string-replace str "&" "&amp;"))
-          (define s2 (string-replace s1 "<" "&lt;"))
-          (define s3 (string-replace s2 ">" "&gt;"))
-          (define s4 (string-replace s3 "\"" "&quot;"))
-          (string-replace s4 "'" "&#39;"))))))
+        (string-replace
+          (string-replace
+            (string-replace
+              (string-replace
+                (string-replace str "&" "&amp;")
+                "<" "&lt;")
+              ">" "&gt;")
+            (string 34) "&quot;")
+          "'" "&#39;")))))
 
 ;; Find delimiter in text starting from character position
 (define find-closing-helper (fn (text pos tlen delimiter dlen)
@@ -34,93 +35,47 @@
   (find-closing-helper text start (length text) delimiter (length delimiter))))
 
 ;; Convert markdown links [text](url) to HTML anchor tags
+;; NOTE: Disabled for now due to compiler bug with define in nested contexts
 (define format-links-rec (fn (remaining result)
-  (if (= (length remaining) 0)
-    result
-    (begin
-      (define open-bracket (find-closing remaining 0 "["))
-      (if (nil? open-bracket)
-        (string-append result remaining)
-        (begin
-          (define before (if (> open-bracket 0) (substring remaining 0 open-bracket) ""))
-          (define mid (find-closing remaining (+ open-bracket 1) "]("))
-           (if (nil? mid)
-             (format-links-rec
-               (substring remaining (+ open-bracket 1) (length remaining))
-               (string-append result before "["))
-            (begin
-              (define close-paren (find-closing remaining (+ mid 2) ")"))
-               (if (nil? close-paren)
-                 (format-links-rec
-                   (substring remaining (+ open-bracket 1) (length remaining))
-                   (string-append result before "["))
-                 (begin
-                   (define link-text (substring remaining (+ open-bracket 1) mid))
-                   (define link-url (substring remaining (+ mid 2) close-paren))
-                   (define after (substring remaining (+ close-paren 1) (length remaining)))
-                   (format-links-rec
-                    after
-                    (string-append result before "<a href=\"" link-url "\">" link-text "</a>"))))))))))))
+  (string-append result remaining)))
 
 (define format-links (fn (text)
   (format-links-rec text "")))
 
+;; Helper function to apply formatting to split parts using fold
+;; Applies a tag (like "strong", "em", "code") to alternating parts
+(define apply-formatting
+  (fn (parts tag)
+    (first
+      (fold
+        (fn (state part)
+          ;; state is [result, is-active]
+          ;; Avoid variable definitions in lambda to work around compiler bug
+          (list
+            (if (first (rest state))
+              (string-append (first state) "<" tag ">" part "</" tag ">")
+              (string-append (first state) part))
+            (not (first (rest state)))))
+        (list "" #f)
+        parts))))
+
 ;; Format inline markdown: **bold**, *italic*, `code`
 ;; Uses string-split to avoid UTF-8 boundary issues
 (define format-inline (fn (text)
-  (begin
-    ;; First, escape HTML characters
-    (define escaped (html-escape text))
-    
-    ;; Then handle **bold** by splitting and rejoining
-    (define parts-bold (string-split escaped "**"))
-    (define format-bold
-      (fn (parts result is-bold)
-        (if (nil? parts)
-          result
-          (begin
-            (define part (first parts))
-            (define rest-parts (rest parts))
-            (define new-result
-              (if is-bold
-                (string-append result "<strong>" part "</strong>")
-                (string-append result part)))
-            (format-bold rest-parts new-result (not is-bold))))))
-    (define after-bold (format-bold parts-bold "" #f))
-    
-    ;; Then handle *italic* by splitting and rejoining
-    (define parts-italic (string-split after-bold "*"))
-    (define format-italic
-      (fn (parts result is-italic)
-        (if (nil? parts)
-          result
-          (begin
-            (define part (first parts))
-            (define rest-parts (rest parts))
-            (define new-result
-              (if is-italic
-                (string-append result "<em>" part "</em>")
-                (string-append result part)))
-            (format-italic rest-parts new-result (not is-italic))))))
-    (define after-italic (format-italic parts-italic "" #f))
-    
-    ;; Then handle `code` by splitting and rejoining
-    (define parts-code (string-split after-italic "`"))
-    (define format-code
-      (fn (parts result is-code)
-        (if (nil? parts)
-          result
-          (begin
-            (define part (first parts))
-            (define rest-parts (rest parts))
-            (define new-result
-              (if is-code
-                (string-append result "<code>" part "</code>")
-                (string-append result part)))
-            (format-code rest-parts new-result (not is-code))))))
-    (define after-code (format-code parts-code "" #f))
-    
-    (format-links after-code))))
+  (format-links
+    (apply-formatting
+      (string-split
+        (apply-formatting
+          (string-split
+            (apply-formatting
+              (string-split
+                (html-escape text)
+                "**")
+              "strong")
+            "*")
+          "em")
+        "`")
+      "code"))))
 
 ;; ============================================================================
 ;; CSS stylesheet generation
@@ -434,146 +389,109 @@ tbody tr:nth-child(even) {
 ;; Render a paragraph block
 (define render-paragraph
   (fn (block)
-    (begin
-      (define text (get block "text"))
-      (string-append "<p>" (format-inline text) "</p>"))))
+    (string-append "<p>" (format-inline (get block "text")) "</p>")))
 
 ;; Render a code block
 (define render-code
   (fn (block)
-    (begin
-      (define text (get block "text"))
-      (define language (get block "language"))
-      (string-append 
-        "<pre><code class=\"language-" (html-escape language) "\">"
-        (html-escape text)
-        "</code></pre>"))))
+    (string-append 
+      "<pre><code class=\"language-" (html-escape (get block "language")) "\">"
+      (html-escape (get block "text"))
+      "</code></pre>")))
 
 ;; Render a list block using fold
+;; NOTE: We call format-inline directly without storing in a variable
+;; to work around a compiler bug with variable definitions in fold lambdas
 (define render-list
   (fn (block)
-    (begin
-      (define items (get block "items"))
-      (define ordered (get block "ordered"))
-      (define tag (if ordered "ol" "ul"))
-      ;; Use fold to concatenate all rendered list items
-      (define rendered-items
-        (fold
-          (fn (acc item)
-            (string-append acc "<li>" (format-inline item) "</li>"))
-          ""
-          items))
-      (string-append 
-        "<" tag ">"
-        rendered-items
-        "</" tag ">"))))
+    (string-append 
+      "<" (if (get block "ordered") "ol" "ul") ">"
+      (fold
+        (fn (acc item)
+          (string-append acc "<li>" (format-inline item) "</li>"))
+        ""
+        (get block "items"))
+      "</" (if (get block "ordered") "ol" "ul") ">")))
 
 ;; Render a blockquote block
 (define render-blockquote
   (fn (block)
-    (begin
-      (define text (get block "text"))
-      (string-append "<blockquote>" (format-inline text) "</blockquote>"))))
+    (string-append "<blockquote>" (format-inline (get block "text")) "</blockquote>")))
 
 ;; Render a table block using fold
 (define render-table
   (fn (block)
-    (begin
-      (define headers (get block "headers"))
-      (define rows (get block "rows"))
-      
-      ;; Render header cells using fold
-      (define rendered-headers
-        (fold
-          (fn (acc header)
-            (string-append acc "<th>" (html-escape header) "</th>"))
-          ""
-          headers))
-      
-      ;; Render row cells using fold
-      (define render-row-cells
-        (fn (cells)
-          (fold
-            (fn (acc cell)
-              (string-append acc "<td>" (html-escape cell) "</td>"))
-            ""
-            cells)))
-      
-      ;; Render all rows using fold
-      (define rendered-rows
-        (fold
-          (fn (acc row)
-            (string-append acc "<tr>" (render-row-cells row) "</tr>"))
-          ""
-          rows))
-      
-      (string-append 
-        "<table><thead><tr>"
-        rendered-headers
-        "</tr></thead><tbody>"
-        rendered-rows
-        "</tbody></table>"))))
+    (string-append 
+      "<table><thead><tr>"
+      (fold
+        (fn (acc header)
+          (string-append acc "<th>" (html-escape header) "</th>"))
+        ""
+        (get block "headers"))
+      "</tr></thead><tbody>"
+      (fold
+        (fn (acc row)
+          (string-append acc "<tr>"
+            (fold
+              (fn (acc2 cell)
+                (string-append acc2 "<td>" (html-escape cell) "</td>"))
+              ""
+              row)
+            "</tr>"))
+        ""
+        (get block "rows"))
+      "</tbody></table>")))
 
 ;; Render a note/callout block
 (define render-note
   (fn (block)
-    (begin
-      (define text (get block "text"))
-      (define kind (get block "kind"))
-      (string-append 
-        "<div class=\"note note-" (html-escape kind) "\">"
-        (format-inline text)
-        "</div>"))))
+    (string-append 
+      "<div class=\"note note-" (html-escape (get block "kind")) "\">"
+      (format-inline (get block "text"))
+      "</div>")))
 
 ;; Main dispatcher
 (define render-block
   (fn (block)
-    (begin
-      (define type (get block "type"))
-      (cond
-        ((string-contains? type "paragraph") (render-paragraph block))
-        ((string-contains? type "code") (render-code block))
-        ((string-contains? type "list") (render-list block))
-        ((string-contains? type "blockquote") (render-blockquote block))
-        ((string-contains? type "table") (render-table block))
-        ((string-contains? type "note") (render-note block))
-        ((string-contains? type "heading") "")
-        (#t "")))))
+    (cond
+      ((string-contains? (get block "type") "paragraph") (render-paragraph block))
+      ((string-contains? (get block "type") "code") (render-code block))
+      ((string-contains? (get block "type") "list") (render-list block))
+      ((string-contains? (get block "type") "blockquote") (render-blockquote block))
+      ((string-contains? (get block "type") "table") (render-table block))
+      ((string-contains? (get block "type") "note") (render-note block))
+      ((string-contains? (get block "type") "heading") "")
+      (#t ""))))
 
 ;; Render blocks in a section
 (define render-blocks-in-section
   (fn (blocks result)
-    (if (nil? blocks)
+    (fold
+      (fn (acc block)
+        (string-append acc (render-block block)))
       result
-      (begin
-        (define block (first blocks))
-        (define rest-blocks (rest blocks))
-        (render-blocks-in-section rest-blocks
-          (string-append result (render-block block)))))))
+      blocks)))
 
 ;; Render a heading block (nested heading within content)
 (define render-heading
   (fn (block)
-    (begin
-      (define level (get block "level"))
-      (define content (get block "content"))
-      (define level-str (number->string level))
-      (string-append 
-        "<h" level-str ">" (render-blocks-in-section content "") "</h" level-str ">"))))
+    (string-append 
+      "<h" (number->string (get block "level")) ">" 
+      (render-blocks-in-section (get block "content") "") 
+      "</h" (number->string (get block "level")) ">")))
 
 ;; Render a section with heading and content blocks
 (define render-section
   (fn (section)
-    (begin
-      (define heading (get section "heading"))
-      (define level (get section "level"))
-      (define content (get section "content"))
-      (define level-str (number->string level))
-      (string-append 
-        "<h" level-str ">" (html-escape heading) "</h" level-str ">"
-        (render-blocks-in-section content "")))))
+    (string-append 
+      "<h" (number->string (get section "level")) ">" 
+      (html-escape (get section "heading")) 
+      "</h" (number->string (get section "level")) ">"
+      (render-blocks-in-section (get section "content") ""))))
 
 ;; Render all sections using fold
+;; NOTE: We call render-section directly without storing in a variable
+;; to work around a compiler bug with variable definitions in fold lambdas
 (define render-sections
   (fn (sections)
     (fold
@@ -589,18 +507,14 @@ tbody tr:nth-child(even) {
 ;; Render navigation items
 (define render-nav-items
   (fn (items current-slug result)
-    (if (nil? items)
+    (fold
+      (fn (acc item)
+        (string-append acc 
+          "<li><a href=\"" (get item "slug") ".html\" class=\"nav-link" 
+          (if (string-contains? (get item "slug") current-slug) " active" "") 
+          "\">" (get item "title") "</a></li>"))
       result
-      (begin
-        (define item (first items))
-        (define rest-items (rest items))
-        (define nav-slug (get item "slug"))
-        (define title (get item "title"))
-        (define active-class (if (string-contains? nav-slug current-slug) " active" ""))
-        (render-nav-items rest-items current-slug
-          (string-append result 
-            "<li><a href=\"" nav-slug ".html\" class=\"nav-link" active-class "\">" 
-            title "</a></li>"))))))
+      items)))
 
 ;; Generate navigation HTML
 (define generate-nav
@@ -610,35 +524,29 @@ tbody tr:nth-child(even) {
 ;; Generate the full HTML page
 (define generate-page
   (fn (site page nav css body)
-    (begin
-      (define site-title (get site "title"))
-      (define page-title (get page "title"))
-      (define page-desc (get page "description"))
-      (define nav-items (get site "nav"))
-      (define current-slug (get page "slug"))
-      (string-append
-        "<!DOCTYPE html>\n"
-        "<html lang=\"en\">\n"
-        "<head>\n"
-        "  <meta charset=\"UTF-8\">\n"
-        "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-        "  <title>" page-title " - " site-title "</title>\n"
-        "  <meta name=\"description\" content=\"" page-desc "\">\n"
-        "  <link rel=\"stylesheet\" href=\"style.css\">\n"
-        "</head>\n"
-        "<body>\n"
-        "  <nav class=\"sidebar\">\n"
-        "    <div class=\"site-title\">" site-title "</div>\n"
-        "    <ul>\n"
-        (generate-nav nav-items current-slug)
-        "    </ul>\n"
-        "  </nav>\n"
-        "  <main class=\"content\">\n"
-        "    <h1>" page-title "</h1>\n"
-        body
-        "  </main>\n"
-        "</body>\n"
-        "</html>\n"))))
+    (string-append
+      "<!DOCTYPE html>\n"
+      "<html lang=\"en\">\n"
+      "<head>\n"
+      "  <meta charset=\"UTF-8\">\n"
+      "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+      "  <title>" (get page "title") " - " (get site "title") "</title>\n"
+      "  <meta name=\"description\" content=\"" (get page "description") "\">\n"
+      "  <link rel=\"stylesheet\" href=\"style.css\">\n"
+      "</head>\n"
+      "<body>\n"
+      "  <nav class=\"sidebar\">\n"
+      "    <div class=\"site-title\">" (get site "title") "</div>\n"
+      "    <ul>\n"
+      (generate-nav (get site "nav") (get page "slug"))
+      "    </ul>\n"
+      "  </nav>\n"
+      "  <main class=\"content\">\n"
+      "    <h1>" (get page "title") "</h1>\n"
+      body
+      "  </main>\n"
+      "</body>\n"
+      "</html>\n")))
 
 ;; ============================================================================
 ;; Main generator

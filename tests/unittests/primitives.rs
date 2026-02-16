@@ -1478,6 +1478,7 @@ fn test_spawn_primitive() {
         constants: std::rc::Rc::new(vec![]),
         source_ast: None,
         effect: elle::compiler::effects::Effect::Pure,
+        cell_params_mask: 0,
     }));
 
     let result = call_primitive(&spawn, &[closure]);
@@ -1591,6 +1592,7 @@ fn test_profile_primitive() {
         constants: std::rc::Rc::new(vec![]),
         source_ast: None,
         effect: elle::compiler::effects::Effect::Pure,
+        cell_params_mask: 0,
     }));
 
     let result = call_primitive(&profile, &[closure]);
@@ -1939,6 +1941,7 @@ fn test_json_serialize_errors() {
         constants: std::rc::Rc::new(vec![]),
         source_ast: None,
         effect: elle::compiler::effects::Effect::Pure,
+        cell_params_mask: 0,
     }));
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());

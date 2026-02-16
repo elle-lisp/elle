@@ -30,6 +30,7 @@ fn test_closure_type_identification() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     let value = Value::Closure(Rc::new(closure));
 
@@ -51,6 +52,7 @@ fn test_closure_display() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     let value = Value::Closure(Rc::new(closure));
     let s = format!("{}", value);
@@ -69,6 +71,7 @@ fn test_closure_clone() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     let value1 = Value::Closure(Rc::new(closure.clone()));
     let value2 = value1.clone();
@@ -133,6 +136,7 @@ fn test_closure_empty_environment() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert_eq!(closure.env.len(), 0);
 }
@@ -150,6 +154,7 @@ fn test_closure_single_captured_variable() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert_eq!(closure.env.len(), 1);
     assert_eq!(closure.env[0], Value::Int(42));
@@ -173,6 +178,7 @@ fn test_closure_multiple_captured_variables() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert_eq!(closure.env.len(), 4);
     assert_eq!(closure.env[0], Value::Int(1));
@@ -193,6 +199,7 @@ fn test_closure_environment_sharing() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     let closure2 = Closure {
@@ -204,6 +211,7 @@ fn test_closure_environment_sharing() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     // Both closures share the same environment
@@ -228,6 +236,7 @@ fn test_closure_bytecode_storage() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert_eq!(*closure.bytecode, bytecode);
 }
@@ -249,6 +258,7 @@ fn test_closure_constants_storage() {
         constants: Rc::new(constants.clone()),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert_eq!(*closure.constants, constants);
 }
@@ -266,6 +276,7 @@ fn test_closure_num_locals() {
             constants: Rc::new(vec![]),
             source_ast: None,
             effect: Effect::Pure,
+            cell_params_mask: 0,
         };
         assert_eq!(closure.num_locals, num_locals);
     }
@@ -286,6 +297,7 @@ fn test_closure_zero_parameters() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert!(closure.arity.matches(0));
     assert!(!closure.arity.matches(1));
@@ -302,6 +314,7 @@ fn test_closure_single_parameter() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert!(closure.arity.matches(1));
 }
@@ -317,6 +330,7 @@ fn test_closure_multiple_parameters() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert!(closure.arity.matches(3));
     assert!(!closure.arity.matches(2));
@@ -334,6 +348,7 @@ fn test_closure_variadic_parameters() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert!(closure.arity.matches(1));
     assert!(closure.arity.matches(2));
@@ -356,6 +371,7 @@ fn test_closures_never_equal() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     }));
 
     let closure2 = Value::Closure(Rc::new(Closure {
@@ -367,6 +383,7 @@ fn test_closures_never_equal() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     }));
 
     // Even though they're structurally identical, they should not be equal
@@ -385,6 +402,7 @@ fn test_same_closure_reference_equality() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     });
 
     let value1 = Value::Closure(closure_rc.clone());
@@ -419,6 +437,7 @@ fn test_closure_with_nested_captured_values() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     assert_eq!(closure.env.len(), 1);
@@ -436,6 +455,7 @@ fn test_closure_with_closure_in_constants() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     }));
 
     let outer_closure = Closure {
@@ -447,6 +467,7 @@ fn test_closure_with_closure_in_constants() {
         constants: Rc::new(vec![inner_closure]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     assert_eq!(outer_closure.constants.len(), 1);
@@ -466,6 +487,7 @@ fn test_closure_with_many_upvalues() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     assert_eq!(closure.env.len(), 100);
@@ -488,6 +510,7 @@ fn test_closure_as_method() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     let value = Value::Closure(Rc::new(closure));
@@ -512,6 +535,7 @@ fn test_closure_type_check() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     }));
 
     assert!(matches!(closure, Value::Closure(_)));
@@ -539,6 +563,7 @@ fn test_closure_environment_isolation() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     let closure2 = Closure {
@@ -550,6 +575,7 @@ fn test_closure_environment_isolation() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     assert_ne!(closure1.env[0], closure2.env[0]);
@@ -568,6 +594,7 @@ fn test_closure_local_variables_count() {
             constants: Rc::new(vec![]),
             source_ast: None,
             effect: Effect::Pure,
+            cell_params_mask: 0,
         };
         assert_eq!(closure.num_locals, locals);
     }
@@ -588,6 +615,7 @@ fn test_closure_with_empty_bytecode() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert_eq!(closure.bytecode.len(), 0);
 }
@@ -605,6 +633,7 @@ fn test_closure_with_large_bytecode() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
     assert_eq!(closure.bytecode.len(), 10000);
 }
@@ -624,6 +653,7 @@ fn test_closure_rc_reference_counting() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     // Reference should still be alive
@@ -646,6 +676,7 @@ fn test_closure_debug_format() {
         constants: Rc::new(vec![Value::String("test".into())]),
         source_ast: None,
         effect: Effect::Pure,
+            cell_params_mask: 0,
     };
 
     let debug_str = format!("{:?}", closure);

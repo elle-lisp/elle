@@ -864,6 +864,7 @@ fn create_cps_closure(
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Yields,
+        cell_params_mask: 0,
     };
 
     Value::Closure(Rc::new(closure))

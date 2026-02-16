@@ -168,6 +168,10 @@ impl VM {
                     stack::handle_dup(self)?;
                 }
 
+                Instruction::DupN => {
+                    stack::handle_dup_n(self, bytecode, &mut ip)?;
+                }
+
                 // Variable access
                 Instruction::LoadGlobal => {
                     variables::handle_load_global(self, bytecode, &mut ip, constants)?;
@@ -268,11 +272,23 @@ impl VM {
                                 // Create a new environment that includes:
                                 // [captured_vars..., parameters..., locally_defined_cells...]
                                 // The closure's env contains captured variables
-                                // We append the arguments as parameters
+                                // We append the arguments as parameters (wrapping in cells if needed)
                                 // We append empty cells for locally-defined variables (Phase 4)
                                 let mut new_env = Vec::new();
                                 new_env.extend((*closure.env).iter().cloned());
-                                new_env.extend(args.clone());
+
+                                // Add parameters, wrapping in cells if needed based on cell_params_mask
+                                for (i, arg) in args.iter().enumerate() {
+                                    if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                                        // This parameter needs a cell
+                                        let cell = Value::LocalCell(std::rc::Rc::new(
+                                            std::cell::RefCell::new(Box::new(arg.clone())),
+                                        ));
+                                        new_env.push(cell);
+                                    } else {
+                                        new_env.push(arg.clone());
+                                    }
+                                }
 
                                 // Calculate number of locally-defined variables
                                 let num_params = match closure.arity {
@@ -296,6 +312,15 @@ impl VM {
 
                                 let new_env_rc = std::rc::Rc::new(new_env);
 
+                                // Push call frame for stack tracing and local variable access
+                                // The frame_base is the current stack top - locals will be allocated above this
+                                let frame_base = self.stack.len();
+                                self.push_call_frame_with_base(
+                                    "<closure>".to_string(),
+                                    ip,
+                                    frame_base,
+                                );
+
                                 // If we're in a coroutine context, use coroutine-aware execution
                                 // that can handle yields from called functions
                                 if self.in_coroutine() {
@@ -305,7 +330,10 @@ impl VM {
                                         Some(&new_env_rc),
                                     )?;
 
+                                    self.pop_call_frame();
                                     self.call_depth -= 1;
+                                    // Clean up any garbage left on the stack by the called closure
+                                    self.stack.truncate(frame_base);
 
                                     // If the called function yielded, propagate it up
                                     match result {
@@ -324,7 +352,11 @@ impl VM {
                                         Some(&new_env_rc),
                                     )?;
 
+                                    self.pop_call_frame();
                                     self.call_depth -= 1;
+                                    // Clean up any garbage left on the stack by the called closure
+                                    // The closure may have left temporary values; we only want the result
+                                    self.stack.truncate(frame_base);
                                     self.stack.push(result);
                                 }
                             }
@@ -393,6 +425,14 @@ impl VM {
 
                                 let new_env_rc = std::rc::Rc::new(new_env);
 
+                                // Push call frame for stack tracing and local variable access
+                                let frame_base = self.stack.len();
+                                self.push_call_frame_with_base(
+                                    "<jit-closure>".to_string(),
+                                    ip,
+                                    frame_base,
+                                );
+
                                 // If we're in a coroutine context, use coroutine-aware execution
                                 if self.in_coroutine() {
                                     let result = self.execute_bytecode_coroutine(
@@ -401,6 +441,7 @@ impl VM {
                                         Some(&new_env_rc),
                                     )?;
 
+                                    self.pop_call_frame();
                                     self.call_depth -= 1;
 
                                     // If the called function yielded, propagate it up
@@ -420,6 +461,7 @@ impl VM {
                                         Some(&new_env_rc),
                                     )?;
 
+                                    self.pop_call_frame();
                                     self.call_depth -= 1;
                                     self.stack.push(result);
                                 }
@@ -837,6 +879,16 @@ impl VM {
                                 "BindException: Expected symbol in constants".to_string(),
                             ));
                         }
+                    }
+                }
+
+                Instruction::LoadException => {
+                    // Load current exception onto stack
+                    if let Some(exc) = &self.current_exception {
+                        self.stack.push(Value::Condition(exc.clone()));
+                    } else {
+                        // No exception - push nil (shouldn't happen in normal flow)
+                        self.stack.push(Value::Nil);
                     }
                 }
 

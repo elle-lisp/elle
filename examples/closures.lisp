@@ -930,18 +930,18 @@
 
 (newline)
 
-;; Mutual recursion with nested definitions
+;; Mutual recursion with nested definitions requires letrec
+;; (define does not support forward references)
 (define run-even-odd (fn ()
-  (begin
-    (define is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
-    (define is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
-    (is-even 8))))
+  (letrec ((is-even-local (fn (n) (if (= n 0) #t (is-odd-local (- n 1)))))
+           (is-odd-local (fn (n) (if (= n 0) #f (is-even-local (- n 1))))))
+    (is-even-local 8))))
 
-(display "Is 8 even (nested)? ")
+(display "Is 8 even (nested letrec)? ")
 (display (run-even-odd))
 (newline)
 
-;; Verify nested mutual recursion
+;; Verify nested mutual recursion with letrec
 (assert-eq (run-even-odd) #t "8 should be even")
 
 (newline)

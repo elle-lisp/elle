@@ -58,8 +58,8 @@ use super::table::{
     prim_del, prim_get, prim_has_key, prim_keys, prim_put, prim_table, prim_values,
 };
 use super::type_check::{
-    prim_is_boolean, prim_is_list, prim_is_nil, prim_is_number, prim_is_pair, prim_is_string,
-    prim_is_symbol, prim_type_of,
+    prim_is_boolean, prim_is_keyword, prim_is_list, prim_is_nil, prim_is_number, prim_is_pair,
+    prim_is_string, prim_is_symbol, prim_type_of,
 };
 use super::vector::{prim_vector, prim_vector_ref, prim_vector_set};
 
@@ -93,6 +93,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "symbol?", prim_is_symbol);
     register_fn(vm, symbols, "string?", prim_is_string);
     register_fn(vm, symbols, "boolean?", prim_is_boolean);
+    register_fn(vm, symbols, "keyword?", prim_is_keyword);
 
     // Logic
     register_fn(vm, symbols, "not", prim_not);
