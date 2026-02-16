@@ -34,6 +34,10 @@ pub enum Instruction {
     /// Duplicate top of stack
     Dup,
 
+    /// Duplicate value at offset from top of stack (offset u8)
+    /// offset 0 = top, offset 1 = second from top, etc.
+    DupN,
+
     /// Function call (arg_count)
     Call,
 
@@ -148,6 +152,9 @@ pub enum Instruction {
 
     /// Bind caught exception to variable (var_symbol_id u16)
     BindException,
+
+    /// Load current exception onto stack
+    LoadException,
 
     /// Clear current exception state
     ClearException,

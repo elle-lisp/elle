@@ -35,6 +35,66 @@
 ;;;   - style-warning (ID 8)
 
 ;;; ============================================================================
+;;; Handler-Case Runtime Tests
+;;; ============================================================================
+
+;; Basic handler-case: catch division-by-zero
+(define div-result-1 
+  (handler-case (/ 10 2)
+    (error e -1)))
+(assert-equal div-result-1 5 "handler-case: successful division returns result")
+
+(define div-result-2
+  (handler-case (/ 10 0)
+    (error e -1)))
+(assert-equal div-result-2 -1 "handler-case: division by zero caught, returns -1")
+
+;; Exception variable binding: verify we can access the caught exception
+(define caught-exc
+  (handler-case (/ 1 0)
+    (error e e)))
+(assert-true (not (nil? caught-exc)) "handler-case: exception variable is bound")
+
+;; Multiple sequential handler-cases
+(define seq-1 (handler-case (/ 100 0) (error e 111)))
+(define seq-2 (handler-case (/ 200 0) (error e 222)))
+(define seq-3 (handler-case (+ 10 20) (error e 999)))
+(assert-equal seq-1 111 "sequential handler-case 1")
+(assert-equal seq-2 222 "sequential handler-case 2")
+(assert-equal seq-3 30 "sequential handler-case 3: no error, returns body result")
+
+;; Handler-case in function
+(define safe-divide
+  (fn (a b)
+    (handler-case (/ a b)
+      (error e 0))))
+
+(assert-equal (safe-divide 20 4) 5 "safe-divide: 20/4 = 5")
+(assert-equal (safe-divide 10 0) 0 "safe-divide: 10/0 returns 0")
+(assert-equal (safe-divide 100 5) 20 "safe-divide: 100/5 = 20")
+
+;; Nested handler-case
+(define nested-result
+  (handler-case
+    (handler-case (/ 1 0)
+      (division-by-zero e 42))
+    (error e 99)))
+(assert-equal nested-result 42 "nested handler-case: inner catches division-by-zero")
+
+;; Inheritance: error handler catches division-by-zero
+(define inherit-result
+  (handler-case (/ 5 0)
+    (error e 777)))
+(assert-equal inherit-result 777 "handler-case: error handler catches division-by-zero")
+
+;; Handler with computation in body
+(define compute-result
+  (handler-case
+    (+ (* 3 4) (/ 10 0))
+    (error e -999)))
+(assert-equal compute-result -999 "handler-case: exception in subexpression caught")
+
+;;; ============================================================================
 ;;; Practical Inheritance Matching Examples
 ;;; ============================================================================
 

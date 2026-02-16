@@ -83,6 +83,7 @@ mod tests {
             constants: Rc::new(vec![]),
             source_ast: None,
             effect: Effect::Pure,
+            cell_params_mask: 0,
         }))
     }
 

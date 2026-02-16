@@ -48,6 +48,13 @@ pub fn disassemble(instructions: &[u8]) -> String {
                     i += 1;
                 }
             }
+            Instruction::DupN => {
+                if i < instructions.len() {
+                    let offset = instructions[i];
+                    output.push_str(&format!(" (offset={})", offset));
+                    i += 1;
+                }
+            }
             _ => {}
         }
 

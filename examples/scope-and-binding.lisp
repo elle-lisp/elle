@@ -408,8 +408,8 @@
 (display "Outside let - x is back to: ")
 (display x)
 (newline)
-;; Note: Elle's let binding modifies the global x
-(assert-eq x 42 "x outside let is modified by let binding to 42")
+;; Note: Elle's let creates a new lexical binding, outer scope unchanged
+(assert-eq x 100 "x outside let unchanged - let creates shadow binding")
 
 (newline)
 

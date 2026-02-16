@@ -348,6 +348,7 @@ mod tests {
             constants: Rc::new(vec![]),
             source_ast: None,
             effect: crate::compiler::effects::Effect::Pure,
+            cell_params_mask: 0,
         }));
         assert!(serialize_value(&closure).is_err());
 

@@ -120,6 +120,9 @@ pub struct Closure {
     pub source_ast: Option<Rc<JitLambda>>,
     /// Effect of the closure body
     pub effect: Effect,
+    /// Bitmask indicating which parameters need to be wrapped in cells
+    /// Bit i is set if parameter i needs a cell (for mutable parameters)
+    pub cell_params_mask: u64,
 }
 
 impl Closure {
@@ -537,8 +540,30 @@ impl fmt::Debug for Value {
             Value::Bool(b) => write!(f, "{}", b),
             Value::Int(n) => write!(f, "{}", n),
             Value::Float(fl) => write!(f, "{}", fl),
-            Value::Symbol(id) => write!(f, "Symbol({})", id.0),
-            Value::Keyword(id) => write!(f, ":{}", id.0),
+            Value::Symbol(id) => {
+                // Try to get the symbol name from the thread-local symbol table
+                unsafe {
+                    if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
+                        if let Some(name) = (*symbols_ptr).name(*id) {
+                            return write!(f, "{}", name);
+                        }
+                    }
+                }
+                // Fallback if symbol table is not available
+                write!(f, "Symbol({})", id.0)
+            }
+            Value::Keyword(id) => {
+                // Try to get the keyword name from the thread-local symbol table
+                unsafe {
+                    if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
+                        if let Some(name) = (*symbols_ptr).name(*id) {
+                            return write!(f, ":{}", name);
+                        }
+                    }
+                }
+                // Fallback if symbol table is not available
+                write!(f, ":keyword-{}", id.0)
+            }
             Value::String(s) => write!(f, "\"{}\"", s),
             Value::Cons(cons) => {
                 write!(f, "(")?;
@@ -685,6 +710,7 @@ mod coroutine_tests {
             constants: Rc::new(vec![Value::Nil]),
             source_ast: None,
             effect: Effect::Pure,
+            cell_params_mask: 0,
         });
 
         let co = Coroutine::new(closure);
@@ -717,6 +743,7 @@ mod coroutine_tests {
             constants: Rc::new(vec![Value::Nil]),
             source_ast: None,
             effect: Effect::Pure,
+            cell_params_mask: 0,
         });
 
         let mut co = Coroutine::new(closure.clone());

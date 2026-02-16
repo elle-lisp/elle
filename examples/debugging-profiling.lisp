@@ -35,16 +35,14 @@
 
 (display "Tracing function calls:\n")
 
-(trace add)
 (display "  Calling add(3, 4):\n")
-(define result1 (add 3 4))
+(define result1 (trace "add" (add 3 4)))
 (display "  Result: ")
 (display result1)
 (newline)
 
-(trace multiply)
 (display "  Calling multiply(5, 6):\n")
-(define result2 (multiply 5 6))
+(define result2 (trace "multiply" (multiply 5 6)))
 (display "  Result: ")
 (display result2)
 (newline)
@@ -193,11 +191,8 @@
 
 (display "Tracing nested function calls:\n")
 
-(trace inner-fn)
-(trace outer-fn)
-
 (display "  Calling outer-fn(5):\n")
-(define nested-result (outer-fn 5))
+(define nested-result (trace "outer-fn" (outer-fn 5)))
 (display "  Result: ")
 (display nested-result)
 (newline)

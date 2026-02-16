@@ -30,6 +30,7 @@ pub fn handle_make_closure(
             constants: template.constants.clone(),
             source_ast: template.source_ast.clone(),
             effect: template.effect,
+            cell_params_mask: template.cell_params_mask,
         };
 
         vm.stack.push(Value::Closure(Rc::new(closure)));

@@ -3,10 +3,3 @@
 
 # Output format
 out = ["Xml"]
-
-# Exclude test and example files from coverage
-exclude_files = ["tests/*", "examples/*"]
-
-# Enable parallel coverage analysis
-# Speeds up coverage collection on multi-core systems
-parallel = true

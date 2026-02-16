@@ -38,3 +38,12 @@ mod mutual_recursion {
 mod scope_compilation {
     include!("scope_compilation.rs");
 }
+mod bytecode_debug {
+    include!("bytecode_debug.rs");
+}
+mod hir_debug {
+    include!("hir_debug.rs");
+}
+mod lir_debug {
+    include!("lir_debug.rs");
+}

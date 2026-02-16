@@ -283,9 +283,15 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                     // Release the borrow before calling resume_from_context
                     drop(borrowed);
 
+                    // Enter coroutine context so resume_from_context can access current_coroutine()
+                    vm.enter_coroutine(co.clone());
+
                     // Resume from the saved context
                     let result =
                         vm.resume_from_context(context, resume_value, &bytecode, &constants);
+
+                    // Exit coroutine context
+                    vm.exit_coroutine();
 
                     // Re-borrow to update state
                     let mut borrowed = co.borrow_mut();
@@ -633,6 +639,7 @@ mod tests {
             constants: Rc::new(vec![Value::Nil]),
             source_ast: None,
             effect: Effect::Pure,
+            cell_params_mask: 0,
         }))
     }
 

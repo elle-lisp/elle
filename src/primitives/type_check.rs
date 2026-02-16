@@ -62,6 +62,14 @@ pub fn prim_is_boolean(args: &[Value]) -> LResult<Value> {
     Ok(Value::Bool(matches!(args[0], Value::Bool(_))))
 }
 
+/// Check if value is a keyword
+pub fn prim_is_keyword(args: &[Value]) -> LResult<Value> {
+    if args.len() != 1 {
+        return Err(LError::arity_mismatch(1, args.len()));
+    }
+    Ok(Value::Bool(matches!(args[0], Value::Keyword(_))))
+}
+
 /// Get the type name of a value as a keyword
 pub fn prim_type_of(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
