@@ -1,8 +1,8 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
-use elle::compiler::value_to_expr;
 use elle::ffi_primitives;
-use elle::primitives::{clear_macro_symbol_table, set_macro_symbol_table};
-use elle::{compile, read_str, register_primitives, SymbolTable, Value, VM};
+use elle::pipeline::{compile_all_new, compile_new};
+use elle::primitives::{clear_macro_symbol_table, register_primitives, set_macro_symbol_table};
+use elle::{SymbolTable, Value, VM};
 
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
@@ -16,10 +16,33 @@ fn eval(input: &str) -> Result<Value, String> {
     set_macro_symbol_table(&mut symbols as *mut SymbolTable);
     ffi_primitives::set_symbol_table(&mut symbols as *mut SymbolTable);
 
-    let value = read_str(input, &mut symbols)?;
-    let expr = value_to_expr(&value, &mut symbols)?;
-    let bytecode = compile(&expr);
-    let result = vm.execute(&bytecode);
+    // Try single expression first
+    let result = match compile_new(input, &mut symbols) {
+        Ok(compiled) => vm.execute(&compiled.bytecode),
+        Err(_) => {
+            // Try wrapping in begin
+            let wrapped = format!("(begin {})", input);
+            match compile_new(&wrapped, &mut symbols) {
+                Ok(compiled) => vm.execute(&compiled.bytecode),
+                Err(_) => {
+                    // Try multiple expressions
+                    match compile_all_new(input, &mut symbols) {
+                        Ok(results) => {
+                            let mut last_result = Ok(Value::NIL);
+                            for r in results {
+                                last_result = vm.execute(&r.bytecode);
+                                if last_result.is_err() {
+                                    break;
+                                }
+                            }
+                            last_result
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+            }
+        }
+    };
 
     // Clear context
     ffi_primitives::clear_vm_context();
@@ -56,19 +79,19 @@ fn test_macro_primitives_integration() {
     assert!(eval("(expand-macro '(test 1 2))").is_err());
 
     // Test macro?
-    assert_eq!(eval("(macro? 'some-name)").unwrap(), Value::Bool(false));
-    assert_eq!(eval("(macro? 42)").unwrap(), Value::Bool(false));
+    assert_eq!(eval("(macro? 'some-name)").unwrap(), Value::bool(false));
+    assert_eq!(eval("(macro? 42)").unwrap(), Value::bool(false));
 }
 
 #[test]
 fn test_spawn_and_thread_id() {
     // Get current thread ID
-    match eval("(current-thread-id)").unwrap() {
-        Value::String(s) => {
-            assert!(!s.is_empty());
-            assert!(s.contains("ThreadId"));
-        }
-        _ => panic!("Expected string thread ID"),
+    let result = eval("(current-thread-id)").unwrap();
+    if let Some(s) = result.as_string() {
+        assert!(!s.is_empty());
+        assert!(s.contains("ThreadId"));
+    } else {
+        panic!("Expected string thread ID");
     }
 }
 
@@ -76,34 +99,34 @@ fn test_spawn_and_thread_id() {
 fn test_sleep_integration() {
     // Sleep with integer
     let start = std::time::Instant::now();
-    assert_eq!(eval("(sleep 0)").unwrap(), Value::Nil);
+    assert_eq!(eval("(sleep 0)").unwrap(), Value::NIL);
     let elapsed = start.elapsed();
     assert!(elapsed.as_millis() < 100); // Should be quick for 0 seconds
 
     // Sleep with float
-    assert_eq!(eval("(sleep 0.001)").unwrap(), Value::Nil);
+    assert_eq!(eval("(sleep 0.001)").unwrap(), Value::NIL);
 }
 
 #[test]
 fn test_debug_print_integration() {
     // debug-print should return the value
-    assert_eq!(eval("(debug-print 42)").unwrap(), Value::Int(42));
+    assert_eq!(eval("(debug-print 42)").unwrap(), Value::int(42));
     assert_eq!(
         eval("(debug-print \"hello\")").unwrap(),
-        Value::String("hello".into())
+        Value::string("hello")
     );
 
     // Works with expressions
-    assert_eq!(eval("(debug-print (+ 1 2))").unwrap(), Value::Int(3));
+    assert_eq!(eval("(debug-print (+ 1 2))").unwrap(), Value::int(3));
 }
 
 #[test]
 fn test_trace_integration() {
     // trace should return the second argument
-    assert_eq!(eval("(trace \"label\" 42)").unwrap(), Value::Int(42));
+    assert_eq!(eval("(trace \"label\" 42)").unwrap(), Value::int(42));
     assert_eq!(
         eval("(trace \"computation\" (+ 5 3))").unwrap(),
-        Value::Int(8)
+        Value::int(8)
     );
 }
 
@@ -117,11 +140,11 @@ fn test_profile_integration() {
 #[test]
 fn test_memory_usage_integration() {
     // memory-usage should return a list
-    match eval("(memory-usage)").unwrap() {
-        Value::Cons(_) | Value::Nil => {
-            // Valid list form
-        }
-        _ => panic!("memory-usage should return a list"),
+    let result = eval("(memory-usage)").unwrap();
+    if result.is_cons() || result.is_nil() {
+        // Valid list form
+    } else {
+        panic!("memory-usage should return a list");
     }
 }
 
@@ -147,10 +170,10 @@ fn test_debug_with_list_operations() {
 fn test_trace_with_arithmetic_chain() {
     // Multiple traces in computation
     let result = eval("(trace \"step1\" (+ 1 2))").unwrap();
-    assert_eq!(result, Value::Int(3));
+    assert_eq!(result, Value::int(3));
 
     let result2 = eval("(trace \"step2\" (* 3 4))").unwrap();
-    assert_eq!(result2, Value::Int(12));
+    assert_eq!(result2, Value::int(12));
 }
 
 #[test]
@@ -169,16 +192,16 @@ fn test_multiple_debug_calls() {
     // Multiple debug-prints should work with begin
     assert_eq!(
         eval("(begin (debug-print 1) (debug-print 2) (debug-print 3))").unwrap(),
-        Value::Int(3)
+        Value::int(3)
     );
 }
 
 #[test]
 fn test_module_and_arithmetic_combination() {
     // Module primitives don't break normal arithmetic
-    assert_eq!(eval("(+ 1 2)").unwrap(), Value::Int(3));
+    assert_eq!(eval("(+ 1 2)").unwrap(), Value::int(3));
     assert!(eval("(import-file \"test-modules/test.lisp\")").is_ok());
-    assert_eq!(eval("(+ 1 2)").unwrap(), Value::Int(3));
+    assert_eq!(eval("(+ 1 2)").unwrap(), Value::int(3));
 }
 
 #[test]
@@ -192,10 +215,10 @@ fn test_expand_macro_with_symbols() {
 #[test]
 fn test_macro_predicate_various_types() {
     // macro? with different value types
-    assert_eq!(eval("(macro? 42)").unwrap(), Value::Bool(false));
-    assert_eq!(eval("(macro? \"string\")").unwrap(), Value::Bool(false));
-    assert_eq!(eval("(macro? (list 1 2))").unwrap(), Value::Bool(false));
-    assert_eq!(eval("(macro? +)").unwrap(), Value::Bool(false));
+    assert_eq!(eval("(macro? 42)").unwrap(), Value::bool(false));
+    assert_eq!(eval("(macro? \"string\")").unwrap(), Value::bool(false));
+    assert_eq!(eval("(macro? (list 1 2))").unwrap(), Value::bool(false));
+    assert_eq!(eval("(macro? +)").unwrap(), Value::bool(false));
 }
 
 #[test]
@@ -374,45 +397,45 @@ fn test_memory_usage_returns_real_values() {
     // Test that memory-usage returns actual, non-zero memory statistics
     let result = eval("(memory-usage)").unwrap();
 
-    match result {
-        Value::Cons(_) => {
-            // Convert to vec to inspect values
-            let vec = result.list_to_vec().expect("Should be a valid list");
-            assert_eq!(
-                vec.len(),
-                2,
-                "memory-usage should return a list of 2 elements"
-            );
+    if result.is_cons() {
+        // Convert to vec to inspect values
+        let vec = result.list_to_vec().expect("Should be a valid list");
+        assert_eq!(
+            vec.len(),
+            2,
+            "memory-usage should return a list of 2 elements"
+        );
 
-            // Both values should be integers representing bytes
-            let rss = vec[0].as_int().expect("RSS should be an integer");
-            let vms = vec[1]
-                .as_int()
-                .expect("Virtual memory should be an integer");
+        // Both values should be integers representing bytes
+        let rss = vec[0].as_int().expect("RSS should be an integer");
+        let vms = vec[1]
+            .as_int()
+            .expect("Virtual memory should be an integer");
 
-            // On a real system, both should be positive (non-zero)
-            // The interpreter uses at least some memory
-            assert!(rss > 0, "RSS memory should be greater than 0, got: {}", rss);
-            assert!(
-                vms > 0,
-                "Virtual memory should be greater than 0, got: {}",
-                vms
-            );
+        // On a real system, both should be positive (non-zero)
+        // The interpreter uses at least some memory
+        assert!(rss > 0, "RSS memory should be greater than 0, got: {}", rss);
+        assert!(
+            vms > 0,
+            "Virtual memory should be greater than 0, got: {}",
+            vms
+        );
 
-            // Virtual memory should always be >= RSS
-            assert!(
-                vms >= rss,
-                "Virtual memory ({}) should be >= RSS ({})",
-                vms,
-                rss
-            );
+        // Virtual memory should always be >= RSS
+        assert!(
+            vms >= rss,
+            "Virtual memory ({}) should be >= RSS ({})",
+            vms,
+            rss
+        );
 
-            // Sanity check: values should be reasonable for a Lisp interpreter
-            // RSS should be less than 100 MB for interpreter alone
-            assert!(rss < 100_000_000, "RSS seems too high: {} bytes", rss);
-        }
-        Value::Nil => panic!("memory-usage should return a non-empty list, not nil"),
-        _ => panic!("memory-usage should return a list, got: {:?}", result),
+        // Sanity check: values should be reasonable for a Lisp interpreter
+        // RSS should be less than 100 MB for interpreter alone
+        assert!(rss < 100_000_000, "RSS seems too high: {} bytes", rss);
+    } else if result.is_nil() {
+        panic!("memory-usage should return a non-empty list, not nil");
+    } else {
+        panic!("memory-usage should return a list, got: {:?}", result);
     }
 }
 
@@ -423,8 +446,8 @@ fn test_memory_usage_consistency() {
     let result2 = eval("(memory-usage)").unwrap();
 
     // Both should return lists
-    assert!(matches!(result1, Value::Cons(_)));
-    assert!(matches!(result2, Value::Cons(_)));
+    assert!((result1).is_cons());
+    assert!((result2).is_cons());
 
     // Values might differ slightly due to memory allocation during eval,
     // but they should be in the same ballpark (within 2x)
@@ -451,23 +474,28 @@ fn test_memory_usage_consistency() {
 fn test_match_syntax_parsing() {
     // Test that match syntax is properly parsed (not treated as function call)
     // Match expression should evaluate without errors
-    assert!(eval("(match 5 ((5) \"five\"))").is_ok());
+    assert!(eval("(match 5 (5 \"five\"))").is_ok());
 }
 
 #[test]
 fn test_match_wildcard_catches_any() {
     // Wildcard pattern matches any value
-    assert!(eval("(match 42 ((_ ) \"matched\"))").is_ok());
-    assert!(eval("(match \"test\" ((_ ) #t))").is_ok());
+    assert!(eval("(match 42 (_ \"matched\"))").is_ok());
+    assert!(eval("(match \"test\" (_ #t))").is_ok());
 }
 
 #[test]
 fn test_match_returns_result_expression() {
     // Match should return the value of the matched branch
     // Using literals to avoid variable binding complexity
-    match eval("(match 5 ((5) 42) ((10) 0))") {
-        Ok(Value::Int(n)) => assert!(n > 0, "Should return a positive number"),
-        Ok(v) => panic!("Expected Int, got {:?}", v),
+    match eval("(match 5 (5 42) (10 0))") {
+        Ok(v) => {
+            if let Some(n) = v.as_int() {
+                assert!(n > 0, "Should return a positive number");
+            } else {
+                panic!("Expected Int, got {:?}", v);
+            }
+        }
         Err(e) => panic!("Unexpected error: {}", e),
     }
 }
@@ -475,31 +503,31 @@ fn test_match_returns_result_expression() {
 #[test]
 fn test_match_clause_ordering() {
     // First matching clause should be used
-    assert!(eval("(match 5 ((5) #t) ((5) #f))").is_ok());
+    assert!(eval("(match 5 (5 #t) (5 #f))").is_ok());
 }
 
 #[test]
 fn test_match_default_wildcard() {
     // Wildcard pattern should match when no literals match
-    assert!(eval("(match 99 ((1) \"one\") ((2) \"two\") ((_ ) \"other\"))").is_ok());
+    assert!(eval("(match 99 (1 \"one\") (2 \"two\") (_ \"other\"))").is_ok());
 }
 
 #[test]
 fn test_match_nil_pattern_parsing() {
     // Nil pattern should parse and work
-    assert!(eval("(match nil ((nil) \"empty\"))").is_ok());
+    assert!(eval("(match nil (nil \"empty\"))").is_ok());
 }
 
 #[test]
 fn test_match_wildcard_pattern() {
     // Match with wildcard (_) - catches any value
     assert_eq!(
-        eval("(match 42 ((_ ) \"any\"))").unwrap(),
-        Value::String("any".into())
+        eval("(match 42 (_ \"any\"))").unwrap(),
+        Value::string("any")
     );
     assert_eq!(
-        eval("(match \"hello\" ((_ ) \"matched\"))").unwrap(),
-        Value::String("matched".into())
+        eval("(match \"hello\" (_ \"matched\"))").unwrap(),
+        Value::string("matched")
     );
 }
 
@@ -507,12 +535,13 @@ fn test_match_wildcard_pattern() {
 fn test_match_nil_pattern() {
     // Match nil
     assert_eq!(
-        eval("(match nil ((nil) \"empty\"))").unwrap(),
-        Value::String("empty".into())
+        eval("(match nil (nil \"empty\"))").unwrap(),
+        Value::string("empty")
     );
+    // nil pattern should NOT match empty list
     assert_eq!(
-        eval("(match (list) ((nil) \"empty\"))").unwrap(),
-        Value::String("empty".into())
+        eval("(match (list) (nil \"empty\") (_ \"not-nil\"))").unwrap(),
+        Value::string("not-nil")
     );
 }
 
@@ -520,8 +549,8 @@ fn test_match_nil_pattern() {
 fn test_match_default_case() {
     // Default pattern at end - catches anything not matched
     assert_eq!(
-        eval("(match 99 ((1) \"one\") ((2) \"two\") ((_ ) \"other\"))").unwrap(),
-        Value::String("other".into())
+        eval("(match 99 (1 \"one\") (2 \"two\") (_ \"other\"))").unwrap(),
+        Value::string("other")
     );
 }
 
@@ -529,28 +558,28 @@ fn test_match_default_case() {
 fn test_match_multiple_clauses_ordering() {
     // Test clause ordering - first matching clause wins
     assert_eq!(
-        eval("(match 2 ((1) \"one\") ((2) \"two\") ((3) \"three\"))").unwrap(),
-        Value::String("two".into())
+        eval("(match 2 (1 \"one\") (2 \"two\") (3 \"three\"))").unwrap(),
+        Value::string("two")
     );
     assert_eq!(
-        eval("(match 1 ((1) \"one\") ((2) \"two\") ((3) \"three\"))").unwrap(),
-        Value::String("one".into())
+        eval("(match 1 (1 \"one\") (2 \"two\") (3 \"three\"))").unwrap(),
+        Value::string("one")
     );
 }
 
 #[test]
 fn test_match_with_static_expressions() {
     // Matched expressions should be evaluated (without pattern variable binding)
-    assert_eq!(eval("(match 10 ((10) (* 2 3)))").unwrap(), Value::Int(6));
-    assert_eq!(eval("(match 5 ((5) (+ 1 1)))").unwrap(), Value::Int(2));
+    assert_eq!(eval("(match 10 (10 (* 2 3)))").unwrap(), Value::int(6));
+    assert_eq!(eval("(match 5 (5 (+ 1 1)))").unwrap(), Value::int(2));
 }
 
 #[test]
 fn test_match_string_literals() {
     // Match string literals
     assert_eq!(
-        eval("(match \"hello\" ((\"hello\") \"matched\") ((_ ) \"no\"))").unwrap(),
-        Value::String("matched".into())
+        eval("(match \"hello\" (\"hello\" \"matched\") (_ \"no\"))").unwrap(),
+        Value::string("matched")
     );
 }
 
@@ -578,14 +607,14 @@ fn test_import_file_returns_bool() {
     // import-file should return a bool (true) when file is found
     assert_eq!(
         eval("(import-file \"test-modules/test.lisp\")").unwrap(),
-        Value::Bool(true)
+        Value::bool(true)
     );
 }
 
 #[test]
 fn test_add_module_path_returns_nil() {
     // add-module-path should return nil
-    assert_eq!(eval("(add-module-path \".\")").unwrap(), Value::Nil);
+    assert_eq!(eval("(add-module-path \".\")").unwrap(), Value::NIL);
 }
 
 #[test]
@@ -615,12 +644,12 @@ fn test_import_same_file_twice_idempotent() {
     // Loading the same file twice should succeed both times (idempotent)
     let result1 = eval("(import-file \"test-modules/test.lisp\")");
     assert!(result1.is_ok());
-    assert_eq!(result1.unwrap(), Value::Bool(true));
+    assert_eq!(result1.unwrap(), Value::bool(true));
 
     // Second load of same file
     let result2 = eval("(import-file \"test-modules/test.lisp\")");
     assert!(result2.is_ok());
-    assert_eq!(result2.unwrap(), Value::Bool(true));
+    assert_eq!(result2.unwrap(), Value::bool(true));
 }
 
 #[test]

@@ -30,14 +30,17 @@ pub fn handle_return(vm: &mut VM) -> Result<Value, String> {
         .pop()
         .ok_or_else(|| "Stack underflow on return".to_string())?;
 
-    // Unwrap LocalCell (internal cells for mutable captures)
-    // User code should never see a LocalCell - it's an implementation detail
-    match value {
-        Value::LocalCell(cell_rc) => {
-            let inner = cell_rc.borrow().clone();
+    // Unwrap Cell (internal cells for mutable captures)
+    // User code should never see a Cell - it's an implementation detail
+    if let Some(_cell_ptr) = value.as_heap_ptr() {
+        if let Some(cell_val) = value.as_cell() {
+            let inner = cell_val.borrow();
             Ok(*inner)
+        } else {
+            Ok(value)
         }
-        _ => Ok(value),
+    } else {
+        Ok(value)
     }
 }
 

@@ -5,7 +5,8 @@ use super::variable_analysis::{adjust_var_indices, pre_register_defines};
 use super::{ScopeEntry, ScopeType};
 use crate::binding::VarRef;
 use crate::symbol::SymbolTable;
-use crate::value::{SymbolId, Value};
+use crate::value::Value;
+use crate::value_old::SymbolId;
 use std::collections::HashSet;
 
 /// Helper function to convert lambda expressions
@@ -23,7 +24,14 @@ pub fn convert_lambda(
     }
 
     let params = list[1].list_to_vec()?;
-    let param_syms: Result<Vec<_>, _> = params.iter().map(|p| p.as_symbol()).collect();
+    let param_syms: Result<Vec<SymbolId>, _> = params
+        .iter()
+        .map(|p| {
+            p.as_symbol()
+                .map(SymbolId)
+                .ok_or("Expected symbol in parameter list")
+        })
+        .collect();
     let param_syms = param_syms?;
 
     // Push a new Function scope with the lambda parameters
@@ -174,7 +182,7 @@ pub fn convert_let(
             .collect();
         let body_exprs = body_exprs?;
         return Ok(match body_exprs.len() {
-            0 => Expr::Literal(Value::Nil),
+            0 => Expr::Literal(Value::NIL),
             1 => body_exprs.into_iter().next().unwrap(),
             _ => Expr::Begin(body_exprs),
         });
@@ -189,7 +197,10 @@ pub fn convert_let(
         if binding_list.len() != 2 {
             return Err("Each let binding must be a [var expr] pair".to_string());
         }
-        let var = binding_list[0].as_symbol()?;
+        let var = binding_list[0]
+            .as_symbol()
+            .ok_or("Expected symbol in let binding")?;
+        let var = SymbolId(var);
         binding_names.push(var);
         let expr = value_to_expr_with_scope(&binding_list[1], symbols, scope_stack)?;
         bindings.push((var, expr));
@@ -210,7 +221,7 @@ pub fn convert_let(
 
     let body_exprs = body_exprs?;
     let body = match body_exprs.len() {
-        0 => Expr::Literal(Value::Nil),
+        0 => Expr::Literal(Value::NIL),
         1 => body_exprs.into_iter().next().unwrap(),
         _ => Expr::Begin(body_exprs),
     };
@@ -245,7 +256,7 @@ pub fn convert_let_star(
             .collect();
         let body_exprs = body_exprs?;
         return Ok(match body_exprs.len() {
-            0 => Expr::Literal(Value::Nil),
+            0 => Expr::Literal(Value::NIL),
             1 => body_exprs.into_iter().next().unwrap(),
             _ => Expr::Begin(body_exprs),
         });
@@ -258,7 +269,10 @@ pub fn convert_let_star(
         if binding_list.len() != 2 {
             return Err("Each let* binding must be a [var expr] pair".to_string());
         }
-        all_names.push(binding_list[0].as_symbol()?);
+        let sym = binding_list[0]
+            .as_symbol()
+            .ok_or("Expected symbol in let* binding")?;
+        all_names.push(SymbolId(sym));
     }
 
     // Parse body with ALL let* variables in scope
@@ -276,7 +290,7 @@ pub fn convert_let_star(
 
     let body_exprs = body_exprs?;
     let mut result = match body_exprs.len() {
-        0 => Expr::Literal(Value::Nil),
+        0 => Expr::Literal(Value::NIL),
         1 => body_exprs.into_iter().next().unwrap(),
         _ => Expr::Begin(body_exprs),
     };
@@ -331,7 +345,10 @@ pub fn convert_letrec(
         if binding_list.len() != 2 {
             return Err("Each letrec binding must be a [var expr] pair".to_string());
         }
-        param_syms.push(binding_list[0].as_symbol()?);
+        let sym = binding_list[0]
+            .as_symbol()
+            .ok_or("Expected symbol in letrec binding")?;
+        param_syms.push(SymbolId(sym));
     }
 
     // Second pass: parse binding expressions
@@ -353,7 +370,7 @@ pub fn convert_letrec(
     let body = if body_exprs.len() == 1 {
         Box::new(body_exprs[0].clone())
     } else if body_exprs.is_empty() {
-        Box::new(Expr::Literal(Value::Nil))
+        Box::new(Expr::Literal(Value::NIL))
     } else {
         Box::new(Expr::Begin(body_exprs))
     };

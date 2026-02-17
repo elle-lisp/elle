@@ -58,9 +58,10 @@ pub extern "C" fn jit_car(value_ptr: i64) -> i64 {
         return 0; // car of nil is nil
     }
     let value = unsafe { &*(value_ptr as *const Value) };
-    match value {
-        Value::Cons(cons) => encode_value_for_jit(&cons.first),
-        _ => 0, // car of non-cons is nil
+    if let Some(cons) = value.as_cons() {
+        encode_value_for_jit(&cons.first)
+    } else {
+        0 // car of non-cons is nil
     }
 }
 
@@ -75,27 +76,29 @@ pub extern "C" fn jit_cdr(value_ptr: i64) -> i64 {
         return 0; // cdr of nil is nil
     }
     let value = unsafe { &*(value_ptr as *const Value) };
-    match value {
-        Value::Cons(cons) => encode_value_for_jit(&cons.rest),
-        _ => 0, // cdr of non-cons is nil
+    if let Some(cons) = value.as_cons() {
+        encode_value_for_jit(&cons.rest)
+    } else {
+        0 // cdr of non-cons is nil
     }
 }
 
 /// Encode a Value as an i64 for JIT use
 /// Primitives are encoded directly, heap values return pointers
 pub fn encode_value_for_jit(value: &Value) -> i64 {
-    match value {
-        Value::Nil => 0,
-        Value::Bool(b) => {
-            if *b {
-                1
-            } else {
-                0
-            }
+    if value.is_nil() || value.is_empty_list() {
+        0
+    } else if let Some(b) = value.as_bool() {
+        if b {
+            1
+        } else {
+            0
         }
-        Value::Int(i) => *i,
+    } else if let Some(i) = value.as_int() {
+        i
+    } else {
         // For heap values (cons, etc.), return pointer to the value
-        _ => value as *const Value as i64,
+        value as *const Value as i64
     }
 }
 
@@ -103,20 +106,20 @@ pub fn encode_value_for_jit(value: &Value) -> i64 {
 /// This is the inverse of encode_value_for_jit
 pub fn decode_value_for_jit(encoded: i64) -> Value {
     if encoded == 0 {
-        Value::Nil
+        Value::NIL
     } else if encoded == 1 {
-        Value::Bool(true)
+        Value::bool(true)
     } else if encoded > 1 && encoded < i64::MAX / 2 {
         // Likely a small integer
-        Value::Int(encoded)
+        Value::int(encoded)
     } else {
         // Likely a pointer to a heap value
         unsafe {
             let ptr = encoded as *const Value;
             if ptr.is_null() {
-                Value::Nil
+                Value::NIL
             } else {
-                (*ptr).clone()
+                *ptr
             }
         }
     }
@@ -143,23 +146,21 @@ pub extern "C" fn jit_load_global(sym_id: i64) -> i64 {
     // Check scope stack first (for proper shadowing)
     if let Some(val) = vm.scope_stack.get(sym_id_u32) {
         // Handle cells (for mutable captures)
-        match val {
-            Value::Cell(cell_rc) | Value::LocalCell(cell_rc) => {
-                let cell_ref = cell_rc.borrow();
-                return encode_value_for_jit(&cell_ref);
-            }
-            _ => return encode_value_for_jit(&val),
+        if let Some(cell_rc) = val.as_cell() {
+            let cell_ref = cell_rc.borrow();
+            return encode_value_for_jit(&cell_ref);
+        } else {
+            return encode_value_for_jit(&val);
         }
     }
 
     // Fall back to global scope
     if let Some(val) = vm.globals.get(&sym_id_u32) {
-        match val {
-            Value::Cell(cell_rc) | Value::LocalCell(cell_rc) => {
-                let cell_ref = cell_rc.borrow();
-                encode_value_for_jit(&cell_ref)
-            }
-            _ => encode_value_for_jit(val),
+        if let Some(cell_rc) = val.as_cell() {
+            let cell_ref = cell_rc.borrow();
+            encode_value_for_jit(&cell_ref)
+        } else {
+            encode_value_for_jit(val)
         }
     } else {
         eprintln!("jit_load_global: Undefined global variable: {}", sym_id_u32);
@@ -192,8 +193,8 @@ pub unsafe extern "C" fn jit_tail_call_closure(
     };
 
     // Dispatch based on callee type
-    match &callee {
-        Value::JitClosure(jc) if !jc.code_ptr.is_null() => {
+    if let Some(jc) = callee.as_jit_closure() {
+        if !jc.code_ptr.is_null() {
             // Native JIT closure - call directly
             // The signature is: fn(args_ptr: *const i64, args_len: i64, env_ptr: *const i64) -> i64
             let func: extern "C" fn(*const i64, i64, *const i64) -> i64 =
@@ -202,18 +203,18 @@ pub unsafe extern "C" fn jit_tail_call_closure(
             // Encode args
             let encoded_args: Vec<i64> = args.iter().map(encode_value_for_jit).collect();
 
-            // Encode env
-            let encoded_env: Vec<i64> = jc.env.iter().map(encode_value_for_jit).collect();
+            // Encode env (convert from old Value to new Value first)
+            let encoded_env: Vec<i64> = jc
+                .env
+                .iter()
+                .map(|v| {
+                    let new_v = crate::compiler::cps::primitives::old_value_to_new(v);
+                    encode_value_for_jit(&new_v)
+                })
+                .collect();
 
             func(encoded_args.as_ptr(), args_len, encoded_env.as_ptr()) // Already encoded
-        }
-        Value::Closure(_c) => {
-            // For interpreted closures, we would need access to the VM
-            // For now, return an error encoded as nil
-            eprintln!("jit_tail_call_closure: Cannot tail-call interpreted closure from JIT");
-            0 // nil
-        }
-        Value::JitClosure(jc) => {
+        } else {
             // JitClosure without code_ptr - fall back to source
             if let Some(ref _source) = jc.source {
                 eprintln!("jit_tail_call_closure: Cannot tail-call closure without code_ptr");
@@ -223,13 +224,17 @@ pub unsafe extern "C" fn jit_tail_call_closure(
                 0 // nil
             }
         }
-        _ => {
-            eprintln!(
-                "jit_tail_call_closure: Cannot tail-call non-closure: {:?}",
-                callee
-            );
-            0 // nil
-        }
+    } else if callee.is_closure() {
+        // For interpreted closures, we would need access to the VM
+        // For now, return an error encoded as nil
+        eprintln!("jit_tail_call_closure: Cannot tail-call interpreted closure from JIT");
+        0 // nil
+    } else {
+        eprintln!(
+            "jit_tail_call_closure: Cannot tail-call non-closure: {:?}",
+            callee
+        );
+        0 // nil
     }
 }
 
@@ -245,14 +250,14 @@ mod tests {
 
     #[test]
     fn test_jit_is_nil_with_nil_value() {
-        let nil = Value::Nil;
+        let nil = Value::NIL;
         let ptr = &nil as *const Value as i64;
         assert_eq!(jit_is_nil(ptr), 1);
     }
 
     #[test]
     fn test_jit_is_nil_with_cons() {
-        let list = cons(Value::Int(1), Value::Nil);
+        let list = cons(Value::int(1), Value::EMPTY_LIST);
         let ptr = &list as *const Value as i64;
         assert_eq!(jit_is_nil(ptr), 0);
     }
@@ -264,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_jit_car_of_cons() {
-        let list = cons(Value::Int(42), Value::Nil);
+        let list = cons(Value::int(42), Value::EMPTY_LIST);
         let ptr = &list as *const Value as i64;
         // car should return 42 (the integer value directly)
         assert_eq!(jit_car(ptr), 42);
@@ -277,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_jit_cdr_of_single_element_list() {
-        let list = cons(Value::Int(1), Value::Nil);
+        let list = cons(Value::int(1), Value::EMPTY_LIST);
         let ptr = &list as *const Value as i64;
         // cdr should return 0 (nil)
         assert_eq!(jit_cdr(ptr), 0);
@@ -285,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_jit_cdr_of_multi_element_list() {
-        let list = cons(Value::Int(1), cons(Value::Int(2), Value::Nil));
+        let list = cons(Value::int(1), cons(Value::int(2), Value::EMPTY_LIST));
         let ptr = &list as *const Value as i64;
         let cdr_ptr = jit_cdr(ptr);
         // cdr should be a pointer to the rest of the list
@@ -296,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_pin_and_unpin() {
-        let value = Value::Int(42);
+        let value = Value::int(42);
         let ptr = pin_value(value);
         assert_ne!(ptr, 0);
 

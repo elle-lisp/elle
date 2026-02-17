@@ -98,6 +98,7 @@ pub enum Instruction {
 
     /// Type checks
     IsNil,
+    IsEmptyList,
     IsPair,
     IsNumber,
     IsSymbol,
@@ -164,6 +165,13 @@ pub enum Instruction {
 
     /// Yield from coroutine (suspends execution)
     Yield,
+
+    /// Empty list constant
+    EmptyList,
+
+    /// Re-raise current exception: pop handler, clear handling_exception flag,
+    /// but leave current_exception set so the interrupt mechanism re-fires.
+    ReraiseException,
 }
 
 /// Inline cache entry for function lookups
@@ -180,6 +188,10 @@ pub struct Bytecode {
     pub instructions: Vec<u8>,
     pub constants: Vec<Value>,
     pub inline_caches: std::collections::HashMap<usize, CacheEntry>,
+    /// Symbol ID → name mapping for cross-thread portability.
+    /// When bytecode is sent to a new thread, symbol IDs may differ.
+    /// This map allows remapping globals to the correct IDs.
+    pub symbol_names: std::collections::HashMap<u32, String>,
 }
 
 impl Bytecode {
@@ -188,7 +200,17 @@ impl Bytecode {
             instructions: Vec::new(),
             constants: Vec::new(),
             inline_caches: std::collections::HashMap::new(),
+            symbol_names: std::collections::HashMap::new(),
         }
+    }
+
+    /// Add a symbol constant and record its name for portability.
+    /// This enables cross-thread symbol ID remapping.
+    pub fn add_symbol(&mut self, id: u32, name: &str) -> u16 {
+        self.symbol_names
+            .entry(id)
+            .or_insert_with(|| name.to_string());
+        self.add_constant(Value::symbol(id))
     }
 
     /// Add a constant and return its index
@@ -239,6 +261,11 @@ impl Bytecode {
         self.instructions[pos] = (offset >> 8) as u8;
         self.instructions[pos + 1] = (offset & 0xff) as u8;
     }
+
+    pub fn patch_u16(&mut self, pos: usize, value: u16) {
+        self.instructions[pos] = (value >> 8) as u8;
+        self.instructions[pos + 1] = (value & 0xff) as u8;
+    }
 }
 
 impl Default for Bytecode {
@@ -263,8 +290,8 @@ mod tests {
     #[test]
     fn test_constant_deduplication() {
         let mut bc = Bytecode::new();
-        let idx1 = bc.add_constant(Value::Int(42));
-        let idx2 = bc.add_constant(Value::Int(42));
+        let idx1 = bc.add_constant(Value::int(42));
+        let idx2 = bc.add_constant(Value::int(42));
         assert_eq!(idx1, idx2);
         assert_eq!(bc.constants.len(), 1);
     }

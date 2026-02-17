@@ -43,15 +43,15 @@ pub fn handle_define_local(
     let value = vm.stack.pop().ok_or("Stack underflow")?;
 
     // Get the symbol ID from constants
-    let sym_id = if let Value::Symbol(id) = constants[sym_idx as usize] {
-        id.0
+    let sym_id = if let Some(id) = constants[sym_idx as usize].as_symbol() {
+        id
     } else {
         return Err("Expected symbol in constants".to_string());
     };
 
     // Define in current scope
     // Note: ScopeStack always has at least the global scope, so we don't need to check
-    vm.scope_stack.define_local(sym_id, value.clone());
+    vm.scope_stack.define_local(sym_id, value);
 
     // Push the value back on the stack to maintain expression semantics
     // This way (define x 10) returns 10, allowing it to be used in expression contexts
@@ -69,17 +69,14 @@ pub fn handle_define_local(
 /// User-created cells via `box` use a different code path.
 pub fn handle_make_cell(vm: &mut VM) -> Result<(), String> {
     let value = vm.stack.pop().ok_or("Stack underflow")?;
-    match value {
-        Value::Cell(_) | Value::LocalCell(_) => {
-            // Already a cell (e.g., locally-defined variable from outer lambda) — don't double-wrap
-            vm.stack.push(value);
-        }
-        _ => {
-            // Use LocalCell for compiler-generated cells (mutable captures)
-            // LocalCell is auto-unwrapped by LoadUpvalue, unlike user Cell from `box`
-            let cell = Value::LocalCell(std::rc::Rc::new(std::cell::RefCell::new(Box::new(value))));
-            vm.stack.push(cell);
-        }
+    if value.is_cell() {
+        // Already a cell (e.g., locally-defined variable from outer lambda) — don't double-wrap
+        vm.stack.push(value);
+    } else {
+        // Create a local cell for compiler-generated cells (mutable captures)
+        // LocalCell is auto-unwrapped by LoadUpvalue
+        let cell = Value::local_cell(value);
+        vm.stack.push(cell);
     }
     Ok(())
 }
@@ -88,14 +85,16 @@ pub fn handle_make_cell(vm: &mut VM) -> Result<(), String> {
 /// Pops cell from stack, unwraps it, pushes the value
 pub fn handle_unwrap_cell(vm: &mut VM) -> Result<(), String> {
     let cell_val = vm.stack.pop().ok_or("Stack underflow")?;
-    match cell_val {
-        Value::Cell(cell_rc) | Value::LocalCell(cell_rc) => {
-            let cell_ref = cell_rc.borrow();
-            let value = (**cell_ref).clone();
+    if cell_val.is_cell() {
+        if let Some(cell_ref) = cell_val.as_cell() {
+            let value = *cell_ref.borrow();
             vm.stack.push(value);
             Ok(())
+        } else {
+            Err("Failed to extract cell reference".to_string())
         }
-        _ => Err(format!("Expected cell, got {}", cell_val.type_name())),
+    } else {
+        Err(format!("Expected cell, got {}", cell_val.type_name()))
     }
 }
 
@@ -104,13 +103,16 @@ pub fn handle_unwrap_cell(vm: &mut VM) -> Result<(), String> {
 pub fn handle_update_cell(vm: &mut VM) -> Result<(), String> {
     let new_value = vm.stack.pop().ok_or("Stack underflow")?;
     let cell_val = vm.stack.pop().ok_or("Stack underflow")?;
-    match cell_val {
-        Value::Cell(cell_rc) | Value::LocalCell(cell_rc) => {
-            let mut cell_ref = cell_rc.borrow_mut();
-            **cell_ref = new_value.clone();
+    if cell_val.is_cell() {
+        if let Some(cell_ref) = cell_val.as_cell() {
+            let mut cell_mut = cell_ref.borrow_mut();
+            *cell_mut = new_value;
             vm.stack.push(new_value);
             Ok(())
+        } else {
+            Err("Failed to extract cell reference".to_string())
         }
-        _ => Err(format!("Expected cell, got {}", cell_val.type_name())),
+    } else {
+        Err(format!("Expected cell, got {}", cell_val.type_name()))
     }
 }

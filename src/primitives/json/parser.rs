@@ -1,6 +1,6 @@
-use crate::value::{list, TableKey, Value};
+use crate::value::{list, Value};
+use crate::value_old::TableKey;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 /// JSON parser using recursive descent
 pub struct JsonParser {
@@ -40,9 +40,9 @@ impl JsonParser {
         }
 
         match self.input[self.pos] {
-            'n' => self.parse_literal("null", Value::Nil),
-            't' => self.parse_literal("true", Value::Bool(true)),
-            'f' => self.parse_literal("false", Value::Bool(false)),
+            'n' => self.parse_literal("null", Value::NIL),
+            't' => self.parse_literal("true", Value::bool(true)),
+            'f' => self.parse_literal("false", Value::bool(false)),
             '"' => self.parse_string(),
             '[' => self.parse_array(),
             '{' => self.parse_object(),
@@ -93,7 +93,7 @@ impl JsonParser {
             match self.input[self.pos] {
                 '"' => {
                     self.pos += 1;
-                    return Ok(Value::String(Rc::from(result)));
+                    return Ok(Value::string(result));
                 }
                 '\\' => {
                     self.pos += 1;
@@ -276,12 +276,12 @@ impl JsonParser {
 
         if has_decimal || has_exponent {
             match num_str.parse::<f64>() {
-                Ok(f) => Ok(Value::Float(f)),
+                Ok(f) => Ok(Value::float(f)),
                 Err(_) => Err(format!("Invalid float: {}", num_str)),
             }
         } else {
             match num_str.parse::<i64>() {
-                Ok(i) => Ok(Value::Int(i)),
+                Ok(i) => Ok(Value::int(i)),
                 Err(_) => Err(format!("Invalid integer: {}", num_str)),
             }
         }
@@ -347,7 +347,7 @@ impl JsonParser {
 
         if self.pos < self.input.len() && self.input[self.pos] == '}' {
             self.pos += 1;
-            return Ok(Value::Table(Rc::new(std::cell::RefCell::new(map))));
+            return Ok(Value::table_from(map));
         }
 
         loop {
@@ -362,8 +362,8 @@ impl JsonParser {
             }
 
             let key_value = self.parse_string()?;
-            let key = match key_value {
-                Value::String(s) => TableKey::String(s.to_string()),
+            let key = match key_value.as_string() {
+                Some(s) => TableKey::String(s.to_string()),
                 _ => unreachable!(),
             };
 
@@ -396,7 +396,7 @@ impl JsonParser {
                 }
                 '}' => {
                     self.pos += 1;
-                    return Ok(Value::Table(Rc::new(std::cell::RefCell::new(map))));
+                    return Ok(Value::table_from(map));
                 }
                 c => {
                     return Err(format!(

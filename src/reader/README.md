@@ -23,7 +23,7 @@ immediately.
 use elle::reader::read_str;
 
 let value = read_str("(+ 1 2)", &mut symbols)?;
-// value is Value::Cons(...)
+// value is a cons cell created via Value::cons(...)
 ```
 
 ## Lexer

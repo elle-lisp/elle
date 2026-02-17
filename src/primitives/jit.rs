@@ -1,5 +1,5 @@
 //! JIT compilation primitives
-use crate::error::LResult;
+use crate::value::Condition;
 
 use crate::compiler::cranelift::context::JITContext;
 use crate::compiler::cranelift::jit_compile::{compile_closure, is_jit_compilable, CompileResult};
@@ -67,28 +67,33 @@ pub fn clear_jit_context() {
 /// is not possible (e.g., unsupported constructs in the body).
 ///
 /// Errors only on actual compilation failures, not on "not compilable" cases.
-pub fn prim_jit_compile(args: &[Value]) -> LResult<Value> {
+pub fn prim_jit_compile(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!("jit-compile: expected 1 argument, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "jit-compile: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
-    let closure = match &args[0] {
-        Value::Closure(c) => c,
-        Value::JitClosure(_) => {
-            // Already JIT compiled, return as-is
-            return Ok(args[0].clone());
-        }
-        _ => {
-            return Err(
-                format!("jit-compile: expected closure, got {}", args[0].type_name()).into(),
-            )
+    let closure = match args[0].as_closure() {
+        Some(c) => c,
+        None => {
+            // Check if it's already a JIT closure
+            if args[0].as_jit_closure().is_some() {
+                // Already JIT compiled, return as-is
+                return Ok(args[0]);
+            }
+            return Err(Condition::type_error(format!(
+                "jit-compile: expected closure, got {}",
+                args[0].type_name()
+            )));
         }
     };
 
     // Check if source AST is available
     if closure.source_ast.is_none() {
         // No AST available, return original closure
-        return Ok(args[0].clone());
+        return Ok(args[0]);
     }
 
     // Try to compile using thread-local JIT context
@@ -122,21 +127,23 @@ pub fn prim_jit_compile(args: &[Value]) -> LResult<Value> {
     match result {
         Some(CompileResult::Success(jit_closure)) => {
             COMPILED_FUNCTIONS.fetch_add(1, Ordering::Relaxed);
-            Ok(Value::JitClosure(Rc::new(jit_closure)))
+            // Create a JIT closure value from the heap
+            use crate::value::heap::{alloc, HeapObject};
+            Ok(alloc(HeapObject::JitClosure(Rc::new(jit_closure))))
         }
         Some(CompileResult::NotCompilable(_reason)) => {
             // Not compilable, return original closure silently
-            Ok(args[0].clone())
+            Ok(args[0])
         }
         Some(CompileResult::Error(e)) => {
             FAILED_COMPILATIONS.fetch_add(1, Ordering::Relaxed);
             // Compilation error - still return original closure for graceful degradation
             eprintln!("JIT compilation failed: {}", e);
-            Ok(args[0].clone())
+            Ok(args[0])
         }
         None => {
             // No JIT context available, return original closure
-            Ok(args[0].clone())
+            Ok(args[0])
         }
     }
 }
@@ -144,29 +151,37 @@ pub fn prim_jit_compile(args: &[Value]) -> LResult<Value> {
 /// (jit-compiled? value) -> bool
 ///
 /// Returns true if the value is a JIT-compiled closure.
-pub fn prim_jit_compiled_p(args: &[Value]) -> LResult<Value> {
+pub fn prim_jit_compiled_p(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!("jit-compiled?: expected 1 argument, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "jit-compiled?: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
-    Ok(Value::Bool(matches!(args[0], Value::JitClosure(_))))
+    Ok(Value::bool(args[0].as_jit_closure().is_some()))
 }
 
 /// (jit-compilable? closure) -> bool
 ///
 /// Returns true if the closure can be JIT compiled.
-pub fn prim_jit_compilable_p(args: &[Value]) -> LResult<Value> {
+pub fn prim_jit_compilable_p(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!("jit-compilable?: expected 1 argument, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "jit-compilable?: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
-    match &args[0] {
-        Value::Closure(c) => match &c.source_ast {
-            Some(ast) => Ok(Value::Bool(is_jit_compilable(&ast.body))),
-            None => Ok(Value::Bool(false)),
-        },
-        Value::JitClosure(_) => Ok(Value::Bool(true)), // Already compiled
-        _ => Ok(Value::Bool(false)),
+    if let Some(c) = args[0].as_closure() {
+        match &c.source_ast {
+            Some(ast) => Ok(Value::bool(is_jit_compilable(&ast.body))),
+            None => Ok(Value::bool(false)),
+        }
+    } else if args[0].as_jit_closure().is_some() {
+        Ok(Value::bool(true)) // Already compiled
+    } else {
+        Ok(Value::bool(false))
     }
 }
 
@@ -176,9 +191,12 @@ pub fn prim_jit_compilable_p(args: &[Value]) -> LResult<Value> {
 /// Returns a struct with the following fields:
 /// - compiled-functions: Number of functions compiled to native code
 /// - jit-enabled: Whether JIT compilation is available
-pub fn prim_jit_stats(args: &[Value]) -> LResult<Value> {
+pub fn prim_jit_stats(args: &[Value]) -> Result<Value, Condition> {
     if !args.is_empty() {
-        return Err(format!("jit-stats: expected 0 arguments, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "jit-stats: expected 0 arguments, got {}",
+            args.len()
+        )));
     }
 
     let mut stats = BTreeMap::new();
@@ -193,35 +211,35 @@ pub fn prim_jit_stats(args: &[Value]) -> LResult<Value> {
 
     stats.insert(
         TableKey::String("compiled-functions".to_string()),
-        Value::Int(compiled),
+        Value::int(compiled),
     );
     stats.insert(
         TableKey::String("total-compilations".to_string()),
-        Value::Int(total),
+        Value::int(total),
     );
     stats.insert(
         TableKey::String("failed-compilations".to_string()),
-        Value::Int(failed),
+        Value::int(failed),
     );
     // These could be tracked with more infrastructure
-    stats.insert(TableKey::String("cache-hits".to_string()), Value::Int(0));
-    stats.insert(TableKey::String("cache-misses".to_string()), Value::Int(0));
-    stats.insert(TableKey::String("hot-closures".to_string()), Value::Int(0));
+    stats.insert(TableKey::String("cache-hits".to_string()), Value::int(0));
+    stats.insert(TableKey::String("cache-misses".to_string()), Value::int(0));
+    stats.insert(TableKey::String("hot-closures".to_string()), Value::int(0));
     stats.insert(
         TableKey::String("native-code-bytes".to_string()),
-        Value::Int(0),
+        Value::int(0),
     );
     stats.insert(
         TableKey::String("compilation-time-ms".to_string()),
-        Value::Int(0),
+        Value::int(0),
     );
     stats.insert(
         TableKey::String("jit-enabled".to_string()),
-        Value::Bool(jit_enabled),
+        Value::bool(jit_enabled),
     );
 
     // Return as immutable struct
-    Ok(Value::Struct(Rc::new(stats)))
+    Ok(Value::struct_from(stats))
 }
 
 #[cfg(test)]
@@ -230,31 +248,31 @@ mod tests {
 
     #[test]
     fn test_jit_compiled_p_with_non_closure() {
-        let result = prim_jit_compiled_p(&[Value::Int(42)]).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        let result = prim_jit_compiled_p(&[Value::int(42)]).unwrap();
+        assert_eq!(result, Value::FALSE);
     }
 
     #[test]
     fn test_jit_compiled_p_with_nil() {
-        let result = prim_jit_compiled_p(&[Value::Nil]).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        let result = prim_jit_compiled_p(&[Value::NIL]).unwrap();
+        assert_eq!(result, Value::FALSE);
     }
 
     #[test]
     fn test_jit_compilable_p_with_non_closure() {
-        let result = prim_jit_compilable_p(&[Value::Int(42)]).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        let result = prim_jit_compilable_p(&[Value::int(42)]).unwrap();
+        assert_eq!(result, Value::FALSE);
     }
 
     #[test]
     fn test_jit_compilable_p_with_nil() {
-        let result = prim_jit_compilable_p(&[Value::Nil]).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        let result = prim_jit_compilable_p(&[Value::NIL]).unwrap();
+        assert_eq!(result, Value::FALSE);
     }
 
     #[test]
     fn test_jit_compile_with_non_closure() {
-        let result = prim_jit_compile(&[Value::Int(42)]);
+        let result = prim_jit_compile(&[Value::int(42)]);
         assert!(result.is_err());
     }
 
@@ -269,47 +287,48 @@ mod tests {
             func_id: 1,
             effect: crate::compiler::effects::Effect::Pure,
         };
-        let value = Value::JitClosure(Rc::new(jit_closure));
+        use crate::value::heap::{alloc, HeapObject};
+        let value = alloc(HeapObject::JitClosure(Rc::new(jit_closure)));
 
         // jit-compile should return it as-is
         let result = prim_jit_compile(std::slice::from_ref(&value)).unwrap();
-        assert!(matches!(result, Value::JitClosure(_)));
+        assert!(result.as_jit_closure().is_some());
     }
 
     #[test]
     fn test_jit_compile_wrong_arg_count() {
-        let result = prim_jit_compile(&[Value::Int(1), Value::Int(2)]);
+        let result = prim_jit_compile(&[Value::int(1), Value::int(2)]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_jit_compilable_p_wrong_arg_count() {
-        let result = prim_jit_compilable_p(&[Value::Int(1), Value::Int(2)]);
+        let result = prim_jit_compilable_p(&[Value::int(1), Value::int(2)]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_jit_compiled_p_wrong_arg_count() {
-        let result = prim_jit_compiled_p(&[Value::Int(1), Value::Int(2)]);
+        let result = prim_jit_compiled_p(&[Value::int(1), Value::int(2)]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_jit_stats_returns_struct() {
         let result = prim_jit_stats(&[]).unwrap();
-        assert!(matches!(result, Value::Struct(_)));
+        assert!(result.as_struct().is_some());
     }
 
     #[test]
     fn test_jit_stats_no_args() {
-        let result = prim_jit_stats(&[Value::Int(1)]);
+        let result = prim_jit_stats(&[Value::int(1)]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_jit_stats_has_expected_fields() {
         let result = prim_jit_stats(&[]).unwrap();
-        if let Value::Struct(s) = result {
+        if let Some(s) = result.as_struct() {
             assert!(s.contains_key(&TableKey::String("compiled-functions".to_string())));
             assert!(s.contains_key(&TableKey::String("total-compilations".to_string())));
             assert!(s.contains_key(&TableKey::String("failed-compilations".to_string())));
@@ -327,10 +346,10 @@ mod tests {
     #[test]
     fn test_jit_stats_jit_enabled_is_bool() {
         let result = prim_jit_stats(&[]).unwrap();
-        if let Value::Struct(s) = result {
+        if let Some(s) = result.as_struct() {
             let jit_enabled = s.get(&TableKey::String("jit-enabled".to_string()));
             // jit-enabled is a bool (may be true or false depending on context initialization)
-            assert!(matches!(jit_enabled, Some(Value::Bool(_))));
+            assert!(matches!(jit_enabled, Some(v) if v.is_bool()));
         } else {
             panic!("Expected struct");
         }
@@ -339,9 +358,9 @@ mod tests {
     #[test]
     fn test_jit_stats_compiled_functions_is_int() {
         let result = prim_jit_stats(&[]).unwrap();
-        if let Value::Struct(s) = result {
+        if let Some(s) = result.as_struct() {
             let compiled = s.get(&TableKey::String("compiled-functions".to_string()));
-            assert!(matches!(compiled, Some(Value::Int(0))));
+            assert!(matches!(compiled, Some(v) if v.as_int() == Some(0)));
         } else {
             panic!("Expected struct");
         }

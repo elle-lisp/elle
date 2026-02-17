@@ -194,7 +194,7 @@
 (display "---")
 (newline)
 (define result6 (match (list)
-  (nil "empty list")
+  (() "empty list")
   (_ "not empty")))
 (display result6)
 (newline)

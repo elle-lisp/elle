@@ -86,6 +86,7 @@ Bytecode
 | `StoreCapture` | value → | Into closure env, handles cells |
 | `MakeCell` | value → cell | Wrap in LocalCell |
 | `MakeClosure` | caps... → closure | Pops N captures, creates closure |
+| `EmptyList` | → empty_list | Push Value::EMPTY_LIST (truthy, unlike Nil) |
 
 ## Files
 
@@ -95,3 +96,9 @@ Bytecode
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
 | `lower.rs` | 1400+ | `Lowerer`, HIR→LIR translation |
 | `emit.rs` | 800 | `Emitter`, LIR→Bytecode with stack simulation |
+
+## Constants
+
+`LirConst` represents compile-time constants. Note: `LirConst::Nil` and
+`LirConst::EmptyList` are distinct. Nil is falsy, EmptyList is truthy. Lists
+terminate with EmptyList, not Nil.

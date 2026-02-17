@@ -2359,8 +2359,10 @@ ERROR: email - Must contain @
 
 ## Notes on Semantics
 
-- **Truthiness**: In Elle, `#f` (false) and `nil` are falsy; all other values are truthy.
-- **List Semantics**: Lists are represented as cons cells; `nil` is the empty list.
+- **Truthiness**: In Elle, `#f` (false) and `nil` are falsy; all other values including the empty list `()` are truthy.
+- **List Semantics**: Lists are represented as cons cells terminated by `()` (the empty list). Note that `nil` and `()` are distinct values:
+  - `nil` - Represents absence of value, used for "no result" or undefined. It is **falsy**.
+  - `()` - The empty list. It is a valid list value and is **truthy**.
 - **Numeric Types**: Operations work with both integers and floats; results may be promoted to float.
 - **Error Handling**: Primitives return `Result<Value, String>` errors caught by the VM.
 - **Mutability**: Tables and vectors are mutable; structs and lists are immutable.

@@ -10,26 +10,36 @@ pub mod stack;
 pub mod types;
 pub mod variables;
 
-pub use core::{is_exception_subclass, CallFrame, VmResult, VM};
+pub use crate::value::condition::{exception_parent, is_exception_subclass};
+pub use core::{CallFrame, VmResult, VM};
 
 use crate::compiler::bytecode::{Bytecode, Instruction};
-use crate::value::{CoroutineContext, CoroutineState, Value};
+use crate::value::Value;
+use crate::value_old::{CoroutineContext, CoroutineState};
 use std::rc::Rc;
 
 impl VM {
     pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
-        self.execute_bytecode(&bytecode.instructions, &bytecode.constants, None)
+        let result = self.execute_bytecode(&bytecode.instructions, &bytecode.constants, None)?;
+        // Check if an exception escaped all handlers at the top level
+        if let Some(exc) = &self.current_exception {
+            // Use the exception's message for the error
+            Err(format!("{}", exc))
+        } else {
+            Ok(result)
+        }
     }
 
     /// Check arity and set exception if mismatch
     /// Returns true if arity is OK, false if there's a mismatch (exception is set)
-    fn check_arity(&mut self, arity: &crate::value::Arity, arg_count: usize) -> bool {
+    fn check_arity(&mut self, arity: &crate::value_old::Arity, arg_count: usize) -> bool {
         match arity {
-            crate::value::Arity::Exact(n) => {
+            crate::value_old::Arity::Exact(n) => {
                 if arg_count != *n {
-                    let mut cond = crate::value::Condition::new(6);
-                    cond.set_field(0, Value::Int(*n as i64));
-                    cond.set_field(1, Value::Int(arg_count as i64));
+                    let msg = format!("expected {} arguments, got {}", n, arg_count);
+                    let mut cond = crate::value::Condition::arity_error(msg)
+                        .with_field(0, Value::int(*n as i64))
+                        .with_field(1, Value::int(arg_count as i64));
                     if let Some(loc) = self.current_source_loc.clone() {
                         cond.location = Some(loc);
                     }
@@ -37,11 +47,12 @@ impl VM {
                     return false;
                 }
             }
-            crate::value::Arity::AtLeast(n) => {
+            crate::value_old::Arity::AtLeast(n) => {
                 if arg_count < *n {
-                    let mut cond = crate::value::Condition::new(6);
-                    cond.set_field(0, Value::Int(*n as i64));
-                    cond.set_field(1, Value::Int(arg_count as i64));
+                    let msg = format!("expected at least {} arguments, got {}", n, arg_count);
+                    let mut cond = crate::value::Condition::arity_error(msg)
+                        .with_field(0, Value::int(*n as i64))
+                        .with_field(1, Value::int(arg_count as i64));
                     if let Some(loc) = self.current_source_loc.clone() {
                         cond.location = Some(loc);
                     }
@@ -49,11 +60,12 @@ impl VM {
                     return false;
                 }
             }
-            crate::value::Arity::Range(min, max) => {
+            crate::value_old::Arity::Range(min, max) => {
                 if arg_count < *min || arg_count > *max {
-                    let mut cond = crate::value::Condition::new(6);
-                    cond.set_field(0, Value::Int(*min as i64));
-                    cond.set_field(1, Value::Int(arg_count as i64));
+                    let msg = format!("expected {}-{} arguments, got {}", min, max, arg_count);
+                    let mut cond = crate::value::Condition::arity_error(msg)
+                        .with_field(0, Value::int(*min as i64))
+                        .with_field(1, Value::int(arg_count as i64));
                     if let Some(loc) = self.current_source_loc.clone() {
                         cond.location = Some(loc);
                     }
@@ -103,8 +115,7 @@ impl VM {
                     VmResult::Done(v) => Ok(v),
                     VmResult::Yielded(_) => {
                         // Yield should be handled by coroutine_resume, not here
-                        Err(self
-                            .wrap_error("Unexpected yield outside coroutine context".to_string()))
+                        Err("Unexpected yield outside coroutine context".to_string())
                     }
                 };
             }
@@ -112,7 +123,8 @@ impl VM {
     }
 
     /// Inner execution loop that handles all instructions except tail calls
-    fn execute_bytecode_inner_with_ip(
+    /// This is the implementation; the public wrapper handles handler isolation.
+    fn execute_bytecode_inner_impl(
         &mut self,
         bytecode: &[u8],
         constants: &[Value],
@@ -131,18 +143,17 @@ impl VM {
                 } else {
                     255
                 };
-                let error = format!(
+                return Err(format!(
                     "Instruction limit exceeded at ip={} (instr={}), stack depth={}, exception={}",
                     ip,
                     instr_byte,
                     self.stack.len(),
                     self.current_exception.is_some()
-                );
-                return Err(self.wrap_error(error));
+                ));
             }
 
             if ip >= bytecode.len() {
-                return Err(self.wrap_error("Unexpected end of bytecode".to_string()));
+                return Err("Unexpected end of bytecode".to_string());
             }
 
             let instr_byte = bytecode[ip];
@@ -226,251 +237,212 @@ impl VM {
                     }
                     args.reverse();
 
-                    match func {
-                        Value::NativeFn(f) => {
-                            let result = match f(&args) {
-                                Ok(val) => val,
-                                Err(e) if e.to_string().contains("Division by zero") => {
-                                    // Create a division-by-zero exception
-                                    let mut cond = crate::value::Condition::new(4);
-                                    // Try to set dividend and divisor if we have the arguments
-                                    if args.len() >= 2 {
-                                        cond.set_field(0, args[0].clone()); // dividend
-                                        cond.set_field(1, args[1].clone()); // divisor
-                                    }
-                                    self.current_exception = Some(std::rc::Rc::new(cond));
-                                    // Push Nil to keep stack consistent
-                                    Value::Nil
+                    if let Some(f) = func.as_native_fn() {
+                        let result = match f(args.as_slice()) {
+                            Ok(val) => val,
+                            Err(cond) => {
+                                self.current_exception = Some(std::rc::Rc::new(cond));
+                                Value::NIL
+                            }
+                        };
+                        self.stack.push(result);
+                    } else if let Some(f) = func.as_vm_aware_fn() {
+                        let result = f(args.as_slice(), self)?;
+                        self.stack.push(result);
+                    } else if let Some(closure) = func.as_closure() {
+                        self.call_depth += 1;
+                        if self.call_depth > 1000 {
+                            return Err("Stack overflow".to_string());
+                        }
+
+                        // Record this closure call for profiling (only track hot closures)
+                        let bytecode_ptr = closure.bytecode.as_ptr();
+                        let is_hot = self.record_closure_call(bytecode_ptr);
+                        if is_hot {
+                            // TODO: When hot, attempt to compile and cache this closure
+                            // For now, just track that it's hot
+                        }
+
+                        // Validate argument count
+                        if !self.check_arity(&closure.arity, args.len()) {
+                            self.call_depth -= 1;
+                            self.stack.push(Value::NIL);
+                        } else {
+                            // Create a new environment that includes:
+                            // [captured_vars..., parameters..., locally_defined_cells...]
+                            // The closure's env contains captured variables
+                            // We append the arguments as parameters
+                            // We append empty cells for locally-defined variables (Phase 4)
+                            let mut new_env = Vec::new();
+                            new_env.extend((*closure.env).iter().cloned());
+
+                            // Add parameters, wrapping in local cells if cell_params_mask indicates
+                            for (i, arg) in args.iter().enumerate() {
+                                if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                                    // This parameter is mutated - wrap it in a local cell
+                                    new_env.push(Value::local_cell(*arg));
+                                } else {
+                                    new_env.push(*arg);
                                 }
-                                Err(e) => return Err(self.wrap_error(e.to_string())),
+                            }
+
+                            // Calculate number of locally-defined variables
+                            let num_params = match closure.arity {
+                                crate::value_old::Arity::Exact(n) => n,
+                                crate::value_old::Arity::AtLeast(n) => n,
+                                crate::value_old::Arity::Range(min, _) => min,
+                            };
+                            let num_locally_defined = closure.num_locals.saturating_sub(num_params);
+
+                            // Add empty LocalCells for locally-defined variables
+                            // These will be initialized when define statements execute
+                            // LocalCell is auto-unwrapped by LoadUpvalue (unlike user Cell)
+                            for _ in 0..num_locally_defined {
+                                let empty_cell = Value::local_cell(Value::NIL);
+                                new_env.push(empty_cell);
+                            }
+
+                            let new_env_rc = std::rc::Rc::new(new_env);
+
+                            // If we're in a coroutine context, use coroutine-aware execution
+                            // that can handle yields from called functions
+                            if self.in_coroutine() {
+                                let result = self.execute_bytecode_coroutine(
+                                    &closure.bytecode,
+                                    &closure.constants,
+                                    Some(&new_env_rc),
+                                )?;
+
+                                self.call_depth -= 1;
+
+                                // If the called function yielded, propagate it up
+                                match result {
+                                    VmResult::Done(v) => {
+                                        self.stack.push(v);
+                                    }
+                                    VmResult::Yielded(v) => {
+                                        // Propagate yield - the caller will handle it
+                                        return Ok(VmResult::Yielded(v));
+                                    }
+                                }
+                            } else {
+                                let result = self.execute_bytecode(
+                                    &closure.bytecode,
+                                    &closure.constants,
+                                    Some(&new_env_rc),
+                                )?;
+
+                                self.call_depth -= 1;
+                                self.stack.push(result);
+                            }
+                        }
+                    } else if let Some(jit_closure) = func.as_jit_closure() {
+                        // Validate argument count
+                        if !self.check_arity(&jit_closure.arity, args.len()) {
+                            self.stack.push(Value::NIL);
+                        } else if !jit_closure.code_ptr.is_null() {
+                            // Call native code!
+                            let result = unsafe {
+                                // Prepare args array
+                                let args_encoded: Vec<i64> =
+                                    args.iter().map(encode_value_for_jit).collect();
+
+                                // Prepare env array (captures) - uses old Value type
+                                let env_encoded: Vec<i64> = jit_closure
+                                    .env
+                                    .iter()
+                                    .map(encode_old_value_for_jit)
+                                    .collect();
+
+                                // Cast to function pointer
+                                // Signature: fn(args_ptr: i64, args_len: i64, env_ptr: i64) -> i64
+                                let func: extern "C" fn(i64, i64, i64) -> i64 =
+                                    std::mem::transmute(jit_closure.code_ptr);
+
+                                // Call it
+                                let result_encoded = func(
+                                    args_encoded.as_ptr() as i64,
+                                    args_encoded.len() as i64,
+                                    env_encoded.as_ptr() as i64,
+                                );
+
+                                // Decode result
+                                decode_jit_result(result_encoded)?
                             };
                             self.stack.push(result);
-                        }
-                        Value::VmAwareFn(f) => {
-                            let result = f(&args, self)?;
-                            self.stack.push(result);
-                        }
-                        Value::Closure(closure) => {
+                        } else if let Some(ref source) = jit_closure.source {
+                            // Fall back to interpreted execution of the source closure
                             self.call_depth += 1;
                             if self.call_depth > 1000 {
-                                return Err(self.wrap_error("Stack overflow".to_string()));
+                                return Err("Stack overflow".to_string());
                             }
 
-                            // Record this closure call for profiling (only track hot closures)
-                            let bytecode_ptr = closure.bytecode.as_ptr();
-                            let is_hot = self.record_closure_call(bytecode_ptr);
-                            if is_hot {
-                                // TODO: When hot, attempt to compile and cache this closure
-                                // For now, just track that it's hot
+                            // Create a new environment that includes:
+                            // [captured_vars..., parameters..., locally_defined_cells...]
+                            let mut new_env = Vec::new();
+                            new_env.extend((*source.env).iter().cloned());
+
+                            // Add parameters, wrapping in local cells if cell_params_mask indicates
+                            for (i, arg) in args.iter().enumerate() {
+                                if i < 64 && (source.cell_params_mask & (1 << i)) != 0 {
+                                    // This parameter is mutated - wrap it in a local cell
+                                    new_env.push(Value::local_cell(*arg));
+                                } else {
+                                    new_env.push(*arg);
+                                }
                             }
 
-                            // Validate argument count
-                            if !self.check_arity(&closure.arity, args.len()) {
+                            // Calculate number of locally-defined variables
+                            let num_params = match source.arity {
+                                crate::value_old::Arity::Exact(n) => n,
+                                crate::value_old::Arity::AtLeast(n) => n,
+                                crate::value_old::Arity::Range(min, _) => min,
+                            };
+                            let num_locally_defined = source.num_locals.saturating_sub(num_params);
+
+                            // Add empty LocalCells for locally-defined variables
+                            for _ in 0..num_locally_defined {
+                                let empty_cell = Value::local_cell(Value::NIL);
+                                new_env.push(empty_cell);
+                            }
+
+                            let new_env_rc = std::rc::Rc::new(new_env);
+
+                            // If we're in a coroutine context, use coroutine-aware execution
+                            if self.in_coroutine() {
+                                let result = self.execute_bytecode_coroutine(
+                                    &source.bytecode,
+                                    &source.constants,
+                                    Some(&new_env_rc),
+                                )?;
+
                                 self.call_depth -= 1;
-                                self.stack.push(Value::Nil);
+
+                                // If the called function yielded, propagate it up
+                                match result {
+                                    VmResult::Done(v) => {
+                                        self.stack.push(v);
+                                    }
+                                    VmResult::Yielded(v) => {
+                                        // Propagate yield - the caller will handle it
+                                        return Ok(VmResult::Yielded(v));
+                                    }
+                                }
                             } else {
-                                // Create a new environment that includes:
-                                // [captured_vars..., parameters..., locally_defined_cells...]
-                                // The closure's env contains captured variables
-                                // We append the arguments as parameters (wrapping in cells if needed)
-                                // We append empty cells for locally-defined variables (Phase 4)
-                                let mut new_env = Vec::new();
-                                new_env.extend((*closure.env).iter().cloned());
+                                let result = self.execute_bytecode(
+                                    &source.bytecode,
+                                    &source.constants,
+                                    Some(&new_env_rc),
+                                )?;
 
-                                // Add parameters, wrapping in cells if needed based on cell_params_mask
-                                for (i, arg) in args.iter().enumerate() {
-                                    if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-                                        // This parameter needs a cell
-                                        let cell = Value::LocalCell(std::rc::Rc::new(
-                                            std::cell::RefCell::new(Box::new(arg.clone())),
-                                        ));
-                                        new_env.push(cell);
-                                    } else {
-                                        new_env.push(arg.clone());
-                                    }
-                                }
-
-                                // Calculate number of locally-defined variables
-                                let num_params = match closure.arity {
-                                    crate::value::Arity::Exact(n) => n,
-                                    crate::value::Arity::AtLeast(n) => n,
-                                    crate::value::Arity::Range(min, _) => min,
-                                };
-                                let num_locally_defined = closure
-                                    .num_locals
-                                    .saturating_sub(num_params + closure.num_captures);
-
-                                // Add empty LocalCells for locally-defined variables
-                                // These will be initialized when define statements execute
-                                // LocalCell is auto-unwrapped by LoadUpvalue (unlike user Cell)
-                                for _ in 0..num_locally_defined {
-                                    let empty_cell = Value::LocalCell(std::rc::Rc::new(
-                                        std::cell::RefCell::new(Box::new(Value::Nil)),
-                                    ));
-                                    new_env.push(empty_cell);
-                                }
-
-                                let new_env_rc = std::rc::Rc::new(new_env);
-
-                                // Push call frame for stack tracing and local variable access
-                                // The frame_base is the current stack top - locals will be allocated above this
-                                let frame_base = self.stack.len();
-                                self.push_call_frame_with_base(
-                                    "<closure>".to_string(),
-                                    ip,
-                                    frame_base,
-                                );
-
-                                // If we're in a coroutine context, use coroutine-aware execution
-                                // that can handle yields from called functions
-                                if self.in_coroutine() {
-                                    let result = self.execute_bytecode_coroutine(
-                                        &closure.bytecode,
-                                        &closure.constants,
-                                        Some(&new_env_rc),
-                                    )?;
-
-                                    self.pop_call_frame();
-                                    self.call_depth -= 1;
-                                    // Clean up any garbage left on the stack by the called closure
-                                    self.stack.truncate(frame_base);
-
-                                    // If the called function yielded, propagate it up
-                                    match result {
-                                        VmResult::Done(v) => {
-                                            self.stack.push(v);
-                                        }
-                                        VmResult::Yielded(v) => {
-                                            // Propagate yield - the caller will handle it
-                                            return Ok(VmResult::Yielded(v));
-                                        }
-                                    }
-                                } else {
-                                    let result = self.execute_bytecode(
-                                        &closure.bytecode,
-                                        &closure.constants,
-                                        Some(&new_env_rc),
-                                    )?;
-
-                                    self.pop_call_frame();
-                                    self.call_depth -= 1;
-                                    // Clean up any garbage left on the stack by the called closure
-                                    // The closure may have left temporary values; we only want the result
-                                    self.stack.truncate(frame_base);
-                                    self.stack.push(result);
-                                }
-                            }
-                        }
-                        Value::JitClosure(jit_closure) => {
-                            // Validate argument count
-                            if !self.check_arity(&jit_closure.arity, args.len()) {
-                                self.stack.push(Value::Nil);
-                            } else if !jit_closure.code_ptr.is_null() {
-                                // Call native code!
-                                let result = unsafe {
-                                    // Prepare args array
-                                    let args_encoded: Vec<i64> =
-                                        args.iter().map(encode_value_for_jit).collect();
-
-                                    // Prepare env array (captures)
-                                    let env_encoded: Vec<i64> =
-                                        jit_closure.env.iter().map(encode_value_for_jit).collect();
-
-                                    // Cast to function pointer
-                                    // Signature: fn(args_ptr: i64, args_len: i64, env_ptr: i64) -> i64
-                                    let func: extern "C" fn(i64, i64, i64) -> i64 =
-                                        std::mem::transmute(jit_closure.code_ptr);
-
-                                    // Call it
-                                    let result_encoded = func(
-                                        args_encoded.as_ptr() as i64,
-                                        args_encoded.len() as i64,
-                                        env_encoded.as_ptr() as i64,
-                                    );
-
-                                    // Decode result
-                                    decode_jit_result(result_encoded)?
-                                };
+                                self.call_depth -= 1;
                                 self.stack.push(result);
-                            } else if let Some(ref source) = jit_closure.source {
-                                // Fall back to interpreted execution of the source closure
-                                self.call_depth += 1;
-                                if self.call_depth > 1000 {
-                                    return Err(self.wrap_error("Stack overflow".to_string()));
-                                }
-
-                                // Create a new environment that includes:
-                                // [captured_vars..., parameters..., locally_defined_cells...]
-                                let mut new_env = Vec::new();
-                                new_env.extend((*source.env).iter().cloned());
-                                new_env.extend(args.clone());
-
-                                // Calculate number of locally-defined variables
-                                let num_params = match source.arity {
-                                    crate::value::Arity::Exact(n) => n,
-                                    crate::value::Arity::AtLeast(n) => n,
-                                    crate::value::Arity::Range(min, _) => min,
-                                };
-                                let num_locally_defined = source
-                                    .num_locals
-                                    .saturating_sub(num_params + source.num_captures);
-
-                                // Add empty LocalCells for locally-defined variables
-                                for _ in 0..num_locally_defined {
-                                    let empty_cell = Value::LocalCell(std::rc::Rc::new(
-                                        std::cell::RefCell::new(Box::new(Value::Nil)),
-                                    ));
-                                    new_env.push(empty_cell);
-                                }
-
-                                let new_env_rc = std::rc::Rc::new(new_env);
-
-                                // Push call frame for stack tracing and local variable access
-                                let frame_base = self.stack.len();
-                                self.push_call_frame_with_base(
-                                    "<jit-closure>".to_string(),
-                                    ip,
-                                    frame_base,
-                                );
-
-                                // If we're in a coroutine context, use coroutine-aware execution
-                                if self.in_coroutine() {
-                                    let result = self.execute_bytecode_coroutine(
-                                        &source.bytecode,
-                                        &source.constants,
-                                        Some(&new_env_rc),
-                                    )?;
-
-                                    self.pop_call_frame();
-                                    self.call_depth -= 1;
-
-                                    // If the called function yielded, propagate it up
-                                    match result {
-                                        VmResult::Done(v) => {
-                                            self.stack.push(v);
-                                        }
-                                        VmResult::Yielded(v) => {
-                                            // Propagate yield - the caller will handle it
-                                            return Ok(VmResult::Yielded(v));
-                                        }
-                                    }
-                                } else {
-                                    let result = self.execute_bytecode(
-                                        &source.bytecode,
-                                        &source.constants,
-                                        Some(&new_env_rc),
-                                    )?;
-
-                                    self.pop_call_frame();
-                                    self.call_depth -= 1;
-                                    self.stack.push(result);
-                                }
-                            } else {
-                                return Err(self
-                                    .wrap_error("JIT closure has no fallback source".to_string()));
                             }
+                        } else {
+                            return Err("JIT closure has no fallback source".to_string());
                         }
-                        _ => return Err(self.wrap_error(format!("Cannot call {:?}", func))),
+                    } else {
+                        return Err(format!("Cannot call {:?}", func));
                     }
                 }
 
@@ -484,173 +456,163 @@ impl VM {
                     }
                     args.reverse();
 
-                    match func {
-                        Value::NativeFn(f) => {
-                            return f(&args).map(VmResult::Done).map_err(|e| e.to_string());
-                        }
-                        Value::VmAwareFn(f) => {
-                            return f(&args, self)
-                                .map(VmResult::Done)
-                                .map_err(|e| e.to_string());
-                        }
-                        Value::Closure(closure) => {
-                            // Validate argument count
-                            if !self.check_arity(&closure.arity, args.len()) {
-                                // Exception was set, check it before returning
-                                if self.current_exception.is_some()
-                                    && !self.handling_exception
-                                    && self.exception_handlers.is_empty()
-                                {
-                                    // No handler for this exception - propagate as error
-                                    if let Some(exc) = &self.current_exception {
-                                        let details =
-                                            if let Some(Value::Symbol(sym_id)) = exc.get_field(0) {
-                                                format!(" (SymbolId({}))", sym_id.0)
-                                            } else {
-                                                String::new()
-                                            };
-                                        return Err(self.wrap_error(format!(
-                                            "Unhandled exception: {}{}",
-                                            exc.exception_id, details
-                                        )));
-                                    }
-                                    return Err(self.wrap_error("Unhandled exception".to_string()));
-                                }
-                                return Ok(VmResult::Done(Value::Nil));
+                    if let Some(f) = func.as_native_fn() {
+                        match f(&args) {
+                            Ok(val) => return Ok(VmResult::Done(val)),
+                            Err(cond) => {
+                                self.current_exception = Some(std::rc::Rc::new(cond));
+                                return Ok(VmResult::Done(Value::NIL));
                             }
+                        }
+                    } else if let Some(f) = func.as_vm_aware_fn() {
+                        return f(&args, self)
+                            .map(VmResult::Done)
+                            .map_err(|e| e.description());
+                    } else if let Some(closure) = func.as_closure() {
+                        // Validate argument count
+                        if !self.check_arity(&closure.arity, args.len()) {
+                            // Exception was set, check it before returning
+                            if self.current_exception.is_some()
+                                && !self.handling_exception
+                                && self.exception_handlers.is_empty()
+                            {
+                                // No local handler — propagate via current_exception
+                                return Ok(VmResult::Done(Value::NIL));
+                            }
+                            return Ok(VmResult::Done(Value::NIL));
+                        }
 
+                        // Build proper environment: captures + args + locals (same as Call)
+                        // Reuse the cached environment vector to avoid repeated allocations
+                        self.tail_call_env_cache.clear();
+                        self.tail_call_env_cache
+                            .extend((*closure.env).iter().cloned());
+
+                        // Add parameters, wrapping in local cells if cell_params_mask indicates
+                        for (i, arg) in args.iter().enumerate() {
+                            if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                                // This parameter is mutated - wrap it in a local cell
+                                self.tail_call_env_cache.push(Value::local_cell(*arg));
+                            } else {
+                                self.tail_call_env_cache.push(*arg);
+                            }
+                        }
+
+                        // Calculate number of locally-defined variables
+                        let num_params = match closure.arity {
+                            crate::value_old::Arity::Exact(n) => n,
+                            crate::value_old::Arity::AtLeast(n) => n,
+                            crate::value_old::Arity::Range(min, _) => min,
+                        };
+                        let num_locally_defined = closure.num_locals.saturating_sub(num_params);
+
+                        // Add empty LocalCells for locally-defined variables
+                        for _ in 0..num_locally_defined {
+                            let empty_cell = Value::local_cell(Value::NIL);
+                            self.tail_call_env_cache.push(empty_cell);
+                        }
+
+                        let new_env_rc = std::rc::Rc::new(self.tail_call_env_cache.clone());
+
+                        // Store the tail call information to be executed in the outer loop
+                        // instead of recursively calling execute_bytecode
+                        // Don't increment call_depth — this is the tail call optimization
+                        self.pending_tail_call = Some((
+                            (*closure.bytecode).clone(),
+                            (*closure.constants).clone(),
+                            new_env_rc,
+                        ));
+
+                        // Return a dummy value - the outer loop will detect the pending tail call
+                        // and execute it instead of returning this value
+                        return Ok(VmResult::Done(Value::NIL));
+                    } else if let Some(jit_closure) = func.as_jit_closure() {
+                        // Validate argument count
+                        if !self.check_arity(&jit_closure.arity, args.len()) {
+                            // Exception was set, check it before returning
+                            if self.current_exception.is_some()
+                                && !self.handling_exception
+                                && self.exception_handlers.is_empty()
+                            {
+                                // No local handler — propagate via current_exception
+                                return Ok(VmResult::Done(Value::NIL));
+                            }
+                            return Ok(VmResult::Done(Value::NIL));
+                        } else if !jit_closure.code_ptr.is_null() {
+                            // Call native code directly (tail call optimization)
+                            return unsafe {
+                                // Prepare args array
+                                let args_encoded: Vec<i64> =
+                                    args.iter().map(encode_value_for_jit).collect();
+
+                                // Prepare env array (captures) - uses old Value type
+                                let env_encoded: Vec<i64> = jit_closure
+                                    .env
+                                    .iter()
+                                    .map(encode_old_value_for_jit)
+                                    .collect();
+
+                                // Cast to function pointer
+                                let func: extern "C" fn(i64, i64, i64) -> i64 =
+                                    std::mem::transmute(jit_closure.code_ptr);
+
+                                // Call it
+                                let result_encoded = func(
+                                    args_encoded.as_ptr() as i64,
+                                    args_encoded.len() as i64,
+                                    env_encoded.as_ptr() as i64,
+                                );
+
+                                // Decode result
+                                decode_jit_result(result_encoded).map(VmResult::Done)
+                            };
+                        } else if let Some(ref source) = jit_closure.source {
                             // Build proper environment: captures + args + locals (same as Call)
-                            // Reuse the cached environment vector to avoid repeated allocations
                             self.tail_call_env_cache.clear();
                             self.tail_call_env_cache
-                                .extend((*closure.env).iter().cloned());
-                            self.tail_call_env_cache.extend(args);
+                                .extend((*source.env).iter().cloned());
+
+                            // Add parameters, wrapping in local cells if cell_params_mask indicates
+                            for (i, arg) in args.iter().enumerate() {
+                                if i < 64 && (source.cell_params_mask & (1 << i)) != 0 {
+                                    // This parameter is mutated - wrap it in a local cell
+                                    self.tail_call_env_cache.push(Value::local_cell(*arg));
+                                } else {
+                                    self.tail_call_env_cache.push(*arg);
+                                }
+                            }
 
                             // Calculate number of locally-defined variables
-                            let num_params = match closure.arity {
-                                crate::value::Arity::Exact(n) => n,
-                                crate::value::Arity::AtLeast(n) => n,
-                                crate::value::Arity::Range(min, _) => min,
+                            let num_params = match source.arity {
+                                crate::value_old::Arity::Exact(n) => n,
+                                crate::value_old::Arity::AtLeast(n) => n,
+                                crate::value_old::Arity::Range(min, _) => min,
                             };
-                            let num_locally_defined = closure
-                                .num_locals
-                                .saturating_sub(num_params + closure.num_captures);
+                            let num_locally_defined = source.num_locals.saturating_sub(num_params);
 
                             // Add empty LocalCells for locally-defined variables
                             for _ in 0..num_locally_defined {
-                                let empty_cell = Value::LocalCell(std::rc::Rc::new(
-                                    std::cell::RefCell::new(Box::new(Value::Nil)),
-                                ));
+                                let empty_cell = Value::local_cell(Value::NIL);
                                 self.tail_call_env_cache.push(empty_cell);
                             }
 
                             let new_env_rc = std::rc::Rc::new(self.tail_call_env_cache.clone());
 
                             // Store the tail call information to be executed in the outer loop
-                            // instead of recursively calling execute_bytecode
-                            // Don't increment call_depth — this is the tail call optimization
                             self.pending_tail_call = Some((
-                                (*closure.bytecode).clone(),
-                                (*closure.constants).clone(),
+                                (*source.bytecode).clone(),
+                                (*source.constants).clone(),
                                 new_env_rc,
                             ));
 
                             // Return a dummy value - the outer loop will detect the pending tail call
-                            // and execute it instead of returning this value
-                            return Ok(VmResult::Done(Value::Nil));
+                            return Ok(VmResult::Done(Value::NIL));
+                        } else {
+                            return Err("JIT closure has no fallback source".to_string());
                         }
-                        Value::JitClosure(jit_closure) => {
-                            // Validate argument count
-                            if !self.check_arity(&jit_closure.arity, args.len()) {
-                                // Exception was set, check it before returning
-                                if self.current_exception.is_some()
-                                    && !self.handling_exception
-                                    && self.exception_handlers.is_empty()
-                                {
-                                    // No handler for this exception - propagate as error
-                                    if let Some(exc) = &self.current_exception {
-                                        let details =
-                                            if let Some(Value::Symbol(sym_id)) = exc.get_field(0) {
-                                                format!(" (SymbolId({}))", sym_id.0)
-                                            } else {
-                                                String::new()
-                                            };
-                                        return Err(self.wrap_error(format!(
-                                            "Unhandled exception: {}{}",
-                                            exc.exception_id, details
-                                        )));
-                                    }
-                                    return Err(self.wrap_error("Unhandled exception".to_string()));
-                                }
-                                return Ok(VmResult::Done(Value::Nil));
-                            } else if !jit_closure.code_ptr.is_null() {
-                                // Call native code directly (tail call optimization)
-                                return unsafe {
-                                    // Prepare args array
-                                    let args_encoded: Vec<i64> =
-                                        args.iter().map(encode_value_for_jit).collect();
-
-                                    // Prepare env array (captures)
-                                    let env_encoded: Vec<i64> =
-                                        jit_closure.env.iter().map(encode_value_for_jit).collect();
-
-                                    // Cast to function pointer
-                                    let func: extern "C" fn(i64, i64, i64) -> i64 =
-                                        std::mem::transmute(jit_closure.code_ptr);
-
-                                    // Call it
-                                    let result_encoded = func(
-                                        args_encoded.as_ptr() as i64,
-                                        args_encoded.len() as i64,
-                                        env_encoded.as_ptr() as i64,
-                                    );
-
-                                    // Decode result
-                                    decode_jit_result(result_encoded).map(VmResult::Done)
-                                };
-                            } else if let Some(ref source) = jit_closure.source {
-                                // Build proper environment: captures + args + locals (same as Call)
-                                self.tail_call_env_cache.clear();
-                                self.tail_call_env_cache
-                                    .extend((*source.env).iter().cloned());
-                                self.tail_call_env_cache.extend(args);
-
-                                // Calculate number of locally-defined variables
-                                let num_params = match source.arity {
-                                    crate::value::Arity::Exact(n) => n,
-                                    crate::value::Arity::AtLeast(n) => n,
-                                    crate::value::Arity::Range(min, _) => min,
-                                };
-                                let num_locally_defined = source
-                                    .num_locals
-                                    .saturating_sub(num_params + source.num_captures);
-
-                                // Add empty LocalCells for locally-defined variables
-                                for _ in 0..num_locally_defined {
-                                    let empty_cell = Value::LocalCell(std::rc::Rc::new(
-                                        std::cell::RefCell::new(Box::new(Value::Nil)),
-                                    ));
-                                    self.tail_call_env_cache.push(empty_cell);
-                                }
-
-                                let new_env_rc = std::rc::Rc::new(self.tail_call_env_cache.clone());
-
-                                // Store the tail call information to be executed in the outer loop
-                                self.pending_tail_call = Some((
-                                    (*source.bytecode).clone(),
-                                    (*source.constants).clone(),
-                                    new_env_rc,
-                                ));
-
-                                // Return a dummy value - the outer loop will detect the pending tail call
-                                return Ok(VmResult::Done(Value::Nil));
-                            } else {
-                                return Err(self
-                                    .wrap_error("JIT closure has no fallback source".to_string()));
-                            }
-                        }
-                        _ => return Err(self.wrap_error(format!("Cannot call {:?}", func))),
-                    };
+                    } else {
+                        return Err(format!("Cannot call {:?}", func));
+                    }
                 }
 
                 // Closures
@@ -743,6 +705,10 @@ impl VM {
                     types::handle_is_nil(self)?;
                 }
 
+                Instruction::IsEmptyList => {
+                    types::handle_is_empty_list(self)?;
+                }
+
                 Instruction::IsPair => {
                     types::handle_is_pair(self)?;
                 }
@@ -762,6 +728,10 @@ impl VM {
                 // Literals
                 Instruction::Nil => {
                     literals::handle_nil(self);
+                }
+
+                Instruction::EmptyList => {
+                    literals::handle_empty_list(self);
                 }
 
                 Instruction::True => {
@@ -804,7 +774,7 @@ impl VM {
                 // Exception handling (Phase 3)
                 Instruction::PushHandler => {
                     // Read handler_offset (i16) and finally_offset (i16)
-                    let handler_offset = self.read_i16(bytecode, &mut ip);
+                    let handler_offset = self.read_u16(bytecode, &mut ip);
                     let finally_offset_val = self.read_i16(bytecode, &mut ip);
                     let finally_offset = if finally_offset_val == -1 {
                         None
@@ -839,9 +809,7 @@ impl VM {
                     // (Normal path jumps past this via the Jump after PopHandler)
                     if self.current_exception.is_none() {
                         // This shouldn't happen, but if it does, we have a bug
-                        return Err(self.wrap_error(
-                            "CheckException reached with no exception set".to_string(),
-                        ));
+                        return Err("CheckException reached with no exception set".to_string());
                     }
                     // Exception is set, fall through to handler matching code
                 }
@@ -859,7 +827,7 @@ impl VM {
                     };
 
                     // Push boolean result onto stack for JumpIfFalse to check
-                    self.stack.push(Value::Bool(matches));
+                    self.stack.push(Value::bool(matches));
                 }
 
                 Instruction::BindException => {
@@ -870,25 +838,43 @@ impl VM {
                     // Get the current exception if it exists
                     if let Some(exc) = &self.current_exception {
                         // Extract the symbol ID from constants
-                        if let Some(Value::Symbol(sym_id)) = constants.get(const_idx) {
-                            // Bind the exception to the variable in the current scope
-                            // For now, use globals as a simple binding mechanism
-                            self.globals.insert(sym_id.0, Value::Condition(exc.clone()));
+                        if let Some(const_val) = constants.get(const_idx) {
+                            if let Some(sym_id) = const_val.as_symbol() {
+                                // Bind the exception to the variable in the current scope
+                                // For now, use globals as a simple binding mechanism
+                                use crate::value::heap::{alloc, HeapObject};
+                                // Convert new Condition to old Condition
+                                let new_cond = (**exc).clone();
+                                let mut old_cond =
+                                    crate::value_old::Condition::new(new_cond.exception_id);
+                                // Store message in old condition's FIELD_MESSAGE
+                                old_cond.set_field(
+                                    crate::value_old::Condition::FIELD_MESSAGE,
+                                    crate::value_old::Value::String(
+                                        new_cond.message.clone().into(),
+                                    ),
+                                );
+                                for (field_id, value) in new_cond.fields {
+                                    let old_value =
+                                        crate::primitives::coroutines::new_value_to_old(value);
+                                    old_cond.set_field(field_id, old_value);
+                                }
+                                if let Some(bt) = new_cond.backtrace {
+                                    old_cond.backtrace = Some(bt);
+                                }
+                                if let Some(loc) = new_cond.location {
+                                    old_cond.location = Some(loc);
+                                }
+                                let exc_value = alloc(HeapObject::Condition(old_cond));
+                                self.globals.insert(sym_id, exc_value);
+                            } else {
+                                return Err(
+                                    "BindException: Expected symbol in constants".to_string()
+                                );
+                            }
                         } else {
-                            return Err(self.wrap_error(
-                                "BindException: Expected symbol in constants".to_string(),
-                            ));
+                            return Err("BindException: Expected symbol in constants".to_string());
                         }
-                    }
-                }
-
-                Instruction::LoadException => {
-                    // Load current exception onto stack
-                    if let Some(exc) = &self.current_exception {
-                        self.stack.push(Value::Condition(exc.clone()));
-                    } else {
-                        // No exception - push nil (shouldn't happen in normal flow)
-                        self.stack.push(Value::Nil);
                     }
                 }
 
@@ -897,6 +883,18 @@ impl VM {
                     self.current_exception = None;
                     // No longer handling exception
                     self.handling_exception = false;
+                }
+
+                Instruction::ReraiseException => {
+                    // No handler clause matched — re-raise the exception.
+                    // Pop this handler so the interrupt mechanism doesn't loop
+                    // back to the same handler, and clear the handling flag so
+                    // the interrupt mechanism can fire again for the next handler.
+                    self.exception_handlers.pop();
+                    self.handling_exception = false;
+                    // current_exception remains set — the interrupt check at the
+                    // bottom of the loop will re-fire and find the next handler
+                    // (or the "no handler" path if none remain).
                 }
 
                 Instruction::InvokeRestart => {
@@ -912,33 +910,59 @@ impl VM {
                     // 2. Check we're in a coroutine context
                     let coroutine = match self.current_coroutine() {
                         Some(co) => co.clone(),
-                        None => {
-                            return Err(
-                                self.wrap_error("yield used outside of coroutine".to_string())
-                            )
-                        }
+                        None => return Err("yield used outside of coroutine".to_string()),
                     };
 
-                    // 3. Save execution context
-                    // The stack contains locals at the bottom and operands on top
-                    // We need to save it so we can restore when resuming
+                    // 3. Save execution context — the LIVE operand stack and environment
+                    let saved_stack: Vec<Value> = self.stack.drain(..).collect();
+                    let saved_env = closure_env.cloned();
+
                     let saved_context = CoroutineContext {
-                        ip, // Current IP (will resume at next instruction)
-                        stack: self.stack.iter().cloned().collect(),
-                        locals: vec![],      // Locals are on the stack, not separate
-                        call_frames: vec![], // TODO: save call frames if we support nested calls in coroutines
+                        ip,
+                        stack: saved_stack,
+                        env: saved_env,
                     };
 
                     // 4. Update coroutine state
                     {
                         let mut co = coroutine.borrow_mut();
                         co.state = CoroutineState::Suspended;
-                        co.yielded_value = Some(yielded_value.clone());
+                        co.yielded_value = None;
                         co.saved_context = Some(saved_context);
                     }
 
                     // 5. Return the yielded value
                     return Ok(VmResult::Yielded(yielded_value));
+                }
+
+                Instruction::LoadException => {
+                    // Push the current exception value onto the stack
+                    // If there's an exception, push it as a Value; otherwise push NIL
+                    let exc_value = if let Some(exc) = &self.current_exception {
+                        use crate::value::heap::{alloc, HeapObject};
+                        // Convert new Condition to old Condition
+                        let new_cond = (**exc).clone();
+                        let mut old_cond = crate::value_old::Condition::new(new_cond.exception_id);
+                        // Store message in old condition's FIELD_MESSAGE
+                        old_cond.set_field(
+                            crate::value_old::Condition::FIELD_MESSAGE,
+                            crate::value_old::Value::String(new_cond.message.clone().into()),
+                        );
+                        for (field_id, value) in new_cond.fields {
+                            let old_value = crate::primitives::coroutines::new_value_to_old(value);
+                            old_cond.set_field(field_id, old_value);
+                        }
+                        if let Some(bt) = new_cond.backtrace {
+                            old_cond.backtrace = Some(bt);
+                        }
+                        if let Some(loc) = new_cond.location {
+                            old_cond.location = Some(loc);
+                        }
+                        alloc(HeapObject::Condition(old_cond))
+                    } else {
+                        Value::NIL
+                    };
+                    self.stack.push(exc_value);
                 }
             }
 
@@ -957,26 +981,16 @@ impl VM {
                     // Jump to handler code (handler_offset is absolute bytecode position)
                     ip = handler.handler_offset as usize;
                 } else {
-                    // No handler for this exception - propagate as error
-                    if let Some(exc) = &self.current_exception {
-                        // Include field 0 info if it contains a symbol (for undefined-variable)
-                        let details = if let Some(Value::Symbol(sym_id)) = exc.get_field(0) {
-                            format!(" (SymbolId({}))", sym_id.0)
-                        } else {
-                            String::new()
-                        };
-                        return Err(self.wrap_error(format!(
-                            "Unhandled exception: {}{}",
-                            exc.exception_id, details
-                        )));
-                    }
-                    return Err(self.wrap_error("Unhandled exception".to_string()));
+                    // No local handler — return normally, leaving current_exception set.
+                    // The caller's interrupt mechanism will handle it after handler
+                    // isolation restores the outer frame's handlers.
+                    return Ok(VmResult::Done(Value::NIL));
                 }
             }
         }
     }
 
-    /// Wrapper that calls execute_bytecode_inner_with_ip with start_ip = 0
+    /// Wrapper that calls execute_bytecode_inner_impl with start_ip = 0
     fn execute_bytecode_inner(
         &mut self,
         bytecode: &[u8],
@@ -984,6 +998,31 @@ impl VM {
         closure_env: Option<&Rc<Vec<Value>>>,
     ) -> Result<VmResult, String> {
         self.execute_bytecode_inner_with_ip(bytecode, constants, closure_env, 0)
+    }
+
+    /// Execute bytecode starting from a specific instruction pointer.
+    /// This is the main entry point for bytecode execution.
+    /// Handler isolation happens at the Call instruction level, not here.
+    fn execute_bytecode_inner_with_ip(
+        &mut self,
+        bytecode: &[u8],
+        constants: &[Value],
+        closure_env: Option<&Rc<Vec<Value>>>,
+        start_ip: usize,
+    ) -> Result<VmResult, String> {
+        // Each bytecode frame has its own exception handler scope.
+        // PushHandler/PopHandler are bytecode-local; the inner frame must not
+        // see (or jump to) the outer frame's handlers.
+        let saved_handlers = std::mem::take(&mut self.exception_handlers);
+        let saved_handling = self.handling_exception;
+        self.handling_exception = false;
+
+        let result = self.execute_bytecode_inner_impl(bytecode, constants, closure_env, start_ip);
+
+        self.exception_handlers = saved_handlers;
+        self.handling_exception = saved_handling;
+
+        result
     }
 
     /// Execute bytecode starting from a specific instruction pointer
@@ -995,6 +1034,7 @@ impl VM {
         closure_env: Option<&Rc<Vec<Value>>>,
         start_ip: usize,
     ) -> Result<VmResult, String> {
+        // This goes through the wrapper which handles handler isolation
         self.execute_bytecode_inner_with_ip(bytecode, constants, closure_env, start_ip)
     }
 
@@ -1005,11 +1045,15 @@ impl VM {
         constants: &[Value],
         closure_env: Option<&Rc<Vec<Value>>>,
     ) -> Result<VmResult, String> {
+        // Save the caller's stack — the Yield handler will drain self.stack
+        // to capture the coroutine's operand state, so we must isolate it.
+        let saved_stack = std::mem::take(&mut self.stack);
+
         let mut current_bytecode = bytecode.to_vec();
         let mut current_constants = constants.to_vec();
         let mut current_env = closure_env.cloned();
 
-        loop {
+        let result = loop {
             let result = self.execute_bytecode_inner(
                 &current_bytecode,
                 &current_constants,
@@ -1021,25 +1065,61 @@ impl VM {
                 current_constants = tail_constants;
                 current_env = Some(tail_env);
             } else {
-                return Ok(result);
+                // If there's an unhandled exception from the coroutine body,
+                // leave it on current_exception. The caller (prim_coroutine_resume)
+                // will check it and route through the proper exception channel.
+                // Do NOT convert to Err(String) — that's the VM bug channel,
+                // uncatchable by handler-case.
+                break result;
             }
-        }
+        };
+
+        // Restore the caller's stack
+        self.stack = saved_stack;
+
+        Ok(result)
     }
 }
 
 /// Encode a Value for passing to JIT code
 fn encode_value_for_jit(value: &Value) -> i64 {
-    match value {
-        Value::Nil => 0,
-        Value::Bool(false) => 0,
-        Value::Bool(true) => 1,
-        Value::Int(n) => *n,
+    if value.is_nil() {
+        0
+    } else if let Some(b) = value.as_bool() {
+        if b {
+            1
+        } else {
+            0
+        }
+    } else if let Some(n) = value.as_int() {
+        n
+    } else {
         // For heap values, we pass the pointer
         // IMPORTANT: The value must be kept alive during JIT execution!
-        other => {
-            // This is unsafe - we're passing a raw pointer
-            // The caller must ensure the Value lives long enough
-            other as *const Value as i64
+        // This is unsafe - we're passing a raw pointer
+        // The caller must ensure the Value lives long enough
+        value.to_bits() as i64
+    }
+}
+
+/// Encode an old Value for passing to JIT code
+fn encode_old_value_for_jit(value: &crate::value_old::Value) -> i64 {
+    use crate::value_old::Value as OldValue;
+    match value {
+        OldValue::Nil => 0,
+        OldValue::Bool(b) => {
+            if *b {
+                1
+            } else {
+                0
+            }
+        }
+        OldValue::Int(n) => *n,
+        OldValue::Float(f) => f.to_bits() as i64,
+        _ => {
+            // For other types, we'd need proper encoding
+            // For now, just return 0 as a placeholder
+            0
         }
     }
 }
@@ -1048,5 +1128,5 @@ fn encode_value_for_jit(value: &Value) -> i64 {
 fn decode_jit_result(encoded: i64) -> Result<Value, String> {
     // For now, assume integer result
     // TODO: Need type information to properly decode
-    Ok(Value::Int(encoded))
+    Ok(Value::int(encoded))
 }

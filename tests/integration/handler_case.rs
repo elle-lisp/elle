@@ -24,35 +24,35 @@ fn eval(input: &str) -> Result<Value, String> {
 fn test_handler_case_no_exception() {
     // handler-case returns body value when no exception occurs
     let result = eval("(handler-case 42 (4 e 99))").unwrap();
-    assert_eq!(result, Value::Int(42));
+    assert_eq!(result, Value::int(42));
 }
 
 #[test]
 fn test_handler_case_catches_division_by_zero() {
     // handler-case catches division by zero (exception ID 4)
     let result = eval("(handler-case (/ 10 0) (4 e 99))").unwrap();
-    assert_eq!(result, Value::Int(99));
+    assert_eq!(result, Value::int(99));
 }
 
 #[test]
 fn test_handler_case_with_arithmetic_in_body() {
     // handler-case body can contain arithmetic operations
     let result = eval("(handler-case (+ 5 10) (4 e 0))").unwrap();
-    assert_eq!(result, Value::Int(15));
+    assert_eq!(result, Value::int(15));
 }
 
 #[test]
 fn test_handler_case_with_arithmetic_in_handler() {
     // handler-case handler can contain arithmetic operations
     let result = eval("(handler-case (/ 10 0) (4 e (+ 50 49)))").unwrap();
-    assert_eq!(result, Value::Int(99));
+    assert_eq!(result, Value::int(99));
 }
 
 #[test]
 fn test_handler_case_with_complex_body() {
     // handler-case with nested arithmetic in body
     let result = eval("(handler-case (+ (* 2 5) (* 3 4)) (4 e 0))").unwrap();
-    assert_eq!(result, Value::Int(22)); // (10 + 12) = 22
+    assert_eq!(result, Value::int(22)); // (10 + 12) = 22
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn test_handler_case_handler_not_executed_on_success() {
     // This test verifies the handler has a specific value that differs
     // from the try body result
     let result = eval("(handler-case 100 (4 e 0))").unwrap();
-    assert_eq!(result, Value::Int(100)); // Not 0, so handler didn't run
+    assert_eq!(result, Value::int(100)); // Not 0, so handler didn't run
 }
 
 // ============================================================================
@@ -72,7 +72,7 @@ fn test_handler_case_handler_not_executed_on_success() {
 fn test_handler_case_matches_exception_id_4() {
     // handler-case specifically matches exception ID 4 (arithmetic errors)
     let result = eval("(handler-case (/ 5 0) (4 e 88))").unwrap();
-    assert_eq!(result, Value::Int(88));
+    assert_eq!(result, Value::int(88));
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn test_handler_case_different_exception_types() {
     // handler-case handles arithmetic exceptions
     // Division by zero is the primary exception we test
     let result = eval("(handler-case (/ 20 0) (4 e 111))").unwrap();
-    assert_eq!(result, Value::Int(111));
+    assert_eq!(result, Value::int(111));
 }
 
 // ============================================================================
@@ -100,14 +100,14 @@ fn test_handler_case_different_exception_types() {
 fn test_nested_handler_case_inner_handles() {
     // Inner handler-case catches exception from nested try
     let result = eval("(handler-case (handler-case (/ 10 0) (4 e 50)) (4 e 100))").unwrap();
-    assert_eq!(result, Value::Int(50));
+    assert_eq!(result, Value::int(50));
 }
 
 #[test]
 fn test_nested_handler_case_no_exception() {
     // Nested handler-case with no exception
     let result = eval("(handler-case (handler-case 75 (4 e 100)) (4 e 200))").unwrap();
-    assert_eq!(result, Value::Int(75));
+    assert_eq!(result, Value::int(75));
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn test_deeply_nested_handler_case() {
          (4 e 90))",
     )
     .unwrap();
-    assert_eq!(result, Value::Int(30));
+    assert_eq!(result, Value::int(30));
 }
 
 // ============================================================================
@@ -132,21 +132,21 @@ fn test_deeply_nested_handler_case() {
 fn test_handler_case_returns_different_type_on_exception() {
     // Handler can return different type from body
     let result = eval("(handler-case (/ 10 0) (4 e \"error\"))").unwrap();
-    assert_eq!(result, Value::String("error".into()));
+    assert_eq!(result, Value::string("error"));
 }
 
 #[test]
 fn test_handler_case_returns_boolean_from_handler() {
     // Handler can return boolean value
     let result = eval("(handler-case (/ 10 0) (4 e #t))").unwrap();
-    assert_eq!(result, Value::Bool(true));
+    assert_eq!(result, Value::bool(true));
 }
 
 #[test]
 fn test_handler_case_returns_nil_from_handler() {
     // Handler can return nil
     let result = eval("(handler-case (/ 10 0) (4 e nil))").unwrap();
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::NIL);
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn test_handler_case_returns_list_from_handler() {
     let result = eval("(handler-case (/ 10 0) (4 e (list 1 2 3)))").unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0], Value::Int(1));
+    assert_eq!(vec[0], Value::int(1));
 }
 
 #[test]
@@ -165,9 +165,9 @@ fn test_handler_case_type_consistency() {
     let str_result = eval("(handler-case \"hello\" (4 e \"\"))").unwrap();
     let bool_result = eval("(handler-case #t (4 e #f))").unwrap();
 
-    assert_eq!(int_result, Value::Int(42));
-    assert!(matches!(str_result, Value::String(_)));
-    assert_eq!(bool_result, Value::Bool(true));
+    assert_eq!(int_result, Value::int(42));
+    assert!((str_result).is_string());
+    assert_eq!(bool_result, Value::bool(true));
 }
 
 // ============================================================================
@@ -178,21 +178,21 @@ fn test_handler_case_type_consistency() {
 fn test_handler_case_with_let_binding() {
     // handler-case can be used with let
     let result = eval("(let ((x 10)) (handler-case (/ x 0) (4 e 99)))").unwrap();
-    assert_eq!(result, Value::Int(99));
+    assert_eq!(result, Value::int(99));
 }
 
 #[test]
 fn test_handler_case_in_function() {
     // handler-case works inside function definitions
     let result = eval("((lambda () (handler-case (/ 10 0) (4 e 99))))").unwrap();
-    assert_eq!(result, Value::Int(99));
+    assert_eq!(result, Value::int(99));
 }
 
 #[test]
 fn test_handler_case_with_variable_capture() {
     // handler-case handler can reference variables from outer scope
     let result = eval("(let ((x 99)) (handler-case (/ 10 0) (4 e x)))").unwrap();
-    assert_eq!(result, Value::Int(99));
+    assert_eq!(result, Value::int(99));
 }
 
 #[test]
@@ -202,9 +202,9 @@ fn test_handler_case_multiple_divisions() {
     let r2 = eval("(handler-case (/ 20 0) (4 e 2))").unwrap();
     let r3 = eval("(handler-case (/ 30 0) (4 e 3))").unwrap();
 
-    assert_eq!(r1, Value::Int(1));
-    assert_eq!(r2, Value::Int(2));
-    assert_eq!(r3, Value::Int(3));
+    assert_eq!(r1, Value::int(1));
+    assert_eq!(r2, Value::int(2));
+    assert_eq!(r3, Value::int(3));
 }
 
 // ============================================================================
@@ -215,7 +215,7 @@ fn test_handler_case_multiple_divisions() {
 fn test_handler_case_with_lambda_in_body() {
     // handler-case can protect lambda creation
     let result = eval("(handler-case (lambda (x) (+ x 1)) (4 e nil))").unwrap();
-    assert!(matches!(result, Value::Closure(_)));
+    assert!((result).is_closure());
 }
 
 #[test]
@@ -226,7 +226,7 @@ fn test_handler_case_with_lambda_call() {
            (handler-case (f 5) (4 e 0)))",
     )
     .unwrap();
-    assert_eq!(result, Value::Int(15));
+    assert_eq!(result, Value::int(15));
 }
 
 // NOTE: Lambda recursion test skipped due to scoping complexity
@@ -239,7 +239,7 @@ fn test_handler_case_with_lambda_call() {
 //         "(let ((f (lambda (a b) (/ a b)))) \
 //            (handler-case (f 10 0) (4 e 99)))"
 //     ).unwrap();
-//     assert_eq!(result, Value::Int(99));
+//     assert_eq!(result, Value::int(99));
 // }
 
 // ============================================================================
@@ -252,8 +252,8 @@ fn test_handler_case_stack_clean_after_exception() {
     let r1 = eval("(handler-case (/ 10 0) (4 e 1))").unwrap();
     let r2 = eval("(+ 5 3)").unwrap(); // Subsequent operation works
 
-    assert_eq!(r1, Value::Int(1));
-    assert_eq!(r2, Value::Int(8));
+    assert_eq!(r1, Value::int(1));
+    assert_eq!(r2, Value::int(8));
 }
 
 #[test]
@@ -262,8 +262,8 @@ fn test_handler_case_stack_clean_no_exception() {
     let r1 = eval("(handler-case (+ 5 3) (4 e 0))").unwrap();
     let r2 = eval("(* 2 7)").unwrap(); // Subsequent operation works
 
-    assert_eq!(r1, Value::Int(8));
-    assert_eq!(r2, Value::Int(14));
+    assert_eq!(r1, Value::int(8));
+    assert_eq!(r2, Value::int(14));
 }
 
 #[test]
@@ -279,10 +279,10 @@ fn test_handler_case_consecutive_calls() {
     .map(|r| r.unwrap())
     .collect();
 
-    assert_eq!(results[0], Value::Int(10));
-    assert_eq!(results[1], Value::Int(20));
-    assert_eq!(results[2], Value::Int(30));
-    assert_eq!(results[3], Value::Int(40));
+    assert_eq!(results[0], Value::int(10));
+    assert_eq!(results[1], Value::int(20));
+    assert_eq!(results[2], Value::int(30));
+    assert_eq!(results[3], Value::int(40));
 }
 
 // ============================================================================
@@ -293,7 +293,7 @@ fn test_handler_case_consecutive_calls() {
 fn test_handler_case_catches_specific_id() {
     // handler-case only catches exception ID 4
     let result = eval("(handler-case (/ 10 0) (4 e 99))").unwrap();
-    assert_eq!(result, Value::Int(99));
+    assert_eq!(result, Value::int(99));
 }
 
 // NOTE: Other exception IDs would require explicit signal/raise support
@@ -308,14 +308,14 @@ fn test_handler_case_catches_specific_id() {
 fn test_handler_case_safe_division_pattern() {
     // Common pattern: safe division with fallback
     let result = eval("(handler-case (/ 100 10) (4 e 0))").unwrap();
-    assert_eq!(result, Value::Int(10));
+    assert_eq!(result, Value::int(10));
 }
 
 #[test]
 fn test_handler_case_chain_with_multiplication() {
     // Arithmetic chain where division might fail
     let result = eval("(handler-case (* (/ 20 0) 5) (4 e 0))").unwrap();
-    assert_eq!(result, Value::Int(0)); // Division by zero caught
+    assert_eq!(result, Value::int(0)); // Division by zero caught
 }
 
 #[test]
@@ -327,7 +327,7 @@ fn test_handler_case_with_conditional() {
            \"not caught\")",
     )
     .unwrap();
-    assert_eq!(result, Value::String("caught".into()));
+    assert_eq!(result, Value::string("caught"));
 }
 
 // ============================================================================
@@ -339,7 +339,7 @@ fn test_handler_case_variable_binding_context() {
     // Handler variable is bound only in handler scope
     // (outer scope doesn't see it)
     let result = eval("(handler-case (/ 10 0) (4 e (+ 50 49)))").unwrap();
-    assert_eq!(result, Value::Int(99));
+    assert_eq!(result, Value::int(99));
 }
 
 #[test]
@@ -367,7 +367,7 @@ fn test_handler_case_handler_sees_exception() {
 //              (4 e 0))))) \
 //          (fact 5))"
 //     ).unwrap();
-//     assert_eq!(result, Value::Int(120)); // 5!
+//     assert_eq!(result, Value::int(120)); // 5!
 // }
 
 // NOTE: Recursive countdown test skipped due to scoping complexity
@@ -384,5 +384,5 @@ fn test_handler_case_handler_sees_exception() {
 //              (4 e \"error\"))))) \
 //          (countdown 3))"
 //     ).unwrap();
-//     assert_eq!(result, Value::String("done".into()));
+//     assert_eq!(result, Value::string("done"));
 // }

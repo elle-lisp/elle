@@ -23,42 +23,39 @@ pub fn prim_define_c_union(_vm: &mut VM, args: &[Value]) -> Result<Value, String
         return Err("define-c-union requires exactly 2 arguments".into());
     }
 
-    let union_name = match &args[0] {
-        Value::String(s) => s.as_ref(),
-        _ => return Err("union name must be a string".into()),
+    let union_name = match args[0].as_string() {
+        Some(s) => s,
+        None => return Err("union name must be a string".into()),
     };
 
     // Parse fields from list: ((name type) ...)
     let fields_list = &args[1];
     let mut fields = Vec::new();
 
-    match fields_list {
-        Value::Cons(_) => {
-            let fields_vec = fields_list.list_to_vec()?;
-            for field_val in fields_vec {
-                match field_val {
-                    Value::Cons(cons) => {
-                        let field_name = match &cons.first {
-                            Value::String(n) => n.as_ref().to_string(),
-                            _ => return Err("field name must be a string".into()),
-                        };
+    if fields_list.is_cons() {
+        let fields_vec = fields_list.list_to_vec()?;
+        for field_val in fields_vec {
+            if let Some(cons) = field_val.as_cons() {
+                let field_name = match cons.first.as_string() {
+                    Some(n) => n.to_string(),
+                    None => return Err("field name must be a string".into()),
+                };
 
-                        let field_type = match &cons.rest {
-                            Value::Cons(rest_cons) => super::types::parse_ctype(&rest_cons.first)?,
-                            _ => return Err("field must be (name type)".into()),
-                        };
+                let field_type = match cons.rest.as_cons() {
+                    Some(rest_cons) => super::types::parse_ctype(&rest_cons.first)?,
+                    None => return Err("field must be (name type)".into()),
+                };
 
-                        fields.push(UnionField {
-                            name: field_name,
-                            ctype: field_type,
-                        });
-                    }
-                    _ => return Err("each field must be a cons cell".into()),
-                }
+                fields.push(UnionField {
+                    name: field_name,
+                    ctype: field_type,
+                });
+            } else {
+                return Err("each field must be a cons cell".into());
             }
         }
-        Value::Nil => {}
-        _ => return Err("fields must be a list".into()),
+    } else if !fields_list.is_nil() && !fields_list.is_empty_list() {
+        return Err("fields must be a list".into());
     }
 
     if fields.is_empty() {
@@ -80,7 +77,7 @@ pub fn prim_define_c_union(_vm: &mut VM, args: &[Value]) -> Result<Value, String
     let _layout = UnionLayout::new(union_id, union_name.to_string(), fields, size, align);
 
     // Return union ID as integer
-    Ok(Value::Int(union_id.0 as i64))
+    Ok(Value::int(union_id.0 as i64))
 }
 
 /// Wrapper for prim_define_c_union that works with the primitive system.

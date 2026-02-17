@@ -2,7 +2,6 @@
 // Tests the full pipeline from parsing through execution with closures and lambdas
 use elle::compiler::converters::value_to_expr;
 use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, Value, VM};
-use std::rc::Rc;
 
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
@@ -25,7 +24,7 @@ fn test_lambda_creation_identity() {
     // Create a simple identity fn
     let result = eval("(fn (x) x)");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -33,7 +32,7 @@ fn test_lambda_creation_single_arg() {
     // Create fn with single parameter
     let result = eval("(fn (x) (+ x 1))");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -41,7 +40,7 @@ fn test_lambda_creation_multiple_args() {
     // Create fn with multiple parameters
     let result = eval("(fn (a b c) (+ a b c))");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -49,7 +48,7 @@ fn test_lambda_creation_no_args() {
     // Create fn with no parameters
     let result = eval("(fn () 42)");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -57,7 +56,7 @@ fn test_lambda_with_complex_body() {
     // Lambda with complex body expressions
     let result = eval("(fn (x) (if (> x 0) (* x 2) (- x)))");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 // ============================================================================
@@ -95,7 +94,7 @@ fn test_nested_lambda_double() {
     // Lambda returning fn (curried function)
     let result = eval("(fn (x) (fn (y) (+ x y)))");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -103,7 +102,7 @@ fn test_nested_lambda_triple() {
     // Triple nested fn
     let result = eval("(fn (a) (fn (b) (fn (c) (+ a b c))))");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -168,7 +167,7 @@ fn test_define_lambda_identity() {
     // Define a fn as a variable
     let result = eval("(begin (define id (fn (x) x)) id)");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -176,7 +175,7 @@ fn test_define_lambda_arithmetic() {
     // Define arithmetic fn
     let result = eval("(begin (define double (fn (x) (* x 2))) double)");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -323,20 +322,20 @@ fn test_closure_with_state_capture() {
 fn test_lambda_returns_closure_type() {
     // Verify that fn always returns a Closure value
     let result1 = eval("(fn () 1)");
-    assert!(matches!(result1.unwrap(), Value::Closure(_)));
+    assert!((result1.unwrap()).is_closure());
 
     let result2 = eval("(fn (x) x)");
-    assert!(matches!(result2.unwrap(), Value::Closure(_)));
+    assert!((result2.unwrap()).is_closure());
 
     let result3 = eval("(fn (a b c) (+ a b c))");
-    assert!(matches!(result3.unwrap(), Value::Closure(_)));
+    assert!((result3.unwrap()).is_closure());
 }
 
 #[test]
 fn test_defined_lambda_is_closure() {
     // Lambda stored in variable should be a Closure
     let result = eval("(begin (define f (fn (x) x)) f)");
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 // ============================================================================
@@ -375,8 +374,8 @@ fn test_lambda_in_list() {
     assert!(result.is_ok());
     let list = result.unwrap().list_to_vec().unwrap();
     assert_eq!(list.len(), 2);
-    assert!(matches!(list[0], Value::Closure(_)));
-    assert!(matches!(list[1], Value::Closure(_)));
+    assert!((list[0]).is_closure());
+    assert!((list[1]).is_closure());
 }
 
 #[test]
@@ -384,7 +383,7 @@ fn test_lambda_in_begin_block() {
     // Lambda in begin block
     let result = eval("(begin (define x 1) (fn (y) (+ x y)))");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -392,7 +391,7 @@ fn test_lambda_in_if_consequent() {
     // Lambda as consequent of if
     let result = eval("(if #t (fn (x) x) (fn (x) (- x)))");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 #[test]
@@ -400,7 +399,7 @@ fn test_lambda_in_if_alternate() {
     // Lambda as alternate of if
     let result = eval("(if #f (fn (x) x) (fn (x) (- x)))");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Closure(_)));
+    assert!((result.unwrap()).is_closure());
 }
 
 // ============================================================================
@@ -411,7 +410,7 @@ fn test_lambda_in_if_alternate() {
 fn test_closure_string_representation() {
     // Closure should have a reasonable string representation
     let result = eval("(fn (x) x)");
-    let closure_str = format!("{}", result.unwrap());
+    let closure_str = format!("{:?}", result.unwrap());
     assert_eq!(closure_str, "<closure>");
 }
 
@@ -636,14 +635,14 @@ fn test_conditional_logic_in_closure() {
 fn test_let_binding_basic_scope() {
     // Let-bindings work with basic variable isolation
     let result = eval("(let ((x 5)) (+ x 1))");
-    assert_eq!(result.unwrap(), Value::Int(6));
+    assert_eq!(result.unwrap(), Value::int(6));
 }
 
 #[test]
 fn test_let_binding_multiple_vars() {
     // Multiple variables in let-binding
     let result = eval("(let ((x 5) (y 3)) (+ x y))");
-    assert_eq!(result.unwrap(), Value::Int(8));
+    assert_eq!(result.unwrap(), Value::int(8));
 }
 
 #[test]
@@ -655,7 +654,7 @@ fn test_let_binding_global_shadowing() {
           (let ((x 5))
             (+ x 1)))",
     );
-    assert_eq!(result.unwrap(), Value::Int(6));
+    assert_eq!(result.unwrap(), Value::int(6));
 }
 
 #[test]
@@ -667,7 +666,7 @@ fn test_let_binding_function_scope() {
           (let ((x 5))
             (double x)))",
     );
-    assert_eq!(result.unwrap(), Value::Int(10));
+    assert_eq!(result.unwrap(), Value::int(10));
 }
 
 #[test]
@@ -679,7 +678,7 @@ fn test_let_binding_with_global_access() {
           (let ((x 5))
             (* x multiplier)))",
     );
-    assert_eq!(result.unwrap(), Value::Int(50));
+    assert_eq!(result.unwrap(), Value::int(50));
 }
 
 // ============================================================================
@@ -692,7 +691,7 @@ fn test_closure_returning_closure_called() {
     let code = r#"
         (((fn (x) (fn (y) (+ x y))) 10) 20)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(30));
+    assert_eq!(eval(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -703,7 +702,7 @@ fn test_two_level_closure_call() {
           (define x 100)
           ((fn (a) ((fn (b) (+ x a b)) 2)) 1))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(103));
+    assert_eq!(eval(code).unwrap(), Value::int(103));
 }
 
 #[test]
@@ -717,7 +716,7 @@ fn test_set_in_nested_closure() {
           (inc)
           (inc))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(3));
+    assert_eq!(eval(code).unwrap(), Value::int(3));
 }
 
 #[test]
@@ -733,7 +732,7 @@ fn test_set_local_variable_in_lambda() {
                x)))
            (test))
      "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(42));
+    assert_eq!(eval(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -745,7 +744,7 @@ fn test_make_adder_pattern() {
           (define add5 (make-adder 5))
           (add5 10))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(15));
+    assert_eq!(eval(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -754,7 +753,7 @@ fn test_triple_nested_closure_execution() {
     let code = r#"
         ((((fn (a) (fn (b) (fn (c) (+ a b c)))) 1) 2) 3)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(6));
+    assert_eq!(eval(code).unwrap(), Value::int(6));
 }
 
 #[test]
@@ -763,7 +762,7 @@ fn test_closure_captures_multiple_from_same_scope() {
     let code = r#"
         ((fn (x y) ((fn (z) (+ x y z)) 3)) 1 2)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(6));
+    assert_eq!(eval(code).unwrap(), Value::int(6));
 }
 
 #[test]
@@ -775,7 +774,7 @@ fn test_closure_with_let_and_capture() {
              (+ x y)))
          5)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(15));
+    assert_eq!(eval(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -786,7 +785,7 @@ fn test_closure_global_still_works() {
           (define g 100)
           ((fn (x) (+ g x)) 5))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(105));
+    assert_eq!(eval(code).unwrap(), Value::int(105));
 }
 
 #[test]
@@ -799,7 +798,7 @@ fn test_multiple_closures_from_same_factory() {
           (define add7 (make-adder 7))
           (+ (add3 10) (add7 10)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(30));
+    assert_eq!(eval(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -810,7 +809,7 @@ fn test_closure_captures_closure() {
           (define f (fn (x) (+ x 1)))
           ((fn (g) (g 10)) f))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(11));
+    assert_eq!(eval(code).unwrap(), Value::int(11));
 }
 
 #[test]
@@ -821,7 +820,7 @@ fn test_immediately_invoked_nested_lambda() {
            ((fn (y) (+ x y)) (* x 2)))
          5)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(15));
+    assert_eq!(eval(code).unwrap(), Value::int(15));
 }
 
 // ============================================================================
@@ -843,7 +842,7 @@ fn test_let_closure_escape() {
           (define f (make-fn))
           (f))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(42));
+    assert_eq!(eval(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -854,7 +853,7 @@ fn test_let_with_closure_capture() {
           (fn () (+ x y)))
     "#;
     let result = eval(code).unwrap();
-    assert!(matches!(result, Value::Closure(_)));
+    assert!((result).is_closure());
 }
 
 #[test]
@@ -864,7 +863,7 @@ fn test_let_basic_binding() {
         (let ((x 5) (y 10))
           (+ x y))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(15));
+    assert_eq!(eval(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -874,7 +873,7 @@ fn test_let_star_basic() {
         (let* ((x 1) (y 2) (z 3))
           (+ x y z))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(6));
+    assert_eq!(eval(code).unwrap(), Value::int(6));
 }
 
 #[test]
@@ -889,7 +888,7 @@ fn test_nested_let_closure_escape() {
            (define add5 (make-adder 5))
            (add5 3))
      "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(8));
+    assert_eq!(eval(code).unwrap(), Value::int(8));
 }
 
 // ============================================================================
@@ -906,9 +905,9 @@ fn test_map_with_inline_lambda() {
     // Result should be (2 4 6)
     let list = result.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[0], Value::Int(2));
-    assert_eq!(list[1], Value::Int(4));
-    assert_eq!(list[2], Value::Int(6));
+    assert_eq!(list[0], Value::int(2));
+    assert_eq!(list[1], Value::int(4));
+    assert_eq!(list[2], Value::int(6));
 }
 
 #[test]
@@ -922,9 +921,9 @@ fn test_map_with_defined_closure() {
     let result = eval(code).unwrap();
     let list = result.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[0], Value::Int(2));
-    assert_eq!(list[1], Value::Int(4));
-    assert_eq!(list[2], Value::Int(6));
+    assert_eq!(list[0], Value::int(2));
+    assert_eq!(list[1], Value::int(4));
+    assert_eq!(list[2], Value::int(6));
 }
 
 #[test]
@@ -938,9 +937,9 @@ fn test_map_with_closure_capturing_variable() {
     let result = eval(code).unwrap();
     let list = result.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[0], Value::Int(3));
-    assert_eq!(list[1], Value::Int(6));
-    assert_eq!(list[2], Value::Int(9));
+    assert_eq!(list[0], Value::int(3));
+    assert_eq!(list[1], Value::int(6));
+    assert_eq!(list[2], Value::int(9));
 }
 
 #[test]
@@ -953,9 +952,9 @@ fn test_filter_with_inline_lambda() {
     // Result should be (3 4 5)
     let list = result.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[0], Value::Int(3));
-    assert_eq!(list[1], Value::Int(4));
-    assert_eq!(list[2], Value::Int(5));
+    assert_eq!(list[0], Value::int(3));
+    assert_eq!(list[1], Value::int(4));
+    assert_eq!(list[2], Value::int(5));
 }
 
 #[test]
@@ -969,9 +968,9 @@ fn test_filter_with_closure_capturing_threshold() {
     let result = eval(code).unwrap();
     let list = result.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[0], Value::Int(3));
-    assert_eq!(list[1], Value::Int(4));
-    assert_eq!(list[2], Value::Int(5));
+    assert_eq!(list[0], Value::int(3));
+    assert_eq!(list[1], Value::int(4));
+    assert_eq!(list[2], Value::int(5));
 }
 
 #[test]
@@ -981,7 +980,7 @@ fn test_fold_with_inline_lambda() {
         (fold (fn (acc x) (+ acc x)) 0 (list 1 2 3))
     "#;
     let result = eval(code).unwrap();
-    assert_eq!(result, Value::Int(6));
+    assert_eq!(result, Value::int(6));
 }
 
 #[test]
@@ -993,7 +992,7 @@ fn test_fold_with_closure_capturing_initial_value() {
           (fold (fn (acc x) (+ acc x)) initial (list 1 2 3)))
     "#;
     let result = eval(code).unwrap();
-    assert_eq!(result, Value::Int(16));
+    assert_eq!(result, Value::int(16));
 }
 
 #[test]
@@ -1003,7 +1002,7 @@ fn test_fold_with_multiplication() {
         (fold (fn (acc x) (* acc x)) 1 (list 2 3 4))
     "#;
     let result = eval(code).unwrap();
-    assert_eq!(result, Value::Int(24));
+    assert_eq!(result, Value::int(24));
 }
 
 #[test]
@@ -1018,13 +1017,13 @@ fn test_nested_map_with_closures() {
     // First inner list: (1 2)
     let inner1 = outer[0].list_to_vec().unwrap();
     assert_eq!(inner1.len(), 2);
-    assert_eq!(inner1[0], Value::Int(1));
-    assert_eq!(inner1[1], Value::Int(2));
+    assert_eq!(inner1[0], Value::int(1));
+    assert_eq!(inner1[1], Value::int(2));
     // Second inner list: (2 4)
     let inner2 = outer[1].list_to_vec().unwrap();
     assert_eq!(inner2.len(), 2);
-    assert_eq!(inner2[0], Value::Int(2));
-    assert_eq!(inner2[1], Value::Int(4));
+    assert_eq!(inner2[0], Value::int(2));
+    assert_eq!(inner2[1], Value::int(4));
 }
 
 #[test]
@@ -1038,9 +1037,9 @@ fn test_map_filter_composition() {
     // Map: (3 4 5) -> (6 8 10)
     let list = result.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[0], Value::Int(6));
-    assert_eq!(list[1], Value::Int(8));
-    assert_eq!(list[2], Value::Int(10));
+    assert_eq!(list[0], Value::int(6));
+    assert_eq!(list[1], Value::int(8));
+    assert_eq!(list[2], Value::int(10));
 }
 
 #[test]
@@ -1054,9 +1053,9 @@ fn test_map_with_native_function() {
     let result = eval(code).unwrap();
     let list = result.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[0], Value::Int(2));
-    assert_eq!(list[1], Value::Int(3));
-    assert_eq!(list[2], Value::Int(4));
+    assert_eq!(list[0], Value::int(2));
+    assert_eq!(list[1], Value::int(3));
+    assert_eq!(list[2], Value::int(4));
 }
 
 #[test]
@@ -1066,7 +1065,7 @@ fn test_fold_string_concatenation_with_closure() {
          (fold (fn (acc x) (string-append acc x)) "" (list "a" "b" "c"))
      "#;
     let result = eval(code).unwrap();
-    assert_eq!(result, Value::String(Rc::from("abc")));
+    assert_eq!(result, Value::string("abc"));
 }
 
 // ============================================================================
@@ -1087,7 +1086,7 @@ fn test_closure_with_local_define_and_arithmetic() {
               count)))
           (make-counter))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(1));
+    assert_eq!(eval(code).unwrap(), Value::int(1));
 }
 
 #[test]
@@ -1105,7 +1104,7 @@ fn test_closure_accumulator_with_arithmetic() {
           (define acc (make-accumulator))
           (acc 10))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(10));
+    assert_eq!(eval(code).unwrap(), Value::int(10));
 }
 
 #[test]
@@ -1126,7 +1125,7 @@ fn test_closure_accumulator_multiple_calls() {
             (acc 20)
             (acc 5)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(35));
+    assert_eq!(eval(code).unwrap(), Value::int(35));
 }
 
 #[test]
@@ -1142,7 +1141,7 @@ fn test_nested_closure_with_local_arithmetic() {
           (define add-with-offset (make-adder 100))
           (add-with-offset 5))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(115));
+    assert_eq!(eval(code).unwrap(), Value::int(115));
 }
 
 #[test]
@@ -1159,7 +1158,7 @@ fn test_set_on_captured_parameter() {
           (define counter1 (make-counter 10))
           (counter1))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(11));
+    assert_eq!(eval(code).unwrap(), Value::int(11));
 }
 
 #[test]
@@ -1178,7 +1177,7 @@ fn test_set_on_captured_parameter_multiple_calls() {
             (counter1)
             (counter1)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(13));
+    assert_eq!(eval(code).unwrap(), Value::int(13));
 }
 
 // ============================================================================
@@ -1190,7 +1189,7 @@ fn test_lambda_alias_works() {
     // Ensure lambda still works as an alias for fn
     let result = eval("((lambda (x) (+ x 1)) 5)");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(6));
+    assert_eq!(result.unwrap(), Value::int(6));
 }
 
 #[test]
@@ -1199,14 +1198,14 @@ fn test_fn_and_lambda_equivalent() {
     let fn_result = eval("((fn (x y) (+ x y)) 3 4)");
     let lambda_result = eval("((lambda (x y) (+ x y)) 3 4)");
     assert_eq!(fn_result, lambda_result);
-    assert_eq!(fn_result.unwrap(), Value::Int(7));
+    assert_eq!(fn_result.unwrap(), Value::int(7));
 }
 
 #[test]
 fn test_lambda_in_define() {
     // lambda should work in define statements
     let result = eval("(begin (define add (lambda (a b) (+ a b))) (add 10 20))");
-    assert_eq!(result.unwrap(), Value::Int(30));
+    assert_eq!(result.unwrap(), Value::int(30));
 }
 
 #[test]
@@ -1217,16 +1216,16 @@ fn test_lambda_in_map() {
     let val = result.unwrap();
     let list = val.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[0], Value::Int(2));
-    assert_eq!(list[1], Value::Int(4));
-    assert_eq!(list[2], Value::Int(6));
+    assert_eq!(list[0], Value::int(2));
+    assert_eq!(list[1], Value::int(4));
+    assert_eq!(list[2], Value::int(6));
 }
 
 #[test]
 fn test_lambda_closure_capture() {
     // lambda should properly capture variables
     let result = eval("(begin (define x 10) ((lambda (y) (+ x y)) 5))");
-    assert_eq!(result.unwrap(), Value::Int(15));
+    assert_eq!(result.unwrap(), Value::int(15));
 }
 
 // ============================================================================
@@ -1245,7 +1244,7 @@ fn test_closure_set_captured_variable() {
              (setter) \
              x)))",
     );
-    assert_eq!(result.unwrap(), Value::Int(42));
+    assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
@@ -1260,7 +1259,7 @@ fn test_getter_setter_pattern() {
              (setter 42) \
              (getter))) 0)",
     );
-    assert_eq!(result.unwrap(), Value::Int(42));
+    assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
@@ -1274,7 +1273,7 @@ fn test_setter_only_no_getter() {
              (setter 42) \
              value)) 0)",
     );
-    assert_eq!(result.unwrap(), Value::Int(42));
+    assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
@@ -1291,5 +1290,5 @@ fn test_multiple_closures_sharing_mutable_state() {
              (inc) \
              (get))))",
     );
-    assert_eq!(result.unwrap(), Value::Int(3));
+    assert_eq!(result.unwrap(), Value::int(3));
 }

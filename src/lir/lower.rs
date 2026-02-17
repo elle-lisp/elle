@@ -2,6 +2,7 @@
 
 use super::types::*;
 use crate::hir::{BindingId, BindingInfo, BindingKind, Hir, HirKind, HirPattern, PatternLiteral};
+use crate::value::Value;
 use std::collections::HashMap;
 
 /// Lowers HIR to LIR
@@ -92,9 +93,11 @@ impl Lowerer {
 
         self.next_reg = 0;
         self.next_label = 1;
-        // Locals start after captures and parameters in the environment
-        // This ensures allocate_slot() gives slots that don't conflict with captures/params
-        self.current_func.num_locals = captures.len() as u16 + params.len() as u16;
+        // num_locals should be params + locals (NOT including captures)
+        // This matches the HIR definition and is what the VM expects
+        // The environment layout is: [captures..., parameters..., locally_defined_cells...]
+        // But num_locals only counts the parameters and locally-defined variables
+        self.current_func.num_locals = params.len() as u16;
         self.in_lambda = true;
         self.num_captures = captures.len() as u16;
 
@@ -158,6 +161,7 @@ impl Lowerer {
     fn lower_expr(&mut self, hir: &Hir) -> Result<Reg, String> {
         match &hir.kind {
             HirKind::Nil => self.emit_const(LirConst::Nil),
+            HirKind::EmptyList => self.emit_const(LirConst::EmptyList),
             HirKind::Bool(b) => self.emit_const(LirConst::Bool(*b)),
             HirKind::Int(n) => self.emit_const(LirConst::Int(*n)),
             HirKind::Float(f) => self.emit_const(LirConst::Float(*f)),
@@ -475,6 +479,11 @@ impl Lowerer {
                         if !self.binding_to_slot.contains_key(binding) {
                             let slot = self.allocate_slot(*binding);
 
+                            // Inside lambdas, local variables are part of the closure environment
+                            if self.in_lambda {
+                                self.upvalue_bindings.insert(*binding);
+                            }
+
                             // Check if this binding needs a cell
                             let needs_cell = self
                                 .bindings
@@ -482,7 +491,10 @@ impl Lowerer {
                                 .map(|info| info.needs_cell())
                                 .unwrap_or(false);
 
-                            if needs_cell {
+                            // Only create cells for top-level locals (outside lambdas)
+                            // Inside lambdas, the VM creates cells for locally-defined variables
+                            // when building the closure environment
+                            if needs_cell && !self.in_lambda {
                                 // Create a cell containing nil
                                 // This cell will be captured by nested lambdas
                                 // and updated when the LocalDefine is lowered
@@ -928,7 +940,7 @@ impl Lowerer {
 
             HirKind::Quote(value) => {
                 // Quote produces the pre-computed Value as a constant
-                self.emit_value_const(value.clone())
+                self.emit_value_const(*value)
             }
 
             HirKind::Throw(value) => {
@@ -1147,6 +1159,11 @@ impl Lowerer {
                         src: exc_reg,
                     });
 
+                    // Clear the exception BEFORE executing the handler body.
+                    // This ensures that if the handler body yields, the exception
+                    // won't be propagated to the caller.
+                    self.emit(LirInstr::ClearException);
+
                     // Compile handler body (now can find var_id via LoadLocal)
                     let handler_reg = self.lower_expr(handler_body)?;
                     self.emit(LirInstr::Move {
@@ -1165,11 +1182,23 @@ impl Lowerer {
                     });
                 }
 
-                // End label
+                // No handler matched — re-raise exception to propagate
+                // to next enclosing handler
+                self.emit(LirInstr::ReraiseException);
+                // Jump to unreachable label to prevent fall-through to ClearException
+                // The exception interrupt mechanism will jump to the next handler
+                let unreachable_label = self.next_label;
+                self.next_label += 1;
+                self.emit(LirInstr::JumpInline {
+                    label_id: unreachable_label,
+                });
+
+                // End label (reached by success path and matched handler paths)
                 self.emit(LirInstr::LabelMarker {
                     label_id: end_label,
                 });
-                self.emit(LirInstr::ClearException);
+                // Note: ClearException is now emitted BEFORE the handler body,
+                // not after, to ensure it's executed even if the handler yields.
 
                 Ok(result_reg)
             }
@@ -1198,16 +1227,20 @@ impl Lowerer {
                 Ok(())
             }
             HirPattern::Nil => {
-                // Check if value is nil
+                // Check if value is nil (NOT empty_list)
+                // nil and '() are distinct values with distinct semantics
                 let is_nil_reg = self.fresh_reg();
                 self.emit(LirInstr::IsNil {
                     dst: is_nil_reg,
                     src: value_reg,
                 });
+
+                // If NOT nil, fail
                 self.emit(LirInstr::JumpIfFalseInline {
                     cond: is_nil_reg,
                     label_id: fail_label_id,
                 });
+
                 Ok(())
             }
             HirPattern::Literal(lit) => {
@@ -1341,14 +1374,25 @@ impl Lowerer {
                     current_reg = tail_reg;
                 }
 
-                // Check that tail is nil (list ends)
-                let is_nil_reg = self.fresh_reg();
-                self.emit(LirInstr::IsNil {
-                    dst: is_nil_reg,
-                    src: current_reg,
+                // Check that tail is empty_list (list ends)
+                // Proper lists end with empty_list ()
+
+                // Load current_reg for the empty_list check
+                let empty_list_reg = self.fresh_reg();
+                self.emit(LirInstr::ValueConst {
+                    dst: empty_list_reg,
+                    value: Value::EMPTY_LIST,
                 });
+                let is_empty_reg = self.fresh_reg();
+                self.emit(LirInstr::Compare {
+                    dst: is_empty_reg,
+                    op: CmpOp::Eq,
+                    lhs: current_reg,
+                    rhs: empty_list_reg,
+                });
+                // If NOT empty_list, fail
                 self.emit(LirInstr::JumpIfFalseInline {
-                    cond: is_nil_reg,
+                    cond: is_empty_reg,
                     label_id: fail_label_id,
                 });
 
@@ -1368,7 +1412,15 @@ impl Lowerer {
     }
 
     fn allocate_slot(&mut self, binding: BindingId) -> u16 {
-        let slot = self.current_func.num_locals;
+        // Inside a lambda, slots need to account for the captures offset
+        // Environment layout: [captures..., params..., locally_defined...]
+        // num_locals tracks params + locally_defined (NOT captures)
+        // But binding_to_slot needs the actual index in the environment
+        let slot = if self.in_lambda {
+            self.num_captures + self.current_func.num_locals
+        } else {
+            self.current_func.num_locals
+        };
         self.current_func.num_locals += 1;
         self.binding_to_slot.insert(binding, slot);
         slot

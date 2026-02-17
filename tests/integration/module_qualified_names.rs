@@ -31,14 +31,14 @@ fn test_parse_qualified_name_simple() {
 fn test_unqualified_symbol_still_works() {
     // Ensure regular symbols still work
     let result = ModuleQualifiedNamesTest::eval(r#"(+ 5 10)"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(15));
+    assert_eq!(result, elle::value::Value::int(15));
 }
 
 #[test]
 fn test_list_function_unqualified() {
     // Test list function without qualification
     let result = ModuleQualifiedNamesTest::eval(r#"(length (list 1 2 3))"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(3));
+    assert_eq!(result, elle::value::Value::int(3));
 }
 
 // ============================================================================
@@ -50,35 +50,35 @@ fn test_qualified_name_arithmetic() {
     // Test calling arithmetic functions with full qualification
     // Since built-in functions are in a default namespace, this should work
     let result = ModuleQualifiedNamesTest::eval(r#"(+ 3 4)"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(7));
+    assert_eq!(result, elle::value::Value::int(7));
 }
 
 #[test]
 fn test_qualified_builtin_length() {
     // Test qualified access to built-in list function
     let result = ModuleQualifiedNamesTest::eval(r#"(length (list 1 2 3 4))"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(4));
+    assert_eq!(result, elle::value::Value::int(4));
 }
 
 #[test]
 fn test_qualified_builtin_first() {
     // Test qualified access to first function
     let result = ModuleQualifiedNamesTest::eval(r#"(first (list 10 20 30))"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(10));
+    assert_eq!(result, elle::value::Value::int(10));
 }
 
 #[test]
 fn test_qualified_builtin_rest() {
     // Test qualified access to rest function
     let result = ModuleQualifiedNamesTest::eval(r#"(length (rest (list 1 2 3 4)))"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(3));
+    assert_eq!(result, elle::value::Value::int(3));
 }
 
 #[test]
 fn test_qualified_string_operations() {
     // Test qualified string functions
     let result = ModuleQualifiedNamesTest::eval(r#"(length "hello")"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(5));
+    assert_eq!(result, elle::value::Value::int(5));
 }
 
 // ============================================================================
@@ -129,7 +129,7 @@ fn test_undefined_qualified_function() {
 fn test_qualified_in_nested_expression() {
     // Test qualified names in nested expressions
     let result = ModuleQualifiedNamesTest::eval(r#"(+ (length (list 1 2)) 3)"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(5));
+    assert_eq!(result, elle::value::Value::int(5));
 }
 
 #[test]
@@ -141,14 +141,14 @@ fn test_qualified_in_function_definition() {
              (test-fn 10))"#,
     )
     .unwrap();
-    assert_eq!(result, elle::value::Value::Int(11));
+    assert_eq!(result, elle::value::Value::int(11));
 }
 
 #[test]
 fn test_qualified_in_arithmetic_chain() {
     // Test chained qualified function calls
     let result = ModuleQualifiedNamesTest::eval(r#"(+ 1 (+ 2 (+ 3 4)))"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(10));
+    assert_eq!(result, elle::value::Value::int(10));
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn test_qualified_with_list_operations() {
     // Test qualified names with list operations
     let result =
         ModuleQualifiedNamesTest::eval(r#"(+ (length (list 1 2)) (length (list 3 4 5)))"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(5));
+    assert_eq!(result, elle::value::Value::int(5));
 }
 
 // ============================================================================
@@ -167,7 +167,7 @@ fn test_qualified_with_list_operations() {
 fn test_qualified_in_match_pattern() {
     // Test qualified names in match expressions
     let result = ModuleQualifiedNamesTest::eval(r#"(match 42 (x (+ x 8)))"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(50));
+    assert_eq!(result, elle::value::Value::int(50));
 }
 
 // ============================================================================
@@ -178,14 +178,14 @@ fn test_qualified_in_match_pattern() {
 fn test_unqualified_still_resolve() {
     // Ensure unqualified names still work as before
     let result = ModuleQualifiedNamesTest::eval(r#"(+ 100 200)"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(300));
+    assert_eq!(result, elle::value::Value::int(300));
 }
 
 #[test]
 fn test_mixed_qualified_unqualified() {
     // Test mixing qualified and unqualified names
     let result = ModuleQualifiedNamesTest::eval(r#"(+ 1 2)"#).unwrap();
-    assert_eq!(result, elle::value::Value::Int(3));
+    assert_eq!(result, elle::value::Value::int(3));
 }
 
 #[test]

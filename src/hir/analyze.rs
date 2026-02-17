@@ -191,7 +191,7 @@ impl<'a> Analyzer<'a> {
             // List - could be special form or function call
             SyntaxKind::List(items) => {
                 if items.is_empty() {
-                    return Ok(Hir::pure(HirKind::Nil, span));
+                    return Ok(Hir::pure(HirKind::EmptyList, span));
                 }
 
                 // Check for special forms
@@ -265,8 +265,8 @@ impl<'a> Analyzer<'a> {
     }
 
     fn analyze_let(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() < 3 {
-            return Err(format!("{}: let requires bindings and body", span));
+        if items.len() < 2 {
+            return Err(format!("{}: let requires bindings list", span));
         }
 
         let bindings_syntax = items[1]
@@ -301,8 +301,12 @@ impl<'a> Analyzer<'a> {
             bindings.push((id, value));
         }
 
-        // Analyze body expressions
-        let body = self.analyze_body(&items[2..], span.clone())?;
+        // Analyze body expressions (empty body returns nil)
+        let body = if items.len() > 2 {
+            self.analyze_body(&items[2..], span.clone())?
+        } else {
+            Hir::pure(HirKind::Nil, span.clone())
+        };
         effect = effect.combine(body.effect);
 
         self.pop_scope();
@@ -627,9 +631,16 @@ impl<'a> Analyzer<'a> {
             .as_symbol()
             .ok_or_else(|| format!("{}: set! target must be a symbol", span))?;
 
-        let target = self
-            .lookup(name)
-            .ok_or_else(|| format!("{}: undefined variable '{}'", span, name))?;
+        let target = match self.lookup(name) {
+            Some(id) => id,
+            None => {
+                // Treat as global reference (may have been defined in a previous form)
+                let sym = self.symbols.intern(name);
+                let id = self.ctx.fresh_binding();
+                self.ctx.register_binding(BindingInfo::global(id, sym));
+                id
+            }
+        };
 
         // Mark as mutated
         if let Some(info) = self.ctx.get_binding_mut(target) {
@@ -847,7 +858,7 @@ impl<'a> Analyzer<'a> {
             }
             SyntaxKind::List(items) => {
                 if items.is_empty() {
-                    return Ok(HirPattern::Nil);
+                    return Ok(HirPattern::List(vec![]));
                 }
                 // Check for cons pattern (head . tail)
                 if items.len() == 3 && items[1].as_symbol() == Some(".") {

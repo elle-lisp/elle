@@ -35,6 +35,7 @@ impl Hir {
 pub enum HirKind {
     // === Literals ===
     Nil,
+    EmptyList,
     Bool(bool),
     Int(i64),
     Float(f64),

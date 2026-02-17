@@ -1,75 +1,98 @@
 //! Utility primitives (mod, remainder, even?, odd?)
-use crate::error::LResult;
-use crate::value::Value;
+use crate::value::{Condition, Value};
 
 /// Modulo operation (result has same sign as divisor)
-pub fn prim_mod(args: &[Value]) -> LResult<Value> {
+pub fn prim_mod(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 2 {
-        return Err("mod requires exactly 2 arguments".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "mod: expected 2 arguments, got {}",
+            args.len()
+        )));
     }
 
-    match (&args[0], &args[1]) {
-        (Value::Int(a), Value::Int(b)) => {
-            if *b == 0 {
-                return Err("Division by zero".to_string().into());
+    match (args[0].as_int(), args[1].as_int()) {
+        (Some(a), Some(b)) => {
+            if b == 0 {
+                return Err(Condition::division_by_zero("mod: division by zero"));
             }
             // Lisp mod: result has same sign as divisor
             let rem = a % b;
             if rem == 0 {
-                Ok(Value::Int(0))
-            } else if (rem > 0) != (*b > 0) {
-                Ok(Value::Int(rem + b))
+                Ok(Value::int(0))
+            } else if (rem > 0) != (b > 0) {
+                Ok(Value::int(rem + b))
             } else {
-                Ok(Value::Int(rem))
+                Ok(Value::int(rem))
             }
         }
-        _ => Err("mod requires integers".to_string().into()),
+        _ => Err(Condition::type_error(format!(
+            "mod: expected integer, got {}",
+            args[0].type_name()
+        ))),
     }
 }
 
 /// Remainder operation (result has same sign as dividend)
-pub fn prim_remainder(args: &[Value]) -> LResult<Value> {
+pub fn prim_remainder(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 2 {
-        return Err("remainder requires exactly 2 arguments".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "remainder: expected 2 arguments, got {}",
+            args.len()
+        )));
     }
 
-    match (&args[0], &args[1]) {
-        (Value::Int(a), Value::Int(b)) => {
-            if *b == 0 {
-                return Err("Division by zero".to_string().into());
+    match (args[0].as_int(), args[1].as_int()) {
+        (Some(a), Some(b)) => {
+            if b == 0 {
+                return Err(Condition::division_by_zero("remainder: division by zero"));
             }
             let rem = a % b;
             // Adjust remainder to have same sign as dividend
-            if (rem > 0 && *b < 0) || (rem < 0 && *b > 0) {
-                Ok(Value::Int(rem + b))
+            if (rem > 0 && b < 0) || (rem < 0 && b > 0) {
+                Ok(Value::int(rem + b))
             } else {
-                Ok(Value::Int(rem))
+                Ok(Value::int(rem))
             }
         }
-        _ => Err("remainder requires integers".to_string().into()),
+        _ => Err(Condition::type_error(format!(
+            "remainder: expected integer, got {}",
+            args[0].type_name()
+        ))),
     }
 }
 
 /// Check if number is even
-pub fn prim_even(args: &[Value]) -> LResult<Value> {
+pub fn prim_even(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("even? requires exactly 1 argument".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "even?: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
-    match &args[0] {
-        Value::Int(n) => Ok(Value::Bool(n % 2 == 0)),
-        _ => Err("even? requires an integer".to_string().into()),
+    match args[0].as_int() {
+        Some(n) => Ok(Value::bool(n % 2 == 0)),
+        _ => Err(Condition::type_error(format!(
+            "even?: expected integer, got {}",
+            args[0].type_name()
+        ))),
     }
 }
 
 /// Check if number is odd
-pub fn prim_odd(args: &[Value]) -> LResult<Value> {
+pub fn prim_odd(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("odd? requires exactly 1 argument".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "odd?: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
-    match &args[0] {
-        Value::Int(n) => Ok(Value::Bool(n % 2 != 0)),
-        _ => Err("odd? requires an integer".to_string().into()),
+    match args[0].as_int() {
+        Some(n) => Ok(Value::bool(n % 2 != 0)),
+        _ => Err(Condition::type_error(format!(
+            "odd?: expected integer, got {}",
+            args[0].type_name()
+        ))),
     }
 }

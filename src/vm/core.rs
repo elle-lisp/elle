@@ -29,7 +29,7 @@ pub struct CallFrame {
 
 #[derive(Debug, Clone)]
 pub struct ExceptionHandler {
-    pub handler_offset: i16,
+    pub handler_offset: u16,
     pub finally_offset: Option<i16>,
     pub stack_depth: usize,
 }
@@ -54,44 +54,6 @@ pub struct VM {
     pub pending_tail_call: Option<TailCallInfo>, // (bytecode, constants, env) for pending tail call
     pub coroutine_stack: Vec<Rc<RefCell<Coroutine>>>, // Stack of active coroutines
     pub current_source_loc: Option<crate::reader::SourceLoc>, // Current top-level form's location
-}
-
-/// Exception type hierarchy (baked into VM for inheritance checking)
-/// ID 1: condition (base)
-///   ID 2: error
-///     ID 3: type-error
-///     ID 4: division-by-zero
-///     ID 5: undefined-variable
-///     ID 6: arity-error
-///   ID 7: warning
-///     ID 8: style-warning
-pub fn exception_parent(exception_id: u32) -> Option<u32> {
-    match exception_id {
-        2 => Some(1), // error -> condition
-        3 => Some(2), // type-error -> error
-        4 => Some(2), // division-by-zero -> error
-        5 => Some(2), // undefined-variable -> error
-        6 => Some(2), // arity-error -> error
-        7 => Some(1), // warning -> condition
-        8 => Some(7), // style-warning -> warning
-        _ => None,
-    }
-}
-
-/// Check if child exception ID is a subclass of parent exception ID
-pub fn is_exception_subclass(child_id: u32, parent_id: u32) -> bool {
-    if child_id == parent_id {
-        return true;
-    }
-
-    let mut current = child_id;
-    while let Some(parent) = exception_parent(current) {
-        if parent == parent_id {
-            return true;
-        }
-        current = parent;
-    }
-    false
 }
 
 impl VM {
@@ -354,48 +316,42 @@ impl VM {
         // Save current state
         let saved_stack = std::mem::take(&mut self.stack);
 
-        // Restore coroutine's state
-        self.stack = context.stack.into();
+        // Restore the coroutine's operand stack from the saved context
+        self.stack.clear();
+        self.stack.extend(context.stack.iter().copied());
 
-        // Push the resume value (this is what the yield expression evaluates to)
+        // Push the resume value on top — this is what the yield expression evaluates to
         self.stack.push(resume_value);
 
-        // Get the closure env from the current coroutine
-        let (closure_env, num_locals, num_captures) = {
-            let co = self
-                .current_coroutine()
-                .ok_or("resume_from_context called outside coroutine")?;
-            let co_ref = co.borrow();
-            (
-                co_ref.closure.env.clone(),
-                co_ref.closure.num_locals,
-                co_ref.closure.num_captures,
-            )
+        // Use the saved environment if available, otherwise rebuild from closure
+        let env_rc = if let Some(env) = context.env {
+            env
+        } else {
+            // Fallback: rebuild from closure (shouldn't happen for properly saved contexts)
+            let (closure_env, num_locals, num_captures) = {
+                let co = self
+                    .current_coroutine()
+                    .ok_or("resume_from_context called outside coroutine")?;
+                let co_ref = co.borrow();
+                (
+                    co_ref.closure.env.clone(),
+                    co_ref.closure.num_locals,
+                    co_ref.closure.num_captures,
+                )
+            };
+            let mut env = (*closure_env).clone();
+            let num_locally_defined = num_locals.saturating_sub(num_captures);
+            for _ in env.len()..num_captures + num_locally_defined {
+                let empty_cell = Value::local_cell(Value::NIL);
+                env.push(empty_cell);
+            }
+            std::rc::Rc::new(env)
         };
-        // Set up the environment for the coroutine
-        // The closure environment contains: [captures..., parameters..., locals...]
-        // We need to allocate space for locals if they haven't been allocated yet
-        let mut env = (*closure_env).clone();
 
-        // Calculate number of locally-defined variables
-        // num_locals = params.len() + captures.len() + locals.len()
-        // Since a coroutine has no parameters, we need to allocate space for all locals
-        let num_locally_defined = num_locals.saturating_sub(num_captures);
-
-        // Add empty LocalCells for locally-defined variables if not already present
-        for _ in env.len()..num_captures + num_locally_defined {
-            let empty_cell = Value::LocalCell(std::rc::Rc::new(std::cell::RefCell::new(Box::new(
-                Value::Nil,
-            ))));
-            env.push(empty_cell);
-        }
-
-        let env_rc = std::rc::Rc::new(env);
-
-        // Execute from saved IP with the closure's environment
+        // Execute from saved IP with the restored environment
         let result = self.execute_bytecode_from_ip(bytecode, constants, Some(&env_rc), context.ip);
 
-        // Restore our state (in case we need to continue after coroutine completes)
+        // Restore our state
         self.stack = saved_stack;
 
         result
@@ -433,6 +389,7 @@ mod coroutine_vm_tests {
             source_ast: None,
             effect: Effect::Pure,
             cell_params_mask: 0,
+            symbol_names: Rc::new(std::collections::HashMap::new()),
         });
         let co = Rc::new(RefCell::new(Coroutine::new(closure)));
 
@@ -462,6 +419,7 @@ mod coroutine_vm_tests {
                 source_ast: None,
                 effect: Effect::Pure,
                 cell_params_mask: 0,
+                symbol_names: Rc::new(std::collections::HashMap::new()),
             });
             Rc::new(RefCell::new(Coroutine::new(closure)))
         };
@@ -486,17 +444,27 @@ mod coroutine_vm_tests {
 
     #[test]
     fn test_vm_result_enum() {
-        let done = VmResult::Done(Value::Int(42));
-        let yielded = VmResult::Yielded(Value::Int(100));
+        let done = VmResult::Done(Value::int(42));
+        let yielded = VmResult::Yielded(Value::int(100));
 
-        match done {
-            VmResult::Done(Value::Int(n)) => assert_eq!(n, 42),
-            _ => panic!("Expected Done"),
+        if let VmResult::Done(v) = done {
+            if let Some(n) = v.as_int() {
+                assert_eq!(n, 42);
+            } else {
+                panic!("Expected Done");
+            }
+        } else {
+            panic!("Expected Done");
         }
 
-        match yielded {
-            VmResult::Yielded(Value::Int(n)) => assert_eq!(n, 100),
-            _ => panic!("Expected Yielded"),
+        if let VmResult::Yielded(v) = yielded {
+            if let Some(n) = v.as_int() {
+                assert_eq!(n, 100);
+            } else {
+                panic!("Expected Yielded");
+            }
+        } else {
+            panic!("Expected Yielded");
         }
     }
 

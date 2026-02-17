@@ -1,75 +1,83 @@
 //! File I/O primitives
-use crate::error::{LError, LResult};
-use crate::value::Value;
-use std::rc::Rc;
+use crate::value::{Condition, Value};
 
 /// Read entire file as a string
-pub fn prim_slurp(args: &[Value]) -> LResult<Value> {
+pub fn prim_slurp(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("slurp requires exactly 1 argument".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "slurp: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::fs::read_to_string(path_str)
-                .map(|content| Value::String(Rc::from(content)))
-                .map_err(|e| format!("Failed to read file '{}': {}", path_str, e).into())
-        }
-        _ => Err("slurp requires a string path".to_string().into()),
+    if let Some(path) = args[0].as_string() {
+        std::fs::read_to_string(path)
+            .map(Value::string)
+            .map_err(|e| Condition::error(format!("slurp: failed to read '{}': {}", path, e)))
+    } else {
+        Err(Condition::type_error(format!(
+            "slurp: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Write string content to a file (overwrites if exists)
-pub fn prim_spit(args: &[Value]) -> LResult<Value> {
+pub fn prim_spit(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 2 {
-        return Err("spit requires exactly 2 arguments (path, content)"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "spit: expected 2 arguments, got {}",
+            args.len()
+        )));
     }
 
-    let path = match &args[0] {
-        Value::String(s) => s.as_ref(),
-        _ => {
-            return Err("spit: first argument must be a string path"
-                .to_string()
-                .into())
-        }
+    let path = if let Some(s) = args[0].as_string() {
+        s
+    } else {
+        return Err(Condition::type_error(format!(
+            "spit: expected string, got {}",
+            args[0].type_name()
+        )));
     };
 
-    let content = match &args[1] {
-        Value::String(s) => s.as_ref(),
-        _ => return Err("spit: second argument must be a string".to_string().into()),
+    let content = if let Some(s) = args[1].as_string() {
+        s
+    } else {
+        return Err(Condition::type_error(format!(
+            "spit: expected string, got {}",
+            args[1].type_name()
+        )));
     };
 
     std::fs::write(path, content)
-        .map(|_| Value::Bool(true))
-        .map_err(|e| format!("Failed to write file '{}': {}", path, e).into())
+        .map(|_| Value::TRUE)
+        .map_err(|e| Condition::error(format!("spit: failed to write '{}': {}", path, e)))
 }
 
 /// Append string content to a file
-pub fn prim_append_file(args: &[Value]) -> LResult<Value> {
+pub fn prim_append_file(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 2 {
-        return Err("append-file requires exactly 2 arguments (path, content)"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "append-file: expected 2 arguments, got {}",
+            args.len()
+        )));
     }
 
-    let path = match &args[0] {
-        Value::String(s) => s.as_ref(),
-        _ => {
-            return Err("append-file: first argument must be a string path"
-                .to_string()
-                .into())
-        }
+    let path = if let Some(s) = args[0].as_string() {
+        s
+    } else {
+        return Err(Condition::type_error(format!(
+            "append-file: expected string, got {}",
+            args[0].type_name()
+        )));
     };
 
-    let content = match &args[1] {
-        Value::String(s) => s.as_ref(),
-        _ => {
-            return Err("append-file: second argument must be a string"
-                .to_string()
-                .into())
-        }
+    let content = if let Some(s) = args[1].as_string() {
+        s
+    } else {
+        return Err(Condition::type_error(format!(
+            "append-file: expected string, got {}",
+            args[1].type_name()
+        )));
     };
 
     use std::fs::OpenOptions;
@@ -79,401 +87,473 @@ pub fn prim_append_file(args: &[Value]) -> LResult<Value> {
         .create(true)
         .append(true)
         .open(path)
-        .map_err(|e| {
-            LError::from(format!(
-                "Failed to open file '{}' for appending: {}",
-                path, e
-            ))
-        })?;
+        .map_err(|e| Condition::error(format!("append-file: failed to open '{}': {}", path, e)))?;
 
     file.write_all(content.as_bytes())
-        .map(|_| Value::Bool(true))
-        .map_err(|e| LError::from(format!("Failed to write to file '{}': {}", path, e)))
+        .map(|_| Value::TRUE)
+        .map_err(|e| Condition::error(format!("append-file: failed to write '{}': {}", path, e)))
 }
 
 /// Check if a file exists
-pub fn prim_file_exists(args: &[Value]) -> LResult<Value> {
+pub fn prim_file_exists(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("file-exists? requires exactly 1 argument"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "file-exists?: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            Ok(Value::Bool(std::path::Path::new(path_str).exists()))
-        }
-        _ => Err("file-exists? requires a string path".to_string().into()),
+    if let Some(path) = args[0].as_string() {
+        Ok(Value::bool(std::path::Path::new(path).exists()))
+    } else {
+        Err(Condition::type_error(format!(
+            "file-exists?: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Check if path is a directory
-pub fn prim_is_directory(args: &[Value]) -> LResult<Value> {
+pub fn prim_is_directory(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("directory? requires exactly 1 argument".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "directory?: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            match std::fs::metadata(path_str) {
-                Ok(metadata) => Ok(Value::Bool(metadata.is_dir())),
-                Err(_) => Ok(Value::Bool(false)),
-            }
+    if let Some(path) = args[0].as_string() {
+        match std::fs::metadata(path) {
+            Ok(metadata) => Ok(Value::bool(metadata.is_dir())),
+            Err(_) => Ok(Value::FALSE),
         }
-        _ => Err("directory? requires a string path".to_string().into()),
+    } else {
+        Err(Condition::type_error(format!(
+            "directory?: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Check if path is a file
-pub fn prim_is_file(args: &[Value]) -> LResult<Value> {
+pub fn prim_is_file(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("file? requires exactly 1 argument".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "file?: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            match std::fs::metadata(path_str) {
-                Ok(metadata) => Ok(Value::Bool(metadata.is_file())),
-                Err(_) => Ok(Value::Bool(false)),
-            }
+    if let Some(path) = args[0].as_string() {
+        match std::fs::metadata(path) {
+            Ok(metadata) => Ok(Value::bool(metadata.is_file())),
+            Err(_) => Ok(Value::FALSE),
         }
-        _ => Err("file? requires a string path".to_string().into()),
+    } else {
+        Err(Condition::type_error(format!(
+            "file?: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Delete a file
-pub fn prim_delete_file(args: &[Value]) -> LResult<Value> {
+pub fn prim_delete_file(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("delete-file requires exactly 1 argument".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "delete-file: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::fs::remove_file(path_str)
-                .map(|_| Value::Bool(true))
-                .map_err(|e| format!("Failed to delete file '{}': {}", path_str, e).into())
-        }
-        _ => Err("delete-file requires a string path".to_string().into()),
+    if let Some(path) = args[0].as_string() {
+        std::fs::remove_file(path)
+            .map(|_| Value::TRUE)
+            .map_err(|e| {
+                Condition::error(format!("delete-file: failed to delete '{}': {}", path, e))
+            })
+    } else {
+        Err(Condition::type_error(format!(
+            "delete-file: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Delete a directory (must be empty)
-pub fn prim_delete_directory(args: &[Value]) -> LResult<Value> {
+pub fn prim_delete_directory(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("delete-directory requires exactly 1 argument"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "delete-directory: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::fs::remove_dir(path_str)
-                .map(|_| Value::Bool(true))
-                .map_err(|e| format!("Failed to delete directory '{}': {}", path_str, e).into())
-        }
-        _ => Err("delete-directory requires a string path".to_string().into()),
+    if let Some(path) = args[0].as_string() {
+        std::fs::remove_dir(path).map(|_| Value::TRUE).map_err(|e| {
+            Condition::error(format!(
+                "delete-directory: failed to delete '{}': {}",
+                path, e
+            ))
+        })
+    } else {
+        Err(Condition::type_error(format!(
+            "delete-directory: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Create a directory
-pub fn prim_create_directory(args: &[Value]) -> LResult<Value> {
+pub fn prim_create_directory(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("create-directory requires exactly 1 argument"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "create-directory: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::fs::create_dir(path_str)
-                .map(|_| Value::Bool(true))
-                .map_err(|e| format!("Failed to create directory '{}': {}", path_str, e).into())
-        }
-        _ => Err("create-directory requires a string path".to_string().into()),
+    if let Some(path) = args[0].as_string() {
+        std::fs::create_dir(path).map(|_| Value::TRUE).map_err(|e| {
+            Condition::error(format!(
+                "create-directory: failed to create '{}': {}",
+                path, e
+            ))
+        })
+    } else {
+        Err(Condition::type_error(format!(
+            "create-directory: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Create a directory and all parent directories
-pub fn prim_create_directory_all(args: &[Value]) -> LResult<Value> {
+pub fn prim_create_directory_all(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("create-directory-all requires exactly 1 argument"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "create-directory-all: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::fs::create_dir_all(path_str)
-                .map(|_| Value::Bool(true))
-                .map_err(|e| {
-                    format!("Failed to create directory structure '{}': {}", path_str, e).into()
-                })
-        }
-        _ => Err("create-directory-all requires a string path"
-            .to_string()
-            .into()),
+    if let Some(path) = args[0].as_string() {
+        std::fs::create_dir_all(path)
+            .map(|_| Value::TRUE)
+            .map_err(|e| {
+                Condition::error(format!(
+                    "create-directory-all: failed to create '{}': {}",
+                    path, e
+                ))
+            })
+    } else {
+        Err(Condition::type_error(format!(
+            "create-directory-all: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Rename a file
-pub fn prim_rename_file(args: &[Value]) -> LResult<Value> {
+pub fn prim_rename_file(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 2 {
-        return Err(
-            "rename-file requires exactly 2 arguments (old-path, new-path)"
-                .to_string()
-                .into(),
-        );
+        return Err(Condition::arity_error(format!(
+            "rename-file: expected 2 arguments, got {}",
+            args.len()
+        )));
     }
 
-    let old_path = match &args[0] {
-        Value::String(s) => s.as_ref(),
-        _ => {
-            return Err("rename-file: first argument must be a string path"
-                .to_string()
-                .into())
-        }
+    let old_path = if let Some(s) = args[0].as_string() {
+        s
+    } else {
+        return Err(Condition::type_error(format!(
+            "rename-file: expected string, got {}",
+            args[0].type_name()
+        )));
     };
 
-    let new_path = match &args[1] {
-        Value::String(s) => s.as_ref(),
-        _ => {
-            return Err("rename-file: second argument must be a string path"
-                .to_string()
-                .into())
-        }
+    let new_path = if let Some(s) = args[1].as_string() {
+        s
+    } else {
+        return Err(Condition::type_error(format!(
+            "rename-file: expected string, got {}",
+            args[1].type_name()
+        )));
     };
 
     std::fs::rename(old_path, new_path)
-        .map(|_| Value::Bool(true))
+        .map(|_| Value::TRUE)
         .map_err(|e| {
-            LError::from(format!(
-                "Failed to rename file from '{}' to '{}': {}",
-                old_path, new_path, e
+            Condition::error(format!(
+                "rename-file: failed to rename '{}': {}",
+                old_path, e
             ))
         })
 }
 
 /// Copy a file
-pub fn prim_copy_file(args: &[Value]) -> LResult<Value> {
+pub fn prim_copy_file(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 2 {
-        return Err("copy-file requires exactly 2 arguments (source, dest)"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "copy-file: expected 2 arguments, got {}",
+            args.len()
+        )));
     }
 
-    let src = match &args[0] {
-        Value::String(s) => s.as_ref(),
-        _ => {
-            return Err("copy-file: first argument must be a string path"
-                .to_string()
-                .into())
-        }
+    let src = if let Some(s) = args[0].as_string() {
+        s
+    } else {
+        return Err(Condition::type_error(format!(
+            "copy-file: expected string, got {}",
+            args[0].type_name()
+        )));
     };
 
-    let dst = match &args[1] {
-        Value::String(s) => s.as_ref(),
-        _ => {
-            return Err("copy-file: second argument must be a string path"
-                .to_string()
-                .into())
-        }
+    let dst = if let Some(s) = args[1].as_string() {
+        s
+    } else {
+        return Err(Condition::type_error(format!(
+            "copy-file: expected string, got {}",
+            args[1].type_name()
+        )));
     };
 
     std::fs::copy(src, dst)
-        .map(|_| Value::Bool(true))
-        .map_err(|e| format!("Failed to copy file from '{}' to '{}': {}", src, dst, e).into())
+        .map(|_| Value::TRUE)
+        .map_err(|e| Condition::error(format!("copy-file: failed to copy '{}': {}", src, e)))
 }
 
 /// Get file size in bytes
-pub fn prim_file_size(args: &[Value]) -> LResult<Value> {
+pub fn prim_file_size(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("file-size requires exactly 1 argument".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "file-size: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::fs::metadata(path_str)
-                .map(|metadata| Value::Int(metadata.len() as i64))
-                .map_err(|e| format!("Failed to get file size for '{}': {}", path_str, e).into())
-        }
-        _ => Err("file-size requires a string path".to_string().into()),
+    if let Some(path) = args[0].as_string() {
+        std::fs::metadata(path)
+            .map(|metadata| Value::int(metadata.len() as i64))
+            .map_err(|e| {
+                Condition::error(format!(
+                    "file-size: failed to get size of '{}': {}",
+                    path, e
+                ))
+            })
+    } else {
+        Err(Condition::type_error(format!(
+            "file-size: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// List directory contents
-pub fn prim_list_directory(args: &[Value]) -> LResult<Value> {
+pub fn prim_list_directory(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("list-directory requires exactly 1 argument"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "list-directory: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::fs::read_dir(path_str)
-                .map_err(|e| format!("Failed to read directory '{}': {}", path_str, e).into())
-                .and_then(|entries| {
-                    let mut items = Vec::new();
-                    for entry in entries {
-                        match entry {
-                            Ok(entry) => {
-                                if let Ok(name) = entry.file_name().into_string() {
-                                    items.push(Value::String(Rc::from(name)));
-                                }
-                            }
-                            Err(e) => {
-                                return Err(format!("Error reading directory entry: {}", e).into())
+    if let Some(path) = args[0].as_string() {
+        std::fs::read_dir(path)
+            .map_err(|e| {
+                Condition::error(format!("list-directory: failed to read '{}': {}", path, e))
+            })
+            .and_then(|entries| {
+                let mut items = Vec::new();
+                for entry in entries {
+                    match entry {
+                        Ok(entry) => {
+                            if let Ok(name) = entry.file_name().into_string() {
+                                items.push(Value::string(name));
                             }
                         }
+                        Err(e) => {
+                            return Err(Condition::error(format!(
+                                "list-directory: error reading '{}': {}",
+                                path, e
+                            )))
+                        }
                     }
-                    Ok(crate::value::list(items))
-                })
-        }
-        _ => Err("list-directory requires a string path".to_string().into()),
+                }
+                Ok(crate::value::list(items))
+            })
+    } else {
+        Err(Condition::type_error(format!(
+            "list-directory: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Get absolute path
-pub fn prim_absolute_path(args: &[Value]) -> LResult<Value> {
+pub fn prim_absolute_path(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("absolute-path requires exactly 1 argument"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "absolute-path: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::fs::canonicalize(path_str)
-                .map(|abs_path| Value::String(Rc::from(abs_path.to_string_lossy().into_owned())))
-                .map_err(|e| {
-                    format!("Failed to get absolute path for '{}': {}", path_str, e).into()
-                })
-        }
-        _ => Err("absolute-path requires a string path".to_string().into()),
+    if let Some(path) = args[0].as_string() {
+        std::fs::canonicalize(path)
+            .map(|abs_path| Value::string(abs_path.to_string_lossy().into_owned()))
+            .map_err(|e| {
+                Condition::error(format!(
+                    "absolute-path: failed to resolve '{}': {}",
+                    path, e
+                ))
+            })
+    } else {
+        Err(Condition::type_error(format!(
+            "absolute-path: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Get current working directory
-pub fn prim_current_directory(_args: &[Value]) -> LResult<Value> {
+pub fn prim_current_directory(_args: &[Value]) -> Result<Value, Condition> {
     std::env::current_dir()
-        .map(|path| Value::String(Rc::from(path.to_string_lossy().into_owned())))
-        .map_err(|e| format!("Failed to get current directory: {}", e).into())
+        .map(|path| Value::string(path.to_string_lossy().into_owned()))
+        .map_err(|e| {
+            Condition::error(format!(
+                "current-directory: failed to get current directory: {}",
+                e
+            ))
+        })
 }
 
 /// Change current working directory
-pub fn prim_change_directory(args: &[Value]) -> LResult<Value> {
+pub fn prim_change_directory(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("change-directory requires exactly 1 argument"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "change-directory: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::env::set_current_dir(path_str)
-                .map(|_| Value::Bool(true))
-                .map_err(|e| format!("Failed to change directory to '{}': {}", path_str, e).into())
-        }
-        _ => Err("change-directory requires a string path".to_string().into()),
+    if let Some(path) = args[0].as_string() {
+        std::env::set_current_dir(path)
+            .map(|_| Value::TRUE)
+            .map_err(|e| {
+                Condition::error(format!(
+                    "change-directory: failed to change to '{}': {}",
+                    path, e
+                ))
+            })
+    } else {
+        Err(Condition::type_error(format!(
+            "change-directory: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Join path components (return a properly formatted path)
-pub fn prim_join_path(args: &[Value]) -> LResult<Value> {
+pub fn prim_join_path(args: &[Value]) -> Result<Value, Condition> {
     if args.is_empty() {
-        return Err("join-path requires at least 1 argument".to_string().into());
+        return Err(Condition::arity_error(
+            "join-path: expected at least 1 argument, got 0".to_string(),
+        ));
     }
 
     let mut path = std::path::PathBuf::new();
     for arg in args {
-        match arg {
-            Value::String(s) => path.push(s.as_ref()),
-            _ => {
-                return Err("join-path requires all arguments to be strings"
-                    .to_string()
-                    .into())
-            }
+        if let Some(s) = arg.as_string() {
+            path.push(s);
+        } else {
+            return Err(Condition::type_error(format!(
+                "join-path: expected string, got {}",
+                arg.type_name()
+            )));
         }
     }
 
-    Ok(Value::String(Rc::from(path.to_string_lossy().into_owned())))
+    Ok(Value::string(path.to_string_lossy().into_owned()))
 }
 
 /// Get file extension
-pub fn prim_file_extension(args: &[Value]) -> LResult<Value> {
+pub fn prim_file_extension(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("file-extension requires exactly 1 argument"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "file-extension: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path = std::path::Path::new(path.as_ref());
-            match path.extension() {
-                Some(ext) => Ok(Value::String(Rc::from(ext.to_string_lossy().into_owned()))),
-                None => Ok(Value::Nil),
-            }
+    if let Some(path_str) = args[0].as_string() {
+        let path = std::path::Path::new(path_str);
+        match path.extension() {
+            Some(ext) => Ok(Value::string(ext.to_string_lossy().into_owned())),
+            None => Ok(Value::NIL),
         }
-        _ => Err("file-extension requires a string path".to_string().into()),
+    } else {
+        Err(Condition::type_error(format!(
+            "file-extension: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Get file name (without directory)
-pub fn prim_file_name(args: &[Value]) -> LResult<Value> {
+pub fn prim_file_name(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("file-name requires exactly 1 argument".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "file-name: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path = std::path::Path::new(path.as_ref());
-            match path.file_name() {
-                Some(name) => Ok(Value::String(Rc::from(name.to_string_lossy().into_owned()))),
-                None => Ok(Value::Nil),
-            }
+    if let Some(path_str) = args[0].as_string() {
+        let path = std::path::Path::new(path_str);
+        match path.file_name() {
+            Some(name) => Ok(Value::string(name.to_string_lossy().into_owned())),
+            None => Ok(Value::NIL),
         }
-        _ => Err("file-name requires a string path".to_string().into()),
+    } else {
+        Err(Condition::type_error(format!(
+            "file-name: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Get parent directory path
-pub fn prim_parent_directory(args: &[Value]) -> LResult<Value> {
+pub fn prim_parent_directory(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("parent-directory requires exactly 1 argument"
-            .to_string()
-            .into());
+        return Err(Condition::arity_error(format!(
+            "parent-directory: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path = std::path::Path::new(path.as_ref());
-            match path.parent() {
-                Some(parent) => Ok(Value::String(Rc::from(
-                    parent.to_string_lossy().into_owned(),
-                ))),
-                None => Ok(Value::Nil),
-            }
+    if let Some(path_str) = args[0].as_string() {
+        let path = std::path::Path::new(path_str);
+        match path.parent() {
+            Some(parent) => Ok(Value::string(parent.to_string_lossy().into_owned())),
+            None => Ok(Value::NIL),
         }
-        _ => Err("parent-directory requires a string path".to_string().into()),
+    } else {
+        Err(Condition::type_error(format!(
+            "parent-directory: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Read lines from a file and return as a list of strings
-pub fn prim_read_lines(args: &[Value]) -> LResult<Value> {
+pub fn prim_read_lines(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err("read-lines requires exactly 1 argument".to_string().into());
+        return Err(Condition::arity_error(format!(
+            "read-lines: expected 1 argument, got {}",
+            args.len()
+        )));
     }
-    match &args[0] {
-        Value::String(path) => {
-            let path_str = path.as_ref();
-            std::fs::read_to_string(path_str)
-                .map_err(|e| format!("Failed to read file '{}': {}", path_str, e).into())
-                .map(|content| {
-                    let lines: Vec<Value> = content
-                        .lines()
-                        .map(|line| Value::String(Rc::from(line.to_string())))
-                        .collect();
-                    crate::value::list(lines)
-                })
-        }
-        _ => Err("read-lines requires a string path".to_string().into()),
+    if let Some(path) = args[0].as_string() {
+        std::fs::read_to_string(path)
+            .map_err(|e| Condition::error(format!("read-lines: failed to read '{}': {}", path, e)))
+            .map(|content| {
+                let lines: Vec<Value> = content
+                    .lines()
+                    .map(|line| Value::string(line.to_string()))
+                    .collect();
+                crate::value::list(lines)
+            })
+    } else {
+        Err(Condition::type_error(format!(
+            "read-lines: expected string, got {}",
+            args[0].type_name()
+        )))
     }
 }

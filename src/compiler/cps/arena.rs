@@ -135,7 +135,7 @@ mod tests {
     fn test_arena_sequence_non_empty() {
         let arena = ContinuationArena::new();
         let next = arena.done();
-        let cont = arena.sequence(vec![Expr::Literal(Value::Int(1))], next);
+        let cont = arena.sequence(vec![Expr::Literal(Value::int(1))], next);
         assert!(!cont.is_done());
         assert_eq!(arena.len(), 2);
     }

@@ -122,7 +122,7 @@ pub fn encode_value(value: Value) -> i64 {
 /// The i64 must be a valid encoded Value from encode_value
 pub fn decode_value(encoded: i64) -> Value {
     if encoded == 0 {
-        return Value::Nil;
+        return Value::NIL;
     }
     unsafe {
         let ptr = encoded as *mut Value;
@@ -170,7 +170,7 @@ macro_rules! jit_primitive_wrapper {
             // Call the actual primitive
             match $prim(&args) {
                 Ok(result) => encode_value(result),
-                Err(_) => encode_value(Value::Nil), // TODO: proper error handling
+                Err(_) => encode_value(Value::NIL), // TODO: proper error handling
             }
         }
     };
@@ -228,16 +228,16 @@ mod tests {
 
     #[test]
     fn test_value_encoding_decoding() {
-        let original = Value::Int(42);
-        let encoded = encode_value(original.clone());
+        let original = Value::int(42);
+        let encoded = encode_value(original);
         let decoded = decode_value(encoded);
         assert_eq!(original, decoded);
     }
 
     #[test]
     fn test_value_encoding_nil() {
-        let original = Value::Nil;
-        let encoded = encode_value(original.clone());
+        let original = Value::NIL;
+        let encoded = encode_value(original);
         let decoded = decode_value(encoded);
         assert_eq!(original, decoded);
     }

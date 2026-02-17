@@ -52,6 +52,7 @@ pub mod resident_compiler;
 pub mod symbol;
 pub mod syntax;
 pub mod value;
+pub mod value_old;
 pub mod vm;
 
 // Re-export ffi primitives from the ffi module

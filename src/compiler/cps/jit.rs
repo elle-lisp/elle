@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn test_can_inline_literal() {
         use crate::value::Value;
-        let expr = CpsExpr::Literal(Value::Int(42));
+        let expr = CpsExpr::Literal(Value::int(42));
         assert!(!CpsJitCompiler::can_inline(&expr));
     }
 }

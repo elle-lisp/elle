@@ -27,13 +27,16 @@ Does NOT:
 
 ## Function types
 
-**NativeFn**: `fn(&[Value]) -> LResult<Value>`
+**NativeFn**: `fn(&[Value]) -> Result<Value, Condition>`
 - Simple primitives that don't need VM access
+- Return `Condition` for user-facing errors (type, arity, etc.)
 - Examples: `+`, `car`, `string-length`
 
 **VmAwareFn**: `fn(&[Value], &mut VM) -> LResult<Value>`
 - Primitives that need to execute bytecode or access VM state
-- Examples: `coroutine-resume`, `apply`
+- Set `vm.current_exception` directly for user-facing errors, return `Ok(Value::NIL)`
+- Return `Err(LError)` only for VM bugs
+- Examples: `coroutine-resume`, `/`
 
 ## Adding a primitive
 
@@ -43,8 +46,8 @@ Does NOT:
 
 ```rust
 // In arithmetic.rs
-pub fn prim_add(args: &[Value]) -> LResult<Value> {
-    // Implementation
+pub fn prim_add(args: &[Value]) -> Result<Value, Condition> {
+    // Implementation — return Err(Condition::type_error(...)) for errors
 }
 
 pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
@@ -61,10 +64,13 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 
 ## Invariants
 
-1. **Primitives validate arguments.** Return `LError::arity_mismatch` or
-   `LError::type_mismatch` on bad input. Never panic.
+1. **Primitives validate arguments.** NativeFn returns `Condition::arity_error`
+   or `Condition::type_error` on bad input. VmAwareFn sets `vm.current_exception`
+   directly. Never panic.
 
-2. **Primitives return `LResult`.** Errors propagate; they're not swallowed.
+2. **NativeFn returns `Result<Value, Condition>`.** VmAwareFn returns
+   `LResult<Value>` but uses `vm.current_exception` for user-facing errors.
+   Errors propagate; they're not swallowed.
 
 3. **Symbol table pointers are set before use.** Some primitives (JIT, macros)
    need global access to symbol tables. Call `set_*_symbol_table` first.

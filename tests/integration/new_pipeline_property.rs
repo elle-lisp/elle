@@ -56,7 +56,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -78,7 +78,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -87,7 +87,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -96,7 +96,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 }
 
@@ -113,7 +113,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Bool(true));
+        prop_assert_eq!(result.unwrap(), Value::bool(true));
     }
 
     #[test]
@@ -135,7 +135,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Bool(false));
+        prop_assert_eq!(result.unwrap(), Value::bool(false));
     }
 
     #[test]
@@ -149,8 +149,8 @@ proptest! {
 
             prop_assert!(r1.is_ok());
             prop_assert!(r2.is_ok());
-            prop_assert_eq!(r1.unwrap(), Value::Bool(true));
-            prop_assert_eq!(r2.unwrap(), Value::Bool(false));
+            prop_assert_eq!(r1.unwrap(), Value::bool(true));
+            prop_assert_eq!(r2.unwrap(), Value::bool(false));
         }
     }
 }
@@ -168,7 +168,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -177,7 +177,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(b));
+        prop_assert_eq!(result.unwrap(), Value::int(b));
     }
 
     #[test]
@@ -188,7 +188,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if a < b { a } else { b };
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -217,7 +217,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -226,7 +226,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(inner));
+        prop_assert_eq!(result.unwrap(), Value::int(inner));
     }
 
     #[test]
@@ -239,7 +239,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(outer));
+        prop_assert_eq!(result.unwrap(), Value::int(outer));
     }
 
     #[test]
@@ -248,7 +248,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a + b));
+        prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
 }
 
@@ -265,7 +265,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -274,7 +274,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(b));
+        prop_assert_eq!(result.unwrap(), Value::int(b));
     }
 
     #[test]
@@ -286,7 +286,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(arg + captured));
+        prop_assert_eq!(result.unwrap(), Value::int(arg + captured));
     }
 
     #[test]
@@ -295,7 +295,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a + b + c));
+        prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
     }
 }
 
@@ -312,7 +312,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -322,7 +322,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(len as i64));
+        prop_assert_eq!(result.unwrap(), Value::int(len as i64));
     }
 
     #[test]
@@ -331,7 +331,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -340,7 +340,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(b));
+        prop_assert_eq!(result.unwrap(), Value::int(b));
     }
 }
 
@@ -358,7 +358,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Bool(b));
+        prop_assert_eq!(result.unwrap(), Value::bool(b));
     }
 
     #[test]
@@ -368,7 +368,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Bool(false));
+        prop_assert_eq!(result.unwrap(), Value::bool(false));
     }
 
     #[test]
@@ -378,7 +378,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Bool(true));
+        prop_assert_eq!(result.unwrap(), Value::bool(true));
     }
 
     #[test]
@@ -412,7 +412,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::String("hit".into()));
+        prop_assert_eq!(result.unwrap(), Value::string("hit"));
     }
 
     #[test]
@@ -423,7 +423,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::String("miss".into()));
+        prop_assert_eq!(result.unwrap(), Value::string("miss"));
     }
 
     #[test]
@@ -432,7 +432,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a + b));
+        prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
 }
 
@@ -454,7 +454,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(len as i64));
+        prop_assert_eq!(result.unwrap(), Value::int(len as i64));
     }
 
     #[test]
@@ -463,7 +463,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 }
 
@@ -483,7 +483,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::String("first".into()));
+        prop_assert_eq!(result.unwrap(), Value::string("first"));
     }
 
     #[test]
@@ -495,7 +495,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::String("second".into()));
+        prop_assert_eq!(result.unwrap(), Value::string("second"));
     }
 
     #[test]
@@ -507,7 +507,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::String("third".into()));
+        prop_assert_eq!(result.unwrap(), Value::string("third"));
     }
 
     #[test]
@@ -517,7 +517,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a + b));
+        prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
 
     #[test]
@@ -526,7 +526,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::String("is-nil".into()));
+        prop_assert_eq!(result.unwrap(), Value::string("is-nil"));
     }
 }
 
@@ -552,7 +552,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (1..=len as i64).sum();
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -562,7 +562,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a)); // x unchanged
+        prop_assert_eq!(result.unwrap(), Value::int(a)); // x unchanged
     }
 }
 
@@ -588,7 +588,7 @@ proptest! {
 
         let result = eval(&expr);
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(increments as i64));
+        prop_assert_eq!(result.unwrap(), Value::int(increments as i64));
     }
 
     #[test]
@@ -624,7 +624,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(start + increments as i64));
+        prop_assert_eq!(result.unwrap(), Value::int(start + increments as i64));
     }
 
     #[test]
@@ -639,7 +639,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(start + 3));
+        prop_assert_eq!(result.unwrap(), Value::int(start + 3));
     }
 
     #[test]
@@ -661,7 +661,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int((a + 3) + (b + 2)));
+        prop_assert_eq!(result.unwrap(), Value::int((a + 3) + (b + 2)));
     }
 
     #[test]
@@ -675,7 +675,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(outer + 2 * delta));
+        prop_assert_eq!(result.unwrap(), Value::int(outer + 2 * delta));
     }
 
     #[test]
@@ -692,7 +692,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(init + 1)); // +2 -1 = +1
+        prop_assert_eq!(result.unwrap(), Value::int(init + 1)); // +2 -1 = +1
     }
 
     #[test]
@@ -708,7 +708,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a + b + b));
+        prop_assert_eq!(result.unwrap(), Value::int(a + b + b));
     }
 
     #[test]
@@ -724,7 +724,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(param + 3 * delta));
+        prop_assert_eq!(result.unwrap(), Value::int(param + 3 * delta));
     }
 
     #[test]
@@ -744,7 +744,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = init + values.iter().sum::<i64>();
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 }
 
@@ -766,7 +766,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if cond { a } else { b };
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -777,7 +777,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if cond { a } else { b };
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -789,7 +789,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::String("a".into()));
+        prop_assert_eq!(result.unwrap(), Value::string("a"));
     }
 
     #[test]
@@ -801,7 +801,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a + b));
+        prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
 }
 
@@ -818,7 +818,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(c));
+        prop_assert_eq!(result.unwrap(), Value::int(c));
     }
 
     #[test]
@@ -831,7 +831,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(b));
+        prop_assert_eq!(result.unwrap(), Value::int(b));
     }
 }
 
@@ -848,7 +848,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -857,7 +857,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -876,7 +876,7 @@ proptest! {
         } else {
             "greater"
         };
-        prop_assert_eq!(result.unwrap(), Value::String(expected.into()));
+        prop_assert_eq!(result.unwrap(), Value::string(expected));
     }
 }
 
@@ -896,7 +896,7 @@ proptest! {
         if let Ok(val) = result {
             if let Ok(vec) = val.list_to_vec() {
                 prop_assert_eq!(vec.len(), 3);
-                prop_assert_eq!(&vec[1], &Value::Int(a));
+                prop_assert_eq!(&vec[1], &Value::int(a));
             }
         }
         // If not supported, that's also OK for now
@@ -917,7 +917,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a));
+        prop_assert_eq!(result.unwrap(), Value::int(a));
     }
 
     #[test]
@@ -926,7 +926,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(-a));
+        prop_assert_eq!(result.unwrap(), Value::int(-a));
     }
 }
 
@@ -954,7 +954,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(x + n));
+        prop_assert_eq!(result.unwrap(), Value::int(x + n));
     }
 
     #[test]
@@ -967,7 +967,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(x * n));
+        prop_assert_eq!(result.unwrap(), Value::int(x * n));
     }
 
     #[test]
@@ -984,7 +984,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int((a * 2) + 1));
+        prop_assert_eq!(result.unwrap(), Value::int((a * 2) + 1));
     }
 
     #[test]
@@ -1003,7 +1003,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(start + n as i64));
+        prop_assert_eq!(result.unwrap(), Value::int(start + n as i64));
     }
 }
 
@@ -1025,7 +1025,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a + b));
+        prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
 }
 
@@ -1048,7 +1048,7 @@ proptest! {
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (1..=n as i64).product();
         let expected = if expected == 0 { 1 } else { expected };
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -1062,7 +1062,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (0..=n as i64).sum();
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -1070,14 +1070,14 @@ proptest! {
         let elements: Vec<String> = (0..len).map(|i| i.to_string()).collect();
         let list_str = elements.join(" ");
         let expr = format!(
-            "(letrec ((my-length (fn (lst) (if (nil? lst) 0 (+ 1 (my-length (rest lst)))))))
+            "(letrec ((my-length (fn (lst) (if (empty? lst) 0 (+ 1 (my-length (rest lst)))))))
                (my-length (list {})))",
             list_str
         );
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(len as i64));
+        prop_assert_eq!(result.unwrap(), Value::int(len as i64));
     }
 
     #[test]
@@ -1091,7 +1091,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (0..=n as i64).sum();
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -1105,7 +1105,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Bool(n % 2 == 0));
+        prop_assert_eq!(result.unwrap(), Value::bool(n % 2 == 0));
     }
 }
 
@@ -1126,7 +1126,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int((a + 1) + (b * 2)));
+        prop_assert_eq!(result.unwrap(), Value::int((a + 1) + (b * 2)));
     }
 
     #[test]
@@ -1140,7 +1140,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a + b));
+        prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
 }
 
@@ -1161,7 +1161,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int((a+1) + (b+1) + (c+1)));
+        prop_assert_eq!(result.unwrap(), Value::int((a+1) + (b+1) + (c+1)));
     }
 
     #[test]
@@ -1176,8 +1176,8 @@ proptest! {
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         if let Ok(vec) = result.unwrap().list_to_vec() {
             prop_assert_eq!(vec.len(), 2);
-            prop_assert_eq!(&vec[0], &Value::Int(a * 2));
-            prop_assert_eq!(&vec[1], &Value::Int(b * 2));
+            prop_assert_eq!(&vec[0], &Value::int(a * 2));
+            prop_assert_eq!(&vec[1], &Value::int(b * 2));
         }
     }
 
@@ -1189,7 +1189,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(len as i64));
+        prop_assert_eq!(result.unwrap(), Value::int(len as i64));
     }
 
     #[test]
@@ -1202,7 +1202,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = [a, b, c].iter().filter(|&&x| x > 0).count() as i64;
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -1214,7 +1214,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(2));
+        prop_assert_eq!(result.unwrap(), Value::int(2));
     }
 
     #[test]
@@ -1226,7 +1226,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(0));
+        prop_assert_eq!(result.unwrap(), Value::int(0));
     }
 
     #[test]
@@ -1235,7 +1235,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a + b + c));
+        prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
     }
 
     #[test]
@@ -1244,7 +1244,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a * b * c));
+        prop_assert_eq!(result.unwrap(), Value::int(a * b * c));
     }
 
     #[test]
@@ -1253,7 +1253,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(init + a + b));
+        prop_assert_eq!(result.unwrap(), Value::int(init + a + b));
     }
 
     #[test]
@@ -1262,7 +1262,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(init));
+        prop_assert_eq!(result.unwrap(), Value::int(init));
     }
 
     #[test]
@@ -1275,7 +1275,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(2 * (a + b + c)));
+        prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
     }
 
     #[test]
@@ -1289,7 +1289,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = [a, b, c].iter().filter(|&&x| x > 0).sum();
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -1304,7 +1304,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int((a + n) + (b + n)));
+        prop_assert_eq!(result.unwrap(), Value::int((a + n) + (b + n)));
     }
 
     // ============================================================================
@@ -1326,7 +1326,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "define in fold lambda failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(2 * (a + b + c)));
+        prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
     }
 
     #[test]
@@ -1345,7 +1345,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "nested define in fold failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(2 * (a + 1) + 2 * (b + 1)));
+        prop_assert_eq!(result.unwrap(), Value::int(2 * (a + 1) + 2 * (b + 1)));
     }
 
     #[test]
@@ -1366,7 +1366,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "function with define called from fold failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int((2 * a + 1) + (2 * b + 1)));
+        prop_assert_eq!(result.unwrap(), Value::int((2 * a + 1) + (2 * b + 1)));
     }
 
     #[test]
@@ -1390,7 +1390,7 @@ proptest! {
         prop_assert!(result.is_ok(), "nested fold with define failed: {:?}", result);
         // Each outer element multiplied by each inner element, summed
         let expected = (a * a + a * b) + (b * a + b * b);
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -1410,7 +1410,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "define in fold with strings failed: {:?}", result);
         let expected = format!("[{}][{}]", a, b);
-        prop_assert_eq!(result.unwrap(), Value::String(std::rc::Rc::from(expected.as_str())));
+        prop_assert_eq!(result.unwrap(), Value::string(expected.as_str()));
     }
 
     #[test]
@@ -1427,7 +1427,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "map with internal define failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a*a + b*b + c*c));
+        prop_assert_eq!(result.unwrap(), Value::int(a*a + b*b + c*c));
     }
 
     #[test]
@@ -1445,7 +1445,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "filter with internal define failed: {:?}", result);
         let expected = [a, b, c].iter().filter(|&&x| x.abs() > 5).count() as i64;
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     // ============================================================================
@@ -1467,11 +1467,11 @@ proptest! {
                    (define doubled (* x 2))
                    (+ acc doubled))))
                
-               ;; This should work but fails due to name collision
-               (define fold-acc (fn (f acc lst)
-                 (if (nil? lst)
-                   acc
-                   (fold-acc f (f acc (first lst)) (rest lst)))))
+                ;; This should work but fails due to name collision
+                (define fold-acc (fn (f acc lst)
+                  (if (empty? lst)
+                    acc
+                    (fold-acc f (f acc (first lst)) (rest lst)))))
                
                (fold-acc process 0 (list {} {} {})))",
             a, b, c
@@ -1479,7 +1479,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "parameter name collision bug: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(2 * (a + b + c)));
+        prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
     }
 
     #[test]
@@ -1491,11 +1491,11 @@ proptest! {
                  (begin
                    (define doubled (* x 2))
                    (+ acc doubled))))
-               
-               (define fold-init (fn (f init lst)
-                 (if (nil? lst)
-                   init
-                   (fold-init f (f init (first lst)) (rest lst)))))
+                
+                (define fold-init (fn (f init lst)
+                  (if (empty? lst)
+                    init
+                    (fold-init f (f init (first lst)) (rest lst)))))
                
                (fold-init process 0 (list {} {} {})))",
             a, b, c
@@ -1503,7 +1503,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "fold-init failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(2 * (a + b + c)));
+        prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
     }
 
     #[test]
@@ -1529,7 +1529,7 @@ proptest! {
         // outer-local = a * 2
         // middle-local = b + (a * 2)
         // inner-local = 3 * (b + a * 2)
-        prop_assert_eq!(result.unwrap(), Value::Int(3 * (b + a * 2)));
+        prop_assert_eq!(result.unwrap(), Value::int(3 * (b + a * 2)));
     }
 
     #[test]
@@ -1550,7 +1550,7 @@ proptest! {
         prop_assert!(result.is_ok(), "local shadows captured variable failed: {:?}", result);
         // f returns inner_val (the shadowing local)
         // outer x is still outer_val
-        prop_assert_eq!(result.unwrap(), Value::Int(inner_val + outer_val));
+        prop_assert_eq!(result.unwrap(), Value::int(inner_val + outer_val));
     }
 
     #[test]
@@ -1577,7 +1577,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "multiple closures with independent locals failed: {:?}", result);
         // f1 returns a * 2, f2 returns b * 3
-        prop_assert_eq!(result.unwrap(), Value::Int(a * 2 + b * 3));
+        prop_assert_eq!(result.unwrap(), Value::int(a * 2 + b * 3));
     }
 }
 
@@ -1602,7 +1602,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "letrec mutual recursion in lambda failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Bool(n % 2 == 0));
+        prop_assert_eq!(result.unwrap(), Value::bool(n % 2 == 0));
     }
 
     #[test]
@@ -1618,7 +1618,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "nested letrec failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a * b));
+        prop_assert_eq!(result.unwrap(), Value::int(a * b));
     }
 
     #[test]
@@ -1635,7 +1635,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "letrec with captured outer failed: {:?}", result);
         // double-add(n) = add-base(add-base(n)) = (n + base) + base = n + 2*base
-        prop_assert_eq!(result.unwrap(), Value::Int(n as i64 + 2 * outer));
+        prop_assert_eq!(result.unwrap(), Value::int(n as i64 + 2 * outer));
     }
 
     #[test]
@@ -1654,7 +1654,7 @@ proptest! {
 
         prop_assert!(result.is_ok(), "self-recursive with local define failed: {:?}", result);
         let expected: i64 = (1..=n as i64).sum();
-        prop_assert_eq!(result.unwrap(), Value::Int(expected));
+        prop_assert_eq!(result.unwrap(), Value::int(expected));
     }
 
     #[test]
@@ -1674,7 +1674,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "counter in letrec failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(increments as i64));
+        prop_assert_eq!(result.unwrap(), Value::int(increments as i64));
     }
 
     #[test]
@@ -1696,7 +1696,7 @@ proptest! {
             2 => "h",
             _ => unreachable!(),
         };
-        prop_assert_eq!(result.unwrap(), Value::String(expected.into()));
+        prop_assert_eq!(result.unwrap(), Value::string(expected));
     }
 
     #[test]
@@ -1715,7 +1715,7 @@ proptest! {
         prop_assert!(result.is_ok(), "letrec with higher order failed: {:?}", result);
         // apply-twice add-one a = a + 2
         // apply-twice double b = b * 4
-        prop_assert_eq!(result.unwrap(), Value::Int((a + 2) + (b * 4)));
+        prop_assert_eq!(result.unwrap(), Value::int((a + 2) + (b * 4)));
     }
 
     #[test]
@@ -1732,7 +1732,7 @@ proptest! {
         let result = eval(&expr);
 
         prop_assert!(result.is_ok(), "nested lambda with define failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::Int(a * 2 + b));
+        prop_assert_eq!(result.unwrap(), Value::int(a * 2 + b));
     }
 
     #[test]
@@ -1754,6 +1754,6 @@ proptest! {
         let x = a;
         let y = a + b;
         let z = x * y;
-        prop_assert_eq!(result.unwrap(), Value::Int(z));
+        prop_assert_eq!(result.unwrap(), Value::int(z));
     }
 }

@@ -28,6 +28,8 @@ pub struct Emitter {
     /// Stack depth at branch points (label_id -> depth)
     /// Used to reset stack state at control flow merge points
     branch_stack_depth: HashMap<u32, usize>,
+    /// Symbol ID → name mapping for cross-thread portability
+    symbol_names: HashMap<u32, String>,
 }
 
 impl Emitter {
@@ -40,12 +42,30 @@ impl Emitter {
             stack: Vec::new(),
             reg_to_stack: HashMap::new(),
             branch_stack_depth: HashMap::new(),
+            symbol_names: HashMap::new(),
+        }
+    }
+
+    /// Create an emitter with symbol name mappings for cross-thread portability.
+    pub fn new_with_symbols(symbol_names: HashMap<u32, String>) -> Self {
+        Emitter {
+            bytecode: Bytecode::new(),
+            label_offsets: HashMap::new(),
+            pending_jumps: Vec::new(),
+            pending_handler_jumps: Vec::new(),
+            stack: Vec::new(),
+            reg_to_stack: HashMap::new(),
+            branch_stack_depth: HashMap::new(),
+            symbol_names,
         }
     }
 
     /// Emit bytecode from a LIR function
     pub fn emit(&mut self, func: &LirFunction) -> Bytecode {
-        self.bytecode = Bytecode::new();
+        let mut bytecode = Bytecode::new();
+        // Copy symbol names to the new bytecode for cross-thread portability
+        bytecode.symbol_names = self.symbol_names.clone();
+        self.bytecode = bytecode;
         self.label_offsets.clear();
         self.pending_jumps.clear();
         self.pending_handler_jumps.clear();
@@ -148,7 +168,7 @@ impl Emitter {
             }
 
             LirInstr::ValueConst { dst, value } => {
-                let const_idx = self.bytecode.add_constant(value.clone());
+                let const_idx = self.bytecode.add_constant(*value);
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(const_idx);
                 self.push_reg(*dst);
@@ -194,8 +214,9 @@ impl Emitter {
             }
 
             LirInstr::LoadGlobal { dst, sym } => {
-                // Add symbol to constants
-                let const_idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                // Add symbol to constants with name for cross-thread portability
+                let name = self.symbol_names.get(&sym.0).cloned().unwrap_or_default();
+                let const_idx = self.bytecode.add_symbol(sym.0, &name);
                 // LoadGlobal reads the symbol index directly from bytecode
                 self.bytecode.emit(Instruction::LoadGlobal);
                 self.bytecode.emit_u16(const_idx);
@@ -204,7 +225,9 @@ impl Emitter {
 
             LirInstr::StoreGlobal { sym, src } => {
                 self.ensure_on_top(*src);
-                let const_idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                // Add symbol to constants with name for cross-thread portability
+                let name = self.symbol_names.get(&sym.0).cloned().unwrap_or_default();
+                let const_idx = self.bytecode.add_symbol(sym.0, &name);
                 // StoreGlobal reads the symbol index directly from bytecode
                 // Stack should have the value on top
                 self.bytecode.emit(Instruction::StoreGlobal);
@@ -217,9 +240,24 @@ impl Emitter {
                 func,
                 captures,
             } => {
-                // Push captures onto stack
-                for cap in captures {
-                    self.ensure_on_top(*cap);
+                // Check if captures are already in order on top of stack
+                let stack_len = self.stack.len();
+                let mut all_in_place = stack_len >= captures.len();
+                if all_in_place {
+                    let base = stack_len - captures.len();
+                    for (i, cap) in captures.iter().enumerate() {
+                        if self.reg_to_stack.get(cap) != Some(&(base + i)) {
+                            all_in_place = false;
+                            break;
+                        }
+                    }
+                }
+
+                if !all_in_place {
+                    // Captures not in place - need to arrange them
+                    for cap in captures {
+                        self.ensure_on_top(*cap);
+                    }
                 }
 
                 // Recursively emit the nested function
@@ -236,10 +274,11 @@ impl Emitter {
                     source_ast: None,
                     effect: Effect::Pure, // TODO: get from HIR
                     cell_params_mask: func.cell_params_mask,
+                    symbol_names: Rc::new(nested_bytecode.symbol_names),
                 };
 
                 // Add closure template to constants
-                let const_idx = self.bytecode.add_constant(Value::Closure(Rc::new(closure)));
+                let const_idx = self.bytecode.add_constant(Value::closure(closure));
 
                 // Emit MakeClosure instruction
                 self.bytecode.emit(Instruction::MakeClosure);
@@ -405,7 +444,7 @@ impl Emitter {
                         // Emit: push 0, swap, sub
                         // Actually, we need to emit 0 - src
                         // Stack has src on top, we need 0 on top then sub
-                        let zero_idx = self.bytecode.add_constant(Value::Int(0));
+                        let zero_idx = self.bytecode.add_constant(Value::int(0));
                         self.bytecode.emit(Instruction::LoadConst);
                         self.bytecode.emit_u16(zero_idx);
                         self.bytecode.emit(Instruction::Sub);
@@ -531,7 +570,12 @@ impl Emitter {
 
             LirInstr::BindException { var_name } => {
                 self.bytecode.emit(Instruction::BindException);
-                let const_idx = self.bytecode.add_constant(Value::Symbol(*var_name));
+                let name = self
+                    .symbol_names
+                    .get(&var_name.0)
+                    .cloned()
+                    .unwrap_or_default();
+                let const_idx = self.bytecode.add_symbol(var_name.0, &name);
                 self.bytecode.emit_u16(const_idx);
             }
 
@@ -542,6 +586,10 @@ impl Emitter {
 
             LirInstr::ClearException => {
                 self.bytecode.emit(Instruction::ClearException);
+            }
+
+            LirInstr::ReraiseException => {
+                self.bytecode.emit(Instruction::ReraiseException);
             }
 
             LirInstr::Throw { value } => {
@@ -636,6 +684,9 @@ impl Emitter {
             LirConst::Nil => {
                 self.bytecode.emit(Instruction::Nil);
             }
+            LirConst::EmptyList => {
+                self.bytecode.emit(Instruction::EmptyList);
+            }
             LirConst::Bool(true) => {
                 self.bytecode.emit(Instruction::True);
             }
@@ -643,29 +694,28 @@ impl Emitter {
                 self.bytecode.emit(Instruction::False);
             }
             LirConst::Int(n) => {
-                let idx = self.bytecode.add_constant(Value::Int(*n));
+                let idx = self.bytecode.add_constant(Value::int(*n));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
             LirConst::Float(f) => {
-                let idx = self.bytecode.add_constant(Value::Float(*f));
+                let idx = self.bytecode.add_constant(Value::float(*f));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
             LirConst::String(s) => {
-                let idx = self
-                    .bytecode
-                    .add_constant(Value::String(std::rc::Rc::from(s.as_str())));
+                let idx = self.bytecode.add_constant(Value::string(s.clone()));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
             LirConst::Symbol(sym) => {
-                let idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                let name = self.symbol_names.get(&sym.0).cloned().unwrap_or_default();
+                let idx = self.bytecode.add_symbol(sym.0, &name);
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
             LirConst::Keyword(sym) => {
-                let idx = self.bytecode.add_constant(Value::Keyword(*sym));
+                let idx = self.bytecode.add_constant(Value::keyword(sym.0));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }

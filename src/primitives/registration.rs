@@ -5,7 +5,7 @@ use crate::value::Value;
 use crate::vm::VM;
 
 use super::arithmetic::{
-    prim_abs, prim_add, prim_div, prim_even, prim_max, prim_min, prim_mod, prim_mul, prim_odd,
+    prim_abs, prim_add, prim_div_vm, prim_even, prim_max, prim_min, prim_mod, prim_mul, prim_odd,
     prim_rem, prim_sub,
 };
 use super::cell::{prim_box, prim_box_p, prim_box_set, prim_unbox};
@@ -17,7 +17,7 @@ use super::coroutines::{
     prim_yield_from,
 };
 use super::debug::{prim_debug_print, prim_memory_usage, prim_profile, prim_trace};
-use super::display::{prim_display, prim_newline};
+use super::display::{prim_display, prim_newline, prim_print};
 use super::exception::{prim_exception, prim_exception_data, prim_exception_message, prim_throw};
 use super::file_io::{
     prim_absolute_path, prim_append_file, prim_change_directory, prim_copy_file,
@@ -69,7 +69,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
     register_fn(vm, symbols, "+", prim_add);
     register_fn(vm, symbols, "-", prim_sub);
     register_fn(vm, symbols, "*", prim_mul);
-    register_fn(vm, symbols, "/", prim_div);
+    register_vm_aware_fn(vm, symbols, "/", prim_div_vm);
 
     // Comparisons
     register_fn(vm, symbols, "=", prim_eq);
@@ -103,6 +103,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Display
     register_fn(vm, symbols, "display", prim_display);
+    register_fn(vm, symbols, "print", prim_print);
     register_fn(vm, symbols, "newline", prim_newline);
 
     // Additional list operations
@@ -401,10 +402,10 @@ fn register_fn(
     vm: &mut VM,
     symbols: &mut SymbolTable,
     name: &str,
-    func: fn(&[Value]) -> LResult<Value>,
+    func: fn(&[Value]) -> Result<Value, crate::value::Condition>,
 ) {
     let sym_id = symbols.intern(name);
-    vm.set_global(sym_id.0, Value::NativeFn(func));
+    vm.set_global(sym_id.0, Value::native_fn(func));
 }
 
 /// Register a VM-aware primitive function with the VM
@@ -415,5 +416,5 @@ fn register_vm_aware_fn(
     func: fn(&[Value], &mut VM) -> LResult<Value>,
 ) {
     let sym_id = symbols.intern(name);
-    vm.set_global(sym_id.0, Value::VmAwareFn(func));
+    vm.set_global(sym_id.0, Value::vm_aware_fn(func));
 }

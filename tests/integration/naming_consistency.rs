@@ -31,7 +31,7 @@ fn eval(input: &str) -> Result<Value, String> {
     } else if values.is_empty() {
         return Err("No input".to_string());
     } else {
-        let mut begin_args = vec![Value::Symbol(symbols.intern("begin"))];
+        let mut begin_args = vec![Value::symbol(symbols.intern("begin").0)];
         begin_args.extend(values);
         list(begin_args)
     };
@@ -45,32 +45,32 @@ fn eval(input: &str) -> Result<Value, String> {
 
 #[test]
 fn test_get_on_table() {
-    assert_eq!(eval("(get (table 'a 1) 'a)").unwrap(), Value::Int(1));
+    assert_eq!(eval("(get (table 'a 1) 'a)").unwrap(), Value::int(1));
 }
 
 #[test]
 fn test_get_on_table_with_default() {
-    assert_eq!(eval("(get (table 'a 1) 'b 99)").unwrap(), Value::Int(99));
+    assert_eq!(eval("(get (table 'a 1) 'b 99)").unwrap(), Value::int(99));
 }
 
 #[test]
 fn test_get_on_table_missing_key() {
-    assert_eq!(eval("(get (table 'a 1) 'b)").unwrap(), Value::Nil);
+    assert_eq!(eval("(get (table 'a 1) 'b)").unwrap(), Value::NIL);
 }
 
 #[test]
 fn test_get_on_struct() {
-    assert_eq!(eval("(get (struct 'a 1) 'a)").unwrap(), Value::Int(1));
+    assert_eq!(eval("(get (struct 'a 1) 'a)").unwrap(), Value::int(1));
 }
 
 #[test]
 fn test_get_on_struct_with_default() {
-    assert_eq!(eval("(get (struct 'a 1) 'b 99)").unwrap(), Value::Int(99));
+    assert_eq!(eval("(get (struct 'a 1) 'b 99)").unwrap(), Value::int(99));
 }
 
 #[test]
 fn test_get_on_struct_missing_key() {
-    assert_eq!(eval("(get (struct 'a 1) 'b)").unwrap(), Value::Nil);
+    assert_eq!(eval("(get (struct 'a 1) 'b)").unwrap(), Value::NIL);
 }
 
 #[test]
@@ -83,25 +83,25 @@ fn test_get_on_invalid_type() {
 #[test]
 fn test_keys_on_table() {
     let result = eval("(keys (table 'a 1 'b 2))").unwrap();
-    assert!(matches!(result, Value::Cons(_)));
+    assert!((result).is_cons());
 }
 
 #[test]
 fn test_keys_on_struct() {
     let result = eval("(keys (struct 'a 1 'b 2))").unwrap();
-    assert!(matches!(result, Value::Cons(_)));
+    assert!((result).is_cons());
 }
 
 #[test]
 fn test_keys_on_empty_table() {
     let result = eval("(keys (table))").unwrap();
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::EMPTY_LIST);
 }
 
 #[test]
 fn test_keys_on_empty_struct() {
     let result = eval("(keys (struct))").unwrap();
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::EMPTY_LIST);
 }
 
 #[test]
@@ -114,25 +114,25 @@ fn test_keys_on_invalid_type() {
 #[test]
 fn test_values_on_table() {
     let result = eval("(values (table 'a 1 'b 2))").unwrap();
-    assert!(matches!(result, Value::Cons(_)));
+    assert!((result).is_cons());
 }
 
 #[test]
 fn test_values_on_struct() {
     let result = eval("(values (struct 'a 1 'b 2))").unwrap();
-    assert!(matches!(result, Value::Cons(_)));
+    assert!((result).is_cons());
 }
 
 #[test]
 fn test_values_on_empty_table() {
     let result = eval("(values (table))").unwrap();
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::EMPTY_LIST);
 }
 
 #[test]
 fn test_values_on_empty_struct() {
     let result = eval("(values (struct))").unwrap();
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::EMPTY_LIST);
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn test_values_on_invalid_type() {
 fn test_has_key_on_table_true() {
     assert_eq!(
         eval("(has-key? (table 'a 1) 'a)").unwrap(),
-        Value::Bool(true)
+        Value::bool(true)
     );
 }
 
@@ -154,7 +154,7 @@ fn test_has_key_on_table_true() {
 fn test_has_key_on_table_false() {
     assert_eq!(
         eval("(has-key? (table 'a 1) 'b)").unwrap(),
-        Value::Bool(false)
+        Value::bool(false)
     );
 }
 
@@ -162,7 +162,7 @@ fn test_has_key_on_table_false() {
 fn test_has_key_on_struct_true() {
     assert_eq!(
         eval("(has-key? (struct 'a 1) 'a)").unwrap(),
-        Value::Bool(true)
+        Value::bool(true)
     );
 }
 
@@ -170,7 +170,7 @@ fn test_has_key_on_struct_true() {
 fn test_has_key_on_struct_false() {
     assert_eq!(
         eval("(has-key? (struct 'a 1) 'b)").unwrap(),
-        Value::Bool(false)
+        Value::bool(false)
     );
 }
 
@@ -184,25 +184,25 @@ fn test_has_key_on_invalid_type() {
 #[test]
 fn test_put_bang_mutates_table() {
     let result = eval("(let ((t (table))) (put! t 'a 1) (get t 'a))").unwrap();
-    assert_eq!(result, Value::Int(1));
+    assert_eq!(result, Value::int(1));
 }
 
 #[test]
 fn test_put_bang_returns_table() {
     let result = eval("(let ((t (table))) (put! t 'a 1))").unwrap();
-    assert!(matches!(result, Value::Table(_)));
+    assert!((result).is_table());
 }
 
 #[test]
 fn test_del_bang_removes_key() {
     let result = eval("(let ((t (table 'a 1))) (del! t 'a) (has-key? t 'a))").unwrap();
-    assert_eq!(result, Value::Bool(false));
+    assert_eq!(result, Value::bool(false));
 }
 
 #[test]
 fn test_del_bang_returns_table() {
     let result = eval("(let ((t (table 'a 1))) (del! t 'a))").unwrap();
-    assert!(matches!(result, Value::Table(_)));
+    assert!((result).is_table());
 }
 
 #[test]
@@ -223,17 +223,17 @@ fn test_del_and_del_bang_equivalent() {
 
 #[test]
 fn test_string_to_int_basic() {
-    assert_eq!(eval("(string->int \"42\")").unwrap(), Value::Int(42));
+    assert_eq!(eval("(string->int \"42\")").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_string_to_int_negative() {
-    assert_eq!(eval("(string->int \"-123\")").unwrap(), Value::Int(-123));
+    assert_eq!(eval("(string->int \"-123\")").unwrap(), Value::int(-123));
 }
 
 #[test]
 fn test_string_to_int_zero() {
-    assert_eq!(eval("(string->int \"0\")").unwrap(), Value::Int(0));
+    assert_eq!(eval("(string->int \"0\")").unwrap(), Value::int(0));
 }
 
 #[test]
@@ -244,18 +244,20 @@ fn test_string_to_int_invalid() {
 #[test]
 fn test_string_to_float_basic() {
     let result = eval("(string->float \"3.14\")").unwrap();
-    match result {
-        Value::Float(f) => assert!((f - PI).abs() < 0.01),
-        _ => panic!("Expected float"),
+    if let Some(f) = result.as_float() {
+        assert!((f - PI).abs() < 0.01)
+    } else {
+        panic!("Expected float")
     }
 }
 
 #[test]
 fn test_string_to_float_negative() {
     let result = eval("(string->float \"-2.5\")").unwrap();
-    match result {
-        Value::Float(f) => assert!((f - (-2.5)).abs() < 0.001),
-        _ => panic!("Expected float"),
+    if let Some(f) = result.as_float() {
+        assert!((f - (-2.5)).abs() < 0.001)
+    } else {
+        panic!("Expected float")
     }
 }
 
@@ -266,50 +268,39 @@ fn test_string_to_float_invalid() {
 
 #[test]
 fn test_any_to_string_int() {
-    assert_eq!(
-        eval("(any->string 42)").unwrap(),
-        Value::String("42".into())
-    );
+    assert_eq!(eval("(any->string 42)").unwrap(), Value::string("42"));
 }
 
 #[test]
 fn test_any_to_string_float() {
     let result = eval("(any->string 3.14)").unwrap();
-    match result {
-        Value::String(s) => assert!(s.contains("3.14")),
-        _ => panic!("Expected string"),
+    if let Some(s) = result.as_string() {
+        assert!(s.contains("3.14"))
+    } else {
+        panic!("Expected string")
     }
 }
 
 #[test]
 fn test_any_to_string_bool_true() {
-    assert_eq!(
-        eval("(any->string #t)").unwrap(),
-        Value::String("true".into())
-    );
+    assert_eq!(eval("(any->string #t)").unwrap(), Value::string("true"));
 }
 
 #[test]
 fn test_any_to_string_bool_false() {
-    assert_eq!(
-        eval("(any->string #f)").unwrap(),
-        Value::String("false".into())
-    );
+    assert_eq!(eval("(any->string #f)").unwrap(), Value::string("false"));
 }
 
 #[test]
 fn test_any_to_string_nil() {
-    assert_eq!(
-        eval("(any->string nil)").unwrap(),
-        Value::String("nil".into())
-    );
+    assert_eq!(eval("(any->string nil)").unwrap(), Value::string("nil"));
 }
 
 #[test]
 fn test_any_to_string_string() {
     assert_eq!(
         eval("(any->string \"hello\")").unwrap(),
-        Value::String("hello".into())
+        Value::string("hello")
     );
 }
 
@@ -317,21 +308,22 @@ fn test_any_to_string_string() {
 
 #[test]
 fn test_legacy_int_still_works() {
-    assert_eq!(eval("(int \"42\")").unwrap(), Value::Int(42));
+    assert_eq!(eval("(int \"42\")").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_legacy_float_still_works() {
     let result = eval("(float \"3.14\")").unwrap();
-    match result {
-        Value::Float(f) => assert!((f - PI).abs() < 0.01),
-        _ => panic!("Expected float"),
+    if let Some(f) = result.as_float() {
+        assert!((f - PI).abs() < 0.01)
+    } else {
+        panic!("Expected float")
     }
 }
 
 #[test]
 fn test_legacy_string_still_works() {
-    assert_eq!(eval("(string 42)").unwrap(), Value::String("42".into()));
+    assert_eq!(eval("(string 42)").unwrap(), Value::string("42"));
 }
 
 #[test]
@@ -355,7 +347,7 @@ fn test_polymorphic_api_with_table() {
     "#;
     let result = eval(code).unwrap();
     // Should be a list of (10, 2, 2, #t)
-    assert!(matches!(result, Value::Cons(_)));
+    assert!((result).is_cons());
 }
 
 #[test]
@@ -370,7 +362,7 @@ fn test_polymorphic_api_with_struct() {
     "#;
     let result = eval(code).unwrap();
     // Should be a list of (10, 2, 2, #t)
-    assert!(matches!(result, Value::Cons(_)));
+    assert!((result).is_cons());
 }
 
 #[test]
@@ -383,7 +375,7 @@ fn test_table_mutation_with_bang_syntax() {
           (list (has-key? t 'a) (has-key? t 'b)))
     "#;
     let result = eval(code).unwrap();
-    assert!(matches!(result, Value::Cons(_)));
+    assert!((result).is_cons());
 }
 
 #[test]
@@ -396,7 +388,7 @@ fn test_struct_immutability_preserved() {
               (has-key? s2 'b))))
     "#;
     let result = eval(code).unwrap();
-    assert!(matches!(result, Value::Cons(_)));
+    assert!((result).is_cons());
 }
 
 #[test]
@@ -404,5 +396,5 @@ fn test_conversion_chain() {
     let code = r#"
         (any->string (string->int "42"))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::String("42".into()));
+    assert_eq!(eval(code).unwrap(), Value::string("42"));
 }

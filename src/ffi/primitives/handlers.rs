@@ -1,5 +1,6 @@
 //! FFI primitives for custom type handler registration and management.
 
+use crate::error::{LError, LResult};
 use crate::ffi::handlers::{TypeHandler, TypeId};
 use crate::ffi::marshal::CValue;
 use crate::ffi::types::CType;
@@ -53,14 +54,16 @@ pub fn prim_define_custom_handler(vm: &VM, args: &[Value]) -> Result<Value, Stri
         return Err("define-custom-handler requires exactly 4 arguments".into());
     }
 
-    let name = match &args[0] {
-        Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".into()),
+    let name = if let Some(s) = args[0].as_string() {
+        s.to_string()
+    } else {
+        return Err("Handler name must be a string".into());
     };
 
-    let _priority = match &args[3] {
-        Value::Int(p) => *p as i32,
-        _ => return Err("Priority must be an integer".into()),
+    let _priority = if let Some(p) = args[3].as_int() {
+        p as i32
+    } else {
+        return Err("Priority must be an integer".into());
     };
 
     // Note: args[1] is elle_to_c_fn and args[2] is c_to_elle_fn
@@ -73,7 +76,7 @@ pub fn prim_define_custom_handler(vm: &VM, args: &[Value]) -> Result<Value, Stri
     let type_id = TypeId::new(name);
     vm.ffi().handler_registry().register(type_id, handler)?;
 
-    Ok(Value::Nil)
+    Ok(Value::EMPTY_LIST)
 }
 
 /// (unregister-custom-handler name) -> nil
@@ -87,15 +90,16 @@ pub fn prim_unregister_custom_handler(vm: &VM, args: &[Value]) -> Result<Value, 
         return Err("unregister-custom-handler requires exactly 1 argument".into());
     }
 
-    let name = match &args[0] {
-        Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".into()),
+    let name = if let Some(s) = args[0].as_string() {
+        s.to_string()
+    } else {
+        return Err("Handler name must be a string".into());
     };
 
     let type_id = TypeId::new(name);
     vm.ffi().handler_registry().unregister(&type_id)?;
 
-    Ok(Value::Nil)
+    Ok(Value::EMPTY_LIST)
 }
 
 /// (list-custom-handlers) -> ((name priority) ...)
@@ -104,13 +108,13 @@ pub fn prim_unregister_custom_handler(vm: &VM, args: &[Value]) -> Result<Value, 
 pub fn prim_list_custom_handlers(vm: &VM, _args: &[Value]) -> Result<Value, String> {
     let handlers = vm.ffi().handler_registry().list_handlers()?;
 
-    let mut result = Value::Nil;
+    let mut result = Value::NIL;
     for (type_id, metadata) in handlers.into_iter().rev() {
-        let entry = crate::value::cons(
-            Value::String(type_id.name().into()),
-            crate::value::cons(Value::Int(metadata.priority as i64), Value::Nil),
+        let entry = Value::cons(
+            Value::string(type_id.name()),
+            Value::cons(Value::int(metadata.priority as i64), Value::EMPTY_LIST),
         );
-        result = crate::value::cons(entry, result);
+        result = Value::cons(entry, result);
     }
 
     Ok(result)
@@ -127,15 +131,16 @@ pub fn prim_custom_handler_registered(vm: &VM, args: &[Value]) -> Result<Value, 
         return Err("custom-handler-registered? requires exactly 1 argument".into());
     }
 
-    let name = match &args[0] {
-        Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".into()),
+    let name = if let Some(s) = args[0].as_string() {
+        s.to_string()
+    } else {
+        return Err("Handler name must be a string".into());
     };
 
     let type_id = TypeId::new(name);
     let registered = vm.ffi().handler_registry().has_handler(&type_id)?;
 
-    Ok(Value::Int(if registered { 1 } else { 0 }))
+    Ok(Value::int(if registered { 1 } else { 0 }))
 }
 
 /// (clear-custom-handlers) -> nil
@@ -143,24 +148,28 @@ pub fn prim_custom_handler_registered(vm: &VM, args: &[Value]) -> Result<Value, 
 /// Clears all registered custom type handlers.
 pub fn prim_clear_custom_handlers(vm: &VM, _args: &[Value]) -> Result<Value, String> {
     vm.ffi().handler_registry().clear()?;
-    Ok(Value::Nil)
+    Ok(Value::EMPTY_LIST)
 }
 
 // Wrapper functions for context-aware calls
 
-pub fn prim_define_custom_handler_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
+pub fn prim_define_custom_handler_wrapper(args: &[Value]) -> LResult<Value> {
     if args.len() != 4 {
-        return Err("define-custom-handler requires exactly 4 arguments".into());
+        return Err(LError::from(
+            "define-custom-handler requires exactly 4 arguments",
+        ));
     }
 
-    let name = match &args[0] {
-        Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".into()),
+    let name = if let Some(s) = args[0].as_string() {
+        s.to_string()
+    } else {
+        return Err(LError::from("Handler name must be a string"));
     };
 
-    let _priority = match &args[3] {
-        Value::Int(p) => *p as i32,
-        _ => return Err("Priority must be an integer".into()),
+    let _priority = if let Some(p) = args[3].as_int() {
+        p as i32
+    } else {
+        return Err(LError::from("Priority must be an integer"));
     };
 
     // Note: args[1] is elle_to_c_fn and args[2] is c_to_elle_fn
@@ -173,81 +182,92 @@ pub fn prim_define_custom_handler_wrapper(args: &[Value]) -> crate::error::LResu
     let type_id = TypeId::new(name);
 
     // Get VM context
-    let vm_ptr = super::context::get_vm_context().ok_or("FFI not initialized")?;
+    let vm_ptr =
+        super::context::get_vm_context().ok_or_else(|| LError::from("FFI not initialized"))?;
     unsafe {
         let vm = &*vm_ptr;
         vm.ffi().handler_registry().register(type_id, handler)?;
     }
 
-    Ok(Value::Nil)
+    Ok(Value::EMPTY_LIST)
 }
 
-pub fn prim_unregister_custom_handler_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
+pub fn prim_unregister_custom_handler_wrapper(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("unregister-custom-handler requires exactly 1 argument".into());
+        return Err(LError::from(
+            "unregister-custom-handler requires exactly 1 argument",
+        ));
     }
 
-    let name = match &args[0] {
-        Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".into()),
+    let name = if let Some(s) = args[0].as_string() {
+        s.to_string()
+    } else {
+        return Err(LError::from("Handler name must be a string"));
     };
 
     let type_id = TypeId::new(name);
 
-    let vm_ptr = super::context::get_vm_context().ok_or("FFI not initialized")?;
+    let vm_ptr =
+        super::context::get_vm_context().ok_or_else(|| LError::from("FFI not initialized"))?;
     unsafe {
         let vm = &*vm_ptr;
         vm.ffi().handler_registry().unregister(&type_id)?;
     }
 
-    Ok(Value::Nil)
+    Ok(Value::EMPTY_LIST)
 }
 
-pub fn prim_list_custom_handlers_wrapper(_args: &[Value]) -> crate::error::LResult<Value> {
-    let vm_ptr = super::context::get_vm_context().ok_or("FFI not initialized")?;
+pub fn prim_list_custom_handlers_wrapper(_args: &[Value]) -> LResult<Value> {
+    let vm_ptr =
+        super::context::get_vm_context().ok_or_else(|| LError::from("FFI not initialized"))?;
     unsafe {
         let vm = &*vm_ptr;
         let handlers = vm.ffi().handler_registry().list_handlers()?;
 
-        let mut result = Value::Nil;
+        let mut result = Value::NIL;
         for (type_id, metadata) in handlers.into_iter().rev() {
-            let entry = crate::value::cons(
-                Value::String(type_id.name().into()),
-                crate::value::cons(Value::Int(metadata.priority as i64), Value::Nil),
+            let entry = Value::cons(
+                Value::string(type_id.name()),
+                Value::cons(Value::int(metadata.priority as i64), Value::EMPTY_LIST),
             );
-            result = crate::value::cons(entry, result);
+            result = Value::cons(entry, result);
         }
 
         Ok(result)
     }
 }
 
-pub fn prim_custom_handler_registered_wrapper(args: &[Value]) -> crate::error::LResult<Value> {
+pub fn prim_custom_handler_registered_wrapper(args: &[Value]) -> LResult<Value> {
     if args.len() != 1 {
-        return Err("custom-handler-registered? requires exactly 1 argument".into());
+        return Err(LError::from(
+            "custom-handler-registered? requires exactly 1 argument",
+        ));
     }
 
-    let name = match &args[0] {
-        Value::String(s) => s.as_ref().to_string(),
-        _ => return Err("Handler name must be a string".into()),
+    let name = if let Some(s) = args[0].as_string() {
+        s.to_string()
+    } else {
+        return Err(LError::from("Handler name must be a string"));
     };
 
     let type_id = TypeId::new(name);
 
-    let vm_ptr = super::context::get_vm_context().ok_or("FFI not initialized")?;
+    let vm_ptr =
+        super::context::get_vm_context().ok_or_else(|| LError::from("FFI not initialized"))?;
     unsafe {
         let vm = &*vm_ptr;
         let registered = vm.ffi().handler_registry().has_handler(&type_id)?;
-        Ok(Value::Int(if registered { 1 } else { 0 }))
+        Ok(Value::int(if registered { 1 } else { 0 }))
     }
 }
 
-pub fn prim_clear_custom_handlers_wrapper(_args: &[Value]) -> crate::error::LResult<Value> {
-    let vm_ptr = super::context::get_vm_context().ok_or("FFI not initialized")?;
+pub fn prim_clear_custom_handlers_wrapper(_args: &[Value]) -> LResult<Value> {
+    let vm_ptr =
+        super::context::get_vm_context().ok_or_else(|| LError::from("FFI not initialized"))?;
     unsafe {
         let vm = &*vm_ptr;
         vm.ffi().handler_registry().clear()?;
     }
 
-    Ok(Value::Nil)
+    Ok(Value::EMPTY_LIST)
 }

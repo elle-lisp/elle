@@ -88,7 +88,7 @@ fn unit_while_loop_returns_nil() {
     env.eval("(define x 0)").unwrap();
     let result = env.eval("(while (< x 1) (set! x 1))").unwrap();
 
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::NIL);
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn unit_for_loop_returns_nil() {
     env.eval("(define lst (list 1 2 3))").unwrap();
     let result = env.eval("(each item lst (+ item 1))").unwrap();
 
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::NIL);
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn unit_simple_while_increment() {
         .unwrap();
     let result = env.eval("counter").unwrap();
 
-    assert_eq!(result, Value::Int(3));
+    assert_eq!(result, Value::int(3));
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn unit_while_loop_comparison_operators() {
     env.eval("(while (>= n 1) (set! n (- n 1)))").unwrap();
     let result = env.eval("n").unwrap();
 
-    assert_eq!(result, Value::Int(0));
+    assert_eq!(result, Value::int(0));
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn unit_while_loop_multiplication() {
 
     let x = env.eval("x").unwrap();
     // 2 * 2^5 = 64
-    assert_eq!(x, Value::Int(64));
+    assert_eq!(x, Value::int(64));
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn unit_loop_variable_mutation() {
     env.eval("(while (> a b) (set! a (- a 1)))").unwrap();
 
     let a = env.eval("a").unwrap();
-    assert_eq!(a, Value::Int(5)); // a should equal b after loop
+    assert_eq!(a, Value::int(5)); // a should equal b after loop
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn unit_while_false_condition() {
     env.eval("(while (= 1 0) (set! flag 1))").unwrap();
     let flag = env.eval("flag").unwrap();
 
-    assert_eq!(flag, Value::Int(0)); // flag should remain 0
+    assert_eq!(flag, Value::int(0)); // flag should remain 0
 }
 
 #[test]
@@ -312,4 +312,56 @@ fn unit_forever_loop_compiles_with_multiple_body_expressions() {
 
     let _bytecode = compile(&expr);
     // If we get here, compilation succeeded
+}
+
+#[test]
+fn unit_each_loop_empty_list_zero_iterations() {
+    let mut env = LoopTestEnv::new();
+
+    // Test: (each x '() body) should iterate 0 times
+    env.eval("(define counter 0)").unwrap();
+    let result = env.eval("(each x '() (set! counter (+ counter 1)))");
+    
+    assert!(result.is_ok());
+    let counter_val = env.eval("counter").unwrap();
+    assert_eq!(counter_val, Value::int(0), "Empty list should not iterate");
+}
+
+#[test]
+fn unit_each_loop_nil_errors() {
+    let mut env = LoopTestEnv::new();
+
+    // Test: (each x nil body) should error - nil is not a valid list
+    // Proper lists must end with '(), not nil
+    env.eval("(define counter 0)").unwrap();
+    let result = env.eval("(each x nil (set! counter (+ counter 1)))");
+    
+    // nil is not a valid list terminator - should error
+    assert!(result.is_err(), "Iterating over nil should error");
+}
+
+#[test]
+fn unit_each_loop_non_empty_list_iterates() {
+    let mut env = LoopTestEnv::new();
+
+    // Test: (each x (list 1 2 3) body) should iterate 3 times
+    env.eval("(define counter 0)").unwrap();
+    let result = env.eval("(each x (list 1 2 3) (set! counter (+ counter 1)))");
+    
+    assert!(result.is_ok());
+    let counter_val = env.eval("counter").unwrap();
+    assert_eq!(counter_val, Value::int(3), "List with 3 elements should iterate 3 times");
+}
+
+#[test]
+fn unit_each_loop_collects_values() {
+    let mut env = LoopTestEnv::new();
+
+    // Test: (each x (list 1 2 3) body) should iterate with correct values
+    env.eval("(define values '())").unwrap();
+    env.eval("(each x (list 1 2 3) (set! values (cons x values)))").unwrap();
+    
+    let values_val = env.eval("values").unwrap();
+    // Values should be in reverse order due to cons
+    assert!(values_val.is_list());
 }

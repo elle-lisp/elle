@@ -8,7 +8,7 @@ use elle::binding::VarRef;
 use elle::compiler::ast::Expr;
 use elle::compiler::converters::value_to_expr;
 use elle::compiler::scope::ScopeType;
-use elle::{read_str, SymbolTable, Value};
+use elle::{read_str, SymbolTable};
 
 /// Test basic scope structure creation
 #[test]
@@ -291,7 +291,7 @@ fn test_variable_in_function_call() {
             }
             // Second argument is 1 (literal)
             match &args[1] {
-                Expr::Literal(Value::Int(1)) => {
+                Expr::Literal(v) if v.as_int() == Some(1) => {
                     // Correct
                 }
                 _ => panic!("Expected Literal(1)"),
@@ -361,7 +361,7 @@ fn test_literal_values() {
     let expr = value_to_expr(&value, &mut symbols).expect("Failed to convert to expression");
 
     match expr {
-        Expr::Literal(Value::Int(42)) => {
+        Expr::Literal(v) if v.as_int() == Some(42) => {
             // Correct
         }
         _ => panic!("Expected Literal expression"),

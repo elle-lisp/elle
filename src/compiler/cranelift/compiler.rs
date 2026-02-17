@@ -186,8 +186,14 @@ impl ExprCompiler {
                             None
                         }
                     }
-                    Expr::Literal(Value::Symbol(sym_id)) => {
-                        ctx.symbols.name(*sym_id).map(|s| s.to_string())
+                    Expr::Literal(val) => {
+                        if let Some(sym_id) = val.as_symbol() {
+                            ctx.symbols
+                                .name(crate::value::SymbolId(sym_id))
+                                .map(|s| s.to_string())
+                        } else {
+                            None
+                        }
                     }
                     _ => None,
                 };
@@ -470,10 +476,10 @@ impl ExprCompiler {
             return Ok(SlotType::I64); // Default for empty lists
         }
 
-        let first_is_float = matches!(&elements[0], Value::Float(_));
+        let first_is_float = elements[0].is_float();
 
         for elem in elements.iter().skip(1) {
-            let is_float = matches!(elem, Value::Float(_));
+            let is_float = elem.is_float();
             if is_float != first_is_float {
                 return Err("Mixed int/float elements in for loop not yet supported".to_string());
             }
@@ -498,21 +504,25 @@ impl ExprCompiler {
         body: &Expr,
     ) -> Result<IrValue, String> {
         // Check if the iterable is a literal list that we can unroll
-        match iter {
-            Expr::Literal(Value::Nil) => {
+        if let Expr::Literal(val) = iter {
+            if val.is_nil() || val.is_empty_list() {
                 // Empty list - for loop body never executes, return nil
-                Ok(IrValue::I64(ctx.builder.ins().iconst(types::I64, 0)))
+                return Ok(IrValue::I64(ctx.builder.ins().iconst(types::I64, 0)));
             }
-            Expr::Literal(Value::Cons(cons_rc)) => {
+
+            // Try to extract cons
+            if let Some(cons) = val.as_cons() {
                 // Collect elements from literal cons list
                 let mut elements = Vec::new();
-                let mut current = (**cons_rc).clone();
+                let mut current = cons.clone();
                 loop {
-                    elements.push(current.first.clone());
-                    match &current.rest {
-                        Value::Nil => break,
-                        Value::Cons(next_cons) => current = (**next_cons).clone(),
-                        _ => return Err("For loop over improper list not supported".to_string()),
+                    elements.push(current.first);
+                    if current.rest.is_nil() || current.rest.is_empty_list() {
+                        break;
+                    } else if let Some(next_cons) = current.rest.as_cons() {
+                        current = next_cons.clone();
+                    } else {
+                        return Err("For loop over improper list not supported".to_string());
                     }
                 }
 
@@ -532,30 +542,21 @@ impl ExprCompiler {
 
                 for elem in elements {
                     // Compile and store the element value
-                    match (&elem, slot_type) {
-                        (Value::Nil, SlotType::I64) => {
-                            let v = ctx.builder.ins().iconst(types::I64, 0);
-                            ctx.builder.ins().stack_store(v, slot, 0);
-                        }
-                        (Value::Bool(b), SlotType::I64) => {
-                            let v = ctx.builder.ins().iconst(types::I64, if *b { 1 } else { 0 });
-                            ctx.builder.ins().stack_store(v, slot, 0);
-                        }
-                        (Value::Int(i), SlotType::I64) => {
-                            let v = ctx.builder.ins().iconst(types::I64, *i);
-                            ctx.builder.ins().stack_store(v, slot, 0);
-                        }
-                        (Value::Float(f), SlotType::F64) => {
-                            let v = ctx.builder.ins().f64const(*f);
-                            ctx.builder.ins().stack_store(v, slot, 0);
-                        }
-                        _ => {
-                            ctx.scope_manager.pop_scope().ok();
-                            return Err(format!(
-                                "Unsupported element type in for loop: {:?}",
-                                elem
-                            ));
-                        }
+                    if elem.is_nil() || elem.is_empty_list() {
+                        let v = ctx.builder.ins().iconst(types::I64, 0);
+                        ctx.builder.ins().stack_store(v, slot, 0);
+                    } else if let Some(b) = elem.as_bool() {
+                        let v = ctx.builder.ins().iconst(types::I64, if b { 1 } else { 0 });
+                        ctx.builder.ins().stack_store(v, slot, 0);
+                    } else if let Some(i) = elem.as_int() {
+                        let v = ctx.builder.ins().iconst(types::I64, i);
+                        ctx.builder.ins().stack_store(v, slot, 0);
+                    } else if let Some(f) = elem.as_float() {
+                        let v = ctx.builder.ins().f64const(f);
+                        ctx.builder.ins().stack_store(v, slot, 0);
+                    } else {
+                        ctx.scope_manager.pop_scope().ok();
+                        return Err(format!("Unsupported element type in for loop: {:?}", elem));
                     }
 
                     // Compile body (can now reference the loop variable)
@@ -565,13 +566,12 @@ impl ExprCompiler {
                 // Pop loop scope
                 ctx.scope_manager.pop_scope().map_err(|e| e.to_string())?;
 
-                Ok(result)
-            }
-            _ => {
-                // Runtime-computed iterables - compile the iterable expression and use runtime helpers
-                Self::compile_for_runtime(ctx, var, iter, body)
+                return Ok(result);
             }
         }
+
+        // Runtime-computed iterables - compile the iterable expression and use runtime helpers
+        Self::compile_for_runtime(ctx, var, iter, body)
     }
 
     /// Compile a for loop over a runtime-computed iterable
@@ -907,7 +907,13 @@ impl ExprCompiler {
     ) -> Result<IrValue, String> {
         // Extract operator name from function (either Var or Literal Symbol)
         let op_name = match func {
-            Expr::Literal(Value::Symbol(sym_id)) => ctx.symbols.name(*sym_id),
+            Expr::Literal(val) => {
+                if let Some(sym_id) = val.as_symbol() {
+                    ctx.symbols.name(crate::value::SymbolId(sym_id))
+                } else {
+                    None
+                }
+            }
             Expr::Var(var_ref) => {
                 if let crate::binding::VarRef::Global { sym } = var_ref {
                     ctx.symbols.name(*sym)
@@ -960,16 +966,17 @@ impl ExprCompiler {
                 }
             }
             "nil?" => {
-                // nil? is same as empty?
+                // nil? checks only for nil (0), not empty list
                 match arg {
                     IrValue::I64(val) => {
                         let zero = ctx.builder.ins().iconst(types::I64, 0);
-                        let cmp_result =
+
+                        let is_nil =
                             ctx.builder
                                 .ins()
                                 .icmp(cranelift::prelude::IntCC::Equal, val, zero);
                         // Extend i8 boolean to i64
-                        let result = ctx.builder.ins().uextend(types::I64, cmp_result);
+                        let result = ctx.builder.ins().uextend(types::I64, is_nil);
                         Ok(IrValue::I64(result))
                     }
                     _ => Err("nil? on non-I64 not supported".to_string()),
@@ -1004,7 +1011,13 @@ impl ExprCompiler {
     ) -> Result<IrValue, String> {
         // Extract operator name from function (either Var or Literal Symbol)
         let op_name = match func {
-            Expr::Literal(Value::Symbol(sym_id)) => ctx.symbols.name(*sym_id),
+            Expr::Literal(val) => {
+                if let Some(sym_id) = val.as_symbol() {
+                    ctx.symbols.name(crate::value::SymbolId(sym_id))
+                } else {
+                    None
+                }
+            }
             Expr::Var(var_ref) => {
                 if let crate::binding::VarRef::Global { sym } = var_ref {
                     ctx.symbols.name(*sym)
@@ -1066,31 +1079,27 @@ impl ExprCompiler {
 
     /// Compile a literal value to CLIF IR
     fn compile_literal(ctx: &mut CompileContext, val: &Value) -> Result<IrValue, String> {
-        match val {
-            Value::Nil => {
-                // Nil is encoded as 0i64
-                let ir_val = IrEmitter::emit_nil(ctx.builder);
-                Ok(IrValue::I64(ir_val))
-            }
-            Value::Bool(b) => {
-                // Bool is encoded as 0 (false) or 1 (true)
-                let ir_val = IrEmitter::emit_bool(ctx.builder, *b);
-                Ok(IrValue::I64(ir_val))
-            }
-            Value::Int(i) => {
-                // Int is emitted directly
-                let ir_val = IrEmitter::emit_int(ctx.builder, *i);
-                Ok(IrValue::I64(ir_val))
-            }
-            Value::Float(f) => {
-                // Float is emitted as f64
-                let ir_val = IrEmitter::emit_float(ctx.builder, *f);
-                Ok(IrValue::F64(ir_val))
-            }
-            _ => Err(format!(
+        if val.is_nil() || val.is_empty_list() {
+            // Nil is encoded as 0i64
+            let ir_val = IrEmitter::emit_nil(ctx.builder);
+            Ok(IrValue::I64(ir_val))
+        } else if let Some(b) = val.as_bool() {
+            // Bool is encoded as 0 (false) or 1 (true)
+            let ir_val = IrEmitter::emit_bool(ctx.builder, b);
+            Ok(IrValue::I64(ir_val))
+        } else if let Some(i) = val.as_int() {
+            // Int is emitted directly
+            let ir_val = IrEmitter::emit_int(ctx.builder, i);
+            Ok(IrValue::I64(ir_val))
+        } else if let Some(f) = val.as_float() {
+            // Float is emitted as f64
+            let ir_val = IrEmitter::emit_float(ctx.builder, f);
+            Ok(IrValue::F64(ir_val))
+        } else {
+            Err(format!(
                 "Cannot compile non-primitive literal in JIT: {:?}",
                 val
-            )),
+            ))
         }
     }
 
@@ -1420,7 +1429,7 @@ mod tests {
         let symbols = SymbolTable::new();
         let primitives = PrimitiveRegistry::new();
         let mut ctx = CompileContext::new(&mut builder, &symbols, &mut jit_ctx.module, &primitives);
-        let result = ExprCompiler::compile_expr_block(&mut ctx, &Expr::Literal(Value::Int(42)));
+        let result = ExprCompiler::compile_expr_block(&mut ctx, &Expr::Literal(Value::int(42)));
         assert!(
             result.is_ok(),
             "Failed to compile integer literal: {:?}",
@@ -1495,7 +1504,7 @@ mod tests {
             crate::value::SymbolId(0),
             0,
             0,
-            &Expr::Literal(Value::Int(99)),
+            &Expr::Literal(Value::int(99)),
         );
         assert!(result.is_ok(), "Failed to compile set!: {:?}", result.err());
     }
@@ -1520,8 +1529,8 @@ mod tests {
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::Begin(vec![
-                Expr::Literal(Value::Int(1)),
-                Expr::Literal(Value::Int(2)),
+                Expr::Literal(Value::int(1)),
+                Expr::Literal(Value::int(2)),
             ]),
         );
         assert!(
@@ -1556,11 +1565,11 @@ mod tests {
             &mut ctx,
             &Expr::While {
                 cond: Box::new(Expr::Call {
-                    func: Box::new(Expr::Literal(Value::Symbol(lt_sym))),
-                    args: vec![Expr::Literal(Value::Int(0)), Expr::Literal(Value::Int(10))],
+                    func: Box::new(Expr::Literal(Value::symbol(lt_sym.0))),
+                    args: vec![Expr::Literal(Value::int(0)), Expr::Literal(Value::int(10))],
                     tail: false,
                 }),
-                body: Box::new(Expr::Literal(Value::Int(42))),
+                body: Box::new(Expr::Literal(Value::int(42))),
             },
         );
         assert!(
@@ -1595,8 +1604,8 @@ mod tests {
             &mut ctx,
             &Expr::For {
                 var: item_sym,
-                iter: Box::new(Expr::Literal(Value::Nil)),
-                body: Box::new(Expr::Literal(Value::Int(0))),
+                iter: Box::new(Expr::Literal(Value::EMPTY_LIST)),
+                body: Box::new(Expr::Literal(Value::int(0))),
             },
         );
         // Should succeed for empty list
@@ -1628,8 +1637,8 @@ mod tests {
         // Test: (for item (list 1 2 3) 42)
         // For loop over literal cons list should compile
         let literal_list = cons(
-            Value::Int(1),
-            cons(Value::Int(2), cons(Value::Int(3), Value::Nil)),
+            Value::int(1),
+            cons(Value::int(2), cons(Value::int(3), Value::EMPTY_LIST)),
         );
 
         let primitives = PrimitiveRegistry::new();
@@ -1639,7 +1648,7 @@ mod tests {
             &Expr::For {
                 var: item_sym,
                 iter: Box::new(Expr::Literal(literal_list)),
-                body: Box::new(Expr::Literal(Value::Int(42))),
+                body: Box::new(Expr::Literal(Value::int(42))),
             },
         );
         // Should succeed for literal list
@@ -1676,8 +1685,8 @@ mod tests {
             &mut ctx,
             &Expr::For {
                 var: item_sym,
-                iter: Box::new(Expr::Begin(vec![Expr::Literal(Value::Nil)])), // Computed iterable
-                body: Box::new(Expr::Literal(Value::Int(0))),
+                iter: Box::new(Expr::Begin(vec![Expr::Literal(Value::EMPTY_LIST)])), // Computed iterable
+                body: Box::new(Expr::Literal(Value::int(0))),
             },
         );
         // Should now succeed for computed iterables
@@ -1711,7 +1720,7 @@ mod tests {
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::Let {
-                bindings: vec![(x_sym, Expr::Literal(Value::Int(42)))],
+                bindings: vec![(x_sym, Expr::Literal(Value::int(42)))],
                 body: Box::new(Expr::Var(crate::binding::VarRef::local(0))),
             },
         );
@@ -1742,8 +1751,8 @@ mod tests {
 
         // Test: (for x '(1 2 3) x)
         let literal_list = cons(
-            Value::Int(1),
-            cons(Value::Int(2), cons(Value::Int(3), Value::Nil)),
+            Value::int(1),
+            cons(Value::int(2), cons(Value::int(3), Value::EMPTY_LIST)),
         );
 
         let primitives = PrimitiveRegistry::new();
@@ -1786,7 +1795,7 @@ mod tests {
         let result = ExprCompiler::compile_expr_block(
             &mut ctx,
             &Expr::Let {
-                bindings: vec![(x_sym, Expr::Literal(Value::Float(std::f64::consts::PI)))],
+                bindings: vec![(x_sym, Expr::Literal(Value::float(std::f64::consts::PI)))],
                 body: Box::new(Expr::Var(crate::binding::VarRef::local(0))),
             },
         );
@@ -1818,8 +1827,11 @@ mod tests {
 
         // Test: (for x '(1.0 2.0 3.0) x)
         let literal_list = cons(
-            Value::Float(1.0),
-            cons(Value::Float(2.0), cons(Value::Float(3.0), Value::Nil)),
+            Value::float(1.0),
+            cons(
+                Value::float(2.0),
+                cons(Value::float(3.0), Value::EMPTY_LIST),
+            ),
         );
 
         let primitives = PrimitiveRegistry::new();

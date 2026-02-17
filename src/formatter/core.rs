@@ -5,7 +5,7 @@
 use super::config::FormatterConfig;
 use crate::reader::Lexer;
 use crate::symbol::SymbolTable;
-use crate::value::Value;
+use crate::value::{SymbolId, Value};
 use crate::Reader;
 
 /// Format Elle code with the given configuration
@@ -54,55 +54,88 @@ fn format_value(
     config: &FormatterConfig,
     symbol_table: &SymbolTable,
 ) -> String {
-    match value {
-        Value::Nil => "nil".to_string(),
-        Value::Bool(b) => if *b { "#t" } else { "#f" }.to_string(),
-        Value::Int(n) => n.to_string(),
-        Value::Float(n) => n.to_string(),
-        Value::String(s) => format!("\"{}\"", s.escape_default()),
-        Value::Symbol(id) => symbol_table
-            .name(*id)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("#{}", id.0)),
-        Value::Keyword(id) => symbol_table
-            .name(*id)
-            .map(|s| format!(":{}", s))
-            .unwrap_or_else(|| format!(":{}", id.0)),
-        Value::Vector(elements) => {
-            if elements.is_empty() {
-                "[]".to_string()
-            } else {
-                let items: Vec<String> = elements
-                    .iter()
-                    .map(|e| format_value(e, indent, config, symbol_table))
-                    .collect();
-                format!("[{}]", items.join(" "))
-            }
-        }
-        Value::Table(_) => {
-            // For Phase 1, just return a placeholder
-            "{{...}}".to_string()
-        }
-        Value::Struct(_) => {
-            // For Phase 1, just return a placeholder
-            "{{...}}".to_string()
-        }
-        Value::Cons(cons_rc) => {
-            format_cons(&cons_rc.first, &cons_rc.rest, indent, config, symbol_table)
-        }
-        Value::Closure(_) => "#<closure>".to_string(),
-        Value::JitClosure(_) => "#<jit-closure>".to_string(),
-        Value::NativeFn(_) => "#<native-fn>".to_string(),
-        Value::VmAwareFn(_) => "#<vm-aware-fn>".to_string(),
-        Value::LibHandle(_) => "#<lib-handle>".to_string(),
-        Value::CHandle(_) => "#<c-handle>".to_string(),
-        Value::Exception(_) => "#<exception>".to_string(),
-        Value::Condition(_) => "#<condition>".to_string(),
-        Value::ThreadHandle(_) => "#<thread-handle>".to_string(),
-        Value::Cell(_) => "#<cell>".to_string(),
-        Value::LocalCell(_) => "#<cell>".to_string(),
-        Value::Coroutine(_) => "#<coroutine>".to_string(),
+    use crate::value::heap::{deref, HeapObject};
+
+    if value.is_nil() {
+        return "nil".to_string();
     }
+
+    if let Some(b) = value.as_bool() {
+        return if b { "#t" } else { "#f" }.to_string();
+    }
+
+    if let Some(n) = value.as_int() {
+        return n.to_string();
+    }
+
+    if let Some(n) = value.as_float() {
+        return n.to_string();
+    }
+
+    if let Some(id) = value.as_symbol() {
+        let sym_id = SymbolId(id);
+        return symbol_table
+            .name(sym_id)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("#{}", id));
+    }
+
+    if let Some(id) = value.as_keyword() {
+        let sym_id = SymbolId(id);
+        return symbol_table
+            .name(sym_id)
+            .map(|s| format!(":{}", s))
+            .unwrap_or_else(|| format!(":{}", id));
+    }
+
+    // Handle heap values
+    if let Some(_ptr) = value.as_heap_ptr() {
+        let obj = unsafe { deref(*value) };
+        match obj {
+            HeapObject::String(s) => {
+                return format!("\"{}\"", s.escape_default());
+            }
+            HeapObject::Vector(v) => {
+                if let Ok(elements) = v.try_borrow() {
+                    if elements.is_empty() {
+                        return "[]".to_string();
+                    } else {
+                        let items: Vec<String> = elements
+                            .iter()
+                            .map(|e| format_value(e, indent, config, symbol_table))
+                            .collect();
+                        return format!("[{}]", items.join(" "));
+                    }
+                }
+                return "[<borrowed>]".to_string();
+            }
+            HeapObject::Cons(cons) => {
+                return format_cons(&cons.first, &cons.rest, indent, config, symbol_table);
+            }
+            HeapObject::Table(_) => {
+                // For Phase 1, just return a placeholder
+                return "{{...}}".to_string();
+            }
+            HeapObject::Struct(_) => {
+                // For Phase 1, just return a placeholder
+                return "{{...}}".to_string();
+            }
+            HeapObject::Closure(_) => return "#<closure>".to_string(),
+            HeapObject::JitClosure(_) => return "#<jit-closure>".to_string(),
+            HeapObject::NativeFn(_) => return "#<native-fn>".to_string(),
+            HeapObject::VmAwareFn(_) => return "#<vm-aware-fn>".to_string(),
+            HeapObject::LibHandle(_) => return "#<lib-handle>".to_string(),
+            HeapObject::CHandle(_, _) => return "#<c-handle>".to_string(),
+            HeapObject::Condition(_) => return "#<condition>".to_string(),
+            HeapObject::ThreadHandle(_) => return "#<thread-handle>".to_string(),
+            HeapObject::Cell(_, _) => return "#<cell>".to_string(),
+            HeapObject::Float(_) => return "#<float>".to_string(),
+            HeapObject::Coroutine(_) => return "#<coroutine>".to_string(),
+        }
+    }
+
+    // Fallback for unknown types
+    "#<unknown>".to_string()
 }
 
 /// Format a cons cell (list)
@@ -113,23 +146,29 @@ fn format_cons(
     config: &FormatterConfig,
     symbol_table: &SymbolTable,
 ) -> String {
+    use crate::value::heap::{deref, HeapObject};
+
     // Collect all elements in the list
     let mut elements = vec![head];
     let mut current = tail;
 
     loop {
-        match current {
-            Value::Nil => break,
-            Value::Cons(cons_rc) => {
-                elements.push(&cons_rc.first);
-                current = &cons_rc.rest;
-            }
-            _ => {
-                // Improper list - not common in well-formed Elle code
-                elements.push(current);
-                break;
+        if current.is_nil() {
+            break;
+        }
+
+        if let Some(_ptr) = current.as_heap_ptr() {
+            let obj = unsafe { deref(*current) };
+            if let HeapObject::Cons(cons) = obj {
+                elements.push(&cons.first);
+                current = &cons.rest;
+                continue;
             }
         }
+
+        // Improper list - not common in well-formed Elle code
+        elements.push(current);
+        break;
     }
 
     // Try to format on one line first

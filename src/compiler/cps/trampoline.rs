@@ -298,7 +298,7 @@ impl Trampoline {
                 } => {
                     // Check if this is a yielding closure with source AST
                     // If so, use CPS execution to properly handle nested yields
-                    if let Value::Closure(closure) = &func {
+                    if let Some(closure) = func.as_closure() {
                         if closure.effect.may_yield() && closure.source_ast.is_some() {
                             // Use CPS execution for yielding closures
                             match execute_cps_call(closure, &args, continuation.clone(), vm) {
@@ -423,7 +423,7 @@ impl Trampoline {
                     }
 
                     // Should not reach here
-                    Action::return_value(Value::Nil, next.clone())
+                    Action::return_value(Value::NIL, next.clone())
                 }
             }
 
@@ -443,7 +443,7 @@ impl Trampoline {
                                 } => {
                                     if !cond_val.is_truthy() {
                                         // Loop condition is false - exit loop
-                                        return Action::return_value(Value::Nil, next.clone());
+                                        return Action::return_value(Value::NIL, next.clone());
                                     }
                                 }
                                 Action::Yield {
@@ -523,7 +523,7 @@ impl Trampoline {
                                 body: body.clone(),
                                 next: next.clone(),
                             });
-                            return Action::return_value(Value::Nil, while_cont);
+                            return Action::return_value(Value::NIL, while_cont);
                         }
                         Action::Return {
                             value: val,
@@ -632,9 +632,7 @@ fn execute_cps_call(
         .saturating_sub(num_params + closure.num_captures);
 
     for _ in 0..num_locally_defined {
-        let empty_cell = Value::LocalCell(std::rc::Rc::new(std::cell::RefCell::new(Box::new(
-            Value::Nil,
-        ))));
+        let empty_cell = Value::cell(Value::NIL);
         new_env.push(empty_cell);
     }
 
@@ -664,10 +662,12 @@ fn register_global_effects(effect_ctx: &mut EffectContext, vm: &VM) {
     use crate::value::SymbolId;
 
     for (&sym_id, value) in &vm.globals {
-        let effect = match value {
-            Value::Closure(c) => c.effect,
-            Value::NativeFn(_) | Value::VmAwareFn(_) => Effect::Pure,
-            _ => continue, // Skip non-function values
+        let effect = if let Some(c) = value.as_closure() {
+            c.effect
+        } else if value.as_native_fn().is_some() || value.as_vm_aware_fn().is_some() {
+            Effect::Pure
+        } else {
+            continue; // Skip non-function values
         };
         effect_ctx.register_global(SymbolId(sym_id), effect);
     }
@@ -675,42 +675,45 @@ fn register_global_effects(effect_ctx: &mut EffectContext, vm: &VM) {
 
 /// Call a value as a function with the given arguments using the VM
 fn call_value_with_vm(func: &Value, args: &[Value], vm: &mut VM) -> Result<Value, String> {
-    match func {
-        Value::Closure(closure) => {
-            // Build environment
-            let mut new_env = Vec::new();
-            new_env.extend((*closure.env).iter().cloned());
-            new_env.extend(args.iter().cloned());
+    let result = if let Some(closure) = func.as_closure() {
+        // Build environment
+        let mut new_env = Vec::new();
+        new_env.extend((*closure.env).iter().cloned());
+        new_env.extend(args.iter().cloned());
 
-            // Add local cells
-            let num_params = match closure.arity {
-                crate::value::Arity::Exact(n) => n,
-                crate::value::Arity::AtLeast(n) => n,
-                crate::value::Arity::Range(min, _) => min,
-            };
-            let num_locally_defined = closure
-                .num_locals
-                .saturating_sub(num_params + closure.num_captures);
+        // Add local cells
+        let num_params = match closure.arity {
+            crate::value::Arity::Exact(n) => n,
+            crate::value::Arity::AtLeast(n) => n,
+            crate::value::Arity::Range(min, _) => min,
+        };
+        let num_locally_defined = closure
+            .num_locals
+            .saturating_sub(num_params + closure.num_captures);
 
-            for _ in 0..num_locally_defined {
-                let empty_cell = Value::LocalCell(std::rc::Rc::new(std::cell::RefCell::new(
-                    Box::new(Value::Nil),
-                )));
-                new_env.push(empty_cell);
-            }
-
-            let env_rc = std::rc::Rc::new(new_env);
-
-            // Execute
-            vm.execute_bytecode(&closure.bytecode, &closure.constants, Some(&env_rc))
+        for _ in 0..num_locally_defined {
+            let empty_cell = Value::cell(Value::NIL);
+            new_env.push(empty_cell);
         }
 
-        Value::NativeFn(f) => f(args).map_err(|e| e.into()),
+        let env_rc = std::rc::Rc::new(new_env);
 
-        Value::VmAwareFn(f) => f(args, vm).map_err(|e| e.into()),
+        // Execute
+        vm.execute_bytecode(&closure.bytecode, &closure.constants, Some(&env_rc))
+    } else if let Some(f) = func.as_native_fn() {
+        f(args).map_err(|e| e.to_string())
+    } else if let Some(f) = func.as_vm_aware_fn() {
+        f(args, vm).map_err(|e| e.into())
+    } else {
+        Err(format!("Cannot call {}", func.type_name()))
+    };
 
-        _ => Err(format!("Cannot call {}", func.type_name())),
+    // Check for exception set by the function
+    if let Some(exc) = vm.current_exception.take() {
+        return Err(format!("{}", exc));
     }
+
+    result
 }
 
 /// Call a value with VM access, returning VmResult to detect yields
@@ -719,56 +722,59 @@ fn call_value_with_vm_result(
     args: &[Value],
     vm: &mut VM,
 ) -> Result<crate::vm::VmResult, String> {
-    match func {
-        Value::Closure(closure) => {
-            // Build environment
-            let mut new_env = Vec::new();
-            new_env.extend((*closure.env).iter().cloned());
-            new_env.extend(args.iter().cloned());
+    let result = if let Some(closure) = func.as_closure() {
+        // Build environment
+        let mut new_env = Vec::new();
+        new_env.extend((*closure.env).iter().cloned());
+        new_env.extend(args.iter().cloned());
 
-            // Add local cells
-            let num_params = match closure.arity {
-                crate::value::Arity::Exact(n) => n,
-                crate::value::Arity::AtLeast(n) => n,
-                crate::value::Arity::Range(min, _) => min,
-            };
-            let num_locally_defined = closure
-                .num_locals
-                .saturating_sub(num_params + closure.num_captures);
+        // Add local cells
+        let num_params = match closure.arity {
+            crate::value::Arity::Exact(n) => n,
+            crate::value::Arity::AtLeast(n) => n,
+            crate::value::Arity::Range(min, _) => min,
+        };
+        let num_locally_defined = closure
+            .num_locals
+            .saturating_sub(num_params + closure.num_captures);
 
-            for _ in 0..num_locally_defined {
-                let empty_cell = Value::LocalCell(std::rc::Rc::new(std::cell::RefCell::new(
-                    Box::new(Value::Nil),
-                )));
-                new_env.push(empty_cell);
-            }
-
-            let env_rc = std::rc::Rc::new(new_env);
-
-            // Execute - use coroutine-aware path if in a coroutine
-            if vm.in_coroutine() {
-                vm.execute_bytecode_coroutine(&closure.bytecode, &closure.constants, Some(&env_rc))
-            } else {
-                // For non-coroutine calls, wrap the result
-                match vm.execute_bytecode(&closure.bytecode, &closure.constants, Some(&env_rc)) {
-                    Ok(v) => Ok(crate::vm::VmResult::Done(v)),
-                    Err(e) => Err(e),
-                }
-            }
+        for _ in 0..num_locally_defined {
+            let empty_cell = Value::cell(Value::NIL);
+            new_env.push(empty_cell);
         }
 
-        Value::NativeFn(f) => match f(args) {
+        let env_rc = std::rc::Rc::new(new_env);
+
+        // Execute - use coroutine-aware path if in a coroutine
+        if vm.in_coroutine() {
+            vm.execute_bytecode_coroutine(&closure.bytecode, &closure.constants, Some(&env_rc))
+        } else {
+            // For non-coroutine calls, wrap the result
+            match vm.execute_bytecode(&closure.bytecode, &closure.constants, Some(&env_rc)) {
+                Ok(v) => Ok(crate::vm::VmResult::Done(v)),
+                Err(e) => Err(e),
+            }
+        }
+    } else if let Some(f) = func.as_native_fn() {
+        match f(args) {
+            Ok(v) => Ok(crate::vm::VmResult::Done(v)),
+            Err(e) => Err(e.to_string()),
+        }
+    } else if let Some(f) = func.as_vm_aware_fn() {
+        match f(args, vm) {
             Ok(v) => Ok(crate::vm::VmResult::Done(v)),
             Err(e) => Err(e.into()),
-        },
+        }
+    } else {
+        Err(format!("Cannot call {}", func.type_name()))
+    };
 
-        Value::VmAwareFn(f) => match f(args, vm) {
-            Ok(v) => Ok(crate::vm::VmResult::Done(v)),
-            Err(e) => Err(e.into()),
-        },
-
-        _ => Err(format!("Cannot call {}", func.type_name())),
+    // Check for exception set by the function
+    if let Some(exc) = vm.current_exception.take() {
+        return Err(format!("{}", exc));
     }
+
+    result
 }
 
 impl Default for Trampoline {
@@ -784,27 +790,27 @@ mod tests {
     #[test]
     fn test_trampoline_done() {
         let mut trampoline = Trampoline::new();
-        let result = trampoline.run(Action::Done(Value::Int(42)));
+        let result = trampoline.run(Action::Done(Value::int(42)));
         assert!(result.is_done());
-        assert_eq!(result.value(), Some(&Value::Int(42)));
+        assert_eq!(result.value(), Some(&Value::int(42)));
     }
 
     #[test]
     fn test_trampoline_yield() {
         let mut trampoline = Trampoline::new();
         let cont = Continuation::done();
-        let result = trampoline.run(Action::yield_value(Value::Int(1), cont));
+        let result = trampoline.run(Action::yield_value(Value::int(1), cont));
         assert!(result.is_suspended());
-        assert_eq!(result.value(), Some(&Value::Int(1)));
+        assert_eq!(result.value(), Some(&Value::int(1)));
     }
 
     #[test]
     fn test_trampoline_return_to_done() {
         let mut trampoline = Trampoline::new();
         let cont = Continuation::done();
-        let result = trampoline.run(Action::return_value(Value::Int(99), cont));
+        let result = trampoline.run(Action::return_value(Value::int(99), cont));
         assert!(result.is_done());
-        assert_eq!(result.value(), Some(&Value::Int(99)));
+        assert_eq!(result.value(), Some(&Value::int(99)));
     }
 
     #[test]
@@ -826,14 +832,14 @@ mod tests {
         // This would loop forever without the max_steps limit
         // For now, we can't create such a loop without VM support
         // So just test that a simple action works within limits
-        let result = trampoline.run(Action::Done(Value::Nil));
+        let result = trampoline.run(Action::Done(Value::NIL));
         assert!(result.is_done());
     }
 
     #[test]
     fn test_trampoline_step_count() {
         let mut trampoline = Trampoline::new();
-        trampoline.run(Action::Done(Value::Int(42)));
+        trampoline.run(Action::Done(Value::int(42)));
         assert_eq!(trampoline.step_count(), 1);
     }
 }

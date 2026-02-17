@@ -3,7 +3,7 @@ use crate::value::Value;
 
 pub fn handle_load_const(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
     let idx = vm.read_u16(bytecode, ip) as usize;
-    vm.stack.push(constants[idx].clone());
+    vm.stack.push(constants[idx]);
 }
 
 pub fn handle_load_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) -> Result<(), String> {
@@ -20,7 +20,7 @@ pub fn handle_load_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) -> Result
             vm.stack.len()
         ));
     }
-    let val = vm.stack[abs_idx].clone();
+    let val = vm.stack[abs_idx];
     vm.stack.push(val);
     Ok(())
 }
@@ -31,7 +31,7 @@ pub fn handle_pop(vm: &mut VM) -> Result<(), String> {
 }
 
 pub fn handle_dup(vm: &mut VM) -> Result<(), String> {
-    let val = vm.stack.last().ok_or("Stack underflow")?.clone();
+    let val = *vm.stack.last().ok_or("Stack underflow")?;
     vm.stack.push(val);
     Ok(())
 }
@@ -46,7 +46,7 @@ pub fn handle_dup_n(vm: &mut VM, bytecode: &[u8], ip: &mut usize) -> Result<(), 
         ));
     }
     let idx = stack_len - 1 - offset;
-    let val = vm.stack[idx].clone();
+    let val = vm.stack[idx];
     vm.stack.push(val);
     Ok(())
 }

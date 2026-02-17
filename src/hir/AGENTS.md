@@ -68,6 +68,10 @@ HIR + bindings HashMap
 5. **Captures are computed per-lambda.** Each `HirKind::Lambda` carries its
    own `Vec<CaptureInfo>` listing what it captures and how.
 
+6. **Empty lists become `HirKind::EmptyList`, not `HirKind::Nil`.** The analyzer
+   distinguishes between `nil` (absence) and `()` (empty list). Conflating them
+   breaks truthiness semantics.
+
 ## Files
 
 | File | Lines | Content |

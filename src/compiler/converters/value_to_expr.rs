@@ -9,6 +9,7 @@ use super::{ScopeEntry, ScopeType};
 use crate::binding::VarRef;
 use crate::symbol::SymbolTable;
 use crate::value::Value;
+use crate::value_old::SymbolId;
 
 /// Simple value-to-expr conversion for bootstrap
 /// This is a simple tree-walking approach before full macro expansion
@@ -28,452 +29,455 @@ pub fn value_to_expr_with_scope(
     symbols: &mut SymbolTable,
     scope_stack: &mut Vec<ScopeEntry>,
 ) -> Result<Expr, String> {
-    match value {
-        Value::Nil
-        | Value::Bool(_)
-        | Value::Int(_)
-        | Value::Float(_)
-        | Value::String(_)
-        | Value::Keyword(_)
-        | Value::Vector(_) => Ok(Expr::Literal(value.clone())),
+    // Handle literal values
+    if value.is_nil()
+        || value.is_bool()
+        || value.is_int()
+        || value.is_float()
+        || value.is_string()
+        || value.is_keyword()
+        || value.is_vector()
+        || value.is_empty_list()
+    {
+        return Ok(Expr::Literal(*value));
+    }
 
-        Value::Symbol(id) => {
-            // Check if the symbol is a local binding by walking up the scope stack
-            for (idx, scope_entry) in scope_stack.iter().enumerate().rev() {
-                if let Some(local_index) = scope_entry.symbols.iter().position(|sym| sym == id) {
-                    let depth = scope_stack.len() - 1 - idx;
+    // Handle symbols
+    if let Some(id) = value.as_symbol() {
+        let id = SymbolId(id);
+        // Check if the symbol is a local binding by walking up the scope stack
+        for (idx, scope_entry) in scope_stack.iter().enumerate().rev() {
+            if let Some(local_index) = scope_entry.symbols.iter().position(|sym| sym == &id) {
+                let depth = scope_stack.len() - 1 - idx;
 
-                    if scope_entry.scope_type == ScopeType::Let {
-                        // Let-bound variable
-                        let mut has_intervening_lambda = false;
-                        for scope in scope_stack.iter().skip(idx + 1) {
-                            if scope.scope_type == ScopeType::Function {
-                                has_intervening_lambda = true;
-                                break;
-                            }
+                if scope_entry.scope_type == ScopeType::Let {
+                    // Let-bound variable
+                    let mut has_intervening_lambda = false;
+                    for scope in scope_stack.iter().skip(idx + 1) {
+                        if scope.scope_type == ScopeType::Function {
+                            has_intervening_lambda = true;
+                            break;
                         }
+                    }
 
-                        if has_intervening_lambda {
-                            // Inside a lambda that needs to capture this variable
-                            return Ok(Expr::Var(VarRef::upvalue(*id, local_index, false)));
-                        } else {
-                            // Direct access to let-bound variable - use symbol for scope stack lookup
-                            return Ok(Expr::Var(VarRef::let_bound(*id)));
-                        }
+                    if has_intervening_lambda {
+                        // Inside a lambda that needs to capture this variable
+                        return Ok(Expr::Var(VarRef::upvalue(id, local_index, false)));
                     } else {
-                        // Lambda parameter or capture
-                        if depth == 0 {
-                            // Current lambda's scope
-                            return Ok(Expr::Var(VarRef::local(local_index)));
-                        } else {
-                            // Outer lambda's scope - needs capture
-                            return Ok(Expr::Var(VarRef::upvalue(*id, local_index, false)));
-                        }
+                        // Direct access to let-bound variable - use symbol for scope stack lookup
+                        return Ok(Expr::Var(VarRef::let_bound(id)));
+                    }
+                } else {
+                    // Lambda parameter or capture
+                    if depth == 0 {
+                        // Current lambda's scope
+                        return Ok(Expr::Var(VarRef::local(local_index)));
+                    } else {
+                        // Outer lambda's scope - needs capture
+                        return Ok(Expr::Var(VarRef::upvalue(id, local_index, false)));
                     }
                 }
             }
-            // Not found in any local scope - treat as global
-            Ok(Expr::Var(VarRef::global(*id)))
+        }
+        // Not found in any local scope - treat as global
+        return Ok(Expr::Var(VarRef::global(id)));
+    }
+
+    // Handle cons cells
+    if value.as_cons().is_some() {
+        let list = value.list_to_vec()?;
+        if list.is_empty() {
+            return Err("Empty list in expression".to_string());
         }
 
-        Value::Cons(_) => {
-            let list = value.list_to_vec()?;
-            if list.is_empty() {
-                return Err("Empty list in expression".to_string());
-            }
+        let first = &list[0];
+        if let Some(sym) = first.as_symbol() {
+            let sym_id = SymbolId(sym);
+            let name = symbols.name(sym_id).ok_or("Unknown symbol")?;
 
-            let first = &list[0];
-            if let Value::Symbol(sym) = first {
-                let name = symbols.name(*sym).ok_or("Unknown symbol")?;
+            match name {
+                "qualified-ref" => {
+                    // Handle module-qualified symbols: (qualified-ref module-name symbol-name)
+                    if list.len() != 3 {
+                        return Err("qualified-ref requires exactly 2 arguments".to_string());
+                    }
+                    let module_sym = list[1].as_symbol().ok_or("Expected symbol")?;
+                    let name_sym = list[2].as_symbol().ok_or("Expected symbol")?;
+                    let module_sym_id = SymbolId(module_sym);
+                    let name_sym_id = SymbolId(name_sym);
 
-                match name {
-                    "qualified-ref" => {
-                        // Handle module-qualified symbols: (qualified-ref module-name symbol-name)
-                        if list.len() != 3 {
-                            return Err("qualified-ref requires exactly 2 arguments".to_string());
-                        }
-                        let module_sym = list[1].as_symbol()?;
-                        let name_sym = list[2].as_symbol()?;
+                    let module_name = symbols.name(module_sym_id).ok_or("Unknown module symbol")?;
+                    let func_name = symbols.name(name_sym_id).ok_or("Unknown function symbol")?;
 
-                        let module_name =
-                            symbols.name(module_sym).ok_or("Unknown module symbol")?;
-                        let func_name = symbols.name(name_sym).ok_or("Unknown function symbol")?;
-
-                        // Try to resolve from the specified module's exports
-                        if let Some(module_def) = symbols.get_module(module_sym) {
-                            // Check if the symbol is exported from the module
-                            if module_def.exports.contains(&name_sym) {
-                                // Return as a qualified global reference
-                                Ok(Expr::Var(VarRef::global(name_sym)))
-                            } else {
-                                Err(format!(
-                                    "Symbol '{}' not exported from module '{}'",
-                                    func_name, module_name
-                                ))
-                            }
+                    // Try to resolve from the specified module's exports
+                    if let Some(module_def) = symbols.get_module(module_sym_id) {
+                        // Check if the symbol is exported from the module
+                        if module_def.exports.contains(&name_sym_id) {
+                            // Return as a qualified global reference
+                            Ok(Expr::Var(VarRef::global(name_sym_id)))
                         } else {
-                            Err(format!("Unknown module: '{}'", module_name))
+                            Err(format!(
+                                "Symbol '{}' not exported from module '{}'",
+                                func_name, module_name
+                            ))
+                        }
+                    } else {
+                        Err(format!("Unknown module: '{}'", module_name))
+                    }
+                }
+
+                "quote" => {
+                    if list.len() != 2 {
+                        return Err("quote requires exactly 1 argument".to_string());
+                    }
+                    Ok(Expr::Literal(list[1]))
+                }
+
+                "quasiquote" => {
+                    if list.len() != 2 {
+                        return Err("quasiquote requires exactly 1 argument".to_string());
+                    }
+                    // Convert the quasiquote form into a proper Expr::Quasiquote
+                    // The content is processed to handle unquotes
+                    let content = &list[1];
+                    expand_quasiquote(content, symbols, scope_stack)
+                }
+
+                "unquote" | "unquote-splicing" => {
+                    // Unquote outside of quasiquote is an error
+                    Err(format!("{} can only be used inside quasiquote", name))
+                }
+
+                "if" => {
+                    if list.len() < 3 || list.len() > 4 {
+                        return Err("if requires 2 or 3 arguments".to_string());
+                    }
+                    let cond = Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
+                    let then = Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
+                    let else_ = if list.len() == 4 {
+                        Box::new(value_to_expr_with_scope(&list[3], symbols, scope_stack)?)
+                    } else {
+                        Box::new(Expr::Literal(Value::NIL))
+                    };
+                    Ok(Expr::If { cond, then, else_ })
+                }
+
+                "begin" => {
+                    // Process expressions sequentially to handle variable definitions properly
+                    // This allows define to register variables that are then available to later expressions
+                    let mut exprs = Vec::new();
+                    for v in &list[1..] {
+                        let expr = value_to_expr_with_scope(v, symbols, scope_stack)?;
+                        exprs.push(expr);
+                    }
+                    Ok(Expr::Begin(exprs))
+                }
+
+                "block" => {
+                    let exprs: Result<Vec<_>, _> = list[1..]
+                        .iter()
+                        .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                        .collect();
+                    Ok(Expr::Block(exprs?))
+                }
+
+                "fn" | "lambda" => convert_lambda(&list, symbols, scope_stack),
+
+                "define" => {
+                    if list.len() != 3 {
+                        return Err("define requires exactly 2 arguments".to_string());
+                    }
+                    let name = SymbolId(list[1].as_symbol().ok_or("Expected symbol")?);
+
+                    // Register the variable in the current scope BEFORE processing the value
+                    // This way, if the value references the variable (unusual but possible),
+                    // it can be found. More importantly, it makes the variable available to
+                    // subsequent expressions in the same scope.
+                    if !scope_stack.is_empty() {
+                        let scope_entry = scope_stack.last_mut().unwrap();
+                        if !scope_entry.symbols.contains(&name) {
+                            scope_entry.symbols.push(name);
                         }
                     }
 
-                    "quote" => {
-                        if list.len() != 2 {
-                            return Err("quote requires exactly 1 argument".to_string());
-                        }
-                        Ok(Expr::Literal(list[1].clone()))
-                    }
+                    let value = Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
 
-                    "quasiquote" => {
-                        if list.len() != 2 {
-                            return Err("quasiquote requires exactly 1 argument".to_string());
-                        }
-                        // Convert the quasiquote form into a proper Expr::Quasiquote
-                        // The content is processed to handle unquotes
-                        let content = &list[1];
-                        expand_quasiquote(content, symbols, scope_stack)
-                    }
+                    Ok(Expr::Define { name, value })
+                }
 
-                    "unquote" | "unquote-splicing" => {
-                        // Unquote outside of quasiquote is an error
-                        Err(format!("{} can only be used inside quasiquote", name))
-                    }
+                "let" => convert_let(&list, symbols, scope_stack),
 
-                    "if" => {
-                        if list.len() < 3 || list.len() > 4 {
-                            return Err("if requires 2 or 3 arguments".to_string());
-                        }
-                        let cond =
-                            Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
-                        let then =
-                            Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
-                        let else_ = if list.len() == 4 {
-                            Box::new(value_to_expr_with_scope(&list[3], symbols, scope_stack)?)
-                        } else {
-                            Box::new(Expr::Literal(Value::Nil))
-                        };
-                        Ok(Expr::If { cond, then, else_ })
-                    }
+                "let*" => convert_let_star(&list, symbols, scope_stack),
 
-                    "begin" => {
-                        // Process expressions sequentially to handle variable definitions properly
-                        // This allows define to register variables that are then available to later expressions
-                        let mut exprs = Vec::new();
-                        for v in &list[1..] {
-                            let expr = value_to_expr_with_scope(v, symbols, scope_stack)?;
-                            exprs.push(expr);
-                        }
-                        Ok(Expr::Begin(exprs))
-                    }
+                "letrec" => convert_letrec(&list, symbols, scope_stack),
 
-                    "block" => {
-                        let exprs: Result<Vec<_>, _> = list[1..]
+                "set!" => {
+                    if list.len() != 3 {
+                        return Err("set! requires exactly 2 arguments".to_string());
+                    }
+                    let var = list[1].as_symbol().ok_or("Expected symbol")?;
+                    let value = Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
+
+                    // Look up the variable in the scope stack to create VarRef
+                    let target = lookup_var_for_set(var, scope_stack);
+
+                    Ok(Expr::Set { target, value })
+                }
+
+                "try" => convert_try(&list, symbols, scope_stack),
+
+                "handler-case" => convert_handler_case(&list, symbols, scope_stack),
+
+                "handler-bind" => convert_handler_bind(&list, symbols, scope_stack),
+
+                "match" => convert_match_expr(&list, symbols, scope_stack),
+
+                "throw" => {
+                    // Syntax: (throw <exception>)
+                    // Throw is a special form that compiles to a function call
+                    // The throw primitive will convert the exception to a Rust error
+                    if list.len() != 2 {
+                        return Err("throw requires exactly 1 argument".to_string());
+                    }
+                    // Compile as a regular function call to the throw primitive
+                    let func_sym = first.as_symbol().ok_or("Expected symbol")?;
+                    let func = Box::new(Expr::Var(VarRef::global(SymbolId(func_sym))));
+                    let args = vec![value_to_expr_with_scope(&list[1], symbols, scope_stack)?];
+                    Ok(Expr::Call {
+                        func,
+                        args,
+                        tail: false,
+                    })
+                }
+
+                "yield" => {
+                    // Syntax: (yield <value>)
+                    // Yield suspends coroutine execution and returns a value
+                    if list.len() != 2 {
+                        return Err("yield requires exactly one argument".to_string());
+                    }
+                    let expr = value_to_expr_with_scope(&list[1], symbols, scope_stack)?;
+                    Ok(Expr::Yield(Box::new(expr)))
+                }
+
+                "defmacro" | "define-macro" => {
+                    // Syntax: (defmacro name (params...) body)
+                    //      or (define-macro name (params...) body)
+                    if list.len() != 4 {
+                        return Err(
+                            "defmacro requires exactly 3 arguments (name, parameters, body)"
+                                .to_string(),
+                        );
+                    }
+                    let name = SymbolId(list[1].as_symbol().ok_or("Expected symbol")?);
+                    let params_val = &list[2];
+
+                    // Parse parameter list
+                    let params = if params_val.is_list() {
+                        let param_vec = params_val.list_to_vec()?;
+                        param_vec
                             .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                            .map(|v| v.as_symbol().map(SymbolId))
+                            .collect::<Option<Vec<_>>>()
+                            .ok_or("Macro parameters must be symbols")?
+                    } else {
+                        return Err("Macro parameters must be a list".to_string());
+                    };
+
+                    // Store macro body as source code for later expansion
+                    // Convert the value back to source code using the symbol table
+                    let body_str = value_to_source(&list[3], symbols);
+
+                    // Register the macro in the symbol table
+                    use crate::symbol::MacroDef;
+                    symbols.define_macro(MacroDef {
+                        name,
+                        params: params.clone(),
+                        body: body_str,
+                    });
+
+                    // Don't compile the macro body - it will be expanded at call time
+                    // The body is stored as source code in the MacroDef
+                    let body = Box::new(Expr::Literal(Value::NIL));
+
+                    Ok(Expr::DefMacro { name, params, body })
+                }
+
+                "while" => {
+                    // Syntax: (while condition body)
+                    if list.len() != 3 {
+                        return Err(
+                            "while requires exactly 2 arguments (condition body)".to_string()
+                        );
+                    }
+                    let cond = Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
+                    let body = Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
+                    Ok(Expr::While { cond, body })
+                }
+
+                "forever" => {
+                    // Syntax: (forever body...)
+                    // Expands to: (while #t body...)
+                    if list.len() < 2 {
+                        return Err("forever requires at least 1 argument (body)".to_string());
+                    }
+                    // Combine all body expressions into a single expression
+                    let body = if list.len() == 2 {
+                        // Single body expression
+                        Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?)
+                    } else {
+                        // Multiple body expressions - wrap in begin
+                        let body_exprs: Result<Vec<Expr>, String> = list[1..]
+                            .iter()
+                            .map(|expr| value_to_expr_with_scope(expr, symbols, scope_stack))
                             .collect();
-                        Ok(Expr::Block(exprs?))
+                        Box::new(Expr::Begin(body_exprs?))
+                    };
+                    // Create a while loop with #t as the condition
+                    let cond = Box::new(Expr::Literal(Value::TRUE));
+                    Ok(Expr::While { cond, body })
+                }
+
+                "each" => {
+                    // Syntax: (each var iter body)
+                    // Also supports: (each var in iter body) for clarity
+                    if list.len() < 4 || list.len() > 5 {
+                        return Err(
+                            "each requires 3 or 4 arguments (var [in] iter body)".to_string()
+                        );
                     }
 
-                    "fn" | "lambda" => convert_lambda(&list, symbols, scope_stack),
-
-                    "define" => {
-                        if list.len() != 3 {
-                            return Err("define requires exactly 2 arguments".to_string());
-                        }
-                        let name = list[1].as_symbol()?;
-
-                        // Register the variable in the current scope BEFORE processing the value
-                        // This way, if the value references the variable (unusual but possible),
-                        // it can be found. More importantly, it makes the variable available to
-                        // subsequent expressions in the same scope.
-                        if !scope_stack.is_empty() {
-                            let scope_entry = scope_stack.last_mut().unwrap();
-                            if !scope_entry.symbols.contains(&name) {
-                                scope_entry.symbols.push(name);
-                            }
-                        }
-
-                        let value =
-                            Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
-
-                        Ok(Expr::Define { name, value })
-                    }
-
-                    "let" => convert_let(&list, symbols, scope_stack),
-
-                    "let*" => convert_let_star(&list, symbols, scope_stack),
-
-                    "letrec" => convert_letrec(&list, symbols, scope_stack),
-
-                    "set!" => {
-                        if list.len() != 3 {
-                            return Err("set! requires exactly 2 arguments".to_string());
-                        }
-                        let var = list[1].as_symbol()?;
-                        let value =
-                            Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
-
-                        // Look up the variable in the scope stack to create VarRef
-                        let target = lookup_var_for_set(var, scope_stack);
-
-                        Ok(Expr::Set { target, value })
-                    }
-
-                    "try" => convert_try(&list, symbols, scope_stack),
-
-                    "handler-case" => convert_handler_case(&list, symbols, scope_stack),
-
-                    "handler-bind" => convert_handler_bind(&list, symbols, scope_stack),
-
-                    "match" => convert_match_expr(&list, symbols, scope_stack),
-
-                    "throw" => {
-                        // Syntax: (throw <exception>)
-                        // Throw is a special form that compiles to a function call
-                        // The throw primitive will convert the exception to a Rust error
-                        if list.len() != 2 {
-                            return Err("throw requires exactly 1 argument".to_string());
-                        }
-                        // Compile as a regular function call to the throw primitive
-                        let func = Box::new(Expr::Var(VarRef::global(first.as_symbol()?)));
-                        let args = vec![value_to_expr_with_scope(&list[1], symbols, scope_stack)?];
-                        Ok(Expr::Call {
-                            func,
-                            args,
-                            tail: false,
-                        })
-                    }
-
-                    "yield" => {
-                        // Syntax: (yield <value>)
-                        // Yield suspends coroutine execution and returns a value
-                        if list.len() != 2 {
-                            return Err("yield requires exactly one argument".to_string());
-                        }
-                        let expr = value_to_expr_with_scope(&list[1], symbols, scope_stack)?;
-                        Ok(Expr::Yield(Box::new(expr)))
-                    }
-
-                    "defmacro" | "define-macro" => {
-                        // Syntax: (defmacro name (params...) body)
-                        //      or (define-macro name (params...) body)
-                        if list.len() != 4 {
-                            return Err(
-                                "defmacro requires exactly 3 arguments (name, parameters, body)"
-                                    .to_string(),
-                            );
-                        }
-                        let name = list[1].as_symbol()?;
-                        let params_val = &list[2];
-
-                        // Parse parameter list
-                        let params = if params_val.is_list() {
-                            let param_vec = params_val.list_to_vec()?;
-                            param_vec
-                                .iter()
-                                .map(|v| v.as_symbol())
-                                .collect::<Result<Vec<_>, _>>()?
-                        } else {
-                            return Err("Macro parameters must be a list".to_string());
-                        };
-
-                        // Store macro body as source code for later expansion
-                        // Convert the value back to source code using the symbol table
-                        let body_str = value_to_source(&list[3], symbols);
-
-                        // Register the macro in the symbol table
-                        use crate::symbol::MacroDef;
-                        symbols.define_macro(MacroDef {
-                            name,
-                            params: params.clone(),
-                            body: body_str,
-                        });
-
-                        // Don't compile the macro body - it will be expanded at call time
-                        // The body is stored as source code in the MacroDef
-                        let body = Box::new(Expr::Literal(Value::Nil));
-
-                        Ok(Expr::DefMacro { name, params, body })
-                    }
-
-                    "while" => {
-                        // Syntax: (while condition body)
-                        if list.len() != 3 {
-                            return Err(
-                                "while requires exactly 2 arguments (condition body)".to_string()
-                            );
-                        }
-                        let cond =
-                            Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?);
-                        let body =
-                            Box::new(value_to_expr_with_scope(&list[2], symbols, scope_stack)?);
-                        Ok(Expr::While { cond, body })
-                    }
-
-                    "forever" => {
-                        // Syntax: (forever body...)
-                        // Expands to: (while #t body...)
-                        if list.len() < 2 {
-                            return Err("forever requires at least 1 argument (body)".to_string());
-                        }
-                        // Combine all body expressions into a single expression
-                        let body = if list.len() == 2 {
-                            // Single body expression
-                            Box::new(value_to_expr_with_scope(&list[1], symbols, scope_stack)?)
-                        } else {
-                            // Multiple body expressions - wrap in begin
-                            let body_exprs: Result<Vec<Expr>, String> = list[1..]
-                                .iter()
-                                .map(|expr| value_to_expr_with_scope(expr, symbols, scope_stack))
-                                .collect();
-                            Box::new(Expr::Begin(body_exprs?))
-                        };
-                        // Create a while loop with #t as the condition
-                        let cond = Box::new(Expr::Literal(Value::Bool(true)));
-                        Ok(Expr::While { cond, body })
-                    }
-
-                    "each" => {
-                        // Syntax: (each var iter body)
-                        // Also supports: (each var in iter body) for clarity
-                        if list.len() < 4 || list.len() > 5 {
-                            return Err(
-                                "each requires 3 or 4 arguments (var [in] iter body)".to_string()
-                            );
-                        }
-
-                        let var = list[1].as_symbol()?;
-                        let (iter_expr, body_expr) = if list.len() == 4 {
-                            // (each var iter body)
-                            (&list[2], &list[3])
-                        } else {
-                            // (each var in iter body)
-                            if let Value::Symbol(in_sym) = &list[2] {
-                                if let Some("in") = symbols.name(*in_sym) {
-                                    (&list[3], &list[4])
-                                } else {
-                                    return Err("each loop syntax: (each var iter body) or (each var in iter body)".to_string());
-                                }
+                    let var = SymbolId(list[1].as_symbol().ok_or("Expected symbol")?);
+                    let (iter_expr, body_expr) = if list.len() == 4 {
+                        // (each var iter body)
+                        (&list[2], &list[3])
+                    } else {
+                        // (each var in iter body)
+                        if let Some(in_sym) = list[2].as_symbol() {
+                            let in_sym_id = SymbolId(in_sym);
+                            if let Some("in") = symbols.name(in_sym_id) {
+                                (&list[3], &list[4])
                             } else {
                                 return Err("each loop syntax: (each var iter body) or (each var in iter body)".to_string());
                             }
-                        };
-
-                        // Compile iterator expression
-                        let iter =
-                            Box::new(value_to_expr_with_scope(iter_expr, symbols, scope_stack)?);
-
-                        // Compile body expression (the loop variable will be set as a global at runtime)
-                        // Note: the loop variable is accessible in the body as a global
-                        let body =
-                            Box::new(value_to_expr_with_scope(body_expr, symbols, scope_stack)?);
-
-                        Ok(Expr::For { var, iter, body })
-                    }
-
-                    "and" => {
-                        // Syntax: (and expr1 expr2 ...)
-                        // Short-circuit evaluation: returns first falsy value or last value
-                        if list.len() < 2 {
-                            return Ok(Expr::Literal(Value::Bool(true))); // (and) => true
+                        } else {
+                            return Err(
+                                "each loop syntax: (each var iter body) or (each var in iter body)"
+                                    .to_string(),
+                            );
                         }
-                        let exprs: Result<Vec<_>, _> = list[1..]
-                            .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                            .collect();
-                        Ok(Expr::And(exprs?))
+                    };
+
+                    // Compile iterator expression
+                    let iter = Box::new(value_to_expr_with_scope(iter_expr, symbols, scope_stack)?);
+
+                    // Compile body expression (the loop variable will be set as a global at runtime)
+                    // Note: the loop variable is accessible in the body as a global
+                    let body = Box::new(value_to_expr_with_scope(body_expr, symbols, scope_stack)?);
+
+                    Ok(Expr::For { var, iter, body })
+                }
+
+                "and" => {
+                    // Syntax: (and expr1 expr2 ...)
+                    // Short-circuit evaluation: returns first falsy value or last value
+                    if list.len() < 2 {
+                        return Ok(Expr::Literal(Value::TRUE)); // (and) => true
+                    }
+                    let exprs: Result<Vec<_>, _> = list[1..]
+                        .iter()
+                        .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                        .collect();
+                    Ok(Expr::And(exprs?))
+                }
+
+                "or" => {
+                    // Syntax: (or expr1 expr2 ...)
+                    // Short-circuit evaluation: returns first truthy value or last value
+                    if list.len() < 2 {
+                        return Ok(Expr::Literal(Value::FALSE)); // (or) => false
+                    }
+                    let exprs: Result<Vec<_>, _> = list[1..]
+                        .iter()
+                        .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                        .collect();
+                    Ok(Expr::Or(exprs?))
+                }
+
+                "xor" => {
+                    // Syntax: (xor expr1 expr2 ...)
+                    // Transform to a function call to the xor primitive
+                    // This way we don't need special compilation logic
+                    if list.len() < 2 {
+                        return Ok(Expr::Literal(Value::FALSE)); // (xor) => false
                     }
 
-                    "or" => {
-                        // Syntax: (or expr1 expr2 ...)
-                        // Short-circuit evaluation: returns first truthy value or last value
-                        if list.len() < 2 {
-                            return Ok(Expr::Literal(Value::Bool(false))); // (or) => false
-                        }
-                        let exprs: Result<Vec<_>, _> = list[1..]
-                            .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                            .collect();
-                        Ok(Expr::Or(exprs?))
-                    }
+                    let func = Box::new(Expr::Var(VarRef::global(symbols.intern("xor"))));
+                    let args: Result<Vec<_>, _> = list[1..]
+                        .iter()
+                        .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                        .collect();
+                    Ok(Expr::Call {
+                        func,
+                        args: args?,
+                        tail: false,
+                    })
+                }
 
-                    "xor" => {
-                        // Syntax: (xor expr1 expr2 ...)
-                        // Transform to a function call to the xor primitive
-                        // This way we don't need special compilation logic
-                        if list.len() < 2 {
-                            return Ok(Expr::Literal(Value::Bool(false))); // (xor) => false
-                        }
+                "->" => handle_thread_first(&list, symbols, scope_stack),
 
-                        let func = Box::new(Expr::Var(VarRef::global(symbols.intern("xor"))));
-                        let args: Result<Vec<_>, _> = list[1..]
-                            .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                            .collect();
-                        Ok(Expr::Call {
-                            func,
-                            args: args?,
-                            tail: false,
-                        })
-                    }
+                "->>" => handle_thread_last(&list, symbols, scope_stack),
 
-                    "->" => handle_thread_first(&list, symbols, scope_stack),
+                "cond" => convert_cond(&list, symbols, scope_stack),
 
-                    "->>" => handle_thread_last(&list, symbols, scope_stack),
+                _ => {
+                    // Check if it's a macro call
+                    if let Some(sym_id_u32) = first.as_symbol() {
+                        let sym_id = SymbolId(sym_id_u32);
+                        if symbols.is_macro(sym_id) {
+                            if let Some(macro_def) = symbols.get_macro(sym_id) {
+                                // This is a macro call - expand it
+                                // Get the arguments as unevaluated values
+                                let args = list[1..].to_vec();
 
-                    "cond" => convert_cond(&list, symbols, scope_stack),
+                                // Expand the macro
+                                let expanded = expand_macro(sym_id, &macro_def, &args, symbols)?;
 
-                    _ => {
-                        // Check if it's a macro call
-                        if let Value::Symbol(sym_id) = first {
-                            if symbols.is_macro(*sym_id) {
-                                if let Some(macro_def) = symbols.get_macro(*sym_id) {
-                                    // This is a macro call - expand it
-                                    // Get the arguments as unevaluated values
-                                    let args = list[1..].to_vec();
-
-                                    // Expand the macro
-                                    let expanded =
-                                        expand_macro(*sym_id, &macro_def, &args, symbols)?;
-
-                                    // Parse the expanded result as an expression
-                                    return value_to_expr_with_scope(
-                                        &expanded,
-                                        symbols,
-                                        scope_stack,
-                                    );
-                                }
+                                // Parse the expanded result as an expression
+                                return value_to_expr_with_scope(&expanded, symbols, scope_stack);
                             }
                         }
-
-                        // Regular function call
-                        let func = Box::new(value_to_expr_with_scope(first, symbols, scope_stack)?);
-                        let args: Result<Vec<_>, _> = list[1..]
-                            .iter()
-                            .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                            .collect();
-                        Ok(Expr::Call {
-                            func,
-                            args: args?,
-                            tail: false,
-                        })
                     }
-                }
-            } else {
-                // Function call with non-symbol function
-                let func = Box::new(value_to_expr_with_scope(first, symbols, scope_stack)?);
-                let args: Result<Vec<_>, _> = list[1..]
-                    .iter()
-                    .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
-                    .collect();
-                Ok(Expr::Call {
-                    func,
-                    args: args?,
-                    tail: false,
-                })
-            }
-        }
 
-        _ => Err(format!("Cannot convert {:?} to expression", value)),
+                    // Regular function call
+                    let func = Box::new(value_to_expr_with_scope(first, symbols, scope_stack)?);
+                    let args: Result<Vec<_>, _> = list[1..]
+                        .iter()
+                        .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                        .collect();
+                    Ok(Expr::Call {
+                        func,
+                        args: args?,
+                        tail: false,
+                    })
+                }
+            }
+        } else {
+            // Function call with non-symbol function
+            let func = Box::new(value_to_expr_with_scope(first, symbols, scope_stack)?);
+            let args: Result<Vec<_>, _> = list[1..]
+                .iter()
+                .map(|v| value_to_expr_with_scope(v, symbols, scope_stack))
+                .collect();
+            Ok(Expr::Call {
+                func,
+                args: args?,
+                tail: false,
+            })
+        }
+    } else {
+        // Not a cons cell - error
+        Err(format!("Cannot convert {:?} to expression", value))
     }
 }
 
@@ -592,9 +596,11 @@ pub fn mark_tail_calls(expr: &mut Expr, in_tail: bool) {
 }
 
 /// Look up a variable for set! and return the appropriate VarRef
-fn lookup_var_for_set(var: crate::value::SymbolId, scope_stack: &[ScopeEntry]) -> VarRef {
+fn lookup_var_for_set(var: u32, scope_stack: &[ScopeEntry]) -> VarRef {
+    let var_id = SymbolId(var);
+
     for (idx, scope_entry) in scope_stack.iter().enumerate().rev() {
-        if let Some(local_index) = scope_entry.symbols.iter().position(|sym| sym == &var) {
+        if let Some(local_index) = scope_entry.symbols.iter().position(|sym| sym == &var_id) {
             if scope_entry.scope_type == ScopeType::Let {
                 // Let-bound variable - check for intervening lambda
                 let mut has_intervening_lambda = false;
@@ -607,10 +613,10 @@ fn lookup_var_for_set(var: crate::value::SymbolId, scope_stack: &[ScopeEntry]) -
 
                 if has_intervening_lambda {
                     // Inside a lambda that captures this variable
-                    return VarRef::upvalue(var, local_index, false);
+                    return VarRef::upvalue(var_id, local_index, false);
                 } else {
                     // Direct access to let-bound variable
-                    return VarRef::let_bound(var);
+                    return VarRef::let_bound(var_id);
                 }
             } else {
                 // Function scope variable
@@ -618,55 +624,59 @@ fn lookup_var_for_set(var: crate::value::SymbolId, scope_stack: &[ScopeEntry]) -
                 if depth == 0 {
                     return VarRef::local(local_index);
                 } else {
-                    return VarRef::upvalue(var, local_index, false);
+                    return VarRef::upvalue(var_id, local_index, false);
                 }
             }
         }
     }
     // Not found in local scopes - it's global
-    VarRef::global(var)
+    VarRef::global(var_id)
 }
 
 /// Convert a value back to source code using the symbol table
 fn value_to_source(value: &Value, symbols: &SymbolTable) -> String {
-    match value {
-        Value::Nil => "nil".to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Int(n) => n.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::Symbol(id) => {
-            // Look up the symbol name in the symbol table
-            symbols
-                .name(*id)
-                .unwrap_or(&format!("Symbol({})", id.0))
-                .to_string()
-        }
-        Value::Keyword(id) => {
-            format!(":{}", id.0)
-        }
-        Value::String(s) => {
-            format!("\"{}\"", s)
-        }
-        Value::Cons(_) => {
-            // Convert list to source code
-            if let Ok(list_vec) = value.list_to_vec() {
-                let items: Vec<String> = list_vec
-                    .iter()
-                    .map(|v| value_to_source(v, symbols))
-                    .collect();
-                format!("({})", items.join(" "))
-            } else {
-                // Improper list
-                format!("{:?}", value)
-            }
-        }
-        Value::Vector(vec) => {
-            let items: Vec<String> = vec.iter().map(|v| value_to_source(v, symbols)).collect();
-            format!("[{}]", items.join(" "))
-        }
-        _ => {
-            // For other types, use debug representation
+    if value.is_nil() {
+        "nil".to_string()
+    } else if value.is_empty_list() {
+        "()".to_string()
+    } else if let Some(b) = value.as_bool() {
+        b.to_string()
+    } else if let Some(n) = value.as_int() {
+        n.to_string()
+    } else if let Some(f) = value.as_float() {
+        f.to_string()
+    } else if let Some(id) = value.as_symbol() {
+        // Look up the symbol name in the symbol table
+        let sym_id = SymbolId(id);
+        symbols
+            .name(sym_id)
+            .unwrap_or(&format!("Symbol({})", id))
+            .to_string()
+    } else if let Some(id) = value.as_keyword() {
+        format!(":{}", id)
+    } else if let Some(s) = value.as_string() {
+        format!("\"{}\"", s)
+    } else if value.as_cons().is_some() {
+        // Convert list to source code
+        if let Ok(list_vec) = value.list_to_vec() {
+            let items: Vec<String> = list_vec
+                .iter()
+                .map(|v| value_to_source(v, symbols))
+                .collect();
+            format!("({})", items.join(" "))
+        } else {
+            // Improper list
             format!("{:?}", value)
         }
+    } else if let Some(vec) = value.as_vector() {
+        let items: Vec<String> = vec
+            .borrow()
+            .iter()
+            .map(|v| value_to_source(v, symbols))
+            .collect();
+        format!("[{}]", items.join(" "))
+    } else {
+        // For other types, use debug representation
+        format!("{:?}", value)
     }
 }

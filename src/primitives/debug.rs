@@ -1,64 +1,87 @@
-use crate::error::LResult;
-use crate::value::{list, Value};
+use crate::value::{list, Condition, Value};
 
 /// Prints a value with debug information
 /// (debug-print value)
-pub fn prim_debug_print(args: &[Value]) -> LResult<Value> {
+pub fn prim_debug_print(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!("debug-print: expected 1 argument, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "debug-print: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
     eprintln!("[DEBUG] {:?}", args[0]);
-    Ok(args[0].clone())
+    Ok(args[0])
 }
 
 /// Traces execution with a label
 /// (trace name value)
-pub fn prim_trace(args: &[Value]) -> LResult<Value> {
+pub fn prim_trace(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 2 {
-        return Err(format!("trace: expected 2 arguments, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "trace: expected 2 arguments, got {}",
+            args.len()
+        )));
     }
 
-    match &args[0] {
-        Value::String(label) => {
-            eprintln!("[TRACE] {}: {:?}", label, args[1]);
-            Ok(args[1].clone())
+    if let Some(_label) = args[0].as_heap_ptr() {
+        // Try to extract string from heap
+        use crate::value::heap::{deref, HeapObject};
+        match unsafe { deref(args[0]) } {
+            HeapObject::String(s) => {
+                eprintln!("[TRACE] {}: {:?}", s, args[1]);
+                Ok(args[1])
+            }
+            _ => {
+                if let Some(sym_id) = args[0].as_symbol() {
+                    eprintln!("[TRACE] {:?}: {:?}", sym_id, args[1]);
+                    Ok(args[1])
+                } else {
+                    Err(Condition::type_error(
+                        "trace: first argument must be a string or symbol".to_string(),
+                    ))
+                }
+            }
         }
-        Value::Symbol(label_id) => {
-            eprintln!("[TRACE] {:?}: {:?}", label_id, args[1]);
-            Ok(args[1].clone())
-        }
-        _ => Err("trace: first argument must be a string or symbol"
-            .to_string()
-            .into()),
+    } else if let Some(sym_id) = args[0].as_symbol() {
+        eprintln!("[TRACE] {:?}: {:?}", sym_id, args[1]);
+        Ok(args[1])
+    } else {
+        Err(Condition::type_error(
+            "trace: first argument must be a string or symbol".to_string(),
+        ))
     }
 }
 
 /// Times the execution of a thunk
 /// (profile thunk)
-pub fn prim_profile(args: &[Value]) -> LResult<Value> {
+pub fn prim_profile(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!("profile: expected 1 argument, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "profile: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
     // In production, would time execution of closure
     // For now, just return a placeholder timing
-    match &args[0] {
-        Value::Closure(_) | Value::NativeFn(_) => {
-            Ok(Value::String("profiling-not-yet-implemented".into()))
-        }
-        _ => Err("profile: argument must be a function".to_string().into()),
+    if args[0].as_closure().is_some() || args[0].as_native_fn().is_some() {
+        Ok(Value::string("profiling-not-yet-implemented"))
+    } else {
+        Err(Condition::type_error(
+            "profile: argument must be a function".to_string(),
+        ))
     }
 }
 
 /// Returns memory usage statistics
 /// (memory-usage)
 /// Returns a list: (rss-bytes virtual-bytes)
-pub fn prim_memory_usage(_args: &[Value]) -> LResult<Value> {
+pub fn prim_memory_usage(_args: &[Value]) -> Result<Value, Condition> {
     let (rss_bytes, virtual_bytes) = get_memory_usage();
     Ok(list(vec![
-        Value::Int(rss_bytes as i64),
-        Value::Int(virtual_bytes as i64),
+        Value::int(rss_bytes as i64),
+        Value::int(virtual_bytes as i64),
     ]))
 }
 
