@@ -49,7 +49,7 @@ fn unit_no_shebang_parses_normally() {
     let code = "42";
     let result = read_str(code, &mut symbols);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(42));
+    assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn unit_shebang_preserves_code_after() {
     // The first expression after shebang should be parsed
     // We can't easily check the exact result since read_str reads one expression
     // but we verify it parses without error
-    assert!(matches!(result, Value::Int(_) | Value::Cons(_)));
+    assert!(result.is_int() || result.is_cons());
 }
 
 // NOTE: This test disabled - #! on line 3 causes lexer to fail
@@ -156,7 +156,7 @@ fn unit_shebang_with_string_after() {
     let code = "#!/usr/bin/env elle\n\"hello world\"";
     let result = read_str(code, &mut symbols);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String("hello world".into()));
+    assert_eq!(result.unwrap(), Value::string("hello world"));
 }
 
 #[test]

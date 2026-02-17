@@ -36,7 +36,7 @@ fn eval(code: &str) -> Result<Value, String> {
         return Err("No input".to_string());
     } else {
         // Wrap multiple expressions in a begin
-        let mut begin_args = vec![Value::Symbol(symbols.intern("begin"))];
+        let mut begin_args = vec![Value::symbol(symbols.intern("begin").0)];
         begin_args.extend(values);
         list(begin_args)
     };
@@ -53,8 +53,8 @@ fn eval(code: &str) -> Result<Value, String> {
 #[test]
 fn test_let_basic() {
     // Basic let binding
-    assert_eq!(eval("(let ((x 1)) x)").unwrap(), Value::Int(1));
-    assert_eq!(eval("(let ((x 1) (y 2)) (+ x y))").unwrap(), Value::Int(3));
+    assert_eq!(eval("(let ((x 1)) x)").unwrap(), Value::int(1));
+    assert_eq!(eval("(let ((x 1) (y 2)) (+ x y))").unwrap(), Value::int(3));
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn test_let_bindings_dont_see_each_other() {
           (let ((x 1) (y x))
             y))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(100));
+    assert_eq!(eval(code).unwrap(), Value::int(100));
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_let_parallel_binding() {
     "#;
     let result = eval(code).unwrap();
     // Should be (2 1), not (2 2)
-    assert_eq!(result.to_string(), "(2 1)");
+    assert_eq!(result, list(vec![Value::int(2), Value::int(1)]));
 }
 
 // ============================================================================
@@ -90,29 +90,29 @@ fn test_let_parallel_binding() {
 #[test]
 fn test_let_star_basic() {
     // Basic let* binding
-    assert_eq!(eval("(let* ((x 1)) x)").unwrap(), Value::Int(1));
-    assert_eq!(eval("(let* ((x 1) (y 2)) (+ x y))").unwrap(), Value::Int(3));
+    assert_eq!(eval("(let* ((x 1)) x)").unwrap(), Value::int(1));
+    assert_eq!(eval("(let* ((x 1) (y 2)) (+ x y))").unwrap(), Value::int(3));
 }
 
 #[test]
 fn test_let_star_sequential_binding() {
     // In let*, each binding can see previous bindings
     let code = "(let* ((x 1) (y (+ x 1))) y)";
-    assert_eq!(eval(code).unwrap(), Value::Int(2));
+    assert_eq!(eval(code).unwrap(), Value::int(2));
 }
 
 #[test]
 fn test_let_star_chain() {
     // Chain of dependencies
     let code = "(let* ((a 1) (b (+ a 1)) (c (+ b 1)) (d (+ c 1))) d)";
-    assert_eq!(eval(code).unwrap(), Value::Int(4));
+    assert_eq!(eval(code).unwrap(), Value::int(4));
 }
 
 #[test]
 fn test_let_star_shadows_previous() {
     // Later binding shadows earlier one
     let code = "(let* ((x 1) (x (+ x 1))) x)";
-    assert_eq!(eval(code).unwrap(), Value::Int(2));
+    assert_eq!(eval(code).unwrap(), Value::int(2));
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn test_let_star_complex_chain() {
     "#;
     let result = eval(code).unwrap();
     // a=1, b=2, c=3, d=6
-    assert_eq!(result.to_string(), "(1 2 3 6)");
+    assert_eq!(result, list(vec![Value::int(1), Value::int(2), Value::int(3), Value::int(6)]));
 }
 
 // ============================================================================
@@ -140,7 +140,7 @@ fn test_let_vs_let_star_reference() {
 
     // let* allows y to reference x
     let code_star = "(let* ((x 10) (y x)) y)";
-    assert_eq!(eval(code_star).unwrap(), Value::Int(10));
+    assert_eq!(eval(code_star).unwrap(), Value::int(10));
 
     // let does NOT allow y to reference the let-bound x
     // y should reference outer x if it exists, or error if not
@@ -149,14 +149,14 @@ fn test_let_vs_let_star_reference() {
           (define x 999)
           (let ((x 10) (y x)) y))
     "#;
-    assert_eq!(eval(code_let).unwrap(), Value::Int(999));
+    assert_eq!(eval(code_let).unwrap(), Value::int(999));
 }
 
 #[test]
 fn test_let_vs_let_star_computation() {
     // let* can build on previous computations
     let code_star = "(let* ((x 2) (y (* x x)) (z (* y y))) z)";
-    assert_eq!(eval(code_star).unwrap(), Value::Int(16)); // 2^4
+    assert_eq!(eval(code_star).unwrap(), Value::int(16)); // 2^4
 
     // let cannot - each binding only sees outer scope
     // This would need outer definitions to work
@@ -174,7 +174,7 @@ fn test_nested_let_star() {
             (let* ((z (+ y 1)))
               z)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(3));
+    assert_eq!(eval(code).unwrap(), Value::int(3));
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn test_let_star_with_inner_let() {
           (let ((a (+ x y)) (b (* x y)))
             (+ a b)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(5)); // (1+2) + (1*2) = 3 + 2
+    assert_eq!(eval(code).unwrap(), Value::int(5)); // (1+2) + (1*2) = 3 + 2
 }
 
 // ============================================================================
@@ -200,7 +200,7 @@ fn test_let_star_closure_captures_sequential() {
                (f (fn () y)))
           (f))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(15));
+    assert_eq!(eval(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn test_let_star_closure_escapes() {
           (define add-20 (make-adder 10))
           (add-20 5))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(25)); // 5 + 20
+    assert_eq!(eval(code).unwrap(), Value::int(25)); // 5 + 20
 }
 
 // ============================================================================
@@ -226,13 +226,13 @@ fn test_let_star_closure_escapes() {
 #[test]
 fn test_let_star_empty() {
     // Empty bindings
-    assert_eq!(eval("(let* () 42)").unwrap(), Value::Int(42));
+    assert_eq!(eval("(let* () 42)").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_let_star_single_binding() {
     // Single binding (same as let)
-    assert_eq!(eval("(let* ((x 1)) x)").unwrap(), Value::Int(1));
+    assert_eq!(eval("(let* ((x 1)) x)").unwrap(), Value::int(1));
 }
 
 #[test]
@@ -244,5 +244,5 @@ fn test_let_star_with_function_calls() {
                (c (- b a)))
           c)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(6)); // a=3, b=9, c=6
+    assert_eq!(eval(code).unwrap(), Value::int(6)); // a=3, b=9, c=6
 }

@@ -28,7 +28,7 @@ fn test_jit_coordinator_with_execution() {
 
     // Execute the bytecode (coordinator can monitor this)
     let result = vm.execute(&bytecode).unwrap();
-    assert_eq!(result, elle::value::Value::Int(3));
+    assert_eq!(result, elle::value::Value::int(3));
 
     // Stats should show activity
     let stats = coordinator.get_stats();
@@ -73,9 +73,9 @@ fn test_jit_arithmetic_expression() {
     register_primitives(&mut vm, &mut symbols);
 
     let test_cases = vec![
-        ("(+ 5 3)", elle::value::Value::Int(8)),
-        ("(* 4 2)", elle::value::Value::Int(8)),
-        ("(- 10 3)", elle::value::Value::Int(7)),
+        ("(+ 5 3)", elle::value::Value::int(8)),
+        ("(* 4 2)", elle::value::Value::int(8)),
+        ("(- 10 3)", elle::value::Value::int(7)),
     ];
 
     for (code, expected) in test_cases {
@@ -98,7 +98,7 @@ fn test_jit_conditional_expression() {
     let expr = value_to_expr(&value, &mut symbols).unwrap();
     let bytecode = compile(&expr);
     let result = vm.execute(&bytecode).unwrap();
-    assert_eq!(result, elle::value::Value::Int(100));
+    assert_eq!(result, elle::value::Value::int(100));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn test_jit_executor_native_code_execution() {
     let symbols = SymbolTable::new();
 
     // Test 1: Literal integer execution
-    let expr = Expr::Literal(Value::Int(42));
+    let expr = Expr::Literal(Value::int(42));
     let result = executor
         .try_jit_execute(&expr, &symbols)
         .expect("JIT execution failed");
@@ -145,13 +145,14 @@ fn test_jit_executor_native_code_execution() {
         result.is_some(),
         "JIT executor should return Some for literal"
     );
-    match result.unwrap() {
-        Value::Int(42) => (),
-        other => panic!("Expected Value::Int(42), got {:?}", other),
+    let result = result.unwrap();
+    if let Some(n) = result.as_int() {
+        assert_eq!(n, 42);
+    } else {
+        panic!("Expected Value::int(42), got {:?}", result);
     }
-
     // Test 2: Boolean literal
-    let expr_bool = Expr::Literal(Value::Bool(true));
+    let expr_bool = Expr::Literal(Value::bool(true));
     let result_bool = executor
         .try_jit_execute(&expr_bool, &symbols)
         .expect("JIT execution failed");
@@ -161,7 +162,7 @@ fn test_jit_executor_native_code_execution() {
     );
 
     // Test 3: Nil literal
-    let expr_nil = Expr::Literal(Value::Nil);
+    let expr_nil = Expr::Literal(Value::NIL);
     let result_nil = executor
         .try_jit_execute(&expr_nil, &symbols)
         .expect("JIT execution failed");
@@ -177,8 +178,8 @@ fn test_jit_executor_cache_functionality() {
     let mut executor = JitExecutor::new().expect("Failed to create JIT executor");
     let symbols = SymbolTable::new();
 
-    let expr1 = Expr::Literal(Value::Int(10));
-    let expr2 = Expr::Literal(Value::Int(20));
+    let expr1 = Expr::Literal(Value::int(10));
+    let expr2 = Expr::Literal(Value::int(20));
 
     // Execute first expression
     executor.try_jit_execute(&expr1, &symbols).ok();

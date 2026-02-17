@@ -314,7 +314,7 @@ fn bench_memory_operations(c: &mut Criterion) {
     group.bench_function("value_clone", |b| {
         let mut symbols = SymbolTable::new();
         let value = read_str("(1 2 3 4 5)", &mut symbols).unwrap();
-        b.iter(|| black_box(value.clone()));
+        b.iter(|| black_box(value));
     });
 
     // List traversal

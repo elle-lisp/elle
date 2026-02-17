@@ -59,9 +59,9 @@ fn test_quasiquote_integers() {
     let result = eval("`(1 2 3)");
     assert!(result.is_ok());
     let list = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(list[0], Value::Int(1));
-    assert_eq!(list[1], Value::Int(2));
-    assert_eq!(list[2], Value::Int(3));
+    assert_eq!(list[0], Value::int(1));
+    assert_eq!(list[1], Value::int(2));
+    assert_eq!(list[2], Value::int(3));
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn test_quasiquote_with_function() {
     let list = result.unwrap().list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
     // First element should be symbol '+'
-    assert!(matches!(list[0], Value::Symbol(_)));
+    assert!((list[0]).is_symbol());
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn test_quasiquote_with_unquote_and_quoted() {
     // Current implementation returns result as-is
     let val = result.unwrap();
     // Should be some form of value
-    assert!(!matches!(val, Value::Nil));
+    assert!(!val.is_nil());
 }
 
 #[test]

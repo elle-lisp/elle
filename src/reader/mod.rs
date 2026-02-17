@@ -107,8 +107,8 @@ mod tests {
     #[allow(clippy::approx_constant)]
     fn test_read_number() {
         let mut symbols = SymbolTable::new();
-        assert_eq!(read_str("42", &mut symbols).unwrap(), Value::Int(42));
-        assert_eq!(read_str("3.14", &mut symbols).unwrap(), Value::Float(3.14));
+        assert_eq!(read_str("42", &mut symbols).unwrap(), Value::int(42));
+        assert_eq!(read_str("3.14", &mut symbols).unwrap(), Value::float(3.14));
     }
 
     #[test]

@@ -128,7 +128,7 @@ impl JitExecutor {
             Expr::Literal(val) => {
                 let mut cache = self.cache.borrow_mut();
                 cache.insert(hash, CachedJitCode::new(hash, true));
-                Ok(Some(val.clone()))
+                Ok(Some(*val))
             }
 
             // If expressions and Begin can be JIT compiled
@@ -212,34 +212,34 @@ impl JitExecutor {
         // For now, we need to know what type of value was compiled
         // In the future, we'd track type information through compilation
         match expr {
-            Expr::Literal(val) => match val {
-                Value::Nil => Ok(Value::Nil),
-                Value::Bool(_) => {
+            Expr::Literal(val) => {
+                if val.is_nil() || val.is_empty_list() {
+                    Ok(Value::NIL)
+                } else if val.is_bool() {
                     // Booleans are encoded as 0 (false) or 1 (true)
-                    Ok(Value::Bool(result != 0))
-                }
-                Value::Int(_) => {
+                    Ok(Value::bool(result != 0))
+                } else if val.is_int() {
                     // Integers are stored directly
-                    Ok(Value::Int(result))
-                }
-                Value::Float(_) => {
+                    Ok(Value::int(result))
+                } else if val.is_float() {
                     // For now, we can't properly decode floats without more context
                     // The result would be bit-encoded, but we can't decode here
                     Err("Float results not yet supported in JIT execution".to_string())
+                } else {
+                    Err(format!(
+                        "Cannot decode native result for literal: {:?}",
+                        val
+                    ))
                 }
-                _ => Err(format!(
-                    "Cannot decode native result for literal: {:?}",
-                    val
-                )),
-            },
+            }
             Expr::If { .. } | Expr::Begin(_) => {
                 // For conditionals and sequences, try to infer from structure
                 // For now, treat as integer
-                Ok(Value::Int(result))
+                Ok(Value::int(result))
             }
             _ => {
                 // Default: treat as integer
-                Ok(Value::Int(result))
+                Ok(Value::int(result))
             }
         }
     }
@@ -313,16 +313,18 @@ mod tests {
     fn test_jit_executor_literal_execution() {
         let mut executor = JitExecutor::new().unwrap();
         let symbols = SymbolTable::new();
-        let expr = Expr::Literal(Value::Int(42));
+        let expr = Expr::Literal(Value::int(42));
 
         let result = executor.try_jit_execute(&expr, &symbols);
         assert!(result.is_ok());
         // Literals should execute successfully
         let res = result.unwrap();
         assert!(res.is_some());
-        match res.unwrap() {
-            Value::Int(42) => (),
-            _ => panic!("Expected Value::Int(42)"),
+        let v = res.unwrap();
+        if let Some(n) = v.as_int() {
+            assert_eq!(n, 42);
+        } else {
+            panic!("Expected Value::int(42)");
         }
     }
 
@@ -330,8 +332,8 @@ mod tests {
     fn test_jit_executor_cache() {
         let mut executor = JitExecutor::new().unwrap();
         let symbols = SymbolTable::new();
-        let expr1 = Expr::Literal(Value::Int(42));
-        let expr2 = Expr::Literal(Value::Int(43));
+        let expr1 = Expr::Literal(Value::int(42));
+        let expr2 = Expr::Literal(Value::int(43));
 
         let hash1 = CachedJitCode::compute_hash(&expr1);
         let hash2 = CachedJitCode::compute_hash(&expr2);

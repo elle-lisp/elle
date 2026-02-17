@@ -3,6 +3,7 @@ use super::variable_analysis::extract_pattern_variables;
 use super::{ScopeEntry, ScopeType};
 use crate::symbol::SymbolTable;
 use crate::value::Value;
+use crate::value_old::SymbolId as SymbolIdType;
 
 /// Helper function to convert match expressions
 /// Extracted to reduce stack frame size of value_to_expr_with_scope
@@ -121,8 +122,8 @@ pub fn convert_cond(
 
         // Check if this is the else clause (single symbol 'else' followed by body)
         if !clause_vec.is_empty() {
-            if let Value::Symbol(test_sym) = &clause_vec[0] {
-                if let Some("else") = symbols.name(*test_sym) {
+            if let Some(test_sym_id) = clause_vec[0].as_symbol() {
+                if let Some("else") = symbols.name(SymbolIdType(test_sym_id)) {
                     // This is the else clause
                     if else_body.is_some() {
                         return Err("cond can have at most one else clause".to_string());
@@ -134,7 +135,7 @@ pub fn convert_cond(
                         .collect();
                     let body_exprs = body_exprs?;
                     let body = if body_exprs.is_empty() {
-                        Expr::Literal(Value::Nil)
+                        Expr::Literal(Value::NIL)
                     } else if body_exprs.len() == 1 {
                         body_exprs[0].clone()
                     } else {
@@ -160,7 +161,7 @@ pub fn convert_cond(
             .collect();
         let body_exprs = body_exprs?;
         let body = if body_exprs.is_empty() {
-            Expr::Literal(Value::Nil)
+            Expr::Literal(Value::NIL)
         } else if body_exprs.len() == 1 {
             body_exprs[0].clone()
         } else {

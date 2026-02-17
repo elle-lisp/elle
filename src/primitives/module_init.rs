@@ -26,7 +26,7 @@ fn init_list_module(vm: &mut VM, symbols: &mut SymbolTable) {
     let mut exports = Vec::new();
     for func_name in &functions {
         if let Some(func) = vm.get_global(symbols.intern(func_name).0) {
-            list_exports.insert(symbols.intern(func_name).0, func.clone());
+            list_exports.insert(symbols.intern(func_name).0, *func);
         }
         exports.push(symbols.intern(func_name));
     }
@@ -64,7 +64,7 @@ fn init_string_module(vm: &mut VM, symbols: &mut SymbolTable) {
     let mut exports = Vec::new();
     for func_name in &functions {
         if let Some(func) = vm.get_global(symbols.intern(func_name).0) {
-            string_exports.insert(symbols.intern(func_name).0, func.clone());
+            string_exports.insert(symbols.intern(func_name).0, *func);
         }
         exports.push(symbols.intern(func_name));
     }
@@ -89,7 +89,7 @@ fn init_math_module(vm: &mut VM, symbols: &mut SymbolTable) {
     let mut exports = Vec::new();
     for func_name in &functions {
         if let Some(func) = vm.get_global(symbols.intern(func_name).0) {
-            math_exports.insert(symbols.intern(func_name).0, func.clone());
+            math_exports.insert(symbols.intern(func_name).0, *func);
         }
         exports.push(symbols.intern(func_name));
     }
@@ -111,7 +111,7 @@ fn init_json_module(vm: &mut VM, symbols: &mut SymbolTable) {
     let mut exports = Vec::new();
     for func_name in &functions {
         if let Some(func) = vm.get_global(symbols.intern(func_name).0) {
-            json_exports.insert(symbols.intern(func_name).0, func.clone());
+            json_exports.insert(symbols.intern(func_name).0, *func);
         }
         exports.push(symbols.intern(func_name));
     }

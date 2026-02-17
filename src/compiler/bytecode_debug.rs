@@ -41,6 +41,14 @@ pub fn disassemble(instructions: &[u8]) -> String {
                     i += 2;
                 }
             }
+            Instruction::LoadUpvalue | Instruction::LoadUpvalueRaw | Instruction::StoreUpvalue => {
+                if i + 1 < instructions.len() {
+                    let depth = instructions[i];
+                    let index = instructions[i + 1];
+                    output.push_str(&format!(" (depth={}, index={})", depth, index));
+                    i += 2;
+                }
+            }
             Instruction::Call | Instruction::TailCall => {
                 if i < instructions.len() {
                     let arg_count = instructions[i];
@@ -53,6 +61,17 @@ pub fn disassemble(instructions: &[u8]) -> String {
                     let offset = instructions[i];
                     output.push_str(&format!(" (offset={})", offset));
                     i += 1;
+                }
+            }
+            Instruction::MakeClosure => {
+                if i + 2 < instructions.len() {
+                    let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                    let num_captures = instructions[i + 2];
+                    output.push_str(&format!(
+                        " (const_idx={}, num_captures={})",
+                        const_idx, num_captures
+                    ));
+                    i += 3;
                 }
             }
             _ => {}

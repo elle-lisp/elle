@@ -5,37 +5,36 @@ use crate::value::Value;
 
 /// Marshal a struct value to C representation with layout information.
 pub fn marshal_struct_with_layout(value: &Value, layout: &StructLayout) -> Result<CValue, String> {
-    match value {
-        Value::Vector(vec) => {
-            // Vector representation: fields in order
-            if vec.len() != layout.fields.len() {
-                return Err(format!(
-                    "Struct {} expects {} fields, got {}",
-                    layout.name,
-                    layout.fields.len(),
-                    vec.len()
-                ));
-            }
-
-            let mut bytes = vec![0u8; layout.size];
-
-            for (i, field) in layout.fields.iter().enumerate() {
-                let field_value = &vec[i];
-                pack_field(&mut bytes, field_value, field.offset, &field.ctype)?;
-            }
-
-            Ok(CValue::Struct(bytes))
+    if let Some(vec_ref) = value.as_vector() {
+        // Vector representation: fields in order
+        let vec = vec_ref.borrow();
+        if vec.len() != layout.fields.len() {
+            return Err(format!(
+                "Struct {} expects {} fields, got {}",
+                layout.name,
+                layout.fields.len(),
+                vec.len()
+            ));
         }
-        Value::Cons(_) => {
-            // List representation: convert to vector first
-            let vec_vals = value.list_to_vec()?;
-            let vec_value = Value::Vector(std::rc::Rc::new(vec_vals));
-            marshal_struct_with_layout(&vec_value, layout)
+
+        let mut bytes = vec![0u8; layout.size];
+
+        for (i, field) in layout.fields.iter().enumerate() {
+            let field_value = &vec[i];
+            pack_field(&mut bytes, field_value, field.offset, &field.ctype)?;
         }
-        _ => Err(format!(
+
+        Ok(CValue::Struct(bytes))
+    } else if value.is_cons() {
+        // List representation: convert to vector first
+        let vec_vals = value.list_to_vec()?;
+        let vec_value = Value::vector(vec_vals);
+        marshal_struct_with_layout(&vec_value, layout)
+    } else {
+        Err(format!(
             "Cannot marshal {:?} as struct {}",
             value, layout.name
-        )),
+        ))
     }
 }
 
@@ -67,7 +66,7 @@ pub fn unmarshal_struct_with_layout(
                 field_values.push(field_value);
             }
 
-            Ok(Value::Vector(std::rc::Rc::new(field_values)))
+            Ok(Value::vector(field_values))
         }
         _ => Err(format!(
             "Type mismatch: expected struct {}, got {:?}",
@@ -110,7 +109,7 @@ mod tests {
         );
 
         // Create Elle vector [10, 20]
-        let value = Value::Vector(std::rc::Rc::new(vec![Value::Int(10), Value::Int(20)]));
+        let value = Value::vector(vec![Value::int(10), Value::int(20)]);
 
         // Marshal to struct
         let cval = marshal_struct_with_layout(&value, &layout).unwrap();
@@ -163,13 +162,13 @@ mod tests {
         let val = unmarshal_struct_with_layout(&cval, &layout).unwrap();
 
         // Verify values
-        match val {
-            Value::Vector(vec) => {
-                assert_eq!(vec.len(), 2);
-                assert_eq!(vec[0], Value::Int(10));
-                assert_eq!(vec[1], Value::Int(20));
-            }
-            _ => panic!("Expected Value::Vector"),
+        if let Some(vec_ref) = val.as_vector() {
+            let vec = vec_ref.borrow();
+            assert_eq!(vec.len(), 2);
+            assert_eq!(vec[0], Value::int(10));
+            assert_eq!(vec[1], Value::int(20));
+        } else {
+            panic!("Expected Value::Vector");
         }
     }
 
@@ -200,11 +199,11 @@ mod tests {
         );
 
         // Original values
-        let original = Value::Vector(std::rc::Rc::new(vec![
-            Value::Int(100),
-            Value::Int(5000),
-            Value::Float(std::f64::consts::PI),
-        ]));
+        let original = Value::vector(vec![
+            Value::int(100),
+            Value::int(5000),
+            Value::float(std::f64::consts::PI),
+        ]);
 
         // Marshal
         let marshaled = marshal_struct_with_layout(&original, &layout).unwrap();
@@ -213,17 +212,18 @@ mod tests {
         let unmarshaled = unmarshal_struct_with_layout(&marshaled, &layout).unwrap();
 
         // Verify
-        match unmarshaled {
-            Value::Vector(vec) => {
-                assert_eq!(vec.len(), 3);
-                assert_eq!(vec[0], Value::Int(100));
-                assert_eq!(vec[1], Value::Int(5000));
-                match &vec[2] {
-                    Value::Float(f) => assert!((f - std::f64::consts::PI).abs() < 0.01),
-                    _ => panic!("Expected float"),
-                }
+        if let Some(vec_ref) = unmarshaled.as_vector() {
+            let vec = vec_ref.borrow();
+            assert_eq!(vec.len(), 3);
+            assert_eq!(vec[0], Value::int(100));
+            assert_eq!(vec[1], Value::int(5000));
+            if let Some(f) = vec[2].as_float() {
+                assert!((f - std::f64::consts::PI).abs() < 0.01);
+            } else {
+                panic!("Expected float");
             }
-            _ => panic!("Expected Vector"),
+        } else {
+            panic!("Expected Vector");
         }
     }
 
@@ -259,27 +259,28 @@ mod tests {
             8,
         );
 
-        let value = Value::Vector(std::rc::Rc::new(vec![
-            Value::Bool(true),
-            Value::Int(65), // 'A'
-            Value::Int(42),
-            Value::Float(std::f64::consts::E),
-        ]));
+        let value = Value::vector(vec![
+            Value::bool(true),
+            Value::int(65), // 'A'
+            Value::int(42),
+            Value::float(std::f64::consts::E),
+        ]);
 
         let cval = marshal_struct_with_layout(&value, &layout).unwrap();
         let result = unmarshal_struct_with_layout(&cval, &layout).unwrap();
 
-        match result {
-            Value::Vector(vec) => {
-                assert_eq!(vec[0], Value::Bool(true));
-                assert_eq!(vec[1], Value::Int(65));
-                assert_eq!(vec[2], Value::Int(42));
-                match &vec[3] {
-                    Value::Float(f) => assert!((f - std::f64::consts::E).abs() < 0.01),
-                    _ => panic!("Expected float"),
-                }
+        if let Some(vec_ref) = result.as_vector() {
+            let vec = vec_ref.borrow();
+            assert_eq!(vec[0], Value::bool(true));
+            assert_eq!(vec[1], Value::int(65));
+            assert_eq!(vec[2], Value::int(42));
+            if let Some(f) = vec[3].as_float() {
+                assert!((f - std::f64::consts::E).abs() < 0.01);
+            } else {
+                panic!("Expected float");
             }
-            _ => panic!("Expected Vector"),
+        } else {
+            panic!("Expected Vector");
         }
     }
 
@@ -305,7 +306,7 @@ mod tests {
         );
 
         // Only provide 1 field instead of 2
-        let value = Value::Vector(std::rc::Rc::new(vec![Value::Int(10)]));
+        let value = Value::vector(vec![Value::int(10)]);
 
         let result = marshal_struct_with_layout(&value, &layout);
         assert!(result.is_err());

@@ -244,15 +244,16 @@ mod tests {
 
     impl TypeHandler for SimpleHandler {
         fn elle_to_c(&self, value: &Value, _ctype: &CType) -> Result<CValue, String> {
-            match value {
-                Value::Int(n) => Ok(CValue::Int(*n)),
-                _ => Err("Can only handle integers".to_string()),
+            if let Some(n) = value.as_int() {
+                Ok(CValue::Int(n))
+            } else {
+                Err("Can only handle integers".to_string())
             }
         }
 
         fn c_to_elle(&self, cval: &CValue, _ctype: &CType) -> Result<Value, String> {
             match cval {
-                CValue::Int(n) => Ok(Value::Int(*n)),
+                CValue::Int(n) => Ok(Value::int(*n)),
                 _ => Err("Can only handle integers".to_string()),
             }
         }

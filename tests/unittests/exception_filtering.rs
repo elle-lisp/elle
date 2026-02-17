@@ -110,8 +110,8 @@ fn unit_exception_filtering_by_message_pattern() {
     let network_msg = ExceptionEval::eval(r#"(exception-message (exception "network"))"#).unwrap();
 
     // Both should be strings
-    assert!(matches!(timeout_msg, Value::String(_)));
-    assert!(matches!(network_msg, Value::String(_)));
+    assert!((timeout_msg).is_string());
+    assert!((network_msg).is_string());
 }
 
 #[test]
@@ -120,8 +120,8 @@ fn unit_exception_filtering_by_data_code() {
     let code_404 = ExceptionEval::eval(r#"(exception-data (exception "http" 404))"#).unwrap();
     let code_500 = ExceptionEval::eval(r#"(exception-data (exception "http" 500))"#).unwrap();
 
-    assert_eq!(code_404, Value::Int(404));
-    assert_eq!(code_500, Value::Int(500));
+    assert_eq!(code_404, Value::int(404));
+    assert_eq!(code_500, Value::int(500));
 }
 
 #[test]
@@ -161,9 +161,9 @@ fn unit_exception_categorization_for_filtering() {
     let auth_exc = ExceptionEval::eval(r#"(exception "auth" "invalid-token")"#).unwrap();
     let db_exc = ExceptionEval::eval(r#"(exception "database" "connection-lost")"#).unwrap();
 
-    assert!(matches!(network_exc, Value::Exception(_)));
-    assert!(matches!(auth_exc, Value::Exception(_)));
-    assert!(matches!(db_exc, Value::Exception(_)));
+    assert!(network_exc.as_condition().is_some());
+    assert!(auth_exc.as_condition().is_some());
+    assert!(db_exc.as_condition().is_some());
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn unit_exception_list_data_for_complex_filtering() {
     )
     .unwrap();
 
-    assert!(matches!(data, Value::Cons(_)));
+    assert!((data).is_cons());
 }
 
 #[test]
@@ -187,15 +187,15 @@ fn unit_exception_filtering_documentation() {
 
     // Pattern 1: Filter by message
     let msg = ExceptionEval::eval(r#"(exception-message (exception "network-error"))"#).unwrap();
-    assert!(matches!(msg, Value::String(_)));
+    assert!((msg).is_string());
 
     // Pattern 2: Filter by error code
     let code = ExceptionEval::eval(r#"(exception-data (exception "http" 404))"#).unwrap();
-    assert_eq!(code, Value::Int(404));
+    assert_eq!(code, Value::int(404));
 
     // Pattern 3: Filter by structured data
     let data =
         ExceptionEval::eval(r#"(exception-data (exception "api" (list "status" "unauthorized")))"#)
             .unwrap();
-    assert!(matches!(data, Value::Cons(_)));
+    assert!((data).is_cons());
 }

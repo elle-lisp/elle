@@ -120,6 +120,16 @@ impl SymbolTable {
     pub fn current_module(&self) -> Option<SymbolId> {
         self.current_module
     }
+
+    /// Extract all symbol ID → name mappings.
+    /// Used for cross-thread symbol portability.
+    pub fn all_names(&self) -> std::collections::HashMap<u32, String> {
+        self.names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (i as u32, name.to_string()))
+            .collect()
+    }
 }
 
 impl Default for SymbolTable {

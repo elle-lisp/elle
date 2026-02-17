@@ -103,7 +103,7 @@ impl<'a> CpsInterpreter<'a> {
     /// Evaluate a CPS expression and return an Action
     pub fn eval(&mut self, expr: &CpsExpr) -> Result<Action, String> {
         match expr {
-            CpsExpr::Literal(v) => Ok(Action::done(v.clone())),
+            CpsExpr::Literal(v) => Ok(Action::done(*v)),
 
             CpsExpr::Var {
                 sym,
@@ -112,10 +112,9 @@ impl<'a> CpsInterpreter<'a> {
             } => {
                 let env = self.env.borrow();
                 if *index < env.len() {
-                    let val = env[*index].clone();
+                    let val = env[*index];
                     drop(env);
-                    let unwrapped = unwrap_local_cell(val);
-                    Ok(Action::done(unwrapped))
+                    Ok(Action::done(val))
                 } else {
                     let env_len = env.len();
                     drop(env);
@@ -138,11 +137,11 @@ impl<'a> CpsInterpreter<'a> {
 
                     // Check globals
                     if let Some(val) = self.vm.globals.get(&sym.0) {
-                        Ok(Action::done(val.clone()))
+                        Ok(Action::done(*val))
                     } else {
                         // Try to load from scope stack (for let-bound variables)
                         if let Some(val) = self.vm.scope_stack.get(sym.0) {
-                            Ok(Action::done(val.clone()))
+                            Ok(Action::done(val))
                         } else {
                             Err(format!("Undefined global: {:?}", sym))
                         }
@@ -151,7 +150,7 @@ impl<'a> CpsInterpreter<'a> {
                     drop(env);
                     // Check globals
                     if let Some(val) = self.vm.globals.get(&sym.0) {
-                        Ok(Action::done(val.clone()))
+                        Ok(Action::done(*val))
                     } else {
                         Err(format!("Undefined global: {:?}", sym))
                     }
@@ -235,7 +234,7 @@ impl<'a> CpsInterpreter<'a> {
                     } else {
                         // Extend if needed
                         while env.len() <= *index {
-                            env.push(Value::Nil);
+                            env.push(Value::NIL);
                         }
                         env[*index] = init_val;
                     }
@@ -250,7 +249,7 @@ impl<'a> CpsInterpreter<'a> {
                 continuation,
             } => {
                 if exprs.is_empty() {
-                    return Ok(Action::return_value(Value::Nil, continuation.clone()));
+                    return Ok(Action::return_value(Value::NIL, continuation.clone()));
                 }
 
                 // Evaluate expressions one by one, capturing remaining on yield/call
@@ -320,7 +319,7 @@ impl<'a> CpsInterpreter<'a> {
                     }
                 }
 
-                Ok(Action::return_value(Value::Nil, continuation.clone()))
+                Ok(Action::return_value(Value::NIL, continuation.clone()))
             }
 
             CpsExpr::If {
@@ -388,7 +387,7 @@ impl<'a> CpsInterpreter<'a> {
                         return Ok(Action::yield_value(value, chained_cont));
                     }
                 }
-                Ok(Action::return_value(Value::Nil, continuation.clone()))
+                Ok(Action::return_value(Value::NIL, continuation.clone()))
             }
 
             CpsExpr::Lambda {
@@ -407,24 +406,24 @@ impl<'a> CpsInterpreter<'a> {
                     let value = if *index == 0 {
                         // This might be a LetBound variable - try scope stack first, then env[0]
                         if let Some(val) = self.vm.scope_stack.get(sym.0) {
-                            val.clone()
+                            val
                         } else if let Some(val) = self.vm.globals.get(&sym.0) {
-                            val.clone()
+                            *val
                         } else if !env_borrowed.is_empty() {
-                            env_borrowed[0].clone()
+                            env_borrowed[0]
                         } else {
-                            Value::Nil
+                            Value::NIL
                         }
                     } else if *index < env_borrowed.len() {
-                        env_borrowed[*index].clone()
+                        env_borrowed[*index]
                     } else {
                         // Index out of bounds - try loading by symbol
                         if let Some(val) = self.vm.scope_stack.get(sym.0) {
-                            val.clone()
+                            val
                         } else if let Some(val) = self.vm.globals.get(&sym.0) {
-                            val.clone()
+                            *val
                         } else {
-                            Value::Nil
+                            Value::NIL
                         }
                     };
                     closure_env.push(value);
@@ -433,7 +432,7 @@ impl<'a> CpsInterpreter<'a> {
 
                 // Pre-allocate remaining slots for params and locals
                 for _ in captures.len()..*num_locals {
-                    closure_env.push(Value::Nil);
+                    closure_env.push(Value::NIL);
                 }
 
                 // Create closure - for now, we need to extract the Expr from CPS
@@ -453,7 +452,7 @@ impl<'a> CpsInterpreter<'a> {
                 exprs,
                 continuation,
             } => {
-                let mut result = Value::Bool(true);
+                let mut result = Value::TRUE;
                 for expr in exprs {
                     let action = self.eval(expr)?;
                     match action {
@@ -488,10 +487,7 @@ impl<'a> CpsInterpreter<'a> {
                         _ => return Err("Unexpected action in Or expression".to_string()),
                     }
                 }
-                Ok(Action::return_value(
-                    Value::Bool(false),
-                    continuation.clone(),
-                ))
+                Ok(Action::return_value(Value::FALSE, continuation.clone()))
             }
 
             CpsExpr::Cond {
@@ -519,7 +515,7 @@ impl<'a> CpsInterpreter<'a> {
                         other => Ok(other),
                     }
                 } else {
-                    Ok(Action::return_value(Value::Nil, continuation.clone()))
+                    Ok(Action::return_value(Value::NIL, continuation.clone()))
                 }
             }
 
@@ -543,7 +539,7 @@ impl<'a> CpsInterpreter<'a> {
                             env[*index] = item;
                         } else {
                             while env.len() <= *index {
-                                env.push(Value::Nil);
+                                env.push(Value::NIL);
                             }
                             env[*index] = item;
                         }
@@ -556,7 +552,7 @@ impl<'a> CpsInterpreter<'a> {
                     }
                 }
 
-                Ok(Action::return_value(Value::Nil, continuation.clone()))
+                Ok(Action::return_value(Value::NIL, continuation.clone()))
             }
 
             CpsExpr::Return(expr) => {
@@ -583,7 +579,7 @@ impl<'a> CpsInterpreter<'a> {
         use crate::compiler::ast::Expr;
 
         match expr {
-            Expr::Literal(v) => Ok(v.clone()),
+            Expr::Literal(v) => Ok(*v),
 
             Expr::Var(var_ref) => {
                 match var_ref {
@@ -591,9 +587,9 @@ impl<'a> CpsInterpreter<'a> {
                         // In CPS execution, environment is flat
                         let env = self.env.borrow();
                         if *index < env.len() {
-                            let val = env[*index].clone();
+                            let val = env[*index];
                             drop(env);
-                            Ok(unwrap_local_cell(val))
+                            Ok(val)
                         } else {
                             Err(format!("Variable index {} out of bounds", index))
                         }
@@ -602,7 +598,7 @@ impl<'a> CpsInterpreter<'a> {
                         // Check globals (let-bound vars are handled via scope stack in bytecode VM,
                         // but in CPS interpreter we treat them as globals)
                         if let Some(val) = self.vm.globals.get(&sym.0) {
-                            Ok(val.clone())
+                            Ok(*val)
                         } else {
                             Err(format!("Undefined variable: {:?}", sym))
                         }
@@ -620,7 +616,7 @@ impl<'a> CpsInterpreter<'a> {
             }
 
             Expr::Begin(exprs) => {
-                let mut result = Value::Nil;
+                let mut result = Value::NIL;
                 for e in exprs {
                     result = self.eval_pure_expr(e)?;
                 }
@@ -628,7 +624,7 @@ impl<'a> CpsInterpreter<'a> {
             }
 
             Expr::Block(exprs) => {
-                let mut result = Value::Nil;
+                let mut result = Value::NIL;
                 for e in exprs {
                     result = self.eval_pure_expr(e)?;
                 }
@@ -644,7 +640,7 @@ impl<'a> CpsInterpreter<'a> {
             }
 
             Expr::And(exprs) => {
-                let mut result = Value::Bool(true);
+                let mut result = Value::TRUE;
                 for e in exprs {
                     let val = self.eval_pure_expr(e)?;
                     if !val.is_truthy() {
@@ -662,7 +658,7 @@ impl<'a> CpsInterpreter<'a> {
                         return Ok(val);
                     }
                 }
-                Ok(Value::Bool(false))
+                Ok(Value::FALSE)
             }
 
             Expr::Cond { clauses, else_body } => {
@@ -675,7 +671,7 @@ impl<'a> CpsInterpreter<'a> {
                 if let Some(else_expr) = else_body {
                     self.eval_pure_expr(else_expr)
                 } else {
-                    Ok(Value::Nil)
+                    Ok(Value::NIL)
                 }
             }
 
@@ -694,7 +690,7 @@ impl<'a> CpsInterpreter<'a> {
             Expr::Define { name, value } => {
                 let val = self.eval_pure_expr(value)?;
                 // Set global for top-level defines
-                self.vm.set_global(name.0, val.clone());
+                self.vm.set_global(name.0, val);
                 Ok(val)
             }
 
@@ -704,12 +700,12 @@ impl<'a> CpsInterpreter<'a> {
                     VarRef::Local { index } | VarRef::Upvalue { index, .. } => {
                         let mut env = self.env.borrow_mut();
                         if *index < env.len() {
-                            env[*index] = val.clone();
+                            env[*index] = val;
                         }
                         Ok(val)
                     }
                     VarRef::LetBound { sym } | VarRef::Global { sym } => {
-                        self.vm.globals.insert(sym.0, val.clone());
+                        self.vm.globals.insert(sym.0, val);
                         Ok(val)
                     }
                 }
@@ -734,17 +730,17 @@ impl<'a> CpsInterpreter<'a> {
                     let value = match &capture_info.source {
                         VarRef::Local { index } | VarRef::Upvalue { index, .. } => {
                             if *index < env_borrowed.len() {
-                                env_borrowed[*index].clone()
+                                env_borrowed[*index]
                             } else {
-                                Value::Nil
+                                Value::NIL
                             }
                         }
                         VarRef::LetBound { sym } | VarRef::Global { sym } => {
                             // Look up in globals
                             if let Some(val) = self.vm.globals.get(&sym.0) {
-                                val.clone()
+                                *val
                             } else {
-                                Value::Nil
+                                Value::NIL
                             }
                         }
                     };
@@ -762,7 +758,7 @@ impl<'a> CpsInterpreter<'a> {
                     Effect::Pure,
                 )?;
 
-                Ok(Value::Closure(Rc::new(closure)))
+                Ok(Value::closure(closure))
             }
 
             _ => Err(format!(
@@ -774,70 +770,67 @@ impl<'a> CpsInterpreter<'a> {
 
     /// Call a value as a function with the given arguments
     fn call_value(&mut self, func: &Value, args: &[Value]) -> Result<Value, String> {
-        match func {
-            Value::Closure(closure) => {
-                // Build environment
-                let mut new_env = Vec::new();
-                new_env.extend((*closure.env).iter().cloned());
-                new_env.extend(args.iter().cloned());
+        let result = if let Some(closure_rc) = func.as_closure() {
+            let closure = closure_rc.as_ref();
+            // Build environment
+            let mut new_env = Vec::new();
+            new_env.extend((*closure.env).iter().cloned());
+            new_env.extend(args.iter().cloned());
 
-                // Add local cells
-                let num_params = match closure.arity {
-                    crate::value::Arity::Exact(n) => n,
-                    crate::value::Arity::AtLeast(n) => n,
-                    crate::value::Arity::Range(min, _) => min,
-                };
-                let num_locally_defined = closure
-                    .num_locals
-                    .saturating_sub(num_params + closure.num_captures);
+            // Add local cells
+            let num_params = match closure.arity {
+                crate::value_old::Arity::Exact(n) => n,
+                crate::value_old::Arity::AtLeast(n) => n,
+                crate::value_old::Arity::Range(min, _) => min,
+            };
+            let num_locally_defined = closure
+                .num_locals
+                .saturating_sub(num_params + closure.num_captures);
 
-                for _ in 0..num_locally_defined {
-                    let empty_cell = Value::LocalCell(Rc::new(RefCell::new(Box::new(Value::Nil))));
-                    new_env.push(empty_cell);
-                }
-
-                let env_rc = Rc::new(new_env);
-
-                // Execute
-                self.vm
-                    .execute_bytecode(&closure.bytecode, &closure.constants, Some(&env_rc))
+            for _ in 0..num_locally_defined {
+                let empty_cell = Value::cell(Value::NIL);
+                new_env.push(empty_cell);
             }
 
-            Value::NativeFn(f) => f(args).map_err(|e| e.into()),
+            let env_rc = Rc::new(new_env);
 
-            Value::VmAwareFn(f) => f(args, self.vm).map_err(|e| e.into()),
+            // Execute
+            self.vm
+                .execute_bytecode(&closure.bytecode, &closure.constants, Some(&env_rc))
+        } else if let Some(f) = func.as_native_fn() {
+            f(args).map_err(|e| e.to_string())
+        } else if let Some(f) = func.as_vm_aware_fn() {
+            f(args, self.vm).map_err(|e| e.into())
+        } else {
+            Err(format!("Cannot call {}", func.type_name()))
+        };
 
-            _ => Err(format!("Cannot call {}", func.type_name())),
+        // Check for exception set by the function
+        if let Some(exc) = self.vm.current_exception.take() {
+            return Err(format!("{}", exc));
         }
+
+        result
     }
 }
 
-/// Unwrap LocalCell if present
-fn unwrap_local_cell(val: Value) -> Value {
-    match val {
-        Value::LocalCell(cell_rc) => {
-            let borrowed = cell_rc.borrow();
-            (**borrowed).clone()
-        }
-        other => other,
-    }
-}
-
+/// Unwrap Cell if present
 /// Convert a Value to a list of Values for iteration
 fn value_to_list(val: &Value) -> Result<Vec<Value>, String> {
-    match val {
-        Value::Nil => Ok(vec![]),
-        Value::Cons(_) => {
-            let mut result = vec![];
-            let mut current = val.clone();
-            while let Value::Cons(cons) = current {
-                result.push(cons.first.clone());
-                current = cons.rest.clone();
-            }
-            Ok(result)
+    if val.is_nil() || val.is_empty_list() {
+        Ok(vec![])
+    } else if val.is_cons() {
+        let mut result = vec![];
+        let mut current = *val;
+        while let Some(cons_cell) = current.as_cons() {
+            result.push(cons_cell.first);
+            current = cons_cell.rest;
         }
-        Value::Vector(v) => Ok((**v).clone()),
-        _ => Err(format!("Cannot iterate over {}", val.type_name())),
+        Ok(result)
+    } else if let Some(vec_cell) = val.as_vector() {
+        Ok(vec_cell.borrow().clone())
+    } else {
+        Err(format!("Cannot iterate over {}", val.type_name()))
     }
 }
 
@@ -865,9 +858,10 @@ fn create_cps_closure(
         source_ast: None,
         effect: Effect::Yields,
         cell_params_mask: 0,
+        symbol_names: Rc::new(std::collections::HashMap::new()),
     };
 
-    Value::Closure(Rc::new(closure))
+    Value::closure(closure)
 }
 
 #[cfg(test)]
@@ -882,20 +876,26 @@ mod tests {
         let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
-        let expr = CpsExpr::Literal(Value::Int(42));
+        let expr = CpsExpr::Literal(Value::int(42));
         let result = interp.eval(&expr).unwrap();
 
         assert!(result.is_done());
         match result {
-            Action::Done(Value::Int(n)) => assert_eq!(n, 42),
-            _ => panic!("Expected Done(Int(42))"),
+            Action::Done(v) => {
+                if let Some(n) = v.as_int() {
+                    assert_eq!(n, 42);
+                } else {
+                    panic!("Expected Done(Int(42))");
+                }
+            }
+            _ => panic!("Expected Done"),
         }
     }
 
     #[test]
     fn test_eval_global_var() {
         let mut vm = VM::new();
-        vm.set_global(1, Value::Int(100));
+        vm.set_global(1, Value::int(100));
 
         let env = Rc::new(RefCell::new(vec![]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
@@ -904,8 +904,14 @@ mod tests {
         let result = interp.eval(&expr).unwrap();
 
         match result {
-            Action::Done(Value::Int(n)) => assert_eq!(n, 100),
-            _ => panic!("Expected Done(Int(100))"),
+            Action::Done(v) => {
+                if let Some(n) = v.as_int() {
+                    assert_eq!(n, 100);
+                } else {
+                    panic!("Expected Done(Int(100))");
+                }
+            }
+            _ => panic!("Expected Done"),
         }
     }
 
@@ -916,14 +922,14 @@ mod tests {
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::Yield {
-            value: Box::new(CpsExpr::Literal(Value::Int(42))),
+            value: Box::new(CpsExpr::Literal(Value::int(42))),
             continuation: Continuation::done(),
         };
         let result = interp.eval(&expr).unwrap();
 
         assert!(result.is_yield());
         match result {
-            Action::Yield { value, .. } => assert_eq!(value, Value::Int(42)),
+            Action::Yield { value, .. } => assert_eq!(value, Value::int(42)),
             _ => panic!("Expected Yield"),
         }
     }
@@ -932,19 +938,25 @@ mod tests {
     fn test_eval_let() {
         let mut vm = VM::new();
         // Pre-allocate space for the let binding
-        let env = Rc::new(RefCell::new(vec![Value::Nil]));
+        let env = Rc::new(RefCell::new(vec![Value::NIL]));
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::Let {
             index: 0,
-            init: Box::new(CpsExpr::Literal(Value::Int(10))),
-            body: Box::new(CpsExpr::Literal(Value::Int(20))),
+            init: Box::new(CpsExpr::Literal(Value::int(10))),
+            body: Box::new(CpsExpr::Literal(Value::int(20))),
         };
         let result = interp.eval(&expr).unwrap();
 
         match result {
-            Action::Done(Value::Int(n)) => assert_eq!(n, 20),
-            _ => panic!("Expected Done(Int(20))"),
+            Action::Done(v) => {
+                if let Some(n) = v.as_int() {
+                    assert_eq!(n, 20);
+                } else {
+                    panic!("Expected Done(Int(20))");
+                }
+            }
+            _ => panic!("Expected Done"),
         }
     }
 
@@ -955,16 +967,22 @@ mod tests {
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::If {
-            cond: Box::new(CpsExpr::Literal(Value::Bool(true))),
-            then_branch: Box::new(CpsExpr::Literal(Value::Int(1))),
-            else_branch: Box::new(CpsExpr::Literal(Value::Int(2))),
+            cond: Box::new(CpsExpr::Literal(Value::TRUE)),
+            then_branch: Box::new(CpsExpr::Literal(Value::int(1))),
+            else_branch: Box::new(CpsExpr::Literal(Value::int(2))),
             continuation: Continuation::done(),
         };
         let result = interp.eval(&expr).unwrap();
 
         match result {
-            Action::Done(Value::Int(n)) => assert_eq!(n, 1),
-            _ => panic!("Expected Done(Int(1))"),
+            Action::Done(v) => {
+                if let Some(n) = v.as_int() {
+                    assert_eq!(n, 1);
+                } else {
+                    panic!("Expected Done(Int(1))");
+                }
+            }
+            _ => panic!("Expected Done"),
         }
     }
 
@@ -975,16 +993,22 @@ mod tests {
         let mut interp = CpsInterpreter::new(&mut vm, env);
 
         let expr = CpsExpr::If {
-            cond: Box::new(CpsExpr::Literal(Value::Bool(false))),
-            then_branch: Box::new(CpsExpr::Literal(Value::Int(1))),
-            else_branch: Box::new(CpsExpr::Literal(Value::Int(2))),
+            cond: Box::new(CpsExpr::Literal(Value::FALSE)),
+            then_branch: Box::new(CpsExpr::Literal(Value::int(1))),
+            else_branch: Box::new(CpsExpr::Literal(Value::int(2))),
             continuation: Continuation::done(),
         };
         let result = interp.eval(&expr).unwrap();
 
         match result {
-            Action::Done(Value::Int(n)) => assert_eq!(n, 2),
-            _ => panic!("Expected Done(Int(2))"),
+            Action::Done(v) => {
+                if let Some(n) = v.as_int() {
+                    assert_eq!(n, 2);
+                } else {
+                    panic!("Expected Done(Int(2))");
+                }
+            }
+            _ => panic!("Expected Done"),
         }
     }
 
@@ -996,17 +1020,23 @@ mod tests {
 
         let expr = CpsExpr::Sequence {
             exprs: vec![
-                CpsExpr::Literal(Value::Int(1)),
-                CpsExpr::Literal(Value::Int(2)),
-                CpsExpr::Literal(Value::Int(3)),
+                CpsExpr::Literal(Value::int(1)),
+                CpsExpr::Literal(Value::int(2)),
+                CpsExpr::Literal(Value::int(3)),
             ],
             continuation: Continuation::done(),
         };
         let result = interp.eval(&expr).unwrap();
 
         match result {
-            Action::Done(Value::Int(n)) => assert_eq!(n, 3),
-            _ => panic!("Expected Done(Int(3))"),
+            Action::Done(v) => {
+                if let Some(n) = v.as_int() {
+                    assert_eq!(n, 3);
+                } else {
+                    panic!("Expected Done(Int(3))");
+                }
+            }
+            _ => panic!("Expected Done"),
         }
     }
 
@@ -1018,17 +1048,23 @@ mod tests {
 
         let expr = CpsExpr::And {
             exprs: vec![
-                CpsExpr::Literal(Value::Bool(true)),
-                CpsExpr::Literal(Value::Bool(false)),
-                CpsExpr::Literal(Value::Bool(true)),
+                CpsExpr::Literal(Value::TRUE),
+                CpsExpr::Literal(Value::FALSE),
+                CpsExpr::Literal(Value::TRUE),
             ],
             continuation: Continuation::done(),
         };
         let result = interp.eval(&expr).unwrap();
 
         match result {
-            Action::Done(Value::Bool(b)) => assert!(!b),
-            _ => panic!("Expected Done(Bool(false))"),
+            Action::Done(v) => {
+                if let Some(b) = v.as_bool() {
+                    assert!(!b);
+                } else {
+                    panic!("Expected Done(Bool(false))");
+                }
+            }
+            _ => panic!("Expected Done"),
         }
     }
 
@@ -1040,17 +1076,23 @@ mod tests {
 
         let expr = CpsExpr::Or {
             exprs: vec![
-                CpsExpr::Literal(Value::Bool(false)),
-                CpsExpr::Literal(Value::Int(42)),
-                CpsExpr::Literal(Value::Bool(false)),
+                CpsExpr::Literal(Value::FALSE),
+                CpsExpr::Literal(Value::int(42)),
+                CpsExpr::Literal(Value::FALSE),
             ],
             continuation: Continuation::done(),
         };
         let result = interp.eval(&expr).unwrap();
 
         match result {
-            Action::Done(Value::Int(n)) => assert_eq!(n, 42),
-            _ => panic!("Expected Done(Int(42))"),
+            Action::Done(v) => {
+                if let Some(n) = v.as_int() {
+                    assert_eq!(n, 42);
+                } else {
+                    panic!("Expected Done(Int(42))");
+                }
+            }
+            _ => panic!("Expected Done"),
         }
     }
 }

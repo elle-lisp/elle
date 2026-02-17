@@ -42,7 +42,7 @@ fn test_for_loop_variable_accessible_in_body() {
     eval.eval("(define result 0)").unwrap();
     eval.eval("(each x (list 1 2 3) (set! result (+ result x)))")
         .unwrap();
-    assert_eq!(eval.eval("result").unwrap(), Value::Int(6));
+    assert_eq!(eval.eval("result").unwrap(), Value::int(6));
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn test_for_loop_does_not_clobber_outer_variable() {
     let mut eval = ScopeEval::new();
     eval.eval("(define x 999)").unwrap();
     eval.eval("(each x (list 1 2 3) (+ x 1))").unwrap();
-    assert_eq!(eval.eval("x").unwrap(), Value::Int(999));
+    assert_eq!(eval.eval("x").unwrap(), Value::int(999));
 }
 
 // === Define inside loops ===
@@ -86,7 +86,7 @@ fn test_define_in_for_loop_is_local() {
 fn test_block_creates_scope() {
     let mut eval = ScopeEval::new();
     let result = eval.eval("(block (define x 42) x)").unwrap();
-    assert_eq!(result, Value::Int(42));
+    assert_eq!(result, Value::int(42));
     let outer = eval.eval("x");
     assert!(outer.is_err(), "Variable defined in block should not leak");
 }
@@ -95,7 +95,7 @@ fn test_block_creates_scope() {
 fn test_block_returns_last_expression() {
     let mut eval = ScopeEval::new();
     let result = eval.eval("(block 1 2 3)").unwrap();
-    assert_eq!(result, Value::Int(3));
+    assert_eq!(result, Value::int(3));
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn test_nested_blocks() {
     let result = eval
         .eval("(block (define x 1) (block (define y 2) (+ x y)))")
         .unwrap();
-    assert_eq!(result, Value::Int(3));
+    assert_eq!(result, Value::int(3));
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn test_block_inside_lambda() {
     let result = eval
         .eval("((lambda (x) (block (define y (* x 2)) (+ x y))) 5)")
         .unwrap();
-    assert_eq!(result, Value::Int(15));
+    assert_eq!(result, Value::int(15));
 }
 
 // === Variable shadowing ===
@@ -124,28 +124,28 @@ fn test_set_bang_modifies_innermost_scope() {
     eval.eval("(define x 1)").unwrap();
     eval.eval("(block (define x 10) (set! x 20))").unwrap();
     // The global x should be unchanged
-    assert_eq!(eval.eval("x").unwrap(), Value::Int(1));
+    assert_eq!(eval.eval("x").unwrap(), Value::int(1));
 }
 
 #[test]
 fn test_let_shadowing() {
     let mut eval = ScopeEval::new();
     let result = eval.eval("(let ((x 1)) (let ((x 2)) x))").unwrap();
-    assert_eq!(result, Value::Int(2));
+    assert_eq!(result, Value::int(2));
 }
 
 #[test]
 fn test_gensym_returns_string() {
     let mut eval = ScopeEval::new();
     let result = eval.eval("(string? (gensym))").unwrap();
-    assert_eq!(result, Value::Bool(true));
+    assert_eq!(result, Value::bool(true));
 }
 
 #[test]
 fn test_gensym_unique() {
     let mut eval = ScopeEval::new();
     let result = eval.eval("(= (gensym) (gensym))").unwrap();
-    assert_eq!(result, Value::Bool(false));
+    assert_eq!(result, Value::bool(false));
 }
 
 // === Existing behavior preserved ===
@@ -154,14 +154,14 @@ fn test_gensym_unique() {
 fn test_global_define_still_works() {
     let mut eval = ScopeEval::new();
     eval.eval("(define x 42)").unwrap();
-    assert_eq!(eval.eval("x").unwrap(), Value::Int(42));
+    assert_eq!(eval.eval("x").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_let_still_works() {
     let mut eval = ScopeEval::new();
     let result = eval.eval("(let ((x 5) (y 10)) (+ x y))").unwrap();
-    assert_eq!(result, Value::Int(15));
+    assert_eq!(result, Value::int(15));
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn test_while_loop_still_works() {
     eval.eval("(define counter 0)").unwrap();
     eval.eval("(while (< counter 5) (set! counter (+ counter 1)))")
         .unwrap();
-    assert_eq!(eval.eval("counter").unwrap(), Value::Int(5));
+    assert_eq!(eval.eval("counter").unwrap(), Value::int(5));
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn test_for_loop_accumulation_still_works() {
     eval.eval("(define result 0)").unwrap();
     eval.eval("(each i (list 1 2 3) (set! result (+ result i)))")
         .unwrap();
-    assert_eq!(eval.eval("result").unwrap(), Value::Int(6));
+    assert_eq!(eval.eval("result").unwrap(), Value::int(6));
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn test_closure_capture_still_works() {
     let result = eval
         .eval("(begin (define make-adder (lambda (x) (lambda (y) (+ x y)))) (define add5 (make-adder 5)) (add5 10))")
         .unwrap();
-    assert_eq!(result, Value::Int(15));
+    assert_eq!(result, Value::int(15));
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn test_gcd_with_define_in_loop() {
     eval.eval("(define b 18)").unwrap();
     eval.eval("(while (> b 0) (begin (define temp (% a b)) (set! a b) (set! b temp)))")
         .unwrap();
-    assert_eq!(eval.eval("a").unwrap(), Value::Int(6));
+    assert_eq!(eval.eval("a").unwrap(), Value::int(6));
 }
 
 // === letrec: mutual recursion ===
@@ -216,7 +216,7 @@ fn test_letrec_mutual_recursion_even_odd() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Bool(true));
+    assert_eq!(result, Value::bool(true));
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn test_letrec_mutual_recursion_odd() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Bool(true));
+    assert_eq!(result, Value::bool(true));
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn test_letrec_self_recursion() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Int(120));
+    assert_eq!(result, Value::int(120));
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn test_letrec_three_way_cycle() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::String(std::rc::Rc::from("c")));
+    assert_eq!(result, Value::string("c"));
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn test_letrec_with_non_lambda_bindings() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Int(30));
+    assert_eq!(result, Value::int(30));
 }
 
 #[test]
@@ -293,7 +293,7 @@ fn test_letrec_nested_in_lambda() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Bool(true));
+    assert_eq!(result, Value::bool(true));
 }
 
 // === define inside lambda bodies ===
@@ -333,7 +333,7 @@ fn test_define_in_lambda_self_recursion() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Int(720));
+    assert_eq!(result, Value::int(720));
 }
 
 #[test]
@@ -352,7 +352,7 @@ fn test_define_in_lambda_mutual_recursion() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Bool(true));
+    assert_eq!(result, Value::bool(true));
 }
 
 // === tail call optimization ===
@@ -370,7 +370,7 @@ fn test_tail_call_simple() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Int(0));
+    assert_eq!(result, Value::int(0));
 }
 
 #[test]
@@ -387,7 +387,7 @@ fn test_tail_call_accumulator() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Int(5050));
+    assert_eq!(result, Value::int(5050));
 }
 
 #[test]
@@ -406,5 +406,5 @@ fn test_tail_call_mutual() {
     "#,
         )
         .unwrap();
-    assert_eq!(result, Value::Int(0));
+    assert_eq!(result, Value::int(0));
 }

@@ -27,9 +27,9 @@ fn test_mutual_recursion_even_odd_integration() {
     let result = eval(code);
     assert!(result.is_ok());
     let vec = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(vec[0], Value::Bool(true));
-    assert_eq!(vec[1], Value::Bool(true));
-    assert_eq!(vec[2], Value::Bool(true));
+    assert_eq!(vec[0], Value::bool(true));
+    assert_eq!(vec[1], Value::bool(true));
+    assert_eq!(vec[2], Value::bool(true));
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn test_mutual_recursion_three_way_integration() {
 
     let result = eval(code);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String("C".into()));
+    assert_eq!(result.unwrap(), Value::string("C"));
 }
 
 #[test]
@@ -76,8 +76,8 @@ fn test_mutual_recursion_deeply_nested() {
     let result = eval(code);
     assert!(result.is_ok());
     let vec = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(vec[0], Value::Bool(true));
-    assert_eq!(vec[1], Value::Bool(true));
+    assert_eq!(vec[0], Value::bool(true));
+    assert_eq!(vec[1], Value::bool(true));
 }
 
 #[test]
@@ -142,8 +142,8 @@ fn test_mutual_recursion_conditional_dispatch() {
     let result = eval(code);
     assert!(result.is_ok());
     let vec = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(vec[0], Value::String("done-even".into()));
-    assert_eq!(vec[1], Value::String("done-odd".into()));
+    assert_eq!(vec[0], Value::string("done-even"));
+    assert_eq!(vec[1], Value::string("done-odd"));
 }
 
 #[test]
@@ -162,7 +162,7 @@ fn test_mutual_recursion_with_boolean_logic() {
     let result = eval(code);
     assert!(result.is_ok());
     let vec = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(vec[0], Value::Bool(true));
-    assert_eq!(vec[1], Value::Bool(false));
-    assert_eq!(vec[2], Value::Bool(false));
+    assert_eq!(vec[0], Value::bool(true));
+    assert_eq!(vec[1], Value::bool(false));
+    assert_eq!(vec[2], Value::bool(false));
 }

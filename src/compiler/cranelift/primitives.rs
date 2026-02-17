@@ -3,7 +3,7 @@
 // Handles compilation of Elle's primitive types (Int, Float, Bool, Nil)
 // to Cranelift IR values.
 
-use crate::value::Value;
+use crate::value::Value as ElleValue;
 use cranelift::prelude::*;
 
 /// Represents a compiled Elle value in Cranelift IR
@@ -61,11 +61,13 @@ pub struct PrimitiveEncoder;
 
 impl PrimitiveEncoder {
     /// Get the Cranelift type for a primitive
-    pub fn get_type(val: &Value) -> Option<Type> {
-        match val {
-            Value::Nil | Value::Bool(_) | Value::Int(_) => Some(types::I64),
-            Value::Float(_) => Some(types::F64),
-            _ => None,
+    pub fn get_type(val: &ElleValue) -> Option<Type> {
+        if val.is_nil() || val.as_bool().is_some() || val.as_int().is_some() {
+            Some(types::I64)
+        } else if val.as_float().is_some() {
+            Some(types::F64)
+        } else {
+            None
         }
     }
 }
@@ -106,17 +108,20 @@ mod tests {
 
     #[test]
     fn test_get_type_primitives() {
-        assert_eq!(PrimitiveEncoder::get_type(&Value::Nil), Some(types::I64));
         assert_eq!(
-            PrimitiveEncoder::get_type(&Value::Bool(true)),
+            PrimitiveEncoder::get_type(&ElleValue::NIL),
             Some(types::I64)
         );
         assert_eq!(
-            PrimitiveEncoder::get_type(&Value::Int(42)),
+            PrimitiveEncoder::get_type(&ElleValue::bool(true)),
             Some(types::I64)
         );
         assert_eq!(
-            PrimitiveEncoder::get_type(&Value::Float(std::f64::consts::PI)),
+            PrimitiveEncoder::get_type(&ElleValue::int(42)),
+            Some(types::I64)
+        );
+        assert_eq!(
+            PrimitiveEncoder::get_type(&ElleValue::float(std::f64::consts::PI)),
             Some(types::F64)
         );
     }

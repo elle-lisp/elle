@@ -1,10 +1,9 @@
-pub mod condition;
 use crate::compiler::ast::Expr;
 use crate::compiler::effects::Effect;
 use crate::error::{LError, LResult};
-pub use condition::Condition;
+use crate::reader::SourceLoc;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -72,11 +71,12 @@ impl Arity {
 }
 
 /// Native function type
-pub type NativeFn = fn(&[Value]) -> LResult<Value>;
+pub type NativeFn =
+    fn(&[crate::value::Value]) -> Result<crate::value::Value, crate::value::Condition>;
 
 /// VM-aware native function type (needs access to VM for execution)
 /// This is used for primitives like coroutine-resume that need to execute bytecode
-pub type VmAwareFn = fn(&[Value], &mut crate::vm::VM) -> LResult<Value>;
+pub type VmAwareFn = fn(&[crate::value::Value], &mut crate::vm::VM) -> LResult<crate::value::Value>;
 
 /// Cons cell for list construction
 #[derive(Debug, Clone, PartialEq)]
@@ -108,21 +108,24 @@ pub struct JitLambda {
 }
 
 /// Closure with captured environment
+/// Note: Uses repr::Value for constants and env (migrating to new NaN-boxed representation)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Closure {
     pub bytecode: Rc<Vec<u8>>,
     pub arity: Arity,
-    pub env: Rc<Vec<Value>>,
+    pub env: Rc<Vec<crate::value::Value>>,
     pub num_locals: usize,
     pub num_captures: usize, // Number of captured variables (for env layout)
-    pub constants: Rc<Vec<Value>>,
+    pub constants: Rc<Vec<crate::value::Value>>,
     /// Original AST for JIT compilation (None if not available)
     pub source_ast: Option<Rc<JitLambda>>,
     /// Effect of the closure body
     pub effect: Effect,
-    /// Bitmask indicating which parameters need to be wrapped in cells
-    /// Bit i is set if parameter i needs a cell (for mutable parameters)
     pub cell_params_mask: u64,
+    /// Symbol ID → name mapping for cross-thread portability.
+    /// When bytecode is sent to a new thread, symbol IDs may differ.
+    /// This map allows remapping globals to the correct IDs.
+    pub symbol_names: Rc<std::collections::HashMap<u32, String>>,
 }
 
 impl Closure {
@@ -218,33 +221,6 @@ impl TableKey {
     }
 }
 
-/// Exception value for error handling
-#[derive(Debug, Clone, PartialEq)]
-pub struct Exception {
-    /// Error message
-    pub message: Rc<str>,
-    /// Optional error data
-    pub data: Option<Rc<Value>>,
-}
-
-impl Exception {
-    /// Create a new exception with a message
-    pub fn new(message: impl Into<String>) -> Self {
-        Exception {
-            message: message.into().into(),
-            data: None,
-        }
-    }
-
-    /// Create a new exception with message and data
-    pub fn with_data(message: impl Into<String>, data: Value) -> Self {
-        Exception {
-            message: message.into().into(),
-            data: Some(Rc::new(data)),
-        }
-    }
-}
-
 /// Thread handle for concurrent execution
 /// Holds the actual `Result<Value>` from the spawned thread
 ///
@@ -254,6 +230,7 @@ pub struct ThreadHandle {
     /// The result of the spawned thread execution
     /// `Arc<Mutex<>>` allows safe sharing across threads
     /// The `Result` is wrapped in `SendValue` to make it Send
+    #[allow(dead_code)]
     pub(crate) result: Arc<Mutex<Option<Result<SendValue, String>>>>,
 }
 
@@ -272,21 +249,12 @@ pub enum CoroutineState {
     Error(String),
 }
 
-/// Saved call frame for coroutine resumption
-#[derive(Debug, Clone)]
-pub struct CoroutineCallFrame {
-    pub return_ip: usize,
-    pub base_pointer: usize,
-    pub closure: Rc<Closure>,
-}
-
 /// Saved execution context for suspended coroutines
 #[derive(Debug, Clone)]
 pub struct CoroutineContext {
-    pub ip: usize,                            // Instruction pointer
-    pub stack: Vec<Value>,                    // Operand stack snapshot
-    pub locals: Vec<Value>,                   // Local variables
-    pub call_frames: Vec<CoroutineCallFrame>, // Call stack
+    pub ip: usize,
+    pub stack: Vec<crate::value::Value>,
+    pub env: Option<std::rc::Rc<Vec<crate::value::Value>>>,
 }
 
 /// A coroutine value
@@ -333,6 +301,129 @@ impl PartialEq for ThreadHandle {
     }
 }
 
+impl Default for ThreadHandle {
+    fn default() -> Self {
+        ThreadHandle {
+            result: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+/// A condition object representing an exceptional situation
+#[derive(Debug, Clone)]
+pub struct Condition {
+    /// Exception type ID (compiled at compile-time)
+    pub exception_id: u32,
+    /// Field values (field_id -> value mapping)
+    pub fields: HashMap<u32, Value>,
+    /// Optional backtrace for debugging
+    pub backtrace: Option<String>,
+    /// Optional source location for error reporting
+    pub location: Option<SourceLoc>,
+}
+
+impl Condition {
+    /// Reserved exception ID for generic exceptions (legacy Exception type)
+    pub const GENERIC_EXCEPTION_ID: u32 = 0;
+
+    /// Reserved field ID for exception message
+    pub const FIELD_MESSAGE: u32 = 0;
+
+    /// Reserved field ID for exception data
+    pub const FIELD_DATA: u32 = 1;
+
+    /// Create a new condition with given exception ID
+    pub fn new(exception_id: u32) -> Self {
+        Condition {
+            exception_id,
+            fields: HashMap::new(),
+            backtrace: None,
+            location: None,
+        }
+    }
+
+    /// Set a field value
+    pub fn set_field(&mut self, field_id: u32, value: Value) {
+        self.fields.insert(field_id, value);
+    }
+
+    /// Get a field value
+    pub fn get_field(&self, field_id: u32) -> Option<&Value> {
+        self.fields.get(&field_id)
+    }
+
+    /// Set backtrace information
+    pub fn with_backtrace(mut self, backtrace: String) -> Self {
+        self.backtrace = Some(backtrace);
+        self
+    }
+
+    /// Set source location information
+    pub fn with_location(mut self, loc: SourceLoc) -> Self {
+        self.location = Some(loc);
+        self
+    }
+
+    /// Check if this condition is of a specific type (including inheritance)
+    pub fn is_instance_of(&self, exception_id: u32) -> bool {
+        self.exception_id == exception_id
+    }
+
+    /// Create a generic exception with a message (replaces Exception::new)
+    pub fn generic(message: impl Into<String>) -> Self {
+        let mut cond = Condition::new(Self::GENERIC_EXCEPTION_ID);
+        cond.set_field(Self::FIELD_MESSAGE, Value::String(message.into().into()));
+        cond
+    }
+
+    /// Create a generic exception with message and data (replaces Exception::with_data)
+    pub fn generic_with_data(message: impl Into<String>, data: Value) -> Self {
+        let mut cond = Condition::new(Self::GENERIC_EXCEPTION_ID);
+        cond.set_field(Self::FIELD_MESSAGE, Value::String(message.into().into()));
+        cond.set_field(Self::FIELD_DATA, data);
+        cond
+    }
+
+    /// Check if this is a generic exception
+    pub fn is_generic(&self) -> bool {
+        self.exception_id == Self::GENERIC_EXCEPTION_ID
+    }
+
+    /// Get message for generic exceptions (field 0)
+    pub fn message(&self) -> Option<&str> {
+        if let Some(Value::String(s)) = self.get_field(Self::FIELD_MESSAGE) {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    /// Get data for generic exceptions (field 1)
+    pub fn data(&self) -> Option<&Value> {
+        self.get_field(Self::FIELD_DATA)
+    }
+}
+
+impl PartialEq for Condition {
+    fn eq(&self, other: &Self) -> bool {
+        // Conditions are equal if they have the same ID, field values, and location
+        self.exception_id == other.exception_id
+            && self.fields == other.fields
+            && self.location == other.location
+    }
+}
+
+impl fmt::Display for Condition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.exception_id == Self::GENERIC_EXCEPTION_ID {
+            if let Some(msg) = self.message() {
+                return write!(f, "Exception: {}", msg);
+            }
+        }
+        write!(f, "Condition(id={})", self.exception_id)
+    }
+}
+
 /// Core Lisp value type
 #[derive(Clone)]
 pub enum Value {
@@ -354,8 +445,6 @@ pub enum Value {
     // FFI types
     LibHandle(LibHandle),
     CHandle(CHandle),
-    // Exception handling
-    Exception(Rc<Exception>),
     // Condition system (new CL-style exceptions)
     Condition(Rc<Condition>),
     // Concurrency
@@ -389,7 +478,6 @@ impl PartialEq for Value {
             (Value::VmAwareFn(_), Value::VmAwareFn(_)) => false, // VM-aware functions are never equal
             (Value::LibHandle(a), Value::LibHandle(b)) => a == b,
             (Value::CHandle(a), Value::CHandle(b)) => a == b,
-            (Value::Exception(a), Value::Exception(b)) => a == b,
             (Value::Condition(a), Value::Condition(b)) => a == b,
             (Value::ThreadHandle(a), Value::ThreadHandle(b)) => a == b,
             (Value::Cell(_), Value::Cell(_)) => false, // Cells are mutable, never equal
@@ -408,7 +496,7 @@ impl Value {
 
     #[inline(always)]
     pub fn is_truthy(&self) -> bool {
-        !matches!(self, Value::Bool(false))
+        !matches!(self, Value::Bool(false) | Value::Nil)
     }
 
     pub fn as_int(&self) -> LResult<i64> {
@@ -523,7 +611,6 @@ impl Value {
             Value::VmAwareFn(_) => "vm-aware-function",
             Value::LibHandle(_) => "library-handle",
             Value::CHandle(_) => "c-handle",
-            Value::Exception(_) => "exception",
             Value::Condition(_) => "condition",
             Value::ThreadHandle(_) => "thread-handle",
             Value::Cell(_) => "cell",
@@ -540,30 +627,8 @@ impl fmt::Debug for Value {
             Value::Bool(b) => write!(f, "{}", b),
             Value::Int(n) => write!(f, "{}", n),
             Value::Float(fl) => write!(f, "{}", fl),
-            Value::Symbol(id) => {
-                // Try to get the symbol name from the thread-local symbol table
-                unsafe {
-                    if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                        if let Some(name) = (*symbols_ptr).name(*id) {
-                            return write!(f, "{}", name);
-                        }
-                    }
-                }
-                // Fallback if symbol table is not available
-                write!(f, "Symbol({})", id.0)
-            }
-            Value::Keyword(id) => {
-                // Try to get the keyword name from the thread-local symbol table
-                unsafe {
-                    if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                        if let Some(name) = (*symbols_ptr).name(*id) {
-                            return write!(f, ":{}", name);
-                        }
-                    }
-                }
-                // Fallback if symbol table is not available
-                write!(f, ":keyword-{}", id.0)
-            }
+            Value::Symbol(id) => write!(f, "Symbol({})", id.0),
+            Value::Keyword(id) => write!(f, ":{}", id.0),
             Value::String(s) => write!(f, "\"{}\"", s),
             Value::Cons(cons) => {
                 write!(f, "(")?;
@@ -618,7 +683,6 @@ impl fmt::Debug for Value {
             Value::VmAwareFn(_) => write!(f, "<vm-aware-fn>"),
             Value::LibHandle(h) => write!(f, "<library-handle:{}>", h.0),
             Value::CHandle(h) => write!(f, "<c-handle:{}>", h.id),
-            Value::Exception(exc) => write!(f, "<exception: {}>", exc.message),
             Value::Condition(cond) => write!(f, "<condition: id={}>", cond.exception_id),
             Value::ThreadHandle(_) => write!(f, "<thread-handle>"),
             Value::Cell(_) => write!(f, "<cell>"),
@@ -638,7 +702,6 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::String(s) => write!(f, "{}", s),
-            Value::Exception(exc) => write!(f, "Exception: {}", exc.message),
             Value::Condition(cond) => write!(f, "Condition(id={})", cond.exception_id),
             _ => write!(f, "{:?}", self),
         }
@@ -671,12 +734,22 @@ mod tests {
         assert_eq!(vec.len(), 3);
     }
 
+    // ============================================================================
+    // TRUTHINESS SEMANTICS - DO NOT CHANGE
+    // ============================================================================
+    // In Elle, only nil and #f are falsy. Everything else is truthy.
+    // This matches the new NaN-boxed Value type semantics.
+    // ============================================================================
     #[test]
     fn test_truthy() {
+        // Truthy values
         assert!(Value::Int(0).is_truthy());
         assert!(Value::Bool(true).is_truthy());
-        assert!(Value::Nil.is_truthy()); // Empty list is truthy (matching Janet/modern Lisps)
+        // Note: Value::Nil is FALSY in the new semantics
+
+        // Falsy values
         assert!(!Value::Bool(false).is_truthy());
+        assert!(!Value::Nil.is_truthy()); // ← nil is falsy
     }
 }
 
@@ -689,13 +762,11 @@ mod coroutine_tests {
     fn test_coroutine_context_creation() {
         let ctx = CoroutineContext {
             ip: 42,
-            stack: vec![Value::Int(1), Value::Int(2)],
-            locals: vec![Value::Nil],
-            call_frames: vec![],
+            stack: vec![crate::value::Value::int(1), crate::value::Value::int(2)],
+            env: None,
         };
         assert_eq!(ctx.ip, 42);
         assert_eq!(ctx.stack.len(), 2);
-        assert_eq!(ctx.locals.len(), 1);
     }
 
     #[test]
@@ -707,10 +778,11 @@ mod coroutine_tests {
             env: Rc::new(vec![]),
             num_locals: 0,
             num_captures: 0,
-            constants: Rc::new(vec![Value::Nil]),
+            constants: Rc::new(vec![crate::value::Value::NIL]),
             source_ast: None,
             effect: Effect::Pure,
             cell_params_mask: 0,
+            symbol_names: Rc::new(std::collections::HashMap::new()),
         });
 
         let co = Coroutine::new(closure);
@@ -740,10 +812,11 @@ mod coroutine_tests {
             env: Rc::new(vec![]),
             num_locals: 0,
             num_captures: 0,
-            constants: Rc::new(vec![Value::Nil]),
+            constants: Rc::new(vec![crate::value::Value::NIL]),
             source_ast: None,
             effect: Effect::Pure,
             cell_params_mask: 0,
+            symbol_names: Rc::new(std::collections::HashMap::new()),
         });
 
         let mut co = Coroutine::new(closure.clone());
@@ -752,13 +825,8 @@ mod coroutine_tests {
         // Simulate saving context on yield
         co.saved_context = Some(CoroutineContext {
             ip: 10,
-            stack: vec![Value::Int(42)],
-            locals: vec![],
-            call_frames: vec![CoroutineCallFrame {
-                return_ip: 5,
-                base_pointer: 0,
-                closure: closure.clone(),
-            }],
+            stack: vec![crate::value::Value::int(42)],
+            env: Some(std::rc::Rc::new(vec![])),
         });
 
         assert!(co.saved_context.is_some());

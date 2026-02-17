@@ -36,14 +36,17 @@ impl FunctionCallCompiler {
         symbol_table: &SymbolTable,
     ) -> CallCompileResult {
         // Check if this is a call to a primitive operation
-        if let Expr::Literal(Value::Symbol(sym_id)) = func {
-            // Get the symbol name from the symbol table
-            if let Some(op_name) = symbol_table.name(*sym_id) {
-                // Try to extract constant values from all arguments
-                if let Ok(arg_values) = Self::extract_constant_args(args) {
-                    // Try to compute the operation
-                    if let Ok(result) = Self::compute_primitive_op(op_name, &arg_values) {
-                        return CallCompileResult::CompiledConstant(result);
+        if let Expr::Literal(val) = func {
+            if let Some(id) = val.as_symbol() {
+                let sym_id = crate::value::SymbolId(id);
+                // Get the symbol name from the symbol table
+                if let Some(op_name) = symbol_table.name(sym_id) {
+                    // Try to extract constant values from all arguments
+                    if let Ok(arg_values) = Self::extract_constant_args(args) {
+                        // Try to compute the operation
+                        if let Ok(result) = Self::compute_primitive_op(op_name, &arg_values) {
+                            return CallCompileResult::CompiledConstant(result);
+                        }
                     }
                 }
             }
@@ -57,7 +60,7 @@ impl FunctionCallCompiler {
         let mut values = Vec::new();
         for arg in args {
             match arg {
-                Expr::Literal(val) => values.push(val.clone()),
+                Expr::Literal(val) => values.push(*val),
                 _ => return Err("Non-literal argument".to_string()),
             }
         }
@@ -83,9 +86,9 @@ impl FunctionCallCompiler {
 
     fn compute_add(args: &[Value]) -> Result<Value, String> {
         if args.is_empty() {
-            return Ok(Value::Int(0));
+            return Ok(Value::int(0));
         }
-        let mut result = args[0].clone();
+        let mut result = args[0];
         for arg in &args[1..] {
             result = BinOpCompiler::add(&result, arg)?;
         }
@@ -97,13 +100,15 @@ impl FunctionCallCompiler {
             return Err("- requires at least 1 argument".to_string());
         }
         if args.len() == 1 {
-            match &args[0] {
-                Value::Int(i) => return Ok(Value::Int(-i)),
-                Value::Float(f) => return Ok(Value::Float(-f)),
-                _ => return Err("Cannot negate non-numeric value".to_string()),
+            if let Some(i) = args[0].as_int() {
+                return Ok(Value::int(-i));
+            } else if let Some(f) = args[0].as_float() {
+                return Ok(Value::float(-f));
+            } else {
+                return Err("Cannot negate non-numeric value".to_string());
             }
         }
-        let mut result = args[0].clone();
+        let mut result = args[0];
         for arg in &args[1..] {
             result = BinOpCompiler::sub(&result, arg)?;
         }
@@ -112,9 +117,9 @@ impl FunctionCallCompiler {
 
     fn compute_mul(args: &[Value]) -> Result<Value, String> {
         if args.is_empty() {
-            return Ok(Value::Int(1));
+            return Ok(Value::int(1));
         }
-        let mut result = args[0].clone();
+        let mut result = args[0];
         for arg in &args[1..] {
             result = BinOpCompiler::mul(&result, arg)?;
         }
@@ -125,7 +130,7 @@ impl FunctionCallCompiler {
         if args.len() < 2 {
             return Err("/ requires at least 2 arguments".to_string());
         }
-        let mut result = args[0].clone();
+        let mut result = args[0];
         for arg in &args[1..] {
             result = BinOpCompiler::div(&result, arg)?;
         }
@@ -185,13 +190,19 @@ mod tests {
         let add_sym = symbol_table.intern("+");
 
         let result = FunctionCallCompiler::try_compile_call(
-            &Expr::Literal(Value::Symbol(add_sym)),
-            &[Expr::Literal(Value::Int(1)), Expr::Literal(Value::Int(2))],
+            &Expr::Literal(Value::symbol(add_sym.0)),
+            &[Expr::Literal(Value::int(1)), Expr::Literal(Value::int(2))],
             &symbol_table,
         );
         match result {
-            CallCompileResult::CompiledConstant(Value::Int(3)) => (),
-            _ => panic!("Expected CompiledConstant(3), got {:?}", result),
+            CallCompileResult::CompiledConstant(v) => {
+                if let Some(n) = v.as_int() {
+                    assert_eq!(n, 3);
+                } else {
+                    panic!("Expected CompiledConstant(3), got {:?}", result);
+                }
+            }
+            _ => panic!("Expected CompiledConstant, got {:?}", result),
         }
     }
 
@@ -201,13 +212,19 @@ mod tests {
         let mul_sym = symbol_table.intern("*");
 
         let result = FunctionCallCompiler::try_compile_call(
-            &Expr::Literal(Value::Symbol(mul_sym)),
-            &[Expr::Literal(Value::Int(3)), Expr::Literal(Value::Int(4))],
+            &Expr::Literal(Value::symbol(mul_sym.0)),
+            &[Expr::Literal(Value::int(3)), Expr::Literal(Value::int(4))],
             &symbol_table,
         );
         match result {
-            CallCompileResult::CompiledConstant(Value::Int(12)) => (),
-            _ => panic!("Expected CompiledConstant(12), got {:?}", result),
+            CallCompileResult::CompiledConstant(v) => {
+                if let Some(n) = v.as_int() {
+                    assert_eq!(n, 12);
+                } else {
+                    panic!("Expected CompiledConstant(12), got {:?}", result);
+                }
+            }
+            _ => panic!("Expected CompiledConstant, got {:?}", result),
         }
     }
 
@@ -217,19 +234,19 @@ mod tests {
         let lt_sym = symbol_table.intern("<");
 
         let result = FunctionCallCompiler::try_compile_call(
-            &Expr::Literal(Value::Symbol(lt_sym)),
-            &[Expr::Literal(Value::Int(1)), Expr::Literal(Value::Int(5))],
+            &Expr::Literal(Value::symbol(lt_sym.0)),
+            &[Expr::Literal(Value::int(1)), Expr::Literal(Value::int(5))],
             &symbol_table,
         );
         match result {
-            CallCompileResult::CompiledConstant(Value::Bool(true)) => (),
+            CallCompileResult::CompiledConstant(v) if v.as_bool() == Some(true) => (),
             _ => panic!("Expected CompiledConstant(true), got {:?}", result),
         }
     }
 
     #[test]
     fn test_extract_constant_args() {
-        let args = vec![Expr::Literal(Value::Int(1)), Expr::Literal(Value::Int(2))];
+        let args = vec![Expr::Literal(Value::int(1)), Expr::Literal(Value::int(2))];
         let result = FunctionCallCompiler::extract_constant_args(&args);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 2);
@@ -238,7 +255,7 @@ mod tests {
     #[test]
     fn test_extract_args_with_non_literal() {
         let args = vec![
-            Expr::Literal(Value::Int(1)),
+            Expr::Literal(Value::int(1)),
             Expr::Var(crate::binding::VarRef::local(0)),
         ];
         let result = FunctionCallCompiler::extract_constant_args(&args);
@@ -251,9 +268,9 @@ mod tests {
         let add_sym = symbol_table.intern("+");
 
         let result = FunctionCallCompiler::try_compile_call(
-            &Expr::Literal(Value::Symbol(add_sym)),
+            &Expr::Literal(Value::symbol(add_sym.0)),
             &[
-                Expr::Literal(Value::Int(1)),
+                Expr::Literal(Value::int(1)),
                 Expr::Var(crate::binding::VarRef::local(0)),
             ],
             &symbol_table,

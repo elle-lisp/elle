@@ -1,36 +1,109 @@
 //! CPS primitives: yield and resume
 
+use crate::value::heap::{alloc, HeapObject};
 use crate::value::{Coroutine, CoroutineState, Value};
 use std::rc::Rc;
 
-/// Create a new coroutine from a closure
-pub fn make_coroutine(closure: Value) -> Result<Value, String> {
-    match closure {
-        Value::Closure(c) => {
-            let coroutine = Coroutine::new(c);
-            Ok(Value::Coroutine(Rc::new(std::cell::RefCell::new(
-                coroutine,
+use std::sync::{Arc, Mutex};
+// Helper function to convert from old Value to new Value
+pub fn old_value_to_new(old_val: &crate::value_old::Value) -> Value {
+    use crate::value_old::Value as OldValue;
+    match old_val {
+        OldValue::Nil => Value::NIL,
+        OldValue::Bool(b) => Value::bool(*b),
+        OldValue::Int(i) => Value::int(*i),
+        OldValue::Float(f) => Value::float(*f),
+        OldValue::Symbol(id) => Value::symbol(id.0),
+        OldValue::Keyword(id) => Value::keyword(id.0),
+        OldValue::String(s) => Value::string(s.as_ref()),
+        OldValue::Cons(cons) => {
+            let first = old_value_to_new(&cons.first);
+            let rest = old_value_to_new(&cons.rest);
+            crate::value::cons(first, rest)
+        }
+        OldValue::Table(t) => {
+            let borrowed = t.borrow();
+            let mut new_table = std::collections::BTreeMap::new();
+            for (k, v) in borrowed.iter() {
+                new_table.insert(k.clone(), old_value_to_new(v));
+            }
+            Value::table_from(new_table)
+        }
+        OldValue::Struct(s) => {
+            let mut new_struct = std::collections::BTreeMap::new();
+            for (k, v) in s.iter() {
+                new_struct.insert(k.clone(), old_value_to_new(v));
+            }
+            Value::struct_from(new_struct)
+        }
+        OldValue::Vector(v) => {
+            let new_vals: Vec<Value> = v.iter().map(old_value_to_new).collect();
+            Value::vector(new_vals)
+        }
+        OldValue::Closure(c) => alloc(HeapObject::Closure(c.clone())),
+        OldValue::JitClosure(jc) => alloc(HeapObject::JitClosure(jc.clone())),
+        OldValue::NativeFn(f) => alloc(HeapObject::NativeFn(*f)),
+        OldValue::VmAwareFn(f) => alloc(HeapObject::VmAwareFn(*f)),
+        OldValue::LibHandle(h) => alloc(HeapObject::LibHandle(h.0)),
+        OldValue::CHandle(h) => alloc(HeapObject::CHandle(h.ptr, h.id)),
+        OldValue::Condition(c) => alloc(HeapObject::Condition(c.as_ref().clone())),
+        OldValue::ThreadHandle(_h) => alloc(HeapObject::ThreadHandle(
+            crate::value::heap::ThreadHandleData {
+                result: Arc::new(Mutex::new(None)),
+            },
+        )),
+        OldValue::Cell(c) => {
+            let borrowed = c.borrow();
+            let inner = old_value_to_new(&borrowed);
+            Value::cell(inner)
+        }
+        OldValue::LocalCell(c) => {
+            let borrowed = c.borrow();
+            let inner = old_value_to_new(&borrowed);
+            Value::cell(inner)
+        }
+        OldValue::Coroutine(co) => {
+            // co is Rc<RefCell<Coroutine>>, we need RefCell<Coroutine>
+            let borrowed = co.borrow();
+            alloc(HeapObject::Coroutine(Rc::new(std::cell::RefCell::new(
+                borrowed.clone(),
             ))))
         }
-        Value::JitClosure(jc) => {
-            // Convert JitClosure to Closure for coroutine
-            if let Some(source) = &jc.source {
-                let coroutine = Coroutine::new(source.clone());
-                Ok(Value::Coroutine(Rc::new(std::cell::RefCell::new(
-                    coroutine,
-                ))))
-            } else {
-                Err("JitClosure has no source for coroutine".to_string())
-            }
+    }
+}
+
+/// Create a new coroutine from a closure
+pub fn make_coroutine(closure: Value) -> Result<Value, String> {
+    if let Some(c) = closure.as_closure() {
+        let coroutine = Coroutine::new((*c).clone());
+        Ok(alloc(HeapObject::Coroutine(Rc::new(
+            std::cell::RefCell::new(coroutine),
+        ))))
+    } else if let Some(jc) = closure.as_jit_closure() {
+        // Convert JitClosure to Closure for coroutine
+        if let Some(source) = &jc.source {
+            let coroutine = Coroutine::new(source.clone());
+            Ok(alloc(HeapObject::Coroutine(Rc::new(
+                std::cell::RefCell::new(coroutine),
+            ))))
+        } else {
+            Err("JitClosure has no source for coroutine".to_string())
         }
-        _ => Err(format!("Cannot create coroutine from {:?}", closure)),
+    } else {
+        Err(format!("Cannot create coroutine from {:?}", closure))
     }
 }
 
 /// Get the status of a coroutine
 pub fn coroutine_status(coroutine: &Value) -> Result<Value, String> {
-    match coroutine {
-        Value::Coroutine(c) => {
+    use crate::value::heap::{deref, HeapObject};
+
+    if !coroutine.is_heap() {
+        return Err("Not a coroutine".to_string());
+    }
+
+    match unsafe { deref(*coroutine) } {
+        HeapObject::Coroutine(c) => {
             let borrowed = c.borrow();
             let status = match &borrowed.state {
                 CoroutineState::Created => "created",
@@ -39,7 +112,7 @@ pub fn coroutine_status(coroutine: &Value) -> Result<Value, String> {
                 CoroutineState::Done => "done",
                 CoroutineState::Error(_) => "error",
             };
-            Ok(Value::String(status.to_string().into()))
+            Ok(Value::string(status))
         }
         _ => Err("Not a coroutine".to_string()),
     }
@@ -47,8 +120,14 @@ pub fn coroutine_status(coroutine: &Value) -> Result<Value, String> {
 
 /// Check if a coroutine is done
 pub fn coroutine_done(coroutine: &Value) -> Result<bool, String> {
-    match coroutine {
-        Value::Coroutine(c) => {
+    use crate::value::heap::{deref, HeapObject};
+
+    if !coroutine.is_heap() {
+        return Err("Not a coroutine".to_string());
+    }
+
+    match unsafe { deref(*coroutine) } {
+        HeapObject::Coroutine(c) => {
             let borrowed = c.borrow();
             Ok(matches!(borrowed.state, CoroutineState::Done))
         }
@@ -58,10 +137,20 @@ pub fn coroutine_done(coroutine: &Value) -> Result<bool, String> {
 
 /// Get the last yielded value from a coroutine
 pub fn coroutine_value(coroutine: &Value) -> Result<Value, String> {
-    match coroutine {
-        Value::Coroutine(c) => {
+    use crate::value::heap::{deref, HeapObject};
+
+    if !coroutine.is_heap() {
+        return Err("Not a coroutine".to_string());
+    }
+
+    match unsafe { deref(*coroutine) } {
+        HeapObject::Coroutine(c) => {
             let borrowed = c.borrow();
-            Ok(borrowed.yielded_value.clone().unwrap_or(Value::Nil))
+            Ok(borrowed
+                .yielded_value
+                .as_ref()
+                .map(old_value_to_new)
+                .unwrap_or(Value::NIL))
         }
         _ => Err("Not a coroutine".to_string()),
     }
@@ -71,10 +160,12 @@ pub fn coroutine_value(coroutine: &Value) -> Result<Value, String> {
 mod tests {
     use super::*;
     use crate::compiler::effects::Effect;
+    use crate::value::heap::{deref, HeapObject};
     use crate::value::{Arity, Closure};
+    use std::rc::Rc;
 
     fn make_test_closure() -> Value {
-        Value::Closure(Rc::new(Closure {
+        Value::closure(Closure {
             bytecode: Rc::new(vec![]),
             arity: Arity::Exact(0),
             env: Rc::new(vec![]),
@@ -84,7 +175,8 @@ mod tests {
             source_ast: None,
             effect: Effect::Pure,
             cell_params_mask: 0,
-        }))
+            symbol_names: Rc::new(std::collections::HashMap::new()),
+        })
     }
 
     #[test]
@@ -93,7 +185,8 @@ mod tests {
         let result = make_coroutine(closure);
         assert!(result.is_ok());
 
-        if let Value::Coroutine(c) = result.unwrap() {
+        let coroutine = result.unwrap();
+        if let HeapObject::Coroutine(c) = unsafe { deref(coroutine) } {
             let borrowed = c.borrow();
             assert!(matches!(borrowed.state, CoroutineState::Created));
         } else {
@@ -106,7 +199,7 @@ mod tests {
         let closure = make_test_closure();
         let coroutine = make_coroutine(closure).unwrap();
         let status = coroutine_status(&coroutine).unwrap();
-        assert_eq!(status, Value::String("created".to_string().into()));
+        assert_eq!(status, Value::string("created"));
     }
 
     #[test]

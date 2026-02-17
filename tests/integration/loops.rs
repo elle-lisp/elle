@@ -33,7 +33,7 @@ fn test_while_loop_basic() {
         .unwrap();
     let result = eval.eval("counter").unwrap();
 
-    assert_eq!(result, Value::Int(3));
+    assert_eq!(result, Value::int(3));
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn test_while_loop_condition_false_initially() {
     eval.eval("(while (< x 5) (set! x (+ x 1)))").unwrap();
     let result = eval.eval("x").unwrap();
 
-    assert_eq!(result, Value::Int(10)); // x should remain unchanged
+    assert_eq!(result, Value::int(10)); // x should remain unchanged
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn test_while_loop_countdown() {
     eval.eval("(while (> n 0) (set! n (- n 1)))").unwrap();
     let result = eval.eval("n").unwrap();
 
-    assert_eq!(result, Value::Int(0));
+    assert_eq!(result, Value::int(0));
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_while_loop_with_arithmetic() {
     let result = eval.eval("value").unwrap();
 
     // 1 * 2 * 2 * 2 * 2 * 2 * 2 * 2 = 128
-    assert_eq!(result, Value::Int(128));
+    assert_eq!(result, Value::int(128));
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn test_while_loop_returns_nil() {
     eval.eval("(define x 0)").unwrap();
     let result = eval.eval("(while (< x 1) (set! x 1))").unwrap();
 
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::NIL);
 }
 
 #[test]
@@ -106,8 +106,8 @@ fn test_while_loop_with_nested_operations() {
     let counter = eval.eval("counter").unwrap();
 
     // sum: 0 + 1 + 2 + 3 + 4 = 10
-    assert_eq!(sum, Value::Int(10));
-    assert_eq!(counter, Value::Int(5));
+    assert_eq!(sum, Value::int(10));
+    assert_eq!(counter, Value::int(5));
 }
 
 #[test]
@@ -123,8 +123,8 @@ fn test_while_loop_with_complex_condition() {
     let x = eval.eval("x").unwrap();
     let y = eval.eval("y").unwrap();
 
-    assert_eq!(x, Value::Int(5));
-    assert_eq!(y, Value::Int(5));
+    assert_eq!(x, Value::int(5));
+    assert_eq!(y, Value::int(5));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn test_each_loop_basic_iteration() {
 
     // Each loop should complete and return nil
     assert!(result.is_ok(), "each loop failed: {:?}", result);
-    assert_eq!(result.unwrap(), Value::Nil);
+    assert_eq!(result.unwrap(), Value::NIL);
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn test_while_loop_multiplication_table() {
 
     let product = eval.eval("product").unwrap();
     // 1 * 1 * 2 * 3 * 4 * 5 = 120
-    assert_eq!(product, Value::Int(120));
+    assert_eq!(product, Value::int(120));
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn test_while_loop_with_floats() {
         .unwrap();
 
     let counter = eval.eval("counter").unwrap();
-    assert_eq!(counter, Value::Int(5));
+    assert_eq!(counter, Value::int(5));
 }
 
 #[test]
@@ -197,9 +197,9 @@ fn test_while_loop_fibonacci_sequence() {
     // Iteration 3: a=2, b=3
     // Iteration 4: a=3, b=5
     // Iteration 5: a=5, b=8
-    assert_eq!(a, Value::Int(5));
-    assert_eq!(b, Value::Int(8));
-    assert_eq!(n, Value::Int(5));
+    assert_eq!(a, Value::int(5));
+    assert_eq!(b, Value::int(8));
+    assert_eq!(n, Value::int(5));
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn test_nested_while_loops() {
 
     let sum = eval.eval("sum").unwrap();
     // i: 0,1,2 (3 iterations) * j: 0,1 (2 iterations each) = 6 total increments
-    assert_eq!(sum, Value::Int(6));
+    assert_eq!(sum, Value::int(6));
 }
 
 #[test]
@@ -237,7 +237,7 @@ fn test_while_loop_sum_integers() {
 
     let sum = eval.eval("sum").unwrap();
     // Sum of 1..10 = 55
-    assert_eq!(sum, Value::Int(55));
+    assert_eq!(sum, Value::int(55));
 }
 
 #[test]
@@ -249,10 +249,10 @@ fn test_while_loop_condition_never_true() {
     eval.eval("(define x 0)").unwrap();
     let result = eval.eval("(while (> x 100) (set! x (+ x 1)))").unwrap();
 
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::NIL);
 
     let x = eval.eval("x").unwrap();
-    assert_eq!(x, Value::Int(0)); // Should never enter loop
+    assert_eq!(x, Value::int(0)); // Should never enter loop
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn test_while_loop_power_calculation() {
 
     let result = eval.eval("result").unwrap();
     // 2^8 = 256
-    assert_eq!(result, Value::Int(256));
+    assert_eq!(result, Value::int(256));
 }
 
 #[test]
@@ -291,7 +291,7 @@ fn test_while_loop_gcd_calculation() {
 
     let gcd = eval.eval("a").unwrap();
     // GCD of 48 and 18 is 6
-    assert_eq!(gcd, Value::Int(6));
+    assert_eq!(gcd, Value::int(6));
 }
 
 #[test]
@@ -320,14 +320,14 @@ fn test_scope_management_features() {
     eval.eval("(define x 10)").unwrap();
     eval.eval("(while (< x 15) (set! x (+ x 1)))").unwrap();
     let result = eval.eval("x").unwrap();
-    assert_eq!(result, Value::Int(15));
+    assert_eq!(result, Value::int(15));
 
     // Test 2: Each loop correctly accumulates with global variable
     eval.eval("(define result 0)").unwrap();
     eval.eval("(each i (list 1 2 3) (set! result (+ result i)))")
         .unwrap();
     let result = eval.eval("result").unwrap();
-    assert_eq!(result, Value::Int(6)); // 1 + 2 + 3
+    assert_eq!(result, Value::int(6)); // 1 + 2 + 3
 
     // Test 3: Global variable access from loop
     eval.eval("(define multiplier 10)").unwrap();
@@ -335,7 +335,7 @@ fn test_scope_management_features() {
     eval.eval("(each item (list 1 2 3) (set! sum (+ sum (* item multiplier))))")
         .unwrap();
     let result = eval.eval("sum").unwrap();
-    assert_eq!(result, Value::Int(60)); // (1+2+3) * 10
+    assert_eq!(result, Value::int(60)); // (1+2+3) * 10
 }
 
 #[test]

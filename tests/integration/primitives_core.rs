@@ -3,7 +3,6 @@
 use elle::compiler::converters::value_to_expr;
 use elle::{compile, init_stdlib, read_str, register_primitives, SymbolTable, Value, VM};
 use std::fs;
-use std::rc::Rc;
 
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
@@ -27,7 +26,7 @@ fn test_string_length_basic() {
     // Basic string length
     let result = eval("(length \"hello\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(5));
+    assert_eq!(result.unwrap(), Value::int(5));
 }
 
 #[test]
@@ -35,7 +34,7 @@ fn test_string_length_empty() {
     // Empty string length
     let result = eval("(length \"\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(0));
+    assert_eq!(result.unwrap(), Value::int(0));
 }
 
 #[test]
@@ -43,7 +42,7 @@ fn test_string_length_unicode() {
     // Unicode characters (emoji is 1 character, 4 bytes in UTF-8)
     let result = eval("(length \"hello🌍\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(6)); // 5 ASCII characters + 1 emoji character
+    assert_eq!(result.unwrap(), Value::int(6)); // 5 ASCII characters + 1 emoji character
 }
 
 #[test]
@@ -51,7 +50,7 @@ fn test_string_append_multiple() {
     // String append with multiple arguments
     let result = eval("(string-append \"hello\" \" \" \"world\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("hello world")));
+    assert_eq!(result.unwrap(), Value::string("hello world"));
 }
 
 #[test]
@@ -59,7 +58,7 @@ fn test_string_append_empty() {
     // String append with empty strings
     let result = eval("(string-append \"\" \"test\" \"\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("test")));
+    assert_eq!(result.unwrap(), Value::string("test"));
 }
 
 #[test]
@@ -67,7 +66,7 @@ fn test_string_upcase() {
     // Convert to uppercase
     let result = eval("(string-upcase \"Hello World\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("HELLO WORLD")));
+    assert_eq!(result.unwrap(), Value::string("HELLO WORLD"));
 }
 
 #[test]
@@ -75,7 +74,7 @@ fn test_string_downcase() {
     // Convert to lowercase
     let result = eval("(string-downcase \"Hello World\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("hello world")));
+    assert_eq!(result.unwrap(), Value::string("hello world"));
 }
 
 #[test]
@@ -83,7 +82,7 @@ fn test_substring_basic() {
     // Basic substring
     let result = eval("(substring \"hello\" 1 4)");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("ell")));
+    assert_eq!(result.unwrap(), Value::string("ell"));
 }
 
 #[test]
@@ -91,7 +90,7 @@ fn test_substring_from_start() {
     // Substring from start
     let result = eval("(substring \"hello\" 0 3)");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("hel")));
+    assert_eq!(result.unwrap(), Value::string("hel"));
 }
 
 #[test]
@@ -99,7 +98,7 @@ fn test_string_replace_basic() {
     // String replace
     let result = eval("(string-replace \"hello world\" \"world\" \"universe\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("hello universe")));
+    assert_eq!(result.unwrap(), Value::string("hello universe"));
 }
 
 #[test]
@@ -114,7 +113,7 @@ fn test_string_join() {
     // Join strings
     let result = eval("(string-join '(\"a\" \"b\" \"c\") \",\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("a,b,c")));
+    assert_eq!(result.unwrap(), Value::string("a,b,c"));
 }
 
 #[test]
@@ -122,7 +121,7 @@ fn test_string_trim_spaces() {
     // Trim whitespace
     let result = eval("(string-trim \"  hello  \")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("hello")));
+    assert_eq!(result.unwrap(), Value::string("hello"));
 }
 
 #[test]
@@ -130,7 +129,7 @@ fn test_number_to_string() {
     // Convert number to string
     let result = eval("(number->string 42)");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("42")));
+    assert_eq!(result.unwrap(), Value::string("42"));
 }
 
 // ============================================================================
@@ -143,7 +142,7 @@ fn test_file_extension() {
     // Get file extension
     let result = eval("(file-extension \"test.txt\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("txt")));
+    assert_eq!(result.unwrap(), Value::string("txt"));
 }
 
 #[test]
@@ -151,7 +150,7 @@ fn test_file_name() {
     // Get file name from path
     let result = eval("(file-name \"path/to/file.txt\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("file.txt")));
+    assert_eq!(result.unwrap(), Value::string("file.txt"));
 }
 
 #[test]
@@ -159,7 +158,7 @@ fn test_current_directory() {
     // Get current directory
     let result = eval("(current-directory)");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::String(_)));
+    assert!((result.unwrap()).is_string());
 }
 
 #[test]
@@ -174,7 +173,7 @@ fn test_absolute_path() {
     // Get absolute path
     let result = eval("(absolute-path \".\")");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::String(_)));
+    assert!((result.unwrap()).is_string());
 }
 
 #[test]
@@ -182,7 +181,7 @@ fn test_file_size_known_file() {
     // Get file size of known file
     let result = eval("(file-size \"Cargo.toml\")");
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), Value::Int(_)));
+    assert!((result.unwrap()).is_int());
 }
 
 #[test]
@@ -202,7 +201,7 @@ fn test_file_io_slurp_write_basic() {
     // Read file
     let read_result = eval(&format!("(slurp \"{}\")", test_file_str));
     assert!(read_result.is_ok());
-    assert_eq!(read_result.unwrap(), Value::String(Rc::from("hello world")));
+    assert_eq!(read_result.unwrap(), Value::string("hello world"));
 
     // Clean up
     let _ = fs::remove_file(&test_file);
@@ -228,7 +227,7 @@ fn test_file_io_append() {
     // Verify appended content
     let read_result = eval(&format!("(slurp \"{}\")", test_file_str));
     assert!(read_result.is_ok());
-    assert_eq!(read_result.unwrap(), Value::String(Rc::from("hello world")));
+    assert_eq!(read_result.unwrap(), Value::string("hello world"));
 
     // Clean up
     let _ = fs::remove_file(&test_file);
@@ -246,7 +245,7 @@ fn test_parent_directory() {
     // Get parent directory
     let result = eval("(parent-directory \"path/to/file.txt\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("path/to")));
+    assert_eq!(result.unwrap(), Value::string("path/to"));
 }
 
 #[test]
@@ -283,7 +282,7 @@ fn test_arithmetic_primitives_registered() {
     // Test that arithmetic primitives are available
     let result = eval("(+ 1 2 3)");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(6));
+    assert_eq!(result.unwrap(), Value::int(6));
 }
 
 #[test]
@@ -291,7 +290,7 @@ fn test_string_primitives_registered() {
     // Test that string primitives are available
     let result = eval("(length \"test\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(4));
+    assert_eq!(result.unwrap(), Value::int(4));
 }
 
 #[test]
@@ -299,7 +298,7 @@ fn test_list_primitives_registered() {
     // Test that list primitives are available
     let result = eval("(length '(1 2 3))");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(3));
+    assert_eq!(result.unwrap(), Value::int(3));
 }
 
 #[test]
@@ -307,7 +306,7 @@ fn test_comparison_primitives_registered() {
     // Test that comparison primitives are available
     let result = eval("(> 5 3)");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Bool(true));
+    assert_eq!(result.unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -315,7 +314,7 @@ fn test_type_check_primitives_registered() {
     // Test that type check primitives are available
     let result = eval("(string? \"test\")");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Bool(true));
+    assert_eq!(result.unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -327,7 +326,7 @@ fn test_multiple_stdlib_features() {
          (string-append greeting \" world\"))",
     );
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("hello world")));
+    assert_eq!(result.unwrap(), Value::string("hello world"));
 }
 
 #[test]
@@ -356,7 +355,7 @@ fn test_fold_with_string_append() {
          \"\" '(1 2 3))",
     );
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("123")));
+    assert_eq!(result.unwrap(), Value::string("123"));
 }
 
 #[test]
@@ -368,7 +367,7 @@ fn test_string_operations_combined() {
          (string-append (string-upcase text) \" WORLD\"))",
     );
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::String(Rc::from("HELLO WORLD")));
+    assert_eq!(result.unwrap(), Value::string("HELLO WORLD"));
 }
 
 #[test]
@@ -436,7 +435,7 @@ fn test_file_io_with_strings() {
     // Read and verify
     let read_result = eval(&format!("(slurp \"{}\")", test_file_str));
     assert!(read_result.is_ok());
-    assert_eq!(read_result.unwrap(), Value::String(Rc::from("HELLO WORLD")));
+    assert_eq!(read_result.unwrap(), Value::string("HELLO WORLD"));
 
     // Clean up
     let _ = fs::remove_file(&test_file);

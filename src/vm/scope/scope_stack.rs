@@ -56,7 +56,7 @@ impl ScopeStack {
         // Search from current scope back to global
         for scope in self.stack.iter().rev() {
             if let Some(value) = scope.get(sym_id) {
-                return Some(value.clone());
+                return Some(*value);
             }
         }
         None
@@ -172,9 +172,9 @@ mod tests {
     fn test_define_local() {
         let mut stack = ScopeStack::new();
         let sym_id = 42;
-        let value = Value::Int(123);
+        let value = Value::int(123);
 
-        stack.define_local(sym_id, value.clone());
+        stack.define_local(sym_id, value);
         assert_eq!(stack.get(sym_id), Some(value));
     }
 
@@ -183,17 +183,17 @@ mod tests {
         let mut stack = ScopeStack::new();
         let x_id = 1;
         let y_id = 2;
-        let x_val = Value::Int(10);
-        let y_val = Value::Int(20);
+        let x_val = Value::int(10);
+        let y_val = Value::int(20);
 
         // Define x in global
-        stack.define_local(x_id, x_val.clone());
+        stack.define_local(x_id, x_val);
 
         // Push a function scope
         stack.push(ScopeType::Function);
 
         // Define y locally
-        stack.define_local(y_id, y_val.clone());
+        stack.define_local(y_id, y_val);
 
         // Should find both
         assert_eq!(stack.get(x_id), Some(x_val));
@@ -208,8 +208,8 @@ mod tests {
     fn test_set_walks_up_scopes() {
         let mut stack = ScopeStack::new();
         let x_id = 1;
-        let x_val1 = Value::Int(10);
-        let x_val2 = Value::Int(20);
+        let x_val1 = Value::int(10);
+        let x_val2 = Value::int(20);
 
         // Define in global
         stack.define_local(x_id, x_val1);
@@ -218,8 +218,8 @@ mod tests {
         stack.push(ScopeType::Function);
 
         // Set should find x in parent and update it
-        assert!(stack.set(x_id, x_val2.clone()));
-        assert_eq!(stack.get(x_id), Some(x_val2.clone()));
+        assert!(stack.set(x_id, x_val2));
+        assert_eq!(stack.get(x_id), Some(x_val2));
 
         // Go back to global - should see the update
         stack.pop();
@@ -230,8 +230,8 @@ mod tests {
     fn test_set_at_depth() {
         let mut stack = ScopeStack::new();
         let sym_id = 42;
-        let val1 = Value::Int(1);
-        let val2 = Value::Int(2);
+        let val1 = Value::int(1);
+        let val2 = Value::int(2);
 
         // Define in global (depth 0 from global)
         stack.define_local(sym_id, val1);
@@ -240,7 +240,7 @@ mod tests {
         stack.push(ScopeType::Block);
 
         // Set at depth 1 (parent scope/global)
-        assert!(stack.set_at_depth(1, sym_id, val2.clone()));
+        assert!(stack.set_at_depth(1, sym_id, val2));
 
         // Verify it changed in global
         stack.pop();
@@ -270,30 +270,30 @@ mod tests {
         let b_id = 2;
         let c_id = 3;
 
-        let a_val = Value::Int(10);
-        let b_val = Value::Int(20);
-        let c_val = Value::Int(30);
+        let a_val = Value::int(10);
+        let b_val = Value::int(20);
+        let c_val = Value::int(30);
 
         // Global scope: define a
-        stack.define_local(a_id, a_val.clone());
+        stack.define_local(a_id, a_val);
 
         // Function scope: define b
         stack.push(ScopeType::Function);
-        stack.define_local(b_id, b_val.clone());
+        stack.define_local(b_id, b_val);
 
         // Block scope: define c
         stack.push(ScopeType::Block);
-        stack.define_local(c_id, c_val.clone());
+        stack.define_local(c_id, c_val);
 
         // Can see all three
-        assert_eq!(stack.get(a_id), Some(a_val.clone()));
-        assert_eq!(stack.get(b_id), Some(b_val.clone()));
-        assert_eq!(stack.get(c_id), Some(c_val.clone()));
+        assert_eq!(stack.get(a_id), Some(a_val));
+        assert_eq!(stack.get(b_id), Some(b_val));
+        assert_eq!(stack.get(c_id), Some(c_val));
 
         // Pop block
         assert!(stack.pop());
-        assert_eq!(stack.get(a_id), Some(a_val.clone()));
-        assert_eq!(stack.get(b_id), Some(b_val.clone()));
+        assert_eq!(stack.get(a_id), Some(a_val));
+        assert_eq!(stack.get(b_id), Some(b_val));
         assert_eq!(stack.get(c_id), None); // c no longer visible
 
         // Pop function
@@ -306,16 +306,16 @@ mod tests {
     fn test_total_variables() {
         let mut stack = ScopeStack::new();
 
-        stack.define_local(1, Value::Int(1));
+        stack.define_local(1, Value::int(1));
         assert_eq!(stack.total_variables(), 1);
 
         stack.push(ScopeType::Function);
-        stack.define_local(2, Value::Int(2));
-        stack.define_local(3, Value::Int(3));
+        stack.define_local(2, Value::int(2));
+        stack.define_local(3, Value::int(3));
         assert_eq!(stack.total_variables(), 3);
 
         stack.push(ScopeType::Block);
-        stack.define_local(4, Value::Int(4));
+        stack.define_local(4, Value::int(4));
         assert_eq!(stack.total_variables(), 4);
 
         stack.pop();

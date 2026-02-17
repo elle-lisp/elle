@@ -190,14 +190,14 @@ mod tests {
 
     #[test]
     fn test_literal_is_pure() {
-        let expr = CpsExpr::literal(Value::Int(42));
+        let expr = CpsExpr::literal(Value::int(42));
         assert!(expr.is_pure());
     }
 
     #[test]
     fn test_yield_is_not_pure() {
         let expr = CpsExpr::Yield {
-            value: Box::new(CpsExpr::literal(Value::Int(1))),
+            value: Box::new(CpsExpr::literal(Value::int(1))),
             continuation: Continuation::done(),
         };
         assert!(!expr.is_pure());

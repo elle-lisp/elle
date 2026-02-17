@@ -10,11 +10,11 @@ use elle::Value;
 fn test_marshal_integers_to_c_values() {
     // Test marshaling various integer types
     let values = vec![
-        (Value::Int(0), CType::Int, true),
-        (Value::Int(42), CType::Int, true),
-        (Value::Int(-5), CType::Int, true),
-        (Value::Int(256), CType::Short, true),
-        (Value::Int(65536), CType::Long, true),
+        (Value::int(0), CType::Int, true),
+        (Value::int(42), CType::Int, true),
+        (Value::int(-5), CType::Int, true),
+        (Value::int(256), CType::Short, true),
+        (Value::int(65536), CType::Long, true),
     ];
 
     for (value, ctype, should_succeed) in values {
@@ -34,11 +34,11 @@ fn test_marshal_integers_to_c_values() {
 fn test_marshal_unsigned_integers_validation() {
     // Unsigned integers should reject negative values
     let test_cases = vec![
-        (Value::Int(0), CType::UInt, true),
-        (Value::Int(100), CType::UInt, true),
-        (Value::Int(-1), CType::UInt, false),
-        (Value::Int(-100), CType::UChar, false),
-        (Value::Int(256), CType::UChar, true), // Will truncate but not error
+        (Value::int(0), CType::UInt, true),
+        (Value::int(100), CType::UInt, true),
+        (Value::int(-1), CType::UInt, false),
+        (Value::int(-100), CType::UChar, false),
+        (Value::int(256), CType::UChar, true), // Will truncate but not error
     ];
 
     for (value, ctype, should_succeed) in test_cases {
@@ -57,10 +57,10 @@ fn test_marshal_unsigned_integers_validation() {
 fn test_marshal_floats() {
     // Test marshaling floating point values
     let test_cases = vec![
-        Value::Float(0.0),
-        Value::Float(1.5),
-        Value::Float(-2.5),
-        Value::Float(4.2),
+        Value::float(0.0),
+        Value::float(1.5),
+        Value::float(-2.5),
+        Value::float(4.2),
     ];
 
     for value in test_cases {
@@ -76,18 +76,19 @@ fn test_marshal_floats() {
 fn test_marshal_booleans() {
     // Test marshaling boolean values
     let test_cases = vec![
-        (Value::Bool(true), true),
-        (Value::Bool(false), false),
-        (Value::Int(1), true),
-        (Value::Int(0), false),
-        (Value::Nil, false),
+        (Value::bool(true), true),
+        (Value::bool(false), false),
+        (Value::int(1), true),
+        (Value::int(0), false),
+        (Value::NIL, false),
     ];
 
     for (value, expected_bool) in test_cases {
         let result = Marshal::elle_to_c(&value, &CType::Bool).unwrap();
-        match result {
-            CValue::Int(n) => assert_eq!(n != 0, expected_bool),
-            _ => panic!("Expected CValue::Int for bool"),
+        if let CValue::Int(n) = result {
+            assert_eq!(n != 0, expected_bool)
+        } else {
+            panic!("Expected CValue::Int for bool")
         }
     }
 }
@@ -98,7 +99,7 @@ fn test_marshal_strings_to_pointers() {
     let strings = vec!["hello", "world", "test", ""];
 
     for s in strings {
-        let value = Value::String(s.into());
+        let value = Value::string(s);
         let result = Marshal::elle_to_c(&value, &CType::Pointer(Box::new(CType::Char)));
 
         assert!(
@@ -123,13 +124,13 @@ fn test_marshal_strings_to_pointers() {
 #[test]
 fn test_marshal_vectors_to_arrays() {
     // Test marshaling Elle vectors to C arrays
-    let vector = Value::Vector(std::rc::Rc::new(vec![
-        Value::Int(1),
-        Value::Int(2),
-        Value::Int(3),
-        Value::Int(4),
-        Value::Int(5),
-    ]));
+    let vector = Value::vector(vec![
+        Value::int(1),
+        Value::int(2),
+        Value::int(3),
+        Value::int(4),
+        Value::int(5),
+    ]);
 
     let result = Marshal::elle_to_c(&vector, &CType::Array(Box::new(CType::Int), 5));
     assert!(result.is_ok());
@@ -139,9 +140,10 @@ fn test_marshal_vectors_to_arrays() {
             assert_eq!(elems.len(), 5);
             // Verify each element
             for (i, elem) in elems.iter().enumerate() {
-                match elem {
-                    CValue::Int(n) => assert_eq!(*n, (i + 1) as i64),
-                    _ => panic!("Expected CValue::Int"),
+                if let CValue::Int(n) = elem {
+                    assert_eq!(*n, (i + 1) as i64)
+                } else {
+                    panic!("Expected CValue::Int")
                 }
             }
         }
@@ -153,8 +155,8 @@ fn test_marshal_vectors_to_arrays() {
 fn test_marshal_cons_lists_to_arrays() {
     // Test marshaling Elle cons lists to C arrays
     let list = cons(
-        Value::Int(10),
-        cons(Value::Int(20), cons(Value::Int(30), Value::Nil)),
+        Value::int(10),
+        cons(Value::int(20), cons(Value::int(30), Value::NIL)),
     );
 
     let result = Marshal::elle_to_c(&list, &CType::Array(Box::new(CType::Int), 3));
@@ -174,7 +176,7 @@ fn test_marshal_cons_lists_to_arrays() {
 #[test]
 fn test_marshal_nil_as_null_pointer() {
     // Test that nil marshals to null pointer
-    let result = Marshal::elle_to_c(&Value::Nil, &CType::Pointer(Box::new(CType::Int)));
+    let result = Marshal::elle_to_c(&Value::NIL, &CType::Pointer(Box::new(CType::Int)));
     assert!(result.is_ok());
 
     match result.unwrap() {
@@ -217,7 +219,7 @@ fn test_unmarshal_floats() {
         let result = Marshal::c_to_elle(&cvalue, &ctype);
         assert!(result.is_ok());
 
-        if let Value::Float(_f) = result.unwrap() {
+        if let Some(_f) = result.unwrap().as_float() {
             // Float is correct type
         } else {
             panic!("Expected Value::Float");
@@ -238,15 +240,15 @@ fn test_unmarshal_arrays() {
     let result = Marshal::c_to_elle(&carray, &CType::Array(Box::new(CType::Int), 4));
     assert!(result.is_ok());
 
-    match result.unwrap() {
-        Value::Vector(vec) => {
-            assert_eq!(vec.len(), 4);
-            assert_eq!(vec[0], Value::Int(5));
-            assert_eq!(vec[1], Value::Int(10));
-            assert_eq!(vec[2], Value::Int(15));
-            assert_eq!(vec[3], Value::Int(20));
-        }
-        _ => panic!("Expected Value::Vector"),
+    if let Some(vec_ref) = result.unwrap().as_vector() {
+        let vec = vec_ref.borrow();
+        assert_eq!(vec.len(), 4);
+        assert_eq!(vec[0], Value::int(5));
+        assert_eq!(vec[1], Value::int(10));
+        assert_eq!(vec[2], Value::int(15));
+        assert_eq!(vec[3], Value::int(20));
+    } else {
+        panic!("Expected Value::Vector");
     }
 }
 
@@ -258,13 +260,13 @@ fn test_unmarshal_null_pointer_to_nil() {
         &CType::Pointer(Box::new(CType::Int)),
     );
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Nil);
+    assert_eq!(result.unwrap(), Value::NIL);
 }
 
 #[test]
 fn test_roundtrip_marshal_unmarshal_integers() {
     // Test roundtrip marshaling of integers
-    let original = Value::Int(42);
+    let original = Value::int(42);
     let marshaled = Marshal::elle_to_c(&original, &CType::Int).unwrap();
     let unmarshaled = Marshal::c_to_elle(&marshaled, &CType::Int).unwrap();
     assert_eq!(original, unmarshaled);
@@ -273,11 +275,11 @@ fn test_roundtrip_marshal_unmarshal_integers() {
 #[test]
 fn test_roundtrip_marshal_unmarshal_floats() {
     // Test roundtrip marshaling of floats
-    let original = Value::Float(2.4);
+    let original = Value::float(2.4);
     let marshaled = Marshal::elle_to_c(&original, &CType::Double).unwrap();
     let unmarshaled = Marshal::c_to_elle(&marshaled, &CType::Double).unwrap();
 
-    if let Value::Float(f) = unmarshaled {
+    if let Some(f) = unmarshaled.as_float() {
         assert!((f - 2.4).abs() < 0.0001);
     } else {
         panic!("Expected Value::Float");
@@ -287,25 +289,21 @@ fn test_roundtrip_marshal_unmarshal_floats() {
 #[test]
 fn test_roundtrip_marshal_unmarshal_arrays() {
     // Test roundtrip marshaling of arrays
-    let original = Value::Vector(std::rc::Rc::new(vec![
-        Value::Int(1),
-        Value::Int(2),
-        Value::Int(3),
-    ]));
+    let original = Value::vector(vec![Value::int(1), Value::int(2), Value::int(3)]);
 
     let marshaled = Marshal::elle_to_c(&original, &CType::Array(Box::new(CType::Int), 3)).unwrap();
 
     let unmarshaled =
         Marshal::c_to_elle(&marshaled, &CType::Array(Box::new(CType::Int), 3)).unwrap();
 
-    match unmarshaled {
-        Value::Vector(vec) => {
-            assert_eq!(vec.len(), 3);
-            assert_eq!(vec[0], Value::Int(1));
-            assert_eq!(vec[1], Value::Int(2));
-            assert_eq!(vec[2], Value::Int(3));
-        }
-        _ => panic!("Expected Value::Vector"),
+    if let Some(vec_ref) = unmarshaled.as_vector() {
+        let vec = vec_ref.borrow();
+        assert_eq!(vec.len(), 3);
+        assert_eq!(vec[0], Value::int(1));
+        assert_eq!(vec[1], Value::int(2));
+        assert_eq!(vec[2], Value::int(3));
+    } else {
+        panic!("Expected Value::Vector");
     }
 }
 
@@ -313,12 +311,12 @@ fn test_roundtrip_marshal_unmarshal_arrays() {
 fn test_error_on_type_mismatch() {
     // Test that type mismatches produce errors
     let test_cases = vec![
-        (Value::String("hello".into()), CType::Int),
+        (Value::string("hello"), CType::Int),
         (
-            Value::Symbol(elle::SymbolTable::new().intern("sym")),
+            Value::symbol(elle::SymbolTable::new().intern("sym").0),
             CType::Float,
         ),
-        (Value::Bool(true), CType::Pointer(Box::new(CType::Int))),
+        (Value::bool(true), CType::Pointer(Box::new(CType::Int))),
     ];
 
     for (value, ctype) in test_cases {
@@ -332,12 +330,12 @@ fn test_signed_unsigned_handling() {
     // Test proper handling of signed vs unsigned types
 
     // Positive values should work for both
-    let positive = Value::Int(100);
+    let positive = Value::int(100);
     assert!(Marshal::elle_to_c(&positive, &CType::Int).is_ok());
     assert!(Marshal::elle_to_c(&positive, &CType::UInt).is_ok());
 
     // Negative values should only work for signed
-    let negative = Value::Int(-50);
+    let negative = Value::int(-50);
     assert!(Marshal::elle_to_c(&negative, &CType::Int).is_ok());
     assert!(Marshal::elle_to_c(&negative, &CType::UInt).is_err());
 

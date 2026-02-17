@@ -578,7 +578,7 @@ tbody tr:nth-child(even) {
 ;; Process each page
 (define process-pages
   (fn (all-nav-items current-nav-items)
-    (if (nil? current-nav-items)
+    (if (empty? current-nav-items)
       (begin
         (display "Done!")
         (newline))

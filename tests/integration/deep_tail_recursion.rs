@@ -37,7 +37,7 @@ fn test_tail_recursion_moderate_depth() {
         "Moderate depth recursion should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::Int(0));
+    assert_eq!(result.unwrap(), Value::int(0));
 }
 
 /// Test tail recursion with deeper depth (10000)
@@ -57,7 +57,7 @@ fn test_tail_recursion_deep() {
         "Deep recursion should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::Int(0));
+    assert_eq!(result.unwrap(), Value::int(0));
 }
 
 /// Test tail recursion with very deep depth (50000) - the original issue
@@ -77,7 +77,7 @@ fn test_tail_recursion_very_deep() {
         "Very deep recursion (50k) should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::Int(0));
+    assert_eq!(result.unwrap(), Value::int(0));
 }
 
 /// Test tail recursion with accumulator pattern
@@ -98,7 +98,7 @@ fn test_tail_recursion_with_accumulator() {
         result
     );
     // Sum of 1 to 1000 = 1000 * 1001 / 2 = 500500
-    assert_eq!(result.unwrap(), Value::Int(500500));
+    assert_eq!(result.unwrap(), Value::int(500500));
 }
 
 /// Test tail recursion with accumulator at deep depth
@@ -119,7 +119,7 @@ fn test_tail_recursion_accumulator_deep() {
         result
     );
     // Sum of 1 to 10000 = 10000 * 10001 / 2 = 50005000
-    assert_eq!(result.unwrap(), Value::Int(50005000));
+    assert_eq!(result.unwrap(), Value::int(50005000));
 }
 
 /// Test tail recursion with captured variables
@@ -142,7 +142,7 @@ fn test_tail_recursion_with_captures() {
         "Tail recursion with captures should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::Int(42));
+    assert_eq!(result.unwrap(), Value::int(42));
 }
 
 /// Test tail recursion with local variable definitions
@@ -163,7 +163,7 @@ fn test_tail_recursion_with_locals() {
         "Tail recursion with local variables should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::Int(0));
+    assert_eq!(result.unwrap(), Value::int(0));
 }
 
 /// Test tail recursion with local variables at moderate depth
@@ -184,7 +184,7 @@ fn test_tail_recursion_locals_deep() {
         "Deep tail recursion with local variables should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::Int(0));
+    assert_eq!(result.unwrap(), Value::int(0));
 }
 
 /// Test tail recursion with multiple parameters
@@ -207,8 +207,8 @@ fn test_tail_recursion_multiple_params() {
         result
     );
     let vec = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(vec[0], Value::Int(0));
-    assert_eq!(vec[1], Value::Int(0));
+    assert_eq!(vec[0], Value::int(0));
+    assert_eq!(vec[1], Value::int(0));
 }
 
 /// Test tail recursion with multiple parameters at deep depth
@@ -231,8 +231,8 @@ fn test_tail_recursion_multiple_params_deep() {
         result
     );
     let vec = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(vec[0], Value::Int(0));
-    assert_eq!(vec[1], Value::Int(0));
+    assert_eq!(vec[0], Value::int(0));
+    assert_eq!(vec[1], Value::int(0));
 }
 
 /// Test tail recursion with conditional branching
@@ -254,7 +254,7 @@ fn test_tail_recursion_conditional() {
         "Tail recursion with conditionals should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::String("done".into()));
+    assert_eq!(result.unwrap(), Value::string("done"));
 }
 
 /// Test tail recursion with conditional branching at deep depth
@@ -276,7 +276,7 @@ fn test_tail_recursion_conditional_deep() {
         "Deep tail recursion with conditionals should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::String("done".into()));
+    assert_eq!(result.unwrap(), Value::string("done"));
 }
 
 /// Test tail recursion returning accumulated list
@@ -296,7 +296,7 @@ fn test_tail_recursion_list_accumulation() {
         "Tail recursion with list accumulation should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::Int(100));
+    assert_eq!(result.unwrap(), Value::int(100));
 }
 
 /// Test tail recursion with very deep list accumulation
@@ -316,7 +316,7 @@ fn test_tail_recursion_list_accumulation_deep() {
         "Deep tail recursion with list accumulation should succeed: {:?}",
         result
     );
-    assert_eq!(result.unwrap(), Value::Int(5000));
+    assert_eq!(result.unwrap(), Value::int(5000));
 }
 
 /// Test mutual tail recursion at moderate depth
@@ -334,8 +334,8 @@ fn test_mutual_tail_recursion_moderate() {
         result
     );
     let vec = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(vec[0], Value::Bool(true));
-    assert_eq!(vec[1], Value::Bool(true));
+    assert_eq!(vec[0], Value::bool(true));
+    assert_eq!(vec[1], Value::bool(true));
 }
 
 /// Test mutual tail recursion at deep depth
@@ -353,6 +353,6 @@ fn test_mutual_tail_recursion_deep() {
         result
     );
     let vec = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(vec[0], Value::Bool(true));
-    assert_eq!(vec[1], Value::Bool(true));
+    assert_eq!(vec[0], Value::bool(true));
+    assert_eq!(vec[1], Value::bool(true));
 }

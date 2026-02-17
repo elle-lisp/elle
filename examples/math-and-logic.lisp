@@ -181,12 +181,12 @@
 (display "=== Mathematical Constants ===\n")
 
 (display "pi = ")
-(display pi)
+(display (pi))
 (newline)
 (assert-true #t "pi is available")
 
 (display "e = ")
-(display e)
+(display (e))
 (newline)
 (assert-true #t "e is available")
 
@@ -287,7 +287,7 @@
 
 ; Filter even numbers from a list
 (define filter-even (fn (lst)
-  (if (nil? lst)
+  (if (empty? lst)
       '()
       (if (even? (first lst))
           (cons (first lst) (filter-even (rest lst)))
@@ -304,7 +304,7 @@
 
 ; Filter odd numbers from a list
 (define filter-odd (fn (lst)
-  (if (nil? lst)
+  (if (empty? lst)
       '()
       (if (odd? (first lst))
           (cons (first lst) (filter-odd (rest lst)))
@@ -323,7 +323,7 @@
 
 ; Count even numbers
 (define count-even (fn (lst)
-  (if (nil? lst)
+  (if (empty? lst)
       0
       (if (even? (first lst))
           (+ 1 (count-even (rest lst)))
@@ -338,7 +338,7 @@
 
 ; Count odd numbers
 (define count-odd (fn (lst)
-  (if (nil? lst)
+  (if (empty? lst)
       0
       (if (odd? (first lst))
           (+ 1 (count-odd (rest lst)))
@@ -356,9 +356,9 @@
 
 ; Check if list alternates between even and odd
 (define alternates? (fn (lst)
-  (if (nil? lst)
+  (if (empty? lst)
       #t
-      (if (nil? (rest lst))
+      (if (empty? (rest lst))
           #t
           (if (even? (first lst))
               (if (odd? (first (rest lst)))
@@ -380,7 +380,7 @@
 
 ; Sum of even numbers
 (define sum-even (fn (lst)
-  (if (nil? lst)
+  (if (empty? lst)
       0
       (if (even? (first lst))
           (+ (first lst) (sum-even (rest lst)))
@@ -395,7 +395,7 @@
 
 ; Sum of odd numbers
 (define sum-odd (fn (lst)
-  (if (nil? lst)
+  (if (empty? lst)
       0
       (if (odd? (first lst))
           (+ (first lst) (sum-odd (rest lst)))
@@ -571,7 +571,7 @@
 
 (assert-true (valid? 42) "42 is valid")
 (assert-true (valid? "hello") "\"hello\" is valid")
-(assert-false (valid? '()) "() is not valid")
+(assert-true (valid? '()) "() is valid (empty list is truthy)")
 (assert-false (valid? #f) "#f is not valid")
 (display "✓ valid? works\n")
 

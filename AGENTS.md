@@ -35,7 +35,9 @@ Value-based pipeline. Prefer the new pipeline; it's in `pipeline.rs`.
 
 ### The Value type
 
-`Value` is the runtime representation. It's an enum. Notable variants:
+`Value` is the runtime representation. It uses NaN-boxing for efficient
+representation. Create values via methods like `Value::int()`, `Value::cons()`,
+`Value::closure()` rather than enum variants. Notable types:
 - `Closure` - bytecode + captured environment + arity + effect
 - `JitClosure` - native code pointer + environment
 - `Cell` / `LocalCell` - mutable cells for captured variables
@@ -51,7 +53,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 | elle | `src/` | Interpreter/compiler |
 | elle-lsp | `elle-lsp/` | Language server |
 | elle-lint | `elle-lint/` | Static analysis |
-| elle-doc | `elle-doc/` | Documentation generator |
+| elle-doc | `elle-doc/` | Documentation site generator (written in Elle) |
 
 ## Directories
 
@@ -88,10 +90,16 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 # Run a single example
 cargo run -- examples/closures.lisp
+
+# Generate documentation site (this runs Elle code — catches runtime bugs)
+cargo build --release && ./target/release/elle elle-doc/generate.lisp
+
+# Rust API docs with warnings as errors
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
 CI runs: tests (stable/beta/nightly), fmt, clippy, examples, coverage,
-benchmarks, docs. All must pass.
+benchmarks, rustdoc, elle-doc site generation. All must pass.
 
 ## Invariants
 
@@ -123,8 +131,15 @@ Things that look wrong but aren't:
   `LocalCell` (compiler-created for mutable captures, auto-unwrapped).
 - `VmAwareFn` exists because some primitives (like `coroutine-resume`) need
   to execute bytecode, so they need VM access.
-- The `Cons` type is separate from `Value::Cons` - the former is the data,
-  the latter wraps it in `Rc`.
+- The `Cons` type in `value/heap.rs` is the heap-allocated cons cell data.
+  `Value::cons(car, cdr)` creates a NaN-boxed pointer to a heap Cons.
+- `nil` and empty list `()` are distinct values with different truthiness:
+  - `Value::NIL` is falsy (represents absence)
+  - `Value::EMPTY_LIST` is truthy (it's a list, just empty)
+- Lists are `EMPTY_LIST`-terminated, not `NIL`-terminated. `(rest (list 1))`
+  returns `EMPTY_LIST`. Use `empty?` (not `nil?`) to check for end-of-list.
+  `nil?` only matches `Value::NIL`. This distinction matters in recursive
+  list functions and affects `elle-doc/` and `examples/`.
 
 ## Conventions
 
@@ -153,6 +168,18 @@ AGENTS.md and README.md files exist throughout the codebase. Keep them current:
   add to "Intentional oddities." If it's a bug, file an issue.
 
 Documentation debt compounds. A few minutes now saves hours of confusion later.
+
+## elle-doc: the documentation site generator
+
+`elle-doc/generate.lisp` is an Elle program that generates the documentation
+site. CI builds it with `./target/release/elle elle-doc/generate.lisp` as part
+of the docs job. Because it's written in Elle, it exercises the runtime — any
+change to the language semantics (value representation, list operations,
+string handling) can break it.
+
+When the docs CI job fails, check `elle-doc/generate.lisp` and its library
+files in `elle-doc/lib/`. Common failure: using `nil?` instead of `empty?`
+for list termination.
 
 ## What not to do
 

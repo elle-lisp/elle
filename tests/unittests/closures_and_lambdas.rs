@@ -5,6 +5,7 @@ use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::value::{Arity, Closure, Value};
 use elle::vm::VM;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 fn setup() -> (VM, SymbolTable) {
@@ -30,12 +31,13 @@ fn test_closure_type_identification() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
-    let value = Value::Closure(Rc::new(closure));
+    let value = Value::closure(closure);
 
     match value {
-        Value::Closure(_) => {} // Success
+        v if v.is_closure() => {} // Success
         _ => panic!("Value should be a Closure"),
     }
 }
@@ -52,9 +54,10 @@ fn test_closure_display() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
-    let value = Value::Closure(Rc::new(closure));
+    let value = Value::closure(closure);
     let s = format!("{}", value);
     assert_eq!(s, "<closure>");
 }
@@ -65,20 +68,21 @@ fn test_closure_clone() {
     let closure = Closure {
         bytecode: Rc::new(vec![1, 2, 3]),
         arity: Arity::Exact(2),
-        env: Rc::new(vec![Value::Int(42)]),
+        env: Rc::new(vec![Value::int(42)]),
         num_locals: 2,
         num_captures: 0,
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
-    let value1 = Value::Closure(Rc::new(closure.clone()));
-    let value2 = value1.clone();
+    let value1 = Value::closure(closure.clone());
+    let value2 = value1;
 
     // Both should be closures
-    assert!(matches!(value1, Value::Closure(_)));
-    assert!(matches!(value2, Value::Closure(_)));
+    assert!(value1.is_closure());
+    assert!(value2.is_closure());
 }
 
 // ============================================================================
@@ -136,7 +140,8 @@ fn test_closure_empty_environment() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert_eq!(closure.env.len(), 0);
 }
@@ -144,7 +149,7 @@ fn test_closure_empty_environment() {
 #[test]
 fn test_closure_single_captured_variable() {
     // Closure capturing one variable
-    let env = vec![Value::Int(42)];
+    let env = vec![Value::int(42)];
     let closure = Closure {
         bytecode: Rc::new(vec![]),
         arity: Arity::Exact(1),
@@ -154,20 +159,21 @@ fn test_closure_single_captured_variable() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert_eq!(closure.env.len(), 1);
-    assert_eq!(closure.env[0], Value::Int(42));
+    assert_eq!(closure.env[0], Value::int(42));
 }
 
 #[test]
 fn test_closure_multiple_captured_variables() {
     // Closure capturing multiple variables
     let env = vec![
-        Value::Int(1),
-        Value::Int(2),
-        Value::String("test".into()),
-        Value::Bool(true),
+        Value::int(1),
+        Value::int(2),
+        Value::string("test"),
+        Value::bool(true),
     ];
     let closure = Closure {
         bytecode: Rc::new(vec![]),
@@ -178,17 +184,18 @@ fn test_closure_multiple_captured_variables() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert_eq!(closure.env.len(), 4);
-    assert_eq!(closure.env[0], Value::Int(1));
-    assert_eq!(closure.env[2], Value::String("test".into()));
+    assert_eq!(closure.env[0], Value::int(1));
+    assert_eq!(closure.env[2], Value::string("test"));
 }
 
 #[test]
 fn test_closure_environment_sharing() {
     // Multiple closures can share environment data
-    let shared_env = Rc::new(vec![Value::Int(100), Value::Int(200)]);
+    let shared_env = Rc::new(vec![Value::int(100), Value::int(200)]);
 
     let closure1 = Closure {
         bytecode: Rc::new(vec![1]),
@@ -199,7 +206,8 @@ fn test_closure_environment_sharing() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
     let closure2 = Closure {
@@ -211,7 +219,8 @@ fn test_closure_environment_sharing() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
     // Both closures share the same environment
@@ -236,7 +245,8 @@ fn test_closure_bytecode_storage() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert_eq!(*closure.bytecode, bytecode);
 }
@@ -244,11 +254,7 @@ fn test_closure_bytecode_storage() {
 #[test]
 fn test_closure_constants_storage() {
     // Constants should be properly stored
-    let constants = vec![
-        Value::Int(42),
-        Value::String("hello".into()),
-        Value::Bool(true),
-    ];
+    let constants = vec![Value::int(42), Value::string("hello"), Value::bool(true)];
     let closure = Closure {
         bytecode: Rc::new(vec![]),
         arity: Arity::Exact(0),
@@ -258,7 +264,8 @@ fn test_closure_constants_storage() {
         constants: Rc::new(constants.clone()),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert_eq!(*closure.constants, constants);
 }
@@ -277,6 +284,7 @@ fn test_closure_num_locals() {
             source_ast: None,
             effect: Effect::Pure,
             cell_params_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
         };
         assert_eq!(closure.num_locals, num_locals);
     }
@@ -297,7 +305,8 @@ fn test_closure_zero_parameters() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert!(closure.arity.matches(0));
     assert!(!closure.arity.matches(1));
@@ -314,7 +323,8 @@ fn test_closure_single_parameter() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert!(closure.arity.matches(1));
 }
@@ -330,7 +340,8 @@ fn test_closure_multiple_parameters() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert!(closure.arity.matches(3));
     assert!(!closure.arity.matches(2));
@@ -348,7 +359,8 @@ fn test_closure_variadic_parameters() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert!(closure.arity.matches(1));
     assert!(closure.arity.matches(2));
@@ -362,7 +374,7 @@ fn test_closure_variadic_parameters() {
 #[test]
 fn test_closures_never_equal() {
     // Closures should never compare equal (even with identical contents)
-    let closure1 = Value::Closure(Rc::new(Closure {
+    let closure1 = Value::closure(Closure {
         bytecode: Rc::new(vec![]),
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
@@ -371,10 +383,11 @@ fn test_closures_never_equal() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
-    }));
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
+    });
 
-    let closure2 = Value::Closure(Rc::new(Closure {
+    let closure2 = Value::closure(Closure {
         bytecode: Rc::new(vec![]),
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
@@ -383,8 +396,9 @@ fn test_closures_never_equal() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
-    }));
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
+    });
 
     // Even though they're structurally identical, they should not be equal
     assert!(closure1 != closure2);
@@ -402,11 +416,12 @@ fn test_same_closure_reference_equality() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     });
 
-    let value1 = Value::Closure(closure_rc.clone());
-    let value2 = Value::Closure(closure_rc.clone());
+    let value1 = Value::closure((*closure_rc).clone());
+    let value2 = Value::closure((*closure_rc).clone());
 
     // They're different Value enums even though they wrap the same Rc
     assert!(value1 != value2);
@@ -419,13 +434,7 @@ fn test_same_closure_reference_equality() {
 #[test]
 fn test_closure_with_nested_captured_values() {
     // Closure capturing nested data structures
-    let nested_list = Value::Cons(Rc::new(elle::value::Cons {
-        first: Value::Int(1),
-        rest: Value::Cons(Rc::new(elle::value::Cons {
-            first: Value::Int(2),
-            rest: Value::Nil,
-        })),
-    }));
+    let nested_list = Value::cons(Value::int(1), Value::cons(Value::int(2), Value::NIL));
 
     let env = vec![nested_list];
     let closure = Closure {
@@ -437,7 +446,8 @@ fn test_closure_with_nested_captured_values() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
     assert_eq!(closure.env.len(), 1);
@@ -446,7 +456,7 @@ fn test_closure_with_nested_captured_values() {
 #[test]
 fn test_closure_with_closure_in_constants() {
     // A closure's constants can contain other closures
-    let inner_closure = Value::Closure(Rc::new(Closure {
+    let inner_closure = Value::closure(Closure {
         bytecode: Rc::new(vec![1]),
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
@@ -455,8 +465,9 @@ fn test_closure_with_closure_in_constants() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
-    }));
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
+    });
 
     let outer_closure = Closure {
         bytecode: Rc::new(vec![]),
@@ -467,7 +478,8 @@ fn test_closure_with_closure_in_constants() {
         constants: Rc::new(vec![inner_closure]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
     assert_eq!(outer_closure.constants.len(), 1);
@@ -476,7 +488,7 @@ fn test_closure_with_closure_in_constants() {
 #[test]
 fn test_closure_with_many_upvalues() {
     // Closure capturing many variables (stress test)
-    let env: Vec<Value> = (0..100).map(|i| Value::Int(i as i64)).collect();
+    let env: Vec<Value> = (0..100).map(|i| Value::int(i as i64)).collect();
 
     let closure = Closure {
         bytecode: Rc::new(vec![]),
@@ -487,7 +499,8 @@ fn test_closure_with_many_upvalues() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
     assert_eq!(closure.env.len(), 100);
@@ -504,29 +517,30 @@ fn test_closure_as_method() {
     let closure = Closure {
         bytecode: Rc::new(vec![]),
         arity: Arity::Exact(2),
-        env: Rc::new(vec![Value::Int(10)]),
+        env: Rc::new(vec![Value::int(10)]),
         num_locals: 2,
         num_captures: 0,
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
-    let value = Value::Closure(Rc::new(closure));
+    let value = Value::closure(closure);
 
     // Should be able to extract as closure
     match value.as_closure() {
-        Ok(c) => {
+        Some(c) => {
             assert_eq!(c.env.len(), 1);
         }
-        Err(_) => panic!("Should be a closure"),
+        None => panic!("Should be a closure"),
     }
 }
 
 #[test]
 fn test_closure_type_check() {
-    let closure = Value::Closure(Rc::new(Closure {
+    let closure = Value::closure(Closure {
         bytecode: Rc::new(vec![]),
         arity: Arity::Exact(0),
         env: Rc::new(vec![]),
@@ -535,13 +549,14 @@ fn test_closure_type_check() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
-    }));
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
+    });
 
-    assert!(matches!(closure, Value::Closure(_)));
-    assert!(!matches!(closure, Value::Nil));
-    assert!(!matches!(closure, Value::Int(_)));
-    assert!(!matches!(closure, Value::NativeFn(_)));
+    assert!(closure.is_closure());
+    assert!(!matches!(closure, v if v.is_nil()));
+    assert!(!matches!(closure, v if v.is_int()));
+    assert!(!matches!(closure, v if v.as_native_fn().is_some()));
 }
 
 // ============================================================================
@@ -551,8 +566,8 @@ fn test_closure_type_check() {
 #[test]
 fn test_closure_environment_isolation() {
     // Different closures should have different environments
-    let env1 = Rc::new(vec![Value::Int(1)]);
-    let env2 = Rc::new(vec![Value::Int(2)]);
+    let env1 = Rc::new(vec![Value::int(1)]);
+    let env2 = Rc::new(vec![Value::int(2)]);
 
     let closure1 = Closure {
         bytecode: Rc::new(vec![]),
@@ -563,7 +578,8 @@ fn test_closure_environment_isolation() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
     let closure2 = Closure {
@@ -575,7 +591,8 @@ fn test_closure_environment_isolation() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
     assert_ne!(closure1.env[0], closure2.env[0]);
@@ -595,6 +612,7 @@ fn test_closure_local_variables_count() {
             source_ast: None,
             effect: Effect::Pure,
             cell_params_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
         };
         assert_eq!(closure.num_locals, locals);
     }
@@ -615,7 +633,8 @@ fn test_closure_with_empty_bytecode() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert_eq!(closure.bytecode.len(), 0);
 }
@@ -633,7 +652,8 @@ fn test_closure_with_large_bytecode() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
     assert_eq!(closure.bytecode.len(), 10000);
 }
@@ -653,14 +673,15 @@ fn test_closure_rc_reference_counting() {
         constants: Rc::new(vec![]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
     // Reference should still be alive
     assert!(bytecode_weak.upgrade().is_some());
 
     // Create value and let closure go out of scope
-    let _value = Value::Closure(Rc::new(closure));
+    let _value = Value::closure(closure);
     // Bytecode should still be alive due to outer reference
     assert!(bytecode_weak.upgrade().is_some());
 }
@@ -670,13 +691,14 @@ fn test_closure_debug_format() {
     let closure = Closure {
         bytecode: Rc::new(vec![1, 2, 3]),
         arity: Arity::Exact(2),
-        env: Rc::new(vec![Value::Int(42)]),
+        env: Rc::new(vec![Value::int(42)]),
         num_locals: 2,
         num_captures: 0,
-        constants: Rc::new(vec![Value::String("test".into())]),
+        constants: Rc::new(vec![Value::string("test")]),
         source_ast: None,
         effect: Effect::Pure,
-            cell_params_mask: 0,
+        cell_params_mask: 0,
+        symbol_names: Rc::new(HashMap::new()),
     };
 
     let debug_str = format!("{:?}", closure);

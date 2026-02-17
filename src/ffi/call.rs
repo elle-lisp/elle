@@ -309,7 +309,7 @@ mod tests {
         let func_ptr = 0x1234 as *const c_void;
         let call = FunctionCall::new(sig, func_ptr).unwrap();
 
-        let args = vec![Value::Int(1)];
+        let args = vec![Value::int(1)];
         let result = call.call(&args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("expects 2 arguments, got 1"));
@@ -321,7 +321,7 @@ mod tests {
         let func_ptr = 0x1234 as *const c_void;
         let call = FunctionCall::new(sig, func_ptr).unwrap();
 
-        let args: Vec<Value> = (0..7).map(Value::Int).collect();
+        let args: Vec<Value> = (0..7).map(Value::int).collect();
         let result = call.call(&args);
         assert!(result.is_err());
     }

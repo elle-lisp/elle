@@ -6,7 +6,6 @@
 use super::ast::Expr;
 use super::cranelift::context::JITContext;
 use crate::symbol::SymbolTable;
-use crate::value::Value;
 
 /// Represents a JIT-compiled function
 #[derive(Debug, Clone)]
@@ -49,18 +48,24 @@ pub fn compile_jit(expr: &Expr, _symbols: &SymbolTable) -> Result<JitCompiledFun
 
     match expr {
         // Simple literals can be compiled to JIT
-        Expr::Literal(Value::Int(_)) | Expr::Literal(Value::Float(_)) => {
+        Expr::Literal(val) if val.as_int().is_some() || val.as_float().is_some() => {
             Ok(JitCompiledFunction::new("literal".to_string(), true))
         }
-        Expr::Literal(Value::Bool(_)) => {
+        Expr::Literal(val) if val.as_bool().is_some() => {
             Ok(JitCompiledFunction::new("bool_literal".to_string(), true))
         }
-        Expr::Literal(Value::Nil) => Ok(JitCompiledFunction::new("nil_literal".to_string(), true)),
+        Expr::Literal(val) if val.is_nil() => {
+            Ok(JitCompiledFunction::new("nil_literal".to_string(), true))
+        }
 
         // Binary operations can be compiled
         Expr::Call { func, args, .. } if args.len() == 2 => {
-            if let Expr::Literal(Value::Symbol(_)) = &**func {
-                Ok(JitCompiledFunction::new("binop".to_string(), true))
+            if let Expr::Literal(val) = &**func {
+                if val.as_symbol().is_some() {
+                    Ok(JitCompiledFunction::new("binop".to_string(), true))
+                } else {
+                    Err("Dynamic function calls not yet supported in JIT".to_string())
+                }
             } else {
                 Err("Dynamic function calls not yet supported in JIT".to_string())
             }
@@ -80,7 +85,7 @@ pub fn compile_jit(expr: &Expr, _symbols: &SymbolTable) -> Result<JitCompiledFun
 /// Check if an expression is JIT-compilable
 pub fn is_jit_compilable(expr: &Expr) -> bool {
     match expr {
-        Expr::Literal(Value::Symbol(_)) => false, // Symbols aren't directly compilable
+        Expr::Literal(val) if val.as_symbol().is_some() => false, // Symbols aren't directly compilable
         Expr::Literal(_) => true,
         Expr::Call { args, .. } if args.len() == 2 => true,
         Expr::If { .. } => true,
@@ -91,11 +96,12 @@ pub fn is_jit_compilable(expr: &Expr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::Value;
 
     #[test]
     fn test_jit_compile_literal() {
         let symbols = SymbolTable::new();
-        let expr = Expr::Literal(Value::Int(42));
+        let expr = Expr::Literal(Value::int(42));
         let result = compile_jit(&expr, &symbols);
         assert!(result.is_ok());
         assert!(result.unwrap().success);
@@ -103,10 +109,8 @@ mod tests {
 
     #[test]
     fn test_jit_is_compilable() {
-        assert!(is_jit_compilable(&Expr::Literal(Value::Int(42))));
-        assert!(is_jit_compilable(&Expr::Literal(Value::Bool(true))));
-        assert!(!is_jit_compilable(&Expr::Literal(Value::Symbol(
-            crate::value::SymbolId(0)
-        ))));
+        assert!(is_jit_compilable(&Expr::Literal(Value::int(42))));
+        assert!(is_jit_compilable(&Expr::Literal(Value::bool(true))));
+        assert!(!is_jit_compilable(&Expr::Literal(Value::symbol(0))));
     }
 }

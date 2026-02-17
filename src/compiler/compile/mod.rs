@@ -81,7 +81,7 @@ impl Compiler {
                     }
                     VarRef::LetBound { sym } => {
                         // Let-bound variable - use LoadGlobal which checks scope stack first
-                        let idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                        let idx = self.bytecode.add_constant(Value::symbol(sym.0));
                         self.bytecode.emit(Instruction::LoadGlobal);
                         self.bytecode.emit_u16(idx);
                     }
@@ -92,7 +92,7 @@ impl Compiler {
                         self.bytecode.emit_byte(*index as u8);
                     }
                     VarRef::Global { sym } => {
-                        let idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                        let idx = self.bytecode.add_constant(Value::symbol(sym.0));
                         self.bytecode.emit(Instruction::LoadGlobal);
                         self.bytecode.emit_u16(idx);
                     }
@@ -148,7 +148,7 @@ impl Compiler {
                     }
                     VarRef::LetBound { sym } => {
                         // Let-bound variable - use StoreGlobal which checks scope stack first
-                        let idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                        let idx = self.bytecode.add_constant(Value::symbol(sym.0));
                         self.bytecode.emit(Instruction::StoreGlobal);
                         self.bytecode.emit_u16(idx);
                     }
@@ -159,7 +159,7 @@ impl Compiler {
                         self.bytecode.emit_byte(*index as u8);
                     }
                     VarRef::Global { sym } => {
-                        let idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                        let idx = self.bytecode.add_constant(Value::symbol(sym.0));
                         self.bytecode.emit(Instruction::StoreGlobal);
                         self.bytecode.emit_u16(idx);
                     }
@@ -176,12 +176,12 @@ impl Compiler {
                     self.bytecode.emit_byte(env_idx as u8);
                 } else if self.scope_depth > 0 {
                     // Inside a block/loop/let scope (not a lambda) — define locally
-                    let idx = self.bytecode.add_constant(Value::Symbol(*name));
+                    let idx = self.bytecode.add_constant(Value::symbol(name.0));
                     self.bytecode.emit(Instruction::DefineLocal);
                     self.bytecode.emit_u16(idx);
                 } else {
                     // Top-level — define globally
-                    let idx = self.bytecode.add_constant(Value::Symbol(*name));
+                    let idx = self.bytecode.add_constant(Value::symbol(name.0));
                     self.bytecode.emit(Instruction::StoreGlobal);
                     self.bytecode.emit_u16(idx);
                 }
@@ -312,19 +312,42 @@ impl Compiler {
                 Vec::new()
             }
             Pattern::Nil => {
-                // Check if value is nil
+                // Check if value is nil or empty_list
                 self.bytecode.emit(Instruction::Dup);
                 self.bytecode.emit(Instruction::Nil);
                 self.bytecode.emit(Instruction::Eq);
+                self.bytecode.emit(Instruction::JumpIfTrue);
+                let nil_jump = self.bytecode.instructions.len();
+                self.bytecode.emit_i16(0);
+
+                // Check if it's empty list
+                self.bytecode.emit(Instruction::Dup);
+                let empty_list_const = self.bytecode.add_constant(Value::empty_list());
+                self.bytecode.emit(Instruction::LoadConst);
+                self.bytecode.emit_u16(empty_list_const);
+                self.bytecode.emit(Instruction::Eq);
+                self.bytecode.emit(Instruction::JumpIfTrue);
+                let empty_list_jump = self.bytecode.instructions.len();
+                self.bytecode.emit_i16(0);
+
+                // Neither nil nor empty list, fail
                 self.bytecode.emit(Instruction::JumpIfFalse);
                 let fail_jump = self.bytecode.instructions.len();
                 self.bytecode.emit_i16(0);
+
+                // Patch the nil and empty list jumps to skip the fail jump
+                let skip_target = self.bytecode.instructions.len();
+                let offset = (skip_target as i32) - (nil_jump as i32 + 2);
+                self.bytecode.patch_jump(nil_jump, offset as i16);
+                let offset = (skip_target as i32) - (empty_list_jump as i32 + 2);
+                self.bytecode.patch_jump(empty_list_jump, offset as i16);
+
                 vec![fail_jump]
             }
             Pattern::Literal(val) => {
                 // Check if value equals literal
                 self.bytecode.emit(Instruction::Dup);
-                let const_idx = self.bytecode.add_constant(val.clone());
+                let const_idx = self.bytecode.add_constant(*val);
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(const_idx);
                 self.bytecode.emit(Instruction::Eq);
@@ -348,11 +371,129 @@ impl Compiler {
                 // For Phase 2, just check if it's a pair
                 vec![fail_jump]
             }
-            Pattern::List(_patterns) => {
-                // List pattern: for Phase 2, just check if it's a list
-                // Full implementation would check length and match elements
-                // For now, accept any value
-                Vec::new()
+            Pattern::List(patterns) => {
+                // List pattern: check if value is a list and matches all elements
+                let mut fail_jumps = Vec::new();
+
+                if patterns.is_empty() {
+                    // Pattern is empty list, check if value is nil or empty list
+                    self.bytecode.emit(Instruction::Dup);
+                    self.bytecode.emit(Instruction::Nil);
+                    self.bytecode.emit(Instruction::Eq);
+                    self.bytecode.emit(Instruction::JumpIfTrue);
+                    let nil_jump = self.bytecode.instructions.len();
+                    self.bytecode.emit_i16(0);
+
+                    // Check if it's empty list
+                    self.bytecode.emit(Instruction::Dup);
+                    let empty_list_const = self.bytecode.add_constant(Value::empty_list());
+                    self.bytecode.emit(Instruction::LoadConst);
+                    self.bytecode.emit_u16(empty_list_const);
+                    self.bytecode.emit(Instruction::Eq);
+                    self.bytecode.emit(Instruction::JumpIfTrue);
+                    let empty_list_jump = self.bytecode.instructions.len();
+                    self.bytecode.emit_i16(0);
+
+                    // Neither nil nor empty list, fail
+                    self.bytecode.emit(Instruction::JumpIfFalse);
+                    let fail_jump = self.bytecode.instructions.len();
+                    self.bytecode.emit_i16(0);
+                    fail_jumps.push(fail_jump);
+
+                    // Patch the nil and empty list jumps to skip the fail jump
+                    let skip_target = self.bytecode.instructions.len();
+                    let offset = (skip_target as i32) - (nil_jump as i32 + 2);
+                    self.bytecode.patch_jump(nil_jump, offset as i16);
+                    let offset = (skip_target as i32) - (empty_list_jump as i32 + 2);
+                    self.bytecode.patch_jump(empty_list_jump, offset as i16);
+                } else {
+                    // Pattern is non-empty list, check if value is a pair
+                    self.bytecode.emit(Instruction::Dup);
+                    self.bytecode.emit(Instruction::IsPair);
+                    self.bytecode.emit(Instruction::JumpIfFalse);
+                    let fail_jump = self.bytecode.instructions.len();
+                    self.bytecode.emit_i16(0);
+                    fail_jumps.push(fail_jump);
+
+                    // Now we know it's a cons cell, check each element
+                    for (i, elem_pattern) in patterns.iter().enumerate() {
+                        // Extract the head (car)
+                        self.bytecode.emit(Instruction::Dup);
+                        self.bytecode.emit(Instruction::Car);
+
+                        // Check this element against the pattern inline
+                        match elem_pattern {
+                            super::ast::Pattern::Literal(val) => {
+                                self.bytecode.emit(Instruction::Dup);
+                                let const_idx = self.bytecode.add_constant(*val);
+                                self.bytecode.emit(Instruction::LoadConst);
+                                self.bytecode.emit_u16(const_idx);
+                                self.bytecode.emit(Instruction::Eq);
+                                self.bytecode.emit(Instruction::JumpIfFalse);
+                                let fail_jump = self.bytecode.instructions.len();
+                                self.bytecode.emit_i16(0);
+                                fail_jumps.push(fail_jump);
+                            }
+                            super::ast::Pattern::Wildcard => {
+                                // Wildcard matches anything, no check needed
+                            }
+                            super::ast::Pattern::Var(_) => {
+                                // Variable pattern always matches - no type check needed
+                            }
+                            _ => {
+                                // For other patterns, use recursive call
+                                let elem_fails = self.compile_pattern_check(elem_pattern);
+                                fail_jumps.extend(elem_fails);
+                            }
+                        }
+
+                        // Pop the checked element
+                        self.bytecode.emit(Instruction::Pop);
+
+                        // Move to the next element (cdr) if not the last element
+                        if i < patterns.len() - 1 {
+                            self.bytecode.emit(Instruction::Cdr);
+                        }
+                    }
+
+                    // Check that there are no remaining elements
+                    // The tail should be nil or empty list
+                    self.bytecode.emit(Instruction::Cdr);
+                    self.bytecode.emit(Instruction::Dup);
+                    self.bytecode.emit(Instruction::Nil);
+                    self.bytecode.emit(Instruction::Eq);
+                    self.bytecode.emit(Instruction::JumpIfTrue);
+                    let nil_jump = self.bytecode.instructions.len();
+                    self.bytecode.emit_i16(0);
+
+                    // Check if it's empty list
+                    self.bytecode.emit(Instruction::Dup);
+                    let empty_list_const = self.bytecode.add_constant(Value::empty_list());
+                    self.bytecode.emit(Instruction::LoadConst);
+                    self.bytecode.emit_u16(empty_list_const);
+                    self.bytecode.emit(Instruction::Eq);
+                    self.bytecode.emit(Instruction::JumpIfTrue);
+                    let empty_list_jump = self.bytecode.instructions.len();
+                    self.bytecode.emit_i16(0);
+
+                    // Neither nil nor empty list, fail
+                    self.bytecode.emit(Instruction::JumpIfFalse);
+                    let fail_jump = self.bytecode.instructions.len();
+                    self.bytecode.emit_i16(0);
+                    fail_jumps.push(fail_jump);
+
+                    // Patch the nil and empty list jumps to skip the fail jump
+                    let skip_target = self.bytecode.instructions.len();
+                    let offset = (skip_target as i32) - (nil_jump as i32 + 2);
+                    self.bytecode.patch_jump(nil_jump, offset as i16);
+                    let offset = (skip_target as i32) - (empty_list_jump as i32 + 2);
+                    self.bytecode.patch_jump(empty_list_jump, offset as i16);
+
+                    // Pop the final nil/empty list
+                    self.bytecode.emit(Instruction::Pop);
+                }
+
+                fail_jumps
             }
             Pattern::Guard {
                 pattern: inner,
@@ -368,15 +509,16 @@ impl Compiler {
 
     /// Compile literal values (nil, booleans, and constants)
     fn compile_literal(&mut self, val: &Value) {
-        match val {
-            Value::Nil => self.bytecode.emit(Instruction::Nil),
-            Value::Bool(true) => self.bytecode.emit(Instruction::True),
-            Value::Bool(false) => self.bytecode.emit(Instruction::False),
-            _ => {
-                let idx = self.bytecode.add_constant(val.clone());
-                self.bytecode.emit(Instruction::LoadConst);
-                self.bytecode.emit_u16(idx);
-            }
+        if val.is_nil() {
+            self.bytecode.emit(Instruction::Nil);
+        } else if let Some(true) = val.as_bool() {
+            self.bytecode.emit(Instruction::True);
+        } else if let Some(false) = val.as_bool() {
+            self.bytecode.emit(Instruction::False);
+        } else {
+            let idx = self.bytecode.add_constant(*val);
+            self.bytecode.emit(Instruction::LoadConst);
+            self.bytecode.emit_u16(idx);
         }
     }
 
@@ -456,19 +598,22 @@ impl Compiler {
         // Loop start
         let loop_label = self.bytecode.current_pos() as i32;
 
-        // Check if list is nil
+        // Check if list is empty (proper list terminator)
+        // Stack: [list]
         self.bytecode.emit(Instruction::Dup);
-        self.bytecode.emit(Instruction::IsNil);
+        // Stack: [list, list]
+        self.bytecode.emit(Instruction::IsEmptyList);
+        // Stack: [list, is_empty_list]
         self.bytecode.emit(Instruction::JumpIfTrue);
         let exit_jump = self.bytecode.current_pos() as i32;
         self.bytecode.emit_u16(0);
 
-        // Extract car
+        // Extract car (will error if nil encountered - enforces proper list invariant)
         self.bytecode.emit(Instruction::Dup);
         self.bytecode.emit(Instruction::Car);
 
         // Store in loop variable
-        let var_idx = self.bytecode.add_constant(Value::Symbol(*var));
+        let var_idx = self.bytecode.add_constant(Value::symbol(var.0));
         self.bytecode.emit(Instruction::DefineLocal);
         self.bytecode.emit_u16(var_idx);
         self.bytecode.emit(Instruction::Pop);
@@ -477,7 +622,7 @@ impl Compiler {
         self.compile_expr(body, false);
         self.bytecode.emit(Instruction::Pop);
 
-        // Update list to rest
+        // Update list to rest (will error if nil encountered)
         self.bytecode.emit(Instruction::Cdr);
 
         // Loop back
@@ -570,7 +715,7 @@ impl Compiler {
             }
             // Load nil and store it
             self.bytecode.emit(Instruction::Nil);
-            let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
+            let idx = self.bytecode.add_constant(Value::symbol(sym_id.0));
             if !self.lambda_locals.is_empty() {
                 // Inside a lambda — store to closure environment
                 if let Some(local_idx) = self.lambda_locals.iter().position(|s| s == &sym_id) {
@@ -618,7 +763,7 @@ impl Compiler {
         let defines = collect_defines(&temp_expr);
         for sym_id in defines {
             self.bytecode.emit(Instruction::Nil);
-            let idx = self.bytecode.add_constant(Value::Symbol(sym_id));
+            let idx = self.bytecode.add_constant(Value::symbol(sym_id.0));
             self.bytecode.emit(Instruction::DefineLocal);
             self.bytecode.emit_u16(idx);
             // DefineLocal pushes the value back, but we don't need it for pre-declaration
@@ -740,7 +885,7 @@ impl Compiler {
         // Emit PushHandler with placeholder
         self.bytecode.emit(Instruction::PushHandler);
         let handler_offset_pos = self.bytecode.current_pos();
-        self.bytecode.emit_i16(0); // Placeholder for handler offset
+        self.bytecode.emit_u16(0); // Placeholder for handler offset
         self.bytecode.emit_i16(-1); // No finally offset in handler instruction
 
         // Compile the protected body
@@ -757,9 +902,9 @@ impl Compiler {
         // ============================================================
         // Exception handler code - only reached if exception occurs
         // ============================================================
-        let handler_code_start = self.bytecode.current_pos() as i16;
+        let handler_code_start = self.bytecode.current_pos() as u16;
         self.bytecode
-            .patch_jump(handler_offset_pos, handler_code_start);
+            .patch_u16(handler_offset_pos, handler_code_start);
 
         // Verify exception exists
         self.bytecode.emit(Instruction::CheckException);
@@ -779,7 +924,7 @@ impl Compiler {
 
             // Exception matched - bind to variable
             self.bytecode.emit(Instruction::BindException);
-            let var_idx = self.bytecode.add_constant(Value::Symbol(*var));
+            let var_idx = self.bytecode.add_constant(Value::symbol(var.0));
             self.bytecode.emit_u16(var_idx);
 
             // Compile catch handler body
@@ -848,7 +993,7 @@ impl Compiler {
         self.bytecode.emit(Instruction::PushHandler);
         let pushhandler_pos = self.bytecode.current_pos(); // Position right after PushHandler instruction
         let handler_offset_pos = pushhandler_pos; // Where we'll patch the offset (right after instruction byte)
-        self.bytecode.emit_i16(0); // Placeholder for handler_offset
+        self.bytecode.emit_u16(0); // Placeholder for handler_offset
         self.bytecode.emit_i16(-1); // No finally block for now
 
         // Compile the protected body
@@ -864,9 +1009,9 @@ impl Compiler {
 
         // Patch the handler_offset to point here
         // Using absolute position - the interrupt mechanism will handle it correctly
-        let handler_code_offset = self.bytecode.current_pos() as i16;
+        let handler_code_offset = self.bytecode.current_pos() as u16;
         self.bytecode
-            .patch_jump(handler_offset_pos, handler_code_offset);
+            .patch_u16(handler_offset_pos, handler_code_offset);
 
         // Emit CheckException (only reached if an exception actually occurred)
         self.bytecode.emit(Instruction::CheckException);
@@ -885,7 +1030,7 @@ impl Compiler {
 
             // Handler matches - bind the exception to the handler variable
             self.bytecode.emit(Instruction::BindException);
-            let var_idx = self.bytecode.add_constant(Value::Symbol(*var));
+            let var_idx = self.bytecode.add_constant(Value::symbol(var.0));
             self.bytecode.emit_u16(var_idx);
 
             // Execute handler code
@@ -968,7 +1113,7 @@ impl Compiler {
             if self.scope_mutated_vars.contains(var) && binding_vars.contains(var) {
                 self.bytecode.emit(Instruction::MakeCell);
             }
-            let idx = self.bytecode.add_constant(Value::Symbol(*var));
+            let idx = self.bytecode.add_constant(Value::symbol(var.0));
             self.bytecode.emit(Instruction::DefineLocal);
             self.bytecode.emit_u16(idx);
             // DefineLocal pushes the value back, but we don't need it
@@ -1004,7 +1149,7 @@ impl Compiler {
         // Pre-declare all binding names as nil (enables mutual references)
         for (var, _) in bindings {
             self.bytecode.emit(Instruction::Nil);
-            let idx = self.bytecode.add_constant(Value::Symbol(*var));
+            let idx = self.bytecode.add_constant(Value::symbol(var.0));
             self.bytecode.emit(Instruction::DefineLocal);
             self.bytecode.emit_u16(idx);
         }
@@ -1012,7 +1157,7 @@ impl Compiler {
         // Compile each binding expression and update the scope
         for (var, expr) in bindings {
             self.compile_expr(expr, false);
-            let idx = self.bytecode.add_constant(Value::Symbol(*var));
+            let idx = self.bytecode.add_constant(Value::symbol(var.0));
             self.bytecode.emit(Instruction::DefineLocal);
             self.bytecode.emit_u16(idx);
         }
@@ -1105,10 +1250,11 @@ impl Compiler {
             constants: Rc::new(lambda_compiler.bytecode.constants),
             source_ast,
             effect,
-            cell_params_mask: 0, // Old compiler doesn't use this
+            cell_params_mask: 0,
+            symbol_names: Rc::new(lambda_compiler.bytecode.symbol_names),
         };
 
-        let idx = self.bytecode.add_constant(Value::Closure(Rc::new(closure)));
+        let idx = self.bytecode.add_constant(Value::closure(closure));
 
         if num_captures == 0 && num_locals == params.len() {
             // No captures AND no locals — just load the closure template directly as a constant
@@ -1144,7 +1290,7 @@ impl Compiler {
                 if let Some(_idx) = locals.iter().position(|s| *s == capture_info.sym) {
                     // This is a forward reference - we need to create a cell that will be updated later
                     // Push nil as a placeholder
-                    let nil_idx = self.bytecode.add_constant(Value::Nil);
+                    let nil_idx = self.bytecode.add_constant(Value::NIL);
                     self.bytecode.emit(Instruction::LoadConst);
                     self.bytecode.emit_u16(nil_idx);
                     // Wrap in a cell so it can be updated later
@@ -1182,7 +1328,7 @@ impl Compiler {
                     // Not found in enclosing closure - use LoadGlobal
                     match &capture_info.source {
                         VarRef::LetBound { sym } | VarRef::Global { sym } => {
-                            let sym_idx = self.bytecode.add_constant(Value::Symbol(*sym));
+                            let sym_idx = self.bytecode.add_constant(Value::symbol(sym.0));
                             self.bytecode.emit(Instruction::LoadGlobal);
                             self.bytecode.emit_u16(sym_idx);
 
@@ -1247,7 +1393,7 @@ impl Compiler {
         let mut pending_jumps: Vec<Vec<usize>> = Vec::new();
 
         // Compile all patterns
-        for (pattern, body_expr) in patterns.iter() {
+        for (pattern, body_expr) in patterns {
             // If we have pending jumps from the previous pattern, patch them now
             // They should jump to this position (start of this pattern check)
             if !pending_jumps.is_empty() {
@@ -1392,7 +1538,8 @@ pub fn compile_lambda_to_closure(
         constants: Rc::new(lambda_compiler.bytecode.constants),
         source_ast,
         effect,
-        cell_params_mask: 0, // Old compiler doesn't use this
+        cell_params_mask: 0,
+        symbol_names: Rc::new(lambda_compiler.bytecode.symbol_names),
     };
 
     Ok(closure)
@@ -1409,7 +1556,7 @@ mod tests {
         let params = vec![crate::value::SymbolId(1)];
         let body = Box::new(Expr::Call {
             func: Box::new(Expr::Var(VarRef::global(crate::value::SymbolId(2)))), // +
-            args: vec![Expr::Var(VarRef::local(0)), Expr::Literal(Value::Int(1))],
+            args: vec![Expr::Var(VarRef::local(0)), Expr::Literal(Value::int(1))],
             tail: false,
         });
 
@@ -1436,7 +1583,7 @@ mod tests {
         let params = vec![x_sym];
         let body = Box::new(Expr::Call {
             func: Box::new(Expr::Var(VarRef::global(plus_sym))),
-            args: vec![Expr::Var(VarRef::local(0)), Expr::Literal(Value::Int(1))],
+            args: vec![Expr::Var(VarRef::local(0)), Expr::Literal(Value::int(1))],
             tail: false,
         });
 
@@ -1457,7 +1604,7 @@ mod tests {
     fn test_closure_stores_effect() {
         // Create a simple lambda and verify the closure stores the effect
         let params = vec![crate::value::SymbolId(1)];
-        let body = Box::new(Expr::Literal(Value::Int(42)));
+        let body = Box::new(Expr::Literal(Value::int(42)));
 
         let expr = Expr::Lambda {
             params: params.clone(),
@@ -1472,10 +1619,7 @@ mod tests {
         assert!(!bytecode.constants.is_empty());
 
         // Find the closure constant
-        let closure_found = bytecode
-            .constants
-            .iter()
-            .any(|v| matches!(v, Value::Closure(_)));
+        let closure_found = bytecode.constants.iter().any(|v| v.is_closure());
         assert!(closure_found, "Closure should be stored as a constant");
     }
 
@@ -1526,7 +1670,7 @@ mod tests {
         let body = Box::new(Expr::Begin(vec![
             Expr::Define {
                 name: y_sym,
-                value: Box::new(Expr::Literal(Value::Int(1))),
+                value: Box::new(Expr::Literal(Value::int(1))),
             },
             Expr::Call {
                 func: Box::new(Expr::Var(VarRef::global(plus_sym))),
@@ -1559,7 +1703,7 @@ mod tests {
             params: vec![x_sym],
             body: Box::new(Expr::Call {
                 func: Box::new(Expr::Var(VarRef::global(plus_sym))),
-                args: vec![Expr::Var(VarRef::local(0)), Expr::Literal(Value::Int(1))],
+                args: vec![Expr::Var(VarRef::local(0)), Expr::Literal(Value::int(1))],
                 tail: false,
             }),
             captures: vec![],
@@ -1570,13 +1714,10 @@ mod tests {
         let bytecode = compile_with_symbols(&expr, Rc::new(symbols));
 
         // Find the closure constant
-        let closure = bytecode.constants.iter().find_map(|v| {
-            if let Value::Closure(c) = v {
-                Some(c.clone())
-            } else {
-                None
-            }
-        });
+        let closure = bytecode
+            .constants
+            .iter()
+            .find_map(|v| v.as_closure().cloned());
 
         assert!(closure.is_some(), "Closure should be stored as a constant");
         let closure = closure.unwrap();
@@ -1608,7 +1749,7 @@ mod tests {
                         args: vec![Expr::Var(VarRef::local(0))],
                         tail: false,
                     },
-                    Expr::Literal(Value::Int(1)),
+                    Expr::Literal(Value::int(1)),
                 ],
                 tail: false,
             }),
@@ -1619,13 +1760,10 @@ mod tests {
 
         let bytecode = compile_with_symbols(&expr, Rc::new(symbols));
 
-        let closure = bytecode.constants.iter().find_map(|v| {
-            if let Value::Closure(c) = v {
-                Some(c.clone())
-            } else {
-                None
-            }
-        });
+        let closure = bytecode
+            .constants
+            .iter()
+            .find_map(|v| v.as_closure().cloned());
 
         assert!(closure.is_some());
         let closure = closure.unwrap();
@@ -1647,7 +1785,7 @@ mod tests {
             params: vec![x_sym],
             body: Box::new(Expr::Call {
                 func: Box::new(Expr::Var(VarRef::global(plus_sym))),
-                args: vec![Expr::Var(VarRef::local(0)), Expr::Literal(Value::Int(1))],
+                args: vec![Expr::Var(VarRef::local(0)), Expr::Literal(Value::int(1))],
                 tail: false,
             }),
             captures: vec![],
@@ -1660,13 +1798,7 @@ mod tests {
         let closure = bytecode
             .constants
             .iter()
-            .find_map(|v| {
-                if let Value::Closure(c) = v {
-                    Some(c.clone())
-                } else {
-                    None
-                }
-            })
+            .find_map(|v| v.as_closure().cloned())
             .expect("Closure should exist");
 
         // Check that effect is in the Closure
@@ -1710,13 +1842,7 @@ mod tests {
         let closure = bytecode
             .constants
             .iter()
-            .find_map(|v| {
-                if let Value::Closure(c) = v {
-                    Some(c.clone())
-                } else {
-                    None
-                }
-            })
+            .find_map(|v| v.as_closure().cloned())
             .expect("Closure should exist");
 
         assert_eq!(closure.effect, crate::compiler::effects::Effect::Pure);
@@ -1737,7 +1863,7 @@ mod tests {
             body: Box::new(Expr::Begin(vec![
                 Expr::Define {
                     name: y_sym,
-                    value: Box::new(Expr::Literal(Value::Int(1))),
+                    value: Box::new(Expr::Literal(Value::int(1))),
                 },
                 Expr::Call {
                     func: Box::new(Expr::Var(VarRef::global(plus_sym))),
@@ -1755,13 +1881,7 @@ mod tests {
         let closure = bytecode
             .constants
             .iter()
-            .find_map(|v| {
-                if let Value::Closure(c) = v {
-                    Some(c.clone())
-                } else {
-                    None
-                }
-            })
+            .find_map(|v| v.as_closure().cloned())
             .expect("Closure should exist");
 
         assert_eq!(closure.effect, crate::compiler::effects::Effect::Pure);

@@ -30,7 +30,7 @@ fn eval(input: &str) -> Result<Value, String> {
     } else if values.is_empty() {
         return Err("No input".to_string());
     } else {
-        let mut begin_args = vec![Value::Symbol(symbols.intern("begin"))];
+        let mut begin_args = vec![Value::symbol(symbols.intern("begin").0)];
         begin_args.extend(values);
         list(begin_args)
     };
@@ -51,7 +51,7 @@ fn test_closure_captures_global_variable() {
         (define x 42)
         ((lambda () x))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(42));
+    assert_eq!(eval(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_closure_captures_function() {
         (define add (lambda (a b) (+ a b)))
         ((lambda () (add 10 20)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(30));
+    assert_eq!(eval(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn test_closure_no_captures() {
     let code = r#"
         ((lambda () 42))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(42));
+    assert_eq!(eval(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn test_closure_captures_multiple_globals() {
         (define y 20)
         ((lambda () (+ x y)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(30));
+    assert_eq!(eval(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn test_closure_references_global_list() {
         (define nums (list 1 2 3))
         ((lambda () (first nums)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(1));
+    assert_eq!(eval(code).unwrap(), Value::int(1));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn test_closure_captures_and_uses_global() {
         (define threshold 5)
         ((lambda (x) (> x threshold)) 10)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Bool(true));
+    assert_eq!(eval(code).unwrap(), Value::bool(true));
 }
 #[test]
 fn test_closure_shadowing_parameter() {
@@ -104,7 +104,7 @@ fn test_closure_shadowing_parameter() {
         (define x 100)
         ((lambda (x) x) 42)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(42));
+    assert_eq!(eval(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn test_closure_with_multiple_operations() {
           (+ (* base x) y))
          2 3)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(23));
+    assert_eq!(eval(code).unwrap(), Value::int(23));
 }
 
 #[test]
@@ -126,5 +126,5 @@ fn test_closure_with_conditional_using_capture() {
           (if (> x min-val) x min-val))
          5)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(5));
+    assert_eq!(eval(code).unwrap(), Value::int(5));
 }

@@ -83,11 +83,11 @@ pub fn is_jit_compilable(expr: &Expr) -> bool {
 /// Check if a Call expression can be JIT compiled
 fn is_jit_compilable_call(func: &Expr, args: &[Expr]) -> bool {
     // The function must be a symbol (either Var(Global) or Literal(Symbol))
-    let is_symbol_func = matches!(
-        func,
-        Expr::Var(crate::binding::VarRef::Global { .. })
-            | Expr::Literal(crate::value::Value::Symbol(_))
-    );
+    let is_symbol_func = match func {
+        Expr::Var(crate::binding::VarRef::Global { .. }) => true,
+        Expr::Literal(v) => v.is_symbol(),
+        _ => false,
+    };
 
     if !is_symbol_func {
         return false;
@@ -162,9 +162,16 @@ pub fn compile_closure(
     };
 
     // 6. Create JitClosure
+    // Convert environment from new Value to old Value
+    let old_env: Vec<crate::value_old::Value> = closure
+        .env
+        .iter()
+        .map(|v| crate::primitives::coroutines::new_value_to_old(*v))
+        .collect();
+
     let jit_closure = JitClosure {
         code_ptr,
-        env: closure.env.clone(),
+        env: Rc::new(old_env),
         arity: closure.arity,
         source: Some(Rc::new(closure.clone())),
         func_id,
@@ -396,7 +403,7 @@ mod tests {
 
     #[test]
     fn test_is_jit_compilable_literal() {
-        let expr = Expr::Literal(Value::Int(42));
+        let expr = Expr::Literal(Value::int(42));
         assert!(is_jit_compilable(&expr));
     }
 
@@ -409,8 +416,8 @@ mod tests {
     #[test]
     fn test_is_jit_compilable_begin() {
         let expr = Expr::Begin(vec![
-            Expr::Literal(Value::Int(1)),
-            Expr::Literal(Value::Int(2)),
+            Expr::Literal(Value::int(1)),
+            Expr::Literal(Value::int(2)),
         ]);
         assert!(is_jit_compilable(&expr));
     }
@@ -418,9 +425,9 @@ mod tests {
     #[test]
     fn test_is_jit_compilable_if() {
         let expr = Expr::If {
-            cond: Box::new(Expr::Literal(Value::Bool(true))),
-            then: Box::new(Expr::Literal(Value::Int(1))),
-            else_: Box::new(Expr::Literal(Value::Int(2))),
+            cond: Box::new(Expr::Literal(Value::bool(true))),
+            then: Box::new(Expr::Literal(Value::int(1))),
+            else_: Box::new(Expr::Literal(Value::int(2))),
         };
         assert!(is_jit_compilable(&expr));
     }
@@ -429,7 +436,7 @@ mod tests {
     fn test_is_jit_compilable_lambda_not_compilable() {
         let expr = Expr::Lambda {
             params: vec![],
-            body: Box::new(Expr::Literal(Value::Int(1))),
+            body: Box::new(Expr::Literal(Value::int(1))),
             captures: vec![],
             num_locals: 0,
             locals: vec![],
@@ -440,7 +447,7 @@ mod tests {
     #[test]
     fn test_is_jit_compilable_call_not_compilable() {
         let expr = Expr::Call {
-            func: Box::new(Expr::Literal(Value::Int(1))),
+            func: Box::new(Expr::Literal(Value::int(1))),
             args: vec![],
             tail: false,
         };
@@ -450,8 +457,8 @@ mod tests {
     #[test]
     fn test_is_jit_compilable_and() {
         let expr = Expr::And(vec![
-            Expr::Literal(Value::Bool(true)),
-            Expr::Literal(Value::Bool(false)),
+            Expr::Literal(Value::bool(true)),
+            Expr::Literal(Value::bool(false)),
         ]);
         assert!(is_jit_compilable(&expr));
     }
@@ -459,8 +466,8 @@ mod tests {
     #[test]
     fn test_is_jit_compilable_or() {
         let expr = Expr::Or(vec![
-            Expr::Literal(Value::Bool(true)),
-            Expr::Literal(Value::Bool(false)),
+            Expr::Literal(Value::bool(true)),
+            Expr::Literal(Value::bool(false)),
         ]);
         assert!(is_jit_compilable(&expr));
     }
@@ -468,8 +475,8 @@ mod tests {
     #[test]
     fn test_is_jit_compilable_while() {
         let expr = Expr::While {
-            cond: Box::new(Expr::Literal(Value::Bool(true))),
-            body: Box::new(Expr::Literal(Value::Nil)),
+            cond: Box::new(Expr::Literal(Value::bool(true))),
+            body: Box::new(Expr::Literal(Value::NIL)),
         };
         assert!(is_jit_compilable(&expr));
     }
@@ -477,13 +484,13 @@ mod tests {
     #[test]
     fn test_is_jit_compilable_nested_if() {
         let expr = Expr::If {
-            cond: Box::new(Expr::Literal(Value::Bool(true))),
+            cond: Box::new(Expr::Literal(Value::bool(true))),
             then: Box::new(Expr::If {
-                cond: Box::new(Expr::Literal(Value::Bool(false))),
-                then: Box::new(Expr::Literal(Value::Int(1))),
-                else_: Box::new(Expr::Literal(Value::Int(2))),
+                cond: Box::new(Expr::Literal(Value::bool(false))),
+                then: Box::new(Expr::Literal(Value::int(1))),
+                else_: Box::new(Expr::Literal(Value::int(2))),
             }),
-            else_: Box::new(Expr::Literal(Value::Int(3))),
+            else_: Box::new(Expr::Literal(Value::int(3))),
         };
         assert!(is_jit_compilable(&expr));
     }
@@ -493,7 +500,7 @@ mod tests {
         // Set expressions with compilable values are now compilable
         let expr = Expr::Set {
             target: crate::binding::VarRef::local(0),
-            value: Box::new(Expr::Literal(Value::Int(1))),
+            value: Box::new(Expr::Literal(Value::int(1))),
         };
         assert!(is_jit_compilable(&expr));
     }
@@ -501,8 +508,8 @@ mod tests {
     #[test]
     fn test_is_jit_compilable_letrec_not_compilable() {
         let expr = Expr::Letrec {
-            bindings: vec![(SymbolId(1), Expr::Literal(Value::Int(1)))],
-            body: Box::new(Expr::Literal(Value::Int(2))),
+            bindings: vec![(SymbolId(1), Expr::Literal(Value::int(1)))],
+            body: Box::new(Expr::Literal(Value::int(2))),
         };
         assert!(!is_jit_compilable(&expr));
     }
@@ -541,7 +548,7 @@ mod tests {
             super::super::context::JITContext::new().expect("Failed to create JIT context"),
         ));
 
-        let body = Expr::Literal(Value::Int(42));
+        let body = Expr::Literal(Value::int(42));
         let params = vec![];
         let captures = vec![];
         let symbols = crate::symbol::SymbolTable::new();
@@ -601,7 +608,7 @@ mod tests {
 
         let expr = Expr::Call {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(first_sym))),
-            args: vec![Expr::Literal(Value::Nil)],
+            args: vec![Expr::Literal(Value::NIL)],
             tail: false,
         };
 
@@ -620,7 +627,7 @@ mod tests {
 
         let expr = Expr::Call {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(cons_sym))),
-            args: vec![Expr::Literal(Value::Int(1)), Expr::Literal(Value::Nil)],
+            args: vec![Expr::Literal(Value::int(1)), Expr::Literal(Value::NIL)],
             tail: false,
         };
 

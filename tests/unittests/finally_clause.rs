@@ -60,21 +60,21 @@ fn unit_nested_finally_parses() {
 fn unit_finally_returns_try_value() {
     // Finally block should NOT change the return value of try
     let result = FinallyEval::eval("(try 42 (finally 999))").unwrap();
-    assert_eq!(result, Value::Int(42));
+    assert_eq!(result, Value::int(42));
 }
 
 #[test]
 fn unit_finally_with_arithmetic_returns_try_value() {
     // Finally's computation result should be discarded
     let result = FinallyEval::eval("(try 100 (finally (+ 50 50)))").unwrap();
-    assert_eq!(result, Value::Int(100)); // Not 100
+    assert_eq!(result, Value::int(100)); // Not 100
 }
 
 #[test]
 fn unit_finally_returns_string_value() {
     // Finally should preserve string returns
     let result = FinallyEval::eval("(try \"hello\" (finally 0))").unwrap();
-    assert_eq!(result, Value::String("hello".into()));
+    assert_eq!(result, Value::string("hello"));
 }
 
 #[test]
@@ -89,14 +89,14 @@ fn unit_finally_returns_list_value() {
 fn unit_finally_with_nil_try() {
     // Finally should preserve nil returns
     let result = FinallyEval::eval("(try nil (finally 99))").unwrap();
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::NIL);
 }
 
 #[test]
 fn unit_finally_with_boolean() {
     // Finally should preserve boolean returns
     let result = FinallyEval::eval("(try #t (finally #f))").unwrap();
-    assert_eq!(result, Value::Bool(true));
+    assert_eq!(result, Value::bool(true));
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn unit_finally_executes_with_side_effects() {
 //     // Finally can reference variables in scope
 //     let code = "(let ((x 10)) (try x (finally (+ x 5))))";
 //     let result = FinallyEval::eval(code).unwrap();
-//     assert_eq!(result, Value::Int(10)); // Returns try body value, not finally
+//     assert_eq!(result, Value::int(10)); // Returns try body value, not finally
 // }
 
 #[test]
@@ -121,7 +121,7 @@ fn unit_nested_finally_inner_returns() {
     // Inner try returns through outer finally
     let code = "(try (try 5 (finally 10)) (finally 20))";
     let result = FinallyEval::eval(code).unwrap();
-    assert_eq!(result, Value::Int(5)); // Inner try value
+    assert_eq!(result, Value::int(5)); // Inner try value
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn unit_finally_with_arithmetic_operations() {
     // Finally with complex arithmetic
     let code = "(try 100 (finally (* (+ 2 3) 10)))";
     let result = FinallyEval::eval(code).unwrap();
-    assert_eq!(result, Value::Int(100)); // From try
+    assert_eq!(result, Value::int(100)); // From try
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn unit_finally_multiple_expressions() {
     // Finally executes all expressions
     let code = "(try 42 (finally (begin (+ 1 1) (- 5 2) 0)))";
     let result = FinallyEval::eval(code).unwrap();
-    assert_eq!(result, Value::Int(42)); // From try
+    assert_eq!(result, Value::int(42)); // From try
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn unit_finally_with_comparison() {
     // Finally can use comparison operators
     let code = "(try 7 (finally (> 10 5)))";
     let result = FinallyEval::eval(code).unwrap();
-    assert_eq!(result, Value::Int(7)); // From try
+    assert_eq!(result, Value::int(7)); // From try
 }
 
 #[test]
@@ -165,13 +165,13 @@ fn unit_finally_preserves_all_types() {
     let bool_code = "(try #t (finally #f))";
     let nil_code = "(try nil (finally 1))";
 
-    assert_eq!(FinallyEval::eval(int_code).unwrap(), Value::Int(42));
+    assert_eq!(FinallyEval::eval(int_code).unwrap(), Value::int(42));
     assert_eq!(
         FinallyEval::eval(string_code).unwrap(),
-        Value::String("test".into())
+        Value::string("test")
     );
-    assert_eq!(FinallyEval::eval(bool_code).unwrap(), Value::Bool(true));
-    assert_eq!(FinallyEval::eval(nil_code).unwrap(), Value::Nil);
+    assert_eq!(FinallyEval::eval(bool_code).unwrap(), Value::bool(true));
+    assert_eq!(FinallyEval::eval(nil_code).unwrap(), Value::NIL);
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn unit_finally_with_catch_clause() {
     // Finally executes alongside catch clause
     let code = "(try 50 (catch e 0) (finally 100))";
     let result = FinallyEval::eval(code).unwrap();
-    assert_eq!(result, Value::Int(50)); // From try
+    assert_eq!(result, Value::int(50)); // From try
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn unit_deeply_nested_finally() {
     // Multiple levels of nesting
     let code = "(try (try (try 5 (finally 6)) (finally 7)) (finally 8))";
     let result = FinallyEval::eval(code).unwrap();
-    assert_eq!(result, Value::Int(5)); // From innermost try
+    assert_eq!(result, Value::int(5)); // From innermost try
 }
 
 #[test]
@@ -195,7 +195,7 @@ fn unit_finally_with_conditional() {
     // Finally with if expression
     let code = "(try 100 (finally (if #t 1 2)))";
     let result = FinallyEval::eval(code).unwrap();
-    assert_eq!(result, Value::Int(100)); // From try
+    assert_eq!(result, Value::int(100)); // From try
 }
 
 #[test]
@@ -205,5 +205,5 @@ fn unit_finally_value_discarded() {
     let result = FinallyEval::eval(code).unwrap();
     // If finally's value was used, result would be 111
     // But it should be 999 from try block
-    assert_eq!(result, Value::Int(999));
+    assert_eq!(result, Value::int(999));
 }

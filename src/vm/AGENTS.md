@@ -68,7 +68,15 @@ VmResult
    On exception, unwind to handler's stack_depth and jump to handler_offset.
 
 6. **Coroutines save full context on yield.** IP, stack snapshot, locals.
-   Resume restores context and pushes resume value.
+    Resume restores context and pushes resume value.
+
+7. **Instruction handlers have two error channels.** `Err(String)` is for VM
+   bugs (stack underflow, bad bytecode). `Ok(())` with `current_exception`
+   set is for runtime errors on bad data (type mismatch, division by zero).
+   The handler pushes `Value::NIL` to keep the stack consistent and returns
+   `Ok(())`. The interrupt mechanism at the bottom of the instruction loop
+   handles the exception. See `handle_div_int` and `handle_load_global` for
+   the canonical pattern.
 
 ## Key VM fields
 
@@ -95,21 +103,32 @@ condition (1)
     └── style-warning (8)
 ```
 
-`is_exception_subclass(child, parent)` checks inheritance.
+Hierarchy data and `is_exception_subclass(child, parent)` live in
+`value/condition.rs` — the single source of truth. Re-exported from `vm/mod.rs`.
 
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | 1050 | Main execution loop, instruction dispatch |
-| `core.rs` | 550 | `VM` struct, `VmResult`, exception hierarchy |
+| `core.rs` | 550 | `VM` struct, `VmResult` |
 | `stack.rs` | ~100 | Stack operations: LoadConst, Pop, Dup |
 | `variables.rs` | ~150 | LoadGlobal, StoreGlobal, LoadUpvalue, etc. |
 | `control.rs` | ~100 | Jump, JumpIfFalse, Return |
 | `closure.rs` | ~100 | MakeClosure |
 | `arithmetic.rs` | ~150 | Add, Sub, Mul, Div |
 | `comparison.rs` | ~100 | Eq, Lt, Gt, Le, Ge |
-| `types.rs` | ~50 | IsNil, IsPair, Not |
+| `types.rs` | ~50 | IsNil, IsEmptyList, IsPair, Not |
 | `data.rs` | ~100 | Cons, Car, Cdr, MakeVector |
 | `scope/` | ~200 | Runtime scope stack (legacy) |
+
+## Truthiness
+
+The VM evaluates truthiness via `Value::is_truthy()`:
+- `Value::NIL` → falsy
+- `Value::FALSE` → falsy  
+- Everything else (including `Value::EMPTY_LIST`, `Value::int(0)`) → truthy
+
+The `Instruction::Nil` pushes `Value::NIL` (falsy).
+The `Instruction::EmptyList` pushes `Value::EMPTY_LIST` (truthy).
 ```

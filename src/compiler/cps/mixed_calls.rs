@@ -4,7 +4,7 @@
 //! we need a trampoline to handle the CPS execution.
 
 use crate::compiler::cranelift::runtime_helpers::{decode_value_for_jit, encode_value_for_jit};
-use crate::value::Value;
+use crate::value::repr::Value;
 
 /// Call a CPS function from native code
 ///
@@ -26,7 +26,7 @@ pub unsafe extern "C" fn jit_call_cps_function(
     // This is a placeholder that will be filled in when E2 is complete
 
     // Return nil for now
-    encode_value_for_jit(&Value::Nil)
+    encode_value_for_jit(&Value::NIL)
 }
 
 /// Resume a suspended coroutine from native code
@@ -37,23 +37,22 @@ pub unsafe extern "C" fn jit_call_cps_function(
 #[no_mangle]
 pub unsafe extern "C" fn jit_resume_coroutine(_continuation: i64, _resume_value: i64) -> i64 {
     // Placeholder for coroutine resumption
-    encode_value_for_jit(&Value::Nil)
+    encode_value_for_jit(&Value::NIL)
 }
 
 /// Check if a value is a suspended coroutine
 #[no_mangle]
 pub extern "C" fn jit_is_suspended_coroutine(value: i64) -> i64 {
     let decoded = decode_value_for_jit(value);
-    match decoded {
-        Value::Coroutine(ref c) => {
-            let borrowed = c.borrow();
-            if matches!(borrowed.state, crate::value::CoroutineState::Suspended) {
-                1
-            } else {
-                0
-            }
+    if let Some(c) = decoded.as_coroutine() {
+        let borrowed = c.borrow();
+        if matches!(borrowed.state, crate::value_old::CoroutineState::Suspended) {
+            1
+        } else {
+            0
         }
-        _ => 0,
+    } else {
+        0
     }
 }
 
@@ -63,13 +62,13 @@ mod tests {
 
     #[test]
     fn test_jit_is_suspended_coroutine_with_non_coroutine() {
-        let val = encode_value_for_jit(&Value::Int(42));
+        let val = encode_value_for_jit(&Value::int(42));
         assert_eq!(jit_is_suspended_coroutine(val), 0);
     }
 
     #[test]
     fn test_jit_is_suspended_coroutine_with_nil() {
-        let val = encode_value_for_jit(&Value::Nil);
+        let val = encode_value_for_jit(&Value::NIL);
         assert_eq!(jit_is_suspended_coroutine(val), 0);
     }
 }

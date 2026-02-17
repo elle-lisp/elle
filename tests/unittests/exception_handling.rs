@@ -92,56 +92,56 @@ fn unit_nested_try_blocks_parse() {
 fn unit_exception_creation_returns_exception() {
     // Verify exception creation returns an Exception value
     let result = ExceptionEval::eval("(exception \"test error\")").unwrap();
-    assert!(matches!(result, Value::Exception(_)));
+    assert!(result.as_condition().is_some());
 }
 
 #[test]
 fn unit_exception_with_data_creates_exception() {
     // Verify exception with data creates exception
     let result = ExceptionEval::eval("(exception \"error\" 42)").unwrap();
-    assert!(matches!(result, Value::Exception(_)));
+    assert!(result.as_condition().is_some());
 }
 
 #[test]
 fn unit_exception_message_extraction_works() {
     // Verify exception-message extracts string message
     let result = ExceptionEval::eval("(exception-message (exception \"hello\"))").unwrap();
-    assert_eq!(result, Value::String("hello".into()));
+    assert_eq!(result, Value::string("hello"));
 }
 
 #[test]
 fn unit_exception_data_extraction_integer() {
     // Verify exception-data returns attached integer
     let result = ExceptionEval::eval("(exception-data (exception \"error\" 99))").unwrap();
-    assert_eq!(result, Value::Int(99));
+    assert_eq!(result, Value::int(99));
 }
 
 #[test]
 fn unit_exception_data_extraction_nil_for_no_data() {
     // Verify exception-data returns nil when no data provided
     let result = ExceptionEval::eval("(exception-data (exception \"error\"))").unwrap();
-    assert_eq!(result, Value::Nil);
+    assert_eq!(result, Value::NIL);
 }
 
 #[test]
 fn unit_try_returns_successful_result() {
     // Verify try block returns result of successful computation
     let result = ExceptionEval::eval("(try (+ 10 20))").unwrap();
-    assert_eq!(result, Value::Int(30));
+    assert_eq!(result, Value::int(30));
 }
 
 #[test]
 fn unit_try_returns_multiply_result() {
     // Verify try block returns correct computation
     let result = ExceptionEval::eval("(try (* 5 7))").unwrap();
-    assert_eq!(result, Value::Int(35));
+    assert_eq!(result, Value::int(35));
 }
 
 #[test]
 fn unit_try_with_catch_no_exception() {
     // Verify try block without exception ignores catch
     let result = ExceptionEval::eval("(try (+ 1 2) (catch e 999))").unwrap();
-    assert_eq!(result, Value::Int(3));
+    assert_eq!(result, Value::int(3));
 }
 
 #[test]
@@ -151,16 +151,16 @@ fn unit_try_arithmetic_operations() {
     let result2 = ExceptionEval::eval("(try (/ 20 4))").unwrap();
     let result3 = ExceptionEval::eval("(try 100))").unwrap();
 
-    assert_eq!(result1, Value::Int(7));
-    assert_eq!(result2, Value::Int(5));
-    assert_eq!(result3, Value::Int(100));
+    assert_eq!(result1, Value::int(7));
+    assert_eq!(result2, Value::int(5));
+    assert_eq!(result3, Value::int(100));
 }
 
 #[test]
 fn unit_nested_try_blocks() {
     // Verify nested try blocks work correctly
     let result = ExceptionEval::eval("(try (try (+ 2 3) (catch e 0)) (catch e 1))").unwrap();
-    assert_eq!(result, Value::Int(5));
+    assert_eq!(result, Value::int(5));
 }
 
 #[test]
@@ -170,9 +170,9 @@ fn unit_exception_with_list_data() {
         ExceptionEval::eval("(exception-data (exception \"error\" (list 1 2 3)))").unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0], Value::Int(1));
-    assert_eq!(vec[1], Value::Int(2));
-    assert_eq!(vec[2], Value::Int(3));
+    assert_eq!(vec[0], Value::int(1));
+    assert_eq!(vec[1], Value::int(2));
+    assert_eq!(vec[2], Value::int(3));
 }
 
 #[test]
@@ -182,8 +182,8 @@ fn unit_exception_message_with_different_strings() {
         ExceptionEval::eval("(exception-message (exception \"Division by zero\"))").unwrap();
     let result2 = ExceptionEval::eval("(exception-message (exception \"Network error\"))").unwrap();
 
-    assert_eq!(result1, Value::String("Division by zero".into()));
-    assert_eq!(result2, Value::String("Network error".into()));
+    assert_eq!(result1, Value::string("Division by zero"));
+    assert_eq!(result2, Value::string("Network error"));
 }
 
 #[test]
@@ -194,15 +194,15 @@ fn unit_multiple_exceptions_independent() {
     let vec = result.list_to_vec().unwrap();
 
     assert_eq!(vec.len(), 2);
-    assert!(matches!(vec[0], Value::Exception(_)));
-    assert!(matches!(vec[1], Value::Exception(_)));
+    assert!(vec[0].as_condition().is_some());
+    assert!(vec[1].as_condition().is_some());
 }
 
 #[test]
 fn unit_try_with_nested_arithmetic() {
     // Verify try works with nested arithmetic expressions
     let result = ExceptionEval::eval("(try (+ (* 2 3) (- 10 4)))").unwrap();
-    assert_eq!(result, Value::Int(12));
+    assert_eq!(result, Value::int(12));
 }
 
 #[test]
@@ -212,6 +212,6 @@ fn unit_exception_immutable() {
     let eval2 = ExceptionEval::eval("(exception \"test\")").unwrap();
 
     // Both should be exceptions but different instances
-    assert!(matches!(eval1, Value::Exception(_)));
-    assert!(matches!(eval2, Value::Exception(_)));
+    assert!(eval1.as_condition().is_some());
+    assert!(eval2.as_condition().is_some());
 }

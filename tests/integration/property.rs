@@ -93,7 +93,7 @@ proptest! {
         let bc = compile(&e);
         let r = vm.execute(&bc).unwrap();
 
-        prop_assert_eq!(r, Value::Int(a));
+        prop_assert_eq!(r, Value::int(a));
     }
 
     #[test]
@@ -110,7 +110,7 @@ proptest! {
         let bc = compile(&e);
         let r = vm.execute(&bc).unwrap();
 
-        prop_assert_eq!(r, Value::Int(a));
+        prop_assert_eq!(r, Value::int(a));
     }
 }
 
@@ -130,7 +130,7 @@ proptest! {
             let bc = compile(&e);
             let r = vm.execute(&bc).unwrap();
 
-            prop_assert_eq!(r, Value::Bool(true));
+            prop_assert_eq!(r, Value::bool(true));
         }
     }
 
@@ -146,7 +146,7 @@ proptest! {
         let bc = compile(&e);
         let r = vm.execute(&bc).unwrap();
 
-        prop_assert_eq!(r, Value::Bool(true));
+        prop_assert_eq!(r, Value::bool(true));
     }
 
     #[test]
@@ -178,16 +178,16 @@ proptest! {
 proptest! {
     #[test]
     fn test_cons_preserves_values(a in -100i64..100, b in -100i64..100) {
-        let cell = cons(Value::Int(a), Value::Int(b));
+        let cell = cons(Value::int(a), Value::int(b));
         let cons_ref = cell.as_cons().unwrap();
 
-        prop_assert_eq!(&cons_ref.first, &Value::Int(a));
-        prop_assert_eq!(&cons_ref.rest, &Value::Int(b));
+        prop_assert_eq!(&cons_ref.first, &Value::int(a));
+        prop_assert_eq!(&cons_ref.rest, &Value::int(b));
     }
 
     #[test]
     fn test_list_roundtrip(values in prop::collection::vec(-100i64..100, 0..20)) {
-        let list_values: Vec<Value> = values.iter().map(|&v| Value::Int(v)).collect();
+        let list_values: Vec<Value> = values.iter().map(|&v| Value::int(v)).collect();
         let l = list(list_values.clone());
 
         let roundtrip = l.list_to_vec().unwrap();
@@ -196,7 +196,7 @@ proptest! {
 
     #[test]
     fn test_first_rest_reconstruction(values in prop::collection::vec(-100i64..100, 1..20)) {
-        let list_values: Vec<Value> = values.iter().map(|&v| Value::Int(v)).collect();
+        let list_values: Vec<Value> = values.iter().map(|&v| Value::int(v)).collect();
         let l = list(list_values.clone());
 
         let mut vm = VM::new();
@@ -205,7 +205,7 @@ proptest! {
 
         // Store list in global
         let id = symbols.intern("test-list");
-        vm.set_global(id.0, l.clone());
+        vm.set_global(id.0, l);
 
         // Get first
         let first_expr = read_str("(first test-list)", &mut symbols).unwrap();
@@ -261,7 +261,7 @@ proptest! {
 
         let result = read_str(&input, &mut symbols);
         prop_assert!(result.is_ok());
-        prop_assert_eq!(result.unwrap(), Value::Int(n));
+        prop_assert_eq!(result.unwrap(), Value::int(n));
     }
 
     #[test]
@@ -270,7 +270,7 @@ proptest! {
 
         let result = read_str(&s, &mut symbols);
         prop_assert!(result.is_ok());
-        prop_assert!(matches!(result.unwrap(), Value::Symbol(_)));
+        prop_assert!((result.unwrap()).is_symbol());
     }
 
     #[test]
@@ -283,7 +283,7 @@ proptest! {
 
         let parsed = result.unwrap();
         if values.is_empty() {
-            prop_assert_eq!(parsed, Value::Nil);
+            prop_assert_eq!(parsed, Value::EMPTY_LIST);
         } else {
             prop_assert!(parsed.is_list());
             let vec = parsed.list_to_vec().unwrap();
@@ -309,7 +309,7 @@ proptest! {
         let bc = compile(&e);
         let r = vm.execute(&bc).unwrap();
 
-        prop_assert_eq!(r, Value::Bool(b));
+        prop_assert_eq!(r, Value::bool(b));
     }
 }
 
@@ -327,7 +327,7 @@ proptest! {
         let bc = compile(&e);
         let r = vm.execute(&bc).unwrap();
 
-        prop_assert_eq!(r, Value::Int(a));
+        prop_assert_eq!(r, Value::int(a));
     }
 
     #[test]
@@ -342,7 +342,7 @@ proptest! {
         let bc = compile(&e);
         let r = vm.execute(&bc).unwrap();
 
-        prop_assert_eq!(r, Value::Int(b));
+        prop_assert_eq!(r, Value::int(b));
     }
 }
 
@@ -350,16 +350,16 @@ proptest! {
 proptest! {
     #[test]
     fn test_value_clone_preserves_equality_int(n in -1000i64..1000) {
-        let v = Value::Int(n);
-        let cloned = v.clone();
+        let v = Value::int(n);
+        let cloned = v;
         prop_assert_eq!(v, cloned);
     }
 
     #[test]
     fn test_value_clone_preserves_equality_list(values in prop::collection::vec(-100i64..100, 0..10)) {
-        let list_values: Vec<Value> = values.iter().map(|&v| Value::Int(v)).collect();
+        let list_values: Vec<Value> = values.iter().map(|&v| Value::int(v)).collect();
         let l = list(list_values);
-        let cloned = l.clone();
+        let cloned = l;
         prop_assert_eq!(l, cloned);
     }
 }

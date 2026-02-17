@@ -20,7 +20,7 @@ impl Marshal {
         value: &crate::value::Value,
         ctype: &crate::ffi::types::CType,
     ) -> Result<CValue, String> {
-        conversions::elle_to_c(value, ctype)
+        conversions::elle_to_c(value, ctype).map_err(|e| e.to_string())
     }
 
     /// Marshal a struct value to C representation with layout information.
@@ -36,7 +36,7 @@ impl Marshal {
         cvalue: &CValue,
         ctype: &crate::ffi::types::CType,
     ) -> Result<crate::value::Value, String> {
-        conversions::c_to_elle(cvalue, ctype)
+        conversions::c_to_elle(cvalue, ctype).map_err(|e| e.to_string())
     }
 
     /// Unmarshal a C struct to Elle value with layout information.
@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn test_marshal_enum() {
-        let val = crate::value::Value::Int(5);
+        let val = crate::value::Value::int(5);
         let enum_type = crate::ffi::types::CType::Enum(EnumId::new(1));
         let cval = Marshal::elle_to_c(&val, &enum_type).unwrap();
         match cval {
@@ -85,6 +85,6 @@ mod tests {
         let cval = CValue::Int(10);
         let enum_type = crate::ffi::types::CType::Enum(EnumId::new(1));
         let val = Marshal::c_to_elle(&cval, &enum_type).unwrap();
-        assert_eq!(val, crate::value::Value::Int(10));
+        assert_eq!(val, crate::value::Value::int(10));
     }
 }

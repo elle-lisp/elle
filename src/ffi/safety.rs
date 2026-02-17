@@ -115,25 +115,76 @@ pub struct TypeChecker;
 impl TypeChecker {
     /// Check if a Value matches the expected CType
     pub fn check_type(value: &Value, expected: &CType) -> Result<(), FFIError> {
-        match (value, expected) {
-            (Value::Int(_), CType::Int) => Ok(()),
-            (Value::Int(_), CType::UInt) => Ok(()),
-            (Value::Int(_), CType::Long) => Ok(()),
-            (Value::Int(_), CType::ULong) => Ok(()),
-            (Value::Int(_), CType::Bool) => Ok(()),
-            (Value::Int(_), CType::Char) => Ok(()),
-            (Value::Int(_), CType::SChar) => Ok(()),
-            (Value::Int(_), CType::UChar) => Ok(()),
-            (Value::Int(_), CType::Short) => Ok(()),
-            (Value::Int(_), CType::UShort) => Ok(()),
-            (Value::Int(_), CType::LongLong) => Ok(()),
-            (Value::Int(_), CType::ULongLong) => Ok(()),
-            (Value::Float(_), CType::Float) => Ok(()),
-            (Value::Float(_), CType::Double) => Ok(()),
-            (Value::String(_), CType::Pointer(inner)) if **inner == CType::Char => Ok(()),
-            (Value::Nil, CType::Pointer(_)) => Ok(()), // null pointer
-            (Value::CHandle(_), CType::Pointer(_)) => Ok(()),
-            (Value::CHandle(_), CType::Void) => Ok(()),
+        let is_int = value.as_int().is_some();
+        let is_float = value.as_float().is_some();
+        let is_string = value.as_string().is_some();
+        let is_nil = value.is_nil();
+        let is_heap = value.as_heap_ptr().is_some();
+
+        match expected {
+            CType::Int
+            | CType::UInt
+            | CType::Long
+            | CType::ULong
+            | CType::Bool
+            | CType::Char
+            | CType::SChar
+            | CType::UChar
+            | CType::Short
+            | CType::UShort
+            | CType::LongLong
+            | CType::ULongLong => {
+                if is_int {
+                    Ok(())
+                } else {
+                    Err(FFIError::new(
+                        FFIErrorKind::TypeMismatch {
+                            expected: format!("{:?}", expected),
+                            got: format!("{:?}", value),
+                        },
+                        "Type checking failed",
+                    ))
+                }
+            }
+            CType::Float | CType::Double => {
+                if is_float {
+                    Ok(())
+                } else {
+                    Err(FFIError::new(
+                        FFIErrorKind::TypeMismatch {
+                            expected: format!("{:?}", expected),
+                            got: format!("{:?}", value),
+                        },
+                        "Type checking failed",
+                    ))
+                }
+            }
+            CType::Pointer(inner) => {
+                if is_nil || (is_string && **inner == CType::Char) || is_heap {
+                    Ok(()) // null pointer or valid string/heap
+                } else {
+                    Err(FFIError::new(
+                        FFIErrorKind::TypeMismatch {
+                            expected: format!("{:?}", expected),
+                            got: format!("{:?}", value),
+                        },
+                        "Type checking failed",
+                    ))
+                }
+            }
+            CType::Void => {
+                if is_heap {
+                    Ok(())
+                } else {
+                    Err(FFIError::new(
+                        FFIErrorKind::TypeMismatch {
+                            expected: format!("{:?}", expected),
+                            got: format!("{:?}", value),
+                        },
+                        "Type checking failed",
+                    ))
+                }
+            }
             _ => Err(FFIError::new(
                 FFIErrorKind::TypeMismatch {
                     expected: format!("{:?}", expected),
@@ -177,7 +228,7 @@ pub struct NullPointerChecker;
 impl NullPointerChecker {
     /// Check if a value is a null pointer
     pub fn is_null(value: &Value) -> bool {
-        matches!(value, Value::Nil)
+        value.is_nil()
     }
 
     /// Check if a C handle is null
@@ -245,12 +296,12 @@ mod tests {
 
     #[test]
     fn test_type_checker() {
-        assert!(TypeChecker::check_type(&Value::Int(42), &CType::Int).is_ok());
+        assert!(TypeChecker::check_type(&Value::int(42), &CType::Int).is_ok());
         assert!(
-            TypeChecker::check_type(&Value::Float(std::f64::consts::PI), &CType::Float).is_ok()
+            TypeChecker::check_type(&Value::float(std::f64::consts::PI), &CType::Float).is_ok()
         );
         assert!(TypeChecker::check_type(
-            &Value::String("hello".into()),
+            &Value::string("hello"),
             &CType::Pointer(Box::new(CType::Char))
         )
         .is_ok());
@@ -258,13 +309,13 @@ mod tests {
 
     #[test]
     fn test_type_mismatch() {
-        assert!(TypeChecker::check_type(&Value::Int(42), &CType::Float).is_err());
-        assert!(TypeChecker::check_type(&Value::Float(std::f64::consts::PI), &CType::Int).is_err());
+        assert!(TypeChecker::check_type(&Value::int(42), &CType::Float).is_err());
+        assert!(TypeChecker::check_type(&Value::float(std::f64::consts::PI), &CType::Int).is_err());
     }
 
     #[test]
     fn test_signature_validation() {
-        let args = vec![Value::Int(42), Value::Float(std::f64::consts::PI)];
+        let args = vec![Value::int(42), Value::float(std::f64::consts::PI)];
         let types = vec![CType::Int, CType::Float];
         let return_type = CType::Void;
 
@@ -273,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_signature_argument_count_mismatch() {
-        let args = vec![Value::Int(42)];
+        let args = vec![Value::int(42)];
         let types = vec![CType::Int, CType::Float];
         let return_type = CType::Void;
 
@@ -282,14 +333,14 @@ mod tests {
 
     #[test]
     fn test_null_pointer_detection() {
-        assert!(NullPointerChecker::is_null(&Value::Nil));
-        assert!(!NullPointerChecker::is_null(&Value::Int(0)));
+        assert!(NullPointerChecker::is_null(&Value::NIL));
+        assert!(!NullPointerChecker::is_null(&Value::int(0)));
     }
 
     #[test]
     fn test_null_pointer_check() {
-        assert!(NullPointerChecker::check_handle_not_null(&Value::Nil, "TestType").is_err());
-        assert!(NullPointerChecker::check_handle_not_null(&Value::Int(42), "TestType").is_ok());
+        assert!(NullPointerChecker::check_handle_not_null(&Value::NIL, "TestType").is_err());
+        assert!(NullPointerChecker::check_handle_not_null(&Value::int(42), "TestType").is_ok());
     }
 
     #[test]

@@ -262,8 +262,8 @@
 (assert-false (nil? 42) "nil? returns false for 42")
 (assert-false (nil? #f) "nil? returns false for #f")
 
-; Empty list is nil in Elle
-(assert-true (nil? '()) "nil? returns true for empty list")
+; Empty list is not nil in Elle
+(assert-false (nil? '()) "nil? returns false for empty list")
 
 (display "✓ Nil verified\n")
 
@@ -293,7 +293,7 @@
 
 (display "\n=== Type Predicates: nil?, pair?, list? ===\n")
 
-(assert-true (nil? '()) "nil? returns true for empty list")
+(assert-false (nil? '()) "nil? returns false for empty list")
 (assert-false (nil? 42) "nil? returns false for number")
 (assert-false (nil? "hello") "nil? returns false for string")
 
@@ -937,82 +937,6 @@
 
 (display "✓ Boxes are mutable, lists are immutable\n")
 
-; === Use Case: Counter ===
-(display "\n=== Use Case: Counter ===\n")
-
-; Create a counter function using a box
-(define make-counter (fn ()
-  (let ((count (box 0)))
-    (fn ()
-      (begin
-        (box-set! count (+ (unbox count) 1))
-        (unbox count))))))
-
-; Create two independent counters
-(define counter1 (make-counter))
-(define counter2 (make-counter))
-
-(define c1-val1 (counter1))
-(display "Counter 1: ")
-(display c1-val1)
-(newline)
-(assert-eq c1-val1 1 "counter1 increments to 1")
-
-(define c1-val2 (counter1))
-(display "Counter 1: ")
-(display c1-val2)
-(newline)
-(assert-eq c1-val2 2 "counter1 increments to 2")
-
-(define c2-val1 (counter2))
-(display "Counter 2: ")
-(display c2-val1)
-(newline)
-(assert-eq c2-val1 1 "counter2 is independent")
-
-(define c1-val3 (counter1))
-(display "Counter 1: ")
-(display c1-val3)
-(newline)
-(assert-eq c1-val3 3 "counter1 continues from 3")
-
-(display "✓ Counter closure works\n")
-
-; === Use Case: Accumulator ===
-(display "\n=== Use Case: Accumulator ===\n")
-
-; Create an accumulator function
-(define make-accumulator (fn (initial)
-  (let ((total (box initial)))
-    (fn (x)
-      (begin
-        (box-set! total (+ (unbox total) x))
-        (unbox total))))))
-
-; Create accumulators
-(define sum1 (make-accumulator 0))
-(define sum2 (make-accumulator 100))
-
-(define s1-val1 (sum1 5))
-(display "Sum1 + 5 = ")
-(display s1-val1)
-(newline)
-(assert-eq s1-val1 5 "accumulator adds 5")
-
-(define s1-val2 (sum1 3))
-(display "Sum1 + 3 = ")
-(display s1-val2)
-(newline)
-(assert-eq s1-val2 8 "accumulator adds 3")
-
-(define s2-val1 (sum2 10))
-(display "Sum2 + 10 = ")
-(display s2-val1)
-(newline)
-(assert-eq s2-val1 110 "accumulator2 starts at 100")
-
-(display "✓ Accumulator closure works\n")
-
 ; === Use Case: Mutable State ===
 (display "\n=== Use Case: Mutable State ===\n")
 
@@ -1093,6 +1017,116 @@
 (display "  - Round-trip conversions preserve values\n")
 (display "  - Conversion chains enable flexible type handling\n")
 (display "  - Boxes provide mutable storage in functional language\n")
+
+;; ============================================================================
+;; SECTION 15: Truthiness Semantics
+;; ============================================================================
+
+(display "\n=== Truthiness Semantics ===\n")
+
+; In Elle, only nil and #f are falsy. Everything else is truthy.
+; This is different from languages like C where 0, "", [], etc. are falsy.
+
+(display "\n=== Falsy Values ===\n")
+
+; nil is falsy
+(assert-false (if nil #t #f) "nil is falsy in if")
+(display "nil is falsy\n")
+
+; #f is falsy
+(assert-false (if #f #t #f) "#f is falsy in if")
+(display "#f is falsy\n")
+
+(display "✓ Only nil and #f are falsy\n")
+
+(display "\n=== Truthy Values ===\n")
+
+; #t is truthy
+(assert-true (if #t #t #f) "#t is truthy in if")
+(display "#t is truthy\n")
+
+; Zero is truthy (unlike C)
+(assert-true (if 0 #t #f) "0 is truthy in if")
+(display "0 is truthy (not falsy like C)\n")
+
+; Negative numbers are truthy
+(assert-true (if -1 #t #f) "-1 is truthy in if")
+(display "-1 is truthy\n")
+
+; Floats are truthy
+(assert-true (if 3.14 #t #f) "3.14 is truthy in if")
+(display "3.14 is truthy\n")
+
+; Empty string is truthy (unlike C)
+(assert-true (if "" #t #f) "empty string is truthy in if")
+(display "empty string is truthy (not falsy like C)\n")
+
+; Empty list is truthy (unlike C)
+(assert-true (if '() #t #f) "empty list is truthy in if")
+(display "empty list is truthy (not falsy like C)\n")
+
+; Empty vector is truthy (unlike C)
+(assert-true (if [] #t #f) "empty vector is truthy in if")
+(display "empty vector is truthy (not falsy like C)\n")
+
+; Non-empty string is truthy
+(assert-true (if "hello" #t #f) "non-empty string is truthy in if")
+(display "non-empty string is truthy\n")
+
+; Non-empty list is truthy
+(assert-true (if '(a b c) #t #f) "non-empty list is truthy in if")
+(display "non-empty list is truthy\n")
+
+; Non-empty vector is truthy
+(assert-true (if [1 2 3] #t #f) "non-empty vector is truthy in if")
+(display "non-empty vector is truthy\n")
+
+; Symbols are truthy
+(assert-true (if 'symbol #t #f) "symbol is truthy in if")
+(display "symbol is truthy\n")
+
+; Keywords are truthy
+(assert-true (if :keyword #t #f) "keyword is truthy in if")
+(display "keyword is truthy\n")
+
+(display "✓ All other values are truthy\n")
+
+(display "\n=== Truthiness in Conditionals ===\n")
+
+; Using truthiness in cond
+(define test-value 0)
+(define result (cond
+  ((nil? test-value) "is nil")
+  ((= test-value #f) "is false")
+  (test-value "is truthy")
+  (else "unreachable")))
+(assert-eq result "is truthy" "0 is truthy in cond")
+(display "0 evaluates to truthy in cond\n")
+
+; Using truthiness in and/or
+(assert-eq (and 1 2 3) 3 "and returns last value if all truthy")
+(assert-eq (and 1 nil 3) nil "and returns first falsy value")
+(assert-eq (and 1 #f 3) #f "and returns first falsy value")
+(display "and returns last truthy or first falsy\n")
+
+; Using truthiness in or
+(assert-eq (or nil #f "hello") "hello" "or returns first truthy value")
+(assert-eq (or nil #f) #f "or returns last value if all falsy")
+(display "or returns first truthy or last value\n")
+
+(display "✓ Truthiness works in conditionals\n")
+
+(display "\n=== Truthiness Summary ===\n")
+(display "Falsy values: nil, #f\n")
+(display "Truthy values: everything else\n")
+(display "  - 0 is truthy (not falsy like C)\n")
+(display "  - \"\" (empty string) is truthy\n")
+(display "  - '() (empty list) is truthy\n")
+(display "  - [] (empty vector) is truthy\n")
+(display "  - All other values are truthy\n")
+
+(display "✓ Truthiness semantics verified\n")
+
 (display "  - box-set! enables stateful closures\n")
 (display "  - Lists remain immutable; boxes are mutable\n")
 

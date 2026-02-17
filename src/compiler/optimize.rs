@@ -4,7 +4,6 @@
 
 use super::ast::Expr;
 use crate::symbol::SymbolTable;
-use crate::value::Value;
 
 /// Apply all optimization passes to an expression
 pub fn optimize(expr: &mut Expr, symbols: &SymbolTable) {
@@ -152,7 +151,11 @@ fn try_optimize_length_zero(
     symbols: &SymbolTable,
 ) -> Option<Expr> {
     // Check if second arg is 0
-    if !matches!(maybe_zero, Expr::Literal(Value::Int(0))) {
+    if let Expr::Literal(v) = maybe_zero {
+        if v.as_int() != Some(0) {
+            return None;
+        }
+    } else {
         return None;
     }
 
@@ -181,6 +184,7 @@ fn try_optimize_length_zero(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::Value;
 
     #[test]
     fn test_length_zero_optimization() {
@@ -199,7 +203,7 @@ mod tests {
                     args: vec![Expr::Var(crate::binding::VarRef::global(x_sym))],
                     tail: false,
                 },
-                Expr::Literal(Value::Int(0)),
+                Expr::Literal(Value::int(0)),
             ],
             tail: false,
         };
@@ -237,7 +241,7 @@ mod tests {
         let mut expr = Expr::Call {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(eq_sym))),
             args: vec![
-                Expr::Literal(Value::Int(0)),
+                Expr::Literal(Value::int(0)),
                 Expr::Call {
                     func: Box::new(Expr::Var(crate::binding::VarRef::global(length_sym))),
                     args: vec![Expr::Var(crate::binding::VarRef::global(x_sym))],
@@ -284,7 +288,7 @@ mod tests {
                     args: vec![Expr::Var(crate::binding::VarRef::global(x_sym))],
                     tail: false,
                 },
-                Expr::Literal(Value::Int(1)),
+                Expr::Literal(Value::int(1)),
             ],
             tail: false,
         };

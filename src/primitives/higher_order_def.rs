@@ -5,19 +5,19 @@ use crate::vm::VM;
 pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
     use crate::read_str;
 
-    // Define map: (lambda (f lst) (if (nil? lst) nil (cons (f (first lst)) (map f (rest lst)))))
+    // Define map: (lambda (f lst) (if (empty? lst) () (cons (f (first lst)) (map f (rest lst)))))
     let map_code = r#"
         (define map (lambda (f lst)
-          (if (nil? lst)
-            nil
+          (if (empty? lst)
+            ()
             (cons (f (first lst)) (map f (rest lst))))))
     "#;
 
     // Define filter
     let filter_code = r#"
         (define filter (lambda (p lst)
-          (if (nil? lst)
-            nil
+          (if (empty? lst)
+            ()
             (if (p (first lst))
               (cons (first lst) (filter p (rest lst)))
               (filter p (rest lst))))))
@@ -26,7 +26,7 @@ pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
     // Define fold
     let fold_code = r#"
         (define fold (lambda (f init lst)
-          (if (nil? lst)
+          (if (empty? lst)
             init
             (fold f (f init (first lst)) (rest lst)))))
     "#;

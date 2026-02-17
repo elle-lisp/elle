@@ -16,46 +16,46 @@ fn eval(input: &str) -> Result<Value, String> {
 #[test]
 fn test_length_zero_optimization_empty_list() {
     // (= (length '()) 0) should return true
-    assert_eq!(eval("(= (length '()) 0)").unwrap(), Value::Bool(true));
+    assert_eq!(eval("(= (length '()) 0)").unwrap(), Value::bool(true));
 }
 
 #[test]
 fn test_length_zero_optimization_non_empty_list() {
     // (= (length '(1 2 3)) 0) should return false
-    assert_eq!(eval("(= (length '(1 2 3)) 0)").unwrap(), Value::Bool(false));
+    assert_eq!(eval("(= (length '(1 2 3)) 0)").unwrap(), Value::bool(false));
 }
 
 #[test]
 fn test_length_zero_optimization_reversed_empty() {
     // (= 0 (length '())) should also work
-    assert_eq!(eval("(= 0 (length '()))").unwrap(), Value::Bool(true));
+    assert_eq!(eval("(= 0 (length '()))").unwrap(), Value::bool(true));
 }
 
 #[test]
 fn test_length_zero_optimization_reversed_non_empty() {
-    assert_eq!(eval("(= 0 (length '(1 2)))").unwrap(), Value::Bool(false));
+    assert_eq!(eval("(= 0 (length '(1 2)))").unwrap(), Value::bool(false));
 }
 
 #[test]
 fn test_length_zero_optimization_vector_empty() {
-    assert_eq!(eval("(= (length []) 0)").unwrap(), Value::Bool(true));
+    assert_eq!(eval("(= (length []) 0)").unwrap(), Value::bool(true));
 }
 
 #[test]
 fn test_length_zero_optimization_vector_non_empty() {
-    assert_eq!(eval("(= (length [1 2 3]) 0)").unwrap(), Value::Bool(false));
+    assert_eq!(eval("(= (length [1 2 3]) 0)").unwrap(), Value::bool(false));
 }
 
 #[test]
 fn test_length_zero_optimization_string_empty() {
-    assert_eq!(eval("(= (length \"\") 0)").unwrap(), Value::Bool(true));
+    assert_eq!(eval("(= (length \"\") 0)").unwrap(), Value::bool(true));
 }
 
 #[test]
 fn test_length_zero_optimization_string_non_empty() {
     assert_eq!(
         eval("(= (length \"hello\") 0)").unwrap(),
-        Value::Bool(false)
+        Value::bool(false)
     );
 }
 
@@ -63,14 +63,14 @@ fn test_length_zero_optimization_string_non_empty() {
 fn test_length_zero_in_conditional() {
     // Test that optimization works in conditionals
     let result = eval("(if (= (length '()) 0) \"empty\" \"not empty\")");
-    assert_eq!(result.unwrap(), Value::String("empty".into()));
+    assert_eq!(result.unwrap(), Value::string("empty"));
 }
 
 #[test]
 fn test_length_zero_in_conditional_non_empty() {
     // Test that optimization works in conditionals
     let result = eval("(if (= (length '(a b c)) 0) \"empty\" \"not empty\")");
-    assert_eq!(result.unwrap(), Value::String("not empty".into()));
+    assert_eq!(result.unwrap(), Value::string("not empty"));
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn test_length_zero_in_recursion() {
                     (count-elements (rest lst) (+ acc 1)))))
             (count-elements '(a b c d e) 0))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(5));
+    assert_eq!(eval(code).unwrap(), Value::int(5));
 }
 
 #[test]
@@ -100,21 +100,21 @@ fn test_length_zero_in_recursion_empty() {
                     (count-elements (rest lst) (+ acc 1)))))
             (count-elements '() 0))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(0));
+    assert_eq!(eval(code).unwrap(), Value::int(0));
 }
 
 #[test]
 fn test_non_zero_comparison_not_optimized() {
     // (= (length x) 1) should NOT be optimized (different semantics)
-    assert_eq!(eval("(= (length '(a)) 1)").unwrap(), Value::Bool(true));
-    assert_eq!(eval("(= (length '()) 1)").unwrap(), Value::Bool(false));
+    assert_eq!(eval("(= (length '(a)) 1)").unwrap(), Value::bool(true));
+    assert_eq!(eval("(= (length '()) 1)").unwrap(), Value::bool(false));
 }
 
 #[test]
 fn test_length_greater_than_zero_not_optimized() {
     // (> (length x) 0) should NOT be optimized
-    assert_eq!(eval("(> (length '(a b c)) 0)").unwrap(), Value::Bool(true));
-    assert_eq!(eval("(> (length '()) 0)").unwrap(), Value::Bool(false));
+    assert_eq!(eval("(> (length '(a b c)) 0)").unwrap(), Value::bool(true));
+    assert_eq!(eval("(> (length '()) 0)").unwrap(), Value::bool(false));
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn test_length_zero_with_variable() {
             (define my-list '(1 2 3))
             (= (length my-list) 0))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Bool(false));
+    assert_eq!(eval(code).unwrap(), Value::bool(false));
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn test_length_zero_with_empty_variable() {
             (define my-list '())
             (= (length my-list) 0))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Bool(true));
+    assert_eq!(eval(code).unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn test_length_zero_in_and_expression() {
     let code = r#"
         (and (= (length '()) 0) (= 1 1))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Bool(true));
+    assert_eq!(eval(code).unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn test_length_zero_in_or_expression() {
     let code = r#"
         (or (= (length '(a)) 0) (= 1 1))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Bool(true));
+    assert_eq!(eval(code).unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn test_length_zero_in_nested_if() {
             (if (= (length '(a)) 0) "both empty" "first empty")
             "first not empty")
     "#;
-    assert_eq!(eval(code).unwrap(), Value::String("first empty".into()));
+    assert_eq!(eval(code).unwrap(), Value::string("first empty"));
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn test_length_zero_in_let_binding() {
         (let ((is-empty (= (length '()) 0)))
           is-empty)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Bool(true));
+    assert_eq!(eval(code).unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn test_length_zero_in_lambda() {
                 (= (length lst) 0)))
             (check-empty '()))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Bool(true));
+    assert_eq!(eval(code).unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -201,5 +201,5 @@ fn test_length_zero_in_lambda_non_empty() {
                 (= (length lst) 0)))
             (check-empty '(a b c)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Bool(false));
+    assert_eq!(eval(code).unwrap(), Value::bool(false));
 }

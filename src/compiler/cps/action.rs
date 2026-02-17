@@ -118,14 +118,14 @@ mod tests {
     #[test]
     fn test_return_with_done_continuation() {
         let cont = Continuation::done();
-        let action = Action::return_value(Value::Int(42), cont);
+        let action = Action::return_value(Value::int(42), cont);
         assert!(action.is_done());
     }
 
     #[test]
     fn test_yield_action() {
         let cont = Continuation::done();
-        let action = Action::yield_value(Value::Int(1), cont);
+        let action = Action::yield_value(Value::int(1), cont);
         assert!(action.is_yield());
     }
 

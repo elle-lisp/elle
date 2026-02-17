@@ -11,15 +11,16 @@ struct IntHandler;
 
 impl TypeHandler for IntHandler {
     fn elle_to_c(&self, value: &Value, _ctype: &CType) -> Result<CValue, String> {
-        match value {
-            Value::Int(n) => Ok(CValue::Int(*n)),
-            _ => Err("IntHandler: expected integer".to_string()),
+        if let Some(n) = value.as_int() {
+            Ok(CValue::Int(n))
+        } else {
+            Err("IntHandler: expected integer".to_string())
         }
     }
 
     fn c_to_elle(&self, cval: &CValue, _ctype: &CType) -> Result<Value, String> {
         match cval {
-            CValue::Int(n) => Ok(Value::Int(*n)),
+            CValue::Int(n) => Ok(Value::int(*n)),
             _ => Err("IntHandler: expected integer CValue".to_string()),
         }
     }
@@ -44,7 +45,7 @@ impl TypeHandler for CustomHandler {
     }
 
     fn c_to_elle(&self, _cval: &CValue, _ctype: &CType) -> Result<Value, String> {
-        Ok(Value::Int(42))
+        Ok(Value::int(42))
     }
 
     fn can_handle(&self, _ctype: &CType) -> bool {
@@ -197,13 +198,14 @@ fn test_handler_elle_to_c() {
 
     registry.register(type_id.clone(), handler.clone()).unwrap();
 
-    let result = handler.elle_to_c(&Value::Int(42), &CType::Int);
+    let result = handler.elle_to_c(&Value::int(42), &CType::Int);
     assert!(result.is_ok());
 
     let cval = result.unwrap();
-    match cval {
-        CValue::Int(n) => assert_eq!(n, 42),
-        _ => panic!("Expected Int CValue"),
+    if let CValue::Int(n) = cval {
+        assert_eq!(n, 42)
+    } else {
+        panic!("Expected Int CValue")
     }
 }
 
@@ -219,9 +221,10 @@ fn test_handler_c_to_elle() {
     assert!(result.is_ok());
 
     let val = result.unwrap();
-    match val {
-        Value::Int(n) => assert_eq!(n, 99),
-        _ => panic!("Expected Int Value"),
+    if let Some(n) = val.as_int() {
+        assert_eq!(n, 99)
+    } else {
+        panic!("Expected Int Value")
     }
 }
 
@@ -230,7 +233,7 @@ fn test_handler_error_handling() {
     let handler = Arc::new(IntHandler);
 
     // Try to convert wrong type
-    let result = handler.elle_to_c(&Value::Float(std::f64::consts::PI), &CType::Int);
+    let result = handler.elle_to_c(&Value::float(std::f64::consts::PI), &CType::Int);
     assert!(result.is_err());
 
     let error = result.unwrap_err();
@@ -275,15 +278,16 @@ fn test_selective_handler_matching() {
 
     impl TypeHandler for SelectiveHandler {
         fn elle_to_c(&self, value: &Value, _ctype: &CType) -> Result<CValue, String> {
-            match value {
-                Value::Int(n) => Ok(CValue::Int(*n)),
-                _ => Err("Can only handle integers".to_string()),
+            if let Some(n) = value.as_int() {
+                Ok(CValue::Int(n))
+            } else {
+                Err("Can only handle integers".to_string())
             }
         }
 
         fn c_to_elle(&self, cval: &CValue, _ctype: &CType) -> Result<Value, String> {
             match cval {
-                CValue::Int(n) => Ok(Value::Int(*n)),
+                CValue::Int(n) => Ok(Value::int(*n)),
                 _ => Err("Can only handle integers".to_string()),
             }
         }

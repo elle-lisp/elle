@@ -31,7 +31,7 @@ fn test_closure_no_unused_captures() {
   (define y 20)
   ((lambda () (+ x y))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(30));
+    assert_eq!(eval(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn test_closure_with_single_unused_capture() {
   (define y 20)
   ((lambda () y)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(20));
+    assert_eq!(eval(code).unwrap(), Value::int(20));
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn test_closure_with_multiple_unused_captures() {
   (define c 30)
   ((lambda () c)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(30));
+    assert_eq!(eval(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn test_closure_uses_one_from_multiple_globals() {
   (define z 300)
   ((lambda () (+ x z))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(400));
+    assert_eq!(eval(code).unwrap(), Value::int(400));
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_closure_with_parameters_and_captures() {
   (define base 5)
   ((lambda (x y) (+ base (* x y))) 3 4))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(17));
+    assert_eq!(eval(code).unwrap(), Value::int(17));
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn test_closure_captures_function() {
   (define add (lambda (a b) (+ a b)))
   ((lambda () (add 10 20))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(30));
+    assert_eq!(eval(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn test_closure_with_unused_global_function() {
   (define mul (lambda (a b) (* a b)))
   ((lambda () 42)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(42));
+    assert_eq!(eval(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn test_closure_mixed_used_and_unused() {
   (define unused2 999)
   ((lambda () (+ used1 used2))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(30));
+    assert_eq!(eval(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn test_closure_with_conditional_capture_usage() {
   (define threshold 5)
   ((lambda (x) (if (> x threshold) x 0)) 10))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(10));
+    assert_eq!(eval(code).unwrap(), Value::int(10));
 }
 
 #[test]
@@ -140,7 +140,7 @@ fn test_closure_with_arithmetic_operations() {
   (define multiplier 3)
   ((lambda (x) (* base (+ x multiplier))) 5))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(80));
+    assert_eq!(eval(code).unwrap(), Value::int(80));
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn test_closure_all_captures_unused() {
   (define x 100)
   ((lambda (y) y) 42))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(42));
+    assert_eq!(eval(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn test_multiple_closures_independent_optimization() {
   (define closure2 (lambda () data2))
   (+ (closure1) (closure2)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(30));
+    assert_eq!(eval(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn test_closure_captures_used_in_list_operation() {
   (define nums (list 1 2 3))
   ((lambda () (first nums))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(1));
+    assert_eq!(eval(code).unwrap(), Value::int(1));
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn test_closure_parameter_shadows_capture() {
   (define x 100)
   ((lambda (x) x) 42))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(42));
+    assert_eq!(eval(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn test_closure_uses_parameter_not_capture() {
   (define y 200)
   ((lambda (x) (+ x y)) 50))
      "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(250));
+    assert_eq!(eval(code).unwrap(), Value::int(250));
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn test_dead_capture_elimination_nested_lambda() {
     ((lambda () x))))
   (f))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(10));
+    assert_eq!(eval(code).unwrap(), Value::int(10));
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn test_capture_free_closure_works() {
   (define f (lambda (x) (+ x 1)))
   (f 5))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(6));
+    assert_eq!(eval(code).unwrap(), Value::int(6));
 }
 
 #[test]
@@ -235,7 +235,7 @@ fn test_capture_free_closure_as_argument() {
   (define apply-fn (lambda (f x) (f x)))
   (apply-fn (lambda (n) (* n 2)) 5))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(10));
+    assert_eq!(eval(code).unwrap(), Value::int(10));
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn test_dead_capture_in_let() {
      a))
  1 2 3)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(4));
+    assert_eq!(eval(code).unwrap(), Value::int(4));
 }
 
 #[test]
@@ -260,5 +260,5 @@ fn test_mixed_capture_and_no_capture() {
   (define g (lambda (n) (+ n 1))) ; no captures
   (+ (f) (g 5)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::Int(16));
+    assert_eq!(eval(code).unwrap(), Value::int(16));
 }

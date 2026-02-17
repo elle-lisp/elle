@@ -28,10 +28,8 @@ fn divide(a: i64, b: i64) -> LResult<i64> {
 }
 
 fn get_int(value: &Value) -> LResult<i64> {
-    match value {
-        Value::Int(n) => Ok(*n),
-        _ => Err(LError::type_mismatch("integer", value.type_name())),
-    }
+    value.as_int().map(|n| n)
+        .ok_or_else(|| LError::type_mismatch("integer", value.type_name()))
 }
 ```
 

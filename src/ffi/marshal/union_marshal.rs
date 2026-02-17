@@ -8,49 +8,48 @@ use crate::value::Value;
 /// The union value should be a vector with a single element: \[field_index_or_value\].
 /// The field is packed at offset 0 (all union fields overlap at offset 0).
 pub fn marshal_union_with_layout(value: &Value, layout: &UnionLayout) -> Result<CValue, String> {
-    match value {
-        Value::Vector(fields) => {
-            // Union must have exactly one field value
-            if fields.is_empty() || fields.len() > layout.fields.len() {
-                return Err(format!(
-                    "Union has {} fields but got {} values",
-                    layout.fields.len(),
-                    fields.len()
-                ));
-            }
-
-            // Get the field index or use first field
-            let field_idx = if fields.len() == 2 {
-                // Optional: first element could be field index
-                match &fields[0] {
-                    Value::Int(idx) => {
-                        if *idx < 0 || *idx as usize >= layout.fields.len() {
-                            return Err(format!("Union field index out of range: {}", idx));
-                        }
-                        *idx as usize
-                    }
-                    _ => 0, // Treat as [value] format - use first field
-                }
-            } else {
-                0
-            };
-
-            let field = &layout.fields[field_idx];
-            let field_value = if fields.len() == 2 {
-                &fields[1]
-            } else {
-                &fields[0]
-            };
-
-            // Create bytes buffer of union size
-            let mut bytes = vec![0u8; layout.size];
-
-            // Pack the field value at offset 0 (all union fields start at 0)
-            pack_field(&mut bytes, field_value, 0, &field.ctype)?;
-
-            Ok(CValue::Union(bytes))
+    if let Some(fields_ref) = value.as_vector() {
+        let fields = fields_ref.borrow();
+        // Union must have exactly one field value
+        if fields.is_empty() || fields.len() > layout.fields.len() {
+            return Err(format!(
+                "Union has {} fields but got {} values",
+                layout.fields.len(),
+                fields.len()
+            ));
         }
-        _ => Err(format!("Cannot marshal {:?} as union", value)),
+
+        // Get the field index or use first field
+        let field_idx = if fields.len() == 2 {
+            // Optional: first element could be field index
+            if let Some(idx) = fields[0].as_int() {
+                if idx < 0 || idx as usize >= layout.fields.len() {
+                    return Err(format!("Union field index out of range: {}", idx));
+                }
+                idx as usize
+            } else {
+                0 // Treat as [value] format - use first field
+            }
+        } else {
+            0
+        };
+
+        let field = &layout.fields[field_idx];
+        let field_value = if fields.len() == 2 {
+            &fields[1]
+        } else {
+            &fields[0]
+        };
+
+        // Create bytes buffer of union size
+        let mut bytes = vec![0u8; layout.size];
+
+        // Pack the field value at offset 0 (all union fields start at 0)
+        pack_field(&mut bytes, field_value, 0, &field.ctype)?;
+
+        Ok(CValue::Union(bytes))
+    } else {
+        Err(format!("Cannot marshal {:?} as union", value))
     }
 }
 
@@ -77,7 +76,7 @@ pub fn unmarshal_union_with_layout(cvalue: &CValue, layout: &UnionLayout) -> Res
                 field_values.push(field_value);
             }
 
-            Ok(Value::Vector(std::rc::Rc::new(field_values)))
+            Ok(Value::vector(field_values))
         }
         _ => Err("Type mismatch in unmarshal: expected union".to_string()),
     }

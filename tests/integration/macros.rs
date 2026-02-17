@@ -71,7 +71,7 @@ fn test_macro_registration() {
     assert!(def.is_ok());
 
     // Macro definitions should return nil
-    assert_eq!(def.unwrap(), Value::Nil);
+    assert_eq!(def.unwrap(), Value::NIL);
 }
 
 // Test basic macro expansion
@@ -130,7 +130,7 @@ fn test_gensym_for_hygiene() {
     // gensym should return a string (generated symbol name)
     let result = eval.eval("(gensym)");
     match result {
-        Ok(Value::String(_)) => {} // Good - returns generated symbol name as string
+        Ok(v) if v.is_string() => {} // Good - returns generated symbol name as string
         Ok(v) => panic!("Expected String, got {:?}", v),
         Err(e) => panic!("gensym failed: {}", e),
     }
@@ -138,7 +138,7 @@ fn test_gensym_for_hygiene() {
     // gensym with prefix
     let result = eval.eval("(gensym \"temp\")");
     match result {
-        Ok(Value::String(_)) => {} // Good
+        Ok(v) if v.is_string() => {} // Good
         Ok(v) => panic!("Expected String, got {:?}", v),
         Err(e) => panic!("gensym with prefix failed: {}", e),
     }
@@ -153,7 +153,7 @@ fn test_macro_with_quote() {
 
     let result = eval.eval("(quote-x 42)");
     match result {
-        Ok(Value::Symbol(_)) => {} // Should return the symbol 'x'
+        Ok(v) if v.is_symbol() => {} // Should return the symbol 'x'
         Ok(v) => eprintln!("Expected Symbol, got {:?}", v),
         Err(e) => {
             // Expansion might fail if quote handling isn't complete
@@ -171,7 +171,7 @@ fn test_macro_list_construction() {
 
     let result = eval.eval("(mklist 1 2)");
     match result {
-        Ok(Value::Cons(_)) => {} // Should return a list
+        Ok(v) if v.is_cons() => {} // Should return a list
         Ok(v) => eprintln!("Expected Cons (list), got {:?}", v),
         Err(e) => eprintln!("Macro list construction note: {}", e),
     }
@@ -186,7 +186,7 @@ fn test_macro_predicate() {
     // macro? should return a boolean
     let result = eval.eval("(macro? test-macro)");
     match result {
-        Ok(Value::Bool(_)) => {} // Good - returns a boolean
+        Ok(v) if v.is_bool() => {} // Good - returns a boolean
         Ok(v) => eprintln!("Expected Bool, got {:?}", v),
         Err(e) => eprintln!("macro? failed: {}", e),
     }
@@ -216,7 +216,7 @@ fn test_macro_predicate_returns_true_for_macro() {
     eval.eval("(defmacro test-m (x) x)").unwrap();
     let result = eval.eval("(macro? 'test-m)");
     assert!(result.is_ok(), "macro? should succeed: {:?}", result);
-    assert_eq!(result.unwrap(), Value::Bool(true));
+    assert_eq!(result.unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn test_macro_predicate_returns_false_for_function() {
     eval.eval("(define test-fn (fn (x) x))").unwrap();
     let result = eval.eval("(macro? 'test-fn)");
     assert!(result.is_ok(), "macro? should succeed: {:?}", result);
-    assert_eq!(result.unwrap(), Value::Bool(false));
+    assert_eq!(result.unwrap(), Value::bool(false));
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn test_macro_predicate_returns_false_for_primitive() {
     let mut eval = StatefulEval::new();
     let result = eval.eval("(macro? '+)");
     assert!(result.is_ok(), "macro? should succeed: {:?}", result);
-    assert_eq!(result.unwrap(), Value::Bool(false));
+    assert_eq!(result.unwrap(), Value::bool(false));
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn test_macro_predicate_returns_false_for_number() {
     let mut eval = StatefulEval::new();
     let result = eval.eval("(macro? 42)");
     assert!(result.is_ok(), "macro? should succeed: {:?}", result);
-    assert_eq!(result.unwrap(), Value::Bool(false));
+    assert_eq!(result.unwrap(), Value::bool(false));
 }
 
 #[test]
@@ -249,7 +249,7 @@ fn test_macro_predicate_returns_false_for_string() {
     let mut eval = StatefulEval::new();
     let result = eval.eval("(macro? \"hello\")");
     assert!(result.is_ok(), "macro? should succeed: {:?}", result);
-    assert_eq!(result.unwrap(), Value::Bool(false));
+    assert_eq!(result.unwrap(), Value::bool(false));
 }
 
 #[test]
@@ -264,11 +264,11 @@ fn test_expand_macro_simple_substitution() {
     let list = expanded.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
     // First element should be * symbol
-    assert!(matches!(list[0], Value::Symbol(_)));
+    assert!((list[0]).is_symbol());
     // Second element should be 5
-    assert_eq!(list[1], Value::Int(5));
+    assert_eq!(list[1], Value::int(5));
     // Third element should be 2
-    assert_eq!(list[2], Value::Int(2));
+    assert_eq!(list[2], Value::int(2));
 }
 
 #[test]
@@ -277,7 +277,7 @@ fn test_expand_macro_identity() {
     eval.eval("(defmacro id (x) x)").unwrap();
     let result = eval.eval("(expand-macro '(id 42))");
     assert!(result.is_ok(), "expand-macro should succeed: {:?}", result);
-    assert_eq!(result.unwrap(), Value::Int(42));
+    assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
@@ -290,8 +290,8 @@ fn test_expand_macro_multiple_params() {
     assert!(expanded.is_list());
     let list = expanded.list_to_vec().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[1], Value::Int(3));
-    assert_eq!(list[2], Value::Int(4));
+    assert_eq!(list[1], Value::int(3));
+    assert_eq!(list[2], Value::int(4));
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn test_macro_and_expand_workflow() {
 
     // Check it's a macro
     let is_macro = eval.eval("(macro? 'inc)").unwrap();
-    assert_eq!(is_macro, Value::Bool(true));
+    assert_eq!(is_macro, Value::bool(true));
 
     // Expand it
     let expanded = eval.eval("(expand-macro '(inc 5))").unwrap();
@@ -358,5 +358,5 @@ fn test_macro_and_expand_workflow() {
 
     // Use it normally (macro expands at compile time)
     let result = eval.eval("(inc 5)").unwrap();
-    assert_eq!(result, Value::Int(6));
+    assert_eq!(result, Value::int(6));
 }

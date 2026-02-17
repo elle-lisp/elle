@@ -245,7 +245,7 @@ mod tests {
     #[test]
     fn test_sequence_non_empty() {
         let next = Continuation::done();
-        let cont = Continuation::sequence(vec![Expr::Literal(Value::Int(1))], next);
+        let cont = Continuation::sequence(vec![Expr::Literal(Value::int(1))], next);
         assert!(!cont.is_done());
     }
 }

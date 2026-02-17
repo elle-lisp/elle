@@ -1,7 +1,6 @@
 // Debug test for printing raw bytecode
 use elle::pipeline::compile_new;
 use elle::symbol::SymbolTable;
-use elle::value::Value;
 
 fn setup() -> (SymbolTable, elle::vm::VM) {
     let mut vm = elle::vm::VM::new();
@@ -31,17 +30,16 @@ fn test_print_raw_bytecode() {
 
     println!("\n=== CONSTANTS ({}) ===", result.bytecode.constants.len());
     for (i, c) in result.bytecode.constants.iter().enumerate() {
-        match c {
-            Value::Closure(closure) => {
-                println!("  [{}] = Closure:", i);
-                println!("    bytecode len: {}", closure.bytecode.len());
-                println!("    constants len: {}", closure.constants.len());
-                println!(
-                    "    raw bytes: {:?}",
-                    &closure.bytecode[..std::cmp::min(20, closure.bytecode.len())]
-                );
-            }
-            _ => println!("  [{}] = {:?}", i, c),
+        if let Some(closure) = c.as_closure() {
+            println!("  [{}] = Closure:", i);
+            println!("    bytecode len: {}", closure.bytecode.len());
+            println!("    constants len: {}", closure.constants.len());
+            println!(
+                "    raw bytes: {:?}",
+                &closure.bytecode[..std::cmp::min(20, closure.bytecode.len())]
+            );
+        } else {
+            println!("  [{}] = {:?}", i, c);
         }
     }
 }

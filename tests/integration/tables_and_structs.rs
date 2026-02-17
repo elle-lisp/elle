@@ -29,7 +29,7 @@ fn eval(input: &str) -> Result<Value, String> {
     } else if values.is_empty() {
         return Err("No input".to_string());
     } else {
-        let mut begin_args = vec![Value::Symbol(symbols.intern("begin"))];
+        let mut begin_args = vec![Value::symbol(symbols.intern("begin").0)];
         begin_args.extend(values);
         list(begin_args)
     };
@@ -44,7 +44,7 @@ fn eval(input: &str) -> Result<Value, String> {
 #[test]
 fn test_table_creation_empty() {
     let result = eval("(table)").unwrap();
-    assert!(matches!(result, Value::Table(_)));
+    assert!((result).is_table());
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn test_table_type_name() {
 #[test]
 fn test_struct_creation_empty() {
     let result = eval("(struct)").unwrap();
-    assert!(matches!(result, Value::Struct(_)));
+    assert!(result.is_struct());
 }
 
 #[test]

@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn test_infer_literal() {
         let ctx = EffectContext::new();
-        let expr = Expr::Literal(Value::Int(42));
+        let expr = Expr::Literal(Value::int(42));
         assert_eq!(ctx.infer(&expr), Effect::Pure);
     }
 
@@ -294,9 +294,9 @@ mod tests {
     fn test_infer_if() {
         let ctx = EffectContext::new();
         let expr = Expr::If {
-            cond: Box::new(Expr::Literal(Value::Bool(true))),
-            then: Box::new(Expr::Literal(Value::Int(1))),
-            else_: Box::new(Expr::Literal(Value::Int(2))),
+            cond: Box::new(Expr::Literal(Value::bool(true))),
+            then: Box::new(Expr::Literal(Value::int(1))),
+            else_: Box::new(Expr::Literal(Value::int(2))),
         };
         assert_eq!(ctx.infer(&expr), Effect::Pure);
     }
@@ -305,8 +305,8 @@ mod tests {
     fn test_infer_begin() {
         let ctx = EffectContext::new();
         let expr = Expr::Begin(vec![
-            Expr::Literal(Value::Int(1)),
-            Expr::Literal(Value::Int(2)),
+            Expr::Literal(Value::int(1)),
+            Expr::Literal(Value::int(2)),
         ]);
         assert_eq!(ctx.infer(&expr), Effect::Pure);
     }
@@ -315,7 +315,7 @@ mod tests {
     fn test_infer_lambda_effect() {
         let ctx = EffectContext::new();
         // A simple lambda with pure body
-        let body = Box::new(Expr::Literal(Value::Int(42)));
+        let body = Box::new(Expr::Literal(Value::int(42)));
         let effect = ctx.infer_lambda_effect(&body);
         assert_eq!(effect, Effect::Pure);
     }
@@ -346,7 +346,7 @@ mod tests {
 
         let expr = Expr::Call {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(sym))),
-            args: vec![Expr::Literal(Value::Int(1))],
+            args: vec![Expr::Literal(Value::int(1))],
             tail: false,
         };
         assert_eq!(ctx.infer(&expr), Effect::Pure);
@@ -365,7 +365,7 @@ mod tests {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(sym1))),
             args: vec![Expr::Call {
                 func: Box::new(Expr::Var(crate::binding::VarRef::global(sym2))),
-                args: vec![Expr::Literal(Value::Int(1))],
+                args: vec![Expr::Literal(Value::int(1))],
                 tail: false,
             }],
             tail: false,
@@ -378,8 +378,8 @@ mod tests {
         let ctx = EffectContext::new();
         let sym = crate::value::SymbolId(1);
         let expr = Expr::Let {
-            bindings: vec![(sym, Expr::Literal(Value::Int(1)))],
-            body: Box::new(Expr::Literal(Value::Int(2))),
+            bindings: vec![(sym, Expr::Literal(Value::int(1)))],
+            body: Box::new(Expr::Literal(Value::int(2))),
         };
         assert_eq!(ctx.infer(&expr), Effect::Pure);
     }
@@ -389,7 +389,7 @@ mod tests {
         let ctx = EffectContext::new();
         let expr = Expr::Lambda {
             params: vec![crate::value::SymbolId(1)],
-            body: Box::new(Expr::Literal(Value::Int(42))),
+            body: Box::new(Expr::Literal(Value::int(42))),
             captures: vec![],
             num_locals: 1,
             locals: vec![],
@@ -411,7 +411,7 @@ mod tests {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(map_sym))),
             args: vec![
                 Expr::Var(crate::binding::VarRef::global(abs_sym)),
-                Expr::Literal(Value::Nil),
+                Expr::Literal(Value::NIL),
             ],
             tail: false,
         };
@@ -433,12 +433,12 @@ mod tests {
             args: vec![
                 Expr::Lambda {
                     params: vec![x_sym],
-                    body: Box::new(Expr::Literal(Value::Int(1))),
+                    body: Box::new(Expr::Literal(Value::int(1))),
                     captures: vec![],
                     num_locals: 1,
                     locals: vec![],
                 },
-                Expr::Literal(Value::Nil),
+                Expr::Literal(Value::NIL),
             ],
             tail: false,
         };
@@ -460,7 +460,7 @@ mod tests {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(map_sym))),
             args: vec![
                 Expr::Var(crate::binding::VarRef::global(yielding_fn_sym)),
-                Expr::Literal(Value::Nil),
+                Expr::Literal(Value::NIL),
             ],
             tail: false,
         };
@@ -493,7 +493,7 @@ mod tests {
                     num_locals: 1,
                     locals: vec![],
                 },
-                Expr::Literal(Value::Nil),
+                Expr::Literal(Value::NIL),
             ],
             tail: false,
         };
@@ -515,7 +515,7 @@ mod tests {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(filter_sym))),
             args: vec![
                 Expr::Var(crate::binding::VarRef::global(positive_sym)),
-                Expr::Literal(Value::Nil),
+                Expr::Literal(Value::NIL),
             ],
             tail: false,
         };
@@ -536,8 +536,8 @@ mod tests {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(fold_sym))),
             args: vec![
                 Expr::Var(crate::binding::VarRef::global(plus_sym)),
-                Expr::Literal(Value::Int(0)),
-                Expr::Literal(Value::Nil),
+                Expr::Literal(Value::int(0)),
+                Expr::Literal(Value::NIL),
             ],
             tail: false,
         };
@@ -558,7 +558,7 @@ mod tests {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(apply_sym))),
             args: vec![
                 Expr::Var(crate::binding::VarRef::global(plus_sym)),
-                Expr::Literal(Value::Nil),
+                Expr::Literal(Value::NIL),
             ],
             tail: false,
         };
@@ -605,7 +605,7 @@ mod tests {
         // Test infer_arg_effect with a lambda
         let arg = Expr::Lambda {
             params: vec![x_sym],
-            body: Box::new(Expr::Literal(Value::Int(42))),
+            body: Box::new(Expr::Literal(Value::int(42))),
             captures: vec![],
             num_locals: 1,
             locals: vec![],

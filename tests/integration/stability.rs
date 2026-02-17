@@ -179,26 +179,28 @@ fn test_performance_closure_creation() {
 #[test]
 fn test_type_information_integers() {
     // Integer operations maintain type
-    assert_eq!(eval("(+ 1 2)").unwrap(), Value::Int(3));
+    assert_eq!(eval("(+ 1 2)").unwrap(), Value::int(3));
 }
 
 #[test]
 fn test_type_information_floats() {
     // Float operations maintain type
-    match eval("(+ 1.5 2.5)").unwrap() {
-        Value::Float(f) => assert!((f - 4.0).abs() < 0.0001),
-        _ => panic!("Expected float"),
+    if let Some(f) = eval("(+ 1.5 2.5)").unwrap().as_float() {
+        assert!((f - 4.0).abs() < 0.0001)
+    } else {
+        panic!("Expected float")
     }
 }
 
 #[test]
 fn test_type_information_strings() {
-    // String operations maintain type
-    match eval("(string-append \"hello\" \" \" \"world\")").unwrap() {
-        Value::String(s) => assert_eq!(s.as_ref(), "hello world"),
-        _ => panic!("Expected string"),
+    let result = eval("(string-append \"hello\" \" \" \"world\")").unwrap();
+    if let Some(s) = result.as_string() {
+        assert_eq!(s, "hello world");
+    } else {
+        panic!("Expected string");
     }
-}
+    }
 
 #[test]
 fn test_type_information_lists() {
@@ -290,7 +292,7 @@ fn test_performance_baseline_comparison() {
 #[test]
 fn test_core_stability_no_state_leakage() {
     // Each eval should be independent
-    eval("(define x 100)").unwrap_or(Value::Nil);
+    eval("(define x 100)").unwrap_or(Value::NIL);
     // Next eval shouldn't see x
     assert!(eval("x").is_err());
 }
@@ -349,7 +351,7 @@ fn test_all_phase1_features_complete() {
     // Errors are handled
     assert!(eval("(undefined)").is_err());
     // Type information exists
-    assert_eq!(eval("(+ 1 2)").unwrap(), Value::Int(3));
+    assert_eq!(eval("(+ 1 2)").unwrap(), Value::int(3));
     // Language is complete
     assert!(eval("(length (list 1 2 3))").is_ok());
 }

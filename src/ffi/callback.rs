@@ -170,9 +170,9 @@ pub fn invoke_callback(id: u32, args: Vec<Value>) -> Result<Value, String> {
 
     // Simple placeholder: return the first argument if provided
     if !args.is_empty() {
-        Ok(args[0].clone())
+        Ok(args[0])
     } else {
-        Ok(Value::Nil)
+        Ok(Value::NIL)
     }
 }
 
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_callback_registration() {
-        let closure = Rc::new(Value::Int(42));
+        let closure = Rc::new(Value::int(42));
         let id = 9999;
 
         // Register callback
@@ -236,7 +236,7 @@ mod tests {
         // Should retrieve the closure
         let retrieved = get_callback(id);
         assert!(retrieved.is_some());
-        assert_eq!(*retrieved.unwrap(), Value::Int(42));
+        assert_eq!(*retrieved.unwrap(), Value::int(42));
 
         // Cleanup
         assert!(unregister_callback(id));
@@ -251,17 +251,17 @@ mod tests {
 
     #[test]
     fn test_multiple_callbacks() {
-        let closure1 = Rc::new(Value::Int(1));
-        let closure2 = Rc::new(Value::Int(2));
-        let closure3 = Rc::new(Value::Int(3));
+        let closure1 = Rc::new(Value::int(1));
+        let closure2 = Rc::new(Value::int(2));
+        let closure3 = Rc::new(Value::int(3));
 
         assert!(register_callback(100, closure1.clone()));
         assert!(register_callback(101, closure2.clone()));
         assert!(register_callback(102, closure3.clone()));
 
-        assert_eq!(*get_callback(100).unwrap(), Value::Int(1));
-        assert_eq!(*get_callback(101).unwrap(), Value::Int(2));
-        assert_eq!(*get_callback(102).unwrap(), Value::Int(3));
+        assert_eq!(*get_callback(100).unwrap(), Value::int(1));
+        assert_eq!(*get_callback(101).unwrap(), Value::int(2));
+        assert_eq!(*get_callback(102).unwrap(), Value::int(3));
 
         // Cleanup
         assert!(unregister_callback(100));
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn test_callback_exists() {
-        let closure = Rc::new(Value::Int(42));
+        let closure = Rc::new(Value::int(42));
         let id = 7777;
 
         // Callback doesn't exist yet
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_invoke_callback_simple() {
-        let closure = Rc::new(Value::Int(99));
+        let closure = Rc::new(Value::int(99));
         let id = 6666;
 
         register_callback(id, closure);
@@ -296,12 +296,12 @@ mod tests {
         // Invoke with no args - should return nil in placeholder
         let result = invoke_callback(id, vec![]);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::Nil);
+        assert_eq!(result.unwrap(), Value::NIL);
 
         // Invoke with args - should return first arg in placeholder
-        let result = invoke_callback(id, vec![Value::Int(123)]);
+        let result = invoke_callback(id, vec![Value::int(123)]);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::Int(123));
+        assert_eq!(result.unwrap(), Value::int(123));
 
         unregister_callback(id);
     }

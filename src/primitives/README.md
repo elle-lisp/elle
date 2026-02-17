@@ -25,7 +25,7 @@ fn prim_add(args: &[Value]) -> LResult<Value> {
     for arg in args {
         sum += arg.as_int()?;
     }
-    Ok(Value::Int(sum))
+    Ok(Value::int(sum))
 }
 ```
 
@@ -57,10 +57,10 @@ fn prim_apply(args: &[Value], vm: &mut VM) -> LResult<Value> {
 
 3. **Register it**:
    ```rust
-   pub fn register_my_module(vm: &mut VM, symbols: &mut SymbolTable) {
-       let sym = symbols.intern("my-func");
-       vm.set_global(sym.0, Value::NativeFn(prim_my_func));
-   }
+    pub fn register_my_module(vm: &mut VM, symbols: &mut SymbolTable) {
+        let sym = symbols.intern("my-func");
+        vm.set_global(sym.0, Value::native_fn(prim_my_func));
+    }
    ```
 
 4. **Call from `registration.rs`**:
@@ -80,7 +80,7 @@ Use `Arity::AtLeast(n)` for functions that take a minimum number of arguments:
 fn prim_add(args: &[Value]) -> LResult<Value> {
     args.iter().try_fold(0i64, |acc, v| {
         Ok(acc + v.as_int()?)
-    }).map(Value::Int)
+    }).map(Value::int)
 }
 ```
 

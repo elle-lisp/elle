@@ -12,15 +12,16 @@ struct DoublingHandler;
 
 impl TypeHandler for DoublingHandler {
     fn elle_to_c(&self, value: &Value, _ctype: &CType) -> Result<CValue, String> {
-        match value {
-            Value::Int(n) => Ok(CValue::Int(n * 2)),
-            _ => Err("DoublingHandler: expected integer".to_string()),
+        if let Some(n) = value.as_int() {
+            Ok(CValue::Int(n * 2))
+        } else {
+            Err("DoublingHandler: expected integer".to_string())
         }
     }
 
     fn c_to_elle(&self, cval: &CValue, _ctype: &CType) -> Result<Value, String> {
         match cval {
-            CValue::Int(n) => Ok(Value::Int(n / 2)),
+            CValue::Int(n) => Ok(Value::int(n / 2)),
             _ => Err("DoublingHandler: expected int CValue".to_string()),
         }
     }
@@ -39,16 +40,18 @@ struct FloatToIntHandler;
 
 impl TypeHandler for FloatToIntHandler {
     fn elle_to_c(&self, value: &Value, _ctype: &CType) -> Result<CValue, String> {
-        match value {
-            Value::Float(f) => Ok(CValue::Int(*f as i64)),
-            Value::Int(n) => Ok(CValue::Int(*n)),
-            _ => Err("FloatToIntHandler: expected float or int".to_string()),
+        if let Some(f) = value.as_float() {
+            Ok(CValue::Int(f as i64))
+        } else if let Some(n) = value.as_int() {
+            Ok(CValue::Int(n))
+        } else {
+            Err("FloatToIntHandler: expected float or int".to_string())
         }
     }
 
     fn c_to_elle(&self, cval: &CValue, _ctype: &CType) -> Result<Value, String> {
         match cval {
-            CValue::Int(n) => Ok(Value::Float(*n as f64)),
+            CValue::Int(n) => Ok(Value::float(*n as f64)),
             _ => Err("FloatToIntHandler: expected int CValue".to_string()),
         }
     }
@@ -66,7 +69,7 @@ impl TypeHandler for FloatToIntHandler {
 fn test_handler_marshal_elle_to_c_without_handler() {
     let registry = HandlerRegistry::new();
 
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(42), &CType::Int, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(42), &CType::Int, &registry);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), CValue::Int(42));
 }
@@ -80,7 +83,7 @@ fn test_handler_marshal_elle_to_c_with_custom_handler() {
     registry.register(type_id, handler).unwrap();
 
     // With custom handler, integer should be doubled
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(21), &CType::Int, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(21), &CType::Int, &registry);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), CValue::Int(42)); // 21 * 2
 }
@@ -91,7 +94,7 @@ fn test_handler_marshal_c_to_elle_without_handler() {
 
     let result = HandlerMarshal::c_to_elle_with_handlers(&CValue::Int(99), &CType::Int, &registry);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(99));
+    assert_eq!(result.unwrap(), Value::int(99));
 }
 
 #[test]
@@ -105,7 +108,7 @@ fn test_handler_marshal_c_to_elle_with_custom_handler() {
     // With custom handler, integer should be halved
     let result = HandlerMarshal::c_to_elle_with_handlers(&CValue::Int(84), &CType::Int, &registry);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Int(42)); // 84 / 2
+    assert_eq!(result.unwrap(), Value::int(42)); // 84 / 2
 }
 
 #[test]
@@ -118,7 +121,7 @@ fn test_handler_marshal_type_conversion() {
 
     // Convert float to int using handler
     let result =
-        HandlerMarshal::elle_to_c_with_handlers(&Value::Float(42.5), &CType::Int, &registry);
+        HandlerMarshal::elle_to_c_with_handlers(&Value::float(42.5), &CType::Int, &registry);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), CValue::Int(42)); // 42.5 as i64
 }
@@ -133,13 +136,13 @@ fn test_handler_marshal_roundtrip() {
 
     // Marshal: 21 -> 42 (doubled)
     let c_value =
-        HandlerMarshal::elle_to_c_with_handlers(&Value::Int(21), &CType::Int, &registry).unwrap();
+        HandlerMarshal::elle_to_c_with_handlers(&Value::int(21), &CType::Int, &registry).unwrap();
     assert_eq!(c_value, CValue::Int(42));
 
     // Unmarshal: 42 -> 21 (halved)
     let elle_value =
         HandlerMarshal::c_to_elle_with_handlers(&c_value, &CType::Int, &registry).unwrap();
-    assert_eq!(elle_value, Value::Int(21));
+    assert_eq!(elle_value, Value::int(21));
 }
 
 #[test]
@@ -156,7 +159,7 @@ fn test_handler_marshal_priority() {
     registry.register(type_id2, handler2).unwrap();
 
     // The handler with higher priority (DoublingHandler = 10) should be used
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(15), &CType::Int, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(15), &CType::Int, &registry);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), CValue::Int(30)); // Doubled (15 * 2)
 }
@@ -187,7 +190,7 @@ fn test_handler_marshal_fallback_on_handler_error() {
     registry.register(type_id, handler).unwrap();
 
     // Even though handler fails, should fall back to default marshaling
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(42), &CType::Int, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(42), &CType::Int, &registry);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), CValue::Int(42)); // Default marshaling result
 }
@@ -207,7 +210,7 @@ fn test_handler_marshal_multiple_handlers() {
     registry.register(type_id2, handler2).unwrap();
 
     // Highest priority should be used (DoublingHandler = 10)
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(5), &CType::Int, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(5), &CType::Int, &registry);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), CValue::Int(10)); // 5 * 2
 }
@@ -218,7 +221,7 @@ fn test_handler_marshal_bool_without_handler() {
 
     // Test with bool type
     let result =
-        HandlerMarshal::elle_to_c_with_handlers(&Value::Bool(true), &CType::Bool, &registry);
+        HandlerMarshal::elle_to_c_with_handlers(&Value::bool(true), &CType::Bool, &registry);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), CValue::Int(1)); // Default bool marshaling
 }
@@ -230,7 +233,7 @@ fn test_handler_marshal_float_without_handler() {
     // Test with float type
     let pi = std::f64::consts::PI;
     let result =
-        HandlerMarshal::elle_to_c_with_handlers(&Value::Float(pi), &CType::Float, &registry);
+        HandlerMarshal::elle_to_c_with_handlers(&Value::float(pi), &CType::Float, &registry);
     assert!(result.is_ok());
     let cval = result.unwrap();
     match cval {
@@ -245,7 +248,7 @@ fn test_handler_marshal_string_without_handler() {
 
     // Test with string type (should marshal as pointer)
     let result = HandlerMarshal::elle_to_c_with_handlers(
-        &Value::String("hello".into()),
+        &Value::string("hello"),
         &CType::Pointer(Box::new(CType::Char)),
         &registry,
     );
@@ -263,7 +266,7 @@ fn test_handler_marshal_nil_pointer_without_handler() {
 
     // Test with nil as pointer
     let result = HandlerMarshal::elle_to_c_with_handlers(
-        &Value::Nil,
+        &Value::NIL,
         &CType::Pointer(Box::new(CType::Void)),
         &registry,
     );
@@ -285,7 +288,7 @@ fn test_handler_marshal_clear_handlers() {
     assert!(!registry.has_handler(&type_id).unwrap());
 
     // After clearing, should use default marshaling
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(21), &CType::Int, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(21), &CType::Int, &registry);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), CValue::Int(21)); // Default marshaling (not doubled)
 }
@@ -295,7 +298,7 @@ fn test_handler_marshal_u64_overflow_protection() {
     let registry = HandlerRegistry::new();
 
     // Test that default marshaling handles unsigned integers correctly
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(100), &CType::UInt, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(100), &CType::UInt, &registry);
     assert!(result.is_ok());
     match result.unwrap() {
         CValue::UInt(n) => assert_eq!(n, 100),
@@ -308,11 +311,11 @@ fn test_handler_marshal_signed_vs_unsigned() {
     let registry = HandlerRegistry::new();
 
     // Negative value should fail for unsigned
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(-1), &CType::UInt, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(-1), &CType::UInt, &registry);
     assert!(result.is_err());
 
     // Positive value should succeed
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(42), &CType::UInt, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(42), &CType::UInt, &registry);
     assert!(result.is_ok());
 }
 
@@ -321,11 +324,8 @@ fn test_handler_marshal_type_mismatch_without_handler() {
     let registry = HandlerRegistry::new();
 
     // Try to marshal wrong type without handler
-    let result = HandlerMarshal::elle_to_c_with_handlers(
-        &Value::String("text".into()),
-        &CType::Int,
-        &registry,
-    );
+    let result =
+        HandlerMarshal::elle_to_c_with_handlers(&Value::string("text"), &CType::Int, &registry);
     assert!(result.is_err());
 }
 
@@ -342,7 +342,7 @@ fn test_handler_marshal_preserves_handler_metadata() {
     assert_eq!(metadata.priority, 10);
 
     // Handler should still work after metadata verification
-    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::Int(10), &CType::Int, &registry);
+    let result = HandlerMarshal::elle_to_c_with_handlers(&Value::int(10), &CType::Int, &registry);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), CValue::Int(20));
 }

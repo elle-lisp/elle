@@ -7,43 +7,48 @@
 use super::{Span, Syntax, SyntaxKind};
 use crate::symbol::SymbolTable;
 use crate::value::Value;
-use std::rc::Rc;
 
 impl Syntax {
     /// Convert Syntax to runtime Value
     /// Used for quote expressions at runtime
     pub fn to_value(&self, symbols: &mut SymbolTable) -> Value {
         match &self.kind {
-            SyntaxKind::Nil => Value::Nil,
-            SyntaxKind::Bool(b) => Value::Bool(*b),
-            SyntaxKind::Int(n) => Value::Int(*n),
-            SyntaxKind::Float(n) => Value::Float(*n),
-            SyntaxKind::Symbol(s) => Value::Symbol(symbols.intern(s)),
-            SyntaxKind::Keyword(s) => Value::Keyword(symbols.intern(s)),
-            SyntaxKind::String(s) => Value::String(Rc::from(s.as_str())),
+            SyntaxKind::Nil => Value::NIL,
+            SyntaxKind::Bool(b) => Value::bool(*b),
+            SyntaxKind::Int(n) => Value::int(*n),
+            SyntaxKind::Float(n) => Value::float(*n),
+            SyntaxKind::Symbol(s) => {
+                let id = symbols.intern(s);
+                Value::symbol(id.0)
+            }
+            SyntaxKind::Keyword(s) => {
+                let id = symbols.intern(s);
+                Value::keyword(id.0)
+            }
+            SyntaxKind::String(s) => Value::string(s.clone()),
             SyntaxKind::List(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 crate::value::list(values)
             }
             SyntaxKind::Vector(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
-                Value::Vector(Rc::new(values))
+                Value::vector(values)
             }
             SyntaxKind::Quote(inner) => {
                 let quote_sym = symbols.intern("quote");
-                crate::value::list(vec![Value::Symbol(quote_sym), inner.to_value(symbols)])
+                crate::value::list(vec![Value::symbol(quote_sym.0), inner.to_value(symbols)])
             }
             SyntaxKind::Quasiquote(inner) => {
                 let sym = symbols.intern("quasiquote");
-                crate::value::list(vec![Value::Symbol(sym), inner.to_value(symbols)])
+                crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
             }
             SyntaxKind::Unquote(inner) => {
                 let sym = symbols.intern("unquote");
-                crate::value::list(vec![Value::Symbol(sym), inner.to_value(symbols)])
+                crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
             }
             SyntaxKind::UnquoteSplicing(inner) => {
                 let sym = symbols.intern("unquote-splicing");
-                crate::value::list(vec![Value::Symbol(sym), inner.to_value(symbols)])
+                crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
             }
         }
     }
@@ -51,36 +56,42 @@ impl Syntax {
     /// Convert runtime Value to Syntax
     /// Used for analyzing macro results
     pub fn from_value(value: &Value, symbols: &SymbolTable, span: Span) -> Result<Syntax, String> {
-        let kind = match value {
-            Value::Nil => SyntaxKind::Nil,
-            Value::Bool(b) => SyntaxKind::Bool(*b),
-            Value::Int(n) => SyntaxKind::Int(*n),
-            Value::Float(n) => SyntaxKind::Float(*n),
-            Value::Symbol(id) => {
-                let name = symbols.name(*id).ok_or("Unknown symbol")?;
-                SyntaxKind::Symbol(name.to_string())
-            }
-            Value::Keyword(id) => {
-                let name = symbols.name(*id).ok_or("Unknown keyword")?;
-                SyntaxKind::Keyword(name.to_string())
-            }
-            Value::String(s) => SyntaxKind::String(s.to_string()),
-            Value::Cons(_) => {
-                let items = value.list_to_vec()?;
-                let syntaxes: Result<Vec<Syntax>, String> = items
-                    .iter()
-                    .map(|v| Syntax::from_value(v, symbols, span.clone()))
-                    .collect();
-                SyntaxKind::List(syntaxes?)
-            }
-            Value::Vector(items) => {
-                let syntaxes: Result<Vec<Syntax>, String> = items
-                    .iter()
-                    .map(|v| Syntax::from_value(v, symbols, span.clone()))
-                    .collect();
-                SyntaxKind::Vector(syntaxes?)
-            }
-            _ => return Err(format!("Cannot convert {:?} to Syntax", value)),
+        let kind = if value.is_nil() {
+            SyntaxKind::Nil
+        } else if let Some(b) = value.as_bool() {
+            SyntaxKind::Bool(b)
+        } else if let Some(n) = value.as_int() {
+            SyntaxKind::Int(n)
+        } else if let Some(n) = value.as_float() {
+            SyntaxKind::Float(n)
+        } else if let Some(id) = value.as_symbol() {
+            let name = symbols
+                .name(crate::value_old::SymbolId(id))
+                .ok_or("Unknown symbol")?;
+            SyntaxKind::Symbol(name.to_string())
+        } else if let Some(id) = value.as_keyword() {
+            let name = symbols
+                .name(crate::value_old::SymbolId(id))
+                .ok_or("Unknown keyword")?;
+            SyntaxKind::Keyword(name.to_string())
+        } else if let Some(s) = value.as_string() {
+            SyntaxKind::String(s.to_string())
+        } else if value.as_cons().is_some() {
+            let items = value.list_to_vec().map_err(|e| e.to_string())?;
+            let syntaxes: Result<Vec<Syntax>, String> = items
+                .iter()
+                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .collect();
+            SyntaxKind::List(syntaxes?)
+        } else if let Some(vec_ref) = value.as_vector() {
+            let items = vec_ref.borrow().clone();
+            let syntaxes: Result<Vec<Syntax>, String> = items
+                .iter()
+                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .collect();
+            SyntaxKind::Vector(syntaxes?)
+        } else {
+            return Err(format!("Cannot convert {:?} to Syntax", value));
         };
         Ok(Syntax::new(kind, span))
     }

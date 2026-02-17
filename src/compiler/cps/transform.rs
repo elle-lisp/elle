@@ -102,7 +102,7 @@ impl<'a> CpsTransformer<'a> {
             } => self.transform_call(func, args, cont),
 
             // Literals are always pure
-            Expr::Literal(v) => CpsExpr::Literal(v.clone()),
+            Expr::Literal(v) => CpsExpr::Literal(*v),
 
             // Variables - check if CPS-local (from let/for)
             Expr::Var(var_ref) => {
@@ -308,7 +308,7 @@ impl<'a> CpsTransformer<'a> {
     /// D4: Transform sequence (begin)
     fn transform_sequence(&mut self, exprs: &[Expr], cont: Rc<Continuation>) -> CpsExpr {
         if exprs.is_empty() {
-            return CpsExpr::Literal(Value::Nil);
+            return CpsExpr::Literal(Value::NIL);
         }
 
         if exprs.len() == 1 {
@@ -619,7 +619,7 @@ mod tests {
         let ctx = make_ctx();
         let mut transformer = CpsTransformer::new(&ctx);
 
-        let expr = Expr::Literal(Value::Int(42));
+        let expr = Expr::Literal(Value::int(42));
         let result = transformer.transform(&expr, Continuation::done());
 
         assert!(result.is_pure());
@@ -630,7 +630,7 @@ mod tests {
         let ctx = make_ctx();
         let mut transformer = CpsTransformer::new(&ctx);
 
-        let expr = Expr::Yield(Box::new(Expr::Literal(Value::Int(1))));
+        let expr = Expr::Yield(Box::new(Expr::Literal(Value::int(1))));
         let result = transformer.transform(&expr, Continuation::done());
 
         assert!(result.is_yield());
@@ -645,7 +645,7 @@ mod tests {
 
         let expr = Expr::Call {
             func: Box::new(Expr::Var(crate::binding::VarRef::global(plus))),
-            args: vec![Expr::Literal(Value::Int(1)), Expr::Literal(Value::Int(2))],
+            args: vec![Expr::Literal(Value::int(1)), Expr::Literal(Value::int(2))],
             tail: false,
         };
         let result = transformer.transform(&expr, Continuation::done());
@@ -663,9 +663,9 @@ mod tests {
         let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::If {
-            cond: Box::new(Expr::Literal(Value::Bool(true))),
-            then: Box::new(Expr::Literal(Value::Int(1))),
-            else_: Box::new(Expr::Literal(Value::Int(2))),
+            cond: Box::new(Expr::Literal(Value::bool(true))),
+            then: Box::new(Expr::Literal(Value::int(1))),
+            else_: Box::new(Expr::Literal(Value::int(2))),
         };
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -678,9 +678,9 @@ mod tests {
         let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::If {
-            cond: Box::new(Expr::Literal(Value::Bool(true))),
-            then: Box::new(Expr::Yield(Box::new(Expr::Literal(Value::Int(1))))),
-            else_: Box::new(Expr::Literal(Value::Int(2))),
+            cond: Box::new(Expr::Literal(Value::bool(true))),
+            then: Box::new(Expr::Yield(Box::new(Expr::Literal(Value::int(1))))),
+            else_: Box::new(Expr::Literal(Value::int(2))),
         };
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -700,8 +700,8 @@ mod tests {
 
         let expr = Expr::For {
             var: x,
-            iter: Box::new(Expr::Literal(Value::Nil)),
-            body: Box::new(Expr::Literal(Value::Int(1))),
+            iter: Box::new(Expr::Literal(Value::NIL)),
+            body: Box::new(Expr::Literal(Value::int(1))),
         };
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -717,8 +717,8 @@ mod tests {
 
         let expr = Expr::For {
             var: x,
-            iter: Box::new(Expr::Literal(Value::Nil)),
-            body: Box::new(Expr::Yield(Box::new(Expr::Literal(Value::Int(1))))),
+            iter: Box::new(Expr::Literal(Value::NIL)),
+            body: Box::new(Expr::Yield(Box::new(Expr::Literal(Value::int(1))))),
         };
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -735,8 +735,8 @@ mod tests {
         let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::And(vec![
-            Expr::Literal(Value::Bool(true)),
-            Expr::Literal(Value::Bool(false)),
+            Expr::Literal(Value::bool(true)),
+            Expr::Literal(Value::bool(false)),
         ]);
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -749,8 +749,8 @@ mod tests {
         let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::And(vec![
-            Expr::Literal(Value::Bool(true)),
-            Expr::Yield(Box::new(Expr::Literal(Value::Bool(false)))),
+            Expr::Literal(Value::bool(true)),
+            Expr::Yield(Box::new(Expr::Literal(Value::bool(false)))),
         ]);
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -767,8 +767,8 @@ mod tests {
         let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Or(vec![
-            Expr::Literal(Value::Bool(true)),
-            Expr::Literal(Value::Bool(false)),
+            Expr::Literal(Value::bool(true)),
+            Expr::Literal(Value::bool(false)),
         ]);
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -781,8 +781,8 @@ mod tests {
         let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Or(vec![
-            Expr::Literal(Value::Bool(true)),
-            Expr::Yield(Box::new(Expr::Literal(Value::Bool(false)))),
+            Expr::Literal(Value::bool(true)),
+            Expr::Yield(Box::new(Expr::Literal(Value::bool(false)))),
         ]);
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -800,10 +800,10 @@ mod tests {
 
         let expr = Expr::Cond {
             clauses: vec![(
-                Expr::Literal(Value::Bool(true)),
-                Expr::Literal(Value::Int(1)),
+                Expr::Literal(Value::bool(true)),
+                Expr::Literal(Value::int(1)),
             )],
-            else_body: Some(Box::new(Expr::Literal(Value::Int(2)))),
+            else_body: Some(Box::new(Expr::Literal(Value::int(2)))),
         };
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -817,10 +817,10 @@ mod tests {
 
         let expr = Expr::Cond {
             clauses: vec![(
-                Expr::Literal(Value::Bool(true)),
-                Expr::Yield(Box::new(Expr::Literal(Value::Int(1)))),
+                Expr::Literal(Value::bool(true)),
+                Expr::Yield(Box::new(Expr::Literal(Value::int(1)))),
             )],
-            else_body: Some(Box::new(Expr::Literal(Value::Int(2)))),
+            else_body: Some(Box::new(Expr::Literal(Value::int(2)))),
         };
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -837,8 +837,8 @@ mod tests {
         let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Block(vec![
-            Expr::Literal(Value::Int(1)),
-            Expr::Literal(Value::Int(2)),
+            Expr::Literal(Value::int(1)),
+            Expr::Literal(Value::int(2)),
         ]);
         let result = transformer.transform(&expr, Continuation::done());
 
@@ -851,8 +851,8 @@ mod tests {
         let mut transformer = CpsTransformer::new(&ctx);
 
         let expr = Expr::Block(vec![
-            Expr::Literal(Value::Int(1)),
-            Expr::Yield(Box::new(Expr::Literal(Value::Int(2)))),
+            Expr::Literal(Value::int(1)),
+            Expr::Yield(Box::new(Expr::Literal(Value::int(2)))),
         ]);
         let result = transformer.transform(&expr, Continuation::done());
 

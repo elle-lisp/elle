@@ -1,7 +1,6 @@
 use super::token::{OwnedToken, SourceLoc};
 use crate::symbol::SymbolTable;
-use crate::value::{cons, Value};
-use std::rc::Rc;
+use crate::value::repr::Value;
 
 pub struct Reader {
     tokens: Vec<OwnedToken>,
@@ -86,12 +85,12 @@ impl Reader {
                             Some(OwnedToken::RightBracket) => {
                                 self.advance();
                                 // Build (list e1 e2 e3 ...)
-                                let list_sym = Value::Symbol(symbols.intern("list"));
+                                let list_sym = Value::symbol(symbols.intern("list").0);
                                 let result = elements
                                     .into_iter()
                                     .rev()
-                                    .fold(Value::Nil, |acc, v| cons(v, acc));
-                                return Ok(cons(list_sym, result));
+                                    .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc));
+                                return Ok(Value::cons(list_sym, result));
                             }
                             _ => elements.push(self.read(symbols)?),
                         }
@@ -111,81 +110,81 @@ impl Reader {
             OwnedToken::Quote => {
                 self.advance();
                 let val = self.read(symbols)?;
-                let quote_sym = Value::Symbol(symbols.intern("quote"));
-                Ok(cons(quote_sym, cons(val, Value::Nil)))
+                let quote_sym = Value::symbol(symbols.intern("quote").0);
+                Ok(Value::cons(quote_sym, Value::cons(val, Value::EMPTY_LIST)))
             }
             OwnedToken::Quasiquote => {
                 self.advance();
                 let val = self.read(symbols)?;
-                let qq_sym = Value::Symbol(symbols.intern("quasiquote"));
-                Ok(cons(qq_sym, cons(val, Value::Nil)))
+                let qq_sym = Value::symbol(symbols.intern("quasiquote").0);
+                Ok(Value::cons(qq_sym, Value::cons(val, Value::EMPTY_LIST)))
             }
             OwnedToken::Unquote => {
                 self.advance();
                 let val = self.read(symbols)?;
-                let uq_sym = Value::Symbol(symbols.intern("unquote"));
-                Ok(cons(uq_sym, cons(val, Value::Nil)))
+                let uq_sym = Value::symbol(symbols.intern("unquote").0);
+                Ok(Value::cons(uq_sym, Value::cons(val, Value::EMPTY_LIST)))
             }
             OwnedToken::UnquoteSplicing => {
                 self.advance();
                 let val = self.read(symbols)?;
-                let uqs_sym = Value::Symbol(symbols.intern("unquote-splicing"));
-                Ok(cons(uqs_sym, cons(val, Value::Nil)))
+                let uqs_sym = Value::symbol(symbols.intern("unquote-splicing").0);
+                Ok(Value::cons(uqs_sym, Value::cons(val, Value::EMPTY_LIST)))
             }
             OwnedToken::Integer(n) => {
-                let val = Value::Int(*n);
+                let val = Value::int(*n);
                 self.advance();
                 Ok(val)
             }
             OwnedToken::Float(f) => {
-                let val = Value::Float(*f);
+                let val = Value::float(*f);
                 self.advance();
                 Ok(val)
             }
             OwnedToken::String(s) => {
-                let val = Value::String(Rc::from(s.as_str()));
+                let val = Value::string(s.as_str());
                 self.advance();
                 Ok(val)
             }
             OwnedToken::Bool(b) => {
-                let val = Value::Bool(*b);
+                let val = Value::bool(*b);
                 self.advance();
                 Ok(val)
             }
             OwnedToken::Nil => {
                 self.advance();
-                Ok(Value::Nil)
+                Ok(Value::NIL)
             }
             OwnedToken::Symbol(s) => {
                 // Check if this is a qualified symbol (e.g., "list:length")
                 let (module_name, symbol_name) = Self::parse_qualified_symbol(s);
                 if !symbol_name.is_empty() {
                     // This is a qualified symbol - represent as: (qualified-ref module-name symbol-name)
-                    let module_sym = symbols.intern(&module_name);
-                    let name_sym = symbols.intern(&symbol_name);
-                    let qualified_ref = symbols.intern("qualified-ref");
+                    let module_sym = symbols.intern(&module_name).0;
+                    let name_sym = symbols.intern(&symbol_name).0;
+                    let qualified_ref = symbols.intern("qualified-ref").0;
                     // Build list: (qualified-ref module symbol)
-                    let result = cons(
-                        Value::Symbol(qualified_ref),
-                        cons(
-                            Value::Symbol(module_sym),
-                            cons(Value::Symbol(name_sym), Value::Nil),
+                    let result = Value::cons(
+                        Value::symbol(qualified_ref),
+                        Value::cons(
+                            Value::symbol(module_sym),
+                            Value::cons(Value::symbol(name_sym), Value::NIL),
                         ),
                     );
                     self.advance();
                     Ok(result)
                 } else {
                     // Regular unqualified symbol
-                    let id = symbols.intern(s);
+                    let id = symbols.intern(s).0;
                     self.advance();
-                    Ok(Value::Symbol(id))
+                    Ok(Value::symbol(id))
                 }
             }
             OwnedToken::Keyword(s) => {
                 // Keywords are self-evaluating values
-                let id = symbols.intern(s);
+                let id = symbols.intern(s).0;
                 self.advance();
-                Ok(Value::Keyword(id))
+                Ok(Value::keyword(id))
             }
             OwnedToken::RightParen => {
                 let loc = self.current_location();
@@ -246,7 +245,7 @@ impl Reader {
                     return Ok(elements
                         .into_iter()
                         .rev()
-                        .fold(Value::Nil, |acc, v| cons(v, acc)));
+                        .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc)));
                 }
                 _ => elements.push(self.read(symbols)?),
             }
@@ -268,7 +267,7 @@ impl Reader {
                 }
                 Some(OwnedToken::RightBracket) => {
                     self.advance();
-                    return Ok(Value::Vector(Rc::new(elements)));
+                    return Ok(Value::vector(elements));
                 }
                 _ => elements.push(self.read(symbols)?),
             }
@@ -291,12 +290,12 @@ impl Reader {
                 Some(OwnedToken::RightBrace) => {
                     self.advance();
                     // Build (struct k1 v1 k2 v2 ...)
-                    let struct_sym = Value::Symbol(symbols.intern("struct"));
+                    let struct_sym = Value::symbol(symbols.intern("struct").0);
                     let result = elements
                         .into_iter()
                         .rev()
-                        .fold(Value::Nil, |acc, v| cons(v, acc));
-                    return Ok(cons(struct_sym, result));
+                        .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc));
+                    return Ok(Value::cons(struct_sym, result));
                 }
                 _ => elements.push(self.read(symbols)?),
             }
@@ -313,12 +312,12 @@ impl Reader {
                 Some(OwnedToken::RightBrace) => {
                     self.advance();
                     // Build (table k1 v1 k2 v2 ...)
-                    let table_sym = Value::Symbol(symbols.intern("table"));
+                    let table_sym = Value::symbol(symbols.intern("table").0);
                     let result = elements
                         .into_iter()
                         .rev()
-                        .fold(Value::Nil, |acc, v| cons(v, acc));
-                    return Ok(cons(table_sym, result));
+                        .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc));
+                    return Ok(Value::cons(table_sym, result));
                 }
                 _ => elements.push(self.read(symbols)?),
             }

@@ -4,34 +4,123 @@ A summary of recent additions and improvements to the Elle language.
 
 ## Recent Additions
 
-### Empty List `()` is Now Truthy
+## nil vs Empty List: The Full Picture
 
-Elle now treats the empty list `()` as truthy, matching Janet and all modern Lisps (Scheme, Clojure, Racket, Dylan):
+Elle distinguishes between `nil` (absence of value) and `()` (empty list). They are **different values** with different NaN-boxed tags:
+- `nil` = `0x7FFC_0000_0000_0000`
+- `()` = `0x7FFC_0000_0000_0003`
+
+### Core Distinction
+
+- **`nil`** represents the absence of a value. It is falsy and used for:
+  - Functions that return "nothing" (like `display`)
+  - Default/missing values
+  - Logical false in conditions
+
+- **`()`** represents an empty list. It is:
+  - A valid list (just with no elements)
+  - The terminator for proper lists
+  - **Truthy** (because it IS a value, not the absence of one)
+
+### Truthiness Table
+
+| Value | Truthy? | Notes |
+|-------|---------|-------|
+| `#f` | ✗ No | Boolean false |
+| `nil` | ✗ No | Absence of value |
+| `()` | ✓ Yes | Empty list (distinct from nil) |
+| `0` | ✓ Yes | Zero is truthy |
+| `""` | ✓ Yes | Empty string is truthy |
+| `[]` | ✓ Yes | Empty vector is truthy |
+| All other values | ✓ Yes | Default |
+
+**Only `#f` and `nil` are falsy.** Everything else, including the empty list, is truthy.
+
+### Predicate Behavior
+
+This is the critical distinction. Each predicate behaves differently:
+
+| Expression | Result | Notes |
+|------------|--------|-------|
+| `(nil? nil)` | `#t` | Only nil is nil |
+| `(nil? ())` | `#f` | Empty list is NOT nil |
+| `(empty? nil)` | error | Nil is not a container |
+| `(empty? ())` | `#t` | Empty list is empty |
+| `(list? ())` | `#t` | Empty list is a list |
+| `(list? nil)` | `#f` | Nil is not a list |
+| `(pair? ())` | `#f` | Empty list is not a pair |
+| `(pair? nil)` | `#f` | Nil is not a pair |
+
+### Equality
+
+`nil` and `()` are **not equal**:
+
+```lisp
+(= nil ())   ; ⟹ #f
+(eq? nil ()) ; ⟹ #f
+```
+
+### List Construction
+
+Lists terminate with `EMPTY_LIST`, not `NIL`:
+
+```lisp
+(list 1 2 3)
+; = cons(1, cons(2, cons(3, EMPTY_LIST)))
+; NOT cons(1, cons(2, cons(3, NIL)))
+
+(first (list 1 2 3))  ; ⟹ 1
+(rest (list 1 2 3))   ; ⟹ (2 3)
+(rest (rest (rest (list 1 2 3))))  ; ⟹ ()
+```
+
+### Migration Guidance
+
+When walking a list, use `(empty? lst)` to check for termination, **not** `(nil? lst)`. The empty list is the proper terminator.
+
+**WRONG** — will infinite-loop or error when lst reaches `()`:
+
+```lisp
+(define (my-map f lst)
+  (if (nil? lst) ()
+    (cons (f (first lst)) (my-map f (rest lst)))))
+```
+
+**RIGHT** — correctly terminates on empty list:
+
+```lisp
+(define (my-map f lst)
+  (if (empty? lst) ()
+    (cons (f (first lst)) (my-map f (rest lst)))))
+```
+
+The distinction matters because `(nil? ())` returns `#f`, so the wrong version will try to call `(first ())` and `(rest ())` on an empty list, causing an error or infinite loop.
+
+### Examples
 
 ```lisp
 ; Empty list is truthy
 (if () "truthy" "falsy")  ⟹ "truthy"
 
-; Only #f is falsy
+; Only #f is falsy among booleans
 (if #f "truthy" "falsy")  ⟹ "falsy"
 
-; nil (which is the empty list) is truthy
-(if nil "truthy" "falsy") ⟹ "truthy"
+; nil is FALSY (represents absence/undefined)
+(if nil "truthy" "falsy") ⟹ "falsy"
 
-; Use nil? to check for empty list
-(if (nil? x) "empty" "not empty")
+; Use nil? to check for nil specifically
+(if (nil? x) "is nil" "not nil")
+
+; Use empty? to check for empty collections
+(if (empty? x) "is empty" "not empty")
+
+; Proper list termination
+(rest (list 1))  ; ⟹ ()
+(nil? (rest (list 1)))  ; ⟹ #f (it's not nil!)
+(empty? (rest (list 1)))  ; ⟹ #t (it's empty)
 ```
 
-**Truthiness Table:**
-| Value | Truthy? |
-|-------|---------|
-| `#f` | ✗ No |
-| `()` / `nil` | ✓ Yes |
-| `0` | ✓ Yes |
-| `""` | ✓ Yes |
-| Any other value | ✓ Yes |
-
-This simplifies Elle's semantics: **only `#f` is falsy**. This aligns with Janet's design and modern Lisp conventions.
+See `docs/SEMANTICS.md` for the authoritative specification.
 
 ## Recent Additions
 

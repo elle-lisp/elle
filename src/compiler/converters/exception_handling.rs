@@ -2,6 +2,7 @@ use super::super::ast::Expr;
 use super::ScopeEntry;
 use crate::symbol::SymbolTable;
 use crate::value::Value;
+use crate::value_old::SymbolId;
 
 /// Helper function to convert handler-case expressions
 /// Extracted to reduce stack frame size of value_to_expr_with_scope
@@ -30,28 +31,31 @@ pub fn convert_handler_case(
             }
 
             // Parse exception ID
-            let exception_id = match &clause_vec[0] {
-                Value::Int(id) => *id as u32,
-                Value::Symbol(sym) => {
-                    // Map symbol to exception ID
-                    let name = symbols.name(*sym).unwrap_or("unknown");
-                    match name {
-                        "condition" => 1,
-                        "error" => 2,
-                        "type-error" => 3,
-                        "division-by-zero" => 4,
-                        "undefined-variable" => 5,
-                        "arity-error" => 6,
-                        "warning" => 7,
-                        "style-warning" => 8,
-                        _ => return Err(format!("Unknown exception type: {}", name)),
-                    }
+            let exception_id = if let Some(id) = clause_vec[0].as_int() {
+                id as u32
+            } else if let Some(sym) = clause_vec[0].as_symbol() {
+                // Map symbol to exception ID
+                let name = symbols.name(SymbolId(sym)).unwrap_or("unknown");
+                match name {
+                    "condition" => 1,
+                    "error" => 2,
+                    "type-error" => 3,
+                    "division-by-zero" => 4,
+                    "undefined-variable" => 5,
+                    "arity-error" => 6,
+                    "warning" => 7,
+                    "style-warning" => 8,
+                    _ => return Err(format!("Unknown exception type: {}", name)),
                 }
-                _ => return Err("Exception ID must be integer or symbol".to_string()),
+            } else {
+                return Err("Exception ID must be integer or symbol".to_string());
             };
 
             // Parse variable
-            let var = clause_vec[1].as_symbol()?;
+            let var = clause_vec[1]
+                .as_symbol()
+                .ok_or("Expected symbol in handler-case variable")?;
+            let var = SymbolId(var);
 
             // Parse handler code
             let handler_code = Box::new(value_to_expr_with_scope(
@@ -95,23 +99,23 @@ pub fn convert_handler_bind(
         }
 
         // Parse exception ID
-        let exception_id = match &spec_vec[0] {
-            Value::Int(id) => *id as u32,
-            Value::Symbol(sym) => {
-                let name = symbols.name(*sym).unwrap_or("unknown");
-                match name {
-                    "condition" => 1,
-                    "error" => 2,
-                    "type-error" => 3,
-                    "division-by-zero" => 4,
-                    "undefined-variable" => 5,
-                    "arity-error" => 6,
-                    "warning" => 7,
-                    "style-warning" => 8,
-                    _ => return Err(format!("Unknown exception type: {}", name)),
-                }
+        let exception_id = if let Some(id) = spec_vec[0].as_int() {
+            id as u32
+        } else if let Some(sym) = spec_vec[0].as_symbol() {
+            let name = symbols.name(SymbolId(sym)).unwrap_or("unknown");
+            match name {
+                "condition" => 1,
+                "error" => 2,
+                "type-error" => 3,
+                "division-by-zero" => 4,
+                "undefined-variable" => 5,
+                "arity-error" => 6,
+                "warning" => 7,
+                "style-warning" => 8,
+                _ => return Err(format!("Unknown exception type: {}", name)),
             }
-            _ => return Err("Exception ID must be integer or symbol".to_string()),
+        } else {
+            return Err("Exception ID must be integer or symbol".to_string());
         };
 
         // Parse handler function
@@ -154,8 +158,8 @@ pub fn convert_try(
             if v.is_empty() {
                 return Err("Empty clause in try expression".to_string());
             }
-            if let Value::Symbol(keyword) = &v[0] {
-                let keyword_str = symbols.name(*keyword).unwrap_or("unknown");
+            if let Some(keyword) = v[0].as_symbol() {
+                let keyword_str = symbols.name(SymbolId(keyword)).unwrap_or("unknown");
                 match keyword_str {
                     "catch" => {
                         if v.len() != 3 {
@@ -164,7 +168,10 @@ pub fn convert_try(
                                     .to_string(),
                             );
                         }
-                        let var = v[1].as_symbol()?;
+                        let var = v[1]
+                            .as_symbol()
+                            .ok_or("Expected symbol in catch variable")?;
+                        let var = SymbolId(var);
                         let handler =
                             Box::new(value_to_expr_with_scope(&v[2], symbols, scope_stack)?);
                         catch_clause = Some((var, handler));

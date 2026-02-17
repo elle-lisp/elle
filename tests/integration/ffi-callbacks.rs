@@ -39,7 +39,7 @@ fn test_callback_wrapper() {
 #[test]
 fn test_callback_with_closure_registration() {
     // Create a closure value
-    let closure = Rc::new(Value::Int(100));
+    let closure = Rc::new(Value::int(100));
 
     // Create and register callback
     let (id, _info) = create_callback(vec![], CType::Int);
@@ -48,7 +48,7 @@ fn test_callback_with_closure_registration() {
     // Retrieve and verify
     let retrieved = get_callback(id);
     assert!(retrieved.is_some());
-    assert_eq!(*retrieved.unwrap(), Value::Int(100));
+    assert_eq!(*retrieved.unwrap(), Value::int(100));
 
     // Cleanup
     assert!(unregister_callback(id));
@@ -58,9 +58,9 @@ fn test_callback_with_closure_registration() {
 #[test]
 fn test_multiple_callbacks_registration() {
     // Create multiple closures
-    let closure1 = Rc::new(Value::Bool(true));
-    let closure2 = Rc::new(Value::Float(std::f64::consts::PI));
-    let closure3 = Rc::new(Value::String("callback".into()));
+    let closure1 = Rc::new(Value::bool(true));
+    let closure2 = Rc::new(Value::float(std::f64::consts::PI));
+    let closure3 = Rc::new(Value::string("callback"));
 
     // Register all callbacks
     let (id1, _) = create_callback(vec![], CType::Bool);
@@ -72,17 +72,18 @@ fn test_multiple_callbacks_registration() {
     assert!(register_callback(id3, closure3.clone()));
 
     // Verify all retrieved
-    assert_eq!(*get_callback(id1).unwrap(), Value::Bool(true));
-    match get_callback(id2).unwrap().as_ref() {
-        Value::Float(f) => assert!((f - std::f64::consts::PI).abs() < 0.01),
-        _ => panic!("Expected Float"),
+    assert_eq!(*get_callback(id1).unwrap(), Value::bool(true));
+    if let Some(f) = get_callback(id2).unwrap().as_ref().as_float() {
+        assert!((f - std::f64::consts::PI).abs() < 0.01)
+    } else {
+        panic!("Expected Float")
     }
-    match get_callback(id3).unwrap().as_ref() {
-        Value::String(s) => assert_eq!(s.as_ref(), "callback"),
-        _ => panic!("Expected String"),
+    let val3 = get_callback(id3).unwrap();
+    if let Some(s) = val3.as_ref().as_string() {
+        assert_eq!(s, "callback");
+    } else {
+        panic!("Expected String");
     }
-
-    // Cleanup
     assert!(unregister_callback(id1));
     assert!(unregister_callback(id2));
     assert!(unregister_callback(id3));
@@ -90,18 +91,18 @@ fn test_multiple_callbacks_registration() {
 
 #[test]
 fn test_callback_prevents_duplicate_registration() {
-    let closure = Rc::new(Value::Int(42));
+    let closure = Rc::new(Value::int(42));
     let (id, _) = create_callback(vec![], CType::Int);
 
     // First registration should succeed
     assert!(register_callback(id, closure.clone()));
 
     // Second registration should fail
-    let closure2 = Rc::new(Value::Int(99));
+    let closure2 = Rc::new(Value::int(99));
     assert!(!register_callback(id, closure2));
 
     // Original closure should still be there
-    assert_eq!(*get_callback(id).unwrap(), Value::Int(42));
+    assert_eq!(*get_callback(id).unwrap(), Value::int(42));
 
     // Cleanup
     unregister_callback(id);
@@ -133,7 +134,7 @@ fn test_callback_various_signatures() {
 #[test]
 fn test_callback_lifecycle() {
     // Test full callback lifecycle
-    let closure = Rc::new(Value::String("lifecycle test".into()));
+    let closure = Rc::new(Value::string("lifecycle test"));
     let (id, _) = create_callback(vec![CType::Int], CType::Pointer(Box::new(CType::Char)));
 
     // Initially not registered
@@ -144,22 +145,22 @@ fn test_callback_lifecycle() {
     assert!(get_callback(id).is_some());
 
     // Cannot re-register
-    let closure2 = Rc::new(Value::String("new".into()));
+    let closure2 = Rc::new(Value::string("new"));
     assert!(!register_callback(id, closure2));
 
     // Original still there
     let retrieved = get_callback(id).unwrap();
-    match retrieved.as_ref() {
-        Value::String(s) => assert_eq!(s.as_ref(), "lifecycle test"),
-        _ => panic!("Expected String"),
+    if let Some(s) = retrieved.as_ref().as_string() {
+        assert_eq!(s, "lifecycle test");
+    } else {
+        panic!("Expected String");
     }
-
     // Unregister
     assert!(unregister_callback(id));
     assert!(get_callback(id).is_none());
 
     // Can register again after unregistering
-    let closure3 = Rc::new(Value::String("second round".into()));
+    let closure3 = Rc::new(Value::string("second round"));
     assert!(register_callback(id, closure3));
     assert!(get_callback(id).is_some());
 
@@ -171,14 +172,14 @@ fn test_callback_lifecycle() {
 fn test_callback_with_complex_values() {
     // Test callbacks with complex Elle values
     let list = cons(
-        Value::Int(1),
-        cons(Value::Int(2), cons(Value::Int(3), Value::Nil)),
+        Value::int(1),
+        cons(Value::int(2), cons(Value::int(3), Value::NIL)),
     );
-    let vector = Value::Vector(std::rc::Rc::new(vec![
-        Value::Int(10),
-        Value::Int(20),
-        Value::Int(30),
-    ]));
+    let vector = Value::vector(vec![
+        Value::int(10),
+        Value::int(20),
+        Value::int(30),
+    ]);
 
     let (id1, _) = create_callback(vec![], CType::Pointer(Box::new(CType::Int)));
     let (id2, _) = create_callback(vec![], CType::Pointer(Box::new(CType::Int)));
@@ -207,7 +208,7 @@ fn test_callback_error_cases() {
     assert!(!unregister_callback(9999));
 
     // Register with valid ID
-    let closure = Rc::new(Value::Int(42));
+    let closure = Rc::new(Value::int(42));
     assert!(register_callback(id, closure));
 
     // Unregister valid callback

@@ -20,14 +20,14 @@ fn eval(input: &str) -> Result<Value, String> {
 fn test_exception_message_extraction_for_filtering() {
     // Extract message to use in filtering logic
     let result = eval(r#"(exception-message (exception "timeout"))"#).unwrap();
-    assert_eq!(result, Value::String("timeout".into()));
+    assert_eq!(result, Value::string("timeout"));
 }
 
 #[test]
 fn test_exception_data_extraction_for_filtering() {
     // Extract data to use in filtering logic
     let result = eval(r#"(exception-data (exception "error" 500))"#).unwrap();
-    assert_eq!(result, Value::Int(500));
+    assert_eq!(result, Value::int(500));
 }
 
 #[test]
@@ -36,8 +36,8 @@ fn test_filtering_by_http_error_code() {
     let exc_404 = eval(r#"(exception-data (exception "http" 404))"#).unwrap();
     let exc_500 = eval(r#"(exception-data (exception "http" 500))"#).unwrap();
 
-    assert_eq!(exc_404, Value::Int(404));
-    assert_eq!(exc_500, Value::Int(500));
+    assert_eq!(exc_404, Value::int(404));
+    assert_eq!(exc_500, Value::int(500));
 }
 
 #[test]
@@ -47,9 +47,9 @@ fn test_filtering_network_errors() {
     let refused = eval(r#"(exception-message (exception "connection-refused"))"#).unwrap();
     let unreachable = eval(r#"(exception-message (exception "network-unreachable"))"#).unwrap();
 
-    assert_eq!(timeout, Value::String("timeout".into()));
-    assert_eq!(refused, Value::String("connection-refused".into()));
-    assert_eq!(unreachable, Value::String("network-unreachable".into()));
+    assert_eq!(timeout, Value::string("timeout"));
+    assert_eq!(refused, Value::string("connection-refused"));
+    assert_eq!(unreachable, Value::string("network-unreachable"));
 }
 
 #[test]
@@ -59,10 +59,10 @@ fn test_filtering_with_comparison_operators() {
 
     // Filter: is this a server error (>= 500)?
     let is_server_error = eval("(>= 500 500)").unwrap();
-    assert_eq!(is_server_error, Value::Bool(true));
+    assert_eq!(is_server_error, Value::bool(true));
 
     let code_404 = eval(r#"(exception-data (exception "http" 404))"#).unwrap();
-    assert_eq!(code_404, Value::Int(404));
+    assert_eq!(code_404, Value::int(404));
 }
 
 #[test]
@@ -74,9 +74,9 @@ fn test_filtering_by_exception_category() {
     let auth_exc_data = eval(r#"(exception-data (exception "auth" (list "code" 3)))"#).unwrap();
 
     // All should be lists
-    assert!(matches!(network_exc_data, Value::Cons(_)));
-    assert!(matches!(db_exc_data, Value::Cons(_)));
-    assert!(matches!(auth_exc_data, Value::Cons(_)));
+    assert!((network_exc_data).is_cons());
+    assert!((db_exc_data).is_cons());
+    assert!((auth_exc_data).is_cons());
 }
 
 #[test]
@@ -86,9 +86,9 @@ fn test_filtering_authentication_errors() {
     let expired_token = eval(r#"(exception-message (exception "expired-token"))"#).unwrap();
     let missing_creds = eval(r#"(exception-message (exception "missing-credentials"))"#).unwrap();
 
-    assert_eq!(invalid_token, Value::String("invalid-token".into()));
-    assert_eq!(expired_token, Value::String("expired-token".into()));
-    assert_eq!(missing_creds, Value::String("missing-credentials".into()));
+    assert_eq!(invalid_token, Value::string("invalid-token"));
+    assert_eq!(expired_token, Value::string("expired-token"));
+    assert_eq!(missing_creds, Value::string("missing-credentials"));
 }
 
 #[test]
@@ -99,8 +99,8 @@ fn test_filtering_database_errors() {
     let constraint_violation =
         eval(r#"(exception "database" (list "type" "constraint" "code" 2))"#).unwrap();
 
-    assert!(matches!(connection_lost, Value::Exception(_)));
-    assert!(matches!(constraint_violation, Value::Exception(_)));
+    assert!(connection_lost.as_condition().is_some());
+    assert!(constraint_violation.as_condition().is_some());
 }
 
 #[test]
@@ -111,17 +111,18 @@ fn test_filtering_validation_errors() {
     let password_error =
         eval(r#"(exception "validation" (list "field" "password" "error" "too-short"))"#).unwrap();
 
-    assert!(matches!(email_error, Value::Exception(_)));
-    assert!(matches!(password_error, Value::Exception(_)));
+    assert!(email_error.as_condition().is_some());
+    assert!(password_error.as_condition().is_some());
 }
 
 #[test]
 fn test_filtering_with_string_patterns() {
     // Extract messages and check patterns
     let timeout_msg = eval(r#"(exception-message (exception "timeout-reached"))"#).unwrap();
-    let msg_str = match timeout_msg {
-        Value::String(s) => s.to_string(),
-        _ => panic!("Expected string"),
+    let msg_str = if let Some(s) = timeout_msg.as_string() {
+        s.to_string()
+    } else {
+        panic!("Expected string")
     };
 
     // Can check if message contains pattern
@@ -135,9 +136,9 @@ fn test_filtering_http_status_codes() {
     let not_found = eval(r#"(exception "http" 404)"#).unwrap();
     let server_error = eval(r#"(exception "http" 500)"#).unwrap();
 
-    assert!(matches!(client_error, Value::Exception(_)));
-    assert!(matches!(not_found, Value::Exception(_)));
-    assert!(matches!(server_error, Value::Exception(_)));
+    assert!(client_error.as_condition().is_some());
+    assert!(not_found.as_condition().is_some());
+    assert!(server_error.as_condition().is_some());
 }
 
 #[test]
@@ -160,9 +161,9 @@ fn test_filtering_with_numeric_error_codes() {
     let code_2 = eval(r#"(exception "error" 2)"#).unwrap();
     let code_3 = eval(r#"(exception "error" 3)"#).unwrap();
 
-    assert!(matches!(code_1, Value::Exception(_)));
-    assert!(matches!(code_2, Value::Exception(_)));
-    assert!(matches!(code_3, Value::Exception(_)));
+    assert!(code_1.as_condition().is_some());
+    assert!(code_2.as_condition().is_some());
+    assert!(code_3.as_condition().is_some());
 }
 
 #[test]
@@ -171,8 +172,8 @@ fn test_filtering_cascading_errors() {
     let root_cause = eval(r#"(exception "root" (list "retry" #t))"#).unwrap();
     let wrapped_error = eval(r#"(exception "wrapped" (list "original" "timeout"))"#).unwrap();
 
-    assert!(matches!(root_cause, Value::Exception(_)));
-    assert!(matches!(wrapped_error, Value::Exception(_)));
+    assert!(root_cause.as_condition().is_some());
+    assert!(wrapped_error.as_condition().is_some());
 }
 
 #[test]
@@ -182,9 +183,9 @@ fn test_filtering_numeric_range_matching() {
     let mid_code = eval(r#"(exception-data (exception "api" 200))"#).unwrap();
     let high_code = eval(r#"(exception-data (exception "api" 500))"#).unwrap();
 
-    assert_eq!(low_code, Value::Int(100));
-    assert_eq!(mid_code, Value::Int(200));
-    assert_eq!(high_code, Value::Int(500));
+    assert_eq!(low_code, Value::int(100));
+    assert_eq!(mid_code, Value::int(200));
+    assert_eq!(high_code, Value::int(500));
 }
 
 #[test]
@@ -198,7 +199,7 @@ fn test_filtering_exception_collections() {
     assert_eq!(vec.len(), 3);
 
     for exc in vec {
-        assert!(matches!(exc, Value::Exception(_)));
+        assert!(exc.as_condition().is_some());
     }
 }
 
@@ -208,7 +209,7 @@ fn test_filtering_with_try_block() {
     let result = eval(r#"(try (exception "network-timeout" 504) (catch e e))"#).unwrap();
 
     // Result should be the exception (from try, not catch which isn't functional yet)
-    assert!(matches!(result, Value::Exception(_)));
+    assert!(result.as_condition().is_some());
 }
 
 #[test]
@@ -218,7 +219,7 @@ fn test_filtering_semantic_error_categories() {
     let permanent = eval(r#"(exception "permanent" "fix-required")"#).unwrap();
     let retriable = eval(r#"(exception "retriable" (list "attempts" 3))"#).unwrap();
 
-    assert!(matches!(transient, Value::Exception(_)));
-    assert!(matches!(permanent, Value::Exception(_)));
-    assert!(matches!(retriable, Value::Exception(_)));
+    assert!(transient.as_condition().is_some());
+    assert!(permanent.as_condition().is_some());
+    assert!(retriable.as_condition().is_some());
 }

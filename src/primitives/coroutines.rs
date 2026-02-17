@@ -9,12 +9,14 @@
 //! - coroutine->iterator: Convert coroutine to iterator
 //! - coroutine-next: Get next value from coroutine iterator
 
+use crate::compiler::cps::primitives::old_value_to_new;
 use crate::compiler::cps::{
     Action, Continuation, CpsInterpreter, CpsTransformer, Trampoline, TrampolineResult,
 };
 use crate::compiler::effects::EffectContext;
 use crate::error::LResult;
-use crate::value::{Coroutine, CoroutineState, Value};
+use crate::value::{Condition, Coroutine, CoroutineState, Value};
+use crate::value_old::Value as OldValue;
 use crate::vm::{VmResult, VM};
 use std::cell::RefMut;
 use std::rc::Rc;
@@ -22,134 +24,124 @@ use std::rc::Rc;
 /// F1: Create a coroutine from a function
 ///
 /// (make-coroutine fn) -> coroutine
-pub fn prim_make_coroutine(args: &[Value]) -> LResult<Value> {
+pub fn prim_make_coroutine(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!(
-            "make-coroutine requires exactly 1 argument, got {}",
+        return Err(Condition::arity_error(format!(
+            "make-coroutine: expected 1 argument, got {}",
             args.len()
-        )
-        .into());
+        )));
     }
 
-    match &args[0] {
-        Value::Closure(c) => {
-            let coroutine = Coroutine::new(c.clone());
-            Ok(Value::Coroutine(Rc::new(std::cell::RefCell::new(
-                coroutine,
-            ))))
+    if let Some(c) = args[0].as_closure() {
+        let coroutine = Coroutine::new((*c).clone());
+        Ok(Value::coroutine(coroutine))
+    } else if let Some(jc) = args[0].as_jit_closure() {
+        if let Some(source) = &jc.source {
+            let coroutine = Coroutine::new(source.clone());
+            Ok(Value::coroutine(coroutine))
+        } else {
+            Err(Condition::error(
+                "make-coroutine: JitClosure has no source for coroutine",
+            ))
         }
-        Value::JitClosure(jc) => {
-            if let Some(source) = &jc.source {
-                let coroutine = Coroutine::new(source.clone());
-                Ok(Value::Coroutine(Rc::new(std::cell::RefCell::new(
-                    coroutine,
-                ))))
-            } else {
-                Err("JitClosure has no source for coroutine".to_string().into())
-            }
-        }
-        other => Err(format!(
-            "make-coroutine requires a function, got {}",
-            other.type_name()
-        )
-        .into()),
+    } else {
+        Err(Condition::type_error(format!(
+            "make-coroutine: expected function, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// F3: Get the status of a coroutine
 ///
 /// (coroutine-status co) -> string
-pub fn prim_coroutine_status(args: &[Value]) -> LResult<Value> {
+pub fn prim_coroutine_status(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!(
-            "coroutine-status requires exactly 1 argument, got {}",
+        return Err(Condition::arity_error(format!(
+            "coroutine-status: expected 1 argument, got {}",
             args.len()
-        )
-        .into());
+        )));
     }
 
-    match &args[0] {
-        Value::Coroutine(co) => {
-            let borrowed = co.borrow();
-            let status = match &borrowed.state {
-                CoroutineState::Created => "created",
-                CoroutineState::Running => "running",
-                CoroutineState::Suspended => "suspended",
-                CoroutineState::Done => "done",
-                CoroutineState::Error(_) => "error",
-            };
-            Ok(Value::String(status.to_string().into()))
-        }
-        other => Err(format!(
-            "coroutine-status requires a coroutine, got {}",
-            other.type_name()
-        )
-        .into()),
+    if let Some(co) = args[0].as_coroutine() {
+        let borrowed = co.borrow();
+        let status = match &borrowed.state {
+            CoroutineState::Created => "created",
+            CoroutineState::Running => "running",
+            CoroutineState::Suspended => "suspended",
+            CoroutineState::Done => "done",
+            CoroutineState::Error(_) => "error",
+        };
+        Ok(Value::string(status))
+    } else {
+        Err(Condition::type_error(format!(
+            "coroutine-status: expected coroutine, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Check if a coroutine is done
 ///
 /// (coroutine-done? co) -> bool
-pub fn prim_coroutine_done(args: &[Value]) -> LResult<Value> {
+pub fn prim_coroutine_done(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!(
-            "coroutine-done? requires exactly 1 argument, got {}",
+        return Err(Condition::arity_error(format!(
+            "coroutine-done?: expected 1 argument, got {}",
             args.len()
-        )
-        .into());
+        )));
     }
 
-    match &args[0] {
-        Value::Coroutine(co) => {
-            let borrowed = co.borrow();
-            Ok(Value::Bool(matches!(
-                borrowed.state,
-                CoroutineState::Done | CoroutineState::Error(_)
-            )))
-        }
-        other => Err(format!(
-            "coroutine-done? requires a coroutine, got {}",
-            other.type_name()
-        )
-        .into()),
+    if let Some(co) = args[0].as_coroutine() {
+        let borrowed = co.borrow();
+        Ok(Value::bool(matches!(
+            borrowed.state,
+            CoroutineState::Done | CoroutineState::Error(_)
+        )))
+    } else {
+        Err(Condition::type_error(format!(
+            "coroutine-done?: expected coroutine, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Get the last yielded value from a coroutine
 ///
 /// (coroutine-value co) -> value
-pub fn prim_coroutine_value(args: &[Value]) -> LResult<Value> {
+pub fn prim_coroutine_value(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!(
-            "coroutine-value requires exactly 1 argument, got {}",
+        return Err(Condition::arity_error(format!(
+            "coroutine-value: expected 1 argument, got {}",
             args.len()
-        )
-        .into());
+        )));
     }
 
-    match &args[0] {
-        Value::Coroutine(co) => {
-            let borrowed = co.borrow();
-            Ok(borrowed.yielded_value.clone().unwrap_or(Value::Nil))
-        }
-        other => Err(format!(
-            "coroutine-value requires a coroutine, got {}",
-            other.type_name()
-        )
-        .into()),
+    if let Some(co) = args[0].as_coroutine() {
+        let borrowed = co.borrow();
+        Ok(old_value_to_new(
+            &borrowed.yielded_value.clone().unwrap_or(OldValue::Nil),
+        ))
+    } else {
+        Err(Condition::type_error(format!(
+            "coroutine-value: expected coroutine, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
 /// Check if a value is a coroutine
 ///
 /// (coroutine? val) -> bool
-pub fn prim_is_coroutine(args: &[Value]) -> LResult<Value> {
+pub fn prim_is_coroutine(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!("coroutine? requires exactly 1 argument, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "coroutine?: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
-    Ok(Value::Bool(matches!(args[0], Value::Coroutine(_))))
+    Ok(Value::bool(args[0].is_coroutine()))
 }
 
 /// F2/F4: Resume a coroutine
@@ -162,168 +154,204 @@ pub fn prim_is_coroutine(args: &[Value]) -> LResult<Value> {
 /// If the coroutine completes, returns the final value.
 pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
     if args.is_empty() || args.len() > 2 {
-        return Err(format!(
-            "coroutine-resume requires 1 or 2 arguments, got {}",
+        let cond = Condition::arity_error(format!(
+            "coroutine-resume: expected 1-2 arguments, got {}",
             args.len()
-        )
-        .into());
+        ));
+        vm.current_exception = Some(std::rc::Rc::new(cond));
+        return Ok(Value::NIL);
     }
 
-    let resume_value = args.get(1).cloned().unwrap_or(Value::Nil);
+    let resume_value = args.get(1).cloned().unwrap_or(Value::EMPTY_LIST);
 
-    match &args[0] {
-        Value::Coroutine(co) => {
-            // Borrow mutably to update the coroutine state
-            let mut borrowed = co.borrow_mut();
+    if let Some(co) = args[0].as_coroutine() {
+        // Borrow mutably to update the coroutine state
+        let mut borrowed = co.borrow_mut();
 
-            match &borrowed.state {
-                CoroutineState::Created => {
-                    // Check if this closure yields and has source AST for CPS execution
-                    // We re-infer the effect at runtime because the closure might call
-                    // functions that weren't defined at compile time
-                    let use_cps = if let Some(ast) = &borrowed.closure.source_ast {
-                        // Re-infer effect with current global definitions
-                        let mut effect_ctx = EffectContext::new();
-                        register_global_effects(&mut effect_ctx, vm);
-                        let runtime_effect = effect_ctx.infer(&ast.body);
-                        runtime_effect.may_yield()
-                    } else {
-                        borrowed.closure.effect.may_yield()
-                    };
+        match &borrowed.state {
+            CoroutineState::Created => {
+                // Check if this closure yields and has source AST for CPS execution
+                // We re-infer the effect at runtime because the closure might call
+                // functions that weren't defined at compile time
+                let use_cps = if let Some(ast) = &borrowed.closure.source_ast {
+                    // Re-infer effect with current global definitions
+                    let mut effect_ctx = EffectContext::new();
+                    register_global_effects(&mut effect_ctx, vm);
+                    let runtime_effect = effect_ctx.infer(&ast.body);
+                    runtime_effect.may_yield()
+                } else {
+                    borrowed.closure.effect.may_yield()
+                };
 
-                    if use_cps {
-                        // Use CPS execution path
-                        return execute_coroutine_cps(co.clone(), borrowed, vm);
-                    }
-
-                    // Fall back to bytecode execution path
-                    // First resume - start execution
-                    borrowed.state = CoroutineState::Running;
-
-                    // Get closure info before releasing borrow
-                    let bytecode = borrowed.closure.bytecode.clone();
-                    let constants = borrowed.closure.constants.clone();
-                    let closure_env = borrowed.closure.env.clone();
-                    let num_locals = borrowed.closure.num_locals;
-                    let num_captures = borrowed.closure.num_captures;
-
-                    // Release the borrow before calling vm.execute_bytecode_coroutine
-                    drop(borrowed);
-
-                    // Set up the environment for the coroutine
-                    // The closure environment contains: [captures..., parameters..., locals...]
-                    // Since a coroutine is called with no arguments, we need to allocate space for locals
-                    let mut env = (*closure_env).clone();
-
-                    // Calculate number of locally-defined variables
-                    // num_locals = params.len() + captures.len() + locals.len()
-                    // Since a coroutine has no parameters, we need to allocate space for all locals
-                    let num_locally_defined = num_locals.saturating_sub(num_captures);
-
-                    // Add empty LocalCells for locally-defined variables
-                    for _ in env.len()..num_captures + num_locally_defined {
-                        let empty_cell = Value::LocalCell(std::rc::Rc::new(
-                            std::cell::RefCell::new(Box::new(Value::Nil)),
-                        ));
-                        env.push(empty_cell);
-                    }
-
-                    let env_rc = std::rc::Rc::new(env);
-
-                    // Enter coroutine context
-                    vm.enter_coroutine(co.clone());
-
-                    // Execute the closure with coroutine support
-                    let result =
-                        vm.execute_bytecode_coroutine(&bytecode, &constants, Some(&env_rc));
-
-                    // Exit coroutine context
-                    vm.exit_coroutine();
-
-                    // Re-borrow to update state
-                    let mut borrowed = co.borrow_mut();
-                    match result {
-                        Ok(VmResult::Done(value)) => {
-                            borrowed.state = CoroutineState::Done;
-                            borrowed.yielded_value = Some(value.clone());
-                            Ok(value)
-                        }
-                        Ok(VmResult::Yielded(value)) => {
-                            // Coroutine yielded - state already updated by Yield instruction
-                            borrowed.yielded_value = Some(value.clone());
-                            Ok(value)
-                        }
-                        Err(e) => {
-                            borrowed.state = CoroutineState::Error(e.clone());
-                            Err(e.into())
-                        }
-                    }
+                if use_cps {
+                    // Use CPS execution path
+                    return execute_coroutine_cps(co.clone(), borrowed, vm);
                 }
-                CoroutineState::Suspended => {
-                    // Check if we have a saved CPS continuation
-                    if let Some(continuation) = borrowed.saved_continuation.clone() {
-                        return resume_coroutine_cps(
-                            co.clone(),
-                            borrowed,
-                            continuation,
-                            resume_value,
-                            vm,
-                        );
-                    }
 
-                    // Fall back to bytecode resumption
-                    // Resume from suspension
-                    let context = borrowed
-                        .saved_context
-                        .clone()
-                        .ok_or("Suspended coroutine has no saved context")?;
-                    let bytecode = borrowed.closure.bytecode.clone();
-                    let constants = borrowed.closure.constants.clone();
+                // Fall back to bytecode execution path
+                // First resume - start execution
+                borrowed.state = CoroutineState::Running;
 
-                    // Release the borrow before calling resume_from_context
-                    drop(borrowed);
+                // Get closure info before releasing borrow
+                let bytecode = borrowed.closure.bytecode.clone();
+                let constants = borrowed.closure.constants.clone();
+                let closure_env = borrowed.closure.env.clone();
+                let num_locals = borrowed.closure.num_locals;
+                let num_captures = borrowed.closure.num_captures;
 
-                    // Enter coroutine context so resume_from_context can access current_coroutine()
-                    vm.enter_coroutine(co.clone());
+                // Release the borrow before calling vm.execute_bytecode_coroutine
+                drop(borrowed);
 
-                    // Resume from the saved context
-                    let result =
-                        vm.resume_from_context(context, resume_value, &bytecode, &constants);
+                // Set up the environment for the coroutine
+                // The closure environment contains: [captures..., parameters..., locals...]
+                // Since a coroutine is called with no arguments, we need to allocate space for locals
+                let mut env = (*closure_env).clone();
 
-                    // Exit coroutine context
-                    vm.exit_coroutine();
+                // Calculate number of locally-defined variables
+                // num_locals = params.len() + captures.len() + locals.len()
+                // Since a coroutine has no parameters, we need to allocate space for all locals
+                let num_locally_defined = num_locals.saturating_sub(num_captures);
 
-                    // Re-borrow to update state
-                    let mut borrowed = co.borrow_mut();
-                    match result {
-                        Ok(VmResult::Done(value)) => {
-                            borrowed.state = CoroutineState::Done;
-                            borrowed.yielded_value = Some(value.clone());
-                            Ok(value)
-                        }
-                        Ok(VmResult::Yielded(value)) => {
-                            // Coroutine yielded again - state already updated by Yield instruction
-                            borrowed.yielded_value = Some(value.clone());
-                            Ok(value)
-                        }
-                        Err(e) => {
-                            borrowed.state = CoroutineState::Error(e.clone());
-                            Err(e.into())
-                        }
-                    }
+                // Add empty LocalCells for locally-defined variables
+                for _ in env.len()..num_captures + num_locally_defined {
+                    let empty_cell = Value::local_cell(Value::EMPTY_LIST);
+                    env.push(empty_cell);
                 }
-                CoroutineState::Running => Err("Coroutine is already running".to_string().into()),
-                CoroutineState::Done => Err("Cannot resume completed coroutine".to_string().into()),
-                CoroutineState::Error(e) => {
-                    Err(format!("Cannot resume errored coroutine: {}", e).into())
+
+                let env_rc = std::rc::Rc::new(env);
+
+                // Enter coroutine context
+                vm.enter_coroutine(co.clone());
+
+                // Execute the closure with coroutine support
+                let result = vm.execute_bytecode_coroutine(&bytecode, &constants, Some(&env_rc));
+
+                // Exit coroutine context
+                vm.exit_coroutine();
+
+                // Re-borrow to update state
+                let mut borrowed = co.borrow_mut();
+                match result {
+                    Ok(VmResult::Done(value)) => {
+                        // Check if the coroutine body raised an uncaught exception.
+                        // If so, leave it on vm.current_exception for handler-case
+                        // to catch, and transition the coroutine to Error state.
+                        if vm.current_exception.is_some() {
+                            let msg = vm
+                                .current_exception
+                                .as_ref()
+                                .map(|e| e.message.clone())
+                                .unwrap_or_default();
+                            borrowed.state = CoroutineState::Error(msg);
+                            Ok(Value::NIL)
+                        } else {
+                            borrowed.state = CoroutineState::Done;
+                            borrowed.yielded_value = Some(new_value_to_old(value));
+                            Ok(value)
+                        }
+                    }
+                    Ok(VmResult::Yielded(value)) => {
+                        // Coroutine yielded - state already updated by Yield instruction
+                        borrowed.yielded_value = Some(new_value_to_old(value));
+                        Ok(value)
+                    }
+                    Err(e) => {
+                        borrowed.state = CoroutineState::Error(e.clone());
+                        Err(e.into())
+                    }
                 }
             }
+            CoroutineState::Suspended => {
+                // Check if we have a saved CPS continuation
+                if let Some(continuation) = borrowed.saved_continuation.clone() {
+                    return resume_coroutine_cps(
+                        co.clone(),
+                        borrowed,
+                        continuation,
+                        resume_value,
+                        vm,
+                    );
+                }
+
+                // Fall back to bytecode resumption
+                // Resume from suspension
+                let context = borrowed
+                    .saved_context
+                    .clone()
+                    .ok_or("Suspended coroutine has no saved context")?;
+                let bytecode = borrowed.closure.bytecode.clone();
+                let constants = borrowed.closure.constants.clone();
+
+                // Release the borrow before calling resume_from_context
+                drop(borrowed);
+
+                // Enter coroutine context so resume_from_context can access current_coroutine()
+                vm.enter_coroutine(co.clone());
+
+                // Resume from the saved context
+                let result = vm.resume_from_context(context, resume_value, &bytecode, &constants);
+
+                // Exit coroutine context
+                vm.exit_coroutine();
+
+                // Re-borrow to update state
+                let mut borrowed = co.borrow_mut();
+                match result {
+                    Ok(VmResult::Done(value)) => {
+                        // Check if the coroutine body raised an uncaught exception.
+                        // If so, leave it on vm.current_exception for handler-case
+                        // to catch, and transition the coroutine to Error state.
+                        if vm.current_exception.is_some() {
+                            let msg = vm
+                                .current_exception
+                                .as_ref()
+                                .map(|e| e.message.clone())
+                                .unwrap_or_default();
+                            borrowed.state = CoroutineState::Error(msg);
+                            Ok(Value::NIL)
+                        } else {
+                            borrowed.state = CoroutineState::Done;
+                            borrowed.yielded_value = Some(new_value_to_old(value));
+                            Ok(value)
+                        }
+                    }
+                    Ok(VmResult::Yielded(value)) => {
+                        // Coroutine yielded again - state already updated by Yield instruction
+                        borrowed.yielded_value = Some(new_value_to_old(value));
+                        Ok(value)
+                    }
+                    Err(e) => {
+                        borrowed.state = CoroutineState::Error(e.clone());
+                        Err(e.into())
+                    }
+                }
+            }
+            CoroutineState::Running => {
+                let cond = Condition::error("coroutine-resume: coroutine is already running");
+                vm.current_exception = Some(std::rc::Rc::new(cond));
+                Ok(Value::NIL)
+            }
+            CoroutineState::Done => {
+                let cond = Condition::error("coroutine-resume: cannot resume completed coroutine");
+                vm.current_exception = Some(std::rc::Rc::new(cond));
+                Ok(Value::NIL)
+            }
+            CoroutineState::Error(e) => {
+                let cond = Condition::error(format!(
+                    "coroutine-resume: cannot resume errored coroutine: {}",
+                    e
+                ));
+                vm.current_exception = Some(std::rc::Rc::new(cond));
+                Ok(Value::NIL)
+            }
         }
-        other => Err(format!(
-            "coroutine-resume requires a coroutine, got {}",
-            other.type_name()
-        )
-        .into()),
+    } else {
+        let cond = Condition::type_error(format!(
+            "coroutine-resume: expected coroutine, got {}",
+            args[0].type_name()
+        ));
+        vm.current_exception = Some(std::rc::Rc::new(cond));
+        Ok(Value::NIL)
     }
 }
 
@@ -354,9 +382,7 @@ fn execute_coroutine_cps(
     let num_locally_defined = num_locals.saturating_sub(num_captures);
 
     for _ in env.len()..num_captures + num_locally_defined {
-        let empty_cell = Value::LocalCell(std::rc::Rc::new(std::cell::RefCell::new(Box::new(
-            Value::Nil,
-        ))));
+        let empty_cell = Value::local_cell(Value::EMPTY_LIST);
         env.push(empty_cell);
     }
 
@@ -405,7 +431,7 @@ fn execute_coroutine_cps(
     match result {
         TrampolineResult::Done(value) => {
             borrowed.state = CoroutineState::Done;
-            borrowed.yielded_value = Some(value.clone());
+            borrowed.yielded_value = Some(new_value_to_old(value));
             borrowed.saved_continuation = None;
             borrowed.saved_env = None;
             Ok(value)
@@ -415,10 +441,14 @@ fn execute_coroutine_cps(
             continuation,
         } => {
             borrowed.state = CoroutineState::Suspended;
-            borrowed.yielded_value = Some(value.clone());
+            borrowed.yielded_value = Some(new_value_to_old(value));
             borrowed.saved_continuation = Some(continuation);
             // Save the environment so local variables persist across yields
-            borrowed.saved_env = Some(env_rc.clone());
+            // Convert the environment from new Values to old Values
+            let borrowed_env = env_rc.borrow();
+            let old_env: Vec<OldValue> =
+                borrowed_env.iter().map(|v| new_value_to_old(*v)).collect();
+            borrowed.saved_env = Some(std::rc::Rc::new(std::cell::RefCell::new(old_env)));
             Ok(value)
         }
         TrampolineResult::Error(e) => {
@@ -441,8 +471,14 @@ fn resume_coroutine_cps(
     borrowed.state = CoroutineState::Running;
     // Use saved environment if available, otherwise create from closure's environment
     let env = borrowed.saved_env.clone().unwrap_or_else(|| {
-        // Convert immutable closure env to mutable RefCell env
-        Rc::new(std::cell::RefCell::new((*borrowed.closure.env).clone()))
+        // Convert immutable closure env to mutable RefCell env with old Values
+        let old_env: Vec<OldValue> = borrowed
+            .closure
+            .env
+            .iter()
+            .map(|v| new_value_to_old(*v))
+            .collect();
+        Rc::new(std::cell::RefCell::new(old_env))
     });
 
     // Release borrow
@@ -452,9 +488,14 @@ fn resume_coroutine_cps(
     vm.coroutine_stack.push(co.clone());
 
     // Apply resume value to continuation
+    // Convert environment back to new Values for the CPS interpreter
+    let borrowed_env = env.borrow();
+    let new_env: Vec<Value> = borrowed_env.iter().map(old_value_to_new).collect();
+    let new_env_rc = std::rc::Rc::new(std::cell::RefCell::new(new_env));
+
     let mut trampoline = Trampoline::new();
     let initial_action = Action::return_value(resume_value, continuation);
-    let result = trampoline.run_with_vm(initial_action, vm, &env);
+    let result = trampoline.run_with_vm(initial_action, vm, &new_env_rc);
 
     // Pop coroutine from stack
     vm.coroutine_stack.pop();
@@ -464,7 +505,7 @@ fn resume_coroutine_cps(
     match result {
         TrampolineResult::Done(value) => {
             borrowed.state = CoroutineState::Done;
-            borrowed.yielded_value = Some(value.clone());
+            borrowed.yielded_value = Some(new_value_to_old(value));
             borrowed.saved_continuation = None;
             borrowed.saved_env = None;
             Ok(value)
@@ -474,7 +515,7 @@ fn resume_coroutine_cps(
             continuation,
         } => {
             borrowed.state = CoroutineState::Suspended;
-            borrowed.yielded_value = Some(value.clone());
+            borrowed.yielded_value = Some(new_value_to_old(value));
             borrowed.saved_continuation = Some(continuation);
             // Keep the saved environment
             Ok(value)
@@ -495,10 +536,12 @@ fn register_global_effects(effect_ctx: &mut EffectContext, vm: &VM) {
     use crate::value::SymbolId;
 
     for (&sym_id, value) in &vm.globals {
-        let effect = match value {
-            Value::Closure(c) => c.effect,
-            Value::NativeFn(_) | Value::VmAwareFn(_) => Effect::Pure,
-            _ => continue, // Skip non-function values
+        let effect = if let Some(c) = value.as_closure() {
+            c.effect
+        } else if value.as_native_fn().is_some() || value.as_vm_aware_fn().is_some() {
+            Effect::Pure
+        } else {
+            continue; // Skip non-function values
         };
         effect_ctx.register_global(SymbolId(sym_id), effect);
     }
@@ -512,33 +555,50 @@ fn register_global_effects(effect_ctx: &mut EffectContext, vm: &VM) {
 /// then returns the sub-coroutine's final value.
 pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!("yield-from requires exactly 1 argument, got {}", args.len()).into());
+        let cond = Condition::arity_error(format!(
+            "yield-from: expected 1 argument, got {}",
+            args.len()
+        ));
+        vm.current_exception = Some(std::rc::Rc::new(cond));
+        return Ok(Value::NIL);
     }
 
-    match &args[0] {
-        Value::Coroutine(co) => {
-            // Resume the sub-coroutine once
-            let state = {
-                let borrowed = co.borrow();
-                borrowed.state.clone()
-            };
+    if let Some(co) = args[0].as_coroutine() {
+        // Resume the sub-coroutine once
+        let state = {
+            let borrowed = co.borrow();
+            borrowed.state.clone()
+        };
 
-            match &state {
-                CoroutineState::Created | CoroutineState::Suspended => {
-                    // Resume the coroutine once
-                    prim_coroutine_resume(&[Value::Coroutine(co.clone())], vm)
-                }
-                CoroutineState::Done => {
-                    let borrowed = co.borrow();
-                    Ok(borrowed.yielded_value.clone().unwrap_or(Value::Nil))
-                }
-                CoroutineState::Error(e) => Err(e.clone().into()),
-                CoroutineState::Running => {
-                    Err("Sub-coroutine is already running".to_string().into())
-                }
+        match &state {
+            CoroutineState::Created | CoroutineState::Suspended => {
+                // Resume the coroutine once
+                prim_coroutine_resume(&[args[0]], vm)
+            }
+            CoroutineState::Done => {
+                let borrowed = co.borrow();
+                Ok(old_value_to_new(
+                    &borrowed.yielded_value.clone().unwrap_or(OldValue::Nil),
+                ))
+            }
+            CoroutineState::Error(e) => {
+                let cond = Condition::error(format!("yield-from: sub-coroutine errored: {}", e));
+                vm.current_exception = Some(std::rc::Rc::new(cond));
+                Ok(Value::NIL)
+            }
+            CoroutineState::Running => {
+                let cond = Condition::error("yield-from: sub-coroutine is already running");
+                vm.current_exception = Some(std::rc::Rc::new(cond));
+                Ok(Value::NIL)
             }
         }
-        other => Err(format!("yield-from requires a coroutine, got {}", other.type_name()).into()),
+    } else {
+        let cond = Condition::type_error(format!(
+            "yield-from: expected coroutine, got {}",
+            args[0].type_name()
+        ));
+        vm.current_exception = Some(std::rc::Rc::new(cond));
+        Ok(Value::NIL)
     }
 }
 
@@ -547,26 +607,23 @@ pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> LResult<Value> {
 /// (coroutine->iterator co) -> iterator
 ///
 /// Creates an iterator that yields values from the coroutine.
-pub fn prim_coroutine_to_iterator(args: &[Value]) -> LResult<Value> {
+pub fn prim_coroutine_to_iterator(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!(
-            "coroutine->iterator requires exactly 1 argument, got {}",
+        return Err(Condition::arity_error(format!(
+            "coroutine->iterator: expected 1 argument, got {}",
             args.len()
-        )
-        .into());
+        )));
     }
 
-    match &args[0] {
-        Value::Coroutine(_) => {
-            // For now, just return the coroutine itself
-            // The for loop implementation will need to recognize coroutines
-            Ok(args[0].clone())
-        }
-        other => Err(format!(
-            "coroutine->iterator requires a coroutine, got {}",
-            other.type_name()
-        )
-        .into()),
+    if args[0].is_coroutine() {
+        // For now, just return the coroutine itself
+        // The for loop implementation will need to recognize coroutines
+        Ok(args[0])
+    } else {
+        Err(Condition::type_error(format!(
+            "coroutine->iterator: expected coroutine, got {}",
+            args[0].type_name()
+        )))
     }
 }
 
@@ -577,37 +634,128 @@ pub fn prim_coroutine_to_iterator(args: &[Value]) -> LResult<Value> {
 /// Returns a pair of (value, done-flag).
 pub fn prim_coroutine_next(args: &[Value], vm: &mut VM) -> LResult<Value> {
     if args.len() != 1 {
-        return Err(format!(
-            "coroutine-next requires exactly 1 argument, got {}",
+        let cond = Condition::arity_error(format!(
+            "coroutine-next: expected 1 argument, got {}",
             args.len()
-        )
-        .into());
+        ));
+        vm.current_exception = Some(std::rc::Rc::new(cond));
+        return Ok(Value::NIL);
     }
 
-    match &args[0] {
-        Value::Coroutine(co) => {
-            let is_done = {
-                let borrowed = co.borrow();
-                matches!(borrowed.state, CoroutineState::Done)
-            };
+    if let Some(co) = args[0].as_coroutine() {
+        let is_done = {
+            let borrowed = co.borrow();
+            matches!(borrowed.state, CoroutineState::Done)
+        };
 
-            if is_done {
-                // Return (nil . #t) to indicate done
-                Ok(crate::value::cons(Value::Nil, Value::Bool(true)))
-            } else {
-                // Resume and get next value
-                let result = prim_coroutine_resume(args, vm)?;
+        if is_done {
+            // Return (nil . #t) to indicate done
+            Ok(crate::value::cons(Value::EMPTY_LIST, Value::bool(true)))
+        } else {
+            // Resume and get next value
+            let result = prim_coroutine_resume(args, vm)?;
 
-                // Check if done after resume
-                // For now, assume not done unless we got an error
-                Ok(crate::value::cons(result, Value::Bool(false)))
+            // Check if done after resume
+            // For now, assume not done unless we got an error
+            Ok(crate::value::cons(result, Value::bool(false)))
+        }
+    } else {
+        let cond = Condition::type_error(format!(
+            "coroutine-next: expected coroutine, got {}",
+            args[0].type_name()
+        ));
+        vm.current_exception = Some(std::rc::Rc::new(cond));
+        Ok(Value::NIL)
+    }
+}
+
+/// Convert a new Value to an old Value
+/// This is a temporary function for the migration period
+pub fn new_value_to_old(val: Value) -> OldValue {
+    use crate::value::heap::{deref, HeapObject};
+
+    if let Some(b) = val.as_bool() {
+        OldValue::Bool(b)
+    } else if let Some(i) = val.as_int() {
+        OldValue::Int(i)
+    } else if let Some(f) = val.as_float() {
+        OldValue::Float(f)
+    } else if let Some(sym_id) = val.as_symbol() {
+        OldValue::Symbol(crate::value::SymbolId(sym_id))
+    } else if let Some(kw_id) = val.as_keyword() {
+        OldValue::Keyword(crate::value::SymbolId(kw_id))
+    } else if val.is_nil() {
+        OldValue::Nil
+    } else if val.is_heap() {
+        unsafe {
+            match deref(val) {
+                HeapObject::String(s) => OldValue::String(s.clone().into()),
+                HeapObject::Cons(cons) => {
+                    OldValue::Cons(std::rc::Rc::new(crate::value_old::Cons {
+                        first: new_value_to_old(cons.first),
+                        rest: new_value_to_old(cons.rest),
+                    }))
+                }
+                HeapObject::Vector(v) => {
+                    let borrowed = v.borrow();
+                    let old_vals: Vec<OldValue> =
+                        borrowed.iter().map(|v| new_value_to_old(*v)).collect();
+                    OldValue::Vector(std::rc::Rc::new(old_vals))
+                }
+                HeapObject::Table(t) => {
+                    let borrowed = t.borrow();
+                    let mut old_table = std::collections::BTreeMap::new();
+                    for (k, v) in borrowed.iter() {
+                        old_table.insert(k.clone(), new_value_to_old(*v));
+                    }
+                    OldValue::Table(std::rc::Rc::new(std::cell::RefCell::new(old_table)))
+                }
+                HeapObject::Struct(s) => {
+                    let mut old_struct = std::collections::BTreeMap::new();
+                    for (k, v) in s.iter() {
+                        old_struct.insert(k.clone(), new_value_to_old(*v));
+                    }
+                    OldValue::Struct(std::rc::Rc::new(old_struct))
+                }
+                HeapObject::Closure(_) => {
+                    // For now, we can't convert closures
+                    OldValue::Nil
+                }
+                HeapObject::JitClosure(_) => {
+                    // For now, we can't convert JIT closures
+                    OldValue::Nil
+                }
+                HeapObject::Condition(_) => {
+                    // For now, we can't convert conditions
+                    OldValue::Nil
+                }
+                HeapObject::Coroutine(_) => {
+                    // For now, we can't convert coroutines
+                    OldValue::Nil
+                }
+                HeapObject::Cell(c, _) => {
+                    let borrowed = c.borrow();
+                    OldValue::Cell(std::rc::Rc::new(std::cell::RefCell::new(Box::new(
+                        new_value_to_old(*borrowed),
+                    ))))
+                }
+                HeapObject::Float(_) => {
+                    // Float values should be handled above
+                    OldValue::Nil
+                }
+                HeapObject::NativeFn(_) => {
+                    // For now, we can't convert native functions
+                    OldValue::Nil
+                }
+                HeapObject::VmAwareFn(_) => {
+                    // For now, we can't convert VM-aware functions
+                    OldValue::Nil
+                }
+                _ => OldValue::Nil,
             }
         }
-        other => Err(format!(
-            "coroutine-next requires a coroutine, got {}",
-            other.type_name()
-        )
-        .into()),
+    } else {
+        OldValue::Nil
     }
 }
 
@@ -630,17 +778,18 @@ mod tests {
             Instruction::Return as u8,
         ];
 
-        Value::Closure(Rc::new(Closure {
+        Value::closure(Closure {
             bytecode: Rc::new(bytecode),
             arity: Arity::Exact(0),
             env: Rc::new(vec![]),
             num_locals: 0,
             num_captures: 0,
-            constants: Rc::new(vec![Value::Nil]),
+            constants: Rc::new(vec![Value::NIL]),
             source_ast: None,
             effect: Effect::Pure,
             cell_params_mask: 0,
-        }))
+            symbol_names: Rc::new(std::collections::HashMap::new()),
+        })
     }
 
     #[test]
@@ -649,7 +798,8 @@ mod tests {
         let result = prim_make_coroutine(&[closure]);
         assert!(result.is_ok());
 
-        if let Value::Coroutine(co) = result.unwrap() {
+        let result_val = result.unwrap();
+        if let Some(co) = result_val.as_coroutine() {
             let borrowed = co.borrow();
             assert!(matches!(borrowed.state, CoroutineState::Created));
         } else {
@@ -659,7 +809,7 @@ mod tests {
 
     #[test]
     fn test_make_coroutine_wrong_type() {
-        let result = prim_make_coroutine(&[Value::Int(42)]);
+        let result = prim_make_coroutine(&[Value::int(42)]);
         assert!(result.is_err());
     }
 
@@ -668,7 +818,7 @@ mod tests {
         let closure = make_test_closure();
         let co = prim_make_coroutine(&[closure]).unwrap();
         let status = prim_coroutine_status(&[co]).unwrap();
-        assert_eq!(status, Value::String("created".to_string().into()));
+        assert_eq!(status, Value::string("created"));
     }
 
     #[test]
@@ -676,7 +826,7 @@ mod tests {
         let closure = make_test_closure();
         let co = prim_make_coroutine(&[closure]).unwrap();
         let done = prim_coroutine_done(&[co]).unwrap();
-        assert_eq!(done, Value::Bool(false));
+        assert_eq!(done, Value::bool(false));
     }
 
     #[test]
@@ -684,10 +834,10 @@ mod tests {
         let closure = make_test_closure();
         let co = prim_make_coroutine(&[closure]).unwrap();
 
-        assert_eq!(prim_is_coroutine(&[co]).unwrap(), Value::Bool(true));
+        assert_eq!(prim_is_coroutine(&[co]).unwrap(), Value::bool(true));
         assert_eq!(
-            prim_is_coroutine(&[Value::Int(42)]).unwrap(),
-            Value::Bool(false)
+            prim_is_coroutine(&[Value::int(42)]).unwrap(),
+            Value::bool(false)
         );
     }
 
@@ -696,14 +846,16 @@ mod tests {
         let closure = make_test_closure();
         let co = prim_make_coroutine(&[closure]).unwrap();
         let value = prim_coroutine_value(&[co]).unwrap();
-        assert_eq!(value, Value::Nil);
+        assert_eq!(value, Value::NIL);
     }
 
     #[test]
     fn test_coroutine_resume_wrong_type() {
         let mut vm = VM::new();
-        let result = prim_coroutine_resume(&[Value::Int(42)], &mut vm);
-        assert!(result.is_err());
+        let result = prim_coroutine_resume(&[Value::int(42)], &mut vm);
+        // Now returns Ok(NIL) with current_exception set
+        assert!(result.is_ok());
+        assert!(vm.current_exception.is_some());
     }
 
     #[test]
@@ -719,8 +871,10 @@ mod tests {
     #[test]
     fn test_yield_from_wrong_type() {
         let mut vm = VM::new();
-        let result = prim_yield_from(&[Value::Int(42)], &mut vm);
-        assert!(result.is_err());
+        let result = prim_yield_from(&[Value::int(42)], &mut vm);
+        // Now returns Ok(NIL) with current_exception set
+        assert!(result.is_ok());
+        assert!(vm.current_exception.is_some());
     }
 
     #[test]
@@ -728,14 +882,16 @@ mod tests {
         let closure = make_test_closure();
         let co = prim_make_coroutine(&[closure]).unwrap();
         let iter = prim_coroutine_to_iterator(std::slice::from_ref(&co)).unwrap();
-        assert!(matches!(iter, Value::Coroutine(_)));
+        assert!(iter.is_coroutine());
     }
 
     #[test]
     fn test_coroutine_next_wrong_type() {
         let mut vm = VM::new();
-        let result = prim_coroutine_next(&[Value::Int(42)], &mut vm);
-        assert!(result.is_err());
+        let result = prim_coroutine_next(&[Value::int(42)], &mut vm);
+        // Now returns Ok(NIL) with current_exception set
+        assert!(result.is_ok());
+        assert!(vm.current_exception.is_some());
     }
 
     #[test]
@@ -747,11 +903,11 @@ mod tests {
         let result = prim_coroutine_next(&[co], &mut vm);
         assert!(result.is_ok());
         // Result should be a cons pair (value . done?)
-        if let Value::Cons(cons) = result.unwrap() {
+        if let Some(cons) = result.unwrap().as_cons() {
             // The first element should be the value (nil in this case)
-            assert_eq!(cons.first, Value::Nil);
+            assert_eq!(cons.first, Value::NIL);
             // The second element should be a boolean (done flag)
-            assert!(matches!(cons.rest, Value::Bool(_)));
+            assert!(cons.rest.is_bool());
         } else {
             panic!("Expected cons pair");
         }

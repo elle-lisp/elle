@@ -104,15 +104,16 @@ mod tests {
 
     impl super::super::handlers::TypeHandler for TestHandler {
         fn elle_to_c(&self, value: &Value, _ctype: &CType) -> Result<CValue, String> {
-            match value {
-                Value::Int(n) => Ok(CValue::Int(*n)),
-                _ => Err("TestHandler: expected integer".to_string()),
+            if let Some(n) = value.as_int() {
+                Ok(CValue::Int(n))
+            } else {
+                Err("TestHandler: expected integer".to_string())
             }
         }
 
         fn c_to_elle(&self, cval: &CValue, _ctype: &CType) -> Result<Value, String> {
             match cval {
-                CValue::Int(n) => Ok(Value::Int(*n)),
+                CValue::Int(n) => Ok(Value::int(*n)),
                 _ => Err("TestHandler: expected int CValue".to_string()),
             }
         }
@@ -128,7 +129,7 @@ mod tests {
 
         // With no handlers registered, should use default marshaling
         let result =
-            HandlerMarshal::elle_to_c_with_handlers(&Value::Int(42), &CType::Int, &registry);
+            HandlerMarshal::elle_to_c_with_handlers(&Value::int(42), &CType::Int, &registry);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), CValue::Int(42));
     }
@@ -143,7 +144,7 @@ mod tests {
 
         // With handler registered, should use custom handler
         let result =
-            HandlerMarshal::elle_to_c_with_handlers(&Value::Int(99), &CType::Int, &registry);
+            HandlerMarshal::elle_to_c_with_handlers(&Value::int(99), &CType::Int, &registry);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), CValue::Int(99));
     }
@@ -160,7 +161,7 @@ mod tests {
         let result =
             HandlerMarshal::c_to_elle_with_handlers(&CValue::Int(55), &CType::Int, &registry);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::Int(55));
+        assert_eq!(result.unwrap(), Value::int(55));
     }
 
     #[test]

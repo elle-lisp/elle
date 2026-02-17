@@ -25,7 +25,7 @@ fn test_mutual_recursion_even_odd() {
       (is-even 4))"#;
 
     let result = eval(code).unwrap();
-    assert_eq!(result, Value::Bool(true));
+    assert_eq!(result, Value::bool(true));
 }
 
 #[test]
@@ -38,10 +38,10 @@ fn test_mutual_recursion_simple_alternation() {
     let result = eval(code).unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 4);
-    assert_eq!(vec[0], Value::Int(0));
-    assert_eq!(vec[1], Value::Int(1));
-    assert_eq!(vec[2], Value::Int(0));
-    assert_eq!(vec[3], Value::Int(1));
+    assert_eq!(vec[0], Value::int(0));
+    assert_eq!(vec[1], Value::int(1));
+    assert_eq!(vec[2], Value::int(0));
+    assert_eq!(vec[3], Value::int(1));
 }
 
 #[test]
@@ -55,10 +55,10 @@ fn test_mutual_recursion_three_way() {
     let result = eval(code).unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 4);
-    assert_eq!(vec[0], Value::String("x".into()));
-    assert_eq!(vec[1], Value::String("y".into()));
-    assert_eq!(vec[2], Value::String("z".into()));
-    assert_eq!(vec[3], Value::String("x".into()));
+    assert_eq!(vec[0], Value::string("x"));
+    assert_eq!(vec[1], Value::string("y"));
+    assert_eq!(vec[2], Value::string("z"));
+    assert_eq!(vec[3], Value::string("x"));
 }
 
 #[test]
@@ -73,9 +73,9 @@ fn test_mutual_recursion_accumulator() {
     let result = eval(code).unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0], Value::Int(1));
-    assert_eq!(vec[1], Value::Int(2));
-    assert_eq!(vec[2], Value::Int(5));
+    assert_eq!(vec[0], Value::int(1));
+    assert_eq!(vec[1], Value::int(2));
+    assert_eq!(vec[2], Value::int(5));
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn test_mutual_recursion_with_conditions() {
       (is-positive 5))"#;
 
     let result = eval(code).unwrap();
-    assert_eq!(result, Value::Bool(true));
+    assert_eq!(result, Value::bool(true));
 }
 
 #[test]
@@ -103,11 +103,11 @@ fn test_mutual_recursion_mutual_calls() {
     let result = eval(code).unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 5);
-    assert_eq!(vec[0], Value::Int(100));
-    assert_eq!(vec[1], Value::Int(200));
-    assert_eq!(vec[2], Value::Int(100));
-    assert_eq!(vec[3], Value::Int(200));
-    assert_eq!(vec[4], Value::Int(100));
+    assert_eq!(vec[0], Value::int(100));
+    assert_eq!(vec[1], Value::int(200));
+    assert_eq!(vec[2], Value::int(100));
+    assert_eq!(vec[3], Value::int(200));
+    assert_eq!(vec[4], Value::int(100));
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn test_mutual_recursion_string_building() {
       (build-a 0))"#;
 
     let result = eval(code).unwrap();
-    assert_eq!(result, Value::String("a".into()));
+    assert_eq!(result, Value::string("a"));
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn test_mutual_recursion_forward_references() {
       (uses-later))"#;
 
     let result = eval(code).unwrap();
-    assert_eq!(result, Value::Int(42));
+    assert_eq!(result, Value::int(42));
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn test_mutual_recursion_with_multiple_calls() {
     let result = eval(code).unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0], Value::Int(1));
-    assert_eq!(vec[1], Value::Int(2));
-    assert_eq!(vec[2], Value::Int(4));
+    assert_eq!(vec[0], Value::int(1));
+    assert_eq!(vec[1], Value::int(2));
+    assert_eq!(vec[2], Value::int(4));
 }

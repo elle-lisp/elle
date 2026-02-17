@@ -1,10 +1,75 @@
 use crate::error::{LError, LResult};
 use crate::primitives::registration::register_primitives;
 use crate::symbol::SymbolTable;
-use crate::value::{SendValue, ThreadHandle, Value};
+use crate::value::{Condition, Value};
 use crate::vm::VM;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+
+/// Check if an old-style Value is safe to send across thread boundaries.
+/// Note: Old-style closures now use the new Value type for env and constants
+fn is_value_sendable_old(value: &crate::value_old::Value) -> bool {
+    use crate::value_old::Value as OldValue;
+
+    match value {
+        // Primitives are always safe
+        OldValue::Nil
+        | OldValue::Bool(_)
+        | OldValue::Int(_)
+        | OldValue::Float(_)
+        | OldValue::Symbol(_)
+        | OldValue::Keyword(_)
+        | OldValue::String(_) => true,
+
+        // Immutable collections are safe
+        OldValue::Vector(vec) => vec.iter().all(is_value_sendable_old),
+        OldValue::Struct(s) => s.iter().all(|(_, v)| is_value_sendable_old(v)),
+
+        // Cons cells are safe if their contents are
+        OldValue::Cons(cons) => {
+            is_value_sendable_old(&cons.first) && is_value_sendable_old(&cons.rest)
+        }
+
+        // Closures are safe if their captured environment is safe
+        // Note: env uses new Value type, so we use is_value_sendable
+        OldValue::Closure(closure) => closure.env.iter().all(is_value_sendable),
+
+        // JIT closures are safe if their captured environment is safe
+        // Note: env uses old Value type
+        OldValue::JitClosure(jc) => jc.env.iter().all(is_value_sendable_old),
+
+        // Unsafe: mutable tables
+        OldValue::Table(_) => false,
+
+        // Unsafe: native functions (contain function pointers)
+        OldValue::NativeFn(_) => false,
+
+        // Unsafe: VM-aware functions (contain function pointers)
+        OldValue::VmAwareFn(_) => false,
+
+        // Unsafe: FFI handles
+        OldValue::LibHandle(_) | OldValue::CHandle(_) => false,
+
+        // Unsafe: conditions (may contain non-sendable data)
+        OldValue::Condition(_) => false,
+
+        // Unsafe: thread handles
+        OldValue::ThreadHandle(_) => false,
+
+        // Cells are safe if their contents are sendable
+        OldValue::Cell(cell) | OldValue::LocalCell(cell) => {
+            if let Ok(val) = cell.try_borrow() {
+                is_value_sendable_old(&val)
+            } else {
+                // If we can't borrow, assume it's not sendable (to be safe)
+                false
+            }
+        }
+
+        // Coroutines are not sendable (contain closures with mutable state)
+        OldValue::Coroutine(_) => false,
+    }
+}
 
 /// Check if a value is safe to send across thread boundaries.
 ///
@@ -19,55 +84,71 @@ use std::sync::{Arc, Mutex};
 /// - FFI handles
 /// - Thread handles
 fn is_value_sendable(value: &Value) -> bool {
-    match value {
-        // Primitives are always safe
-        Value::Nil
-        | Value::Bool(_)
-        | Value::Int(_)
-        | Value::Float(_)
-        | Value::Symbol(_)
-        | Value::Keyword(_)
-        | Value::String(_) => true,
+    use crate::value::heap::{deref, HeapObject};
+
+    // Check immediate values
+    if value.is_nil()
+        || value.is_empty_list()
+        || value.is_bool()
+        || value.is_int()
+        || value.is_float()
+        || value.is_symbol()
+        || value.is_keyword()
+        || value.is_string()
+    {
+        return true;
+    }
+
+    // Check heap values
+    if !value.is_heap() {
+        return false;
+    }
+
+    match unsafe { deref(*value) } {
+        // Strings are immutable and safe
+        HeapObject::String(_) => true,
 
         // Immutable collections are safe
-        Value::Vector(vec) => {
-            // Check all elements are sendable
-            vec.iter().all(is_value_sendable)
+        HeapObject::Vector(vec) => {
+            if let Ok(borrowed) = vec.try_borrow() {
+                borrowed.iter().all(is_value_sendable)
+            } else {
+                false
+            }
         }
-        Value::Struct(s) => {
-            // Check all values are sendable
-            s.iter().all(|(_, v)| is_value_sendable(v))
-        }
+        HeapObject::Struct(s) => s.iter().all(|(_, v)| is_value_sendable(v)),
 
         // Cons cells are safe if their contents are
-        Value::Cons(cons) => is_value_sendable(&cons.first) && is_value_sendable(&cons.rest),
+        HeapObject::Cons(cons) => is_value_sendable(&cons.first) && is_value_sendable(&cons.rest),
 
         // Closures are safe if their captured environment is safe
-        Value::Closure(closure) => closure.env.iter().all(is_value_sendable),
+        // Note: Closure uses new Value type
+        HeapObject::Closure(closure) => closure.env.iter().all(is_value_sendable),
 
         // JIT closures are safe if their captured environment is safe
-        Value::JitClosure(jc) => jc.env.iter().all(is_value_sendable),
+        // Note: JitClosure uses old Value type, so we use the old check
+        HeapObject::JitClosure(jc) => jc.env.iter().all(is_value_sendable_old),
 
         // Unsafe: mutable tables
-        Value::Table(_) => false,
+        HeapObject::Table(_) => false,
 
         // Unsafe: native functions (contain function pointers)
-        Value::NativeFn(_) => false,
+        HeapObject::NativeFn(_) => false,
 
         // Unsafe: VM-aware functions (contain function pointers)
-        Value::VmAwareFn(_) => false,
+        HeapObject::VmAwareFn(_) => false,
 
         // Unsafe: FFI handles
-        Value::LibHandle(_) | Value::CHandle(_) => false,
+        HeapObject::LibHandle(_) | HeapObject::CHandle(_, _) => false,
 
-        // Unsafe: exceptions and conditions (may contain non-sendable data)
-        Value::Exception(_) | Value::Condition(_) => false,
+        // Unsafe: conditions (may contain non-sendable data)
+        HeapObject::Condition(_) => false,
 
         // Unsafe: thread handles
-        Value::ThreadHandle(_) => false,
+        HeapObject::ThreadHandle(_) => false,
 
         // Cells are safe if their contents are sendable
-        Value::Cell(cell) | Value::LocalCell(cell) => {
+        HeapObject::Cell(cell, _) => {
             if let Ok(val) = cell.try_borrow() {
                 is_value_sendable(&val)
             } else {
@@ -77,53 +158,68 @@ fn is_value_sendable(value: &Value) -> bool {
         }
 
         // Coroutines are not sendable (contain closures with mutable state)
-        Value::Coroutine(_) => false,
+        HeapObject::Coroutine(_) => false,
+
+        // Float values that couldn't be stored inline
+        HeapObject::Float(_) => true,
     }
 }
 
 /// Helper function to spawn a closure in a new thread
 /// Extracts closure data, validates sendability, and executes in a fresh VM
 fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
+    use crate::value::SendValue;
+    use std::collections::HashMap;
+
     // Check that all captured values are sendable
     for (i, captured) in closure.env.iter().enumerate() {
         if !is_value_sendable(captured) {
-            return Err(format!(
+            return Err(LError::from(format!(
                 "spawn: closure captures mutable or unsafe value at position {} ({})",
                 i,
                 captured.type_name()
-            )
-            .into());
+            )));
         }
     }
 
     // Also check constants for sendability
     for (i, constant) in closure.constants.iter().enumerate() {
         if !is_value_sendable(constant) {
-            return Err(format!(
+            return Err(LError::from(format!(
                 "spawn: closure has non-sendable constant at position {} ({})",
                 i,
                 constant.type_name()
-            )
-            .into());
+            )));
         }
     }
 
-    // Extract and wrap the closure data for thread safety
-    let bytecode_data: Vec<u8> = (*closure.bytecode).clone();
-    let constants_data: Vec<SendValue> = closure
-        .constants
-        .iter()
-        .map(|v| SendValue::new(v.clone()))
-        .collect();
-    let env_data: Vec<SendValue> = closure
+    // Deep-copy environment and constants using SendValue
+    let env_send: Result<Vec<SendValue>, String> = closure
         .env
         .iter()
-        .map(|v| SendValue::new(v.clone()))
+        .map(|v| SendValue::from_value(*v))
         .collect();
+    let env_send =
+        env_send.map_err(|e| LError::from(format!("spawn: failed to copy environment: {}", e)))?;
+
+    let constants_send: Result<Vec<SendValue>, String> = closure
+        .constants
+        .iter()
+        .map(|v| SendValue::from_value(*v))
+        .collect();
+    let constants_send = constants_send
+        .map_err(|e| LError::from(format!("spawn: failed to copy constants: {}", e)))?;
+
+    // Extract the closure bytecode for thread safety
+    let bytecode_data: Vec<u8> = (*closure.bytecode).clone();
+
+    // Extract symbol names for cross-thread portability
+    // This allows remapping symbol IDs in the new thread's symbol table
+    let symbol_names_for_thread: HashMap<u32, String> = (*closure.symbol_names).clone();
 
     // Create a holder for the result
-    // We wrap the result in SendValue to make it Send
-    let result_holder: Arc<Mutex<Option<Result<SendValue, String>>>> = Arc::new(Mutex::new(None));
+    let result_holder: Arc<Mutex<Option<Result<crate::value::SendValue, String>>>> =
+        Arc::new(Mutex::new(None));
     let result_clone = result_holder.clone();
 
     // Spawn the thread
@@ -134,35 +230,59 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         // Register primitives so they're available in the spawned thread
         register_primitives(&mut vm, &mut symbols);
 
-        // Convert SendValue back to Value for the VM's execute_bytecode
+        // Remap globals so bytecode symbol IDs resolve correctly.
+        // The bytecode was compiled with symbol IDs from the parent thread's symbol table.
+        // The new thread has a fresh symbol table with potentially different IDs.
+        // We need to ensure that when the bytecode looks up a symbol by its old ID,
+        // it finds the correct value (which was registered under a new ID).
+        for (old_id, name) in &symbol_names_for_thread {
+            // Find what register_primitives registered this name under
+            if let Some(new_id) = symbols.get(name) {
+                if new_id.0 != *old_id {
+                    // The bytecode expects this symbol under old_id, but register_primitives
+                    // put it under new_id. Copy the value to the old_id slot.
+                    if let Some(val) = vm.globals.get(&new_id.0).copied() {
+                        vm.globals.insert(*old_id, val);
+                    }
+                }
+            }
+        }
+
+        // Reconstruct values from SendValue
         let bytecode_rc = Rc::new(bytecode_data);
-        let constants_rc = Rc::new(
-            constants_data
-                .into_iter()
-                .map(|sv| sv.into_value())
-                .collect::<Vec<_>>(),
-        );
-        let env_rc = Rc::new(
-            env_data
-                .into_iter()
-                .map(|sv| sv.into_value())
-                .collect::<Vec<_>>(),
-        );
+        let env_values: Vec<Value> = env_send
+            .into_iter()
+            .map(|sv: SendValue| sv.into_value())
+            .collect();
+        let constants_values: Vec<Value> = constants_send
+            .into_iter()
+            .map(|sv: SendValue| sv.into_value())
+            .collect();
+        let env_rc = Rc::new(env_values);
+        let constants_rc = Rc::new(constants_values);
 
         let result = vm.execute_bytecode(&bytecode_rc, &constants_rc, Some(&env_rc));
 
-        // Store the result, wrapping it in SendValue
+        // Convert result to SendValue to preserve heap objects across thread boundary
+        let send_result = match result {
+            Ok(val) => {
+                SendValue::from_value(val).map_err(|e| format!("Failed to serialize result: {}", e))
+            }
+            Err(e) => Err(e.to_string()),
+        };
+
+        // Store the result
         if let Ok(mut holder) = result_clone.lock() {
-            *holder = Some(result.map(SendValue::new));
+            *holder = Some(send_result);
         }
     });
 
     // Return a thread handle with the result holder
-    let thread_handle = ThreadHandle {
+    use crate::value::heap::{alloc, HeapObject, ThreadHandleData};
+    let thread_handle_data = ThreadHandleData {
         result: result_holder,
     };
-
-    Ok(Value::ThreadHandle(thread_handle))
+    Ok(alloc(HeapObject::ThreadHandle(thread_handle_data)))
 }
 
 /// Spawns a new thread that executes a closure with captured immutable values
@@ -177,33 +297,34 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 /// The closure's bytecode is compiled and executed in that VM.
 ///
 /// For JIT-compiled closures, falls back to the source closure for thread-safe execution.
-pub fn prim_spawn(args: &[Value]) -> LResult<Value> {
+pub fn prim_spawn(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!("spawn: expected 1 argument, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "spawn: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
-    match &args[0] {
-        Value::Closure(closure) => spawn_closure_impl(closure),
-
-        Value::JitClosure(jit_closure) => {
-            // Fall back to the source closure for thread-safe execution
-            match &jit_closure.source {
-                Some(source) => spawn_closure_impl(source),
-                None => Err(
-                    "spawn: JitClosure has no source closure for thread execution. \
-                     JIT-compiled closures must retain their source to be spawned."
-                        .to_string()
-                        .into(),
-                ),
-            }
+    if let Some(closure) = args[0].as_closure() {
+        spawn_closure_impl(closure).map_err(|e| Condition::error(e.to_string()))
+    } else if let Some(jit_closure) = args[0].as_jit_closure() {
+        // Fall back to the source closure for thread-safe execution
+        match &jit_closure.source {
+            Some(source) => spawn_closure_impl(source).map_err(|e| Condition::error(e.to_string())),
+            None => Err(Condition::error(
+                "spawn: JitClosure has no source closure for thread execution. \
+                 JIT-compiled closures must retain their source to be spawned."
+                    .to_string(),
+            )),
         }
-
-        Value::NativeFn(_) => Err(
-            "spawn: native functions cannot be spawned. Use closures instead."
-                .to_string()
-                .into(),
-        ),
-        _ => Err("spawn: argument must be a closure".to_string().into()),
+    } else if args[0].as_native_fn().is_some() {
+        Err(Condition::error(
+            "spawn: native functions cannot be spawned. Use closures instead.".to_string(),
+        ))
+    } else {
+        Err(Condition::type_error(
+            "spawn: argument must be a closure".to_string(),
+        ))
     }
 }
 
@@ -212,71 +333,86 @@ pub fn prim_spawn(args: &[Value]) -> LResult<Value> {
 ///
 /// Blocks until the spawned thread completes and returns the actual Value result.
 /// If the thread produced an error, that error is re-raised.
-pub fn prim_join(args: &[Value]) -> LResult<Value> {
+pub fn prim_join(args: &[Value]) -> Result<Value, Condition> {
+    use crate::value::SendValue;
+
     if args.len() != 1 {
-        return Err(format!("join: expected 1 argument, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "join: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
-    match &args[0] {
-        Value::ThreadHandle(handle) => {
-            // Wait for the result to be available
-            // We need to poll since we can't block indefinitely in a primitive
-            let mut attempts = 0;
-            const MAX_ATTEMPTS: usize = 10000; // ~10 seconds with 1ms sleep
+    if let Some(handle) = args[0].as_thread_handle() {
+        // Wait for the result to be available
+        // We need to poll since we can't block indefinitely in a primitive
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: usize = 10000; // ~10 seconds with 1ms sleep
 
-            loop {
-                if let Ok(holder) = handle.result.lock() {
-                    if let Some(result) = holder.as_ref() {
-                        // Result is ready - unwrap SendValue and return
-                        return result
-                            .as_ref()
-                            .map(|send_val| send_val.clone().into_value())
-                            .map_err(|e| LError::from(e.clone()));
-                    }
+        loop {
+            if let Ok(holder) = handle.result.lock() {
+                if let Some(result) = holder.as_ref() {
+                    // Result is ready - convert from SendValue back to Value
+                    return result
+                        .as_ref()
+                        .map(|send_val: &SendValue| send_val.clone().into_value())
+                        .map_err(|e: &String| Condition::error(e.clone()));
                 }
-
-                attempts += 1;
-                if attempts >= MAX_ATTEMPTS {
-                    return Err("join: thread did not complete in time".to_string().into());
-                }
-
-                // Sleep briefly to avoid busy-waiting
-                std::thread::sleep(std::time::Duration::from_millis(1));
             }
+
+            attempts += 1;
+            if attempts >= MAX_ATTEMPTS {
+                return Err(Condition::error(
+                    "join: thread did not complete in time".to_string(),
+                ));
+            }
+
+            // Sleep briefly to avoid busy-waiting
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        _ => Err("join: argument must be a thread handle".to_string().into()),
+    } else {
+        Err(Condition::type_error(
+            "join: argument must be a thread handle".to_string(),
+        ))
     }
 }
 
 /// Sleeps for the specified number of seconds
 /// (sleep seconds)
-pub fn prim_sleep(args: &[Value]) -> LResult<Value> {
+pub fn prim_sleep(args: &[Value]) -> Result<Value, Condition> {
     if args.len() != 1 {
-        return Err(format!("sleep: expected 1 argument, got {}", args.len()).into());
+        return Err(Condition::arity_error(format!(
+            "sleep: expected 1 argument, got {}",
+            args.len()
+        )));
     }
 
-    match &args[0] {
-        Value::Int(n) => {
-            if *n < 0 {
-                return Err("sleep: duration must be non-negative".to_string().into());
-            }
-            std::thread::sleep(std::time::Duration::from_secs(*n as u64));
-            Ok(Value::Nil)
+    if let Some(n) = args[0].as_int() {
+        if n < 0 {
+            return Err(Condition::error(
+                "sleep: duration must be non-negative".to_string(),
+            ));
         }
-        Value::Float(f) => {
-            if *f < 0.0 {
-                return Err("sleep: duration must be non-negative".to_string().into());
-            }
-            std::thread::sleep(std::time::Duration::from_secs_f64(*f));
-            Ok(Value::Nil)
+        std::thread::sleep(std::time::Duration::from_secs(n as u64));
+        Ok(Value::NIL)
+    } else if let Some(f) = args[0].as_float() {
+        if f < 0.0 {
+            return Err(Condition::error(
+                "sleep: duration must be non-negative".to_string(),
+            ));
         }
-        _ => Err("sleep: argument must be a number".to_string().into()),
+        std::thread::sleep(std::time::Duration::from_secs_f64(f));
+        Ok(Value::NIL)
+    } else {
+        Err(Condition::type_error(
+            "sleep: argument must be a number".to_string(),
+        ))
     }
 }
 
 /// Returns the ID of the current thread
 /// (current-thread-id)
-pub fn prim_current_thread_id(_args: &[Value]) -> LResult<Value> {
+pub fn prim_current_thread_id(_args: &[Value]) -> Result<Value, Condition> {
     let thread_id = std::thread::current().id();
-    Ok(Value::String(format!("{:?}", thread_id).into()))
+    Ok(Value::string(format!("{:?}", thread_id)))
 }

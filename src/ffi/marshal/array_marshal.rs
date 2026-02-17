@@ -5,28 +5,23 @@ use crate::value::Value;
 
 /// Marshal an array value to C representation.
 pub fn marshal_array(value: &Value, elem_type: &CType, _count: usize) -> Result<CValue, String> {
-    match value {
-        Value::Vector(vec) => {
-            let mut elements = Vec::new();
-            for elem in vec.iter() {
-                elements.push(conversions::elle_to_c(elem, elem_type)?);
-            }
-            Ok(CValue::Array(elements))
+    if let Some(vec_ref) = value.as_vector() {
+        let mut elements = Vec::new();
+        let vec = vec_ref.borrow();
+        for elem in vec.iter() {
+            elements.push(conversions::elle_to_c(elem, elem_type)?);
         }
-        Value::Cons(cons) => {
-            let mut elements = Vec::new();
-            let mut current = Some(cons.clone());
-            while let Some(cell) = current {
-                elements.push(conversions::elle_to_c(&cell.first, elem_type)?);
-                current = match &cell.rest {
-                    Value::Cons(c) => Some(c.clone()),
-                    Value::Nil => None,
-                    _ => None,
-                };
-            }
-            Ok(CValue::Array(elements))
+        Ok(CValue::Array(elements))
+    } else if let Some(cons) = value.as_cons() {
+        let mut elements = Vec::new();
+        let mut current = Some(cons.clone());
+        while let Some(cell) = current {
+            elements.push(conversions::elle_to_c(&cell.first, elem_type)?);
+            current = cell.rest.as_cons().cloned();
         }
-        _ => Err(format!("Cannot marshal {:?} as array", value)),
+        Ok(CValue::Array(elements))
+    } else {
+        Err(format!("Cannot marshal {:?} as array", value))
     }
 }
 
@@ -38,7 +33,7 @@ pub fn unmarshal_array(cvalue: &CValue, elem_type: &CType) -> Result<Value, Stri
             for elem in elements {
                 result.push(conversions::c_to_elle(elem, elem_type)?);
             }
-            Ok(Value::Vector(std::rc::Rc::new(result)))
+            Ok(Value::vector(result))
         }
         _ => Err("Type mismatch in unmarshal: expected array".to_string()),
     }
@@ -50,11 +45,7 @@ mod tests {
 
     #[test]
     fn test_marshal_vector_as_array() {
-        let val = Value::Vector(std::rc::Rc::new(vec![
-            Value::Int(1),
-            Value::Int(2),
-            Value::Int(3),
-        ]));
+        let val = Value::vector(vec![Value::int(1), Value::int(2), Value::int(3)]);
         let cval = marshal_array(&val, &CType::Int, 3).unwrap();
         match cval {
             CValue::Array(elems) => {
@@ -72,8 +63,8 @@ mod tests {
     fn test_marshal_cons_as_array() {
         use crate::value::cons;
         let list = cons(
-            Value::Int(10),
-            cons(Value::Int(20), cons(Value::Int(30), Value::Nil)),
+            Value::int(10),
+            cons(Value::int(20), cons(Value::int(30), Value::EMPTY_LIST)),
         );
         let cval = marshal_array(&list, &CType::Int, 3).unwrap();
         match cval {
@@ -88,14 +79,14 @@ mod tests {
     fn test_unmarshal_array_to_vector() {
         let cval = CValue::Array(vec![CValue::Int(5), CValue::Int(10), CValue::Int(15)]);
         let val = unmarshal_array(&cval, &CType::Int).unwrap();
-        match val {
-            Value::Vector(vec) => {
-                assert_eq!(vec.len(), 3);
-                assert_eq!(vec[0], Value::Int(5));
-                assert_eq!(vec[1], Value::Int(10));
-                assert_eq!(vec[2], Value::Int(15));
-            }
-            _ => panic!("Expected Vector"),
+        if let Some(vec_ref) = val.as_vector() {
+            let vec = vec_ref.borrow();
+            assert_eq!(vec.len(), 3);
+            assert_eq!(vec[0], Value::int(5));
+            assert_eq!(vec[1], Value::int(10));
+            assert_eq!(vec[2], Value::int(15));
+        } else {
+            panic!("Expected Vector");
         }
     }
 }

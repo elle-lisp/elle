@@ -1,31 +1,41 @@
 // DEFENSE: Primitives are the building blocks - must be correct
 use elle::error::LError;
-use elle::ffi::primitives::context::set_symbol_table;
+use elle::ffi::primitives::context::{clear_symbol_table, set_symbol_table};
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
-use elle::value::{list, Closure, Cons, Value};
+use elle::value::{list, Closure, Value};
 use elle::vm::VM;
-use std::rc::Rc;
 
 fn setup() -> (VM, SymbolTable) {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     register_primitives(&mut vm, &mut symbols);
-    // Set the symbol table in thread-local context for primitives that need it
-    set_symbol_table(&mut symbols as *mut SymbolTable);
     (vm, symbols)
 }
 
 fn get_primitive(vm: &VM, symbols: &mut SymbolTable, name: &str) -> Value {
     let id = symbols.intern(name);
-    vm.get_global(id.0).unwrap().clone()
+    *vm.get_global(id.0).unwrap()
 }
 
 #[allow(clippy::result_large_err)]
 fn call_primitive(prim: &Value, args: &[Value]) -> Result<Value, LError> {
-    match prim {
-        Value::NativeFn(f) => f(args),
-        _ => panic!("Not a function"),
+    if let Some(f) = prim.as_native_fn() {
+        f(args).map_err(|c| LError::from(c.to_string()))
+    } else if let Some(f) = prim.as_vm_aware_fn() {
+        // VM-aware functions need a VM instance
+        let mut vm = VM::new();
+        let result = f(args, &mut vm);
+        // Check if an exception was set
+        if let Some(exc) = &vm.current_exception {
+            return Err(LError::from(format!(
+                "Unhandled exception: {}",
+                exc.exception_id
+            )));
+        }
+        result
+    } else {
+        panic!("Not a function");
     }
 }
 
@@ -36,24 +46,28 @@ fn test_addition() {
     let add = get_primitive(&vm, &mut symbols, "+");
 
     // No args
-    assert_eq!(call_primitive(&add, &[]).unwrap(), Value::Int(0));
+    assert_eq!(call_primitive(&add, &[]).unwrap(), Value::int(0));
 
     // Single arg
     assert_eq!(
-        call_primitive(&add, &[Value::Int(5)]).unwrap(),
-        Value::Int(5)
+        call_primitive(&add, &[Value::int(5)]).unwrap(),
+        Value::int(5)
     );
 
     // Multiple args
     assert_eq!(
-        call_primitive(&add, &[Value::Int(1), Value::Int(2), Value::Int(3)]).unwrap(),
-        Value::Int(6)
+        call_primitive(&add, &[Value::int(1), Value::int(2), Value::int(3)]).unwrap(),
+        Value::int(6)
     );
 
     // Mixed int/float
-    match call_primitive(&add, &[Value::Int(1), Value::Float(2.5)]).unwrap() {
-        Value::Float(f) => assert!((f - 3.5).abs() < 1e-10),
-        _ => panic!("Expected float"),
+    if let Some(f) = call_primitive(&add, &[Value::int(1), Value::float(2.5)])
+        .unwrap()
+        .as_float()
+    {
+        assert!((f - 3.5).abs() < 1e-10)
+    } else {
+        panic!("Expected float");
     }
 }
 
@@ -64,20 +78,20 @@ fn test_subtraction() {
 
     // Negate
     assert_eq!(
-        call_primitive(&sub, &[Value::Int(5)]).unwrap(),
-        Value::Int(-5)
+        call_primitive(&sub, &[Value::int(5)]).unwrap(),
+        Value::int(-5)
     );
 
     // Subtract
     assert_eq!(
-        call_primitive(&sub, &[Value::Int(10), Value::Int(3)]).unwrap(),
-        Value::Int(7)
+        call_primitive(&sub, &[Value::int(10), Value::int(3)]).unwrap(),
+        Value::int(7)
     );
 
     // Multiple args
     assert_eq!(
-        call_primitive(&sub, &[Value::Int(100), Value::Int(25), Value::Int(25)]).unwrap(),
-        Value::Int(50)
+        call_primitive(&sub, &[Value::int(100), Value::int(25), Value::int(25)]).unwrap(),
+        Value::int(50)
     );
 }
 
@@ -87,18 +101,18 @@ fn test_multiplication() {
     let mul = get_primitive(&vm, &mut symbols, "*");
 
     // Identity
-    assert_eq!(call_primitive(&mul, &[]).unwrap(), Value::Int(1));
+    assert_eq!(call_primitive(&mul, &[]).unwrap(), Value::int(1));
 
     // Multiply
     assert_eq!(
-        call_primitive(&mul, &[Value::Int(2), Value::Int(3), Value::Int(4)]).unwrap(),
-        Value::Int(24)
+        call_primitive(&mul, &[Value::int(2), Value::int(3), Value::int(4)]).unwrap(),
+        Value::int(24)
     );
 
     // Zero
     assert_eq!(
-        call_primitive(&mul, &[Value::Int(5), Value::Int(0)]).unwrap(),
-        Value::Int(0)
+        call_primitive(&mul, &[Value::int(5), Value::int(0)]).unwrap(),
+        Value::int(0)
     );
 }
 
@@ -109,18 +123,18 @@ fn test_division() {
 
     // Division
     assert_eq!(
-        call_primitive(&div, &[Value::Int(10), Value::Int(2)]).unwrap(),
-        Value::Int(5)
+        call_primitive(&div, &[Value::int(10), Value::int(2)]).unwrap(),
+        Value::int(5)
     );
 
     // Integer division
     assert_eq!(
-        call_primitive(&div, &[Value::Int(7), Value::Int(2)]).unwrap(),
-        Value::Int(3)
+        call_primitive(&div, &[Value::int(7), Value::int(2)]).unwrap(),
+        Value::int(3)
     );
 
     // Division by zero
-    assert!(call_primitive(&div, &[Value::Int(10), Value::Int(0)]).is_err());
+    assert!(call_primitive(&div, &[Value::int(10), Value::int(0)]).is_err());
 }
 
 // Comparison tests
@@ -130,13 +144,13 @@ fn test_equality() {
     let eq = get_primitive(&vm, &mut symbols, "=");
 
     assert_eq!(
-        call_primitive(&eq, &[Value::Int(5), Value::Int(5)]).unwrap(),
-        Value::Bool(true)
+        call_primitive(&eq, &[Value::int(5), Value::int(5)]).unwrap(),
+        Value::bool(true)
     );
 
     assert_eq!(
-        call_primitive(&eq, &[Value::Int(5), Value::Int(6)]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&eq, &[Value::int(5), Value::int(6)]).unwrap(),
+        Value::bool(false)
     );
 
     // Float equality
@@ -144,12 +158,12 @@ fn test_equality() {
         call_primitive(
             &eq,
             &[
-                Value::Float(std::f64::consts::PI),
-                Value::Float(std::f64::consts::PI)
+                Value::float(std::f64::consts::PI),
+                Value::float(std::f64::consts::PI)
             ]
         )
         .unwrap(),
-        Value::Bool(true)
+        Value::bool(true)
     );
 }
 
@@ -159,18 +173,18 @@ fn test_less_than() {
     let lt = get_primitive(&vm, &mut symbols, "<");
 
     assert_eq!(
-        call_primitive(&lt, &[Value::Int(3), Value::Int(5)]).unwrap(),
-        Value::Bool(true)
+        call_primitive(&lt, &[Value::int(3), Value::int(5)]).unwrap(),
+        Value::bool(true)
     );
 
     assert_eq!(
-        call_primitive(&lt, &[Value::Int(5), Value::Int(5)]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&lt, &[Value::int(5), Value::int(5)]).unwrap(),
+        Value::bool(false)
     );
 
     assert_eq!(
-        call_primitive(&lt, &[Value::Int(7), Value::Int(5)]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&lt, &[Value::int(7), Value::int(5)]).unwrap(),
+        Value::bool(false)
     );
 }
 
@@ -180,13 +194,13 @@ fn test_greater_than() {
     let gt = get_primitive(&vm, &mut symbols, ">");
 
     assert_eq!(
-        call_primitive(&gt, &[Value::Int(7), Value::Int(5)]).unwrap(),
-        Value::Bool(true)
+        call_primitive(&gt, &[Value::int(7), Value::int(5)]).unwrap(),
+        Value::bool(true)
     );
 
     assert_eq!(
-        call_primitive(&gt, &[Value::Int(5), Value::Int(5)]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&gt, &[Value::int(5), Value::int(5)]).unwrap(),
+        Value::bool(false)
     );
 }
 
@@ -196,11 +210,11 @@ fn test_cons() {
     let (vm, mut symbols) = setup();
     let cons = get_primitive(&vm, &mut symbols, "cons");
 
-    let result = call_primitive(&cons, &[Value::Int(1), Value::Int(2)]).unwrap();
+    let result = call_primitive(&cons, &[Value::int(1), Value::int(2)]).unwrap();
     let cons_cell = result.as_cons().unwrap();
 
-    assert_eq!(cons_cell.first, Value::Int(1));
-    assert_eq!(cons_cell.rest, Value::Int(2));
+    assert_eq!(cons_cell.first, Value::int(1));
+    assert_eq!(cons_cell.rest, Value::int(2));
 }
 
 #[test]
@@ -208,10 +222,10 @@ fn test_first() {
     let (vm, mut symbols) = setup();
     let first = get_primitive(&vm, &mut symbols, "first");
 
-    let l = list(vec![Value::Int(10), Value::Int(20), Value::Int(30)]);
+    let l = list(vec![Value::int(10), Value::int(20), Value::int(30)]);
     let result = call_primitive(&first, &[l]).unwrap();
 
-    assert_eq!(result, Value::Int(10));
+    assert_eq!(result, Value::int(10));
 }
 
 #[test]
@@ -219,14 +233,14 @@ fn test_rest() {
     let (vm, mut symbols) = setup();
     let rest = get_primitive(&vm, &mut symbols, "rest");
 
-    let l = list(vec![Value::Int(10), Value::Int(20), Value::Int(30)]);
+    let l = list(vec![Value::int(10), Value::int(20), Value::int(30)]);
     let result = call_primitive(&rest, &[l]).unwrap();
 
     assert!(result.is_list());
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 2);
-    assert_eq!(vec[0], Value::Int(20));
-    assert_eq!(vec[1], Value::Int(30));
+    assert_eq!(vec[0], Value::int(20));
+    assert_eq!(vec[1], Value::int(30));
 }
 
 #[test]
@@ -234,7 +248,7 @@ fn test_list() {
     let (vm, mut symbols) = setup();
     let list_fn = get_primitive(&vm, &mut symbols, "list");
 
-    let result = call_primitive(&list_fn, &[Value::Int(1), Value::Int(2), Value::Int(3)]).unwrap();
+    let result = call_primitive(&list_fn, &[Value::int(1), Value::int(2), Value::int(3)]).unwrap();
 
     assert!(result.is_list());
     let vec = result.list_to_vec().unwrap();
@@ -248,13 +262,13 @@ fn test_nil_predicate() {
     let nil_pred = get_primitive(&vm, &mut symbols, "nil?");
 
     assert_eq!(
-        call_primitive(&nil_pred, &[Value::Nil]).unwrap(),
-        Value::Bool(true)
+        call_primitive(&nil_pred, &[Value::NIL]).unwrap(),
+        Value::bool(true)
     );
 
     assert_eq!(
-        call_primitive(&nil_pred, &[Value::Int(0)]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&nil_pred, &[Value::int(0)]).unwrap(),
+        Value::bool(false)
     );
 }
 
@@ -263,12 +277,12 @@ fn test_pair_predicate() {
     let (vm, mut symbols) = setup();
     let pair_pred = get_primitive(&vm, &mut symbols, "pair?");
 
-    let l = list(vec![Value::Int(1)]);
-    assert_eq!(call_primitive(&pair_pred, &[l]).unwrap(), Value::Bool(true));
+    let l = list(vec![Value::int(1)]);
+    assert_eq!(call_primitive(&pair_pred, &[l]).unwrap(), Value::bool(true));
 
     assert_eq!(
-        call_primitive(&pair_pred, &[Value::Nil]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&pair_pred, &[Value::NIL]).unwrap(),
+        Value::bool(false)
     );
 }
 
@@ -278,18 +292,18 @@ fn test_number_predicate() {
     let num_pred = get_primitive(&vm, &mut symbols, "number?");
 
     assert_eq!(
-        call_primitive(&num_pred, &[Value::Int(42)]).unwrap(),
-        Value::Bool(true)
+        call_primitive(&num_pred, &[Value::int(42)]).unwrap(),
+        Value::bool(true)
     );
 
     assert_eq!(
-        call_primitive(&num_pred, &[Value::Float(std::f64::consts::PI)]).unwrap(),
-        Value::Bool(true)
+        call_primitive(&num_pred, &[Value::float(std::f64::consts::PI)]).unwrap(),
+        Value::bool(true)
     );
 
     assert_eq!(
-        call_primitive(&num_pred, &[Value::Nil]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&num_pred, &[Value::NIL]).unwrap(),
+        Value::bool(false)
     );
 }
 
@@ -300,13 +314,13 @@ fn test_symbol_predicate() {
 
     let sym_id = symbols.intern("foo");
     assert_eq!(
-        call_primitive(&sym_pred, &[Value::Symbol(sym_id)]).unwrap(),
-        Value::Bool(true)
+        call_primitive(&sym_pred, &[Value::symbol(sym_id.0)]).unwrap(),
+        Value::bool(true)
     );
 
     assert_eq!(
-        call_primitive(&sym_pred, &[Value::Int(42)]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&sym_pred, &[Value::int(42)]).unwrap(),
+        Value::bool(false)
     );
 }
 
@@ -317,24 +331,24 @@ fn test_not() {
     let not = get_primitive(&vm, &mut symbols, "not");
 
     assert_eq!(
-        call_primitive(&not, &[Value::Bool(false)]).unwrap(),
-        Value::Bool(true)
+        call_primitive(&not, &[Value::bool(false)]).unwrap(),
+        Value::bool(true)
     );
 
     assert_eq!(
-        call_primitive(&not, &[Value::Bool(true)]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&not, &[Value::bool(true)]).unwrap(),
+        Value::bool(false)
     );
 
     assert_eq!(
-        call_primitive(&not, &[Value::Nil]).unwrap(),
-        Value::Bool(false) // nil (empty list) is truthy
+        call_primitive(&not, &[Value::NIL]).unwrap(),
+        Value::bool(true) // nil is falsy
     );
 
     // Truthy values
     assert_eq!(
-        call_primitive(&not, &[Value::Int(0)]).unwrap(),
-        Value::Bool(false)
+        call_primitive(&not, &[Value::int(0)]).unwrap(),
+        Value::bool(false)
     );
 }
 
@@ -345,8 +359,8 @@ fn test_arithmetic_type_errors() {
     let add = get_primitive(&vm, &mut symbols, "+");
 
     // Adding non-numbers
-    assert!(call_primitive(&add, &[Value::Nil]).is_err());
-    assert!(call_primitive(&add, &[Value::Bool(true)]).is_err());
+    assert!(call_primitive(&add, &[Value::NIL]).is_err());
+    assert!(call_primitive(&add, &[Value::bool(true)]).is_err());
 }
 
 #[test]
@@ -355,7 +369,7 @@ fn test_comparison_type_errors() {
     let lt = get_primitive(&vm, &mut symbols, "<");
 
     // Comparing non-numbers
-    assert!(call_primitive(&lt, &[Value::Nil, Value::Int(5)]).is_err());
+    assert!(call_primitive(&lt, &[Value::NIL, Value::int(5)]).is_err());
 }
 
 #[test]
@@ -364,8 +378,8 @@ fn test_list_operation_errors() {
     let first = get_primitive(&vm, &mut symbols, "first");
 
     // First of non-list
-    assert!(call_primitive(&first, &[Value::Int(42)]).is_err());
-    assert!(call_primitive(&first, &[Value::Nil]).is_err());
+    assert!(call_primitive(&first, &[Value::int(42)]).is_err());
+    assert!(call_primitive(&first, &[Value::NIL]).is_err());
 }
 
 #[test]
@@ -375,11 +389,11 @@ fn test_arity_errors() {
     // first requires exactly 1 argument
     let first = get_primitive(&vm, &mut symbols, "first");
     assert!(call_primitive(&first, &[]).is_err());
-    assert!(call_primitive(&first, &[Value::Int(1), Value::Int(2)]).is_err());
+    assert!(call_primitive(&first, &[Value::int(1), Value::int(2)]).is_err());
 
     // = requires exactly 2 arguments
     let eq = get_primitive(&vm, &mut symbols, "=");
-    assert!(call_primitive(&eq, &[Value::Int(1)]).is_err());
+    assert!(call_primitive(&eq, &[Value::int(1)]).is_err());
 }
 
 // Exception handling tests
@@ -389,8 +403,8 @@ fn test_exception_creation() {
     let exception_fn = get_primitive(&vm, &mut symbols, "exception");
 
     // Create exception with message
-    let exc = call_primitive(&exception_fn, &[Value::String("Error message".into())]).unwrap();
-    assert_eq!(exc.type_name(), "exception");
+    let exc = call_primitive(&exception_fn, &[Value::string("Error message")]).unwrap();
+    assert_eq!(exc.type_name(), "condition");
 }
 
 #[test]
@@ -400,11 +414,14 @@ fn test_exception_message() {
     let message_fn = get_primitive(&vm, &mut symbols, "exception-message");
 
     // Create exception and extract message
-    let exc = call_primitive(&exception_fn, &[Value::String("Test error".into())]).unwrap();
+    let exc = call_primitive(&exception_fn, &[Value::string("Test error")]).unwrap();
     let msg = call_primitive(&message_fn, &[exc]).unwrap();
 
     match msg {
-        Value::String(s) => assert_eq!(s.as_ref(), "Test error"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "Test error")
+        }
         _ => panic!("Expected string"),
     }
 }
@@ -416,18 +433,14 @@ fn test_exception_data() {
     let data_fn = get_primitive(&vm, &mut symbols, "exception-data");
 
     // Exception without data
-    let exc1 = call_primitive(&exception_fn, &[Value::String("Error".into())]).unwrap();
+    let exc1 = call_primitive(&exception_fn, &[Value::string("Error")]).unwrap();
     let data1 = call_primitive(&data_fn, &[exc1]).unwrap();
-    assert_eq!(data1, Value::Nil);
+    assert_eq!(data1, Value::NIL);
 
     // Exception with data
-    let exc2 = call_primitive(
-        &exception_fn,
-        &[Value::String("Error".into()), Value::Int(42)],
-    )
-    .unwrap();
+    let exc2 = call_primitive(&exception_fn, &[Value::string("Error"), Value::int(42)]).unwrap();
     let data2 = call_primitive(&data_fn, &[exc2]).unwrap();
-    assert_eq!(data2, Value::Int(42));
+    assert_eq!(data2, Value::int(42));
 }
 
 #[test]
@@ -436,9 +449,10 @@ fn test_throw() {
     let throw_fn = get_primitive(&vm, &mut symbols, "throw");
 
     // throw with string message should produce error
-    let result = call_primitive(&throw_fn, &[Value::String("Test error".into())]);
+    let result = call_primitive(&throw_fn, &[Value::string("Test error")]);
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().to_string(), "Error: Test error");
+    // Condition::error formats as "error: {message}", then LError wraps as "Error: ..."
+    assert_eq!(result.unwrap_err().to_string(), "Error: error: Test error");
 }
 
 #[test]
@@ -447,13 +461,18 @@ fn test_exception_is_value() {
     let exception_fn = get_primitive(&vm, &mut symbols, "exception");
     let type_fn = get_primitive(&vm, &mut symbols, "type-of");
 
-    // Exception should be a value with type :exception
-    let exc = call_primitive(&exception_fn, &[Value::String("Error".into())]).unwrap();
+    // Set symbol table context for type-of to work properly
+    set_symbol_table(&mut symbols as *mut SymbolTable);
+
+    // Exception should be a value with type :condition
+    let exc = call_primitive(&exception_fn, &[Value::string("Error")]).unwrap();
     let type_val = call_primitive(&type_fn, &[exc]).unwrap();
 
+    clear_symbol_table();
+
     match type_val {
-        Value::Keyword(_) => {} // type-of returns a keyword
-        _ => panic!("Expected keyword type"),
+        v if v.is_keyword() => {} // type-of returns a keyword
+        _ => panic!("Expected keyword type, got {}", type_val.type_name()),
     }
 }
 
@@ -469,9 +488,11 @@ fn test_gensym_generation() {
 
     // Should generate strings (symbol names)
     match (&sym1, &sym2) {
-        (Value::String(s1), Value::String(s2)) => {
+        (v1, v2) if v1.is_string() && v2.is_string() => {
+            let s1 = v1.as_string().unwrap();
+            let s2 = v2.as_string().unwrap();
             // Symbols should be unique
-            assert_ne!(s1.as_ref(), s2.as_ref());
+            assert_ne!(s1, s2);
             // Should start with G (default prefix)
             assert!(s1.starts_with('G'));
             assert!(s2.starts_with('G'));
@@ -486,10 +507,11 @@ fn test_gensym_with_prefix() {
     let gensym = get_primitive(&vm, &mut symbols, "gensym");
 
     // Generate symbol with custom prefix
-    let sym = call_primitive(&gensym, &[Value::String("VAR".into())]).unwrap();
+    let sym = call_primitive(&gensym, &[Value::string("VAR")]).unwrap();
 
     match sym {
-        Value::String(s) => {
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
             assert!(s.starts_with("VAR"));
         }
         _ => panic!("gensym should return string"),
@@ -574,22 +596,22 @@ fn test_list_module_functions() {
 
     // Test list functions
     let length_fn = get_primitive(&vm, &mut symbols, "length");
-    let list_val = list(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+    let list_val = list(vec![Value::int(1), Value::int(2), Value::int(3)]);
     assert_eq!(
         call_primitive(&length_fn, &[list_val]).unwrap(),
-        Value::Int(3)
+        Value::int(3)
     );
 
     // Test append
     let append_fn = get_primitive(&vm, &mut symbols, "append");
-    let list1 = list(vec![Value::Int(1), Value::Int(2)]);
-    let list2 = list(vec![Value::Int(3), Value::Int(4)]);
+    let list1 = list(vec![Value::int(1), Value::int(2)]);
+    let list2 = list(vec![Value::int(3), Value::int(4)]);
     let result = call_primitive(&append_fn, &[list1, list2]).unwrap();
     assert!(result.is_list());
 
     // Test reverse
     let reverse_fn = get_primitive(&vm, &mut symbols, "reverse");
-    let list_val = list(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+    let list_val = list(vec![Value::int(1), Value::int(2), Value::int(3)]);
     let reversed = call_primitive(&reverse_fn, &[list_val]).unwrap();
     assert!(reversed.is_list());
 }
@@ -600,25 +622,31 @@ fn test_string_module_functions() {
 
     // Test length on strings
     let length_fn = get_primitive(&vm, &mut symbols, "length");
-    let str_val = Value::String("hello".into());
+    let str_val = Value::string("hello");
     assert_eq!(
         call_primitive(&length_fn, &[str_val]).unwrap(),
-        Value::Int(5)
+        Value::int(5)
     );
 
     // Test string-upcase
     let upcase_fn = get_primitive(&vm, &mut symbols, "string-upcase");
-    let str_val = Value::String("hello".into());
+    let str_val = Value::string("hello");
     match call_primitive(&upcase_fn, &[str_val]).unwrap() {
-        Value::String(s) => assert_eq!(s.as_ref(), "HELLO"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "HELLO")
+        }
         _ => panic!("Expected string"),
     }
 
     // Test string-downcase
     let downcase_fn = get_primitive(&vm, &mut symbols, "string-downcase");
-    let str_val = Value::String("HELLO".into());
+    let str_val = Value::string("HELLO");
     match call_primitive(&downcase_fn, &[str_val]).unwrap() {
-        Value::String(s) => assert_eq!(s.as_ref(), "hello"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "hello")
+        }
         _ => panic!("Expected string"),
     }
 }
@@ -629,38 +657,27 @@ fn test_string_split() {
     let split_fn = get_primitive(&vm, &mut symbols, "string-split");
 
     // Basic split
-    let result = call_primitive(
-        &split_fn,
-        &[Value::String("a,b,c".into()), Value::String(",".into())],
-    )
-    .unwrap();
+    let result = call_primitive(&split_fn, &[Value::string("a,b,c"), Value::string(",")]).unwrap();
     assert!(result.is_list());
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0], Value::String("a".into()));
-    assert_eq!(vec[1], Value::String("b".into()));
-    assert_eq!(vec[2], Value::String("c".into()));
+    assert_eq!(vec[0], Value::string("a"));
+    assert_eq!(vec[1], Value::string("b"));
+    assert_eq!(vec[2], Value::string("c"));
 
     // Split with multi-char delimiter
-    let result = call_primitive(
-        &split_fn,
-        &[Value::String("hello".into()), Value::String("ll".into())],
-    )
-    .unwrap();
+    let result = call_primitive(&split_fn, &[Value::string("hello"), Value::string("ll")]).unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 2);
-    assert_eq!(vec[0], Value::String("he".into()));
-    assert_eq!(vec[1], Value::String("o".into()));
+    assert_eq!(vec[0], Value::string("he"));
+    assert_eq!(vec[1], Value::string("o"));
 
     // No match returns original in list
-    let result = call_primitive(
-        &split_fn,
-        &[Value::String("hello".into()), Value::String("xyz".into())],
-    )
-    .unwrap();
+    let result =
+        call_primitive(&split_fn, &[Value::string("hello"), Value::string("xyz")]).unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 1);
-    assert_eq!(vec[0], Value::String("hello".into()));
+    assert_eq!(vec[0], Value::string("hello"));
 }
 
 #[test]
@@ -672,14 +689,17 @@ fn test_string_replace() {
     let result = call_primitive(
         &replace_fn,
         &[
-            Value::String("hello world".into()),
-            Value::String("world".into()),
-            Value::String("elle".into()),
+            Value::string("hello world"),
+            Value::string("world"),
+            Value::string("elle"),
         ],
     )
     .unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), "hello elle"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "hello elle")
+        }
         _ => panic!("Expected string"),
     }
 
@@ -687,14 +707,17 @@ fn test_string_replace() {
     let result = call_primitive(
         &replace_fn,
         &[
-            Value::String("aaa".into()),
-            Value::String("a".into()),
-            Value::String("bb".into()),
+            Value::string("aaa"),
+            Value::string("a"),
+            Value::string("bb"),
         ],
     )
     .unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), "bbbbbb"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "bbbbbb")
+        }
         _ => panic!("Expected string"),
     }
 }
@@ -705,16 +728,22 @@ fn test_string_trim() {
     let trim_fn = get_primitive(&vm, &mut symbols, "string-trim");
 
     // Trim whitespace
-    let result = call_primitive(&trim_fn, &[Value::String("  hello  ".into())]).unwrap();
+    let result = call_primitive(&trim_fn, &[Value::string("  hello  ")]).unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), "hello"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "hello")
+        }
         _ => panic!("Expected string"),
     }
 
     // No whitespace
-    let result = call_primitive(&trim_fn, &[Value::String("hello".into())]).unwrap();
+    let result = call_primitive(&trim_fn, &[Value::string("hello")]).unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), "hello"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "hello")
+        }
         _ => panic!("Expected string"),
     }
 }
@@ -728,33 +757,26 @@ fn test_string_contains() {
     assert_eq!(
         call_primitive(
             &contains_fn,
-            &[
-                Value::String("hello world".into()),
-                Value::String("world".into()),
-            ]
+            &[Value::string("hello world"), Value::string("world"),]
         )
         .unwrap(),
-        Value::Bool(true)
+        Value::bool(true)
     );
 
     // Does not contain
     assert_eq!(
         call_primitive(
             &contains_fn,
-            &[Value::String("hello".into()), Value::String("xyz".into()),]
+            &[Value::string("hello"), Value::string("xyz"),]
         )
         .unwrap(),
-        Value::Bool(false)
+        Value::bool(false)
     );
 
     // Empty string is contained in everything
     assert_eq!(
-        call_primitive(
-            &contains_fn,
-            &[Value::String("hello".into()), Value::String("".into()),]
-        )
-        .unwrap(),
-        Value::Bool(true)
+        call_primitive(&contains_fn, &[Value::string("hello"), Value::string(""),]).unwrap(),
+        Value::bool(true)
     );
 }
 
@@ -765,22 +787,18 @@ fn test_string_starts_with() {
 
     // Starts with
     assert_eq!(
-        call_primitive(
-            &starts_fn,
-            &[Value::String("hello".into()), Value::String("hel".into()),]
-        )
-        .unwrap(),
-        Value::Bool(true)
+        call_primitive(&starts_fn, &[Value::string("hello"), Value::string("hel"),]).unwrap(),
+        Value::bool(true)
     );
 
     // Does not start with
     assert_eq!(
         call_primitive(
             &starts_fn,
-            &[Value::String("hello".into()), Value::String("world".into()),]
+            &[Value::string("hello"), Value::string("world"),]
         )
         .unwrap(),
-        Value::Bool(false)
+        Value::bool(false)
     );
 }
 
@@ -791,22 +809,14 @@ fn test_string_ends_with() {
 
     // Ends with
     assert_eq!(
-        call_primitive(
-            &ends_fn,
-            &[Value::String("hello".into()), Value::String("llo".into()),]
-        )
-        .unwrap(),
-        Value::Bool(true)
+        call_primitive(&ends_fn, &[Value::string("hello"), Value::string("llo"),]).unwrap(),
+        Value::bool(true)
     );
 
     // Does not end with
     assert_eq!(
-        call_primitive(
-            &ends_fn,
-            &[Value::String("hello".into()), Value::String("world".into()),]
-        )
-        .unwrap(),
-        Value::Bool(false)
+        call_primitive(&ends_fn, &[Value::string("hello"), Value::string("world"),]).unwrap(),
+        Value::bool(false)
     );
 }
 
@@ -817,29 +827,38 @@ fn test_string_join() {
 
     // Join list of strings
     let list_val = list(vec![
-        Value::String("a".into()),
-        Value::String("b".into()),
-        Value::String("c".into()),
+        Value::string("a"),
+        Value::string("b"),
+        Value::string("c"),
     ]);
-    let result = call_primitive(&join_fn, &[list_val, Value::String(",".into())]).unwrap();
+    let result = call_primitive(&join_fn, &[list_val, Value::string(",")]).unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), "a,b,c"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "a,b,c")
+        }
         _ => panic!("Expected string"),
     }
 
     // Single element
-    let list_val = list(vec![Value::String("hello".into())]);
-    let result = call_primitive(&join_fn, &[list_val, Value::String(" ".into())]).unwrap();
+    let list_val = list(vec![Value::string("hello")]);
+    let result = call_primitive(&join_fn, &[list_val, Value::string(" ")]).unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), "hello"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "hello")
+        }
         _ => panic!("Expected string"),
     }
 
     // Empty list
     let list_val = list(vec![]);
-    let result = call_primitive(&join_fn, &[list_val, Value::String(",".into())]).unwrap();
+    let result = call_primitive(&join_fn, &[list_val, Value::string(",")]).unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), ""),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "")
+        }
         _ => panic!("Expected string"),
     }
 }
@@ -850,16 +869,20 @@ fn test_number_to_string() {
     let num_to_str = get_primitive(&vm, &mut symbols, "number->string");
 
     // Integer to string
-    let result = call_primitive(&num_to_str, &[Value::Int(42)]).unwrap();
+    let result = call_primitive(&num_to_str, &[Value::int(42)]).unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), "42"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "42")
+        }
         _ => panic!("Expected string"),
     }
 
     // Float to string
-    let result = call_primitive(&num_to_str, &[Value::Float(std::f64::consts::PI)]).unwrap();
+    let result = call_primitive(&num_to_str, &[Value::float(std::f64::consts::PI)]).unwrap();
     match result {
-        Value::String(s) => {
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
             // Just check that it starts with "3.14" since float representation may vary
             assert!(s.starts_with("3.14"));
         }
@@ -867,16 +890,22 @@ fn test_number_to_string() {
     }
 
     // Negative numbers
-    let result = call_primitive(&num_to_str, &[Value::Int(-42)]).unwrap();
+    let result = call_primitive(&num_to_str, &[Value::int(-42)]).unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), "-42"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "-42")
+        }
         _ => panic!("Expected string"),
     }
 
     // Zero
-    let result = call_primitive(&num_to_str, &[Value::Int(0)]).unwrap();
+    let result = call_primitive(&num_to_str, &[Value::int(0)]).unwrap();
     match result {
-        Value::String(s) => assert_eq!(s.as_ref(), "0"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "0")
+        }
         _ => panic!("Expected string"),
     }
 }
@@ -887,31 +916,27 @@ fn test_string_split_errors() {
     let split_fn = get_primitive(&vm, &mut symbols, "string-split");
 
     // Wrong arity - too few args
-    assert!(call_primitive(&split_fn, &[Value::String("hello".into())]).is_err());
+    assert!(call_primitive(&split_fn, &[Value::string("hello")]).is_err());
 
     // Wrong arity - too many args
     assert!(call_primitive(
         &split_fn,
         &[
-            Value::String("hello".into()),
-            Value::String(",".into()),
-            Value::String("extra".into()),
+            Value::string("hello"),
+            Value::string(","),
+            Value::string("extra"),
         ]
     )
     .is_err());
 
     // Wrong type - first arg not string
-    assert!(call_primitive(&split_fn, &[Value::Int(42), Value::String(",".into()),]).is_err());
+    assert!(call_primitive(&split_fn, &[Value::int(42), Value::string(","),]).is_err());
 
     // Wrong type - second arg not string
-    assert!(call_primitive(&split_fn, &[Value::String("hello".into()), Value::Int(42),]).is_err());
+    assert!(call_primitive(&split_fn, &[Value::string("hello"), Value::int(42),]).is_err());
 
     // Empty delimiter
-    assert!(call_primitive(
-        &split_fn,
-        &[Value::String("hello".into()), Value::String("".into()),]
-    )
-    .is_err());
+    assert!(call_primitive(&split_fn, &[Value::string("hello"), Value::string(""),]).is_err());
 }
 
 #[test]
@@ -920,20 +945,16 @@ fn test_string_replace_errors() {
     let replace_fn = get_primitive(&vm, &mut symbols, "string-replace");
 
     // Wrong arity - too few args
-    assert!(call_primitive(
-        &replace_fn,
-        &[Value::String("hello".into()), Value::String("l".into()),]
-    )
-    .is_err());
+    assert!(call_primitive(&replace_fn, &[Value::string("hello"), Value::string("l"),]).is_err());
 
     // Wrong arity - too many args
     assert!(call_primitive(
         &replace_fn,
         &[
-            Value::String("hello".into()),
-            Value::String("l".into()),
-            Value::String("x".into()),
-            Value::String("extra".into()),
+            Value::string("hello"),
+            Value::string("l"),
+            Value::string("x"),
+            Value::string("extra"),
         ]
     )
     .is_err());
@@ -941,33 +962,21 @@ fn test_string_replace_errors() {
     // Wrong type - first arg not string
     assert!(call_primitive(
         &replace_fn,
-        &[
-            Value::Int(42),
-            Value::String("l".into()),
-            Value::String("x".into()),
-        ]
+        &[Value::int(42), Value::string("l"), Value::string("x"),]
     )
     .is_err());
 
     // Wrong type - second arg not string
     assert!(call_primitive(
         &replace_fn,
-        &[
-            Value::String("hello".into()),
-            Value::Int(42),
-            Value::String("x".into()),
-        ]
+        &[Value::string("hello"), Value::int(42), Value::string("x"),]
     )
     .is_err());
 
     // Wrong type - third arg not string
     assert!(call_primitive(
         &replace_fn,
-        &[
-            Value::String("hello".into()),
-            Value::String("l".into()),
-            Value::Int(42),
-        ]
+        &[Value::string("hello"), Value::string("l"), Value::int(42),]
     )
     .is_err());
 
@@ -975,9 +984,9 @@ fn test_string_replace_errors() {
     assert!(call_primitive(
         &replace_fn,
         &[
-            Value::String("hello".into()),
-            Value::String("".into()),
-            Value::String("x".into()),
+            Value::string("hello"),
+            Value::string(""),
+            Value::string("x"),
         ]
     )
     .is_err());
@@ -992,14 +1001,10 @@ fn test_string_trim_errors() {
     assert!(call_primitive(&trim_fn, &[]).is_err());
 
     // Wrong arity - too many args
-    assert!(call_primitive(
-        &trim_fn,
-        &[Value::String("hello".into()), Value::String("extra".into()),]
-    )
-    .is_err());
+    assert!(call_primitive(&trim_fn, &[Value::string("hello"), Value::string("extra"),]).is_err());
 
     // Wrong type - not string
-    assert!(call_primitive(&trim_fn, &[Value::Int(42)]).is_err());
+    assert!(call_primitive(&trim_fn, &[Value::int(42)]).is_err());
 }
 
 #[test]
@@ -1008,28 +1013,24 @@ fn test_string_contains_errors() {
     let contains_fn = get_primitive(&vm, &mut symbols, "string-contains?");
 
     // Wrong arity - too few args
-    assert!(call_primitive(&contains_fn, &[Value::String("hello".into())]).is_err());
+    assert!(call_primitive(&contains_fn, &[Value::string("hello")]).is_err());
 
     // Wrong arity - too many args
     assert!(call_primitive(
         &contains_fn,
         &[
-            Value::String("hello".into()),
-            Value::String("l".into()),
-            Value::String("extra".into()),
+            Value::string("hello"),
+            Value::string("l"),
+            Value::string("extra"),
         ]
     )
     .is_err());
 
     // Wrong type - first arg not string
-    assert!(call_primitive(&contains_fn, &[Value::Int(42), Value::String("l".into()),]).is_err());
+    assert!(call_primitive(&contains_fn, &[Value::int(42), Value::string("l"),]).is_err());
 
     // Wrong type - second arg not string
-    assert!(call_primitive(
-        &contains_fn,
-        &[Value::String("hello".into()), Value::Int(42),]
-    )
-    .is_err());
+    assert!(call_primitive(&contains_fn, &[Value::string("hello"), Value::int(42),]).is_err());
 }
 
 #[test]
@@ -1038,28 +1039,24 @@ fn test_string_starts_with_errors() {
     let starts_fn = get_primitive(&vm, &mut symbols, "string-starts-with?");
 
     // Wrong arity - too few args
-    assert!(call_primitive(&starts_fn, &[Value::String("hello".into())]).is_err());
+    assert!(call_primitive(&starts_fn, &[Value::string("hello")]).is_err());
 
     // Wrong arity - too many args
     assert!(call_primitive(
         &starts_fn,
         &[
-            Value::String("hello".into()),
-            Value::String("h".into()),
-            Value::String("extra".into()),
+            Value::string("hello"),
+            Value::string("h"),
+            Value::string("extra"),
         ]
     )
     .is_err());
 
     // Wrong type - first arg not string
-    assert!(call_primitive(&starts_fn, &[Value::Int(42), Value::String("h".into()),]).is_err());
+    assert!(call_primitive(&starts_fn, &[Value::int(42), Value::string("h"),]).is_err());
 
     // Wrong type - second arg not string
-    assert!(call_primitive(
-        &starts_fn,
-        &[Value::String("hello".into()), Value::Int(42),]
-    )
-    .is_err());
+    assert!(call_primitive(&starts_fn, &[Value::string("hello"), Value::int(42),]).is_err());
 }
 
 #[test]
@@ -1068,24 +1065,24 @@ fn test_string_ends_with_errors() {
     let ends_fn = get_primitive(&vm, &mut symbols, "string-ends-with?");
 
     // Wrong arity - too few args
-    assert!(call_primitive(&ends_fn, &[Value::String("hello".into())]).is_err());
+    assert!(call_primitive(&ends_fn, &[Value::string("hello")]).is_err());
 
     // Wrong arity - too many args
     assert!(call_primitive(
         &ends_fn,
         &[
-            Value::String("hello".into()),
-            Value::String("o".into()),
-            Value::String("extra".into()),
+            Value::string("hello"),
+            Value::string("o"),
+            Value::string("extra"),
         ]
     )
     .is_err());
 
     // Wrong type - first arg not string
-    assert!(call_primitive(&ends_fn, &[Value::Int(42), Value::String("o".into()),]).is_err());
+    assert!(call_primitive(&ends_fn, &[Value::int(42), Value::string("o"),]).is_err());
 
     // Wrong type - second arg not string
-    assert!(call_primitive(&ends_fn, &[Value::String("hello".into()), Value::Int(42),]).is_err());
+    assert!(call_primitive(&ends_fn, &[Value::string("hello"), Value::int(42),]).is_err());
 }
 
 #[test]
@@ -1099,24 +1096,16 @@ fn test_string_join_errors() {
     // Wrong arity - too many args
     assert!(call_primitive(
         &join_fn,
-        &[
-            list(vec![]),
-            Value::String(",".into()),
-            Value::String("extra".into()),
-        ]
+        &[list(vec![]), Value::string(","), Value::string("extra"),]
     )
     .is_err());
 
     // Wrong type - second arg not string
-    assert!(call_primitive(&join_fn, &[list(vec![]), Value::Int(42),]).is_err());
+    assert!(call_primitive(&join_fn, &[list(vec![]), Value::int(42),]).is_err());
 
     // Non-string list elements
-    let list_val = list(vec![
-        Value::String("a".into()),
-        Value::Int(42),
-        Value::String("c".into()),
-    ]);
-    assert!(call_primitive(&join_fn, &[list_val, Value::String(",".into())]).is_err());
+    let list_val = list(vec![Value::string("a"), Value::int(42), Value::string("c")]);
+    assert!(call_primitive(&join_fn, &[list_val, Value::string(",")]).is_err());
 }
 
 #[test]
@@ -1128,14 +1117,14 @@ fn test_number_to_string_errors() {
     assert!(call_primitive(&num_to_str, &[]).is_err());
 
     // Wrong arity - too many args
-    assert!(call_primitive(&num_to_str, &[Value::Int(42), Value::Int(100),]).is_err());
+    assert!(call_primitive(&num_to_str, &[Value::int(42), Value::int(100),]).is_err());
 
     // Wrong type - not a number
-    assert!(call_primitive(&num_to_str, &[Value::String("42".into())]).is_err());
+    assert!(call_primitive(&num_to_str, &[Value::string("42")]).is_err());
 
-    assert!(call_primitive(&num_to_str, &[Value::Nil]).is_err());
+    assert!(call_primitive(&num_to_str, &[Value::NIL]).is_err());
 
-    assert!(call_primitive(&num_to_str, &[Value::Bool(true)]).is_err());
+    assert!(call_primitive(&num_to_str, &[Value::bool(true)]).is_err());
 }
 
 #[test]
@@ -1144,44 +1133,50 @@ fn test_math_module_functions() {
 
     // Test sqrt
     let sqrt_fn = get_primitive(&vm, &mut symbols, "sqrt");
-    match call_primitive(&sqrt_fn, &[Value::Int(4)]).unwrap() {
-        Value::Float(f) => assert!((f - 2.0).abs() < 0.0001),
-        _ => panic!("Expected float"),
+    if let Some(f) = call_primitive(&sqrt_fn, &[Value::int(4)])
+        .unwrap()
+        .as_float()
+    {
+        assert!((f - 2.0).abs() < 0.0001)
+    } else {
+        panic!("Expected float");
     }
 
     // Test floor
     let floor_fn = get_primitive(&vm, &mut symbols, "floor");
     assert_eq!(
-        call_primitive(&floor_fn, &[Value::Float(3.7)]).unwrap(),
-        Value::Int(3)
+        call_primitive(&floor_fn, &[Value::float(3.7)]).unwrap(),
+        Value::int(3)
     );
 
     // Test ceil
     let ceil_fn = get_primitive(&vm, &mut symbols, "ceil");
     assert_eq!(
-        call_primitive(&ceil_fn, &[Value::Float(3.2)]).unwrap(),
-        Value::Int(4)
+        call_primitive(&ceil_fn, &[Value::float(3.2)]).unwrap(),
+        Value::int(4)
     );
 
     // Test round
     let round_fn = get_primitive(&vm, &mut symbols, "round");
     assert_eq!(
-        call_primitive(&round_fn, &[Value::Float(3.6)]).unwrap(),
-        Value::Int(4)
+        call_primitive(&round_fn, &[Value::float(3.6)]).unwrap(),
+        Value::int(4)
     );
 
     // Test pi
     let pi_fn = get_primitive(&vm, &mut symbols, "pi");
-    match call_primitive(&pi_fn, &[]).unwrap() {
-        Value::Float(f) => assert!((f - std::f64::consts::PI).abs() < 0.001),
-        _ => panic!("Expected float"),
+    if let Some(f) = call_primitive(&pi_fn, &[]).unwrap().as_float() {
+        assert!((f - std::f64::consts::PI).abs() < 0.001)
+    } else {
+        panic!("Expected float");
     }
 
     // Test e
     let e_fn = get_primitive(&vm, &mut symbols, "e");
-    match call_primitive(&e_fn, &[]).unwrap() {
-        Value::Float(f) => assert!((f - std::f64::consts::E).abs() < 0.001),
-        _ => panic!("Expected float"),
+    if let Some(f) = call_primitive(&e_fn, &[]).unwrap().as_float() {
+        assert!((f - std::f64::consts::E).abs() < 0.001)
+    } else {
+        panic!("Expected float");
     }
 }
 
@@ -1192,7 +1187,10 @@ fn test_package_manager() {
     // Test package-version
     let version_fn = get_primitive(&vm, &mut symbols, "package-version");
     match call_primitive(&version_fn, &[]).unwrap() {
-        Value::String(s) => assert_eq!(s.as_ref(), "0.3.0"),
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
+            assert_eq!(s, "0.3.0")
+        }
         _ => panic!("Expected string"),
     }
 
@@ -1275,12 +1273,12 @@ fn test_import_file_primitive() {
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
 
     // Test with valid string argument (file may not exist, but function should accept it)
-    let result = call_primitive(&import_file, &[Value::String("lib/math.lisp".into())]);
+    let result = call_primitive(&import_file, &[Value::string("lib/math.lisp")]);
     // Result depends on file existence - we're just checking error handling
     assert!(result.is_ok() || result.is_err());
 
     // Test with invalid argument type
-    let result = call_primitive(&import_file, &[Value::Int(42)]);
+    let result = call_primitive(&import_file, &[Value::int(42)]);
     assert!(result.is_err());
 
     // Test with wrong argument count
@@ -1307,7 +1305,7 @@ fn test_import_file_with_valid_file() {
 
     // Test loading an existing file
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
-    let result = call_primitive(&import_file, &[Value::String(module_path.into())]);
+    let result = call_primitive(&import_file, &[Value::string(module_path)]);
     assert!(result.is_ok(), "Should successfully load valid file");
 
     // Clean up
@@ -1329,10 +1327,7 @@ fn test_import_file_with_invalid_file() {
 
     // Test loading a non-existent file
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
-    let result = call_primitive(
-        &import_file,
-        &[Value::String("/nonexistent/path.lisp".into())],
-    );
+    let result = call_primitive(&import_file, &[Value::string("/nonexistent/path.lisp")]);
     assert!(result.is_err(), "Should fail for non-existent file");
 
     // Clean up
@@ -1358,11 +1353,11 @@ fn test_import_file_circular_dependency_prevention() {
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
 
     // First load should succeed
-    let result1 = call_primitive(&import_file, &[Value::String(module_path.into())]);
+    let result1 = call_primitive(&import_file, &[Value::string(module_path)]);
     assert!(result1.is_ok(), "First load should succeed");
 
     // Second load should also succeed (idempotent - module already marked as loaded)
-    let result2 = call_primitive(&import_file, &[Value::String(module_path.into())]);
+    let result2 = call_primitive(&import_file, &[Value::string(module_path)]);
     assert!(
         result2.is_ok(),
         "Second load should also succeed (idempotent)"
@@ -1378,11 +1373,11 @@ fn test_add_module_path_primitive() {
     let add_path = get_primitive(&vm, &mut symbols, "add-module-path");
 
     // Test with valid string argument (without VM context, should fail)
-    let result = call_primitive(&add_path, &[Value::String("./lib".into())]);
+    let result = call_primitive(&add_path, &[Value::string("./lib")]);
     assert!(result.is_err(), "Should fail without VM context");
 
     // Test with invalid argument type
-    let result = call_primitive(&add_path, &[Value::Int(42)]);
+    let result = call_primitive(&add_path, &[Value::int(42)]);
     assert!(result.is_err());
 }
 
@@ -1402,12 +1397,12 @@ fn test_add_module_path_with_vm_context() {
     let add_path = get_primitive(&vm, &mut symbols, "add-module-path");
 
     // Test with valid string argument
-    let result = call_primitive(&add_path, &[Value::String("./lib".into())]);
+    let result = call_primitive(&add_path, &[Value::string("./lib")]);
     assert!(result.is_ok(), "Should successfully add module path");
-    assert_eq!(result.unwrap(), Value::Nil);
+    assert_eq!(result.unwrap(), Value::NIL);
 
     // Test multiple paths
-    let result = call_primitive(&add_path, &[Value::String("./modules".into())]);
+    let result = call_primitive(&add_path, &[Value::string("./modules")]);
     assert!(result.is_ok());
 
     // Clean up
@@ -1426,11 +1421,8 @@ fn test_expand_macro_primitive() {
 
     // Test with a quoted list (macro call form)
     let macro_name = symbols.intern("test-macro");
-    let arg = Value::Int(42);
-    let form = Value::Cons(Rc::new(Cons::new(
-        Value::Symbol(macro_name),
-        Value::Cons(Rc::new(Cons::new(arg, Value::Nil))),
-    )));
+    let arg = Value::int(42);
+    let form = Value::cons(Value::symbol(macro_name.0), Value::cons(arg, Value::NIL));
 
     let result = call_primitive(&expand, std::slice::from_ref(&form));
     // Should error because test-macro is not defined as a macro
@@ -1451,13 +1443,13 @@ fn test_is_macro_primitive() {
     set_macro_symbol_table(&mut symbols as *mut SymbolTable);
 
     let sym_id = symbols.intern("some-symbol");
-    let result = call_primitive(&is_macro, &[Value::Symbol(sym_id)]);
+    let result = call_primitive(&is_macro, &[Value::symbol(sym_id.0)]);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Bool(false));
+    assert_eq!(result.unwrap(), Value::bool(false));
 
-    let result = call_primitive(&is_macro, &[Value::Int(42)]);
+    let result = call_primitive(&is_macro, &[Value::int(42)]);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Bool(false));
+    assert_eq!(result.unwrap(), Value::bool(false));
 
     // Clear the context
     clear_macro_symbol_table();
@@ -1469,7 +1461,7 @@ fn test_spawn_primitive() {
     let spawn = get_primitive(&vm, &mut symbols, "spawn");
 
     // Create a simple closure to spawn
-    let closure = Value::Closure(std::rc::Rc::new(Closure {
+    let closure = Value::closure(Closure {
         bytecode: std::rc::Rc::new(vec![0u8]), // dummy bytecode
         arity: elle::value::Arity::Exact(0),
         env: std::rc::Rc::new(vec![]),
@@ -1479,19 +1471,20 @@ fn test_spawn_primitive() {
         source_ast: None,
         effect: elle::compiler::effects::Effect::Pure,
         cell_params_mask: 0,
-    }));
+        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+    });
 
     let result = call_primitive(&spawn, &[closure]);
     assert!(result.is_ok());
     match result.unwrap() {
-        Value::ThreadHandle(_) => {
+        v if v.as_thread_handle().is_some() => {
             // Should return a thread handle
         }
         _ => panic!("spawn should return a thread handle"),
     }
 
     // Test with non-function
-    let result = call_primitive(&spawn, &[Value::Int(42)]);
+    let result = call_primitive(&spawn, &[Value::int(42)]);
     assert!(result.is_err());
 }
 
@@ -1501,7 +1494,7 @@ fn test_join_primitive() {
     let join = get_primitive(&vm, &mut symbols, "join");
 
     // join with invalid argument (not a thread handle)
-    let result = call_primitive(&join, &[Value::String("thread-id".into())]);
+    let result = call_primitive(&join, &[Value::string("thread-id")]);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("thread handle"));
 }
@@ -1512,20 +1505,20 @@ fn test_sleep_primitive() {
     let sleep = get_primitive(&vm, &mut symbols, "sleep");
 
     // Test with integer seconds
-    let result = call_primitive(&sleep, &[Value::Int(0)]);
+    let result = call_primitive(&sleep, &[Value::int(0)]);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Nil);
+    assert_eq!(result.unwrap(), Value::NIL);
 
     // Test with float seconds
-    let result = call_primitive(&sleep, &[Value::Float(0.01)]);
+    let result = call_primitive(&sleep, &[Value::float(0.01)]);
     assert!(result.is_ok());
 
     // Test with negative duration
-    let result = call_primitive(&sleep, &[Value::Int(-1)]);
+    let result = call_primitive(&sleep, &[Value::int(-1)]);
     assert!(result.is_err());
 
     // Test with wrong argument type
-    let result = call_primitive(&sleep, &[Value::String("invalid".into())]);
+    let result = call_primitive(&sleep, &[Value::string("invalid")]);
     assert!(result.is_err());
 }
 
@@ -1537,7 +1530,8 @@ fn test_current_thread_id_primitive() {
     let result = call_primitive(&thread_id, &[]);
     assert!(result.is_ok());
     match result.unwrap() {
-        Value::String(s) => {
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
             assert!(!s.is_empty());
         }
         _ => panic!("current-thread-id should return a string"),
@@ -1549,7 +1543,7 @@ fn test_debug_print_primitive() {
     let (vm, mut symbols) = setup();
     let debug_print = get_primitive(&vm, &mut symbols, "debug-print");
 
-    let test_val = Value::Int(42);
+    let test_val = Value::int(42);
     let result = call_primitive(&debug_print, std::slice::from_ref(&test_val));
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), test_val);
@@ -1560,20 +1554,20 @@ fn test_trace_primitive() {
     let (vm, mut symbols) = setup();
     let trace = get_primitive(&vm, &mut symbols, "trace");
 
-    let label = Value::String("test-trace".into());
-    let value = Value::Int(42);
-    let result = call_primitive(&trace, &[label, value.clone()]);
+    let label = Value::string("test-trace");
+    let value = Value::int(42);
+    let result = call_primitive(&trace, &[label, value]);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), value);
 
     // Test with symbol label
     let sym_id = symbols.intern("trace-label");
-    let label = Value::Symbol(sym_id);
-    let result = call_primitive(&trace, &[label, value.clone()]);
+    let label = Value::symbol(sym_id.0);
+    let result = call_primitive(&trace, &[label, value]);
     assert!(result.is_ok());
 
     // Test with invalid label type
-    let label = Value::Int(123);
+    let label = Value::int(123);
     let result = call_primitive(&trace, &[label, value]);
     assert!(result.is_err());
 }
@@ -1583,7 +1577,7 @@ fn test_profile_primitive() {
     let (vm, mut symbols) = setup();
     let profile = get_primitive(&vm, &mut symbols, "profile");
 
-    let closure = Value::Closure(std::rc::Rc::new(Closure {
+    let closure = Value::closure(Closure {
         bytecode: std::rc::Rc::new(vec![0u8]),
         arity: elle::value::Arity::Exact(0),
         env: std::rc::Rc::new(vec![]),
@@ -1593,13 +1587,14 @@ fn test_profile_primitive() {
         source_ast: None,
         effect: elle::compiler::effects::Effect::Pure,
         cell_params_mask: 0,
-    }));
+        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+    });
 
     let result = call_primitive(&profile, &[closure]);
     assert!(result.is_ok());
 
     // Test with non-function
-    let result = call_primitive(&profile, &[Value::Int(42)]);
+    let result = call_primitive(&profile, &[Value::int(42)]);
     assert!(result.is_err());
 }
 
@@ -1613,7 +1608,7 @@ fn test_memory_usage_primitive() {
 
     // Should return a list
     match result.unwrap() {
-        Value::Cons(_) | Value::Nil => {
+        v if v.is_cons() || v.is_nil() => {
             // Valid list representation
         }
         _ => panic!("memory-usage should return a list"),
@@ -1651,9 +1646,9 @@ fn test_json_parse_null() {
     let (vm, mut symbols) = setup();
     let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
 
-    let result = call_primitive(&json_parse, &[Value::String("null".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("null")]);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Nil);
+    assert_eq!(result.unwrap(), Value::NIL);
 }
 
 #[test]
@@ -1661,13 +1656,13 @@ fn test_json_parse_booleans() {
     let (vm, mut symbols) = setup();
     let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
 
-    let result = call_primitive(&json_parse, &[Value::String("true".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("true")]);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Bool(true));
+    assert_eq!(result.unwrap(), Value::bool(true));
 
-    let result = call_primitive(&json_parse, &[Value::String("false".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("false")]);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::Bool(false));
+    assert_eq!(result.unwrap(), Value::bool(false));
 }
 
 #[test]
@@ -1675,14 +1670,14 @@ fn test_json_parse_integers() {
     let (vm, mut symbols) = setup();
     let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
 
-    let result = call_primitive(&json_parse, &[Value::String("0".into())]);
-    assert_eq!(result.unwrap(), Value::Int(0));
+    let result = call_primitive(&json_parse, &[Value::string("0")]);
+    assert_eq!(result.unwrap(), Value::int(0));
 
-    let result = call_primitive(&json_parse, &[Value::String("42".into())]);
-    assert_eq!(result.unwrap(), Value::Int(42));
+    let result = call_primitive(&json_parse, &[Value::string("42")]);
+    assert_eq!(result.unwrap(), Value::int(42));
 
-    let result = call_primitive(&json_parse, &[Value::String("-17".into())]);
-    assert_eq!(result.unwrap(), Value::Int(-17));
+    let result = call_primitive(&json_parse, &[Value::string("-17")]);
+    assert_eq!(result.unwrap(), Value::int(-17));
 }
 
 #[test]
@@ -1691,22 +1686,25 @@ fn test_json_parse_floats() {
     let (vm, mut symbols) = setup();
     let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
 
-    let result = call_primitive(&json_parse, &[Value::String("3.14".into())]);
-    match result.unwrap() {
-        Value::Float(f) => assert!((f - 3.14).abs() < 1e-10),
-        _ => panic!("Expected float"),
+    let result = call_primitive(&json_parse, &[Value::string("3.14")]);
+    if let Some(f) = result.unwrap().as_float() {
+        assert!((f - 3.14).abs() < 1e-10)
+    } else {
+        panic!("Expected float");
     }
 
-    let result = call_primitive(&json_parse, &[Value::String("1e10".into())]);
-    match result.unwrap() {
-        Value::Float(f) => assert!((f - 1e10).abs() < 1e5),
-        _ => panic!("Expected float"),
+    let result = call_primitive(&json_parse, &[Value::string("1e10")]);
+    if let Some(f) = result.unwrap().as_float() {
+        assert!((f - 1e10).abs() < 1e5)
+    } else {
+        panic!("Expected float");
     }
 
-    let result = call_primitive(&json_parse, &[Value::String("1.0".into())]);
-    match result.unwrap() {
-        Value::Float(f) => assert!((f - 1.0).abs() < 1e-10),
-        _ => panic!("Expected float"),
+    let result = call_primitive(&json_parse, &[Value::string("1.0")]);
+    if let Some(f) = result.unwrap().as_float() {
+        assert!((f - 1.0).abs() < 1e-10)
+    } else {
+        panic!("Expected float");
     }
 }
 
@@ -1715,20 +1713,20 @@ fn test_json_parse_strings() {
     let (vm, mut symbols) = setup();
     let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
 
-    let result = call_primitive(&json_parse, &[Value::String("\"hello\"".into())]);
-    assert_eq!(result.unwrap(), Value::String("hello".into()));
+    let result = call_primitive(&json_parse, &[Value::string("\"hello\"")]);
+    assert_eq!(result.unwrap(), Value::string("hello"));
 
-    let result = call_primitive(&json_parse, &[Value::String("\"\"".into())]);
-    assert_eq!(result.unwrap(), Value::String("".into()));
+    let result = call_primitive(&json_parse, &[Value::string("\"\"")]);
+    assert_eq!(result.unwrap(), Value::string(""));
 
-    let result = call_primitive(&json_parse, &[Value::String("\"hello\\nworld\"".into())]);
-    assert_eq!(result.unwrap(), Value::String("hello\nworld".into()));
+    let result = call_primitive(&json_parse, &[Value::string("\"hello\\nworld\"")]);
+    assert_eq!(result.unwrap(), Value::string("hello\nworld"));
 
-    let result = call_primitive(&json_parse, &[Value::String("\"quote\\\"test\"".into())]);
-    assert_eq!(result.unwrap(), Value::String("quote\"test".into()));
+    let result = call_primitive(&json_parse, &[Value::string("\"quote\\\"test\"")]);
+    assert_eq!(result.unwrap(), Value::string("quote\"test"));
 
-    let result = call_primitive(&json_parse, &[Value::String("\"\\u0041\"".into())]);
-    assert_eq!(result.unwrap(), Value::String("A".into()));
+    let result = call_primitive(&json_parse, &[Value::string("\"\\u0041\"")]);
+    assert_eq!(result.unwrap(), Value::string("A"));
 }
 
 #[test]
@@ -1736,28 +1734,25 @@ fn test_json_parse_arrays() {
     let (vm, mut symbols) = setup();
     let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
 
-    let result = call_primitive(&json_parse, &[Value::String("[]".into())]);
-    assert_eq!(result.unwrap(), Value::Nil);
+    let result = call_primitive(&json_parse, &[Value::string("[]")]);
+    assert_eq!(result.unwrap(), Value::EMPTY_LIST);
 
-    let result = call_primitive(&json_parse, &[Value::String("[1,2,3]".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("[1,2,3]")]);
     let list = result.unwrap();
     let vec = list.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0], Value::Int(1));
-    assert_eq!(vec[1], Value::Int(2));
-    assert_eq!(vec[2], Value::Int(3));
+    assert_eq!(vec[0], Value::int(1));
+    assert_eq!(vec[1], Value::int(2));
+    assert_eq!(vec[2], Value::int(3));
 
-    let result = call_primitive(
-        &json_parse,
-        &[Value::String("[1,\"two\",true,null]".into())],
-    );
+    let result = call_primitive(&json_parse, &[Value::string("[1,\"two\",true,null]")]);
     let list = result.unwrap();
     let vec = list.list_to_vec().unwrap();
     assert_eq!(vec.len(), 4);
-    assert_eq!(vec[0], Value::Int(1));
-    assert_eq!(vec[1], Value::String("two".into()));
-    assert_eq!(vec[2], Value::Bool(true));
-    assert_eq!(vec[3], Value::Nil);
+    assert_eq!(vec[0], Value::int(1));
+    assert_eq!(vec[1], Value::string("two"));
+    assert_eq!(vec[2], Value::bool(true));
+    assert_eq!(vec[3], Value::NIL);
 }
 
 #[test]
@@ -1765,9 +1760,10 @@ fn test_json_parse_objects() {
     let (vm, mut symbols) = setup();
     let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
 
-    let result = call_primitive(&json_parse, &[Value::String("{}".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("{}")]);
     match result.unwrap() {
-        Value::Table(t) => {
+        v if v.as_table().is_some() => {
+            let t = v.as_table().unwrap();
             assert_eq!(t.borrow().len(), 0);
         }
         _ => panic!("Expected table"),
@@ -1775,10 +1771,11 @@ fn test_json_parse_objects() {
 
     let result = call_primitive(
         &json_parse,
-        &[Value::String("{\"name\":\"Alice\",\"age\":30}".into())],
+        &[Value::string("{\"name\":\"Alice\",\"age\":30}")],
     );
     match result.unwrap() {
-        Value::Table(t) => {
+        v if v.as_table().is_some() => {
+            let t = v.as_table().unwrap();
             let table = t.borrow();
             assert_eq!(table.len(), 2);
         }
@@ -1791,10 +1788,10 @@ fn test_json_parse_whitespace() {
     let (vm, mut symbols) = setup();
     let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
 
-    let result = call_primitive(&json_parse, &[Value::String("  \n\t  42  \n\t  ".into())]);
-    assert_eq!(result.unwrap(), Value::Int(42));
+    let result = call_primitive(&json_parse, &[Value::string("  \n\t  42  \n\t  ")]);
+    assert_eq!(result.unwrap(), Value::int(42));
 
-    let result = call_primitive(&json_parse, &[Value::String("[ 1 , 2 , 3 ]".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("[ 1 , 2 , 3 ]")]);
     let list = result.unwrap();
     let vec = list.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
@@ -1806,27 +1803,27 @@ fn test_json_parse_errors() {
     let json_parse = get_primitive(&vm, &mut symbols, "json-parse");
 
     // Empty input
-    let result = call_primitive(&json_parse, &[Value::String("".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("")]);
     assert!(result.is_err());
 
     // Trailing content
-    let result = call_primitive(&json_parse, &[Value::String("42 extra".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("42 extra")]);
     assert!(result.is_err());
 
     // Unterminated string
-    let result = call_primitive(&json_parse, &[Value::String("\"unterminated".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("\"unterminated")]);
     assert!(result.is_err());
 
     // Unclosed array
-    let result = call_primitive(&json_parse, &[Value::String("[1,2".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("[1,2")]);
     assert!(result.is_err());
 
     // Unclosed object
-    let result = call_primitive(&json_parse, &[Value::String("{\"key\":42".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("{\"key\":42")]);
     assert!(result.is_err());
 
     // Invalid token
-    let result = call_primitive(&json_parse, &[Value::String("invalid".into())]);
+    let result = call_primitive(&json_parse, &[Value::string("invalid")]);
     assert!(result.is_err());
 }
 
@@ -1835,24 +1832,24 @@ fn test_json_serialize_compact() {
     let (vm, mut symbols) = setup();
     let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
 
-    let result = call_primitive(&json_serialize, &[Value::Nil]);
-    assert_eq!(result.unwrap(), Value::String("null".into()));
+    let result = call_primitive(&json_serialize, &[Value::NIL]);
+    assert_eq!(result.unwrap(), Value::string("null"));
 
-    let result = call_primitive(&json_serialize, &[Value::Bool(true)]);
-    assert_eq!(result.unwrap(), Value::String("true".into()));
+    let result = call_primitive(&json_serialize, &[Value::bool(true)]);
+    assert_eq!(result.unwrap(), Value::string("true"));
 
-    let result = call_primitive(&json_serialize, &[Value::Bool(false)]);
-    assert_eq!(result.unwrap(), Value::String("false".into()));
+    let result = call_primitive(&json_serialize, &[Value::bool(false)]);
+    assert_eq!(result.unwrap(), Value::string("false"));
 
-    let result = call_primitive(&json_serialize, &[Value::Int(42)]);
-    assert_eq!(result.unwrap(), Value::String("42".into()));
+    let result = call_primitive(&json_serialize, &[Value::int(42)]);
+    assert_eq!(result.unwrap(), Value::string("42"));
 
-    let result = call_primitive(&json_serialize, &[Value::String("hello".into())]);
-    assert_eq!(result.unwrap(), Value::String("\"hello\"".into()));
+    let result = call_primitive(&json_serialize, &[Value::string("hello")]);
+    assert_eq!(result.unwrap(), Value::string("\"hello\""));
 
-    let list = list(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+    let list = list(vec![Value::int(1), Value::int(2), Value::int(3)]);
     let result = call_primitive(&json_serialize, &[list]);
-    assert_eq!(result.unwrap(), Value::String("[1,2,3]".into()));
+    assert_eq!(result.unwrap(), Value::string("[1,2,3]"));
 }
 
 #[test]
@@ -1860,17 +1857,17 @@ fn test_json_serialize_string_escaping() {
     let (vm, mut symbols) = setup();
     let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
 
-    let result = call_primitive(&json_serialize, &[Value::String("hello\"world".into())]);
-    assert_eq!(result.unwrap(), Value::String("\"hello\\\"world\"".into()));
+    let result = call_primitive(&json_serialize, &[Value::string("hello\"world")]);
+    assert_eq!(result.unwrap(), Value::string("\"hello\\\"world\""));
 
-    let result = call_primitive(&json_serialize, &[Value::String("hello\\world".into())]);
-    assert_eq!(result.unwrap(), Value::String("\"hello\\\\world\"".into()));
+    let result = call_primitive(&json_serialize, &[Value::string("hello\\world")]);
+    assert_eq!(result.unwrap(), Value::string("\"hello\\\\world\""));
 
-    let result = call_primitive(&json_serialize, &[Value::String("hello\nworld".into())]);
-    assert_eq!(result.unwrap(), Value::String("\"hello\\nworld\"".into()));
+    let result = call_primitive(&json_serialize, &[Value::string("hello\nworld")]);
+    assert_eq!(result.unwrap(), Value::string("\"hello\\nworld\""));
 
-    let result = call_primitive(&json_serialize, &[Value::String("hello\tworld".into())]);
-    assert_eq!(result.unwrap(), Value::String("\"hello\\tworld\"".into()));
+    let result = call_primitive(&json_serialize, &[Value::string("hello\tworld")]);
+    assert_eq!(result.unwrap(), Value::string("\"hello\\tworld\""));
 }
 
 #[test]
@@ -1878,11 +1875,12 @@ fn test_json_serialize_pretty() {
     let (vm, mut symbols) = setup();
     let json_serialize_pretty = get_primitive(&vm, &mut symbols, "json-serialize-pretty");
 
-    let list = list(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+    let list = list(vec![Value::int(1), Value::int(2), Value::int(3)]);
     let result = call_primitive(&json_serialize_pretty, &[list]);
     let serialized = result.unwrap();
     match serialized {
-        Value::String(s) => {
+        v if v.is_string() => {
+            let s = v.as_string().unwrap();
             assert!(s.contains('\n'), "Pretty JSON should contain newlines");
             assert!(s.contains("  "), "Pretty JSON should contain indentation");
         }
@@ -1897,19 +1895,20 @@ fn test_json_serialize_roundtrip() {
     let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
 
     let original = list(vec![
-        Value::Int(1),
-        Value::String("test".into()),
-        Value::Bool(true),
-        Value::Nil,
+        Value::int(1),
+        Value::string("test"),
+        Value::bool(true),
+        Value::NIL,
     ]);
 
     let serialized = call_primitive(&json_serialize, std::slice::from_ref(&original)).unwrap();
-    let json_str = match serialized {
-        Value::String(s) => s.to_string(),
-        _ => panic!("Expected string"),
+    let json_str = if let Some(s) = serialized.as_string() {
+        s.to_string()
+    } else {
+        panic!("Expected string");
     };
 
-    let deserialized = call_primitive(&json_parse, &[Value::String(json_str.into())]).unwrap();
+    let deserialized = call_primitive(&json_parse, &[Value::string(json_str)]).unwrap();
     assert_eq!(original, deserialized);
 }
 
@@ -1918,13 +1917,9 @@ fn test_json_serialize_vectors() {
     let (vm, mut symbols) = setup();
     let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
 
-    let vec = Value::Vector(std::rc::Rc::new(vec![
-        Value::Int(1),
-        Value::Int(2),
-        Value::Int(3),
-    ]));
+    let vec = Value::vector(vec![Value::int(1), Value::int(2), Value::int(3)]);
     let result = call_primitive(&json_serialize, &[vec]);
-    assert_eq!(result.unwrap(), Value::String("[1,2,3]".into()));
+    assert_eq!(result.unwrap(), Value::string("[1,2,3]"));
 }
 
 #[test]
@@ -1932,7 +1927,7 @@ fn test_json_serialize_errors() {
     let (vm, mut symbols) = setup();
     let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
 
-    let closure = Value::Closure(std::rc::Rc::new(Closure {
+    let closure = Value::closure(Closure {
         bytecode: std::rc::Rc::new(vec![]),
         arity: elle::value::Arity::Exact(0),
         env: std::rc::Rc::new(vec![]),
@@ -1942,12 +1937,13 @@ fn test_json_serialize_errors() {
         source_ast: None,
         effect: elle::compiler::effects::Effect::Pure,
         cell_params_mask: 0,
-    }));
+        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+    });
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());
 
-    let native_fn: elle::value::NativeFn = |_| Ok(Value::Nil);
-    let fn_val = Value::NativeFn(native_fn);
+    let native_fn: elle::value::NativeFn = |_| Ok(Value::NIL);
+    let fn_val = Value::native_fn(native_fn);
     let result = call_primitive(&json_serialize, &[fn_val]);
     assert!(result.is_err());
 }
