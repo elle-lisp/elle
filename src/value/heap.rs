@@ -10,13 +10,14 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use crate::value::continuation::ContinuationData;
+use crate::value::ffi::ThreadHandle;
 use crate::value::Value;
 
-// Re-use types from the old value system during migration
-// These will be moved here once the migration is complete
-pub use crate::value_old::{
-    Arity, Closure, Condition, Coroutine, JitClosure, JitLambda, NativeFn, TableKey, VmAwareFn,
-};
+// Re-export types for convenience
+pub use crate::value::closure::Closure;
+pub use crate::value::condition::Condition;
+pub use crate::value::coroutine::Coroutine;
+pub use crate::value::types::{Arity, NativeFn, TableKey, VmAwareFn};
 
 /// Cons cell for list construction using NaN-boxed values.
 #[derive(Debug, Clone, PartialEq)]
@@ -75,12 +76,8 @@ pub enum HeapObject {
     /// Immutable struct
     Struct(BTreeMap<TableKey, Value>),
 
-    /// Function closure (interpreted and/or JIT-compiled)
-    /// Note: Currently uses separate Closure/JitClosure; will be unified
+    /// Function closure (interpreted)
     Closure(Rc<Closure>),
-
-    /// JIT-compiled closure (temporary, will merge into Closure)
-    JitClosure(Rc<JitClosure>),
 
     /// Exception/condition object
     Condition(Condition),
@@ -122,6 +119,14 @@ pub struct ThreadHandleData {
     pub result: Arc<Mutex<Option<Result<crate::value::SendValue, String>>>>,
 }
 
+impl From<ThreadHandle> for ThreadHandleData {
+    fn from(handle: ThreadHandle) -> Self {
+        ThreadHandleData {
+            result: handle.result,
+        }
+    }
+}
+
 impl HeapObject {
     /// Get the type tag for this heap object.
     #[inline]
@@ -133,7 +138,6 @@ impl HeapObject {
             HeapObject::Table(_) => HeapTag::Table,
             HeapObject::Struct(_) => HeapTag::Struct,
             HeapObject::Closure(_) => HeapTag::Closure,
-            HeapObject::JitClosure(_) => HeapTag::Closure, // Same tag for now
             HeapObject::Condition(_) => HeapTag::Condition,
             HeapObject::Coroutine(_) => HeapTag::Coroutine,
             HeapObject::Cell(_, _) => HeapTag::Cell,
@@ -155,7 +159,7 @@ impl HeapObject {
             HeapObject::Vector(_) => "vector",
             HeapObject::Table(_) => "table",
             HeapObject::Struct(_) => "struct",
-            HeapObject::Closure(_) | HeapObject::JitClosure(_) => "closure",
+            HeapObject::Closure(_) => "closure",
             HeapObject::Condition(_) => "condition",
             HeapObject::Coroutine(_) => "coroutine",
             HeapObject::Cell(_, _) => "cell",
@@ -185,7 +189,6 @@ impl std::fmt::Debug for HeapObject {
             HeapObject::Table(_) => write!(f, "<table>"),
             HeapObject::Struct(_) => write!(f, "<struct>"),
             HeapObject::Closure(_) => write!(f, "<closure>"),
-            HeapObject::JitClosure(_) => write!(f, "<jit-closure>"),
             HeapObject::Condition(c) => write!(f, "<condition:{}>", c.exception_id),
             HeapObject::Coroutine(_) => write!(f, "<coroutine>"),
             HeapObject::Cell(_, _) => write!(f, "<cell>"),

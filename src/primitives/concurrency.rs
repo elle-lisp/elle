@@ -6,71 +6,6 @@ use crate::vm::VM;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-/// Check if an old-style Value is safe to send across thread boundaries.
-/// Note: Old-style closures now use the new Value type for env and constants
-fn is_value_sendable_old(value: &crate::value_old::Value) -> bool {
-    use crate::value_old::Value as OldValue;
-
-    match value {
-        // Primitives are always safe
-        OldValue::Nil
-        | OldValue::Bool(_)
-        | OldValue::Int(_)
-        | OldValue::Float(_)
-        | OldValue::Symbol(_)
-        | OldValue::Keyword(_)
-        | OldValue::String(_) => true,
-
-        // Immutable collections are safe
-        OldValue::Vector(vec) => vec.iter().all(is_value_sendable_old),
-        OldValue::Struct(s) => s.iter().all(|(_, v)| is_value_sendable_old(v)),
-
-        // Cons cells are safe if their contents are
-        OldValue::Cons(cons) => {
-            is_value_sendable_old(&cons.first) && is_value_sendable_old(&cons.rest)
-        }
-
-        // Closures are safe if their captured environment is safe
-        // Note: env uses new Value type, so we use is_value_sendable
-        OldValue::Closure(closure) => closure.env.iter().all(is_value_sendable),
-
-        // JIT closures are safe if their captured environment is safe
-        // Note: env uses old Value type
-        OldValue::JitClosure(jc) => jc.env.iter().all(is_value_sendable_old),
-
-        // Unsafe: mutable tables
-        OldValue::Table(_) => false,
-
-        // Unsafe: native functions (contain function pointers)
-        OldValue::NativeFn(_) => false,
-
-        // Unsafe: VM-aware functions (contain function pointers)
-        OldValue::VmAwareFn(_) => false,
-
-        // Unsafe: FFI handles
-        OldValue::LibHandle(_) | OldValue::CHandle(_) => false,
-
-        // Unsafe: conditions (may contain non-sendable data)
-        OldValue::Condition(_) => false,
-
-        // Unsafe: thread handles
-        OldValue::ThreadHandle(_) => false,
-
-        // Cells are safe if their contents are sendable
-        OldValue::Cell(cell) | OldValue::LocalCell(cell) => {
-            if let Ok(val) = cell.try_borrow() {
-                is_value_sendable_old(&val)
-            } else {
-                // If we can't borrow, assume it's not sendable (to be safe)
-                false
-            }
-        }
-
-        // Coroutines are not sendable (contain closures with mutable state)
-        OldValue::Coroutine(_) => false,
-    }
-}
-
 /// Check if a value is safe to send across thread boundaries.
 ///
 /// A value is safe to send if it contains only immutable data:
@@ -124,10 +59,6 @@ fn is_value_sendable(value: &Value) -> bool {
         // Closures are safe if their captured environment is safe
         // Note: Closure uses new Value type
         HeapObject::Closure(closure) => closure.env.iter().all(is_value_sendable),
-
-        // JIT closures are safe if their captured environment is safe
-        // Note: JitClosure uses old Value type, so we use the old check
-        HeapObject::JitClosure(jc) => jc.env.iter().all(is_value_sendable_old),
 
         // Unsafe: mutable tables
         HeapObject::Table(_) => false,
@@ -220,14 +151,18 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
     let num_locals = closure.num_locals;
     let _num_captures = closure.num_captures;
     let arity = match closure.arity {
-        crate::value_old::Arity::Exact(n) => n,
-        crate::value_old::Arity::AtLeast(n) => n,
-        crate::value_old::Arity::Range(min, _) => min,
+        crate::value::Arity::Exact(n) => n,
+        crate::value::Arity::AtLeast(n) => n,
+        crate::value::Arity::Range(min, _) => min,
     };
 
     // Extract symbol names for cross-thread portability
     // This allows remapping symbol IDs in the new thread's symbol table
     let symbol_names_for_thread: HashMap<u32, String> = (*closure.symbol_names).clone();
+
+    // Extract location map for error reporting in the spawned thread
+    let location_map_for_thread: std::collections::HashMap<usize, crate::error::SourceLoc> =
+        (*closure.location_map).clone();
 
     // Create a holder for the result
     let result_holder: Arc<Mutex<Option<Result<crate::value::SendValue, String>>>> =
@@ -283,12 +218,22 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         let env_rc = Rc::new(env_values);
         let constants_rc = Rc::new(constants_values);
 
+        // Set the location map for error reporting in the spawned thread
+        vm.set_location_map(location_map_for_thread);
+
         let result = vm.execute_bytecode(&bytecode_rc, &constants_rc, Some(&env_rc));
 
         // Convert result to SendValue to preserve heap objects across thread boundary
+        // Also check for exceptions that were set but not returned as errors
         let send_result = match result {
             Ok(val) => {
-                SendValue::from_value(val).map_err(|e| format!("Failed to serialize result: {}", e))
+                // Check if an exception escaped all handlers
+                if let Some(exc) = &vm.current_exception {
+                    Err(format!("{}", exc))
+                } else {
+                    SendValue::from_value(val)
+                        .map_err(|e| format!("Failed to serialize result: {}", e))
+                }
             }
             Err(e) => Err(e.to_string()),
         };
@@ -329,16 +274,6 @@ pub fn prim_spawn(args: &[Value]) -> Result<Value, Condition> {
 
     if let Some(closure) = args[0].as_closure() {
         spawn_closure_impl(closure).map_err(|e| Condition::error(e.to_string()))
-    } else if let Some(jit_closure) = args[0].as_jit_closure() {
-        // Fall back to the source closure for thread-safe execution
-        match &jit_closure.source {
-            Some(source) => spawn_closure_impl(source).map_err(|e| Condition::error(e.to_string())),
-            None => Err(Condition::error(
-                "spawn: JitClosure has no source closure for thread execution. \
-                 JIT-compiled closures must retain their source to be spawned."
-                    .to_string(),
-            )),
-        }
     } else if args[0].as_native_fn().is_some() {
         Err(Condition::error(
             "spawn: native functions cannot be spawned. Use closures instead.".to_string(),

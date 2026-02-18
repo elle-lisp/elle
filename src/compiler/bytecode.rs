@@ -1,3 +1,5 @@
+use crate::error::LocationMap;
+use crate::reader::SourceLoc;
 use crate::value::Value;
 
 /// Bytecode instruction set
@@ -183,7 +185,6 @@ pub struct CacheEntry {
 
 /// Compiled bytecode with constants
 #[derive(Debug, Clone)]
-
 pub struct Bytecode {
     pub instructions: Vec<u8>,
     pub constants: Vec<Value>,
@@ -192,6 +193,9 @@ pub struct Bytecode {
     /// When bytecode is sent to a new thread, symbol IDs may differ.
     /// This map allows remapping globals to the correct IDs.
     pub symbol_names: std::collections::HashMap<u32, String>,
+    /// Bytecode offset → source location mapping for error reporting.
+    /// Maps instruction offsets to their source locations.
+    pub location_map: LocationMap,
 }
 
 impl Bytecode {
@@ -201,7 +205,25 @@ impl Bytecode {
             constants: Vec::new(),
             inline_caches: std::collections::HashMap::new(),
             symbol_names: std::collections::HashMap::new(),
+            location_map: LocationMap::new(),
         }
+    }
+
+    /// Record a source location for the current bytecode position.
+    /// Only records non-synthetic spans (line > 0).
+    pub fn record_location(&mut self, span: &crate::syntax::Span) {
+        // Skip synthetic spans (all zeros)
+        if span.line == 0 && span.col == 0 && span.start == 0 && span.end == 0 {
+            return;
+        }
+
+        let offset = self.current_pos();
+        let loc = SourceLoc::new(
+            span.file.clone().unwrap_or_else(|| "<input>".to_string()),
+            span.line as usize,
+            span.col as usize,
+        );
+        self.location_map.insert(offset, loc);
     }
 
     /// Add a symbol constant and record its name for portability.

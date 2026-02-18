@@ -1,53 +1,25 @@
 # compiler
 
-Bytecode compilation, JIT coordination, and supporting infrastructure.
-This is a large module; prefer the new pipeline (`hir/` → `lir/`) for
-new development.
+Bytecode instruction definitions and debug formatting.
 
 ## Responsibility
 
-- Bytecode instruction definitions
-- Legacy AST-based compilation (being replaced)
-- Cranelift JIT compilation
-- Macro expansion support
-
-Note: Effect types and inference have been moved to `src/effects/`.
+- Define the `Instruction` enum (bytecode opcodes)
+- Define the `Bytecode` struct (instructions + constants)
+- Provide debug formatting for bytecode disassembly
 
 ## Submodules
 
 | Module | Purpose |
 |--------|---------|
 | `bytecode.rs` | `Instruction` enum, `Bytecode` struct |
-| `compile/` | Legacy `Expr` → Bytecode compilation |
-| `ast.rs` | Legacy `Expr` AST type |
-| `converters/` | `Value` ↔ `Expr` conversion |
-| `cranelift/` | Native code generation via Cranelift |
-| `linter/` | Legacy Expr-based linter (re-exports from `src/lint/`) |
-| `symbol_index.rs` | Legacy Expr-based symbol extraction (types moved to `src/symbols/`) |
-| `capture_resolution.rs` | Legacy capture analysis |
-| `jit_coordinator.rs` | Hot path detection, JIT triggering |
-| `jit_executor.rs` | Native code execution |
-| `jit_wrapper.rs` | `compile_jit`, `is_jit_compilable` |
-
-## Two pipelines
-
-**New (preferred)**:
-```
-Syntax → HIR → LIR → Bytecode
-```
-Located in `hir/`, `lir/`, `pipeline.rs`. Uses `BindingId`.
-
-**Legacy**:
-```
-Value → Expr → Bytecode
-```
-Located here. Uses `VarRef`. Being phased out.
+| `bytecode_debug.rs` | Debug formatting for bytecode disassembly |
 
 ## Dependents
 
 - `pipeline.rs` - uses `Bytecode`
-- `vm/` - executes bytecode, calls JIT code
-- `primitives/jit.rs` - exposes JIT to Elle code
+- `lir/emit.rs` - emits `Instruction` bytes
+- `vm/` - executes bytecode
 
 ## Invariants
 
@@ -57,50 +29,22 @@ Located here. Uses `VarRef`. Being phased out.
 2. **Effect inference is conservative.** Unknown calls are `IO`. Only proven
    pure code is `Pure`.
 
-3. **JIT compilation is optional.** Must always have bytecode fallback. A
-   `JitClosure` with null code_ptr uses source closure.
-
-4. **Yielding closures use bytecode VM.** The VM's Yield instruction creates
-   first-class continuations that capture the full frame chain. Coroutine
-   resume replays this chain. JIT compilation is not available for yielding
-   closures.
-
 ## Key types
 
 | Type | Location | Purpose |
 |------|----------|---------|
 | `Instruction` | `bytecode.rs` | Bytecode opcodes |
 | `Bytecode` | `bytecode.rs` | Instructions + constants |
-| `Expr` | `ast.rs` | Legacy AST |
-| `Effect` | `src/effects/mod.rs` | `Pure`, `Yields`, `Polymorphic` |
-| `JitCoordinator` | `jit_coordinator.rs` | Hot path tracking |
 
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 32 | Re-exports |
+| `mod.rs` | ~10 | Re-exports |
 | `bytecode.rs` | ~200 | Instruction enum, Bytecode struct |
-| `ast.rs` | ~300 | Legacy Expr type |
-| `compile/mod.rs` | ~800 | Legacy compilation |
-| `cranelift/` | ~500 | Cranelift code generation |
-
-## Relocated modules
-
-The following were moved out of `compiler/` because they are pipeline-agnostic:
-
-| Was | Now | Why |
-|-----|-----|-----|
-| `effects/` | `src/effects/` | Used by both pipelines (HIR, LIR, VM, closures) |
-| `scope.rs` | `src/vm/scope/` | Only used by VM scope system |
-| `linter/diagnostics.rs` | `src/lint/diagnostics.rs` | Used by HIR linter and external crates |
-| `linter/rules.rs` | `src/lint/rules.rs` | Used by HIR linter |
-| `symbol_index.rs` types | `src/symbols/` | Used by HIR symbol extraction and LSP |
-
-The old locations re-export from the new locations for backward compatibility.
+| `bytecode_debug.rs` | ~150 | Debug formatting |
 
 ## Anti-patterns
 
-- Adding features to legacy `compile/` instead of `hir/`+`lir/`
-- Modifying `Instruction` byte values
-- Assuming JIT is available (always check `is_jit_compilable`)
+- Modifying `Instruction` byte values (breaks compatibility)
+- Adding compilation logic here (use `lir/` instead)

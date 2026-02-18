@@ -3,9 +3,8 @@
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a register-based VM.
 
 This is not a toy. The implementation targets correctness, performance, and
-clarity - in that order. We compile through multiple IRs, we JIT-compile hot
-paths via Cranelift, we have proper lexical scoping with closure capture
-analysis, and we have an effect system.
+clarity - in that order. We compile through multiple IRs, we have proper
+lexical scoping with closure capture analysis, and we have an effect system.
 
 You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
@@ -16,9 +15,9 @@ tests. Read the error messages. They are designed to be helpful.
 Source → Reader → Syntax → Expander → Syntax → Analyzer → HIR → Lowerer → LIR → Emitter → Bytecode → VM
 ```
 
-The new pipeline (Syntax → HIR → LIR → Bytecode) is the primary pipeline.
-elle-lint and elle-lsp use it exclusively. The old Value-based pipeline
-remains only for CPS and Cranelift JIT, which still depend on the `Expr` type.
+This is the only compilation pipeline. Source locations flow through the entire
+pipeline: Syntax spans → HIR spans → LIR `SpannedInstr` → `LocationMap` in
+bytecode. Error messages include file:line:col information.
 
 ### Key modules
 
@@ -27,8 +26,8 @@ remains only for CPS and Cranelift JIT, which still depend on the `Expr` type.
 | `reader` | Lexing and parsing to `Syntax` |
 | `syntax` | Syntax types, macro expansion |
 | `hir` | Binding resolution, capture analysis, effect inference, linting, symbol extraction |
-| `lir` | SSA form with virtual registers, basic blocks |
-| `compiler` | Bytecode emission, JIT coordination, CPS (legacy AST still used by JIT/CPS) |
+| `lir` | SSA form with virtual registers, basic blocks, `SpannedInstr` for source tracking |
+| `compiler` | Bytecode instruction definitions (`bytecode.rs`), debug formatting (`bytecode_debug.rs`) |
 | `vm` | Bytecode execution |
 | `value` | Runtime value representation (NaN-boxed) |
 | `effects` | Effect type (`Pure`, `Yields`, `Polymorphic`) |
@@ -37,14 +36,14 @@ remains only for CPS and Cranelift JIT, which still depend on the `Expr` type.
 | `primitives` | Built-in functions |
 | `ffi` | C interop via libloading/bindgen |
 | `pipeline` | Compilation entry points (`compile_new`, `analyze_new`, `eval_new`) |
+| `error` | `LocationMap` for bytecode offset → source location mapping |
 
 ### The Value type
 
 `Value` is the runtime representation. It uses NaN-boxing for efficient
 representation. Create values via methods like `Value::int()`, `Value::cons()`,
 `Value::closure()` rather than enum variants. Notable types:
-- `Closure` - bytecode + captured environment + arity + effect
-- `JitClosure` - native code pointer + environment
+- `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>`
 - `Cell` / `LocalCell` - mutable cells for captured variables
 - `Coroutine` - suspendable computation with saved context
 

@@ -436,10 +436,10 @@ mod coroutine_vm_tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![]),
-            source_ast: None,
             effect: Effect::Pure,
             cell_params_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),
+            location_map: Rc::new(crate::error::LocationMap::new()),
         });
         let co = Rc::new(RefCell::new(Coroutine::new(closure)));
 
@@ -466,10 +466,10 @@ mod coroutine_vm_tests {
                 num_locals: 0,
                 num_captures: 0,
                 constants: Rc::new(vec![]),
-                source_ast: None,
                 effect: Effect::Pure,
                 cell_params_mask: 0,
                 symbol_names: Rc::new(std::collections::HashMap::new()),
+                location_map: Rc::new(crate::error::LocationMap::new()),
             });
             Rc::new(RefCell::new(Coroutine::new(closure)))
         };

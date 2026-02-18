@@ -66,12 +66,12 @@ impl Syntax {
             SyntaxKind::Float(n)
         } else if let Some(id) = value.as_symbol() {
             let name = symbols
-                .name(crate::value_old::SymbolId(id))
+                .name(crate::value::SymbolId(id))
                 .ok_or("Unknown symbol")?;
             SyntaxKind::Symbol(name.to_string())
         } else if let Some(id) = value.as_keyword() {
             let name = symbols
-                .name(crate::value_old::SymbolId(id))
+                .name(crate::value::SymbolId(id))
                 .ok_or("Unknown keyword")?;
             SyntaxKind::Keyword(name.to_string())
         } else if let Some(s) = value.as_string() {

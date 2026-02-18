@@ -68,8 +68,8 @@ fn test_print_lir_failing_case() {
     fn count_nested(func: &elle::lir::LirFunction) -> usize {
         let mut count = 0;
         for block in &func.blocks {
-            for instr in &block.instructions {
-                if let elle::lir::LirInstr::MakeClosure { func: nested, .. } = instr {
+            for spanned in &block.instructions {
+                if let elle::lir::LirInstr::MakeClosure { func: nested, .. } = &spanned.instr {
                     count += 1 + count_nested(nested);
                 }
             }

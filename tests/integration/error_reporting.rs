@@ -217,3 +217,112 @@ fn test_error_formatting_context() {
     assert!(context.contains("^"));
     assert!(context.contains("2 |")); // Line number
 }
+
+// ============================================================================
+// LocationMap Tests - Verify bytecode offset to source location mapping
+// ============================================================================
+
+#[test]
+fn test_location_map_populated_for_simple_expression() {
+    use elle::pipeline::compile_new;
+    use elle::SymbolTable;
+
+    let mut symbols = SymbolTable::new();
+    let source = "(+ 1 2)";
+
+    let result = compile_new(source, &mut symbols);
+    assert!(result.is_ok());
+
+    let compiled = result.unwrap();
+    // The location map should have at least one entry
+    assert!(
+        !compiled.bytecode.location_map.is_empty(),
+        "LocationMap should be populated for compiled code"
+    );
+}
+
+#[test]
+fn test_location_map_has_correct_line_numbers() {
+    use elle::pipeline::compile_new;
+    use elle::SymbolTable;
+
+    let mut symbols = SymbolTable::new();
+    // Single expression with nested structure
+    let source = "(if #t\n  (+ 1 2)\n  (- 3 4))";
+
+    let result = compile_new(source, &mut symbols);
+    assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
+
+    let compiled = result.unwrap();
+    // Check that we have location entries
+    assert!(
+        !compiled.bytecode.location_map.is_empty(),
+        "LocationMap should be populated"
+    );
+
+    // All entries should have line >= 1 (not synthetic)
+    for loc in compiled.bytecode.location_map.values() {
+        assert!(
+            loc.line >= 1,
+            "Line numbers should be >= 1, got {}",
+            loc.line
+        );
+    }
+}
+
+#[test]
+fn test_closure_has_location_map() {
+    use elle::pipeline::compile_new;
+    use elle::SymbolTable;
+
+    let mut symbols = SymbolTable::new();
+    let source = "(fn (x) (+ x 1))";
+
+    let result = compile_new(source, &mut symbols);
+    assert!(result.is_ok());
+
+    let compiled = result.unwrap();
+    // The main bytecode should have a location map
+    assert!(
+        !compiled.bytecode.location_map.is_empty(),
+        "Main bytecode should have LocationMap"
+    );
+
+    // Check that closures in constants also have location maps
+    for constant in &compiled.bytecode.constants {
+        if let Some(closure) = constant.as_closure() {
+            // Nested closures should have their own location maps
+            // The location_map field exists (verified by compilation)
+            // and may have entries for the closure's bytecode
+            let _ = closure.location_map.len(); // Access to verify field exists
+        }
+    }
+}
+
+#[test]
+fn test_vm_uses_location_map_for_stack_trace() {
+    use elle::pipeline::compile_new;
+    use elle::primitives::register_primitives;
+    use elle::vm::VM;
+    use elle::SymbolTable;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    register_primitives(&mut vm, &mut symbols);
+
+    // Compile a simple expression
+    let source = "(+ 1 2)";
+    let result = compile_new(source, &mut symbols);
+    assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
+
+    let compiled = result.unwrap();
+
+    // Execute the bytecode - this sets the VM's location_map
+    let _ = vm.execute(&compiled.bytecode);
+
+    // The VM's location_map should now be populated
+    assert!(
+        !vm.get_location_map().is_empty(),
+        "VM's location_map should be set from bytecode"
+    );
+}

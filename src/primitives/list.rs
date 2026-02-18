@@ -124,7 +124,7 @@ pub fn prim_length(args: &[Value]) -> Result<Value, Condition> {
         Ok(Value::int(s.len() as i64))
     } else if let Some(sid) = args[0].as_symbol() {
         // Get the symbol name from the symbol table context
-        if let Some(name) = get_keyword_name(crate::value_old::SymbolId(sid)) {
+        if let Some(name) = get_keyword_name(crate::value::SymbolId(sid)) {
             Ok(Value::int(name.chars().count() as i64))
         } else {
             Err(Condition::error(format!(
@@ -134,7 +134,7 @@ pub fn prim_length(args: &[Value]) -> Result<Value, Condition> {
         }
     } else if let Some(kid) = args[0].as_keyword() {
         // Get the keyword name from the symbol table context
-        if let Some(name) = get_keyword_name(crate::value_old::SymbolId(kid)) {
+        if let Some(name) = get_keyword_name(crate::value::SymbolId(kid)) {
             Ok(Value::int(name.chars().count() as i64))
         } else {
             Err(Condition::error(format!(

@@ -153,8 +153,8 @@ impl Emitter {
         // First pass: record label positions within the block
         let mut label_positions: HashMap<u32, usize> = HashMap::new();
         let mut current_pos = self.bytecode.current_pos();
-        for instr in &block.instructions {
-            if let LirInstr::LabelMarker { label_id } = instr {
+        for spanned in &block.instructions {
+            if let LirInstr::LabelMarker { label_id } = &spanned.instr {
                 label_positions.insert(*label_id, current_pos);
             }
             // Estimate bytecode size (rough approximation)
@@ -162,11 +162,15 @@ impl Emitter {
         }
 
         // Second pass: emit instructions
-        for instr in &block.instructions {
-            self.emit_instr(instr, func, &label_positions);
+        for spanned in &block.instructions {
+            // Record source location before emitting the instruction
+            self.bytecode.record_location(&spanned.span);
+            self.emit_instr(&spanned.instr, func, &label_positions);
         }
 
-        self.emit_terminator(&block.terminator);
+        // Record source location for the terminator
+        self.bytecode.record_location(&block.terminator.span);
+        self.emit_terminator(&block.terminator.terminator);
     }
 
     fn emit_instr(
@@ -285,10 +289,10 @@ impl Emitter {
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
                     constants: Rc::new(nested_bytecode.constants),
-                    source_ast: None,
                     effect: func.effect,
                     cell_params_mask: func.cell_params_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
+                    location_map: Rc::new(nested_bytecode.location_map),
                 };
 
                 // Add closure template to constants
@@ -807,6 +811,11 @@ impl Default for Emitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::syntax::Span;
+
+    fn synthetic_span() -> Span {
+        Span::synthetic()
+    }
 
     #[test]
     fn test_emit_simple() {
@@ -814,11 +823,14 @@ mod tests {
 
         let mut func = LirFunction::new(0);
         let mut block = BasicBlock::new(Label(0));
-        block.instructions.push(LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(42),
-        });
-        block.terminator = Terminator::Return(Reg(0));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Int(42),
+            },
+            synthetic_span(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), synthetic_span());
         func.blocks.push(block);
         func.entry = Label(0);
 
@@ -834,33 +846,47 @@ mod tests {
 
         // Entry block
         let mut entry = BasicBlock::new(Label(0));
-        entry.instructions.push(LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Bool(true),
-        });
-        entry.terminator = Terminator::Branch {
-            cond: Reg(0),
-            then_label: Label(1),
-            else_label: Label(2),
-        };
+        entry.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Bool(true),
+            },
+            synthetic_span(),
+        ));
+        entry.terminator = SpannedTerminator::new(
+            Terminator::Branch {
+                cond: Reg(0),
+                then_label: Label(1),
+                else_label: Label(2),
+            },
+            synthetic_span(),
+        );
         func.blocks.push(entry);
 
         // Then block
         let mut then_block = BasicBlock::new(Label(1));
-        then_block.instructions.push(LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(1),
-        });
-        then_block.terminator = Terminator::Return(Reg(1));
+        then_block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Int(1),
+            },
+            synthetic_span(),
+        ));
+        then_block.terminator =
+            SpannedTerminator::new(Terminator::Return(Reg(1)), synthetic_span());
         func.blocks.push(then_block);
 
         // Else block
         let mut else_block = BasicBlock::new(Label(2));
-        else_block.instructions.push(LirInstr::Const {
-            dst: Reg(2),
-            value: LirConst::Int(2),
-        });
-        else_block.terminator = Terminator::Return(Reg(2));
+        else_block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(2),
+                value: LirConst::Int(2),
+            },
+            synthetic_span(),
+        ));
+        else_block.terminator =
+            SpannedTerminator::new(Terminator::Return(Reg(2)), synthetic_span());
         func.blocks.push(else_block);
 
         func.entry = Label(0);

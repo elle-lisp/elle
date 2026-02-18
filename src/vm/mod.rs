@@ -14,12 +14,15 @@ pub use crate::value::condition::{exception_parent, is_exception_subclass};
 pub use core::{CallFrame, VmResult, VM};
 
 use crate::compiler::bytecode::{Bytecode, Instruction};
+use crate::value::CoroutineState;
 use crate::value::Value;
-use crate::value_old::CoroutineState;
 use std::rc::Rc;
 
 impl VM {
     pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
+        // Set the location map for error reporting
+        self.location_map = bytecode.location_map.clone();
+
         let result = self.execute_bytecode(&bytecode.instructions, &bytecode.constants, None)?;
         // Check if an exception escaped all handlers at the top level
         if let Some(exc) = &self.current_exception {
@@ -32,9 +35,9 @@ impl VM {
 
     /// Check arity and set exception if mismatch
     /// Returns true if arity is OK, false if there's a mismatch (exception is set)
-    fn check_arity(&mut self, arity: &crate::value_old::Arity, arg_count: usize) -> bool {
+    fn check_arity(&mut self, arity: &crate::value::Arity, arg_count: usize) -> bool {
         match arity {
-            crate::value_old::Arity::Exact(n) => {
+            crate::value::Arity::Exact(n) => {
                 if arg_count != *n {
                     let msg = format!("expected {} arguments, got {}", n, arg_count);
                     let mut cond = crate::value::Condition::arity_error(msg)
@@ -47,7 +50,7 @@ impl VM {
                     return false;
                 }
             }
-            crate::value_old::Arity::AtLeast(n) => {
+            crate::value::Arity::AtLeast(n) => {
                 if arg_count < *n {
                     let msg = format!("expected at least {} arguments, got {}", n, arg_count);
                     let mut cond = crate::value::Condition::arity_error(msg)
@@ -60,7 +63,7 @@ impl VM {
                     return false;
                 }
             }
-            crate::value_old::Arity::Range(min, max) => {
+            crate::value::Arity::Range(min, max) => {
                 if arg_count < *min || arg_count > *max {
                     let msg = format!("expected {}-{} arguments, got {}", min, max, arg_count);
                     let mut cond = crate::value::Condition::arity_error(msg)
@@ -310,9 +313,9 @@ impl VM {
 
                             // Calculate number of locally-defined variables
                             let num_params = match closure.arity {
-                                crate::value_old::Arity::Exact(n) => n,
-                                crate::value_old::Arity::AtLeast(n) => n,
-                                crate::value_old::Arity::Range(min, _) => min,
+                                crate::value::Arity::Exact(n) => n,
+                                crate::value::Arity::AtLeast(n) => n,
+                                crate::value::Arity::Range(min, _) => min,
                             };
                             let num_locally_defined = closure.num_locals.saturating_sub(num_params);
 
@@ -394,144 +397,6 @@ impl VM {
                                 self.stack.push(result);
                             }
                         }
-                    } else if let Some(jit_closure) = func.as_jit_closure() {
-                        // Validate argument count
-                        if !self.check_arity(&jit_closure.arity, args.len()) {
-                            self.stack.push(Value::NIL);
-                        } else if !jit_closure.code_ptr.is_null() {
-                            // Call native code!
-                            let result = unsafe {
-                                // Prepare args array
-                                let args_encoded: Vec<i64> =
-                                    args.iter().map(encode_value_for_jit).collect();
-
-                                // Prepare env array (captures) - uses old Value type
-                                let env_encoded: Vec<i64> = jit_closure
-                                    .env
-                                    .iter()
-                                    .map(encode_old_value_for_jit)
-                                    .collect();
-
-                                // Cast to function pointer
-                                // Signature: fn(args_ptr: i64, args_len: i64, env_ptr: i64) -> i64
-                                let func: extern "C" fn(i64, i64, i64) -> i64 =
-                                    std::mem::transmute(jit_closure.code_ptr);
-
-                                // Call it
-                                let result_encoded = func(
-                                    args_encoded.as_ptr() as i64,
-                                    args_encoded.len() as i64,
-                                    env_encoded.as_ptr() as i64,
-                                );
-
-                                // Decode result
-                                decode_jit_result(result_encoded)?
-                            };
-                            self.stack.push(result);
-                        } else if let Some(ref source) = jit_closure.source {
-                            // Fall back to interpreted execution of the source closure
-                            self.call_depth += 1;
-                            if self.call_depth > 1000 {
-                                return Err("Stack overflow".to_string());
-                            }
-
-                            // Create a new environment that includes:
-                            // [captured_vars..., parameters..., locally_defined_cells...]
-                            let mut new_env = Vec::new();
-                            new_env.extend((*source.env).iter().cloned());
-
-                            // Add parameters, wrapping in local cells if cell_params_mask indicates
-                            for (i, arg) in args.iter().enumerate() {
-                                if i < 64 && (source.cell_params_mask & (1 << i)) != 0 {
-                                    // This parameter is mutated - wrap it in a local cell
-                                    new_env.push(Value::local_cell(*arg));
-                                } else {
-                                    new_env.push(*arg);
-                                }
-                            }
-
-                            // Calculate number of locally-defined variables
-                            let num_params = match source.arity {
-                                crate::value_old::Arity::Exact(n) => n,
-                                crate::value_old::Arity::AtLeast(n) => n,
-                                crate::value_old::Arity::Range(min, _) => min,
-                            };
-                            let num_locally_defined = source.num_locals.saturating_sub(num_params);
-
-                            // Add empty LocalCells for locally-defined variables
-                            for _ in 0..num_locally_defined {
-                                let empty_cell = Value::local_cell(Value::NIL);
-                                new_env.push(empty_cell);
-                            }
-
-                            let new_env_rc = std::rc::Rc::new(new_env);
-
-                            // If we're in a coroutine context, use coroutine-aware execution
-                            if self.in_coroutine() {
-                                let result = self.execute_bytecode_coroutine(
-                                    &source.bytecode,
-                                    &source.constants,
-                                    Some(&new_env_rc),
-                                )?;
-
-                                self.call_depth -= 1;
-
-                                // If the called function yielded, propagate it up
-                                // with the caller's frame prepended to the continuation
-                                match result {
-                                    VmResult::Done(v) => {
-                                        self.stack.push(v);
-                                    }
-                                    VmResult::Yielded {
-                                        value,
-                                        continuation,
-                                    } => {
-                                        // Capture the caller's frame and append it to the continuation.
-                                        let caller_stack: Vec<Value> =
-                                            self.stack.drain(..).collect();
-
-                                        let caller_frame = crate::value::ContinuationFrame {
-                                            bytecode: Rc::new(bytecode.to_vec()),
-                                            constants: Rc::new(constants.to_vec()),
-                                            env: closure_env
-                                                .cloned()
-                                                .unwrap_or_else(|| Rc::new(vec![])),
-                                            ip,
-                                            stack: caller_stack,
-                                            // Save caller's exception handler state
-                                            exception_handlers: self.exception_handlers.clone(),
-                                            handling_exception: self.handling_exception,
-                                        };
-
-                                        let mut cont_data = continuation
-                                            .as_continuation()
-                                            .expect(
-                                                "Yielded continuation must be a continuation value",
-                                            )
-                                            .as_ref()
-                                            .clone();
-                                        cont_data.append_frame(caller_frame);
-
-                                        let new_continuation = Value::continuation(cont_data);
-                                        return Ok(VmResult::Yielded {
-                                            value,
-                                            continuation: new_continuation,
-                                        });
-                                    }
-                                }
-                            } else {
-                                let result = self.execute_bytecode(
-                                    &source.bytecode,
-                                    &source.constants,
-                                    Some(&new_env_rc),
-                                )?;
-
-                                self.call_depth -= 1;
-                                self.stack.push(result);
-                            }
-                        } else {
-                            return Err("JIT closure has no fallback source".to_string());
-                        }
                     } else {
                         return Err(format!("Cannot call {:?}", func));
                     }
@@ -591,9 +456,9 @@ impl VM {
 
                         // Calculate number of locally-defined variables
                         let num_params = match closure.arity {
-                            crate::value_old::Arity::Exact(n) => n,
-                            crate::value_old::Arity::AtLeast(n) => n,
-                            crate::value_old::Arity::Range(min, _) => min,
+                            crate::value::Arity::Exact(n) => n,
+                            crate::value::Arity::AtLeast(n) => n,
+                            crate::value::Arity::Range(min, _) => min,
                         };
                         let num_locally_defined = closure.num_locals.saturating_sub(num_params);
 
@@ -617,90 +482,6 @@ impl VM {
                         // Return a dummy value - the outer loop will detect the pending tail call
                         // and execute it instead of returning this value
                         return Ok(VmResult::Done(Value::NIL));
-                    } else if let Some(jit_closure) = func.as_jit_closure() {
-                        // Validate argument count
-                        if !self.check_arity(&jit_closure.arity, args.len()) {
-                            // Exception was set, check it before returning
-                            if self.current_exception.is_some()
-                                && !self.handling_exception
-                                && self.exception_handlers.is_empty()
-                            {
-                                // No local handler — propagate via current_exception
-                                return Ok(VmResult::Done(Value::NIL));
-                            }
-                            return Ok(VmResult::Done(Value::NIL));
-                        } else if !jit_closure.code_ptr.is_null() {
-                            // Call native code directly (tail call optimization)
-                            return unsafe {
-                                // Prepare args array
-                                let args_encoded: Vec<i64> =
-                                    args.iter().map(encode_value_for_jit).collect();
-
-                                // Prepare env array (captures) - uses old Value type
-                                let env_encoded: Vec<i64> = jit_closure
-                                    .env
-                                    .iter()
-                                    .map(encode_old_value_for_jit)
-                                    .collect();
-
-                                // Cast to function pointer
-                                let func: extern "C" fn(i64, i64, i64) -> i64 =
-                                    std::mem::transmute(jit_closure.code_ptr);
-
-                                // Call it
-                                let result_encoded = func(
-                                    args_encoded.as_ptr() as i64,
-                                    args_encoded.len() as i64,
-                                    env_encoded.as_ptr() as i64,
-                                );
-
-                                // Decode result
-                                decode_jit_result(result_encoded).map(VmResult::Done)
-                            };
-                        } else if let Some(ref source) = jit_closure.source {
-                            // Build proper environment: captures + args + locals (same as Call)
-                            self.tail_call_env_cache.clear();
-                            self.tail_call_env_cache
-                                .extend((*source.env).iter().cloned());
-
-                            // Add parameters, wrapping in local cells if cell_params_mask indicates
-                            for (i, arg) in args.iter().enumerate() {
-                                if i < 64 && (source.cell_params_mask & (1 << i)) != 0 {
-                                    // This parameter is mutated - wrap it in a local cell
-                                    self.tail_call_env_cache.push(Value::local_cell(*arg));
-                                } else {
-                                    self.tail_call_env_cache.push(*arg);
-                                }
-                            }
-
-                            // Calculate number of locally-defined variables
-                            let num_params = match source.arity {
-                                crate::value_old::Arity::Exact(n) => n,
-                                crate::value_old::Arity::AtLeast(n) => n,
-                                crate::value_old::Arity::Range(min, _) => min,
-                            };
-                            let num_locally_defined = source.num_locals.saturating_sub(num_params);
-
-                            // Add empty LocalCells for locally-defined variables
-                            for _ in 0..num_locally_defined {
-                                let empty_cell = Value::local_cell(Value::NIL);
-                                self.tail_call_env_cache.push(empty_cell);
-                            }
-
-                            let new_env_rc = std::rc::Rc::new(self.tail_call_env_cache.clone());
-
-                            // Store the tail call information to be executed in the outer loop
-                            self.pending_tail_call = Some((
-                                (*source.bytecode).clone(),
-                                (*source.constants).clone(),
-                                new_env_rc,
-                            ));
-
-                            // Return a dummy value - the outer loop will detect the pending tail call
-                            return Ok(VmResult::Done(Value::NIL));
-                        } else {
-                            return Err("JIT closure has no fallback source".to_string());
-                        }
                     } else {
                         return Err(format!("Cannot call {:?}", func));
                     }
@@ -934,29 +715,8 @@ impl VM {
                                 // Bind the exception to the variable in the current scope
                                 // For now, use globals as a simple binding mechanism
                                 use crate::value::heap::{alloc, HeapObject};
-                                // Convert new Condition to old Condition
-                                let new_cond = (**exc).clone();
-                                let mut old_cond =
-                                    crate::value_old::Condition::new(new_cond.exception_id);
-                                // Store message in old condition's FIELD_MESSAGE
-                                old_cond.set_field(
-                                    crate::value_old::Condition::FIELD_MESSAGE,
-                                    crate::value_old::Value::String(
-                                        new_cond.message.clone().into(),
-                                    ),
-                                );
-                                for (field_id, value) in new_cond.fields {
-                                    let old_value =
-                                        crate::primitives::coroutines::new_value_to_old(value);
-                                    old_cond.set_field(field_id, old_value);
-                                }
-                                if let Some(bt) = new_cond.backtrace {
-                                    old_cond.backtrace = Some(bt);
-                                }
-                                if let Some(loc) = new_cond.location {
-                                    old_cond.location = Some(loc);
-                                }
-                                let exc_value = alloc(HeapObject::Condition(old_cond));
+                                // Store the Condition directly (no conversion needed)
+                                let exc_value = alloc(HeapObject::Condition((**exc).clone()));
                                 self.globals.insert(sym_id, exc_value);
                             } else {
                                 return Err(
@@ -1042,25 +802,8 @@ impl VM {
                     // If there's an exception, push it as a Value; otherwise push NIL
                     let exc_value = if let Some(exc) = &self.current_exception {
                         use crate::value::heap::{alloc, HeapObject};
-                        // Convert new Condition to old Condition
-                        let new_cond = (**exc).clone();
-                        let mut old_cond = crate::value_old::Condition::new(new_cond.exception_id);
-                        // Store message in old condition's FIELD_MESSAGE
-                        old_cond.set_field(
-                            crate::value_old::Condition::FIELD_MESSAGE,
-                            crate::value_old::Value::String(new_cond.message.clone().into()),
-                        );
-                        for (field_id, value) in new_cond.fields {
-                            let old_value = crate::primitives::coroutines::new_value_to_old(value);
-                            old_cond.set_field(field_id, old_value);
-                        }
-                        if let Some(bt) = new_cond.backtrace {
-                            old_cond.backtrace = Some(bt);
-                        }
-                        if let Some(loc) = new_cond.location {
-                            old_cond.location = Some(loc);
-                        }
-                        alloc(HeapObject::Condition(old_cond))
+                        // Store the Condition directly (no conversion needed)
+                        alloc(HeapObject::Condition((**exc).clone()))
                     } else {
                         Value::NIL
                     };
@@ -1235,54 +978,4 @@ impl VM {
 
         Ok(result)
     }
-}
-
-/// Encode a Value for passing to JIT code
-fn encode_value_for_jit(value: &Value) -> i64 {
-    if value.is_nil() {
-        0
-    } else if let Some(b) = value.as_bool() {
-        if b {
-            1
-        } else {
-            0
-        }
-    } else if let Some(n) = value.as_int() {
-        n
-    } else {
-        // For heap values, we pass the pointer
-        // IMPORTANT: The value must be kept alive during JIT execution!
-        // This is unsafe - we're passing a raw pointer
-        // The caller must ensure the Value lives long enough
-        value.to_bits() as i64
-    }
-}
-
-/// Encode an old Value for passing to JIT code
-fn encode_old_value_for_jit(value: &crate::value_old::Value) -> i64 {
-    use crate::value_old::Value as OldValue;
-    match value {
-        OldValue::Nil => 0,
-        OldValue::Bool(b) => {
-            if *b {
-                1
-            } else {
-                0
-            }
-        }
-        OldValue::Int(n) => *n,
-        OldValue::Float(f) => f.to_bits() as i64,
-        _ => {
-            // For other types, we'd need proper encoding
-            // For now, just return 0 as a placeholder
-            0
-        }
-    }
-}
-
-/// Decode a result from JIT code back to Value
-fn decode_jit_result(encoded: i64) -> Result<Value, String> {
-    // For now, assume integer result
-    // TODO: Need type information to properly decode
-    Ok(Value::int(encoded))
 }

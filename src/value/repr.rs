@@ -123,11 +123,6 @@ impl PartialEq for Value {
                 // Closure comparison (compare by reference)
                 (HeapObject::Closure(c1), HeapObject::Closure(c2)) => std::rc::Rc::ptr_eq(c1, c2),
 
-                // JitClosure comparison (compare by reference)
-                (HeapObject::JitClosure(c1), HeapObject::JitClosure(c2)) => {
-                    std::rc::Rc::ptr_eq(c1, c2)
-                }
-
                 // Condition comparison
                 (HeapObject::Condition(cond1), HeapObject::Condition(cond2)) => cond1 == cond2,
 
@@ -788,22 +783,9 @@ impl Value {
         }
     }
 
-    /// Extract as JIT closure if this is a JIT closure.
-    #[inline]
-    pub fn as_jit_closure(&self) -> Option<&std::rc::Rc<crate::value_old::JitClosure>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::JitClosure(c) => Some(c),
-            _ => None,
-        }
-    }
-
     /// Extract as condition if this is a condition.
     #[inline]
-    pub fn as_condition(&self) -> Option<&crate::value_old::Condition> {
+    pub fn as_condition(&self) -> Option<&crate::value::Condition> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
@@ -818,7 +800,7 @@ impl Value {
     #[inline]
     pub fn as_coroutine(
         &self,
-    ) -> Option<&std::rc::Rc<std::cell::RefCell<crate::value_old::Coroutine>>> {
+    ) -> Option<&std::rc::Rc<std::cell::RefCell<crate::value::Coroutine>>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;

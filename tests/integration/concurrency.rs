@@ -311,9 +311,8 @@ fn test_sleep_non_numeric() {
 }
 
 #[test]
-fn test_spawn_jit_closure_with_source() {
-    // Test spawning a JIT-compiled closure that has a source closure
-    // We create a closure, then manually create a JitClosure with a source
+fn test_spawn_closure_with_capture() {
+    // Test spawning a closure that captures a variable
     let result = eval(
         r#"
         (let ((x 42))

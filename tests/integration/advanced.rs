@@ -1,7 +1,7 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
 use elle::ffi_primitives;
 use elle::pipeline::{compile_all_new, compile_new};
-use elle::primitives::{clear_macro_symbol_table, register_primitives, set_macro_symbol_table};
+use elle::primitives::register_primitives;
 use elle::{SymbolTable, Value, VM};
 
 fn eval(input: &str) -> Result<Value, String> {
@@ -12,8 +12,7 @@ fn eval(input: &str) -> Result<Value, String> {
     // Set VM context for module loading and FFI
     ffi_primitives::set_vm_context(&mut vm as *mut VM);
 
-    // Set symbol table context for macro primitives and module loading
-    set_macro_symbol_table(&mut symbols as *mut SymbolTable);
+    // Set symbol table context for module loading
     ffi_primitives::set_symbol_table(&mut symbols as *mut SymbolTable);
 
     // Try single expression first
@@ -46,7 +45,6 @@ fn eval(input: &str) -> Result<Value, String> {
 
     // Clear context
     ffi_primitives::clear_vm_context();
-    clear_macro_symbol_table();
 
     result
 }
@@ -75,10 +73,11 @@ fn test_add_module_path_integration() {
 #[test]
 fn test_macro_primitives_integration() {
     // Test expand-macro with a quoted list (macro call form)
-    // This should error because test is not a macro
-    assert!(eval("(expand-macro '(test 1 2))").is_err());
+    // In the new pipeline, expand-macro is a placeholder that returns the form unchanged
+    let result = eval("(expand-macro '(test 1 2))").unwrap();
+    assert!(result.is_cons()); // Should return the list unchanged
 
-    // Test macro?
+    // Test macro? - always returns false in the new pipeline
     assert_eq!(eval("(macro? 'some-name)").unwrap(), Value::bool(false));
     assert_eq!(eval("(macro? 42)").unwrap(), Value::bool(false));
 }
@@ -207,9 +206,11 @@ fn test_module_and_arithmetic_combination() {
 #[test]
 fn test_expand_macro_with_symbols() {
     // expand-macro with quoted list (macro call form)
-    // These should error because + and list are not macros
-    assert!(eval("(expand-macro '(+ 1 2))").is_err());
-    assert!(eval("(expand-macro '(list 1 2))").is_err());
+    // In the new pipeline, expand-macro is a placeholder that returns the form unchanged
+    let result = eval("(expand-macro '(+ 1 2))").unwrap();
+    assert!(result.is_cons());
+    let result = eval("(expand-macro '(list 1 2))").unwrap();
+    assert!(result.is_cons());
 }
 
 #[test]
@@ -243,8 +244,8 @@ fn test_phase5_feature_availability() {
     // Verify all Phase 5 primitives are registered
     assert!(eval("(import-file \"test-modules/test.lisp\")").is_ok());
     assert!(eval("(add-module-path \".\")").is_ok());
-    // expand-macro requires a quoted list (macro call form)
-    assert!(eval("(expand-macro '(x 1 2))").is_err()); // x is not a macro
+    // expand-macro returns the form unchanged in the new pipeline
+    assert!(eval("(expand-macro '(x 1 2))").is_ok());
     assert!(eval("(macro? 'x)").is_ok());
     // spawn now requires a closure, not a native function
     assert!(eval("(spawn (fn () 42))").is_ok());

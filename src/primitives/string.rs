@@ -306,7 +306,7 @@ pub fn prim_to_string(args: &[Value]) -> Result<Value, Condition> {
         unsafe {
             if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
                 let symbols = &*symbols_ptr;
-                let sym_id = crate::value_old::SymbolId(sym_id);
+                let sym_id = crate::value::SymbolId(sym_id);
                 if let Some(name) = symbols.name(sym_id) {
                     return Ok(Value::string(name));
                 } else {
@@ -328,7 +328,7 @@ pub fn prim_to_string(args: &[Value]) -> Result<Value, Condition> {
         unsafe {
             if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
                 let symbols = &*symbols_ptr;
-                let sym_id = crate::value_old::SymbolId(kw_id);
+                let sym_id = crate::value::SymbolId(kw_id);
                 if let Some(name) = symbols.name(sym_id) {
                     return Ok(Value::string(format!(":{}", name)));
                 } else {
@@ -724,7 +724,7 @@ pub fn prim_symbol_to_string(args: &[Value], vm: &mut VM) -> LResult<Value> {
             unsafe {
                 if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
                     let symbols = &*symbols_ptr;
-                    let sym_id = crate::value_old::SymbolId(id);
+                    let sym_id = crate::value::SymbolId(id);
                     if let Some(name) = symbols.name(sym_id) {
                         Ok(Value::string(name))
                     } else {
