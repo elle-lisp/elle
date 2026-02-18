@@ -13,7 +13,7 @@ use crate::compiler::cps::primitives::old_value_to_new;
 use crate::compiler::cps::{
     Action, Continuation, CpsInterpreter, CpsTransformer, Trampoline, TrampolineResult,
 };
-use crate::compiler::effects::EffectContext;
+use crate::effects::EffectContext;
 use crate::error::LResult;
 use crate::value::{Condition, Coroutine, CoroutineState, Value};
 use crate::value_old::Value as OldValue;
@@ -532,7 +532,7 @@ fn resume_coroutine_cps(
 /// This scans the VM's globals and registers the effect of each closure.
 /// Native functions are assumed to be pure.
 fn register_global_effects(effect_ctx: &mut EffectContext, vm: &VM) {
-    use crate::compiler::effects::Effect;
+    use crate::effects::Effect;
     use crate::value::SymbolId;
 
     for (&sym_id, value) in &vm.globals {
@@ -762,7 +762,7 @@ pub fn new_value_to_old(val: Value) -> OldValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::effects::Effect;
+    use crate::effects::Effect;
     use crate::value::{Arity, Closure};
     use crate::vm::VM;
 

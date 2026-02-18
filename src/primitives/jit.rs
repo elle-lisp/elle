@@ -285,7 +285,7 @@ mod tests {
             arity: Arity::Exact(0),
             source: None,
             func_id: 1,
-            effect: crate::compiler::effects::Effect::Pure,
+            effect: crate::effects::Effect::Pure,
         };
         use crate::value::heap::{alloc, HeapObject};
         let value = alloc(HeapObject::JitClosure(Rc::new(jit_closure)));

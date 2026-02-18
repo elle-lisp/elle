@@ -5,6 +5,7 @@
 //! existing Value-based pipeline until fully integrated.
 
 use crate::compiler::Bytecode;
+use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::Analyzer;
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::{read_syntax, read_syntax_all};
@@ -28,7 +29,10 @@ pub fn compile_new(source: &str, symbols: &mut SymbolTable) -> Result<CompileRes
 
     // Phase 3: Analyze to HIR
     let mut analyzer = Analyzer::new(symbols);
-    let analysis = analyzer.analyze(&expanded)?;
+    let mut analysis = analyzer.analyze(&expanded)?;
+
+    // Phase 3.5: Mark tail calls
+    mark_tail_calls(&mut analysis.hir);
 
     // Phase 4: Lower to LIR with binding info
     let mut lowerer = Lowerer::new().with_bindings(analysis.bindings);
@@ -59,8 +63,11 @@ pub fn compile_all_new(
 
         // Create analyzer for each form to avoid borrow conflicts
         let mut analyzer = Analyzer::new(symbols);
-        let analysis = analyzer.analyze(&expanded)?;
+        let mut analysis = analyzer.analyze(&expanded)?;
         // Analyzer is dropped here, releasing the mutable borrow
+
+        // Mark tail calls
+        mark_tail_calls(&mut analysis.hir);
 
         let mut lowerer = Lowerer::new().with_bindings(analysis.bindings);
         let lir_func = lowerer.lower(&analysis.hir)?;

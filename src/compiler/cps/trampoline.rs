@@ -4,7 +4,7 @@
 //! It repeatedly processes Actions until completion or yield.
 
 use super::{Action, Continuation, CpsInterpreter, CpsTransformer};
-use crate::compiler::effects::EffectContext;
+use crate::effects::EffectContext;
 use crate::value::Value;
 use crate::vm::VM;
 use std::cell::RefCell;
@@ -658,7 +658,7 @@ fn execute_cps_call(
 /// This scans the VM's globals and registers the effect of each closure.
 /// Native functions are assumed to be pure.
 fn register_global_effects(effect_ctx: &mut EffectContext, vm: &VM) {
-    use crate::compiler::effects::Effect;
+    use crate::effects::Effect;
     use crate::value::SymbolId;
 
     for (&sym_id, value) in &vm.globals {

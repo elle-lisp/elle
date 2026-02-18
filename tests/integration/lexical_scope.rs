@@ -522,3 +522,93 @@ fn test_mutual_recursion_via_define_inside_fn() {
     "#;
     assert_eq!(eval(code).unwrap(), Value::bool(true));
 }
+
+// ============================================================================
+// REGRESSION: let/letrec inside closures must use StoreCapture, not StoreLocal
+// ============================================================================
+// These tests guard against a bug where `let` and `letrec` bindings inside
+// lambdas used StoreLocal/LoadLocal (stack-based) instead of
+// StoreCapture/LoadCapture (environment-based). The StoreLocal writes would
+// corrupt the caller's stack, because frame_base=0 at top level means
+// StoreLocal(0, idx) writes to stack[idx] - the same slots used by
+// the caller's local variables.
+
+#[test]
+fn test_let_inside_closure_does_not_corrupt_caller_stack() {
+    // The bug: a closure with an internal `let` would overwrite the
+    // caller's locals when the `let` binding used StoreLocal instead
+    // of StoreCapture. This test has a top-level `let` binding `x`,
+    // then calls a closure that has its own internal `let` binding.
+    // After the call, `x` must still be intact.
+    let code = r#"
+        (begin
+          (define check (fn (val)
+            (let ((temp (+ val 1)))
+              temp)))
+          (let ((x 100))
+            (check 5)
+            x))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::int(100));
+}
+
+#[test]
+fn test_let_inside_closure_returns_correct_value() {
+    // The closure's let binding must be stored in its own environment,
+    // not on the shared stack.
+    let code = r#"
+        (begin
+          (define f (fn (a b)
+            (let ((sum (+ a b))
+                  (diff (- a b)))
+              (+ sum diff))))
+          (f 10 3))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::int(20));
+}
+
+#[test]
+fn test_letrec_inside_closure_does_not_corrupt_caller_stack() {
+    // Same bug as above but for letrec.
+    let code = r#"
+        (begin
+          (define process (fn (n)
+            (letrec ((helper (fn (x) (if (= x 0) 0 (+ x (helper (- x 1)))))))
+              (helper n))))
+          (let ((result 999))
+            (process 5)
+            result))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::int(999));
+}
+
+#[test]
+fn test_multiple_closures_with_let_dont_interfere() {
+    // Multiple closures with internal let bindings called in sequence.
+    // Each must use its own environment, not stomp the stack.
+    let code = r#"
+        (begin
+          (define f (fn (x) (let ((a (+ x 1))) a)))
+          (define g (fn (x) (let ((b (* x 2))) b)))
+          (let ((r1 (f 10))
+                (r2 (g 20)))
+            (+ r1 r2)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::int(51));
+}
+
+#[test]
+fn test_closure_let_with_string_operations() {
+    // This is the pattern that originally failed in concurrency.lisp:
+    // string-contains? (which uses let internally in assert-eq) was
+    // receiving a boolean instead of a string after spawn/join.
+    let code = r#"
+        (begin
+          (define checker (fn (s)
+            (let ((result (string-contains? s "hello")))
+              result)))
+          (let ((msg "say hello world"))
+            (checker msg)))
+    "#;
+    assert_eq!(eval(code).unwrap(), Value::bool(true));
+}

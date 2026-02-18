@@ -7,6 +7,11 @@
 //! - Pattern matching validation
 //!
 //! This crate provides a wrapper around the compiler's integrated linter.
+//!
+//! TODO: The linter currently uses the legacy pipeline (Value -> Expr) because
+//! the compiler's Linter is tightly coupled to the Expr AST. A future migration
+//! should create a HIR-based linter that works with the new pipeline
+//! (Syntax -> HIR -> LIR -> Bytecode).
 
 pub use elle::compiler::linter::diagnostics::{Diagnostic, Severity};
 

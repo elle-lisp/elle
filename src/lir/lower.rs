@@ -225,6 +225,12 @@ impl Lowerer {
                     let init_reg = self.lower_expr(init)?;
                     let slot = self.allocate_slot(*binding_id);
 
+                    // Inside lambdas, let-bound variables live in the closure
+                    // environment and must be accessed via LoadCapture/StoreCapture
+                    if self.in_lambda {
+                        self.upvalue_bindings.insert(*binding_id);
+                    }
+
                     // Check if this binding needs to be wrapped in a cell
                     let needs_cell = self
                         .bindings
@@ -232,22 +238,33 @@ impl Lowerer {
                         .map(|info| info.needs_cell())
                         .unwrap_or(false);
 
-                    if needs_cell {
-                        // Wrap the value in a cell
-                        let cell_reg = self.fresh_reg();
-                        self.emit(LirInstr::MakeCell {
-                            dst: cell_reg,
-                            value: init_reg,
-                        });
-                        self.emit(LirInstr::StoreLocal {
-                            slot,
-                            src: cell_reg,
-                        });
-                    } else {
-                        self.emit(LirInstr::StoreLocal {
-                            slot,
+                    if self.in_lambda {
+                        // Inside a lambda, use closure environment via StoreCapture.
+                        // The VM's Call handler already creates LocalCell(NIL) slots
+                        // for locally-defined variables, so we don't need MakeCell here.
+                        // StoreCapture handles updating cells automatically.
+                        self.emit(LirInstr::StoreCapture {
+                            index: slot,
                             src: init_reg,
                         });
+                    } else {
+                        // Outside lambdas, use stack-based locals
+                        if needs_cell {
+                            let cell_reg = self.fresh_reg();
+                            self.emit(LirInstr::MakeCell {
+                                dst: cell_reg,
+                                value: init_reg,
+                            });
+                            self.emit(LirInstr::StoreLocal {
+                                slot,
+                                src: cell_reg,
+                            });
+                        } else {
+                            self.emit(LirInstr::StoreLocal {
+                                slot,
+                                src: init_reg,
+                            });
+                        }
                     }
                 }
                 self.lower_expr(body)
@@ -259,6 +276,12 @@ impl Lowerer {
                     let nil_reg = self.emit_const(LirConst::Nil)?;
                     let slot = self.allocate_slot(*binding_id);
 
+                    // Inside lambdas, letrec-bound variables live in the closure
+                    // environment and must be accessed via LoadCapture/StoreCapture
+                    if self.in_lambda {
+                        self.upvalue_bindings.insert(*binding_id);
+                    }
+
                     // Check if this binding needs to be wrapped in a cell
                     let needs_cell = self
                         .bindings
@@ -266,8 +289,15 @@ impl Lowerer {
                         .map(|info| info.needs_cell())
                         .unwrap_or(false);
 
-                    if needs_cell {
-                        // Create a cell containing nil initially
+                    if self.in_lambda {
+                        // Inside a lambda, the VM's Call handler already creates
+                        // LocalCell(NIL) slots. No need to initialize here.
+                        // StoreCapture will update the cell contents.
+                        self.emit(LirInstr::StoreCapture {
+                            index: slot,
+                            src: nil_reg,
+                        });
+                    } else if needs_cell {
                         let cell_reg = self.fresh_reg();
                         self.emit(LirInstr::MakeCell {
                             dst: cell_reg,
@@ -293,8 +323,13 @@ impl Lowerer {
                         .map(|info| info.needs_cell())
                         .unwrap_or(false);
 
-                    if needs_cell {
-                        // Load the cell and update it
+                    if self.in_lambda {
+                        // Inside a lambda, StoreCapture handles cell update
+                        self.emit(LirInstr::StoreCapture {
+                            index: slot,
+                            src: init_reg,
+                        });
+                    } else if needs_cell {
                         let cell_reg = self.fresh_reg();
                         self.emit(LirInstr::LoadLocal {
                             dst: cell_reg,

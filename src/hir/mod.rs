@@ -13,6 +13,7 @@ mod analyze;
 mod binding;
 mod expr;
 mod pattern;
+pub mod tailcall;
 
 pub use analyze::{AnalysisContext, AnalysisResult, Analyzer};
 pub use binding::{BindingId, BindingInfo, BindingKind, CaptureInfo, CaptureKind};

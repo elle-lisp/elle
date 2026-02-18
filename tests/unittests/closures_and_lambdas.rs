@@ -1,6 +1,6 @@
 // DEFENSE: Unit tests for closure and lambda primitives
 // Tests the basic building blocks of closure and lambda functionality
-use elle::compiler::effects::Effect;
+use elle::effects::Effect;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::value::{Arity, Closure, Value};

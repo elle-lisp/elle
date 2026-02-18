@@ -1,5 +1,6 @@
-use elle::compiler::converters::value_to_expr;
-use elle::{compile, read_str, register_primitives, SymbolTable, VM};
+use elle::pipeline::{compile_new, eval_new};
+use elle::primitives::register_primitives;
+use elle::{read_str, SymbolTable, VM};
 use iai_callgrind::black_box;
 
 // IAI-CALLGRIND: Instruction-level benchmarks for deterministic performance measurement
@@ -21,6 +22,13 @@ use iai_callgrind::black_box;
 // Note: Requires valgrind to be installed:
 // Linux: sudo apt-get install valgrind
 // macOS: brew install valgrind
+
+fn setup() -> (VM, SymbolTable) {
+    let mut vm = VM::new();
+    let mut symbols = SymbolTable::new();
+    register_primitives(&mut vm, &mut symbols);
+    (vm, symbols)
+}
 
 /// Parse a simple number (42)
 #[inline(never)]
@@ -61,55 +69,38 @@ pub fn bench_intern_cached() {
 /// Compile a simple arithmetic expression
 #[inline(never)]
 pub fn bench_compile_simple() {
-    let mut symbols = SymbolTable::new();
-    let simple = read_str("(+ 1 2)", &mut symbols).unwrap();
-    let expr = value_to_expr(&simple, &mut symbols).unwrap();
-    black_box(compile(&expr));
+    let (_, mut symbols) = setup();
+    black_box(compile_new("(+ 1 2)", &mut symbols).unwrap());
 }
 
 /// Compile a nested arithmetic expression
 #[inline(never)]
 pub fn bench_compile_nested() {
-    let mut symbols = SymbolTable::new();
-    let nested = read_str("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols).unwrap();
-    let expr = value_to_expr(&nested, &mut symbols).unwrap();
-    black_box(compile(&expr));
+    let (_, mut symbols) = setup();
+    black_box(compile_new("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols).unwrap());
 }
 
 /// Execute arithmetic in the VM
 #[inline(never)]
 pub fn bench_vm_arithmetic() {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
-    let value = read_str("(+ 1 2 3 4 5)", &mut symbols).unwrap();
-    let expr = value_to_expr(&value, &mut symbols).unwrap();
-    let bytecode = compile(&expr);
-    black_box(vm.execute(&bytecode).unwrap());
+    let (mut vm, mut symbols) = setup();
+    let result = compile_new("(+ 1 2 3 4 5)", &mut symbols).unwrap();
+    black_box(vm.execute(&result.bytecode).unwrap());
 }
 
 /// Execute list construction in the VM
 #[inline(never)]
 pub fn bench_vm_list() {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
-    let value = read_str("(cons 1 (cons 2 (cons 3 nil)))", &mut symbols).unwrap();
-    let expr = value_to_expr(&value, &mut symbols).unwrap();
-    let bytecode = compile(&expr);
-    black_box(vm.execute(&bytecode).unwrap());
+    let (mut vm, mut symbols) = setup();
+    let result = compile_new("(cons 1 (cons 2 (cons 3 nil)))", &mut symbols).unwrap();
+    black_box(vm.execute(&result.bytecode).unwrap());
 }
 
 /// End-to-end: parse, compile, and execute
 #[inline(never)]
 pub fn bench_end_to_end_simple() {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
-    let value = read_str("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols).unwrap();
-    let expr = value_to_expr(&value, &mut symbols).unwrap();
-    let bytecode = compile(&expr);
-    black_box(vm.execute(&bytecode).unwrap());
+    let (mut vm, mut symbols) = setup();
+    black_box(eval_new("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols, &mut vm).unwrap());
 }
 
 fn main() {

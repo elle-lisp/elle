@@ -7,7 +7,7 @@
 use std::rc::Rc;
 
 use crate::compiler::ast::Expr;
-use crate::compiler::effects::Effect;
+use crate::effects::Effect;
 use crate::value::Value;
 
 // Re-export SymbolId for use in closure definitions
