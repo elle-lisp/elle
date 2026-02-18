@@ -152,6 +152,28 @@ impl VM {
                 ));
             }
 
+            // Check for pending exception at the START of each iteration.
+            // This is important for continuation resume: if an inner frame returned
+            // with an exception, we need to handle it before executing any instructions
+            // in this frame. Without this check, we'd execute the next instruction
+            // (e.g., PopHandler) before noticing the exception.
+            if self.current_exception.is_some() && !self.handling_exception {
+                if let Some(handler) = self.exception_handlers.last() {
+                    // Unwind stack to saved depth
+                    while self.stack.len() > handler.stack_depth {
+                        self.stack.pop();
+                    }
+                    // Mark that we're handling an exception
+                    self.handling_exception = true;
+                    // Jump to handler code (handler_offset is absolute bytecode position)
+                    ip = handler.handler_offset as usize;
+                    continue; // Skip to next iteration to execute handler code
+                } else {
+                    // No local handler — return normally, leaving current_exception set.
+                    return Ok(VmResult::Done(Value::NIL));
+                }
+            }
+
             if ip >= bytecode.len() {
                 return Err("Unexpected end of bytecode".to_string());
             }
@@ -325,7 +347,7 @@ impl VM {
                                         value,
                                         continuation,
                                     } => {
-                                        // Capture the caller's frame and prepend it to the continuation.
+                                        // Capture the caller's frame and append it to the continuation.
                                         // self.stack has been restored by execute_bytecode_coroutine
                                         // to the caller's stack state (stuff before the Call args).
                                         let caller_stack: Vec<Value> =
@@ -339,9 +361,12 @@ impl VM {
                                                 .unwrap_or_else(|| Rc::new(vec![])),
                                             ip, // IP is right after the Call instruction
                                             stack: caller_stack,
+                                            // Save caller's exception handler state
+                                            exception_handlers: self.exception_handlers.clone(),
+                                            handling_exception: self.handling_exception,
                                         };
 
-                                        // Clone the continuation data and prepend caller's frame
+                                        // Clone the continuation data and append caller's frame
                                         let mut cont_data = continuation
                                             .as_continuation()
                                             .expect(
@@ -349,7 +374,7 @@ impl VM {
                                             )
                                             .as_ref()
                                             .clone();
-                                        cont_data.prepend_frame(caller_frame);
+                                        cont_data.append_frame(caller_frame);
 
                                         let new_continuation = Value::continuation(cont_data);
                                         return Ok(VmResult::Yielded {
@@ -461,7 +486,7 @@ impl VM {
                                         value,
                                         continuation,
                                     } => {
-                                        // Capture the caller's frame and prepend it to the continuation.
+                                        // Capture the caller's frame and append it to the continuation.
                                         let caller_stack: Vec<Value> =
                                             self.stack.drain(..).collect();
 
@@ -473,6 +498,9 @@ impl VM {
                                                 .unwrap_or_else(|| Rc::new(vec![])),
                                             ip,
                                             stack: caller_stack,
+                                            // Save caller's exception handler state
+                                            exception_handlers: self.exception_handlers.clone(),
+                                            handling_exception: self.handling_exception,
                                         };
 
                                         let mut cont_data = continuation
@@ -482,7 +510,7 @@ impl VM {
                                             )
                                             .as_ref()
                                             .clone();
-                                        cont_data.prepend_frame(caller_frame);
+                                        cont_data.append_frame(caller_frame);
 
                                         let new_continuation = Value::continuation(cont_data);
                                         return Ok(VmResult::Yielded {
@@ -846,7 +874,7 @@ impl VM {
                     };
 
                     // Push handler frame to exception_handlers stack
-                    use crate::vm::core::ExceptionHandler;
+                    use crate::value::ExceptionHandler;
                     self.exception_handlers.push(ExceptionHandler {
                         handler_offset,
                         finally_offset,
@@ -981,12 +1009,15 @@ impl VM {
                     let saved_stack: Vec<Value> = self.stack.drain(..).collect();
 
                     // Create the innermost continuation frame (the yielding frame)
+                    // Save exception handler state so it can be restored on resume
                     let frame = crate::value::ContinuationFrame {
                         bytecode: Rc::new(bytecode.to_vec()),
                         constants: Rc::new(constants.to_vec()),
                         env: closure_env.cloned().unwrap_or_else(|| Rc::new(vec![])),
                         ip, // IP after the Yield instruction
                         stack: saved_stack,
+                        exception_handlers: self.exception_handlers.clone(),
+                        handling_exception: self.handling_exception,
                     };
 
                     let cont_data = crate::value::ContinuationData::new(frame);
@@ -1107,6 +1138,60 @@ impl VM {
     ) -> Result<VmResult, String> {
         // This goes through the wrapper which handles handler isolation
         self.execute_bytecode_inner_with_ip(bytecode, constants, closure_env, start_ip)
+    }
+
+    /// Execute bytecode starting from a specific IP with pre-set exception handler state.
+    ///
+    /// This is used when resuming a continuation frame that had active exception handlers
+    /// when it was captured. Unlike `execute_bytecode_from_ip`, this method:
+    /// 1. Sets the exception handlers to the provided state before execution
+    /// 2. Restores the outer handlers after execution
+    ///
+    /// This ensures that `handler-case` blocks active at yield time remain active
+    /// after resume.
+    pub fn execute_bytecode_from_ip_with_state(
+        &mut self,
+        bytecode: &[u8],
+        constants: &[Value],
+        closure_env: Option<&Rc<Vec<Value>>>,
+        start_ip: usize,
+        handlers: Vec<crate::value::ExceptionHandler>,
+        handling: bool,
+    ) -> Result<VmResult, String> {
+        // Save outer state
+        let saved_handlers = std::mem::replace(&mut self.exception_handlers, handlers);
+        let saved_handling = std::mem::replace(&mut self.handling_exception, handling);
+
+        // Execute with tail call loop (similar to execute_bytecode_coroutine)
+        let mut current_bytecode = bytecode.to_vec();
+        let mut current_constants = constants.to_vec();
+        let mut current_env = closure_env.cloned();
+        let mut current_ip = start_ip;
+
+        let result = loop {
+            let result = self.execute_bytecode_inner_impl(
+                &current_bytecode,
+                &current_constants,
+                current_env.as_ref(),
+                current_ip,
+            )?;
+
+            // Check for pending tail call
+            if let Some((tail_bytecode, tail_constants, tail_env)) = self.pending_tail_call.take() {
+                current_bytecode = tail_bytecode;
+                current_constants = tail_constants;
+                current_env = Some(tail_env);
+                current_ip = 0; // Tail calls start from the beginning
+            } else {
+                break result;
+            }
+        };
+
+        // Restore outer state
+        self.exception_handlers = saved_handlers;
+        self.handling_exception = saved_handling;
+
+        Ok(result)
     }
 
     /// Execute bytecode returning VmResult (for coroutine execution)

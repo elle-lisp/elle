@@ -67,8 +67,11 @@ VmResult
 5. **Exception handlers are a stack.** `PushHandler` adds, `PopHandler` removes.
    On exception, unwind to handler's stack_depth and jump to handler_offset.
 
-6. **Coroutines save full context on yield.** IP, stack snapshot, locals.
-    Resume restores context and pushes resume value.
+6. **Coroutines use first-class continuations.** On yield, a `ContinuationFrame`
+   captures bytecode, constants, env, IP, stack, and exception handler state.
+   When yield propagates through Call instructions, each caller's frame is
+   appended to form a chain. `resume_continuation` replays frames from
+   innermost to outermost, restoring handler state for each frame.
 
 7. **Instruction handlers have two error channels.** `Err(String)` is for VM
    bugs (stack underflow, bad bytecode). `Ok(())` with `current_exception`
@@ -106,12 +109,33 @@ condition (1)
 Hierarchy data and `is_exception_subclass(child, parent)` live in
 `value/condition.rs` — the single source of truth. Re-exported from `vm/mod.rs`.
 
+## Continuation mechanism
+
+When a coroutine yields:
+
+1. **Yield instruction** captures innermost frame: bytecode, constants, env,
+   IP (after yield), stack, exception_handlers, handling_exception
+2. **Call handler** (if yield propagates through a call) appends caller's
+   frame to the continuation chain
+3. **Frame ordering**: innermost (yielder) first, outermost (caller) last
+4. **Resume** iterates frames forward, calling `execute_bytecode_from_ip_with_state`
+   for each, which restores exception handler state before execution
+
+Key methods:
+- `execute_bytecode_from_ip_with_state`: Executes with pre-set handler state
+- `resume_continuation`: Replays frame chain, handles re-yields and exceptions
+
+Exception handling across resume:
+- Exception check at START of instruction loop catches exceptions from inner frames
+- Each frame's handlers are restored before execution
+- Exceptions propagate to outer frames if no local handler
+
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 1050 | Main execution loop, instruction dispatch |
-| `core.rs` | 550 | `VM` struct, `VmResult` |
+| `mod.rs` | ~1200 | Main execution loop, instruction dispatch |
+| `core.rs` | ~600 | `VM` struct, `VmResult`, `resume_continuation` |
 | `stack.rs` | ~100 | Stack operations: LoadConst, Pop, Dup |
 | `variables.rs` | ~150 | LoadGlobal, StoreGlobal, LoadUpvalue, etc. |
 | `control.rs` | ~100 | Jump, JumpIfFalse, Return |

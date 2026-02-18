@@ -4,36 +4,41 @@ This document outlines the plan to unify Elle's execution model around
 first-class continuations in bytecode/LIR, eliminating the separate CPS
 interpreter path.
 
-## Current State
+## Current State (Post-Phase 3)
 
-Elle has two execution paths for coroutines:
+Elle now has a **single execution path** for all coroutines:
 
-1. **Bytecode VM**: Used for non-yielding code or when `SavedContext` can
-   capture the stack
-2. **CPS Interpreter**: Used when a closure's effect indicates it may yield
-   and has `source_ast` available
+1. **Bytecode VM only**: All code, yielding or not, executes via bytecode
+2. **First-class continuations**: `Value::Continuation` holds a chain of
+   `ContinuationFrame`s, each capturing bytecode, constants, environment,
+   IP, stack, and exception handler state
+3. **Frame chain mechanism**: When yield propagates through call boundaries,
+   each caller's frame is appended to the continuation chain
+4. **Exception handler preservation**: `handler-case` blocks active at yield
+   time remain active after resume
 
-The CPS path transforms `Expr` (the old AST) to `CpsExpr` at runtime, then
-tree-walks the result. This has several problems:
+The CPS interpreter has been deleted (~4,400 lines removed). The `source_ast`
+field remains on `Closure` only for JIT compilation, which still uses the
+old `Expr` AST.
 
-- **Duplication**: CPS transformation re-does binding resolution that HIR
-  analysis already performed
-- **Performance**: Tree-walking is slower than bytecode dispatch
-- **JIT gap**: No path to JIT-compile yielding code
-- **Complexity**: Two interpreters, two IR formats, two continuation
-  representations
+### Key implementation details
 
-## Target State
+- `ContinuationFrame` stores: bytecode, constants, env, ip, stack,
+  exception_handlers, handling_exception
+- Frame ordering: innermost (yielder) first, outermost (caller) last
+- `append_frame` is O(1) (was O(n) with `prepend_frame`)
+- `resume_continuation` iterates frames forward, restoring handler state
+- Exception check at start of instruction loop handles cross-frame propagation
+- Tail calls handled in `execute_bytecode_from_ip_with_state`
 
-A single execution path where:
+## Target State (Future)
 
-1. **Yield points are compiled**: The lowerer (HIR → LIR) emits explicit
-   continuation capture at yield points
-2. **Continuations are values**: `Value::Continuation` holds a bytecode
-   offset and captured environment
-3. **One VM**: Bytecode handles both yielding and non-yielding code
-4. **JIT works for everything**: Cranelift compiles the same LIR regardless
-   of effect
+The remaining work is JIT support for yields:
+
+1. **LIR continuation instructions**: Yield as a terminator, explicit
+   continuation capture/apply
+2. **JIT consumes LIR**: Rewrite Cranelift codegen to use LIR instead of Expr
+3. **Compile Yield in Cranelift**: Generate native code for yield points
 
 ## Phased Implementation
 
@@ -622,41 +627,43 @@ Run `cargo clippy --workspace -- -D warnings` and fix all issues.
 Track progress by checking off completed steps:
 
 ### Phase 0: Prerequisites
-- [ ] 0.1: NaN-boxing Value merged
-- [ ] 0.2: Continuation usage audited
-- [ ] 0.3: Comprehensive coroutine tests added
+- [x] 0.1: NaN-boxing Value merged
+- [x] 0.2: Continuation usage audited
+- [x] 0.3: Comprehensive coroutine tests added
 
-### Phase 1: Continuation as Value
-- [ ] 1.1: `Value::Continuation` defined
-- [ ] 1.2: New bytecode instructions added
-- [ ] 1.3: `CaptureCont` implemented
-- [ ] 1.4: `ApplyCont` implemented
-- [ ] 1.5: `YieldCont` implemented
-- [ ] 1.6: `VmResult` and `Coroutine` updated
+### Phase 1: First-class Continuations
+- [x] 1.1: `Value::Continuation` defined (`ContinuationData`, `ContinuationFrame`)
+- [x] 1.2: Frame chain mechanism in VM (Yield captures frame, Call appends caller frame)
+- [x] 1.3: `resume_continuation` replays frame chain
+- [x] 1.4: `VmResult::Yielded` carries continuation value
 
-### Phase 2: LIR Continuation Support
-- [ ] 2.1: LIR continuation instructions added
-- [ ] 2.2: `HirKind::Yield` lowering implemented
-- [ ] 2.3: Bytecode emission for Yield terminator
-- [ ] 2.4: Yield in control flow verified
+Note: The original plan (1.2-1.5) was superseded by the frame-chain approach.
+Instead of explicit `CaptureCont`/`ApplyCont` instructions, continuations are
+built incrementally as yields propagate through call boundaries.
 
-### Phase 3: Delete CPS Interpreter
-- [ ] 3.1: `coroutine-resume` uses bytecode only
-- [ ] 3.2: `source_ast` removed from Closure
-- [ ] 3.3: CPS modules deleted
-- [ ] 3.4: Coroutine state simplified
+### Phase 2: Delete CPS Interpreter
+- [x] 2.1: Removed `compiler/cps/` (~4,400 lines)
+- [x] 2.2: Simplified `Coroutine` struct (7 fields → 4)
+- [x] 2.3: Single execution path (bytecode only)
+- [x] 2.4: Migrated `yielded_value` to new Value type
 
-### Phase 4: JIT Support for Yields
-- [ ] 4.1: JIT coordinator updated
-- [ ] 4.2: Yield terminator compiled
-- [ ] 4.3: Continuation resume in JIT
-- [ ] 4.4: Pure section optimization
+### Phase 3: Harden Continuations
+- [x] 3.1: Exception handler state saved in continuation frames
+- [x] 3.2: `ContinuationData` frame ordering optimized (O(1) append)
+- [x] 3.3: Edge case tests (handler-case+yield, deep call chains, tail calls)
+- [x] 3.4: Documentation updated
+- [x] 3.5: Exception check at start of instruction loop (for cross-frame propagation)
+- [x] 3.6: Tail call handling in `execute_bytecode_from_ip_with_state`
 
-### Phase 5: Cleanup and Optimization
-- [ ] 5.1: Stack frame reuse for pure calls
-- [ ] 5.2: Continuation pooling
-- [ ] 5.3: Dead code removed
-- [ ] 5.4: Documentation updated
+### Phase 4: LIR Continuation Instructions (future)
+- [ ] Yield as LIR terminator
+- [ ] Explicit continuation capture/apply in LIR
+- [ ] Prerequisite: JIT consumes LIR (currently uses old Expr AST)
+
+### Phase 5: JIT Support for Yields (future)
+- [ ] Rewrite JIT to consume LIR
+- [ ] Compile Yield terminator in Cranelift
+- [ ] Continuation resume in JIT
 
 ---
 
