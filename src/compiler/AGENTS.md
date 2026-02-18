@@ -11,7 +11,6 @@ new development.
 - CPS transformation (alternative execution path)
 - Cranelift JIT compilation
 - Macro expansion support
-- Linting
 
 Note: Effect types and inference have been moved to `src/effects/`.
 
@@ -25,8 +24,8 @@ Note: Effect types and inference have been moved to `src/effects/`.
 | `converters/` | `Value` ↔ `Expr` conversion |
 | `cps/` | Continuation-passing style transform and interpreter |
 | `cranelift/` | Native code generation via Cranelift |
-| `linter/` | Static analysis |
-| `scope.rs` | Legacy scope tracking |
+| `linter/` | Legacy Expr-based linter (re-exports from `src/lint/`) |
+| `symbol_index.rs` | Legacy Expr-based symbol extraction (types moved to `src/symbols/`) |
 | `capture_resolution.rs` | Legacy capture analysis |
 | `jit_coordinator.rs` | Hot path detection, JIT triggering |
 | `jit_executor.rs` | Native code execution |
@@ -87,6 +86,20 @@ Located here. Uses `VarRef`. Being phased out.
 | `compile/mod.rs` | ~800 | Legacy compilation |
 | `cps/` | ~1500 | CPS transform and interpreter |
 | `cranelift/` | ~500 | Cranelift code generation |
+
+## Relocated modules
+
+The following were moved out of `compiler/` because they are pipeline-agnostic:
+
+| Was | Now | Why |
+|-----|-----|-----|
+| `effects/` | `src/effects/` | Used by both pipelines (HIR, LIR, VM, closures) |
+| `scope.rs` | `src/vm/scope/` | Only used by VM scope system |
+| `linter/diagnostics.rs` | `src/lint/diagnostics.rs` | Used by HIR linter and external crates |
+| `linter/rules.rs` | `src/lint/rules.rs` | Used by HIR linter |
+| `symbol_index.rs` types | `src/symbols/` | Used by HIR symbol extraction and LSP |
+
+The old locations re-export from the new locations for backward compatibility.
 
 ## Anti-patterns
 
