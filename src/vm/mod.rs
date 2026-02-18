@@ -15,7 +15,7 @@ pub use core::{CallFrame, VmResult, VM};
 
 use crate::compiler::bytecode::{Bytecode, Instruction};
 use crate::value::Value;
-use crate::value_old::{CoroutineContext, CoroutineState};
+use crate::value_old::CoroutineState;
 use std::rc::Rc;
 
 impl VM {
@@ -986,29 +986,20 @@ impl VM {
                         constants: Rc::new(constants.to_vec()),
                         env: closure_env.cloned().unwrap_or_else(|| Rc::new(vec![])),
                         ip, // IP after the Yield instruction
-                        stack: saved_stack.clone(),
+                        stack: saved_stack,
                     };
 
                     let cont_data = crate::value::ContinuationData::new(frame);
                     let continuation = Value::continuation(cont_data);
 
-                    // 4. Also save the old-style context for backward compatibility
-                    // (used by the CPS path and legacy resume)
-                    let saved_context = CoroutineContext {
-                        ip,
-                        stack: saved_stack,
-                        env: closure_env.cloned(),
-                    };
-
-                    // 5. Update coroutine state
+                    // 4. Update coroutine state
                     {
                         let mut co = coroutine.borrow_mut();
                         co.state = CoroutineState::Suspended;
                         co.yielded_value = None;
-                        co.saved_context = Some(saved_context);
                     }
 
-                    // 6. Return the yielded value with its continuation
+                    // 5. Return the yielded value with its continuation
                     return Ok(VmResult::Yielded {
                         value: yielded_value,
                         continuation,

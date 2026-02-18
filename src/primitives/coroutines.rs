@@ -9,16 +9,9 @@
 //! - coroutine->iterator: Convert coroutine to iterator
 //! - coroutine-next: Get next value from coroutine iterator
 
-use crate::compiler::cps::primitives::old_value_to_new;
-use crate::compiler::cps::{
-    Action, Continuation, CpsInterpreter, CpsTransformer, Trampoline, TrampolineResult,
-};
-use crate::effects::EffectContext;
 use crate::error::LResult;
 use crate::value::{Condition, Coroutine, CoroutineState, Value};
-use crate::value_old::Value as OldValue;
 use crate::vm::{VmResult, VM};
-use std::cell::RefMut;
 use std::rc::Rc;
 
 /// F1: Create a coroutine from a function
@@ -119,9 +112,8 @@ pub fn prim_coroutine_value(args: &[Value]) -> Result<Value, Condition> {
 
     if let Some(co) = args[0].as_coroutine() {
         let borrowed = co.borrow();
-        Ok(old_value_to_new(
-            &borrowed.yielded_value.clone().unwrap_or(OldValue::Nil),
-        ))
+        // yielded_value is now Option<crate::value::Value> directly
+        Ok(borrowed.yielded_value.unwrap_or(Value::NIL))
     } else {
         Err(Condition::type_error(format!(
             "coroutine-value: expected coroutine, got {}",
@@ -170,32 +162,7 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
 
         match &borrowed.state {
             CoroutineState::Created => {
-                // Check if this closure yields and has source AST for CPS execution
-                // We re-infer the effect at runtime because the closure might call
-                // functions that weren't defined at compile time
-                //
-                // CPS execution requires source_ast. If source_ast is None (new pipeline),
-                // we fall back to bytecode execution which handles yield via the VM's
-                // Yield instruction.
-                let use_cps = if let Some(ast) = &borrowed.closure.source_ast {
-                    // Re-infer effect with current global definitions
-                    let mut effect_ctx = EffectContext::new();
-                    register_global_effects(&mut effect_ctx, vm);
-                    let runtime_effect = effect_ctx.infer(&ast.body);
-                    runtime_effect.may_yield()
-                } else {
-                    // No source_ast means new pipeline - use bytecode path
-                    // The bytecode path handles yield via the VM's Yield instruction
-                    false
-                };
-
-                if use_cps {
-                    // Use CPS execution path
-                    return execute_coroutine_cps(co.clone(), borrowed, vm);
-                }
-
-                // Fall back to bytecode execution path
-                // First resume - start execution
+                // First resume - start execution using bytecode path
                 borrowed.state = CoroutineState::Running;
 
                 // Get closure info before releasing borrow
@@ -252,7 +219,7 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                             Ok(Value::NIL)
                         } else {
                             borrowed.state = CoroutineState::Done;
-                            borrowed.yielded_value = Some(new_value_to_old(value));
+                            borrowed.yielded_value = Some(value);
                             Ok(value)
                         }
                     }
@@ -262,11 +229,9 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                     }) => {
                         // Coroutine yielded - save the continuation for later resume
                         borrowed.state = CoroutineState::Suspended;
-                        borrowed.yielded_value = Some(new_value_to_old(value));
+                        borrowed.yielded_value = Some(value);
                         // Store the first-class continuation for resume_continuation
                         borrowed.saved_value_continuation = Some(continuation);
-                        // Clear old-style context since we're using the new path
-                        borrowed.saved_context = None;
                         Ok(value)
                     }
                     Err(e) => {
@@ -276,73 +241,17 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                 }
             }
             CoroutineState::Suspended => {
-                // Check if we have a saved first-class continuation (new path)
-                if let Some(continuation) = borrowed.saved_value_continuation.take() {
-                    // Use the new continuation-based resume
-                    borrowed.state = CoroutineState::Running;
-                    drop(borrowed); // Release borrow before VM call
+                // Resume using saved first-class continuation
+                let continuation = borrowed
+                    .saved_value_continuation
+                    .take()
+                    .ok_or("Suspended coroutine has no saved continuation".to_string())?;
 
-                    vm.enter_coroutine(co.clone());
-                    let result = vm.resume_continuation(continuation, resume_value);
-                    vm.exit_coroutine();
-
-                    let mut borrowed = co.borrow_mut();
-                    return match result {
-                        Ok(VmResult::Done(value)) => {
-                            if vm.current_exception.is_some() {
-                                let msg = vm
-                                    .current_exception
-                                    .as_ref()
-                                    .map(|e| e.message.clone())
-                                    .unwrap_or_default();
-                                borrowed.state = CoroutineState::Error(msg);
-                                Ok(Value::NIL)
-                            } else {
-                                borrowed.state = CoroutineState::Done;
-                                borrowed.saved_value_continuation = None;
-                                borrowed.yielded_value = Some(new_value_to_old(value));
-                                Ok(value)
-                            }
-                        }
-                        Ok(VmResult::Yielded {
-                            value,
-                            continuation: new_cont,
-                        }) => {
-                            borrowed.state = CoroutineState::Suspended;
-                            borrowed.saved_value_continuation = Some(new_cont);
-                            borrowed.yielded_value = Some(new_value_to_old(value));
-                            Ok(value)
-                        }
-                        Err(e) => {
-                            borrowed.state = CoroutineState::Error(e.clone());
-                            Err(e.into())
-                        }
-                    };
-                }
-
-                // Check if we have a saved CPS continuation (old CPS path)
-                if let Some(continuation) = borrowed.saved_continuation.clone() {
-                    return resume_coroutine_cps(
-                        co.clone(),
-                        borrowed,
-                        continuation,
-                        resume_value,
-                        vm,
-                    );
-                }
-
-                // Fall back to old bytecode resumption (legacy path)
-                let context = borrowed
-                    .saved_context
-                    .clone()
-                    .ok_or("Suspended coroutine has no saved context")?;
-                let bytecode = borrowed.closure.bytecode.clone();
-                let constants = borrowed.closure.constants.clone();
-
-                drop(borrowed);
+                borrowed.state = CoroutineState::Running;
+                drop(borrowed); // Release borrow before VM call
 
                 vm.enter_coroutine(co.clone());
-                let result = vm.resume_from_context(context, resume_value, &bytecode, &constants);
+                let result = vm.resume_continuation(continuation, resume_value);
                 vm.exit_coroutine();
 
                 let mut borrowed = co.borrow_mut();
@@ -358,18 +267,18 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                             Ok(Value::NIL)
                         } else {
                             borrowed.state = CoroutineState::Done;
-                            borrowed.yielded_value = Some(new_value_to_old(value));
+                            borrowed.saved_value_continuation = None;
+                            borrowed.yielded_value = Some(value);
                             Ok(value)
                         }
                     }
                     Ok(VmResult::Yielded {
                         value,
-                        continuation,
+                        continuation: new_cont,
                     }) => {
-                        // Coroutine yielded again - save the new continuation
                         borrowed.state = CoroutineState::Suspended;
-                        borrowed.saved_value_continuation = Some(continuation);
-                        borrowed.yielded_value = Some(new_value_to_old(value));
+                        borrowed.saved_value_continuation = Some(new_cont);
+                        borrowed.yielded_value = Some(value);
                         Ok(value)
                     }
                     Err(e) => {
@@ -407,198 +316,6 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
     }
 }
 
-/// Execute a coroutine using the CPS path
-///
-/// This is used when the closure has a yielding effect and has source AST available.
-fn execute_coroutine_cps(
-    co: Rc<std::cell::RefCell<Coroutine>>,
-    mut borrowed: RefMut<Coroutine>,
-    vm: &mut VM,
-) -> LResult<Value> {
-    borrowed.state = CoroutineState::Running;
-
-    // Get closure info
-    let closure = borrowed.closure.clone();
-    let closure_env = closure.env.clone();
-    let num_locals = closure.num_locals;
-    let num_captures = closure.num_captures;
-
-    // Get the AST from source_ast
-    let ast = closure
-        .source_ast
-        .as_ref()
-        .ok_or("Closure has no source AST for CPS execution")?;
-
-    // Set up the environment with RefCell for mutability
-    let mut env = (*closure_env).clone();
-    let num_locally_defined = num_locals.saturating_sub(num_captures);
-
-    for _ in env.len()..num_captures + num_locally_defined {
-        let empty_cell = Value::local_cell(Value::EMPTY_LIST);
-        env.push(empty_cell);
-    }
-
-    // Use RefCell for shared mutable environment
-    let env_rc = std::rc::Rc::new(std::cell::RefCell::new(env));
-
-    // Create effect context and register effects from VM globals
-    let mut effect_ctx = EffectContext::new();
-    register_global_effects(&mut effect_ctx, vm);
-
-    // Transform the lambda body to CPS
-    let mut transformer = CpsTransformer::new(&effect_ctx);
-    let cps_body = transformer.transform(&ast.body, Continuation::done());
-
-    // Release borrow before execution
-    drop(borrowed);
-
-    // Push coroutine onto stack so bytecode VM knows we're in a coroutine context
-    vm.coroutine_stack.push(co.clone());
-
-    // Create interpreter and evaluate
-    let mut interpreter = CpsInterpreter::new(vm, env_rc.clone());
-    let initial_action = match interpreter.eval(&cps_body) {
-        Ok(action) => action,
-        Err(e) => {
-            // If eval fails, we need to clean up the coroutine state
-            // Pop coroutine from stack
-            vm.coroutine_stack.pop();
-
-            // Update coroutine state to Error
-            let mut borrowed = co.borrow_mut();
-            borrowed.state = CoroutineState::Error(e.clone());
-            return Err(e.into());
-        }
-    };
-
-    // Run trampoline
-    let mut trampoline = Trampoline::new();
-    let result = trampoline.run_with_vm(initial_action, vm, &env_rc);
-
-    // Pop coroutine from stack
-    vm.coroutine_stack.pop();
-
-    // Update coroutine state
-    let mut borrowed = co.borrow_mut();
-    match result {
-        TrampolineResult::Done(value) => {
-            borrowed.state = CoroutineState::Done;
-            borrowed.yielded_value = Some(new_value_to_old(value));
-            borrowed.saved_continuation = None;
-            borrowed.saved_env = None;
-            Ok(value)
-        }
-        TrampolineResult::Suspended {
-            value,
-            continuation,
-        } => {
-            borrowed.state = CoroutineState::Suspended;
-            borrowed.yielded_value = Some(new_value_to_old(value));
-            borrowed.saved_continuation = Some(continuation);
-            // Save the environment so local variables persist across yields
-            // Convert the environment from new Values to old Values
-            let borrowed_env = env_rc.borrow();
-            let old_env: Vec<OldValue> =
-                borrowed_env.iter().map(|v| new_value_to_old(*v)).collect();
-            borrowed.saved_env = Some(std::rc::Rc::new(std::cell::RefCell::new(old_env)));
-            Ok(value)
-        }
-        TrampolineResult::Error(e) => {
-            borrowed.state = CoroutineState::Error(e.clone());
-            Err(e.into())
-        }
-    }
-}
-
-/// Resume a coroutine using the CPS path
-///
-/// This is used when the coroutine was suspended with a saved CPS continuation.
-fn resume_coroutine_cps(
-    co: Rc<std::cell::RefCell<Coroutine>>,
-    mut borrowed: RefMut<Coroutine>,
-    continuation: Rc<Continuation>,
-    resume_value: Value,
-    vm: &mut VM,
-) -> LResult<Value> {
-    borrowed.state = CoroutineState::Running;
-    // Use saved environment if available, otherwise create from closure's environment
-    let env = borrowed.saved_env.clone().unwrap_or_else(|| {
-        // Convert immutable closure env to mutable RefCell env with old Values
-        let old_env: Vec<OldValue> = borrowed
-            .closure
-            .env
-            .iter()
-            .map(|v| new_value_to_old(*v))
-            .collect();
-        Rc::new(std::cell::RefCell::new(old_env))
-    });
-
-    // Release borrow
-    drop(borrowed);
-
-    // Push coroutine onto stack so bytecode VM knows we're in a coroutine context
-    vm.coroutine_stack.push(co.clone());
-
-    // Apply resume value to continuation
-    // Convert environment back to new Values for the CPS interpreter
-    let borrowed_env = env.borrow();
-    let new_env: Vec<Value> = borrowed_env.iter().map(old_value_to_new).collect();
-    let new_env_rc = std::rc::Rc::new(std::cell::RefCell::new(new_env));
-
-    let mut trampoline = Trampoline::new();
-    let initial_action = Action::return_value(resume_value, continuation);
-    let result = trampoline.run_with_vm(initial_action, vm, &new_env_rc);
-
-    // Pop coroutine from stack
-    vm.coroutine_stack.pop();
-
-    // Update coroutine state
-    let mut borrowed = co.borrow_mut();
-    match result {
-        TrampolineResult::Done(value) => {
-            borrowed.state = CoroutineState::Done;
-            borrowed.yielded_value = Some(new_value_to_old(value));
-            borrowed.saved_continuation = None;
-            borrowed.saved_env = None;
-            Ok(value)
-        }
-        TrampolineResult::Suspended {
-            value,
-            continuation,
-        } => {
-            borrowed.state = CoroutineState::Suspended;
-            borrowed.yielded_value = Some(new_value_to_old(value));
-            borrowed.saved_continuation = Some(continuation);
-            // Keep the saved environment
-            Ok(value)
-        }
-        TrampolineResult::Error(e) => {
-            borrowed.state = CoroutineState::Error(e.clone());
-            Err(e.into())
-        }
-    }
-}
-
-/// Register effects of global functions from VM globals
-///
-/// This scans the VM's globals and registers the effect of each closure.
-/// Native functions are assumed to be pure.
-fn register_global_effects(effect_ctx: &mut EffectContext, vm: &VM) {
-    use crate::effects::Effect;
-    use crate::value::SymbolId;
-
-    for (&sym_id, value) in &vm.globals {
-        let effect = if let Some(c) = value.as_closure() {
-            c.effect
-        } else if value.as_native_fn().is_some() || value.as_vm_aware_fn().is_some() {
-            Effect::Pure
-        } else {
-            continue; // Skip non-function values
-        };
-        effect_ctx.register_global(SymbolId(sym_id), effect);
-    }
-}
-
 /// F5: Delegate to a sub-coroutine
 ///
 /// (yield-from co) -> value
@@ -629,9 +346,7 @@ pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> LResult<Value> {
             }
             CoroutineState::Done => {
                 let borrowed = co.borrow();
-                Ok(old_value_to_new(
-                    &borrowed.yielded_value.clone().unwrap_or(OldValue::Nil),
-                ))
+                Ok(borrowed.yielded_value.unwrap_or(Value::NIL))
             }
             CoroutineState::Error(e) => {
                 let cond = Condition::error(format!("yield-from: sub-coroutine errored: {}", e));
@@ -721,10 +436,82 @@ pub fn prim_coroutine_next(args: &[Value], vm: &mut VM) -> LResult<Value> {
     }
 }
 
+/// Convert an old Value to a new Value
+/// This is a utility function for the migration period between value representations
+pub fn old_value_to_new(old_val: &crate::value_old::Value) -> Value {
+    use crate::value::heap::{alloc, HeapObject};
+    use crate::value_old::Value as OldValue;
+    use std::sync::{Arc, Mutex};
+
+    match old_val {
+        OldValue::Nil => Value::NIL,
+        OldValue::Bool(b) => Value::bool(*b),
+        OldValue::Int(i) => Value::int(*i),
+        OldValue::Float(f) => Value::float(*f),
+        OldValue::Symbol(id) => Value::symbol(id.0),
+        OldValue::Keyword(id) => Value::keyword(id.0),
+        OldValue::String(s) => Value::string(s.as_ref()),
+        OldValue::Cons(cons) => {
+            let first = old_value_to_new(&cons.first);
+            let rest = old_value_to_new(&cons.rest);
+            crate::value::cons(first, rest)
+        }
+        OldValue::Table(t) => {
+            let borrowed = t.borrow();
+            let mut new_table = std::collections::BTreeMap::new();
+            for (k, v) in borrowed.iter() {
+                new_table.insert(k.clone(), old_value_to_new(v));
+            }
+            Value::table_from(new_table)
+        }
+        OldValue::Struct(s) => {
+            let mut new_struct = std::collections::BTreeMap::new();
+            for (k, v) in s.iter() {
+                new_struct.insert(k.clone(), old_value_to_new(v));
+            }
+            Value::struct_from(new_struct)
+        }
+        OldValue::Vector(v) => {
+            let new_vals: Vec<Value> = v.iter().map(old_value_to_new).collect();
+            Value::vector(new_vals)
+        }
+        OldValue::Closure(c) => alloc(HeapObject::Closure(c.clone())),
+        OldValue::JitClosure(jc) => alloc(HeapObject::JitClosure(jc.clone())),
+        OldValue::NativeFn(f) => alloc(HeapObject::NativeFn(*f)),
+        OldValue::VmAwareFn(f) => alloc(HeapObject::VmAwareFn(*f)),
+        OldValue::LibHandle(h) => alloc(HeapObject::LibHandle(h.0)),
+        OldValue::CHandle(h) => alloc(HeapObject::CHandle(h.ptr, h.id)),
+        OldValue::Condition(c) => alloc(HeapObject::Condition(c.as_ref().clone())),
+        OldValue::ThreadHandle(_h) => alloc(HeapObject::ThreadHandle(
+            crate::value::heap::ThreadHandleData {
+                result: Arc::new(Mutex::new(None)),
+            },
+        )),
+        OldValue::Cell(c) => {
+            let borrowed = c.borrow();
+            let inner = old_value_to_new(&borrowed);
+            Value::cell(inner)
+        }
+        OldValue::LocalCell(c) => {
+            let borrowed = c.borrow();
+            let inner = old_value_to_new(&borrowed);
+            Value::cell(inner)
+        }
+        OldValue::Coroutine(co) => {
+            // co is Rc<RefCell<Coroutine>>, we need RefCell<Coroutine>
+            let borrowed = co.borrow();
+            alloc(HeapObject::Coroutine(Rc::new(std::cell::RefCell::new(
+                borrowed.clone(),
+            ))))
+        }
+    }
+}
+
 /// Convert a new Value to an old Value
-/// This is a temporary function for the migration period
-pub fn new_value_to_old(val: Value) -> OldValue {
+/// This is a utility function for the migration period between value representations
+pub fn new_value_to_old(val: Value) -> crate::value_old::Value {
     use crate::value::heap::{deref, HeapObject};
+    use crate::value_old::Value as OldValue;
 
     if let Some(b) = val.as_bool() {
         OldValue::Bool(b)

@@ -5,7 +5,6 @@
 
 use super::context::JITContext;
 use crate::compiler::ast::Expr;
-use crate::compiler::cps::CpsJitCompiler;
 use crate::symbol::SymbolTable;
 use crate::value::{Closure, JitClosure, SymbolId};
 use std::cell::RefCell;
@@ -109,7 +108,7 @@ fn is_jit_compilable_call(func: &Expr, args: &[Expr]) -> bool {
 /// Compile a closure to native code
 ///
 /// Returns CompileResult indicating success, not-compilable, or error.
-/// Routes to CPS compilation for yielding closures, pure compilation otherwise.
+/// Yielding closures are not JIT-compilable (they use the bytecode VM path).
 pub fn compile_closure(
     closure: &Closure,
     jit_context: &Rc<RefCell<JITContext>>,
@@ -121,12 +120,11 @@ pub fn compile_closure(
         None => return CompileResult::NotCompilable("No source AST available".to_string()),
     };
 
-    // 2. Check if we should use CPS compilation based on effect
-    if CpsJitCompiler::should_use_cps(closure.effect) {
-        // CPS path - for closures that may yield
-        // For now, fall through to pure compilation
-        // TODO: Implement full CPS compilation path
-        // return compile_cps_closure(closure, jit_context, symbols);
+    // 2. Yielding closures are not JIT-compilable - they use the bytecode VM path
+    if closure.effect.may_yield() {
+        return CompileResult::NotCompilable(
+            "Yielding closures are not JIT-compilable".to_string(),
+        );
     }
 
     // 3. Check if body is compilable (pure path)

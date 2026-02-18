@@ -8,7 +8,6 @@ new development.
 
 - Bytecode instruction definitions
 - Legacy AST-based compilation (being replaced)
-- CPS transformation (alternative execution path)
 - Cranelift JIT compilation
 - Macro expansion support
 
@@ -22,7 +21,6 @@ Note: Effect types and inference have been moved to `src/effects/`.
 | `compile/` | Legacy `Expr` → Bytecode compilation |
 | `ast.rs` | Legacy `Expr` AST type |
 | `converters/` | `Value` ↔ `Expr` conversion |
-| `cps/` | Continuation-passing style transform and interpreter |
 | `cranelift/` | Native code generation via Cranelift |
 | `linter/` | Legacy Expr-based linter (re-exports from `src/lint/`) |
 | `symbol_index.rs` | Legacy Expr-based symbol extraction (types moved to `src/symbols/`) |
@@ -62,8 +60,10 @@ Located here. Uses `VarRef`. Being phased out.
 3. **JIT compilation is optional.** Must always have bytecode fallback. A
    `JitClosure` with null code_ptr uses source closure.
 
-4. **CPS is an alternative, not a replacement.** Some primitives like
-   `coroutine-resume` use CPS for yield semantics.
+4. **Yielding closures use bytecode VM.** The VM's Yield instruction creates
+   first-class continuations that capture the full frame chain. Coroutine
+   resume replays this chain. JIT compilation is not available for yielding
+   closures.
 
 ## Key types
 
@@ -73,7 +73,6 @@ Located here. Uses `VarRef`. Being phased out.
 | `Bytecode` | `bytecode.rs` | Instructions + constants |
 | `Expr` | `ast.rs` | Legacy AST |
 | `Effect` | `src/effects/mod.rs` | `Pure`, `Yields`, `Polymorphic` |
-| `Continuation` | `cps/mod.rs` | CPS continuation |
 | `JitCoordinator` | `jit_coordinator.rs` | Hot path tracking |
 
 ## Files
@@ -84,7 +83,6 @@ Located here. Uses `VarRef`. Being phased out.
 | `bytecode.rs` | ~200 | Instruction enum, Bytecode struct |
 | `ast.rs` | ~300 | Legacy Expr type |
 | `compile/mod.rs` | ~800 | Legacy compilation |
-| `cps/` | ~1500 | CPS transform and interpreter |
 | `cranelift/` | ~500 | Cranelift code generation |
 
 ## Relocated modules

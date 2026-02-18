@@ -36,7 +36,7 @@ pub fn prim_condition_field(args: &[Value]) -> Result<Value, Condition> {
         match cond.fields.get(&field_id) {
             Some(val) => {
                 // Convert old Value to new Value
-                let new_value = crate::compiler::cps::primitives::old_value_to_new(val);
+                let new_value = crate::primitives::coroutines::old_value_to_new(val);
                 Ok(new_value)
             }
             None => Ok(Value::NIL),

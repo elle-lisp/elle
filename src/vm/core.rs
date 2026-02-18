@@ -1,6 +1,6 @@
 use crate::error::{LocationMap, StackFrame};
 use crate::ffi::FFISubsystem;
-use crate::value::{Condition, Coroutine, CoroutineContext, Value};
+use crate::value::{Condition, Coroutine, Value};
 use crate::vm::scope::ScopeStack;
 use smallvec::SmallVec;
 use std::cell::RefCell;
@@ -304,62 +304,6 @@ impl VM {
     /// Check if we're currently inside a coroutine
     pub fn in_coroutine(&self) -> bool {
         !self.coroutine_stack.is_empty()
-    }
-
-    /// Resume execution from a saved coroutine context
-    ///
-    /// This restores the saved state and continues execution from where
-    /// the coroutine yielded. The resume_value becomes the result of the
-    /// yield expression.
-    pub fn resume_from_context(
-        &mut self,
-        context: CoroutineContext,
-        resume_value: Value,
-        bytecode: &[u8],
-        constants: &[Value],
-    ) -> Result<VmResult, String> {
-        // Save current state
-        let saved_stack = std::mem::take(&mut self.stack);
-
-        // Restore the coroutine's operand stack from the saved context
-        self.stack.clear();
-        self.stack.extend(context.stack.iter().copied());
-
-        // Push the resume value on top — this is what the yield expression evaluates to
-        self.stack.push(resume_value);
-
-        // Use the saved environment if available, otherwise rebuild from closure
-        let env_rc = if let Some(env) = context.env {
-            env
-        } else {
-            // Fallback: rebuild from closure (shouldn't happen for properly saved contexts)
-            let (closure_env, num_locals, num_captures) = {
-                let co = self
-                    .current_coroutine()
-                    .ok_or("resume_from_context called outside coroutine")?;
-                let co_ref = co.borrow();
-                (
-                    co_ref.closure.env.clone(),
-                    co_ref.closure.num_locals,
-                    co_ref.closure.num_captures,
-                )
-            };
-            let mut env = (*closure_env).clone();
-            let num_locally_defined = num_locals.saturating_sub(num_captures);
-            for _ in env.len()..num_captures + num_locally_defined {
-                let empty_cell = Value::local_cell(Value::NIL);
-                env.push(empty_cell);
-            }
-            std::rc::Rc::new(env)
-        };
-
-        // Execute from saved IP with the restored environment
-        let result = self.execute_bytecode_from_ip(bytecode, constants, Some(&env_rc), context.ip);
-
-        // Restore our state
-        self.stack = saved_stack;
-
-        result
     }
 
     /// Resume execution from a saved continuation.

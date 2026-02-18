@@ -208,7 +208,7 @@ pub unsafe extern "C" fn jit_tail_call_closure(
                 .env
                 .iter()
                 .map(|v| {
-                    let new_v = crate::compiler::cps::primitives::old_value_to_new(v);
+                    let new_v = crate::primitives::coroutines::old_value_to_new(v);
                     encode_value_for_jit(&new_v)
                 })
                 .collect();
