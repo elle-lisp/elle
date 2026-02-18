@@ -16,8 +16,13 @@ type TailCallInfo = (Vec<u8>, Vec<Value>, Rc<Vec<Value>>);
 pub enum VmResult {
     /// Normal completion with a value
     Done(Value),
-    /// Coroutine yielded with a value
-    Yielded(Value),
+    /// Coroutine yielded with a value and its continuation
+    Yielded {
+        /// The value being yielded
+        value: Value,
+        /// The continuation capturing the full frame chain
+        continuation: Value,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -356,6 +361,101 @@ impl VM {
 
         result
     }
+
+    /// Resume execution from a saved continuation.
+    ///
+    /// A continuation captures the full chain of frames from a yield point
+    /// up to the coroutine boundary. This method replays the chain from
+    /// innermost to outermost, threading the resume value through.
+    ///
+    /// # Arguments
+    /// * `continuation` - A Value containing ContinuationData
+    /// * `resume_value` - The value to resume with (becomes the yield expression's result)
+    ///
+    /// # Returns
+    /// * `VmResult::Done(value)` - All frames completed, returning final value
+    /// * `VmResult::Yielded { value, continuation }` - Re-yielded with new continuation
+    pub fn resume_continuation(
+        &mut self,
+        continuation: Value,
+        resume_value: Value,
+    ) -> Result<VmResult, String> {
+        use crate::value::ContinuationFrame;
+
+        let cont_data = continuation
+            .as_continuation()
+            .ok_or("Expected continuation value")?;
+
+        let frames = &cont_data.frames;
+        if frames.is_empty() {
+            return Ok(VmResult::Done(resume_value));
+        }
+
+        // Save current stack state
+        let saved_stack = std::mem::take(&mut self.stack);
+
+        // Execute from innermost frame outward
+        // frames[0] = outermost (caller), frames[last] = innermost (yielder)
+        let mut current_value = resume_value;
+
+        for i in (0..frames.len()).rev() {
+            let frame = &frames[i];
+
+            // Restore this frame's stack
+            self.stack.clear();
+            self.stack.extend(frame.stack.iter().copied());
+
+            // Push the value from the inner frame (or resume value for innermost)
+            self.stack.push(current_value);
+
+            let result = self.execute_bytecode_from_ip(
+                &frame.bytecode,
+                &frame.constants,
+                Some(&frame.env),
+                frame.ip,
+            )?;
+
+            match result {
+                VmResult::Done(v) => {
+                    current_value = v;
+                    // Continue with next outer frame
+                }
+                VmResult::Yielded {
+                    value,
+                    continuation: new_cont,
+                } => {
+                    // Re-yielded during resume! Need to prepend remaining outer frames
+                    // to the new continuation
+                    if i > 0 {
+                        let mut new_cont_data = new_cont
+                            .as_continuation()
+                            .ok_or("Expected continuation")?
+                            .as_ref()
+                            .clone();
+                        // Prepend frames[0..i] (the remaining outer frames)
+                        let outer_frames: Vec<ContinuationFrame> = frames[0..i].to_vec();
+                        for (j, f) in outer_frames.into_iter().enumerate() {
+                            new_cont_data.frames.insert(j, f);
+                        }
+                        let merged_cont = Value::continuation(new_cont_data);
+                        self.stack = saved_stack;
+                        return Ok(VmResult::Yielded {
+                            value,
+                            continuation: merged_cont,
+                        });
+                    }
+                    self.stack = saved_stack;
+                    return Ok(VmResult::Yielded {
+                        value,
+                        continuation: new_cont,
+                    });
+                }
+            }
+        }
+
+        self.stack = saved_stack;
+        Ok(VmResult::Done(current_value))
+    }
 }
 
 impl Default for VM {
@@ -444,8 +544,15 @@ mod coroutine_vm_tests {
 
     #[test]
     fn test_vm_result_enum() {
+        use crate::value::ContinuationData;
+
         let done = VmResult::Done(Value::int(42));
-        let yielded = VmResult::Yielded(Value::int(100));
+        // Create a dummy continuation for testing
+        let cont_data = ContinuationData { frames: vec![] };
+        let yielded = VmResult::Yielded {
+            value: Value::int(100),
+            continuation: Value::continuation(cont_data),
+        };
 
         if let VmResult::Done(v) = done {
             if let Some(n) = v.as_int() {
@@ -457,8 +564,8 @@ mod coroutine_vm_tests {
             panic!("Expected Done");
         }
 
-        if let VmResult::Yielded(v) = yielded {
-            if let Some(n) = v.as_int() {
+        if let VmResult::Yielded { value, .. } = yielded {
+            if let Some(n) = value.as_int() {
                 assert_eq!(n, 100);
             } else {
                 panic!("Expected Yielded");

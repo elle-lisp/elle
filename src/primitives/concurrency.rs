@@ -162,6 +162,9 @@ fn is_value_sendable(value: &Value) -> bool {
 
         // Float values that couldn't be stored inline
         HeapObject::Float(_) => true,
+
+        // Continuations are not sendable (contain frame data with closures)
+        HeapObject::Continuation(_) => false,
     }
 }
 

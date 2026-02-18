@@ -316,8 +316,12 @@ impl Trampoline {
                         Ok(crate::vm::VmResult::Done(result)) => {
                             current_action = Action::return_value(result, continuation);
                         }
-                        Ok(crate::vm::VmResult::Yielded(value)) => {
+                        Ok(crate::vm::VmResult::Yielded {
+                            value,
+                            continuation: _,
+                        }) => {
                             // Yield happened - propagate it up
+                            // Note: We ignore the VM continuation here because CPS has its own
                             return TrampolineResult::Suspended {
                                 value,
                                 continuation,

@@ -113,7 +113,7 @@ impl VM {
                 // No pending tail call, return the result
                 return match result {
                     VmResult::Done(v) => Ok(v),
-                    VmResult::Yielded(_) => {
+                    VmResult::Yielded { .. } => {
                         // Yield should be handled by coroutine_resume, not here
                         Err("Unexpected yield outside coroutine context".to_string())
                     }
@@ -316,13 +316,46 @@ impl VM {
                                 self.call_depth -= 1;
 
                                 // If the called function yielded, propagate it up
+                                // with the caller's frame prepended to the continuation
                                 match result {
                                     VmResult::Done(v) => {
                                         self.stack.push(v);
                                     }
-                                    VmResult::Yielded(v) => {
-                                        // Propagate yield - the caller will handle it
-                                        return Ok(VmResult::Yielded(v));
+                                    VmResult::Yielded {
+                                        value,
+                                        continuation,
+                                    } => {
+                                        // Capture the caller's frame and prepend it to the continuation.
+                                        // self.stack has been restored by execute_bytecode_coroutine
+                                        // to the caller's stack state (stuff before the Call args).
+                                        let caller_stack: Vec<Value> =
+                                            self.stack.drain(..).collect();
+
+                                        let caller_frame = crate::value::ContinuationFrame {
+                                            bytecode: Rc::new(bytecode.to_vec()),
+                                            constants: Rc::new(constants.to_vec()),
+                                            env: closure_env
+                                                .cloned()
+                                                .unwrap_or_else(|| Rc::new(vec![])),
+                                            ip, // IP is right after the Call instruction
+                                            stack: caller_stack,
+                                        };
+
+                                        // Clone the continuation data and prepend caller's frame
+                                        let mut cont_data = continuation
+                                            .as_continuation()
+                                            .expect(
+                                                "Yielded continuation must be a continuation value",
+                                            )
+                                            .as_ref()
+                                            .clone();
+                                        cont_data.prepend_frame(caller_frame);
+
+                                        let new_continuation = Value::continuation(cont_data);
+                                        return Ok(VmResult::Yielded {
+                                            value,
+                                            continuation: new_continuation,
+                                        });
                                     }
                                 }
                             } else {
@@ -419,13 +452,43 @@ impl VM {
                                 self.call_depth -= 1;
 
                                 // If the called function yielded, propagate it up
+                                // with the caller's frame prepended to the continuation
                                 match result {
                                     VmResult::Done(v) => {
                                         self.stack.push(v);
                                     }
-                                    VmResult::Yielded(v) => {
-                                        // Propagate yield - the caller will handle it
-                                        return Ok(VmResult::Yielded(v));
+                                    VmResult::Yielded {
+                                        value,
+                                        continuation,
+                                    } => {
+                                        // Capture the caller's frame and prepend it to the continuation.
+                                        let caller_stack: Vec<Value> =
+                                            self.stack.drain(..).collect();
+
+                                        let caller_frame = crate::value::ContinuationFrame {
+                                            bytecode: Rc::new(bytecode.to_vec()),
+                                            constants: Rc::new(constants.to_vec()),
+                                            env: closure_env
+                                                .cloned()
+                                                .unwrap_or_else(|| Rc::new(vec![])),
+                                            ip,
+                                            stack: caller_stack,
+                                        };
+
+                                        let mut cont_data = continuation
+                                            .as_continuation()
+                                            .expect(
+                                                "Yielded continuation must be a continuation value",
+                                            )
+                                            .as_ref()
+                                            .clone();
+                                        cont_data.prepend_frame(caller_frame);
+
+                                        let new_continuation = Value::continuation(cont_data);
+                                        return Ok(VmResult::Yielded {
+                                            value,
+                                            continuation: new_continuation,
+                                        });
                                     }
                                 }
                             } else {
@@ -913,17 +976,31 @@ impl VM {
                         None => return Err("yield used outside of coroutine".to_string()),
                     };
 
-                    // 3. Save execution context — the LIVE operand stack and environment
+                    // 3. Save execution context as a continuation frame
+                    // The stack is drained into the frame's stack field
                     let saved_stack: Vec<Value> = self.stack.drain(..).collect();
-                    let saved_env = closure_env.cloned();
 
+                    // Create the innermost continuation frame (the yielding frame)
+                    let frame = crate::value::ContinuationFrame {
+                        bytecode: Rc::new(bytecode.to_vec()),
+                        constants: Rc::new(constants.to_vec()),
+                        env: closure_env.cloned().unwrap_or_else(|| Rc::new(vec![])),
+                        ip, // IP after the Yield instruction
+                        stack: saved_stack.clone(),
+                    };
+
+                    let cont_data = crate::value::ContinuationData::new(frame);
+                    let continuation = Value::continuation(cont_data);
+
+                    // 4. Also save the old-style context for backward compatibility
+                    // (used by the CPS path and legacy resume)
                     let saved_context = CoroutineContext {
                         ip,
                         stack: saved_stack,
-                        env: saved_env,
+                        env: closure_env.cloned(),
                     };
 
-                    // 4. Update coroutine state
+                    // 5. Update coroutine state
                     {
                         let mut co = coroutine.borrow_mut();
                         co.state = CoroutineState::Suspended;
@@ -931,8 +1008,11 @@ impl VM {
                         co.saved_context = Some(saved_context);
                     }
 
-                    // 5. Return the yielded value
-                    return Ok(VmResult::Yielded(yielded_value));
+                    // 6. Return the yielded value with its continuation
+                    return Ok(VmResult::Yielded {
+                        value: yielded_value,
+                        continuation,
+                    });
                 }
 
                 Instruction::LoadException => {

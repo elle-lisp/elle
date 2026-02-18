@@ -261,13 +261,8 @@ fn test_yielding_function_detected() {
 }
 
 #[test]
-#[ignore] // Requires CPS rework: yield across call boundaries
 fn test_calling_yielding_function_propagates_effect() {
     // If f yields and g calls f, g should also yield
-    // NOTE: This test documents expected behavior for effect propagation.
-    // Currently, calling a yielding function from within a coroutine
-    // does not propagate the yield - the inner function's yield is not
-    // visible to the outer coroutine. This requires the CPS rework to fix.
     let result = eval(
         r#"
          (define f (fn ()

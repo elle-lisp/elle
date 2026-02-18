@@ -273,6 +273,9 @@ pub struct Coroutine {
     /// Saved execution environment for CPS resumption (shared mutable)
     /// This preserves local variables across yields
     pub saved_env: Option<Rc<RefCell<Vec<Value>>>>,
+    /// Saved first-class continuation for yield across call boundaries (new path)
+    /// This is a Value containing ContinuationData
+    pub saved_value_continuation: Option<crate::value::Value>,
 }
 
 impl Coroutine {
@@ -285,6 +288,7 @@ impl Coroutine {
             saved_context: None,
             saved_continuation: None,
             saved_env: None,
+            saved_value_continuation: None,
         }
     }
 }

@@ -168,6 +168,11 @@ impl PartialEq for Value {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
+                // Continuation comparison (compare by reference)
+                (HeapObject::Continuation(_), HeapObject::Continuation(_)) => {
+                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
+                }
+
                 // Different types are not equal
                 _ => false,
             }
@@ -546,6 +551,14 @@ impl Value {
         alloc(HeapObject::VmAwareFn(f))
     }
 
+    /// Create a continuation value.
+    #[inline]
+    pub fn continuation(c: crate::value::continuation::ContinuationData) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
+        use std::rc::Rc;
+        alloc(HeapObject::Continuation(Rc::new(c)))
+    }
+
     // =============================================================================
     // Heap Type Predicates
     // =============================================================================
@@ -604,6 +617,13 @@ impl Value {
     pub fn is_coroutine(&self) -> bool {
         use crate::value::heap::HeapTag;
         self.heap_tag() == Some(HeapTag::Coroutine)
+    }
+
+    /// Check if this is a continuation.
+    #[inline]
+    pub fn is_continuation(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::Continuation)
     }
 
     /// Check if this is a proper list (nil or cons ending in nil).
@@ -821,6 +841,22 @@ impl Value {
             _ => None,
         }
     }
+
+    /// Extract as continuation if this is a continuation.
+    #[inline]
+    pub fn as_continuation(
+        &self,
+    ) -> Option<&std::rc::Rc<crate::value::continuation::ContinuationData>> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::Continuation(c) => Some(c),
+            _ => None,
+        }
+    }
+
     /// Get a human-readable type name.
     pub fn type_name(&self) -> &'static str {
         use crate::value::heap::deref;
