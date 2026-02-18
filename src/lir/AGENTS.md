@@ -22,7 +22,7 @@ Does NOT:
 | `LirFunction` | Compilation unit: blocks, constants, metadata |
 | `BasicBlock` | Instructions + terminator |
 | `LirInstr` | Individual operation |
-| `Terminator` | How block exits: `Return`, `Jump`, `Branch` |
+| `Terminator` | How block exits: `Return`, `Jump`, `Branch`, `Yield` |
 | `Reg` | Virtual register |
 | `Label` | Basic block identifier |
 | `Lowerer` | HIR → LIR |
@@ -63,8 +63,8 @@ Bytecode
 1. **Each register assigned exactly once.** SSA form. If you see a register
    used before definition, lowering is broken.
 
-2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, or
-   `Unreachable`. No fall-through.
+2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, `Yield`,
+   or `Unreachable`. No fall-through.
 
 3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with
    "unknown binding," the HIR→LIR mapping is incomplete.
@@ -74,6 +74,11 @@ Bytecode
 
 5. **`cell_params_mask` is set for mutable parameters.** Bit i set means
    parameter i needs cell wrapping at call time.
+
+6. **Yield is a block terminator, not an instruction.** `Terminator::Yield`
+   splits the block: the current block ends with yield, and a new resume block
+   begins. The resume block starts with `LoadResumeValue` to capture the value
+   passed to `coroutine-resume`.
 
 ## Key instructions
 
@@ -87,6 +92,20 @@ Bytecode
 | `MakeCell` | value → cell | Wrap in LocalCell |
 | `MakeClosure` | caps... → closure | Pops N captures, creates closure |
 | `EmptyList` | → empty_list | Push Value::EMPTY_LIST (truthy, unlike Nil) |
+| `LoadResumeValue` | → value | First instruction in yield resume block |
+
+## Yield as terminator
+
+`Terminator::Yield { value, resume_label }` correctly models that yield
+suspends execution and resumes in a new block. The lowerer:
+
+1. Emits `Terminator::Yield` to end the current block
+2. Creates a new block at `resume_label`
+3. Emits `LoadResumeValue` as the first instruction of the resume block
+
+The emitter preserves stack state across the yield boundary via
+`yield_stack_state`. This ensures intermediate values computed before yield
+(e.g., the `1` in `(+ 1 (yield 2) 3)`) survive into the resume block.
 
 ## Files
 

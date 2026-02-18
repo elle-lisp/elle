@@ -29,6 +29,10 @@ pub struct Emitter {
     branch_stack_depth: HashMap<u32, usize>,
     /// Symbol ID → name mapping for cross-thread portability
     symbol_names: HashMap<u32, String>,
+    /// Saved stack state from yield terminators, keyed by resume label.
+    /// When a block ends with Terminator::Yield, the stack state is saved here
+    /// so the resume block can start with the correct simulation state.
+    yield_stack_state: HashMap<Label, (Vec<Reg>, HashMap<Reg, usize>)>,
 }
 
 impl Emitter {
@@ -42,6 +46,7 @@ impl Emitter {
             reg_to_stack: HashMap::new(),
             branch_stack_depth: HashMap::new(),
             symbol_names: HashMap::new(),
+            yield_stack_state: HashMap::new(),
         }
     }
 
@@ -56,6 +61,7 @@ impl Emitter {
             reg_to_stack: HashMap::new(),
             branch_stack_depth: HashMap::new(),
             symbol_names,
+            yield_stack_state: HashMap::new(),
         }
     }
 
@@ -71,6 +77,7 @@ impl Emitter {
         self.stack.clear();
         self.reg_to_stack.clear();
         self.branch_stack_depth.clear();
+        self.yield_stack_state.clear();
 
         // First pass: record label offsets (simplified - emit all blocks in order)
         // Second pass handled inline since we emit sequentially
@@ -114,6 +121,7 @@ impl Emitter {
         let saved_stack = std::mem::take(&mut self.stack);
         let saved_reg_to_stack = std::mem::take(&mut self.reg_to_stack);
         let saved_branch_stack_depth = std::mem::take(&mut self.branch_stack_depth);
+        let saved_yield_stack_state = std::mem::take(&mut self.yield_stack_state);
 
         // Emit the nested function
         let result = self.emit(func);
@@ -126,14 +134,21 @@ impl Emitter {
         self.stack = saved_stack;
         self.reg_to_stack = saved_reg_to_stack;
         self.branch_stack_depth = saved_branch_stack_depth;
+        self.yield_stack_state = saved_yield_stack_state;
 
         result
     }
 
     fn emit_block(&mut self, block: &BasicBlock, func: &LirFunction) {
-        // Reset stack state at block entry
-        self.stack.clear();
-        self.reg_to_stack.clear();
+        // Check if this block has saved stack state from a yield
+        if let Some((saved_stack, saved_reg_map)) = self.yield_stack_state.remove(&block.label) {
+            self.stack = saved_stack;
+            self.reg_to_stack = saved_reg_map;
+        } else {
+            // Reset stack state at block entry
+            self.stack.clear();
+            self.reg_to_stack.clear();
+        }
 
         // First pass: record label positions within the block
         let mut label_positions: HashMap<u32, usize> = HashMap::new();
@@ -535,10 +550,11 @@ impl Emitter {
                 self.pop();
             }
 
-            LirInstr::Yield { dst, value } => {
-                self.ensure_on_top(*value);
-                self.bytecode.emit(Instruction::Yield);
-                self.pop();
+            LirInstr::LoadResumeValue { dst } => {
+                // The resume value is already on the operand stack
+                // (pushed by the VM's resume_continuation).
+                // The stack simulation already has the pre-yield state.
+                // Just register the resume value.
                 self.push_reg(*dst);
             }
 
@@ -668,6 +684,28 @@ impl Emitter {
                 let then_pos = self.bytecode.current_pos();
                 self.bytecode.emit_i16(0); // placeholder
                 self.pending_jumps.push((then_pos, *then_label));
+            }
+
+            Terminator::Yield {
+                value,
+                resume_label,
+            } => {
+                self.ensure_on_top(*value);
+                self.bytecode.emit(Instruction::Yield);
+                // Pop the yielded value from the simulated stack
+                self.pop();
+
+                // Save stack state for the resume block.
+                // The resume block will start with this stack state,
+                // plus the resume value on top (added by LoadResumeValue).
+                self.yield_stack_state.insert(
+                    *resume_label,
+                    (self.stack.clone(), self.reg_to_stack.clone()),
+                );
+                // Note: we don't emit a jump to the resume block because
+                // the blocks are emitted sequentially and the VM resumes
+                // at the saved IP (right after the Yield byte), which is
+                // exactly where the resume block starts.
             }
 
             Terminator::Unreachable => {

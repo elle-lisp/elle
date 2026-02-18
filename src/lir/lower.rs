@@ -969,11 +969,24 @@ impl Lowerer {
 
             HirKind::Yield(value) => {
                 let value_reg = self.lower_expr(value)?;
-                let dst = self.fresh_reg();
-                self.emit(LirInstr::Yield {
-                    dst,
+
+                // Allocate the resume block label
+                let resume_label = self.fresh_label();
+
+                // Terminate current block with Yield
+                self.terminate(Terminator::Yield {
                     value: value_reg,
+                    resume_label,
                 });
+
+                // Start the resume block
+                self.start_new_block(resume_label);
+
+                // The resume value is on the stack when execution resumes.
+                // Load it into a register.
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::LoadResumeValue { dst });
+
                 Ok(dst)
             }
 
@@ -1488,6 +1501,19 @@ impl Lowerer {
     fn finish_block(&mut self) {
         let block = std::mem::replace(&mut self.current_block, BasicBlock::new(Label(0)));
         self.current_func.blocks.push(block);
+    }
+
+    /// Allocate a new basic block label.
+    fn fresh_label(&mut self) -> Label {
+        let label = Label(self.next_label);
+        self.next_label += 1;
+        label
+    }
+
+    /// Finish the current block and start a new one with the given label.
+    fn start_new_block(&mut self, label: Label) {
+        self.finish_block();
+        self.current_block = BasicBlock::new(label);
     }
 }
 
