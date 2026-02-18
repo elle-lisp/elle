@@ -6,16 +6,24 @@
 
 use crate::compiler::Bytecode;
 use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::Analyzer;
+use crate::hir::{Analyzer, BindingId, BindingInfo, Hir};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
+use std::collections::HashMap;
 
 /// Compilation result
 pub struct CompileResult {
     pub bytecode: Bytecode,
     pub warnings: Vec<String>,
+}
+
+/// Analysis-only result (no bytecode generation)
+/// Used by linter and LSP which need HIR but not bytecode
+pub struct AnalyzeResult {
+    pub hir: Hir,
+    pub bindings: HashMap<BindingId, BindingInfo>,
 }
 
 /// Compile source code using the new pipeline
@@ -93,6 +101,40 @@ pub fn eval_new(
 ) -> Result<crate::value::Value, String> {
     let result = compile_new(source, symbols)?;
     vm.execute(&result.bytecode).map_err(|e| e.to_string())
+}
+
+/// Analyze source code without generating bytecode
+/// Used by linter and LSP which need HIR but not bytecode
+pub fn analyze_new(source: &str, symbols: &mut SymbolTable) -> Result<AnalyzeResult, String> {
+    let syntax = read_syntax(source)?;
+    let mut expander = Expander::new();
+    let expanded = expander.expand(syntax)?;
+    let mut analyzer = Analyzer::new(symbols);
+    let analysis = analyzer.analyze(&expanded)?;
+    Ok(AnalyzeResult {
+        hir: analysis.hir,
+        bindings: analysis.bindings,
+    })
+}
+
+/// Analyze multiple top-level forms without generating bytecode
+pub fn analyze_all_new(
+    source: &str,
+    symbols: &mut SymbolTable,
+) -> Result<Vec<AnalyzeResult>, String> {
+    let syntaxes = read_syntax_all(source)?;
+    let mut expander = Expander::new();
+    let mut results = Vec::new();
+    for syntax in syntaxes {
+        let expanded = expander.expand(syntax)?;
+        let mut analyzer = Analyzer::new(symbols);
+        let analysis = analyzer.analyze(&expanded)?;
+        results.push(AnalyzeResult {
+            hir: analysis.hir,
+            bindings: analysis.bindings,
+        });
+    }
+    Ok(results)
 }
 
 #[cfg(test)]
@@ -706,5 +748,64 @@ mod tests {
 
         let result3 = eval_new(code3, &mut symbols3, &mut vm3);
         println!("list 1 2 3: {:?}", result3);
+    }
+
+    // === analyze_new tests ===
+
+    #[test]
+    fn test_analyze_new_literal() {
+        let (mut symbols, _) = setup();
+        let result = analyze_new("42", &mut symbols);
+        assert!(result.is_ok());
+        let analysis = result.unwrap();
+        assert!(matches!(analysis.hir.kind, crate::hir::HirKind::Int(42)));
+    }
+
+    #[test]
+    fn test_analyze_new_define() {
+        let (mut symbols, _) = setup();
+        let result = analyze_new("(define x 10)", &mut symbols);
+        assert!(result.is_ok());
+        let analysis = result.unwrap();
+        assert!(matches!(
+            analysis.hir.kind,
+            crate::hir::HirKind::Define { .. }
+        ));
+    }
+
+    #[test]
+    fn test_analyze_new_lambda() {
+        let (mut symbols, _) = setup();
+        let result = analyze_new("(fn (x) x)", &mut symbols);
+        assert!(result.is_ok());
+        let analysis = result.unwrap();
+        assert!(matches!(
+            analysis.hir.kind,
+            crate::hir::HirKind::Lambda { .. }
+        ));
+        // Should have bindings for the parameter
+        assert!(!analysis.bindings.is_empty());
+    }
+
+    #[test]
+    fn test_analyze_all_new_multiple_forms() {
+        let (mut symbols, _) = setup();
+        let result = analyze_all_new("1 2 3", &mut symbols);
+        assert!(result.is_ok());
+        let analyses = result.unwrap();
+        assert_eq!(analyses.len(), 3);
+        assert!(matches!(analyses[0].hir.kind, crate::hir::HirKind::Int(1)));
+        assert!(matches!(analyses[1].hir.kind, crate::hir::HirKind::Int(2)));
+        assert!(matches!(analyses[2].hir.kind, crate::hir::HirKind::Int(3)));
+    }
+
+    #[test]
+    fn test_analyze_new_with_bindings() {
+        let (mut symbols, _) = setup();
+        let result = analyze_new("(let ((x 1) (y 2)) (+ x y))", &mut symbols);
+        assert!(result.is_ok());
+        let analysis = result.unwrap();
+        // Should have bindings for x and y
+        assert!(analysis.bindings.len() >= 2);
     }
 }

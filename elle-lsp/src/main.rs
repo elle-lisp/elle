@@ -174,9 +174,9 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                                             "end": { "line": line - 1, "character": col }
                                         },
                                         "severity": match d.severity {
-                                            elle::compiler::linter::diagnostics::Severity::Error => 1,
-                                            elle::compiler::linter::diagnostics::Severity::Warning => 2,
-                                            elle::compiler::linter::diagnostics::Severity::Info => 3,
+                                            elle::lint::diagnostics::Severity::Error => 1,
+                                            elle::lint::diagnostics::Severity::Warning => 2,
+                                            elle::lint::diagnostics::Severity::Info => 3,
                                         },
                                         "code": d.code,
                                         "source": "elle-lint",
@@ -234,11 +234,11 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                                                 "start": { "line": line - 1, "character": col - 1 },
                                                 "end": { "line": line - 1, "character": col }
                                             },
-                                            "severity": match d.severity {
-                                                elle::compiler::linter::diagnostics::Severity::Error => 1,
-                                                elle::compiler::linter::diagnostics::Severity::Warning => 2,
-                                                elle::compiler::linter::diagnostics::Severity::Info => 3,
-                                            },
+                                        "severity": match d.severity {
+                                            elle::lint::diagnostics::Severity::Error => 1,
+                                            elle::lint::diagnostics::Severity::Warning => 2,
+                                            elle::lint::diagnostics::Severity::Info => 3,
+                                        },
                                             "code": d.code,
                                             "source": "elle-lint",
                                             "message": d.message

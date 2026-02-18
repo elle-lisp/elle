@@ -3,8 +3,8 @@
 //! Provides completion suggestions for Elle Lisp symbols,
 //! including built-ins and user-defined symbols.
 
-use elle::compiler::symbol_index::{get_primitive_documentation, SymbolIndex, SymbolKind};
 use elle::symbol::SymbolTable;
+use elle::symbols::{get_primitive_documentation, SymbolIndex, SymbolKind};
 use serde_json::{json, Value};
 
 /// Get completion items at the given position

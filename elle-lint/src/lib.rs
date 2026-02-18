@@ -6,19 +6,10 @@
 //! - Unused variable detection
 //! - Pattern matching validation
 //!
-//! This crate provides a wrapper around the compiler's integrated linter.
-//!
-//! TODO: The linter currently uses the legacy pipeline (Value -> Expr) because
-//! the compiler's Linter is tightly coupled to the Expr AST. A future migration
-//! should create a HIR-based linter that works with the new pipeline
-//! (Syntax -> HIR -> LIR -> Bytecode).
+//! This crate wraps the HIR-based linter from the new pipeline.
 
-pub use elle::compiler::linter::diagnostics::{Diagnostic, Severity};
+pub use elle::lint::diagnostics::{Diagnostic, Severity};
 
-use elle::compiler::ast::ExprWithLoc;
-use elle::compiler::converters::value_to_expr;
-use elle::compiler::linter::Linter as CompilerLinter;
-use elle::reader::OwnedToken;
 use elle::symbol::SymbolTable;
 use elle::{init_stdlib, register_primitives, VM};
 use std::path::Path;
@@ -48,14 +39,14 @@ impl Default for LintConfig {
 /// Main linter instance
 pub struct Linter {
     config: LintConfig,
-    compiler_linter: CompilerLinter,
+    diagnostics: Vec<Diagnostic>,
 }
 
 impl Linter {
     pub fn new(config: LintConfig) -> Self {
         Self {
             config,
-            compiler_linter: CompilerLinter::new(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -66,30 +57,16 @@ impl Linter {
         register_primitives(&mut vm, &mut symbols);
         init_stdlib(&mut vm, &mut symbols);
 
-        // Parse code using lexer and reader to handle multiple forms
-        let mut lexer = elle::Lexer::new(code);
-        let mut tokens = Vec::new();
-        loop {
-            match lexer.next_token() {
-                Ok(Some(token)) => tokens.push(OwnedToken::from(token)),
-                Ok(None) => break,
-                Err(e) => return Err(format!("Lex error: {}", e)),
-            }
-        }
+        // Use new pipeline: parse → expand → analyze → HIR
+        let analyses = elle::analyze_all_new(code, &mut symbols)
+            .map_err(|e| format!("Analysis error: {}", e))?;
 
-        let mut reader = elle::Reader::new(tokens);
-        while let Some(result) = reader.try_read(&mut symbols) {
-            match result {
-                Ok(value) => {
-                    // Convert value to expr for linting
-                    let expr = value_to_expr(&value, &mut symbols)
-                        .map_err(|e| format!("Conversion error: {}", e))?;
-                    // Wrap in ExprWithLoc with no location info (we don't have precise source locations from Value)
-                    let expr_with_loc = ExprWithLoc::new(expr, None);
-                    self.compiler_linter.lint_expr(&expr_with_loc, &symbols);
-                }
-                Err(e) => return Err(format!("Read error: {}", e)),
-            }
+        // Lint each analyzed form
+        for analysis in &analyses {
+            let mut hir_linter = elle::hir::HirLinter::new(analysis.bindings.clone());
+            hir_linter.lint(&analysis.hir, &symbols);
+            self.diagnostics
+                .extend(hir_linter.diagnostics().iter().cloned());
         }
 
         Ok(())
@@ -107,7 +84,21 @@ impl Linter {
 
     /// Get all diagnostics
     pub fn diagnostics(&self) -> &[Diagnostic] {
-        self.compiler_linter.diagnostics()
+        &self.diagnostics
+    }
+
+    /// Check if there are any errors
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error)
+    }
+
+    /// Check if there are any warnings
+    pub fn has_warnings(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning)
     }
 
     /// Format diagnostics for output
@@ -158,17 +149,9 @@ impl Linter {
 
     /// Get exit code (0 = no errors, 1 = errors, 2 = warnings)
     pub fn exit_code(&self) -> i32 {
-        if self
-            .diagnostics()
-            .iter()
-            .any(|d| d.severity == Severity::Error)
-        {
+        if self.has_errors() {
             1
-        } else if self
-            .diagnostics()
-            .iter()
-            .any(|d| d.severity == Severity::Warning)
-        {
+        } else if self.has_warnings() {
             2
         } else {
             0

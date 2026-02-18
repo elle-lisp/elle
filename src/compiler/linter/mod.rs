@@ -6,8 +6,9 @@
 //! - Unused variable detection
 //! - Pattern matching validation
 
-pub mod diagnostics;
-pub mod rules;
+// Re-export from crate::lint for backward compatibility
+pub use crate::lint::diagnostics;
+pub use crate::lint::rules;
 
 use super::ast::{Expr, ExprWithLoc};
 use crate::reader::SourceLoc;

@@ -2,29 +2,20 @@
 //!
 //! Manages compilation state for open documents and provides
 //! symbol index for IDE features.
-//!
-//! TODO: This module uses the legacy pipeline (Value -> Expr) because:
-//! 1. The Linter is coupled to the Expr AST
-//! 2. The SymbolIndex extraction uses ExprWithLoc
-//!
-//! A future migration should use the new pipeline (Syntax -> HIR -> LIR)
-//! and create HIR-based versions of the linter and symbol extraction.
 
-use elle::compiler::converters::value_to_expr;
-use elle::compiler::linter::diagnostics::{Diagnostic, Severity};
-use elle::compiler::{ast::ExprWithLoc, extract_symbols, Linter, SymbolIndex};
-use elle::reader::{Lexer, OwnedToken};
+use elle::hir::{extract_symbols_from_hir, HirLinter};
+use elle::lint::diagnostics::{Diagnostic, Severity};
 use elle::symbol::SymbolTable;
-use elle::{init_stdlib, register_primitives, Reader, VM};
+use elle::symbols::SymbolIndex;
+use elle::{analyze_all_new, init_stdlib, register_primitives, VM};
 use std::collections::HashMap;
 
-/// Document state: source + compiled expression + diagnostics
+/// Document state: source + diagnostics + symbol index
 pub struct DocumentState {
     pub uri: String,
     pub source_text: String,
-    pub compiled_expr: Option<ExprWithLoc>,
     pub symbol_index: SymbolIndex,
-    pub diagnostics: Vec<elle::compiler::linter::diagnostics::Diagnostic>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl DocumentState {
@@ -32,7 +23,6 @@ impl DocumentState {
         Self {
             uri,
             source_text: String::new(),
-            compiled_expr: None,
             symbol_index: SymbolIndex::new(),
             diagnostics: Vec::new(),
         }
@@ -40,7 +30,6 @@ impl DocumentState {
 
     fn update(&mut self, text: String) {
         self.source_text = text;
-        self.compiled_expr = None;
         self.symbol_index = SymbolIndex::new();
         self.diagnostics.clear();
     }
@@ -94,92 +83,37 @@ impl CompilerState {
             return false;
         };
 
-        // Clear previous diagnostics
+        // Clear previous state
         doc.diagnostics.clear();
-        doc.compiled_expr = None;
         doc.symbol_index = SymbolIndex::new();
 
-        // Parse the document
-        let mut lexer = Lexer::new(&doc.source_text);
-        let mut tokens = Vec::new();
-
-        loop {
-            match lexer.next_token() {
-                Ok(Some(token)) => tokens.push(OwnedToken::from(token)),
-                Ok(None) => break,
-                Err(e) => {
-                    // Lexer error - add as diagnostic
-                    let msg = format!("Lexer error: {}", e);
-                    doc.diagnostics.push(Diagnostic::new(
-                        Severity::Error,
-                        "E0001",
-                        "syntax-error",
-                        msg,
-                        None,
-                    ));
-                    return false;
-                }
+        // Analyze using the new pipeline
+        let analyses = match analyze_all_new(&doc.source_text, &mut self.symbol_table) {
+            Ok(results) => results,
+            Err(e) => {
+                // Analysis error - add as diagnostic
+                doc.diagnostics.push(Diagnostic::new(
+                    Severity::Error,
+                    "E0001",
+                    "syntax-error",
+                    e,
+                    None,
+                ));
+                return false;
             }
-        }
+        };
 
-        let mut reader = Reader::new(tokens);
-        let mut values = Vec::new();
+        // Process each analysis result
+        for analysis in &analyses {
+            // Extract symbols and merge into document's symbol index
+            let partial_index =
+                extract_symbols_from_hir(&analysis.hir, &analysis.bindings, &self.symbol_table);
+            doc.symbol_index.merge(partial_index);
 
-        while let Some(result) = reader.try_read(&mut self.symbol_table) {
-            match result {
-                Ok(value) => values.push(value),
-                Err(e) => {
-                    // Reader error - add as diagnostic
-                    let msg = format!("Reader error: {}", e);
-                    doc.diagnostics.push(Diagnostic::new(
-                        Severity::Error,
-                        "E0002",
-                        "syntax-error",
-                        msg,
-                        None,
-                    ));
-                    return false;
-                }
-            }
-        }
-
-        // Convert values to exprs
-        let mut exprs = Vec::new();
-        for value in values {
-            match value_to_expr(&value, &mut self.symbol_table) {
-                Ok(expr) => {
-                    exprs.push(ExprWithLoc::new(expr, None));
-                }
-                Err(e) => {
-                    // Conversion error - add as diagnostic
-                    let msg = format!("Conversion error: {}", e);
-                    doc.diagnostics.push(Diagnostic::new(
-                        Severity::Error,
-                        "E0003",
-                        "syntax-error",
-                        msg,
-                        None,
-                    ));
-                    return false;
-                }
-            }
-        }
-
-        // Extract symbol index
-        doc.symbol_index = extract_symbols(&exprs, &self.symbol_table);
-
-        // Run linter
-        let mut linter = Linter::new();
-        for expr in &exprs {
-            linter.lint_expr(expr, &self.symbol_table);
-        }
-
-        // Store diagnostics (append linter diagnostics to any existing syntax errors)
-        doc.diagnostics.extend(linter.diagnostics().iter().cloned());
-
-        // Store compiled expressions
-        if !exprs.is_empty() {
-            doc.compiled_expr = Some(exprs[exprs.len() - 1].clone());
+            // Run HIR linter
+            let mut linter = HirLinter::new(analysis.bindings.clone());
+            linter.lint(&analysis.hir, &self.symbol_table);
+            doc.diagnostics.extend(linter.diagnostics().iter().cloned());
         }
 
         true
