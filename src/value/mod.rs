@@ -25,7 +25,7 @@ pub use condition::Condition;
 pub use send::SendValue;
 
 // Export continuation types
-pub use continuation::{ContinuationData, ContinuationFrame};
+pub use continuation::{ContinuationData, ContinuationFrame, ExceptionHandler};
 
 // Re-export supporting types from value_old (closures, coroutines, etc)
 pub use crate::value_old::{

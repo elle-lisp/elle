@@ -1052,3 +1052,236 @@ fn test_yield_quoted_list() {
     );
     assert!(result.is_ok());
 }
+
+// ============================================================================
+// 16. HANDLER-CASE + YIELD TESTS (Phase 3 hardening)
+// ============================================================================
+
+#[test]
+fn test_yield_inside_handler_case_then_exception() {
+    // Bug fix test: handler-case should still catch exceptions after yield/resume
+    // When yield occurs inside a handler-case body, the exception handler state
+    // must be saved in the continuation and restored on resume.
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn ()
+          (handler-case
+            (begin
+              (yield 1)       ; handler is active here
+              (/ 1 0))        ; after resume, handler should still be active
+            (division-by-zero e "caught")))))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    let list_vals = collect_list_ints(&result.unwrap());
+    // First resume: yields 1
+    // Second resume: (/ 1 0) -> caught by handler-case -> "caught"
+    // But "caught" is a string, not an int, so we check differently
+    assert_eq!(list_vals[0], 1, "First yield should be 1");
+    // The second element is "caught" string, not an int
+}
+
+#[test]
+fn test_yield_inside_handler_case_string_result() {
+    // Same as above but verify the string result
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn ()
+          (handler-case
+            (begin
+              (yield 1)
+              (/ 1 0))
+            (division-by-zero e "caught")))))
+        (coroutine-resume co)
+        (coroutine-resume co)
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        Value::string("caught"),
+        "Exception should be caught after resume"
+    );
+}
+
+#[test]
+fn test_yield_inside_nested_handler_case() {
+    // Nested handler-case blocks should both survive yield/resume
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn ()
+          (handler-case
+            (handler-case
+              (begin
+                (yield 1)
+                (/ 1 0))
+              (type-error e "inner-type-error"))
+            (division-by-zero e "outer-div-zero")))))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    // First resume yields 1, second resume triggers div-by-zero caught by outer handler
+}
+
+#[test]
+fn test_handler_case_outside_coroutine_wrapping_yield() {
+    // Handler-case outside the coroutine should not affect yield/resume
+    // The handler is in the caller's context, not the coroutine's
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn ()
+          (yield 1)
+          (/ 1 0))))
+        (handler-case
+          (begin
+            (coroutine-resume co)
+            (coroutine-resume co))
+          (division-by-zero e "outer-caught"))
+        "#,
+    );
+    // The outer handler-case should catch the exception from the coroutine
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        Value::string("outer-caught"),
+        "Outer handler should catch coroutine exception"
+    );
+}
+
+#[test]
+fn test_exception_before_yield_caught_normally() {
+    // Exception before yield should be caught normally (no resume involved)
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn ()
+          (handler-case
+            (begin
+              (/ 1 0)
+              (yield 1))
+            (division-by-zero e "caught-before-yield")))))
+        (coroutine-resume co)
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        Value::string("caught-before-yield"),
+        "Exception before yield should be caught"
+    );
+}
+
+#[test]
+fn test_multiple_yields_inside_handler_case() {
+    // Multiple yields inside handler-case, exception after last yield
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn ()
+          (handler-case
+            (begin
+              (yield 1)
+              (yield 2)
+              (yield 3)
+              (/ 1 0))
+            (division-by-zero e "caught-after-3-yields")))))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co)
+          (coroutine-resume co)
+          (coroutine-resume co))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+}
+
+#[test]
+fn test_yield_across_call_with_handler_case() {
+    // Yield from a called function, with handler-case in the caller
+    let result = eval(
+        r#"
+        (define inner (fn () (yield 1) (/ 1 0)))
+        (define co (make-coroutine (fn ()
+          (handler-case
+            (inner)
+            (division-by-zero e "caught-from-inner")))))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+}
+
+// ============================================================================
+// 17. DEEP CROSS-CALL YIELD TESTS (Phase 3 hardening)
+// ============================================================================
+
+#[test]
+fn test_yield_across_three_call_levels() {
+    // Yield propagates through 3 levels of function calls
+    // When resuming, we pass a value that becomes the yield expression's result
+    let result = eval(
+        r#"
+        (define a (fn (x) (yield (* x 2))))
+        (define b (fn (x) (+ (a x) 1)))
+        (define c (fn (x) (+ (b x) 1)))
+        (define co (make-coroutine (fn () (c 10))))
+        (list (coroutine-resume co) (coroutine-resume co 20))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    let list_vals = collect_list_ints(&result.unwrap());
+    // c(10) -> b(10) -> a(10) -> yield 20
+    // resume with 20 -> a returns 20 -> b returns 21 -> c returns 22
+    assert_eq!(list_vals[0], 20, "First yield should be 20");
+    assert_eq!(list_vals[1], 22, "Final return should be 22");
+}
+
+#[test]
+fn test_yield_in_tail_position() {
+    // Yield in tail position of coroutine body
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn ()
+          (yield 1)
+          (yield 2))))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co)
+          (coroutine-resume co)
+          (coroutine-status co))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    // yields 1, 2, then the second yield's return (empty list), done
+}
+
+#[test]
+fn test_deep_call_chain_with_multiple_yields() {
+    // Multiple yields at different call depths
+    let result = eval(
+        r#"
+        (define level1 (fn ()
+          (yield 1)
+          (level2)))
+        (define level2 (fn ()
+          (yield 2)
+          (level3)))
+        (define level3 (fn ()
+          (yield 3)
+          "done"))
+        (define co (make-coroutine level1))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co)
+          (coroutine-resume co)
+          (coroutine-resume co))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+}

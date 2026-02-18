@@ -8,6 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
+// Re-export ExceptionHandler from value::continuation where it's defined
+pub use crate::value::continuation::ExceptionHandler;
+
 type StackVec = SmallVec<[Value; 256]>;
 type TailCallInfo = (Vec<u8>, Vec<Value>, Rc<Vec<Value>>);
 
@@ -30,13 +33,6 @@ pub struct CallFrame {
     pub name: String,
     pub ip: usize,
     pub frame_base: usize, // Stack index where this frame's locals start
-}
-
-#[derive(Debug, Clone)]
-pub struct ExceptionHandler {
-    pub handler_offset: u16,
-    pub finally_offset: Option<i16>,
-    pub stack_depth: usize,
 }
 
 pub struct VM {
@@ -312,6 +308,8 @@ impl VM {
     /// up to the coroutine boundary. This method replays the chain from
     /// innermost to outermost, threading the resume value through.
     ///
+    /// Frame ordering: `frames\[0\]` = innermost (yielder), `frames\[last\]` = outermost (caller)
+    ///
     /// # Arguments
     /// * `continuation` - A Value containing ContinuationData
     /// * `resume_value` - The value to resume with (becomes the yield expression's result)
@@ -324,8 +322,6 @@ impl VM {
         continuation: Value,
         resume_value: Value,
     ) -> Result<VmResult, String> {
-        use crate::value::ContinuationFrame;
-
         let cont_data = continuation
             .as_continuation()
             .ok_or("Expected continuation value")?;
@@ -338,11 +334,10 @@ impl VM {
         // Save current stack state
         let saved_stack = std::mem::take(&mut self.stack);
 
-        // Execute from innermost frame outward
-        // frames[0] = outermost (caller), frames[last] = innermost (yielder)
+        // Execute from innermost frame (index 0) outward to outermost (last index)
         let mut current_value = resume_value;
 
-        for i in (0..frames.len()).rev() {
+        for i in 0..frames.len() {
             let frame = &frames[i];
 
             // Restore this frame's stack
@@ -352,34 +347,45 @@ impl VM {
             // Push the value from the inner frame (or resume value for innermost)
             self.stack.push(current_value);
 
-            let result = self.execute_bytecode_from_ip(
+            // Execute with the frame's saved exception handler state
+            let result = self.execute_bytecode_from_ip_with_state(
                 &frame.bytecode,
                 &frame.constants,
                 Some(&frame.env),
                 frame.ip,
+                frame.exception_handlers.clone(),
+                frame.handling_exception,
             )?;
 
             match result {
                 VmResult::Done(v) => {
-                    current_value = v;
+                    // Check if an exception occurred in this frame
+                    // If so, and there are more outer frames, let them handle it
+                    if self.current_exception.is_some() && i + 1 < frames.len() {
+                        // The exception will be handled by the next outer frame's
+                        // exception handlers (which we'll restore when we execute it)
+                        // Pass NIL as the "return value" since we're propagating an exception
+                        current_value = Value::NIL;
+                    } else {
+                        current_value = v;
+                    }
                     // Continue with next outer frame
                 }
                 VmResult::Yielded {
                     value,
                     continuation: new_cont,
                 } => {
-                    // Re-yielded during resume! Need to prepend remaining outer frames
+                    // Re-yielded during resume! Need to append remaining outer frames
                     // to the new continuation
-                    if i > 0 {
+                    if i + 1 < frames.len() {
                         let mut new_cont_data = new_cont
                             .as_continuation()
                             .ok_or("Expected continuation")?
                             .as_ref()
                             .clone();
-                        // Prepend frames[0..i] (the remaining outer frames)
-                        let outer_frames: Vec<ContinuationFrame> = frames[0..i].to_vec();
-                        for (j, f) in outer_frames.into_iter().enumerate() {
-                            new_cont_data.frames.insert(j, f);
+                        // Append frames[i+1..] (the remaining outer frames)
+                        for f in frames[i + 1..].iter() {
+                            new_cont_data.frames.push(f.clone());
                         }
                         let merged_cont = Value::continuation(new_cont_data);
                         self.stack = saved_stack;
