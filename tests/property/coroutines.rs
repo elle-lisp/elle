@@ -335,7 +335,6 @@ proptest! {
 // ============================================================================
 
 #[test]
-#[ignore] // Requires CPS rework: yield across call boundaries
 fn yield_across_call_boundaries() {
     // A helper function that yields a value, called from a coroutine
     let code = r#"
@@ -347,9 +346,85 @@ fn yield_across_call_boundaries() {
     "#;
 
     let result = eval(code);
-    // This should yield 42, but currently fails because yield doesn't
-    // propagate across call boundaries without CPS transformation
     assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn yield_across_two_call_levels() {
+    // Yield propagates through two levels of function calls
+    let code = r#"
+        (begin
+            (define inner (fn (x) (yield (* x 3))))
+            (define outer (fn (x) (inner (+ x 1))))
+            (define gen (fn () (outer 10)))
+            (define co (make-coroutine gen))
+            (coroutine-resume co))
+    "#;
+
+    let result = eval(code);
+    // (outer 10) -> (inner 11) -> (yield 33)
+    assert_eq!(result.unwrap(), Value::int(33));
+}
+
+#[test]
+fn yield_across_call_then_resume_then_yield() {
+    // Yield, resume, then yield again across call boundaries
+    let code = r#"
+        (begin
+            (define helper (fn (x)
+                (let ((first (yield x)))
+                    (yield (+ first x)))))
+            (define gen (fn () (helper 10)))
+            (define co (make-coroutine gen))
+            (list
+                (coroutine-resume co)
+                (coroutine-resume co 5)
+                (coroutine-status co)))
+    "#;
+
+    let result = eval(code);
+    assert!(result.is_ok(), "Evaluation failed: {:?}", result);
+
+    let list_vals = collect_list_ints(&result.unwrap());
+    // First yield: 10
+    // Second yield: 5 + 10 = 15
+    assert_eq!(list_vals[0], 10, "First yield should be 10");
+    assert_eq!(list_vals[1], 15, "Second yield should be 15");
+}
+
+#[test]
+fn yield_across_call_with_return_value() {
+    // After yield, the helper returns a value that the caller uses
+    let code = r#"
+        (begin
+            (define helper (fn (x)
+                (yield x)
+                (* x 2)))
+            (define gen (fn ()
+                (let ((result (helper 5)))
+                    (+ result 100))))
+            (define co (make-coroutine gen))
+            (list
+                (coroutine-resume co)
+                (coroutine-resume co)
+                (coroutine-status co)))
+    "#;
+
+    let result = eval(code);
+    assert!(result.is_ok(), "Evaluation failed: {:?}", result);
+
+    // First resume: yields 5
+    // Second resume: helper returns 10, gen returns 110
+    let mut current = &result.unwrap();
+    let mut values = Vec::new();
+    while let Some(cons) = current.as_cons() {
+        values.push(cons.first);
+        current = &cons.rest;
+    }
+
+    assert_eq!(values[0], Value::int(5), "First yield should be 5");
+    assert_eq!(values[1], Value::int(110), "Final return should be 110");
+    assert_eq!(values[2], Value::string("done"), "Status should be 'done'");
 }
 
 // ============================================================================

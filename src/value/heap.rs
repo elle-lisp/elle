@@ -9,6 +9,7 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::value::continuation::ContinuationData;
 use crate::value::Value;
 
 // Re-use types from the old value system during migration
@@ -50,6 +51,7 @@ pub enum HeapTag {
     LibHandle = 12,
     CHandle = 13,
     ThreadHandle = 14,
+    Continuation = 15,
 }
 
 /// All heap-allocated value types.
@@ -108,6 +110,9 @@ pub enum HeapObject {
 
     /// Thread handle for concurrent execution
     ThreadHandle(ThreadHandleData),
+
+    /// First-class continuation for yield across call boundaries
+    Continuation(Rc<ContinuationData>),
 }
 
 /// Data for thread handles.
@@ -138,6 +143,7 @@ impl HeapObject {
             HeapObject::LibHandle(_) => HeapTag::LibHandle,
             HeapObject::CHandle(_, _) => HeapTag::CHandle,
             HeapObject::ThreadHandle(_) => HeapTag::ThreadHandle,
+            HeapObject::Continuation(_) => HeapTag::Continuation,
         }
     }
 
@@ -159,6 +165,7 @@ impl HeapObject {
             HeapObject::LibHandle(_) => "library-handle",
             HeapObject::CHandle(_, _) => "c-handle",
             HeapObject::ThreadHandle(_) => "thread-handle",
+            HeapObject::Continuation(_) => "continuation",
         }
     }
 }
@@ -188,6 +195,7 @@ impl std::fmt::Debug for HeapObject {
             HeapObject::LibHandle(id) => write!(f, "<lib-handle:{}>", id),
             HeapObject::CHandle(_, id) => write!(f, "<c-handle:{}>", id),
             HeapObject::ThreadHandle(_) => write!(f, "<thread-handle>"),
+            HeapObject::Continuation(c) => write!(f, "<continuation:{} frames>", c.frames.len()),
         }
     }
 }

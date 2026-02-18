@@ -5,6 +5,7 @@
 
 pub mod closure;
 pub mod condition;
+pub mod continuation;
 pub mod display;
 pub mod heap;
 pub mod intern;
@@ -22,6 +23,9 @@ pub use condition::Condition;
 
 // Export SendValue for thread-safe value transmission
 pub use send::SendValue;
+
+// Export continuation types
+pub use continuation::{ContinuationData, ContinuationFrame};
 
 // Re-export supporting types from value_old (closures, coroutines, etc)
 pub use crate::value_old::{

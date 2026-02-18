@@ -256,9 +256,17 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                             Ok(value)
                         }
                     }
-                    Ok(VmResult::Yielded(value)) => {
-                        // Coroutine yielded - state already updated by Yield instruction
+                    Ok(VmResult::Yielded {
+                        value,
+                        continuation,
+                    }) => {
+                        // Coroutine yielded - save the continuation for later resume
+                        borrowed.state = CoroutineState::Suspended;
                         borrowed.yielded_value = Some(new_value_to_old(value));
+                        // Store the first-class continuation for resume_continuation
+                        borrowed.saved_value_continuation = Some(continuation);
+                        // Clear old-style context since we're using the new path
+                        borrowed.saved_context = None;
                         Ok(value)
                     }
                     Err(e) => {
@@ -268,7 +276,51 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                 }
             }
             CoroutineState::Suspended => {
-                // Check if we have a saved CPS continuation
+                // Check if we have a saved first-class continuation (new path)
+                if let Some(continuation) = borrowed.saved_value_continuation.take() {
+                    // Use the new continuation-based resume
+                    borrowed.state = CoroutineState::Running;
+                    drop(borrowed); // Release borrow before VM call
+
+                    vm.enter_coroutine(co.clone());
+                    let result = vm.resume_continuation(continuation, resume_value);
+                    vm.exit_coroutine();
+
+                    let mut borrowed = co.borrow_mut();
+                    return match result {
+                        Ok(VmResult::Done(value)) => {
+                            if vm.current_exception.is_some() {
+                                let msg = vm
+                                    .current_exception
+                                    .as_ref()
+                                    .map(|e| e.message.clone())
+                                    .unwrap_or_default();
+                                borrowed.state = CoroutineState::Error(msg);
+                                Ok(Value::NIL)
+                            } else {
+                                borrowed.state = CoroutineState::Done;
+                                borrowed.saved_value_continuation = None;
+                                borrowed.yielded_value = Some(new_value_to_old(value));
+                                Ok(value)
+                            }
+                        }
+                        Ok(VmResult::Yielded {
+                            value,
+                            continuation: new_cont,
+                        }) => {
+                            borrowed.state = CoroutineState::Suspended;
+                            borrowed.saved_value_continuation = Some(new_cont);
+                            borrowed.yielded_value = Some(new_value_to_old(value));
+                            Ok(value)
+                        }
+                        Err(e) => {
+                            borrowed.state = CoroutineState::Error(e.clone());
+                            Err(e.into())
+                        }
+                    };
+                }
+
+                // Check if we have a saved CPS continuation (old CPS path)
                 if let Some(continuation) = borrowed.saved_continuation.clone() {
                     return resume_coroutine_cps(
                         co.clone(),
@@ -279,8 +331,7 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                     );
                 }
 
-                // Fall back to bytecode resumption
-                // Resume from suspension
+                // Fall back to old bytecode resumption (legacy path)
                 let context = borrowed
                     .saved_context
                     .clone()
@@ -288,25 +339,15 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                 let bytecode = borrowed.closure.bytecode.clone();
                 let constants = borrowed.closure.constants.clone();
 
-                // Release the borrow before calling resume_from_context
                 drop(borrowed);
 
-                // Enter coroutine context so resume_from_context can access current_coroutine()
                 vm.enter_coroutine(co.clone());
-
-                // Resume from the saved context
                 let result = vm.resume_from_context(context, resume_value, &bytecode, &constants);
-
-                // Exit coroutine context
                 vm.exit_coroutine();
 
-                // Re-borrow to update state
                 let mut borrowed = co.borrow_mut();
                 match result {
                     Ok(VmResult::Done(value)) => {
-                        // Check if the coroutine body raised an uncaught exception.
-                        // If so, leave it on vm.current_exception for handler-case
-                        // to catch, and transition the coroutine to Error state.
                         if vm.current_exception.is_some() {
                             let msg = vm
                                 .current_exception
@@ -321,8 +362,13 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                             Ok(value)
                         }
                     }
-                    Ok(VmResult::Yielded(value)) => {
-                        // Coroutine yielded again - state already updated by Yield instruction
+                    Ok(VmResult::Yielded {
+                        value,
+                        continuation,
+                    }) => {
+                        // Coroutine yielded again - save the new continuation
+                        borrowed.state = CoroutineState::Suspended;
+                        borrowed.saved_value_continuation = Some(continuation);
                         borrowed.yielded_value = Some(new_value_to_old(value));
                         Ok(value)
                     }
