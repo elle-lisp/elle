@@ -16,8 +16,9 @@ tests. Read the error messages. They are designed to be helpful.
 Source → Reader → Syntax → Expander → Syntax → Analyzer → HIR → Lowerer → LIR → Emitter → Bytecode → VM
 ```
 
-The new pipeline (Syntax → HIR → LIR → Bytecode) coexists with an older
-Value-based pipeline. Prefer the new pipeline; it's in `pipeline.rs`.
+The new pipeline (Syntax → HIR → LIR → Bytecode) is the primary pipeline.
+elle-lint and elle-lsp use it exclusively. The old Value-based pipeline
+remains only for CPS and Cranelift JIT, which still depend on the `Expr` type.
 
 ### Key modules
 
@@ -25,13 +26,17 @@ Value-based pipeline. Prefer the new pipeline; it's in `pipeline.rs`.
 |--------|----------------|
 | `reader` | Lexing and parsing to `Syntax` |
 | `syntax` | Syntax types, macro expansion |
-| `hir` | Binding resolution, capture analysis, effect inference |
+| `hir` | Binding resolution, capture analysis, effect inference, linting, symbol extraction |
 | `lir` | SSA form with virtual registers, basic blocks |
-| `compiler` | Bytecode emission, JIT coordination |
+| `compiler` | Bytecode emission, JIT coordination, CPS (legacy AST still used by JIT/CPS) |
 | `vm` | Bytecode execution |
-| `value` | Runtime value representation |
+| `value` | Runtime value representation (NaN-boxed) |
+| `effects` | Effect type (`Pure`, `Yields`, `Polymorphic`) |
+| `lint` | Diagnostic types and lint rules (pipeline-agnostic) |
+| `symbols` | Symbol index types for IDE features (pipeline-agnostic) |
 | `primitives` | Built-in functions |
 | `ffi` | C interop via libloading/bindgen |
+| `pipeline` | Compilation entry points (`compile_new`, `analyze_new`, `eval_new`) |
 
 ### The Value type
 
@@ -112,8 +117,8 @@ These must remain true. Violating them breaks the system:
    `LocalCell`. The `cell_params_mask` on `Closure` tracks which parameters need
    cell wrapping.
 
-3. **Effects are inferred, not declared.** The `Effect` enum (`Pure`, `IO`,
-   `Divergent`) propagates from leaves to root during analysis.
+3. **Effects are inferred, not declared.** The `Effect` enum (`Pure`, `Yields`,
+   `Polymorphic`) propagates from leaves to root during analysis.
 
 4. **The VM is stack-based for operands, register-addressed for locals.**
    Instructions reference registers (locals) by index. Results push to the

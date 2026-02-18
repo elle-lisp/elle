@@ -29,6 +29,8 @@ Does NOT:
 | `CaptureKind` | `Local`, `Capture` (transitive), or `Global` |
 | `Analyzer` | Transforms Syntax → HIR |
 | `AnalysisResult` | HIR + binding metadata |
+| `HirLinter` | HIR-based linter producing Diagnostics |
+| `extract_symbols_from_hir` | Builds SymbolIndex from HIR |
 
 ## Data flow
 
@@ -50,6 +52,8 @@ HIR + bindings HashMap
 
 - `lir/lower.rs` - consumes HIR, uses binding info for cell decisions
 - `pipeline.rs` - orchestrates Syntax → HIR → LIR → Bytecode
+- `elle-lint` - uses `HirLinter` for static analysis
+- `elle-lsp` - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
 
 ## Invariants
 
@@ -76,8 +80,11 @@ HIR + bindings HashMap
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 21 | Re-exports |
-| `analyze.rs` | 1400 | `Analyzer`, scope tracking, HIR construction |
+| `mod.rs` | 25 | Re-exports |
+| `analyze.rs` | ~1400 | `Analyzer`, scope tracking, HIR construction |
 | `expr.rs` | 180 | `Hir`, `HirKind` |
 | `binding.rs` | 120 | `BindingId`, `BindingInfo`, `CaptureInfo` |
 | `pattern.rs` | ~100 | Pattern matching types |
+| `tailcall.rs` | ~80 | Post-analysis pass marking tail calls |
+| `lint.rs` | ~150 | HIR-based linter (walks HirKind, produces Diagnostics) |
+| `symbols.rs` | ~200 | HIR-based symbol extraction (builds SymbolIndex) |
