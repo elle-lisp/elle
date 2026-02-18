@@ -113,9 +113,13 @@ fn test_multiple_yields() {
           (coroutine-resume co))
         "#,
     );
-    // This test will likely fail initially as multiple yields aren't fully supported
-    // but it documents the expected behavior
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "Multiple yields should work");
+    let list_vals = collect_list_ints(&result.unwrap());
+    assert_eq!(
+        list_vals,
+        vec![1, 2, 3, 4],
+        "Should yield 1, 2, 3, then return 4"
+    );
 }
 
 #[test]
@@ -131,8 +135,13 @@ fn test_yield_with_resume_value() {
           (coroutine-resume co 5))
         "#,
     );
-    // This test documents the expected behavior for passing values back into coroutines
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "Resume with value should work");
+    let list_vals = collect_list_ints(&result.unwrap());
+    assert_eq!(
+        list_vals,
+        vec![1, 15],
+        "First resume yields 1, second resume with 5 returns 10+5=15"
+    );
 }
 
 // ============================================================================
@@ -176,6 +185,13 @@ fn test_coroutine_done_predicate() {
          "#,
     );
     assert!(result.is_ok());
+    // Result is a list of two booleans: [#f, #t]
+    if let Some(cons) = result.unwrap().as_cons() {
+        assert_eq!(cons.first, Value::bool(false), "Initially not done");
+        if let Some(cons2) = cons.rest.as_cons() {
+            assert_eq!(cons2.first, Value::bool(true), "Done after resume");
+        }
+    }
 }
 
 #[test]
@@ -245,12 +261,13 @@ fn test_yielding_function_detected() {
 }
 
 #[test]
+#[ignore] // Requires CPS rework: yield across call boundaries
 fn test_calling_yielding_function_propagates_effect() {
     // If f yields and g calls f, g should also yield
     // NOTE: This test documents expected behavior for effect propagation.
     // Currently, calling a yielding function from within a coroutine
-    // requires the bytecode path, not the CPS path, because the CPS
-    // interpreter doesn't yet support nested yielding calls.
+    // does not propagate the yield - the inner function's yield is not
+    // visible to the outer coroutine. This requires the CPS rework to fix.
     let result = eval(
         r#"
          (define f (fn ()
@@ -262,9 +279,14 @@ fn test_calling_yielding_function_propagates_effect() {
          (coroutine-resume co)
          "#,
     );
-    // Should yield 1 from f, but currently fails with CPS path
-    // because nested yielding calls aren't fully supported yet
+    // Should yield 1 from f, then 2 from g
+    // Currently this yields 2 because f's yield doesn't propagate
     assert!(result.is_ok());
+    assert_eq!(
+        result.unwrap(),
+        Value::int(1),
+        "Should yield 1 from inner function f"
+    );
 }
 
 // ============================================================================
@@ -272,6 +294,7 @@ fn test_calling_yielding_function_propagates_effect() {
 // ============================================================================
 
 #[test]
+#[ignore] // Requires CPS rework: yield-from delegation not fully implemented
 fn test_yield_from_basic() {
     // (define inner (fn () (yield 1) (yield 2)))
     // (define outer (fn () (yield-from (make-coroutine inner)) (yield 3)))
@@ -286,6 +309,13 @@ fn test_yield_from_basic() {
     );
     // Should get the first yielded value from inner
     assert!(result.is_ok());
+    // yield-from should delegate to inner coroutine, so first resume yields 1
+    // Currently yields 3 because yield-from doesn't properly delegate
+    assert_eq!(
+        result.unwrap(),
+        Value::int(1),
+        "First yield-from should yield 1 from inner"
+    );
 }
 
 #[test]

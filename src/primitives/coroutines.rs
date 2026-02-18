@@ -173,6 +173,10 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                 // Check if this closure yields and has source AST for CPS execution
                 // We re-infer the effect at runtime because the closure might call
                 // functions that weren't defined at compile time
+                //
+                // CPS execution requires source_ast. If source_ast is None (new pipeline),
+                // we fall back to bytecode execution which handles yield via the VM's
+                // Yield instruction.
                 let use_cps = if let Some(ast) = &borrowed.closure.source_ast {
                     // Re-infer effect with current global definitions
                     let mut effect_ctx = EffectContext::new();
@@ -180,7 +184,9 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
                     let runtime_effect = effect_ctx.infer(&ast.body);
                     runtime_effect.may_yield()
                 } else {
-                    borrowed.closure.effect.may_yield()
+                    // No source_ast means new pipeline - use bytecode path
+                    // The bytecode path handles yield via the VM's Yield instruction
+                    false
                 };
 
                 if use_cps {

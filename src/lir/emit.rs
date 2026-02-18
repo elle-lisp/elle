@@ -5,7 +5,6 @@
 
 use super::types::*;
 use crate::compiler::bytecode::{Bytecode, Instruction};
-use crate::effects::Effect;
 use crate::value::{Arity, Closure, Value};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -272,7 +271,7 @@ impl Emitter {
                     num_captures: captures.len(),
                     constants: Rc::new(nested_bytecode.constants),
                     source_ast: None,
-                    effect: Effect::Pure, // TODO: get from HIR
+                    effect: func.effect,
                     cell_params_mask: func.cell_params_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
                 };

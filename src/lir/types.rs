@@ -1,5 +1,6 @@
 //! LIR type definitions
 
+use crate::effects::Effect;
 use crate::value::SymbolId;
 
 /// Virtual register
@@ -42,6 +43,8 @@ pub struct LirFunction {
     /// Bitmask indicating which parameters need to be wrapped in cells
     /// Bit i is set if parameter i needs a cell (for mutable parameters)
     pub cell_params_mask: u64,
+    /// Effect of this function (Pure, Yields, or Polymorphic)
+    pub effect: Effect,
 }
 
 impl LirFunction {
@@ -55,6 +58,7 @@ impl LirFunction {
             num_regs: 0,
             num_locals: 0,
             cell_params_mask: 0,
+            effect: Effect::Pure,
         }
     }
 }
