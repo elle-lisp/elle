@@ -73,6 +73,13 @@ VmResult
    appended to form a chain. `resume_continuation` replays frames from
    innermost to outermost, restoring handler state for each frame.
 
+   **yield-from delegation**: The `Coroutine` struct has a `delegate` field
+   (`Option<Rc<RefCell<Coroutine>>>`). When set, `coroutine-resume` forwards
+   resume values to the delegate coroutine instead of the outer one. This
+   enables transparent delegation where an outer coroutine can yield all
+   values from an inner coroutine. When the delegate completes, control
+   returns to the outer coroutine.
+
 7. **Instruction handlers have two error channels.** `Err(String)` is for VM
    bugs (stack underflow, bad bytecode). `Ok(())` with `current_exception`
    set is for runtime errors on bad data (type mismatch, division by zero).

@@ -16,12 +16,11 @@ Effects track whether an expression may suspend execution (yield).
 
 ## Dependents
 
-Used across both pipelines and the runtime:
+Used across the pipeline and the runtime:
 - `hir/analyze.rs` — infers effects during analysis
 - `hir/expr.rs` — `Hir` carries an `Effect`
 - `lir/emit.rs` — emits effect metadata on closures
 - `value/closure.rs` — `Closure` stores its `Effect`
-- `compiler/cps/` — CPS transform uses effects
 - `primitives/coroutines.rs` — coroutine primitives use `EffectContext`
 
 ## Files
