@@ -2,7 +2,7 @@
 
 use super::binding::{BindingId, CaptureInfo};
 use super::pattern::HirPattern;
-use crate::compiler::effects::Effect;
+use crate::effects::Effect;
 use crate::syntax::Span;
 use crate::value::{SymbolId, Value};
 

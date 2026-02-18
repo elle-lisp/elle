@@ -5,7 +5,7 @@
 
 use super::types::*;
 use crate::compiler::bytecode::{Bytecode, Instruction};
-use crate::compiler::effects::Effect;
+use crate::effects::Effect;
 use crate::value::{Arity, Closure, Value};
 use std::collections::HashMap;
 use std::rc::Rc;

@@ -7,18 +7,14 @@
 //! ## Quick Start
 //!
 //! ```
-//! use elle::{read_str, compile, register_primitives, SymbolTable, VM};
-//! use elle::compiler::converters::value_to_expr;
+//! use elle::{eval_new, register_primitives, SymbolTable, VM};
 //!
 //! let mut vm = VM::new();
 //! let mut symbols = SymbolTable::new();
 //! register_primitives(&mut vm, &mut symbols);
 //!
 //! let code = "(+ 1 2 3)";
-//! let value = read_str(code, &mut symbols).unwrap();
-//! let expr = value_to_expr(&value, &mut symbols).unwrap();
-//! let bytecode = compile(&expr);
-//! let result = vm.execute(&bytecode).unwrap();
+//! let result = eval_new(code, &mut symbols, &mut vm).unwrap();
 //! ```
 //!
 //! ## Architecture
@@ -39,6 +35,7 @@
 pub mod arithmetic;
 pub mod binding;
 pub mod compiler;
+pub mod effects;
 pub mod error;
 pub mod ffi;
 pub mod formatter;
@@ -48,7 +45,6 @@ pub mod pipeline;
 pub mod primitives;
 pub mod reader;
 pub mod repl;
-pub mod resident_compiler;
 pub mod symbol;
 pub mod syntax;
 pub mod value;
@@ -59,8 +55,7 @@ pub mod vm;
 pub use ffi::primitives as ffi_primitives;
 
 pub use compiler::{
-    compile, compile_jit, is_jit_compilable, Bytecode, JitCompiledFunction, JitCoordinator,
-    JitExecutor,
+    compile_jit, is_jit_compilable, Bytecode, JitCompiledFunction, JitCoordinator, JitExecutor,
 };
 pub use error::{RuntimeError, SourceLoc};
 pub use pipeline::{compile_all_new, compile_new, eval_new, CompileResult};

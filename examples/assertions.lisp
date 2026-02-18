@@ -52,7 +52,9 @@
   "Assert that two lists are equal (same length and elements)"
   (if (= (length actual) (length expected))
       ; Check each element - use a simple loop approach
-      (let ((check-all (fn (index)
+      ; NOTE: letrec is required here because check-all calls itself recursively.
+      ; A plain let would leave check-all unbound in its own body.
+      (letrec ((check-all (fn (index)
         (if (>= index (length actual))
             #t
             (if (if (symbol? (nth index expected))

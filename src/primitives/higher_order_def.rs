@@ -1,10 +1,9 @@
+use crate::pipeline::eval_new;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
 
 /// Define map, filter, and fold as Lisp functions that support closures
 pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
-    use crate::read_str;
-
     // Define map: (lambda (f lst) (if (empty? lst) () (cons (f (first lst)) (map f (rest lst)))))
     let map_code = r#"
         (define map (lambda (f lst)
@@ -31,35 +30,10 @@ pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
             (fold f (f init (first lst)) (rest lst)))))
     "#;
 
-    // Execute each definition
+    // Execute each definition using the new pipeline
     for code in &[map_code, filter_code, fold_code] {
-        match read_str(code, symbols) {
-            Ok(value) => {
-                match crate::compiler::value_to_expr(&value, symbols) {
-                    Ok(expr) => {
-                        // Compile and evaluate
-                        let bytecode = crate::compile(&expr);
-                        if let Err(e) = vm.execute(&bytecode) {
-                            eprintln!(
-                                "Warning: Failed to execute higher-order function definition: {}",
-                                e
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: Failed to compile higher-order function definition: {}",
-                            e
-                        );
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!(
-                    "Warning: Failed to parse higher-order function definition: {}",
-                    e
-                );
-            }
+        if let Err(e) = eval_new(code, symbols, vm) {
+            eprintln!("Warning: Failed to define higher-order function: {}", e);
         }
     }
 }

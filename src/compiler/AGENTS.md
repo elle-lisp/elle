@@ -10,9 +10,10 @@ new development.
 - Legacy AST-based compilation (being replaced)
 - CPS transformation (alternative execution path)
 - Cranelift JIT compilation
-- Effect inference
 - Macro expansion support
 - Linting
+
+Note: Effect types and inference have been moved to `src/effects/`.
 
 ## Submodules
 
@@ -24,7 +25,6 @@ new development.
 | `converters/` | `Value` ↔ `Expr` conversion |
 | `cps/` | Continuation-passing style transform and interpreter |
 | `cranelift/` | Native code generation via Cranelift |
-| `effects/` | `Effect` enum, inference |
 | `linter/` | Static analysis |
 | `scope.rs` | Legacy scope tracking |
 | `capture_resolution.rs` | Legacy capture analysis |
@@ -73,7 +73,7 @@ Located here. Uses `VarRef`. Being phased out.
 | `Instruction` | `bytecode.rs` | Bytecode opcodes |
 | `Bytecode` | `bytecode.rs` | Instructions + constants |
 | `Expr` | `ast.rs` | Legacy AST |
-| `Effect` | `effects/mod.rs` | `Pure`, `IO`, `Divergent`, `Yields` |
+| `Effect` | `src/effects/mod.rs` | `Pure`, `Yields`, `Polymorphic` |
 | `Continuation` | `cps/mod.rs` | CPS continuation |
 | `JitCoordinator` | `jit_coordinator.rs` | Hot path tracking |
 
@@ -85,8 +85,6 @@ Located here. Uses `VarRef`. Being phased out.
 | `bytecode.rs` | ~200 | Instruction enum, Bytecode struct |
 | `ast.rs` | ~300 | Legacy Expr type |
 | `compile/mod.rs` | ~800 | Legacy compilation |
-| `effects/mod.rs` | ~50 | Effect type |
-| `effects/inference.rs` | ~300 | Effect inference |
 | `cps/` | ~1500 | CPS transform and interpreter |
 | `cranelift/` | ~500 | Cranelift code generation |
 

@@ -4,7 +4,7 @@
 //! that returns JitAction values.
 
 use super::CpsExpr;
-use crate::compiler::effects::Effect;
+use crate::effects::Effect;
 
 /// CPS JIT compiler
 pub struct CpsJitCompiler;

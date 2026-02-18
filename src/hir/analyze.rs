@@ -9,7 +9,7 @@
 use super::binding::{BindingId, BindingInfo, BindingKind, CaptureInfo, CaptureKind};
 use super::expr::{Hir, HirKind};
 use super::pattern::{HirPattern, PatternLiteral};
-use crate::compiler::effects::Effect;
+use crate::effects::Effect;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
 use std::collections::HashMap;
@@ -273,9 +273,8 @@ impl<'a> Analyzer<'a> {
             .as_list()
             .ok_or_else(|| format!("{}: let bindings must be a list", span))?;
 
-        self.push_scope(false);
-
-        let mut bindings = Vec::new();
+        // Phase 1: Analyze all value expressions in the OUTER scope
+        let mut names_and_values = Vec::new();
         let mut effect = Effect::Pure;
 
         for binding in bindings_syntax {
@@ -291,7 +290,14 @@ impl<'a> Analyzer<'a> {
                 .ok_or_else(|| format!("{}: let binding name must be a symbol", span))?;
             let value = self.analyze_expr(&pair[1])?;
             effect = effect.combine(value.effect);
+            names_and_values.push((name, value));
+        }
 
+        // Phase 2: Push scope and create all bindings
+        self.push_scope(false);
+
+        let mut bindings = Vec::new();
+        for (name, value) in names_and_values {
             let id = self.bind(
                 name,
                 BindingKind::Local {
@@ -322,8 +328,60 @@ impl<'a> Analyzer<'a> {
     }
 
     fn analyze_let_star(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        // let* is just nested lets - same as let for our simple scope model
-        self.analyze_let(items, span)
+        if items.len() < 2 {
+            return Err(format!("{}: let* requires bindings list", span));
+        }
+
+        let bindings_syntax = items[1]
+            .as_list()
+            .ok_or_else(|| format!("{}: let* bindings must be a list", span))?;
+
+        self.push_scope(false);
+
+        let mut bindings = Vec::new();
+        let mut effect = Effect::Pure;
+
+        for binding in bindings_syntax {
+            let pair = binding
+                .as_list()
+                .ok_or_else(|| format!("{}: let* binding must be a pair", span))?;
+            if pair.len() != 2 {
+                return Err(format!("{}: let* binding must be (name value)", span));
+            }
+
+            let name = pair[0]
+                .as_symbol()
+                .ok_or_else(|| format!("{}: let* binding name must be a symbol", span))?;
+            // In let*, each value CAN see previous bindings
+            let value = self.analyze_expr(&pair[1])?;
+            effect = effect.combine(value.effect);
+
+            let id = self.bind(
+                name,
+                BindingKind::Local {
+                    index: self.current_local_index(),
+                },
+            );
+            bindings.push((id, value));
+        }
+
+        let body = if items.len() > 2 {
+            self.analyze_body(&items[2..], span.clone())?
+        } else {
+            Hir::pure(HirKind::Nil, span.clone())
+        };
+        effect = effect.combine(body.effect);
+
+        self.pop_scope();
+
+        Ok(Hir::new(
+            HirKind::Let {
+                bindings,
+                body: Box::new(body),
+            },
+            span,
+            effect,
+        ))
     }
 
     fn analyze_letrec(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {

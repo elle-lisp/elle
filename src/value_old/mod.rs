@@ -1,5 +1,5 @@
 use crate::compiler::ast::Expr;
-use crate::compiler::effects::Effect;
+use crate::effects::Effect;
 use crate::error::{LError, LResult};
 use crate::reader::SourceLoc;
 use std::cell::RefCell;
@@ -756,7 +756,7 @@ mod tests {
 #[cfg(test)]
 mod coroutine_tests {
     use super::*;
-    use crate::compiler::effects::Effect;
+    use crate::effects::Effect;
 
     #[test]
     fn test_coroutine_context_creation() {

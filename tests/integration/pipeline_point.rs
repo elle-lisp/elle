@@ -1,0 +1,516 @@
+// Point tests for the new compilation pipeline
+//
+// These tests cover semantic categories that don't lend themselves to property testing.
+// They verify specific behaviors of the new Syntax → HIR → LIR → Bytecode pipeline.
+
+use elle::ffi::primitives::context::set_symbol_table;
+use elle::pipeline::eval_new;
+use elle::primitives::{init_stdlib, register_primitives};
+use elle::{SymbolTable, Value, VM};
+
+fn eval(input: &str) -> Result<Value, String> {
+    let mut vm = VM::new();
+    let mut symbols = SymbolTable::new();
+    register_primitives(&mut vm, &mut symbols);
+    init_stdlib(&mut vm, &mut symbols);
+    // Set symbol table context for primitives like type-of that need it
+    set_symbol_table(&mut symbols as *mut SymbolTable);
+    eval_new(input, &mut symbols, &mut vm)
+}
+
+// ============================================================================
+// 1. Shebang Handling
+// ============================================================================
+// The new pipeline's read_syntax / read_syntax_all handles shebangs at the
+// reader level (see src/reader/mod.rs lines 44-50, 77-83).
+
+#[test]
+fn test_shebang_with_env_elle() {
+    // Source starting with #!/usr/bin/env elle should evaluate correctly
+    let result = eval("#!/usr/bin/env elle\n(+ 1 2)");
+    assert_eq!(result.unwrap(), Value::int(3));
+}
+
+#[test]
+fn test_shebang_short_form() {
+    // Source starting with #!elle should evaluate correctly
+    let result = eval("#!elle\n42");
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_no_shebang_works_normally() {
+    // Source without shebang works normally
+    let result = eval("(+ 10 20)");
+    assert_eq!(result.unwrap(), Value::int(30));
+}
+
+#[test]
+fn test_shebang_with_complex_expression() {
+    // Shebang followed by complex expression
+    let result = eval("#!/usr/bin/env elle\n(let ((x 5)) (* x x))");
+    assert_eq!(result.unwrap(), Value::int(25));
+}
+
+// ============================================================================
+// 2. Macros
+// ============================================================================
+// The new pipeline uses Expander which supports defmacro (see src/syntax/expand.rs).
+// However, macros defined in one form are not visible in subsequent forms when
+// using eval_new because a fresh Expander is created for each compilation.
+// The threading macros (-> and ->>) are built into the Expander.
+
+#[test]
+#[ignore] // TODO: defmacro in begin doesn't work - Expander is created fresh per compilation
+fn test_defmacro_my_when_true() {
+    // Define a simple when macro and test with true condition
+    let result = eval(
+        "(begin
+           (defmacro my-when (test body) (list 'if test body nil))
+           (my-when #t 42))",
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+#[ignore] // TODO: defmacro in begin doesn't work - Expander is created fresh per compilation
+fn test_defmacro_my_when_false() {
+    // Define a simple when macro and test with false condition
+    let result = eval(
+        "(begin
+           (defmacro my-when (test body) (list 'if test body nil))
+           (my-when #f 42))",
+    );
+    assert_eq!(result.unwrap(), Value::NIL);
+}
+
+#[test]
+#[ignore] // TODO: macro? primitive requires runtime macro registry
+fn test_macro_predicate() {
+    // Test macro? predicate after defining a macro
+    let result = eval(
+        "(begin
+           (defmacro my-when (test body) (list 'if test body nil))
+           (macro? my-when))",
+    );
+    assert_eq!(result.unwrap(), Value::bool(true));
+}
+
+#[test]
+fn test_macro_predicate_non_macro() {
+    // Test macro? predicate on a non-macro (built-in function)
+    let result = eval("(macro? +)");
+    assert_eq!(result.unwrap(), Value::bool(false));
+}
+
+#[test]
+#[ignore] // TODO: expand-macro requires quoted form and runtime macro registry
+fn test_expand_macro() {
+    // Test expand-macro returns the expanded form
+    let result = eval(
+        "(begin
+           (defmacro my-when (test body) (list 'if test body nil))
+           (expand-macro '(my-when #t 42)))",
+    );
+    // Should return something like (if #t 42 nil)
+    assert!(result.is_ok());
+}
+
+// ============================================================================
+// 3. Module-Qualified Names
+// ============================================================================
+// The new pipeline's SyntaxReader does NOT parse qualified symbols - it leaves
+// them as-is (see src/reader/syntax_parser.rs line 168). The old Value-based
+// parser handles qualified names via parse_qualified_symbol.
+
+#[test]
+#[ignore] // TODO: module-qualified syntax not yet supported in new pipeline
+fn test_module_qualified_string_upcase() {
+    // Test module-qualified syntax: string:upcase
+    let result = eval("(string:upcase \"hello\")");
+    assert_eq!(result.unwrap(), Value::string("HELLO"));
+}
+
+#[test]
+#[ignore] // TODO: module-qualified syntax not yet supported in new pipeline
+fn test_module_qualified_math_abs() {
+    // Test module-qualified syntax: math:abs
+    let result = eval("(math:abs -5)");
+    assert_eq!(result.unwrap(), Value::int(5));
+}
+
+// ============================================================================
+// 4. Tables and Structs — Point Tests
+// ============================================================================
+// Note: The API uses polymorphic functions:
+// - (get collection key [default]) - works on tables and structs
+// - (put collection key value) - mutates tables, returns new struct
+// - (keys collection), (values collection), (has-key? collection key)
+// There are no table? or struct? predicates - use type-of instead.
+
+#[test]
+fn test_table_creation_empty() {
+    // (table) creates empty table
+    let result = eval("(table)").unwrap();
+    assert!(result.is_table());
+}
+
+#[test]
+fn test_table_put_and_get() {
+    // (put table key value) then (get table key) returns value
+    // Note: Tables use string keys, not keywords
+    let result = eval(
+        r#"(let ((t (table)))
+           (put t "key" 42)
+           (get t "key"))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_struct_creation_empty() {
+    // (struct) creates empty struct
+    let result = eval("(struct)").unwrap();
+    assert!(result.is_struct());
+}
+
+#[test]
+fn test_table_type_check() {
+    // Verify table type using type_name() on Rust side
+    let result = eval("(table)").unwrap();
+    assert_eq!(result.type_name(), "table");
+}
+
+#[test]
+fn test_struct_type_check() {
+    // Verify struct type using type_name() on Rust side
+    let result = eval("(struct)").unwrap();
+    assert_eq!(result.type_name(), "struct");
+}
+
+#[test]
+fn test_type_of_table() {
+    // (type-of (table)) returns :table keyword
+    // We verify by checking that (eq? (type-of (table)) :table) is true
+    let result = eval("(eq? (type-of (table)) :table)");
+    assert_eq!(result.unwrap(), Value::bool(true));
+}
+
+#[test]
+fn test_type_of_struct() {
+    // (type-of (struct)) returns :struct keyword
+    // We verify by checking that (eq? (type-of (struct)) :struct) is true
+    let result = eval("(eq? (type-of (struct)) :struct)");
+    assert_eq!(result.unwrap(), Value::bool(true));
+}
+
+#[test]
+fn test_table_with_string_keys() {
+    // Table with string key-value pairs
+    let result = eval(
+        r#"(let ((t (table "a" 1 "b" 2)))
+           (+ (get t "a") (get t "b")))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(3));
+}
+
+#[test]
+fn test_struct_with_string_keys() {
+    // Struct with string key-value pairs
+    let result = eval(
+        r#"(let ((s (struct "x" 10 "y" 20)))
+           (+ (get s "x") (get s "y")))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(30));
+}
+
+#[test]
+fn test_table_has_key() {
+    // Test has-key? on table
+    let result = eval(
+        r#"(let ((t (table "a" 1)))
+           (has-key? t "a"))"#,
+    );
+    assert_eq!(result.unwrap(), Value::bool(true));
+}
+
+#[test]
+fn test_table_has_key_missing() {
+    // Test has-key? on table for missing key
+    let result = eval(
+        r#"(let ((t (table "a" 1)))
+           (has-key? t "b"))"#,
+    );
+    assert_eq!(result.unwrap(), Value::bool(false));
+}
+
+// ============================================================================
+// 5. Exception Hierarchy
+// ============================================================================
+// handler-case provides exception handling with type-based dispatch.
+// Exception ID 4 is used for arithmetic errors like division-by-zero.
+
+#[test]
+fn test_handler_case_catches_division_by_zero() {
+    // Division by zero is caught by error handler
+    let result = eval("(handler-case (/ 1 0) (4 e \"caught\"))");
+    assert_eq!(result.unwrap(), Value::string("caught"));
+}
+
+#[test]
+fn test_handler_case_specific_exception() {
+    // Division by zero caught by specific handler (ID 4)
+    let result = eval("(handler-case (/ 1 0) (4 e \"specific\"))");
+    assert_eq!(result.unwrap(), Value::string("specific"));
+}
+
+#[test]
+fn test_handler_case_nested_inner_catches() {
+    // Nested handlers: inner catches first
+    let result = eval(
+        "(handler-case
+           (handler-case (/ 1 0) (4 e \"inner\"))
+           (4 e \"outer\"))",
+    );
+    assert_eq!(result.unwrap(), Value::string("inner"));
+}
+
+#[test]
+fn test_handler_case_no_error_returns_body() {
+    // No error, returns body value
+    let result = eval("(handler-case 42 (4 e \"caught\"))");
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_handler_case_with_arithmetic_in_handler() {
+    // Handler can contain arithmetic
+    let result = eval("(handler-case (/ 1 0) (4 e (+ 40 2)))");
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_handler_case_exception_binding() {
+    // Exception is bound to the handler variable
+    let result = eval("(handler-case (/ 1 0) (4 e e))");
+    // Should return the exception value (not error)
+    assert!(result.is_ok());
+}
+
+// ============================================================================
+// 6. Condition Construction and Introspection
+// ============================================================================
+
+#[test]
+fn test_exception_creation() {
+    // (exception "test-msg") creates a condition
+    let result = eval("(exception \"test-msg\")");
+    assert!(result.is_ok());
+    // The result should be a condition/exception value
+}
+
+#[test]
+fn test_exception_message() {
+    // (exception-message (exception "hello")) = "hello"
+    let result = eval("(exception-message (exception \"hello\"))");
+    assert_eq!(result.unwrap(), Value::string("hello"));
+}
+
+#[test]
+fn test_exception_data() {
+    // (exception-data (exception "msg" 42)) = 42
+    let result = eval("(exception-data (exception \"msg\" 42))");
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_exception_data_default() {
+    // (exception-data (exception "msg")) returns nil when no data provided
+    let result = eval("(exception-data (exception \"msg\"))");
+    assert_eq!(result.unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_condition_type_check() {
+    // Check that exception creates a condition using type-of
+    // We verify by checking that (eq? (type-of (exception "test")) :condition) is true
+    let result = eval("(eq? (type-of (exception \"test\")) :condition)");
+    assert_eq!(result.unwrap(), Value::bool(true));
+}
+
+// ============================================================================
+// Additional Edge Cases
+// ============================================================================
+
+#[test]
+fn test_handler_case_with_let_binding() {
+    // handler-case can be used with let
+    let result = eval("(let ((x 10)) (handler-case (/ x 0) (4 e 99)))");
+    assert_eq!(result.unwrap(), Value::int(99));
+}
+
+#[test]
+fn test_handler_case_in_function() {
+    // handler-case works inside function definitions
+    let result = eval("((fn () (handler-case (/ 10 0) (4 e 99))))");
+    assert_eq!(result.unwrap(), Value::int(99));
+}
+
+#[test]
+fn test_table_mutation() {
+    // Tables are mutable - put modifies in place
+    let result = eval(
+        r#"(let ((t (table)))
+           (put t "a" 1)
+           (put t "a" 2)
+           (get t "a"))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(2));
+}
+
+#[test]
+fn test_struct_immutability() {
+    // Structs are immutable - put returns a new struct
+    // We test that get works on initial values
+    let result = eval(
+        r#"(let ((s (struct "x" 42)))
+           (get s "x"))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_nested_table_operations() {
+    // Nested table operations
+    let result = eval(
+        r#"(let ((outer (table)))
+           (put outer "inner" (table))
+           (put (get outer "inner") "value" 42)
+           (get (get outer "inner") "value"))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+#[ignore] // TODO: defmacro in begin doesn't work - Expander is created fresh per compilation
+fn test_defmacro_with_quasiquote() {
+    // Macro using quasiquote for template
+    let result = eval(
+        "(begin
+           (defmacro add-one (x) `(+ ,x 1))
+           (add-one 41))",
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_threading_macro_first() {
+    // Thread-first macro (->) is built into the Expander
+    let result = eval("(-> 5 (+ 3) (* 2))");
+    // (-> 5 (+ 3) (* 2)) => (* (+ 5 3) 2) => (* 8 2) => 16
+    assert_eq!(result.unwrap(), Value::int(16));
+}
+
+#[test]
+fn test_threading_macro_last() {
+    // Thread-last macro (->>) is built into the Expander
+    let result = eval("(->> 5 (+ 3) (* 2))");
+    // (->> 5 (+ 3) (* 2)) => (* 2 (+ 3 5)) => (* 2 8) => 16
+    assert_eq!(result.unwrap(), Value::int(16));
+}
+
+#[test]
+fn test_table_keys() {
+    // Test keys function on table
+    let result = eval(
+        r#"(let ((t (table "a" 1 "b" 2)))
+           (length (keys t)))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(2));
+}
+
+#[test]
+fn test_table_values() {
+    // Test values function on table
+    let result = eval(
+        r#"(let ((t (table "a" 1 "b" 2)))
+           (length (values t)))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(2));
+}
+
+#[test]
+fn test_table_del() {
+    // Test del function on table (mutates in place)
+    let result = eval(
+        r#"(let ((t (table "a" 1 "b" 2)))
+           (del t "a")
+           (has-key? t "a"))"#,
+    );
+    assert_eq!(result.unwrap(), Value::bool(false));
+}
+
+#[test]
+fn test_struct_put_returns_new() {
+    // Structs are immutable - put returns a new struct, original unchanged
+    let result = eval(
+        r#"(let ((s (struct "x" 1)))
+           (let ((s2 (put s "x" 2)))
+             (list (get s "x") (get s2 "x"))))"#,
+    );
+    let vec = result.unwrap().list_to_vec().unwrap();
+    assert_eq!(vec[0], Value::int(1)); // Original unchanged
+    assert_eq!(vec[1], Value::int(2)); // New struct has updated value
+}
+
+#[test]
+fn test_get_with_default() {
+    // Test get with default value for missing key
+    let result = eval(
+        r#"(let ((t (table)))
+           (get t "missing" 42))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+// ============================================================================
+// 7. Let Binding Semantics
+// ============================================================================
+// Standard Scheme `let` has parallel binding semantics: all init expressions
+// are evaluated in the outer scope before any bindings are created.
+// `let*` has sequential binding semantics: each binding can see previous ones.
+
+#[test]
+fn test_let_parallel_binding() {
+    // Standard let: all init expressions evaluated in outer scope
+    let result = eval("(let ((x 10) (y 20)) (+ x y))").unwrap();
+    assert_eq!(result, Value::int(30));
+}
+
+#[test]
+fn test_let_parallel_binding_shadowing() {
+    // y should see the OUTER x (999), not the inner x (10)
+    let result = eval("(begin (define x 999) (let ((x 10) (y x)) y))").unwrap();
+    assert_eq!(result, Value::int(999));
+}
+
+#[test]
+fn test_let_star_sequential_binding() {
+    // let*: y should see the inner x (10)
+    let result = eval("(begin (define x 999) (let* ((x 10) (y x)) y))").unwrap();
+    assert_eq!(result, Value::int(10));
+}
+
+#[test]
+fn test_let_body_sees_bindings() {
+    // Body should see the let bindings
+    let result = eval("(let ((x 42)) x)").unwrap();
+    assert_eq!(result, Value::int(42));
+}
+
+#[test]
+fn test_let_nested_shadowing() {
+    // Inner let shadows outer let
+    let result = eval("(let ((x 1)) (let ((x 2)) x))").unwrap();
+    assert_eq!(result, Value::int(2));
+}

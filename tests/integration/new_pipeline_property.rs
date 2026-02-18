@@ -973,11 +973,12 @@ proptest! {
     #[test]
     fn compose_functions(a in -20i64..20) {
         // (compose f g)(x) = f(g(x))
+        // Use let* because composed references compose, add1, double from earlier bindings
         let expr = format!(
-            "(let ((compose (fn (f g) (fn (x) (f (g x)))))
-                   (add1 (fn (x) (+ x 1)))
-                   (double (fn (x) (* x 2)))
-                   (composed (compose add1 double)))
+            "(let* ((compose (fn (f g) (fn (x) (f (g x)))))
+                    (add1 (fn (x) (+ x 1)))
+                    (double (fn (x) (* x 2)))
+                    (composed (compose add1 double)))
                 (composed {}))",
             a
         );

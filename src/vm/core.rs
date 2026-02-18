@@ -367,7 +367,7 @@ impl Default for VM {
 #[cfg(test)]
 mod coroutine_vm_tests {
     use super::*;
-    use crate::compiler::effects::Effect;
+    use crate::effects::Effect;
     use crate::value::{Arity, Closure};
 
     #[test]

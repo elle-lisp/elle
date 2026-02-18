@@ -5,29 +5,8 @@ mod core {
 mod advanced {
     include!("advanced.rs");
 }
-mod types {
-    include!("types.rs");
-}
-mod macros {
-    include!("macros.rs");
-}
-mod metaprogramming {
-    include!("metaprogramming.rs");
-}
-mod stdlib {
-    include!("stdlib.rs");
-}
-mod stability {
-    include!("stability.rs");
-}
-mod property {
-    include!("property.rs");
-}
 mod exception_handling {
     include!("exception_handling.rs");
-}
-mod handler_case {
-    include!("handler_case.rs");
 }
 mod ffi_marshaling {
     include!("ffi-marshaling.rs");
@@ -47,105 +26,30 @@ mod ffi_custom_handlers {
 mod ffi_handler_integration {
     include!("ffi-handler-integration.rs");
 }
-mod shebang {
-    include!("shebang.rs");
-}
-mod finally_clause {
-    include!("finally_clause.rs");
-}
-mod loops {
-    include!("loops.rs");
-}
-mod exception_filtering {
-    include!("exception_filtering.rs");
-}
-mod optimization {
-    include!("optimization.rs");
-}
-mod closures_and_lambdas {
-    include!("closures_and_lambdas.rs");
-}
-mod mutual_recursion {
-    include!("mutual_recursion.rs");
-}
-mod closure_capture_optimization {
-    include!("closure_capture_optimization.rs");
-}
-mod closure_optimization {
-    include!("closure_optimization.rs");
-}
-mod pattern_matching {
-    include!("pattern_matching.rs");
-}
-
-mod module_qualified_names {
-    include!("module_qualified_names.rs");
-}
-
-mod tables_and_structs {
-    include!("tables_and_structs.rs");
-}
-
-mod scoping {
-    include!("scoping.rs");
-}
-
-mod compiler_core {
-    include!("compiler_core.rs");
-}
-
-mod primitives_core {
-    include!("primitives_core.rs");
-}
-
-mod jit_integration {
-    include!("jit_integration.rs");
-}
-
 mod concurrency {
     include!("concurrency.rs");
 }
-
 mod error_reporting {
     include!("error_reporting.rs");
 }
-
 mod repl_exit_codes {
     include!("repl_exit_codes.rs");
 }
-
-mod deep_tail_recursion {
-    include!("deep_tail_recursion.rs");
-}
-
-mod naming_consistency {
-    include!("naming_consistency.rs");
-}
-
-mod peephole_optimization {
-    include!("peephole_optimization.rs");
-}
-
-mod let_semantics {
-    include!("let_semantics.rs");
-}
-
 mod coroutines {
     include!("coroutines.rs");
 }
-
-mod catchable_exceptions {
-    include!("catchable_exceptions.rs");
-}
-
 mod lexical_scope {
     include!("lexical_scope.rs");
 }
-
 mod new_pipeline {
     include!("new_pipeline.rs");
 }
-
 mod new_pipeline_property {
     include!("new_pipeline_property.rs");
+}
+mod pipeline_property {
+    include!("pipeline_property.rs");
+}
+mod pipeline_point {
+    include!("pipeline_point.rs");
 }

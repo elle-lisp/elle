@@ -2,6 +2,13 @@
 //!
 //! Manages compilation state for open documents and provides
 //! symbol index for IDE features.
+//!
+//! TODO: This module uses the legacy pipeline (Value -> Expr) because:
+//! 1. The Linter is coupled to the Expr AST
+//! 2. The SymbolIndex extraction uses ExprWithLoc
+//!
+//! A future migration should use the new pipeline (Syntax -> HIR -> LIR)
+//! and create HIR-based versions of the linter and symbol extraction.
 
 use elle::compiler::converters::value_to_expr;
 use elle::compiler::linter::diagnostics::{Diagnostic, Severity};

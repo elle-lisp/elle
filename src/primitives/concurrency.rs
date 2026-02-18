@@ -213,6 +213,15 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
     // Extract the closure bytecode for thread safety
     let bytecode_data: Vec<u8> = (*closure.bytecode).clone();
 
+    // Extract closure metadata needed for proper environment setup
+    let num_locals = closure.num_locals;
+    let _num_captures = closure.num_captures;
+    let arity = match closure.arity {
+        crate::value_old::Arity::Exact(n) => n,
+        crate::value_old::Arity::AtLeast(n) => n,
+        crate::value_old::Arity::Range(min, _) => min,
+    };
+
     // Extract symbol names for cross-thread portability
     // This allows remapping symbol IDs in the new thread's symbol table
     let symbol_names_for_thread: HashMap<u32, String> = (*closure.symbol_names).clone();
@@ -250,7 +259,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 
         // Reconstruct values from SendValue
         let bytecode_rc = Rc::new(bytecode_data);
-        let env_values: Vec<Value> = env_send
+        let mut env_values: Vec<Value> = env_send
             .into_iter()
             .map(|sv: SendValue| sv.into_value())
             .collect();
@@ -258,6 +267,16 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
             .into_iter()
             .map(|sv: SendValue| sv.into_value())
             .collect();
+
+        // Add LocalCell slots for locally-defined variables (let bindings etc.)
+        // This replicates the logic in the VM's Call handler that creates
+        // environment slots for variables defined inside the closure body.
+        let num_params = arity;
+        let num_locally_defined = num_locals.saturating_sub(num_params);
+        for _ in 0..num_locally_defined {
+            env_values.push(Value::local_cell(Value::NIL));
+        }
+
         let env_rc = Rc::new(env_values);
         let constants_rc = Rc::new(constants_values);
 

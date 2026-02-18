@@ -1,4 +1,4 @@
-use crate::compiler::scope::ScopeType;
+use super::ScopeType;
 use crate::value::Value;
 use std::collections::HashMap;
 

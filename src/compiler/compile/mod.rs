@@ -3,8 +3,8 @@ mod utils;
 use super::analysis::{analyze_lambda_mutations, analyze_mutated_vars};
 use super::ast::{CaptureInfo, Expr};
 use super::bytecode::{Bytecode, Instruction};
-use super::effects::EffectContext;
 use crate::binding::VarRef;
+use crate::effects::EffectContext;
 use crate::error::LocationMap;
 use crate::symbol::SymbolTable;
 use crate::value::{Closure, SymbolId, Value};
@@ -1504,7 +1504,7 @@ pub fn compile_lambda_to_closure(
     captures: &[CaptureInfo],
     num_locals: usize,
     capture_values: Vec<Value>,
-    effect: crate::compiler::effects::Effect,
+    effect: crate::effects::Effect,
 ) -> Result<Closure, String> {
     let num_captures = captures.len();
     // Create a compiler for the lambda body
@@ -1725,7 +1725,7 @@ mod tests {
         // Verify the effect is Pure
         assert_eq!(
             closure.effect,
-            crate::compiler::effects::Effect::Pure,
+            crate::effects::Effect::Pure,
             "Simple arithmetic function should be Pure"
         );
     }
@@ -1769,7 +1769,7 @@ mod tests {
         let closure = closure.unwrap();
         assert_eq!(
             closure.effect,
-            crate::compiler::effects::Effect::Pure,
+            crate::effects::Effect::Pure,
             "Nested pure function calls should be Pure"
         );
     }
@@ -1802,11 +1802,11 @@ mod tests {
             .expect("Closure should exist");
 
         // Check that effect is in the Closure
-        assert_eq!(closure.effect, crate::compiler::effects::Effect::Pure);
+        assert_eq!(closure.effect, crate::effects::Effect::Pure);
 
         // Check that effect is also in the JitLambda (source_ast)
         if let Some(jit_lambda) = &closure.source_ast {
-            assert_eq!(jit_lambda.effect, crate::compiler::effects::Effect::Pure);
+            assert_eq!(jit_lambda.effect, crate::effects::Effect::Pure);
         }
     }
 
@@ -1845,7 +1845,7 @@ mod tests {
             .find_map(|v| v.as_closure().cloned())
             .expect("Closure should exist");
 
-        assert_eq!(closure.effect, crate::compiler::effects::Effect::Pure);
+        assert_eq!(closure.effect, crate::effects::Effect::Pure);
         assert_eq!(closure.num_captures, 1);
     }
 
@@ -1884,7 +1884,7 @@ mod tests {
             .find_map(|v| v.as_closure().cloned())
             .expect("Closure should exist");
 
-        assert_eq!(closure.effect, crate::compiler::effects::Effect::Pure);
+        assert_eq!(closure.effect, crate::effects::Effect::Pure);
         assert_eq!(closure.num_locals, 2); // x (param) + y (local)
     }
 }

@@ -1469,7 +1469,7 @@ fn test_spawn_primitive() {
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
         source_ast: None,
-        effect: elle::compiler::effects::Effect::Pure,
+        effect: elle::effects::Effect::Pure,
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
     });
@@ -1585,7 +1585,7 @@ fn test_profile_primitive() {
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
         source_ast: None,
-        effect: elle::compiler::effects::Effect::Pure,
+        effect: elle::effects::Effect::Pure,
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
     });
@@ -1935,7 +1935,7 @@ fn test_json_serialize_errors() {
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
         source_ast: None,
-        effect: elle::compiler::effects::Effect::Pure,
+        effect: elle::effects::Effect::Pure,
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
     });

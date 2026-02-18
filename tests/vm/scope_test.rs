@@ -4,9 +4,8 @@
 // at the VM level. Since Phase 2b integration is partial, these tests
 // focus on scope stack operations and handler correctness.
 
-use elle::compiler::scope::ScopeType;
 use elle::value::Value;
-use elle::vm::scope::{RuntimeScope, ScopeStack};
+use elle::vm::scope::{RuntimeScope, ScopeStack, ScopeType};
 
 #[test]
 fn test_scope_stack_initialization() {

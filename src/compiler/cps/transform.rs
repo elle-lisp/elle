@@ -7,7 +7,7 @@
 use super::{Continuation, CpsExpr};
 use crate::binding::VarRef;
 use crate::compiler::ast::{CaptureInfo, Expr};
-use crate::compiler::effects::{Effect, EffectContext};
+use crate::effects::{Effect, EffectContext};
 use crate::value::{SymbolId, Value};
 use std::collections::HashMap;
 use std::rc::Rc;

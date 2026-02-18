@@ -720,7 +720,7 @@ impl<'a> CpsInterpreter<'a> {
             } => {
                 // Compile the lambda to bytecode
                 use crate::compiler::compile::compile_lambda_to_closure;
-                use crate::compiler::effects::Effect;
+                use crate::effects::Effect;
 
                 // Build capture values using the source information from CaptureInfo
                 let env_borrowed = self.env.borrow();
@@ -843,7 +843,7 @@ fn create_cps_closure(
     num_locals: usize,
     num_captures: usize,
 ) -> Value {
-    use crate::compiler::effects::Effect;
+    use crate::effects::Effect;
     use crate::value::{Arity, Closure};
 
     // For now, create a closure that will error when called

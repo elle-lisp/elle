@@ -341,7 +341,7 @@ mod tests {
             num_captures: 0,
             constants: Rc::new(vec![]),
             source_ast: None,
-            effect: crate::compiler::effects::Effect::Pure,
+            effect: crate::effects::Effect::Pure,
             cell_params_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),
         });

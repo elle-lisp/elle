@@ -38,72 +38,27 @@ pub fn prim_import_file(args: &[Value]) -> Result<Value, Condition> {
 
             // Read and compile the file
             let path_str = path;
-            std::fs::read_to_string(path_str)
-                .map_err(|e| {
-                    Condition::error(format!("import-file: failed to read '{}': {}", path_str, e))
-                })
-                .and_then(|contents| {
-                    // Parse all forms in the module using the caller's symbol table
-                    let symbols = &mut *symbols_ptr;
+            let contents = std::fs::read_to_string(path_str).map_err(|e| {
+                Condition::error(format!("import-file: failed to read '{}': {}", path_str, e))
+            })?;
 
-                    // Tokenize the entire file
-                    let mut lexer = crate::reader::Lexer::new(&contents);
-                    let mut tokens = Vec::new();
-                    let mut locations = Vec::new();
+            // Compile all forms using the new pipeline
+            let symbols = &mut *symbols_ptr;
+            let results = crate::pipeline::compile_all_new(&contents, symbols).map_err(|e| {
+                Condition::error(format!(
+                    "import-file: compilation error in {}: {}",
+                    path_str, e
+                ))
+            })?;
 
-                    loop {
-                        match lexer.next_token_with_loc() {
-                            Ok(Some(token_with_loc)) => {
-                                tokens.push(crate::reader::OwnedToken::from(token_with_loc.token));
-                                locations.push(token_with_loc.loc);
-                            }
-                            Ok(None) => break,
-                            Err(e) => {
-                                return Err(Condition::error(format!(
-                                    "import-file: failed to tokenize '{}': {}",
-                                    path_str, e
-                                )))
-                            }
-                        }
-                    }
+            // Execute each compiled form sequentially
+            for result in &results {
+                vm.execute(&result.bytecode).map_err(|e| {
+                    Condition::error(format!("import-file: runtime error in {}: {}", path_str, e))
+                })?;
+            }
 
-                    if tokens.is_empty() {
-                        return Ok(Value::bool(true));
-                    }
-
-                    // Read and execute all forms
-                    let mut reader = crate::reader::Reader::with_locations(tokens, locations);
-                    while let Some(result) = reader.try_read(symbols) {
-                        match result {
-                            Ok(value) => {
-                                // Compile and execute using the caller's symbol table
-                                let expr = crate::compiler::value_to_expr(&value, symbols)
-                                    .map_err(|e| {
-                                        Condition::error(format!(
-                                            "import-file: failed to compile '{}': {}",
-                                            path_str, e
-                                        ))
-                                    })?;
-                                let bytecode = crate::compile(&expr);
-                                vm.execute(&bytecode).map_err(|e| {
-                                    Condition::error(format!(
-                                        "import-file: failed to execute '{}': {}",
-                                        path_str, e
-                                    ))
-                                })?;
-                            }
-                            Err(e) => {
-                                return Err(Condition::error(format!(
-                                    "import-file: failed to parse '{}': {}",
-                                    path_str, e
-                                )));
-                            }
-                        }
-                    }
-
-                    Ok(Value::bool(true))
-                })
-                .map(|_| Value::bool(true))
+            Ok(Value::bool(true))
         }
     } else {
         Err(Condition::type_error(format!(
