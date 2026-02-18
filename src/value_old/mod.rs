@@ -249,14 +249,6 @@ pub enum CoroutineState {
     Error(String),
 }
 
-/// Saved execution context for suspended coroutines
-#[derive(Debug, Clone)]
-pub struct CoroutineContext {
-    pub ip: usize,
-    pub stack: Vec<crate::value::Value>,
-    pub env: Option<std::rc::Rc<Vec<crate::value::Value>>>,
-}
-
 /// A coroutine value
 #[derive(Debug, Clone)]
 pub struct Coroutine {
@@ -265,15 +257,9 @@ pub struct Coroutine {
     /// Current state
     pub state: CoroutineState,
     /// Last yielded value (if suspended)
-    pub yielded_value: Option<Value>,
-    /// Saved execution context for resumption (bytecode path)
-    pub saved_context: Option<CoroutineContext>,
-    /// Saved CPS continuation for resumption (CPS path)
-    pub saved_continuation: Option<Rc<crate::compiler::cps::Continuation>>,
-    /// Saved execution environment for CPS resumption (shared mutable)
-    /// This preserves local variables across yields
-    pub saved_env: Option<Rc<RefCell<Vec<Value>>>>,
-    /// Saved first-class continuation for yield across call boundaries (new path)
+    /// Uses the new NaN-boxed Value type directly
+    pub yielded_value: Option<crate::value::Value>,
+    /// Saved first-class continuation for yield across call boundaries
     /// This is a Value containing ContinuationData
     pub saved_value_continuation: Option<crate::value::Value>,
 }
@@ -285,9 +271,6 @@ impl Coroutine {
             closure,
             state: CoroutineState::Created,
             yielded_value: None,
-            saved_context: None,
-            saved_continuation: None,
-            saved_env: None,
             saved_value_continuation: None,
         }
     }
@@ -763,17 +746,6 @@ mod coroutine_tests {
     use crate::effects::Effect;
 
     #[test]
-    fn test_coroutine_context_creation() {
-        let ctx = CoroutineContext {
-            ip: 42,
-            stack: vec![crate::value::Value::int(1), crate::value::Value::int(2)],
-            env: None,
-        };
-        assert_eq!(ctx.ip, 42);
-        assert_eq!(ctx.stack.len(), 2);
-    }
-
-    #[test]
     fn test_coroutine_refcell_mutation() {
         // Create a minimal closure for testing
         let closure = Rc::new(Closure {
@@ -806,34 +778,5 @@ mod coroutine_tests {
             }
             _ => panic!("Expected coroutine"),
         }
-    }
-
-    #[test]
-    fn test_coroutine_saved_context() {
-        let closure = Rc::new(Closure {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            env: Rc::new(vec![]),
-            num_locals: 0,
-            num_captures: 0,
-            constants: Rc::new(vec![crate::value::Value::NIL]),
-            source_ast: None,
-            effect: Effect::Pure,
-            cell_params_mask: 0,
-            symbol_names: Rc::new(std::collections::HashMap::new()),
-        });
-
-        let mut co = Coroutine::new(closure.clone());
-        assert!(co.saved_context.is_none());
-
-        // Simulate saving context on yield
-        co.saved_context = Some(CoroutineContext {
-            ip: 10,
-            stack: vec![crate::value::Value::int(42)],
-            env: Some(std::rc::Rc::new(vec![])),
-        });
-
-        assert!(co.saved_context.is_some());
-        assert_eq!(co.saved_context.as_ref().unwrap().ip, 10);
     }
 }

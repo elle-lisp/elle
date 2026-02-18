@@ -99,7 +99,7 @@ pub fn prim_exception_data(args: &[Value]) -> Result<Value, Condition> {
         match cond.data() {
             Some(data) => {
                 // Convert old Value to new Value
-                let new_value = crate::compiler::cps::primitives::old_value_to_new(data);
+                let new_value = crate::primitives::coroutines::old_value_to_new(data);
                 Ok(new_value)
             }
             None => Ok(Value::NIL),

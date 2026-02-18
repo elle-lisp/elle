@@ -88,14 +88,18 @@ Coroutines are suspendable computations:
 ```
 
 On `yield`:
-1. Save IP, stack, locals to `CoroutineContext`
-2. Mark coroutine as `Suspended`
-3. Return `VmResult::Yielded(value)`
+1. Create a `ContinuationFrame` capturing IP, stack, env
+2. Build `ContinuationData` with the frame chain
+3. Mark coroutine as `Suspended`
+4. Return `VmResult::Yielded { value, continuation }`
 
 On resume:
-1. Restore saved context
+1. Replay the continuation frame chain via `resume_continuation`
 2. Push resume value (becomes yield's return value)
 3. Continue execution
+
+The continuation captures the full call chain from yield point to coroutine
+boundary, enabling yield across nested function calls.
 
 ## See Also
 

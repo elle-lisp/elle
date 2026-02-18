@@ -29,6 +29,6 @@ pub use continuation::{ContinuationData, ContinuationFrame};
 
 // Re-export supporting types from value_old (closures, coroutines, etc)
 pub use crate::value_old::{
-    Arity, CHandle, Closure, Coroutine, CoroutineContext, CoroutineState, JitClosure, JitLambda,
-    LibHandle, NativeFn, SymbolId, TableKey, ThreadHandle, VmAwareFn,
+    Arity, CHandle, Closure, Coroutine, CoroutineState, JitClosure, JitLambda, LibHandle, NativeFn,
+    SymbolId, TableKey, ThreadHandle, VmAwareFn,
 };
