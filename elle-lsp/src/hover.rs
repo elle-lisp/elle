@@ -3,8 +3,8 @@
 //! Handles textDocument/hover requests by finding symbols at
 //! the cursor position and returning their documentation.
 
-use elle::compiler::symbol_index::{get_primitive_documentation, SymbolIndex, SymbolKind};
 use elle::symbol::SymbolTable;
+use elle::symbols::{get_primitive_documentation, SymbolIndex, SymbolKind};
 use serde_json::{json, Value};
 
 /// Find hoverable information at a given position

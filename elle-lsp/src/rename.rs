@@ -4,8 +4,8 @@
 //! TextEdits for all occurrences of the symbol to be renamed. Supports both local
 //! and global scope renaming with validation for reserved words and conflicts.
 
-use elle::compiler::symbol_index::SymbolIndex;
 use elle::symbol::SymbolTable;
+use elle::symbols::SymbolIndex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 

@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use elle::compiler::symbol_index::SymbolIndex;
+    use elle::symbols::SymbolIndex;
     use elle::SymbolTable;
     use elle_lsp::{definition, formatting, references, rename, CompilerState};
 
@@ -216,7 +216,7 @@ mod tests {
             let error_diags: Vec<_> = doc
                 .diagnostics
                 .iter()
-                .filter(|d| d.severity == elle::compiler::linter::diagnostics::Severity::Error)
+                .filter(|d| d.severity == elle::lint::diagnostics::Severity::Error)
                 .collect();
             assert!(!error_diags.is_empty());
         }

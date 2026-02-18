@@ -112,7 +112,7 @@ fn to_kebab_case(s: &str) -> String {
 }
 
 /// Get arity of built-in functions
-fn builtin_arity(name: &str) -> Option<usize> {
+pub fn builtin_arity(name: &str) -> Option<usize> {
     match name {
         // Arithmetic - these are actually variadic but min 2
         "+" | "-" | "*" | "/" | "mod" | "rem" => Some(2),

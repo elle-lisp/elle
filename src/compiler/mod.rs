@@ -24,4 +24,6 @@ pub use jit_coordinator::JitCoordinator;
 pub use jit_executor::JitExecutor;
 pub use jit_wrapper::{compile_jit, is_jit_compilable, JitCompiledFunction};
 pub use linter::Linter;
-pub use symbol_index::{extract_symbols, SymbolDef, SymbolIndex, SymbolKind};
+pub use symbol_index::extract_symbols;
+// Types re-exported from crate::symbols for backward compatibility
+pub use crate::symbols::{SymbolDef, SymbolIndex, SymbolKind};

@@ -4,8 +4,8 @@
 //! and returning their locations. Supports the include_declaration parameter
 //! to optionally include the symbol's definition location.
 
-use elle::compiler::symbol_index::SymbolIndex;
 use elle::symbol::SymbolTable;
+use elle::symbols::SymbolIndex;
 use serde_json::{json, Value};
 
 /// Find all references to a symbol at a given position

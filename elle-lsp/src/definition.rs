@@ -3,8 +3,8 @@
 //! Handles textDocument/definition requests by finding symbol
 //! definitions using the symbol index and returning their locations.
 
-use elle::compiler::symbol_index::SymbolIndex;
 use elle::symbol::SymbolTable;
+use elle::symbols::SymbolIndex;
 use serde_json::{json, Value};
 
 /// Find definition location for a symbol at a given position

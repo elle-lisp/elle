@@ -40,12 +40,14 @@ pub mod error;
 pub mod ffi;
 pub mod formatter;
 pub mod hir;
+pub mod lint;
 pub mod lir;
 pub mod pipeline;
 pub mod primitives;
 pub mod reader;
 pub mod repl;
 pub mod symbol;
+pub mod symbols;
 pub mod syntax;
 pub mod value;
 pub mod value_old;
@@ -58,9 +60,14 @@ pub use compiler::{
     compile_jit, is_jit_compilable, Bytecode, JitCompiledFunction, JitCoordinator, JitExecutor,
 };
 pub use error::{RuntimeError, SourceLoc};
-pub use pipeline::{compile_all_new, compile_new, eval_new, CompileResult};
+pub use lint::diagnostics::{Diagnostic, Severity};
+pub use pipeline::{
+    analyze_all_new, analyze_new, compile_all_new, compile_new, eval_new, AnalyzeResult,
+    CompileResult,
+};
 pub use primitives::{init_stdlib, register_primitives};
 pub use reader::{read_str, Lexer, Reader};
 pub use symbol::SymbolTable;
+pub use symbols::{get_primitive_documentation, SymbolDef, SymbolIndex, SymbolKind};
 pub use value::{list, Value};
 pub use vm::VM;
