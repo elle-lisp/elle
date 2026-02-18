@@ -1218,6 +1218,102 @@ fn test_yield_across_call_with_handler_case() {
 }
 
 // ============================================================================
+// 16.5. YIELD WITH INTERMEDIATE VALUES ON STACK (Phase 4 - LIR Yield Terminator)
+// ============================================================================
+
+#[test]
+fn test_yield_with_intermediate_values_on_stack() {
+    // Test that intermediate values on the operand stack survive yield/resume.
+    // In (+ 1 (yield 2) 3), the value 1 is pushed before yield, and must be
+    // available after resume to complete the addition.
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn () (+ 1 (yield 2) 3))))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co 10))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    let list_vals = collect_list_ints(&result.unwrap());
+    // First resume: yields 2
+    // Second resume with 10: (+ 1 10 3) = 14
+    assert_eq!(list_vals[0], 2, "First yield should be 2");
+    assert_eq!(list_vals[1], 14, "Final result should be 1 + 10 + 3 = 14");
+}
+
+#[test]
+fn test_yield_with_multiple_intermediate_values() {
+    // Multiple intermediate values on the stack before yield
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn () (+ 1 2 (yield 3) 4 5))))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co 100))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    let list_vals = collect_list_ints(&result.unwrap());
+    // First resume: yields 3
+    // Second resume with 100: (+ 1 2 100 4 5) = 112
+    assert_eq!(list_vals[0], 3, "First yield should be 3");
+    assert_eq!(
+        list_vals[1], 112,
+        "Final result should be 1 + 2 + 100 + 4 + 5 = 112"
+    );
+}
+
+#[test]
+fn test_yield_in_nested_call_with_intermediate_values() {
+    // Yield inside a nested call with intermediate values at multiple levels
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn () (* 2 (+ 1 (yield 5) 3)))))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co 10))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    let list_vals = collect_list_ints(&result.unwrap());
+    // First resume: yields 5
+    // Second resume with 10: (* 2 (+ 1 10 3)) = (* 2 14) = 28
+    assert_eq!(list_vals[0], 5, "First yield should be 5");
+    assert_eq!(
+        list_vals[1], 28,
+        "Final result should be 2 * (1 + 10 + 3) = 28"
+    );
+}
+
+#[test]
+fn test_multiple_yields_with_intermediate_values() {
+    // Multiple yields in sequence, each with intermediate values
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn ()
+          (+ (+ 1 (yield 2) 3)
+             (+ 4 (yield 5) 6)))))
+        (list
+          (coroutine-resume co)
+          (coroutine-resume co 10)
+          (coroutine-resume co 20))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    let list_vals = collect_list_ints(&result.unwrap());
+    // First resume: yields 2
+    // Second resume with 10: (+ 1 10 3) = 14, then yields 5
+    // Third resume with 20: (+ 4 20 6) = 30, then (+ 14 30) = 44
+    assert_eq!(list_vals[0], 2, "First yield should be 2");
+    assert_eq!(list_vals[1], 5, "Second yield should be 5");
+    assert_eq!(
+        list_vals[2], 44,
+        "Final result should be (1+10+3) + (4+20+6) = 44"
+    );
+}
+
+// ============================================================================
 // 17. DEEP CROSS-CALL YIELD TESTS (Phase 3 hardening)
 // ============================================================================
 

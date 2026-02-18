@@ -184,8 +184,11 @@ pub enum LirInstr {
     LabelMarker { label_id: u32 },
 
     // === Coroutines ===
-    /// Yield a value
-    Yield { dst: Reg, value: Reg },
+    /// Load the resume value after a yield.
+    /// This is the first instruction in a yield's resume block.
+    /// At runtime, the resume value is on top of the operand stack
+    /// (pushed by the VM's resume_continuation).
+    LoadResumeValue { dst: Reg },
 
     // === Exception Handling ===
     /// Push exception handler
@@ -255,6 +258,9 @@ pub enum Terminator {
         then_label: Label,
         else_label: Label,
     },
+    /// Yield control with a value. Execution resumes at resume_label
+    /// with the resume value on the stack.
+    Yield { value: Reg, resume_label: Label },
     /// Unreachable (for incomplete blocks)
     Unreachable,
 }
