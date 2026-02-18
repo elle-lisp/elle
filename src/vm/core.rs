@@ -55,6 +55,7 @@ pub struct VM {
     pub pending_tail_call: Option<TailCallInfo>, // (bytecode, constants, env) for pending tail call
     pub coroutine_stack: Vec<Rc<RefCell<Coroutine>>>, // Stack of active coroutines
     pub current_source_loc: Option<crate::reader::SourceLoc>, // Current top-level form's location
+    pub pending_yield: Option<Value>,    // Pending yield value from yield-from delegation
 }
 
 impl VM {
@@ -79,6 +80,7 @@ impl VM {
             pending_tail_call: None,
             coroutine_stack: Vec::new(),
             current_source_loc: None,
+            pending_yield: None,
         }
     }
 
@@ -300,6 +302,17 @@ impl VM {
     /// Check if we're currently inside a coroutine
     pub fn in_coroutine(&self) -> bool {
         !self.coroutine_stack.is_empty()
+    }
+
+    /// Set a pending yield value (used by yield-from delegation)
+    /// The VM will check for this after each instruction and trigger a yield if set.
+    pub fn set_pending_yield(&mut self, value: Value) {
+        self.pending_yield = Some(value);
+    }
+
+    /// Take the pending yield value, if any
+    pub fn take_pending_yield(&mut self) -> Option<Value> {
+        self.pending_yield.take()
     }
 
     /// Resume execution from a saved continuation.

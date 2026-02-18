@@ -61,36 +61,34 @@ fn test_shebang_with_complex_expression() {
 // The threading macros (-> and ->>) are built into the Expander.
 
 #[test]
-#[ignore] // TODO: defmacro in begin doesn't work - Expander is created fresh per compilation
 fn test_defmacro_my_when_true() {
     // Define a simple when macro and test with true condition
     let result = eval(
         "(begin
-           (defmacro my-when (test body) (list 'if test body nil))
+           (defmacro my-when (test body) `(if ,test ,body nil))
            (my-when #t 42))",
     );
     assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
-#[ignore] // TODO: defmacro in begin doesn't work - Expander is created fresh per compilation
 fn test_defmacro_my_when_false() {
     // Define a simple when macro and test with false condition
     let result = eval(
         "(begin
-           (defmacro my-when (test body) (list 'if test body nil))
+           (defmacro my-when (test body) `(if ,test ,body nil))
            (my-when #f 42))",
     );
     assert_eq!(result.unwrap(), Value::NIL);
 }
 
 #[test]
-#[ignore] // TODO: macro? primitive requires runtime macro registry
 fn test_macro_predicate() {
     // Test macro? predicate after defining a macro
+    // macro? is handled at expansion time - it checks if the symbol names a macro
     let result = eval(
         "(begin
-           (defmacro my-when (test body) (list 'if test body nil))
+           (defmacro my-when (test body) `(if ,test ,body nil))
            (macro? my-when))",
     );
     assert_eq!(result.unwrap(), Value::bool(true));
@@ -104,27 +102,32 @@ fn test_macro_predicate_non_macro() {
 }
 
 #[test]
-#[ignore] // TODO: expand-macro requires quoted form and runtime macro registry
 fn test_expand_macro() {
     // Test expand-macro returns the expanded form
+    // expand-macro is handled at expansion time - it expands the quoted form
+    // and returns the result as quoted data
     let result = eval(
         "(begin
-           (defmacro my-when (test body) (list 'if test body nil))
+           (defmacro my-when (test body) `(if ,test ,body nil))
            (expand-macro '(my-when #t 42)))",
     );
     // Should return something like (if #t 42 nil)
     assert!(result.is_ok());
+    // Verify the expanded form is a list starting with 'if
+    let expanded = result.unwrap();
+    let items = expanded.list_to_vec().expect("should be a list");
+    assert_eq!(items.len(), 4); // (if #t 42 nil)
+    assert!(items[0].is_symbol()); // 'if
 }
 
 // ============================================================================
 // 3. Module-Qualified Names
 // ============================================================================
-// The new pipeline's SyntaxReader does NOT parse qualified symbols - it leaves
-// them as-is (see src/reader/syntax_parser.rs line 168). The old Value-based
-// parser handles qualified names via parse_qualified_symbol.
+// Module-qualified names: The lexer parses `module:name` as a single symbol,
+// and the Expander resolves it to the flat primitive name at compile time.
+// For example: string:upcase -> string-upcase, math:abs -> abs
 
 #[test]
-#[ignore] // TODO: module-qualified syntax not yet supported in new pipeline
 fn test_module_qualified_string_upcase() {
     // Test module-qualified syntax: string:upcase
     let result = eval("(string:upcase \"hello\")");
@@ -132,7 +135,6 @@ fn test_module_qualified_string_upcase() {
 }
 
 #[test]
-#[ignore] // TODO: module-qualified syntax not yet supported in new pipeline
 fn test_module_qualified_math_abs() {
     // Test module-qualified syntax: math:abs
     let result = eval("(math:abs -5)");
@@ -392,7 +394,6 @@ fn test_nested_table_operations() {
 }
 
 #[test]
-#[ignore] // TODO: defmacro in begin doesn't work - Expander is created fresh per compilation
 fn test_defmacro_with_quasiquote() {
     // Macro using quasiquote for template
     let result = eval(

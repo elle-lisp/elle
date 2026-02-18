@@ -74,6 +74,10 @@ Syntax / Value tree
 4. **`SyntaxReader` checks for trailing tokens.** Use `check_exhausted()`
    to detect garbage after the expression.
 
+5. **Qualified symbols are single tokens.** `module:name` is lexed as one
+   token, not three. The Expander resolves qualified symbols to flat
+   primitive names at expansion time.
+
 ## Files
 
 | File | Lines | Content |

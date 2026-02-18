@@ -427,8 +427,18 @@ mod tests {
 
     #[test]
     fn test_parse_qualified_symbol() {
-        // Note: The lexer treats ':' as a delimiter, so "list:length" is three tokens.
-        // This test verifies that symbols without colons are parsed correctly.
+        // The lexer now handles module:name as a single qualified symbol
+        let result = lex_and_parse("string:upcase").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "string:upcase"));
+
+        let result = lex_and_parse("math:abs").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "math:abs"));
+
+        // Keywords still work (colon at start)
+        let result = lex_and_parse(":keyword").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Keyword(ref s) if s == "keyword"));
+
+        // Plain symbols still work
         let result = lex_and_parse("list").unwrap();
         assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "list"));
     }

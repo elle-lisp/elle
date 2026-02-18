@@ -34,6 +34,9 @@ pub struct Coroutine {
     /// Saved first-class continuation for yield across call boundaries.
     /// This is a Value containing ContinuationData.
     pub saved_value_continuation: Option<Value>,
+    /// Sub-coroutine for yield-from delegation.
+    /// When set, coroutine-resume transparently forwards to this delegate.
+    pub delegate: Option<Value>,
 }
 
 impl Coroutine {
@@ -44,6 +47,7 @@ impl Coroutine {
             state: CoroutineState::Created,
             yielded_value: None,
             saved_value_continuation: None,
+            delegate: None,
         }
     }
 }
