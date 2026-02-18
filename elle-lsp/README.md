@@ -9,13 +9,15 @@ A Language Server Protocol implementation for Elle Lisp providing real-time IDE 
 - ✅ **Text Synchronization**: Full document sync protocol
 - ✅ **Hover Information**: Show function and symbol information on hover
 - ✅ **Server Initialization**: Proper LSP handshake and shutdown
+- ✅ **Go to Definition**: Navigate to symbol definitions
+- ✅ **Find References**: Find all usages of a symbol
+- ✅ **Code Completion**: Suggest available symbols
+- ✅ **Symbol Renaming**: Refactor with rename-all capability
+- ✅ **Document Formatting**: Format Elle source code
 
 ### Planned
-- [ ] Go to Definition
-- [ ] Find References
-- [ ] Code Completion
-- [ ] Symbol Renaming
 - [ ] Workspace Diagnostics
+- [ ] Semantic Tokens (syntax highlighting via LSP)
 
 ## Installation
 
@@ -89,9 +91,11 @@ The server implements the following LSP capabilities:
 
 #### Features
 - `textDocument/hover`: Provide hover information
-- `textDocument/definition`: Go to symbol definition (placeholder)
-- `textDocument/references`: Find symbol references (placeholder)
-- `textDocument/completion`: Code completion (placeholder)
+- `textDocument/definition`: Go to symbol definition
+- `textDocument/references`: Find symbol references
+- `textDocument/completion`: Code completion
+- `textDocument/rename`: Symbol renaming
+- `textDocument/formatting`: Document formatting
 
 ### Diagnostic Publishing
 Diagnostics are published via `textDocument/publishDiagnostics` using the elle-lint linter.
@@ -134,9 +138,19 @@ Client                          Server
 
 **`lib.rs`**: Library interface for embedding LSP in other tools
 
-**`protocol.rs`**: Protocol-specific types and serialization
+**`compiler_state.rs`**: Document state, compilation, symbol extraction
 
-**`handler.rs`**: Request/response handlers
+**`hover.rs`**: Hover provider
+
+**`completion.rs`**: Completion provider
+
+**`definition.rs`**: Go-to-definition
+
+**`references.rs`**: Find references
+
+**`rename.rs`**: Rename with validation
+
+**`formatting.rs`**: Document formatting via `elle::formatter`
 
 ## Development
 
@@ -189,11 +203,12 @@ for diag in linter.diagnostics() {
 ```
 
 ### Symbol Table Integration
-Future versions will integrate with Elle's symbol table for:
-- Hover information (function signatures, docstrings)
+The LSP server integrates with Elle's `SymbolIndex` (built from HIR) for:
+- Hover information (symbol name, kind, arity, docs)
 - Go to definition (symbol resolution)
 - Find references (symbol usage tracking)
 - Code completion (available symbols)
+- Rename (with validation)
 
 ## Performance Considerations
 
@@ -203,14 +218,9 @@ Future versions will integrate with Elle's symbol table for:
 
 ## Future Enhancements
 
-1. **Code Completion**: Suggest built-in functions and user-defined symbols
-2. **Go to Definition**: Navigate to symbol definitions across files
-3. **Find References**: Find all usages of a symbol
-4. **Symbol Renaming**: Refactor with rename-all capability
-5. **Formatting**: Integrate with code formatter
-6. **Workspace Support**: Handle multi-file workspaces
-7. **Incremental Sync**: Optimize large document changes
-8. **Semantic Tokens**: Provide syntax highlighting via LSP
+1. **Workspace Support**: Handle multi-file workspaces
+2. **Incremental Sync**: Optimize large document changes
+3. **Semantic Tokens**: Provide syntax highlighting via LSP
 
 ## Troubleshooting
 

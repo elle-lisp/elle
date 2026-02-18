@@ -72,11 +72,11 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
    `LResult<Value>` but uses `vm.current_exception` for user-facing errors.
    Errors propagate; they're not swallowed.
 
-3. **Symbol table pointers are set before use.** Some primitives (JIT, macros)
+3. **Symbol table pointers are set before use.** Some primitives (macros)
    need global access to symbol tables. Call `set_*_symbol_table` first.
 
-4. **Thread-local state exists for some primitives.** JIT context, macro
-   symbol table. Clean up with `clear_*` functions.
+4. **Thread-local state exists for some primitives.** Macro symbol table.
+   Clean up with `clear_*` functions.
 
 ## Modules
 
@@ -95,9 +95,8 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `type_check.rs` | `nil?`, `pair?`, `number?`, `string?`, etc. |
 | `higher_order.rs` | `map`, `filter`, `fold`, `apply` |
 | `concurrency.rs` | `spawn`, `join`, `channel`, `send`, `receive` |
-| `coroutines.rs` | `coroutine`, `coroutine-resume`, `coroutine-done?`, `yield-from` |
+| `coroutines.rs` | `coroutine`, `coroutine-resume`, `coroutine-done?`, `yield-from` (delegation) |
 | `exception.rs` | `throw`, `try`, exception utilities |
-| `jit.rs` | `jit-compile`, `jit-compiled?` |
 | `macros.rs` | `defmacro` (compile-time; `macro?` and `expand-macro` are now Expander operations) |
 | `introspection.rs` | `type-of`, `procedure?`, `arity` |
 | `debug.rs` | `debug-print`, `trace` |

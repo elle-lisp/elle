@@ -19,8 +19,8 @@ locals, transitively through parent's captures, or from globals).
 Combined with capture information, this determines which variables need cell
 boxing for correct semantics.
 
-**Effect Inference**: Each expression is tagged with its effect (`Pure`, `IO`,
-or `Divergent`). Effects propagate upward through the tree.
+**Effect Inference**: Each expression is tagged with its effect (`Pure`, `Yields`,
+or `Polymorphic`). Effects propagate upward through the tree.
 
 ## Example
 

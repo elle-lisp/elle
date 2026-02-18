@@ -20,7 +20,7 @@ Primitives are automatically available after VM initialization:
 **NativeFn**: Simple functions that operate on values.
 
 ```rust
-fn prim_add(args: &[Value]) -> LResult<Value> {
+fn prim_add(args: &[Value]) -> Result<Value, Condition> {
     let mut sum = 0i64;
     for arg in args {
         sum += arg.as_int()?;
@@ -47,9 +47,9 @@ fn prim_apply(args: &[Value], vm: &mut VM) -> LResult<Value> {
 
 2. **Implement the function**:
    ```rust
-   pub fn prim_my_func(args: &[Value]) -> LResult<Value> {
+   pub fn prim_my_func(args: &[Value]) -> Result<Value, Condition> {
        if args.len() != 2 {
-           return Err(LError::arity_mismatch(2, args.len()));
+           return Err(Condition::arity_error(2, args.len()));
        }
        // Implementation...
    }
@@ -77,7 +77,7 @@ Use `Arity::AtLeast(n)` for functions that take a minimum number of arguments:
 
 ```rust
 // (+ a b ...) - at least 0 arguments
-fn prim_add(args: &[Value]) -> LResult<Value> {
+fn prim_add(args: &[Value]) -> Result<Value, Condition> {
     args.iter().try_fold(0i64, |acc, v| {
         Ok(acc + v.as_int()?)
     }).map(Value::int)
@@ -86,18 +86,18 @@ fn prim_add(args: &[Value]) -> LResult<Value> {
 
 ## Error Handling
 
-Always use `LResult` and the `LError` builders:
+NativeFn uses `Result<Value, Condition>` with `Condition` builders:
 
 ```rust
 // Type mismatch
-return Err(LError::type_mismatch("integer", value.type_name()));
+return Err(Condition::type_error("integer", value.type_name()));
 
 // Wrong number of arguments
-return Err(LError::arity_mismatch(2, args.len()));
-
-// Custom error
-return Err(LError::runtime_error("something went wrong"));
+return Err(Condition::arity_error(2, args.len()));
 ```
+
+VmAwareFn uses `LResult<Value>` but sets `vm.current_exception` for user-facing
+errors and returns `Ok(Value::NIL)`. Only return `Err(LError)` for VM bugs.
 
 ## See Also
 

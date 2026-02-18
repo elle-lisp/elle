@@ -74,14 +74,11 @@ See `assertions.lisp` for the standard assertion library documentation.
 - **modules.lisp** - Module system (import-file, add-module-path, organization patterns, file-based module integration)
 
 ### Miscellaneous (Tier 5)
-- **jit.lisp** - JIT compilation with each loops and on-demand compilation
 - **syntax-sugar.lisp** - Syntactic sugar features (thread-first/thread-last operators)
 - **coroutines.lisp** - Coroutine creation, resumption, and advanced patterns
 - **meta-programming.lisp** - Macros, meta-programming, quasiquote/unquote, gensym, type-of
 - **higher-order-functions.lisp** - Functions that operate on functions
-
 - **debugging-profiling.lisp** - Debugging and profiling tools
-- **ffi.lisp** - Foreign Function Interface basics
 
 ## Adding Assertions to New Examples
 
@@ -117,9 +114,9 @@ echo $?
 
 ## Statistics
 
-- **Total Examples**: 23 (consolidated from 47)
+- **Total Examples**: 21 (consolidated from 47)
   - 1 assertions library (assertions.lisp)
-  - 22 feature examples
+  - 20 feature examples
 - **Total Assertions**: 632+
 - **Assertion Pass Rate**: 100% (for passing examples)
 - **Coverage**: All major Elle features
@@ -285,12 +282,6 @@ echo $?
   - Arithmetic predicates (even?, odd?)
   - Filtering, counting, and sum operations with predicates
 
-- `jit-compile.elle` + `for-loops-jit.lisp` → **jit.lisp**
-  - JIT compilation basics (jit-compiled?, jit-compilable?)
-  - For loops with JIT support
-  - Literal list unrolling at compile time
-  - Nested loops and performance characteristics
-
 ### Files Renamed
 - `ffi-basics.lisp` → **ffi.lisp**
 - `threading-operators.lisp` → **syntax-sugar.lisp**
@@ -319,8 +310,6 @@ echo $?
 - `math.lisp` (merged into math-operations.lisp)
 - `arithmetic.lisp` (merged into math-operations.lisp)
 - `arithmetic-predicates.lisp` (merged into math-operations.lisp)
-- `jit-compile.elle` (merged into jit.lisp)
-- `for-loops-jit.lisp` (merged into jit.lisp)
 - `universal-length.lisp` (content redistributed to related files)
 - `coroutines-advanced.lisp` (merged into coroutines.lisp)
 - `type-conversion.lisp` (merged into type-checking.lisp, then into types.lisp)
@@ -328,11 +317,10 @@ echo $?
 
 ### Polymorphic `length` Function Notes
 The `length` function is polymorphic and works on all sequence types:
-- **Lists**: See `list-operations.lisp`
+- **Lists**: See `lists-and-vectors.lisp`
 - **Strings**: See `string-operations.lisp`
-- **Vectors**: See `vector-operations.lisp`
+- **Vectors**: See `lists-and-vectors.lisp`
 - **Tables/Structs**: See `tables-and-structs.lisp`
-- **Keywords**: Supported via polymorphic length
 
 Each file now includes a note about the polymorphic nature of `length`.
 
