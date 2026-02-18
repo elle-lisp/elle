@@ -8,3 +8,6 @@ mod integration {
 mod vm {
     include!("vm/mod.rs");
 }
+mod property {
+    include!("property/mod.rs");
+}
