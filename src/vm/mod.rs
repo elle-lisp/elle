@@ -247,6 +247,49 @@ impl VM {
                 }
 
                 Instruction::Return => {
+                    // Check for pending yield before returning
+                    // This handles the case where yield-from sets a pending yield
+                    // and the next instruction is Return
+                    if let Some(yielded_value) = self.take_pending_yield() {
+                        // Check we're in a coroutine context
+                        let coroutine = match self.current_coroutine() {
+                            Some(co) => co.clone(),
+                            None => {
+                                return Err("pending yield outside of coroutine".to_string());
+                            }
+                        };
+
+                        // Save execution context as a continuation frame
+                        // Note: we use ip (after Return) as the continuation point
+                        // When resumed, the Return will execute and complete the coroutine
+                        let saved_stack: Vec<Value> = self.stack.drain(..).collect();
+
+                        let frame = crate::value::ContinuationFrame {
+                            bytecode: Rc::new(bytecode.to_vec()),
+                            constants: Rc::new(constants.to_vec()),
+                            env: closure_env.cloned().unwrap_or_else(|| Rc::new(vec![])),
+                            ip, // IP at the Return instruction
+                            stack: saved_stack,
+                            exception_handlers: self.exception_handlers.clone(),
+                            handling_exception: self.handling_exception,
+                        };
+
+                        let cont_data = crate::value::ContinuationData::new(frame);
+                        let continuation = Value::continuation(cont_data);
+
+                        // Update coroutine state
+                        {
+                            let mut co = coroutine.borrow_mut();
+                            co.state = CoroutineState::Suspended;
+                            co.yielded_value = Some(yielded_value);
+                        }
+
+                        return Ok(VmResult::Yielded {
+                            value: yielded_value,
+                            continuation,
+                        });
+                    }
+
                     let value = control::handle_return(self)?;
                     return Ok(VmResult::Done(value));
                 }
@@ -274,6 +317,47 @@ impl VM {
                     } else if let Some(f) = func.as_vm_aware_fn() {
                         let result = f(args.as_slice(), self)?;
                         self.stack.push(result);
+
+                        // Check for pending yield from yield-from delegation
+                        // This must happen immediately after the VmAwareFn returns,
+                        // before any subsequent instructions (like Return) execute
+                        if let Some(yielded_value) = self.take_pending_yield() {
+                            // Check we're in a coroutine context
+                            let coroutine = match self.current_coroutine() {
+                                Some(co) => co.clone(),
+                                None => {
+                                    return Err("pending yield outside of coroutine".to_string());
+                                }
+                            };
+
+                            // Save execution context as a continuation frame
+                            let saved_stack: Vec<Value> = self.stack.drain(..).collect();
+
+                            let frame = crate::value::ContinuationFrame {
+                                bytecode: Rc::new(bytecode.to_vec()),
+                                constants: Rc::new(constants.to_vec()),
+                                env: closure_env.cloned().unwrap_or_else(|| Rc::new(vec![])),
+                                ip, // IP after the Call instruction
+                                stack: saved_stack,
+                                exception_handlers: self.exception_handlers.clone(),
+                                handling_exception: self.handling_exception,
+                            };
+
+                            let cont_data = crate::value::ContinuationData::new(frame);
+                            let continuation = Value::continuation(cont_data);
+
+                            // Update coroutine state
+                            {
+                                let mut co = coroutine.borrow_mut();
+                                co.state = CoroutineState::Suspended;
+                                co.yielded_value = Some(yielded_value);
+                            }
+
+                            return Ok(VmResult::Yielded {
+                                value: yielded_value,
+                                continuation,
+                            });
+                        }
                     } else if let Some(closure) = func.as_closure() {
                         self.call_depth += 1;
                         if self.call_depth > 1000 {
@@ -831,6 +915,46 @@ impl VM {
                     // isolation restores the outer frame's handlers.
                     return Ok(VmResult::Done(Value::NIL));
                 }
+            }
+
+            // Check for pending yield from yield-from delegation
+            // This allows yield-from to trigger a yield from within a primitive function
+            if let Some(yielded_value) = self.take_pending_yield() {
+                // Check we're in a coroutine context
+                let coroutine = match self.current_coroutine() {
+                    Some(co) => co.clone(),
+                    None => {
+                        return Err("pending yield outside of coroutine".to_string());
+                    }
+                };
+
+                // Save execution context as a continuation frame
+                let saved_stack: Vec<Value> = self.stack.drain(..).collect();
+
+                let frame = crate::value::ContinuationFrame {
+                    bytecode: Rc::new(bytecode.to_vec()),
+                    constants: Rc::new(constants.to_vec()),
+                    env: closure_env.cloned().unwrap_or_else(|| Rc::new(vec![])),
+                    ip, // IP after the current instruction
+                    stack: saved_stack,
+                    exception_handlers: self.exception_handlers.clone(),
+                    handling_exception: self.handling_exception,
+                };
+
+                let cont_data = crate::value::ContinuationData::new(frame);
+                let continuation = Value::continuation(cont_data);
+
+                // Update coroutine state
+                {
+                    let mut co = coroutine.borrow_mut();
+                    co.state = CoroutineState::Suspended;
+                    co.yielded_value = Some(yielded_value);
+                }
+
+                return Ok(VmResult::Yielded {
+                    value: yielded_value,
+                    continuation,
+                });
             }
         }
     }

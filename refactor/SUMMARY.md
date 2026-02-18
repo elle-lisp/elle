@@ -50,6 +50,16 @@ are locals. Mutable captures use `LocalCell`. `cell_params_mask` on
 | B.3 | LocationMap: source locations flow through entire pipeline |
 | B.4 | Thread transfer tests: closures transfer with location data |
 
+### Phase C: Macros and modules (Feb 2026)
+
+| Component | What |
+|-----------|------|
+| C.1 | Quasiquote templates: `eval_quasiquote_to_syntax` for direct Syntax tree construction |
+| C.2 | Compile-time macro operations: `macro?` and `expand-macro` in Expander |
+| C.3 | Module-qualified names: lexer recognizes `module:name`, Expander resolves to flat names |
+| C.4 | yield-from delegation: `delegate` field on Coroutine, proper suspension semantics |
+| Tests | All 8 previously-ignored tests now pass; zero ignored tests remain |
+
 ### Tail call optimization (Feb 2025, PR #272)
 HIR tail-call marking pass (`hir/tailcall.rs`). Lowerer emits
 `LirInstr::TailCall`. VM trampoline via `pending_tail_call`. Handles
@@ -65,9 +75,7 @@ extraction. No dependency on old `Expr` type.
 - `handler-bind` (non-unwinding handlers): stub
 - Signal/restart system: `InvokeRestart` opcode is a no-op
 - Effect enforcement at compile time: not started
-- Module system: `import` emits nil, module-qualified names unsupported
-- defmacro persistence across compilation units
-- yield-from delegation
+- Module system: `import` emits nil (module-qualified names now supported)
 
 ### Error system
 The unified `LError` from the original plan was never implemented. Current

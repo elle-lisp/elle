@@ -10,6 +10,13 @@ fn is_delimiter(c: char) -> bool {
     )
 }
 
+/// Check if a character can start a symbol name (for qualified name parsing).
+/// Used to determine if `module:name` should be read as a single qualified symbol.
+#[inline]
+fn is_symbol_start(c: char) -> bool {
+    c.is_alphabetic() || matches!(c, '_' | '-' | '+' | '*' | '/' | '!' | '?' | '<' | '>' | '=')
+}
+
 pub struct Lexer<'a> {
     input: &'a str,
     bytes: &'a [u8],
@@ -168,12 +175,24 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Read a symbol and return a slice of the original input
+    /// Read a symbol and return a slice of the original input.
+    /// Handles qualified names like `module:name` as a single symbol.
     fn read_symbol(&mut self) -> (usize, usize) {
         let start = self.pos;
         while let Some(c) = self.current() {
             // Use fast delimiter check instead of string contains()
             if c.is_whitespace() || is_delimiter(c) {
+                // Check for qualified name: if we hit ':' and next char can start a symbol,
+                // continue reading as a qualified name
+                if c == ':' {
+                    if let Some(next) = self.peek(1) {
+                        if is_symbol_start(next) {
+                            // Include the colon and continue reading
+                            self.advance(); // consume ':'
+                            continue;
+                        }
+                    }
+                }
                 break;
             }
             self.advance();

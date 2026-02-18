@@ -95,10 +95,10 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `type_check.rs` | `nil?`, `pair?`, `number?`, `string?`, etc. |
 | `higher_order.rs` | `map`, `filter`, `fold`, `apply` |
 | `concurrency.rs` | `spawn`, `join`, `channel`, `send`, `receive` |
-| `coroutines.rs` | `coroutine`, `coroutine-resume`, `coroutine-done?` |
+| `coroutines.rs` | `coroutine`, `coroutine-resume`, `coroutine-done?`, `yield-from` |
 | `exception.rs` | `throw`, `try`, exception utilities |
 | `jit.rs` | `jit-compile`, `jit-compiled?` |
-| `macros.rs` | `defmacro`, `macroexpand` |
+| `macros.rs` | `defmacro` (compile-time; `macro?` and `expand-macro` are now Expander operations) |
 | `introspection.rs` | `type-of`, `procedure?`, `arity` |
 | `debug.rs` | `debug-print`, `trace` |
 

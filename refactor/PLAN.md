@@ -36,8 +36,7 @@ blocks. The emitter carries stack simulation state across yield boundaries.
 
 ### What still needs work
 
-- **8 ignored tests** — yield-from delegation (1), defmacro persistence
-  (3), macro? primitive (1), expand-macro (1), module-qualified names (2).
+- None. All 8 previously-ignored tests now pass.
 
 ## Completed phases
 
@@ -72,22 +71,32 @@ Removed dead code, migrated types, implemented source location tracking.
 - Property tests for closure transfer with location data
 - Integration tests for cross-thread error reporting
 
-## What we're doing next
+## Completed phases (continued)
 
-### Phase C: Macros and modules
+### Phase C: Macros and modules (COMPLETED)
 
-Un-ignore the 7 macro/module tests by implementing:
+Un-ignored and fixed all 8 macro/module tests:
 
-- **defmacro persistence** — the Expander needs to persist across
-  compilations within a session. Currently created fresh per `compile_new`
-  call, so macros defined in one form aren't visible in the next.
+#### C.1: Quasiquote macro templates
+- Added `eval_quasiquote_to_syntax` to Expander for direct Syntax tree construction
+- Quasiquote templates in `defmacro` now produce actual Syntax trees, not `(list ...)` calls
+- Updated macro tests to use quasiquote templates
 
-- **macro? primitive** — requires runtime access to the macro registry.
+#### C.2: macro? and expand-macro at compile time
+- `macro?` checks Expander's macro registry at expansion time, returns `#t`/`#f` literal
+- `expand-macro` expands quoted form at expansion time, wraps result in quote
+- Both handled in Expander, not as runtime primitives
 
-- **expand-macro** — requires runtime macro expansion on quoted forms.
+#### C.3: Module-qualified names
+- Lexer recognizes `module:name` as single qualified symbol token
+- Expander resolves qualified symbols to flat primitive names (`string:upcase` → `string-upcase`)
+- Module registry covers string, math, list, json modules
 
-- **Module-qualified names** — `string/upcase`, `math/abs` syntax in the
-  new pipeline. The HIR analyzer needs to resolve `module/name` references.
+#### C.4: yield-from coroutine delegation
+- Added `delegate` field to Coroutine struct
+- `coroutine-resume` forwards to delegate when set
+- `yield-from` sets delegate and pending_yield for proper suspension
+- Full delegation: outer yields inner's values until inner completes, then continues
 
 ### Phase D: Documentation cleanup
 
@@ -122,6 +131,3 @@ Phase C complete, LIR stable.
 - `handler-bind` is a stub (parsed, codegen ignores handlers)
 - `InvokeRestart` opcode allocated but VM handler is no-op
 - `signal`/`warn`/`error` are constructors, not signaling primitives
-- yield-from delegation not implemented
-- defmacro doesn't persist across compilation units
-- Module-qualified names not supported

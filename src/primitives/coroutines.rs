@@ -147,6 +147,60 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
     let resume_value = args.get(1).cloned().unwrap_or(Value::EMPTY_LIST);
 
     if let Some(co) = args[0].as_coroutine() {
+        // Check for yield-from delegation
+        // If this coroutine has a delegate, forward the resume to it
+        {
+            let borrowed = co.borrow();
+            if let Some(delegate_val) = borrowed.delegate {
+                drop(borrowed); // Release borrow before recursive call
+
+                // Resume the delegate
+                let delegate_result = prim_coroutine_resume(&[delegate_val, resume_value], vm)?;
+
+                // Check delegate state
+                if let Some(delegate_co) = delegate_val.as_coroutine() {
+                    let delegate_state = {
+                        let delegate_borrowed = delegate_co.borrow();
+                        delegate_borrowed.state.clone()
+                    };
+
+                    match delegate_state {
+                        CoroutineState::Done => {
+                            // Delegate completed - clear delegation and complete outer
+                            let mut outer_borrowed = co.borrow_mut();
+                            outer_borrowed.delegate = None;
+                            outer_borrowed.state = CoroutineState::Done;
+                            outer_borrowed.yielded_value = Some(delegate_result);
+                            return Ok(delegate_result);
+                        }
+                        CoroutineState::Suspended => {
+                            // Delegate yielded - outer stays suspended, return yielded value
+                            let mut outer_borrowed = co.borrow_mut();
+                            outer_borrowed.yielded_value = Some(delegate_result);
+                            return Ok(delegate_result);
+                        }
+                        CoroutineState::Error(e) => {
+                            // Delegate errored - propagate error
+                            let mut outer_borrowed = co.borrow_mut();
+                            outer_borrowed.delegate = None;
+                            outer_borrowed.state = CoroutineState::Error(e.clone());
+                            let cond = Condition::error(format!(
+                                "yield-from: delegate coroutine errored: {}",
+                                e
+                            ));
+                            vm.current_exception = Some(std::rc::Rc::new(cond));
+                            return Ok(Value::NIL);
+                        }
+                        _ => {
+                            // Unexpected state - just return the result
+                            return Ok(delegate_result);
+                        }
+                    }
+                }
+                return Ok(delegate_result);
+            }
+        }
+
         // Borrow mutably to update the coroutine state
         let mut borrowed = co.borrow_mut();
 
@@ -188,6 +242,20 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
 
                 // Execute the closure with coroutine support
                 let result = vm.execute_bytecode_coroutine(&bytecode, &constants, Some(&env_rc));
+
+                // Check for pending yield from yield-from delegation BEFORE exiting
+                // coroutine context. If there's a pending yield, the coroutine should
+                // be suspended, not done.
+                if let Some(yielded_value) = vm.take_pending_yield() {
+                    // yield-from triggered a yield - coroutine is suspended
+                    vm.exit_coroutine();
+                    let mut borrowed = co.borrow_mut();
+                    borrowed.state = CoroutineState::Suspended;
+                    borrowed.yielded_value = Some(yielded_value);
+                    // Note: delegate is already set by yield-from
+                    // No continuation needed - delegation handles resume
+                    return Ok(yielded_value);
+                }
 
                 // Exit coroutine context
                 vm.exit_coroutine();
@@ -312,6 +380,13 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
 ///
 /// Yields all values from the sub-coroutine until it completes,
 /// then returns the sub-coroutine's final value.
+///
+/// When a coroutine executes `(yield-from sub-coroutine)`:
+/// 1. The outer coroutine sets `delegate` to the sub-coroutine
+/// 2. The sub-coroutine is resumed once to get its first yielded value
+/// 3. The outer coroutine yields that value (suspends via pending_yield)
+/// 4. Subsequent resumes of the outer coroutine transparently forward to the delegate
+/// 5. When the delegate completes, the outer coroutine continues after yield-from
 pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> LResult<Value> {
     if args.len() != 1 {
         let cond = Condition::arity_error(format!(
@@ -322,21 +397,18 @@ pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> LResult<Value> {
         return Ok(Value::NIL);
     }
 
-    if let Some(co) = args[0].as_coroutine() {
-        // Resume the sub-coroutine once
+    if let Some(sub_co) = args[0].as_coroutine() {
+        // Check sub-coroutine state
         let state = {
-            let borrowed = co.borrow();
+            let borrowed = sub_co.borrow();
             borrowed.state.clone()
         };
 
         match &state {
-            CoroutineState::Created | CoroutineState::Suspended => {
-                // Resume the coroutine once
-                prim_coroutine_resume(&[args[0]], vm)
-            }
             CoroutineState::Done => {
-                let borrowed = co.borrow();
-                Ok(borrowed.yielded_value.unwrap_or(Value::NIL))
+                // Sub-coroutine already done - just return its final value
+                let borrowed = sub_co.borrow();
+                Ok(borrowed.yielded_value.unwrap_or(Value::EMPTY_LIST))
             }
             CoroutineState::Error(e) => {
                 let cond = Condition::error(format!("yield-from: sub-coroutine errored: {}", e));
@@ -347,6 +419,60 @@ pub fn prim_yield_from(args: &[Value], vm: &mut VM) -> LResult<Value> {
                 let cond = Condition::error("yield-from: sub-coroutine is already running");
                 vm.current_exception = Some(std::rc::Rc::new(cond));
                 Ok(Value::NIL)
+            }
+            CoroutineState::Created | CoroutineState::Suspended => {
+                // Get the outer (current) coroutine
+                let outer_co = match vm.current_coroutine() {
+                    Some(co) => co.clone(),
+                    None => {
+                        let cond = Condition::error("yield-from: not inside a coroutine");
+                        vm.current_exception = Some(std::rc::Rc::new(cond));
+                        return Ok(Value::NIL);
+                    }
+                };
+
+                // Resume the sub-coroutine once to get its first value
+                let result = prim_coroutine_resume(&[args[0]], vm)?;
+
+                // Check sub-coroutine state after resume
+                let state_after = {
+                    let borrowed = sub_co.borrow();
+                    borrowed.state.clone()
+                };
+
+                match state_after {
+                    CoroutineState::Done => {
+                        // Sub-coroutine completed immediately - return its final value
+                        // No delegation needed
+                        Ok(result)
+                    }
+                    CoroutineState::Suspended => {
+                        // Sub-coroutine yielded - set up delegation
+                        {
+                            let mut borrowed = outer_co.borrow_mut();
+                            borrowed.delegate = Some(args[0]);
+                        }
+
+                        // Trigger a yield from the outer coroutine using pending_yield
+                        // The VM's instruction loop will check for this and create a
+                        // proper yield with continuation capture
+                        vm.set_pending_yield(result);
+
+                        // Return the result (will be ignored since pending_yield triggers yield)
+                        Ok(result)
+                    }
+                    CoroutineState::Error(e) => {
+                        // Sub-coroutine errored during resume
+                        let cond =
+                            Condition::error(format!("yield-from: sub-coroutine errored: {}", e));
+                        vm.current_exception = Some(std::rc::Rc::new(cond));
+                        Ok(Value::NIL)
+                    }
+                    _ => {
+                        // Unexpected state
+                        Ok(result)
+                    }
+                }
             }
         }
     } else {

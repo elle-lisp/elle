@@ -289,7 +289,6 @@ fn test_calling_yielding_function_propagates_effect() {
 // ============================================================================
 
 #[test]
-#[ignore] // Requires CPS rework: yield-from delegation not fully implemented
 fn test_yield_from_basic() {
     // (define inner (fn () (yield 1) (yield 2)))
     // (define outer (fn () (yield-from (make-coroutine inner)) (yield 3)))

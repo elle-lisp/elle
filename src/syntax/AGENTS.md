@@ -24,6 +24,8 @@ Does NOT:
 | `ScopeId` | Unique scope identifier for hygiene |
 | `Expander` | Macro expansion engine |
 | `MacroDef` | Macro definition |
+| `resolve_qualified_symbol()` | Resolve `module:name` to flat primitive name |
+| `eval_quasiquote_to_syntax()` | Evaluate quasiquote template to Syntax tree |
 
 ## Data flow
 
@@ -35,6 +37,9 @@ Expander
     ├─► check for macro calls
     ├─► substitute parameters
     ├─► add expansion scope
+    ├─► handle macro? (check registry, return #t/#f literal)
+    ├─► handle expand-macro (expand quoted form, wrap in quote)
+    ├─► resolve module:name to flat primitives
     └─► recurse on result
     │
     ▼
@@ -62,6 +67,19 @@ Analyzer (hir)
 
 4. **Macro arity is checked.** Wrong argument count → error, not silent
    misbehavior.
+
+5. **macro? and expand-macro are compile-time.** Both are handled by the
+   Expander during expansion, not as runtime primitives. `macro?` checks
+   the macro registry and returns a literal `#t` or `#f`. `expand-macro`
+   expands a quoted form and wraps the result in quote.
+
+6. **Quasiquote templates produce Syntax trees.** `eval_quasiquote_to_syntax`
+   evaluates quasiquote templates directly to Syntax, not to `(list ...)`
+   runtime calls. This ensures macro-generated code has proper spans.
+
+7. **Module-qualified names are resolved at expansion time.** `module:name`
+   is recognized by the lexer as a single token, then resolved by the
+   Expander to a flat primitive name (e.g., `string:upcase` → `string-upcase`).
 
 ## Hygiene
 
