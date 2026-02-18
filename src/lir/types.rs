@@ -1,6 +1,7 @@
 //! LIR type definitions
 
 use crate::effects::Effect;
+use crate::syntax::Span;
 use crate::value::SymbolId;
 
 /// Virtual register
@@ -63,12 +64,38 @@ impl LirFunction {
     }
 }
 
+/// An LIR instruction with source location
+#[derive(Debug, Clone)]
+pub struct SpannedInstr {
+    pub instr: LirInstr,
+    pub span: Span,
+}
+
+impl SpannedInstr {
+    pub fn new(instr: LirInstr, span: Span) -> Self {
+        SpannedInstr { instr, span }
+    }
+}
+
+/// A terminator with source location
+#[derive(Debug, Clone)]
+pub struct SpannedTerminator {
+    pub terminator: Terminator,
+    pub span: Span,
+}
+
+impl SpannedTerminator {
+    pub fn new(terminator: Terminator, span: Span) -> Self {
+        SpannedTerminator { terminator, span }
+    }
+}
+
 /// A basic block - sequence of instructions ending in a terminator
 #[derive(Debug, Clone)]
 pub struct BasicBlock {
     pub label: Label,
-    pub instructions: Vec<LirInstr>,
-    pub terminator: Terminator,
+    pub instructions: Vec<SpannedInstr>,
+    pub terminator: SpannedTerminator,
 }
 
 impl BasicBlock {
@@ -76,7 +103,7 @@ impl BasicBlock {
         BasicBlock {
             label,
             instructions: Vec::new(),
-            terminator: Terminator::Unreachable,
+            terminator: SpannedTerminator::new(Terminator::Unreachable, Span::synthetic()),
         }
     }
 }

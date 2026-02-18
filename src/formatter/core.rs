@@ -121,7 +121,6 @@ fn format_value(
                 return "{{...}}".to_string();
             }
             HeapObject::Closure(_) => return "#<closure>".to_string(),
-            HeapObject::JitClosure(_) => return "#<jit-closure>".to_string(),
             HeapObject::NativeFn(_) => return "#<native-fn>".to_string(),
             HeapObject::VmAwareFn(_) => return "#<vm-aware-fn>".to_string(),
             HeapObject::LibHandle(_) => return "#<lib-handle>".to_string(),

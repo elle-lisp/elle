@@ -2,6 +2,7 @@
 
 use super::types::*;
 use crate::hir::{BindingId, BindingInfo, BindingKind, Hir, HirKind, HirPattern, PatternLiteral};
+use crate::syntax::Span;
 use crate::value::Value;
 use std::collections::HashMap;
 
@@ -26,6 +27,8 @@ pub struct Lowerer {
     /// Set of bindings that are upvalues (captures/parameters in lambda)
     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal
     upvalue_bindings: std::collections::HashSet<BindingId>,
+    /// Current span for emitted instructions
+    current_span: Span,
 }
 
 impl Lowerer {
@@ -40,6 +43,7 @@ impl Lowerer {
             in_lambda: false,
             num_captures: 0,
             upvalue_bindings: std::collections::HashSet::new(),
+            current_span: Span::synthetic(),
         }
     }
 
@@ -163,6 +167,9 @@ impl Lowerer {
     }
 
     fn lower_expr(&mut self, hir: &Hir) -> Result<Reg, String> {
+        // Set the current span for all instructions emitted while lowering this HIR node
+        self.current_span = hir.span.clone();
+
         match &hir.kind {
             HirKind::Nil => self.emit_const(LirConst::Nil),
             HirKind::EmptyList => self.emit_const(LirConst::EmptyList),
@@ -1479,7 +1486,9 @@ impl Lowerer {
     }
 
     fn emit(&mut self, instr: LirInstr) {
-        self.current_block.instructions.push(instr);
+        self.current_block
+            .instructions
+            .push(SpannedInstr::new(instr, self.current_span.clone()));
     }
 
     fn emit_const(&mut self, c: LirConst) -> Result<Reg, String> {
@@ -1495,7 +1504,7 @@ impl Lowerer {
     }
 
     fn terminate(&mut self, term: Terminator) {
-        self.current_block.terminator = term;
+        self.current_block.terminator = SpannedTerminator::new(term, self.current_span.clone());
     }
 
     fn finish_block(&mut self) {
@@ -1558,7 +1567,7 @@ mod tests {
         assert!(func.blocks[0]
             .instructions
             .iter()
-            .any(|i| matches!(i, LirInstr::JumpIfFalseInline { .. })));
+            .any(|si| matches!(si.instr, LirInstr::JumpIfFalseInline { .. })));
     }
 
     #[test]

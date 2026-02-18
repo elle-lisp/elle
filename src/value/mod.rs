@@ -6,11 +6,14 @@
 pub mod closure;
 pub mod condition;
 pub mod continuation;
+pub mod coroutine;
 pub mod display;
+pub mod ffi;
 pub mod heap;
 pub mod intern;
 pub mod repr;
 pub mod send;
+pub mod types;
 
 // Export the new NaN-boxed Value as the canonical Value type
 pub use repr::{cons, list, Value};
@@ -27,8 +30,12 @@ pub use send::SendValue;
 // Export continuation types
 pub use continuation::{ContinuationData, ContinuationFrame, ExceptionHandler};
 
-// Re-export supporting types from value_old (closures, coroutines, etc)
-pub use crate::value_old::{
-    Arity, CHandle, Closure, Coroutine, CoroutineState, JitClosure, JitLambda, LibHandle, NativeFn,
-    SymbolId, TableKey, ThreadHandle, VmAwareFn,
-};
+// Export core types
+pub use types::{Arity, NativeFn, SymbolId, TableKey, VmAwareFn};
+
+// Export closure and coroutine types
+pub use closure::Closure;
+pub use coroutine::{Coroutine, CoroutineState};
+
+// Export FFI types
+pub use ffi::{CHandle, LibHandle, ThreadHandle};

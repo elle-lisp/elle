@@ -4,7 +4,7 @@ This document outlines the plan to unify Elle's execution model around
 first-class continuations in bytecode/LIR, eliminating the separate CPS
 interpreter path.
 
-## Current State (Post-Phase 3)
+## Current State (Post-Phase 4)
 
 Elle now has a **single execution path** for all coroutines:
 
@@ -655,13 +655,15 @@ built incrementally as yields propagate through call boundaries.
 - [x] 3.5: Exception check at start of instruction loop (for cross-frame propagation)
 - [x] 3.6: Tail call handling in `execute_bytecode_from_ip_with_state`
 
-### Phase 4: LIR Continuation Instructions (future)
-- [ ] Yield as LIR terminator
-- [ ] Explicit continuation capture/apply in LIR
-- [ ] Prerequisite: JIT consumes LIR (currently uses old Expr AST)
+### Phase 4: LIR Continuation Instructions
+- [x] Yield as LIR terminator (`Terminator::Yield { value, resume_label }`)
+- [x] `LoadResumeValue` pseudo-instruction for resume blocks
+- [x] Emitter carries stack state across yield boundaries
+- [x] Multi-block functions for yielding code
+- [ ] Explicit continuation capture/apply in LIR (deferred — not needed for bytecode path)
 
-### Phase 5: JIT Support for Yields (future)
-- [ ] Rewrite JIT to consume LIR
+### Phase 5: JIT Support for Yields (future — blocked on JIT rewrite)
+- [ ] Rewrite JIT to consume LIR (prerequisite: Phase B removes old JIT)
 - [ ] Compile Yield terminator in Cranelift
 - [ ] Continuation resume in JIT
 

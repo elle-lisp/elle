@@ -3,10 +3,8 @@
 //! This module implements effect inference for colorless coroutines.
 //! Effects track whether an expression may suspend execution (yield).
 
-mod inference;
 mod primitives;
 
-pub use inference::EffectContext;
 pub use primitives::register_primitive_effects;
 
 use std::fmt;

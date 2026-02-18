@@ -10,7 +10,6 @@ pub mod file_io;
 pub mod higher_order;
 pub mod higher_order_def;
 pub mod introspection;
-pub mod jit;
 pub mod json;
 pub mod list;
 pub mod logic;
@@ -30,8 +29,6 @@ pub mod type_check;
 pub mod utility;
 pub mod vector;
 
-pub use jit::{clear_jit_context, init_jit_context, set_jit_symbol_table};
 pub use list::{clear_length_symbol_table, set_length_symbol_table};
-pub use macros::{clear_macro_symbol_table, set_macro_symbol_table};
 pub use module_init::init_stdlib;
 pub use registration::register_primitives;

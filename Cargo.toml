@@ -13,10 +13,6 @@ smallvec = "1.11"
 libloading = "0.8"
 bindgen = "0.69"
 rustyline = "14"
-cranelift = "0.101"
-cranelift-module = "0.101"
-cranelift-jit = "0.101"
-cranelift-native = "0.101"
 target-lexicon = "0.12"
 
 [dev-dependencies]
@@ -39,12 +35,4 @@ harness = false
 
 [[bench]]
 name = "iai_benchmarks"
-harness = false
-
-[[bench]]
-name = "cranelift_jit_benchmarks"
-harness = false
-
-[[bench]]
-name = "jit_vs_bytecode"
 harness = false

@@ -50,15 +50,12 @@ pub mod symbol;
 pub mod symbols;
 pub mod syntax;
 pub mod value;
-pub mod value_old;
 pub mod vm;
 
 // Re-export ffi primitives from the ffi module
 pub use ffi::primitives as ffi_primitives;
 
-pub use compiler::{
-    compile_jit, is_jit_compilable, Bytecode, JitCompiledFunction, JitCoordinator, JitExecutor,
-};
+pub use compiler::Bytecode;
 pub use error::{RuntimeError, SourceLoc};
 pub use lint::diagnostics::{Diagnostic, Severity};
 pub use pipeline::{

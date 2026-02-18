@@ -118,9 +118,6 @@ impl SendValue {
             // Unsafe: closures (contain function pointers and mutable state)
             HeapObject::Closure(_) => Err("Cannot send closure directly".to_string()),
 
-            // Unsafe: JIT closures
-            HeapObject::JitClosure(_) => Err("Cannot send JIT closure directly".to_string()),
-
             // Unsafe: native functions (contain function pointers)
             HeapObject::NativeFn(_) => Err("Cannot send native function".to_string()),
 

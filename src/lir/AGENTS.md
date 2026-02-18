@@ -22,36 +22,55 @@ Does NOT:
 | `LirFunction` | Compilation unit: blocks, constants, metadata |
 | `BasicBlock` | Instructions + terminator |
 | `LirInstr` | Individual operation |
+| `SpannedInstr` | `LirInstr` + `Span` for source tracking |
+| `SpannedTerminator` | `Terminator` + `Span` for source tracking |
 | `Terminator` | How block exits: `Return`, `Jump`, `Branch`, `Yield` |
 | `Reg` | Virtual register |
 | `Label` | Basic block identifier |
 | `Lowerer` | HIR → LIR |
-| `Emitter` | LIR → Bytecode |
+| `Emitter` | LIR → Bytecode + LocationMap |
 
 ## Data flow
 
 ```
-HIR + bindings
+HIR + bindings + spans
     │
     ▼
 Lowerer
     ├─► allocate slots for bindings
     ├─► emit MakeCell for captured locals
     ├─► lower control flow to jumps
-    └─► emit LoadCapture/StoreCapture for upvalues
+    ├─► emit LoadCapture/StoreCapture for upvalues
+    └─► propagate HIR spans to SpannedInstr
     │
     ▼
-LirFunction (basic blocks)
+LirFunction (basic blocks with SpannedInstr)
     │
     ▼
 Emitter
     ├─► simulate stack for register→stack translation
     ├─► patch jump offsets
-    └─► emit Instruction bytes
+    ├─► emit Instruction bytes
+    └─► build LocationMap from SpannedInstr spans
     │
     ▼
-Bytecode
+Bytecode + LocationMap
 ```
+
+## Source location tracking
+
+`SpannedInstr` wraps `LirInstr` with a `Span` for source location tracking:
+
+```rust
+pub struct SpannedInstr {
+    pub instr: LirInstr,
+    pub span: Span,
+}
+```
+
+The lowerer propagates HIR spans to LIR instructions. The emitter builds a
+`LocationMap` that maps bytecode offsets to source locations. This map is
+stored in `Closure.location_map` and used by the VM for error reporting.
 
 ## Dependents
 

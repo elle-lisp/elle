@@ -1,10 +1,7 @@
 use elle::ffi::primitives::context::set_symbol_table;
 use elle::ffi_primitives;
 use elle::pipeline::{compile_all_new, compile_new};
-use elle::primitives::{
-    clear_jit_context, clear_macro_symbol_table, init_jit_context, set_jit_symbol_table,
-    set_length_symbol_table, set_macro_symbol_table,
-};
+use elle::primitives::set_length_symbol_table;
 use elle::repl::Repl;
 use elle::{init_stdlib, register_primitives, SymbolTable, VM};
 use rustyline::error::ReadlineError;
@@ -387,37 +384,23 @@ fn main() {
     // Set symbol table context for primitives
     set_symbol_table(&mut symbols as *mut SymbolTable);
 
-    // Set symbol table context for macro primitives
-    set_macro_symbol_table(&mut symbols as *mut SymbolTable);
-
     // Set symbol table context for length primitive
     set_length_symbol_table(&mut symbols as *mut SymbolTable);
-
-    // Initialize JIT context for jit-compile primitive
-    init_jit_context();
-    set_jit_symbol_table(&mut symbols as *mut SymbolTable);
 
     // Check for command-line arguments
     let args: Vec<String> = env::args().collect();
     let mut had_errors = false;
-    let mut use_jit = false;
     let mut files = Vec::new();
     let mut read_stdin = false;
 
     // Parse flags and files
     for arg in &args[1..] {
-        if arg == "--jit" {
-            use_jit = true;
-        } else if arg == "-" {
+        if arg == "-" {
             // `-` means read from stdin
             read_stdin = true;
         } else if !arg.starts_with('-') {
             files.push(arg.as_str());
         }
-    }
-
-    if use_jit {
-        eprintln!("Elle: JIT mode enabled (experimental)");
     }
 
     if read_stdin {
@@ -434,7 +417,7 @@ fn main() {
                 had_errors = true;
             }
         }
-    } else if args.len() == 1 || (use_jit && args.len() == 2) {
+    } else if args.len() == 1 {
         // Run REPL
         if run_repl(&mut vm, &mut symbols) {
             had_errors = true;
@@ -443,12 +426,6 @@ fn main() {
 
     // Clear VM context
     ffi_primitives::clear_vm_context();
-
-    // Clear macro symbol table context
-    clear_macro_symbol_table();
-
-    // Clear JIT context
-    clear_jit_context();
 
     if args.len() == 1 {
         println!();

@@ -33,23 +33,8 @@ pub fn prim_signal(args: &[Value]) -> Result<Value, Condition> {
         }
 
         use crate::value::heap::{alloc, HeapObject};
-        // Convert new Condition to old Condition
-        let mut old_cond = crate::value_old::Condition::new(condition.exception_id);
-        old_cond.set_field(
-            crate::value_old::Condition::FIELD_MESSAGE,
-            crate::value_old::Value::String(condition.message.clone().into()),
-        );
-        for (field_id, value) in condition.fields {
-            let old_value = crate::primitives::coroutines::new_value_to_old(value);
-            old_cond.set_field(field_id, old_value);
-        }
-        if let Some(bt) = condition.backtrace {
-            old_cond.backtrace = Some(bt);
-        }
-        if let Some(loc) = condition.location {
-            old_cond.location = Some(loc);
-        }
-        Ok(alloc(HeapObject::Condition(old_cond)))
+        // Store the Condition directly (no conversion needed)
+        Ok(alloc(HeapObject::Condition(condition)))
     } else {
         Err(Condition::type_error(
             "signal: first argument must be an integer (exception ID)".to_string(),
@@ -88,11 +73,8 @@ mod tests {
         let result = prim_signal(&[Value::int(1), Value::int(42), Value::string("test")]).unwrap();
         if let Some(cond) = result.as_condition() {
             assert_eq!(cond.exception_id, 1);
-            assert_eq!(cond.get_field(0), Some(&crate::value_old::Value::Int(42)));
-            assert_eq!(
-                cond.get_field(1),
-                Some(&crate::value_old::Value::String("test".into()))
-            );
+            assert_eq!(cond.get_field(0), Some(&Value::int(42)));
+            assert_eq!(cond.get_field(1), Some(&Value::string("test")));
         } else {
             panic!("Expected Condition");
         }

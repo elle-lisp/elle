@@ -1411,37 +1411,31 @@ fn test_add_module_path_with_vm_context() {
 
 #[test]
 fn test_expand_macro_primitive() {
-    use elle::primitives::{clear_macro_symbol_table, set_macro_symbol_table};
-
     let (vm, mut symbols) = setup();
     let expand = get_primitive(&vm, &mut symbols, "expand-macro");
 
-    // Set the symbol table context for macro primitives
-    set_macro_symbol_table(&mut symbols as *mut SymbolTable);
-
     // Test with a quoted list (macro call form)
+    // In the new pipeline, expand-macro is a placeholder that returns the form unchanged
     let macro_name = symbols.intern("test-macro");
     let arg = Value::int(42);
-    let form = Value::cons(Value::symbol(macro_name.0), Value::cons(arg, Value::NIL));
+    let form = Value::cons(
+        Value::symbol(macro_name.0),
+        Value::cons(arg, Value::EMPTY_LIST),
+    );
 
     let result = call_primitive(&expand, std::slice::from_ref(&form));
-    // Should error because test-macro is not defined as a macro
-    assert!(result.is_err());
-
-    // Clear the context
-    clear_macro_symbol_table();
+    // Should return the form unchanged (placeholder behavior)
+    assert!(result.is_ok());
+    // The result should be the same form we passed in
+    assert!(result.unwrap().is_cons());
 }
 
 #[test]
 fn test_is_macro_primitive() {
-    use elle::primitives::{clear_macro_symbol_table, set_macro_symbol_table};
-
     let (vm, mut symbols) = setup();
     let is_macro = get_primitive(&vm, &mut symbols, "macro?");
 
-    // Set the symbol table context for macro primitives
-    set_macro_symbol_table(&mut symbols as *mut SymbolTable);
-
+    // In the new pipeline, macro? always returns false (macros are expanded at compile time)
     let sym_id = symbols.intern("some-symbol");
     let result = call_primitive(&is_macro, &[Value::symbol(sym_id.0)]);
     assert!(result.is_ok());
@@ -1450,9 +1444,6 @@ fn test_is_macro_primitive() {
     let result = call_primitive(&is_macro, &[Value::int(42)]);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), Value::bool(false));
-
-    // Clear the context
-    clear_macro_symbol_table();
 }
 
 #[test]
@@ -1468,10 +1459,11 @@ fn test_spawn_primitive() {
         num_locals: 0,
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
-        source_ast: None,
+
         effect: elle::effects::Effect::Pure,
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
     });
 
     let result = call_primitive(&spawn, &[closure]);
@@ -1584,10 +1576,11 @@ fn test_profile_primitive() {
         num_locals: 0,
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
-        source_ast: None,
+
         effect: elle::effects::Effect::Pure,
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
     });
 
     let result = call_primitive(&profile, &[closure]);
@@ -1934,10 +1927,11 @@ fn test_json_serialize_errors() {
         num_locals: 0,
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
-        source_ast: None,
+
         effect: elle::effects::Effect::Pure,
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
     });
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());

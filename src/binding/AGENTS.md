@@ -34,12 +34,9 @@ AST traversal
 
 ## Dependents
 
-Used by `compiler/` subsystems:
-- `ast.rs` - AST nodes contain `VarRef`
-- `compile/` - emits different bytecode per `VarRef` variant
-- `cps/` - CPS transform uses `VarRef` for variable access
-- `cranelift/` - JIT needs resolved references
-- `effects/` - effect inference checks `VarRef::Global` for impure calls
+Used by the HIR/LIR pipeline:
+- `hir/` - binding resolution produces `BindingId`
+- `lir/` - lowerer maps `BindingId` to slot indices
 
 ## Invariants
 

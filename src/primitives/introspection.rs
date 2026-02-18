@@ -34,11 +34,7 @@ pub fn prim_condition_field(args: &[Value]) -> Result<Value, Condition> {
     })? as u32;
     if let Some(cond) = args[0].as_condition() {
         match cond.fields.get(&field_id) {
-            Some(val) => {
-                // Convert old Value to new Value
-                let new_value = crate::primitives::coroutines::old_value_to_new(val);
-                Ok(new_value)
-            }
+            Some(val) => Ok(*val),
             None => Ok(Value::NIL),
         }
     } else {

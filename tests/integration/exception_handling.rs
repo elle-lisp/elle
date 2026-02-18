@@ -180,12 +180,12 @@ fn test_exception_in_list_operations() {
 
     assert_eq!(vec.len(), 2);
     let msg1 = if let Some(cond) = vec[0].as_condition() {
-        cond.message().unwrap_or("").to_string()
+        cond.message().to_string()
     } else {
         panic!("Expected condition")
     };
     let msg2 = if let Some(cond) = vec[1].as_condition() {
-        cond.message().unwrap_or("").to_string()
+        cond.message().to_string()
     } else {
         panic!("Expected condition")
     };

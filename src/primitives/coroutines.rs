@@ -12,7 +12,6 @@
 use crate::error::LResult;
 use crate::value::{Condition, Coroutine, CoroutineState, Value};
 use crate::vm::{VmResult, VM};
-use std::rc::Rc;
 
 /// F1: Create a coroutine from a function
 ///
@@ -28,15 +27,6 @@ pub fn prim_make_coroutine(args: &[Value]) -> Result<Value, Condition> {
     if let Some(c) = args[0].as_closure() {
         let coroutine = Coroutine::new((*c).clone());
         Ok(Value::coroutine(coroutine))
-    } else if let Some(jc) = args[0].as_jit_closure() {
-        if let Some(source) = &jc.source {
-            let coroutine = Coroutine::new(source.clone());
-            Ok(Value::coroutine(coroutine))
-        } else {
-            Err(Condition::error(
-                "make-coroutine: JitClosure has no source for coroutine",
-            ))
-        }
     } else {
         Err(Condition::type_error(format!(
             "make-coroutine: expected function, got {}",
@@ -436,174 +426,13 @@ pub fn prim_coroutine_next(args: &[Value], vm: &mut VM) -> LResult<Value> {
     }
 }
 
-/// Convert an old Value to a new Value
-/// This is a utility function for the migration period between value representations
-pub fn old_value_to_new(old_val: &crate::value_old::Value) -> Value {
-    use crate::value::heap::{alloc, HeapObject};
-    use crate::value_old::Value as OldValue;
-    use std::sync::{Arc, Mutex};
-
-    match old_val {
-        OldValue::Nil => Value::NIL,
-        OldValue::Bool(b) => Value::bool(*b),
-        OldValue::Int(i) => Value::int(*i),
-        OldValue::Float(f) => Value::float(*f),
-        OldValue::Symbol(id) => Value::symbol(id.0),
-        OldValue::Keyword(id) => Value::keyword(id.0),
-        OldValue::String(s) => Value::string(s.as_ref()),
-        OldValue::Cons(cons) => {
-            let first = old_value_to_new(&cons.first);
-            let rest = old_value_to_new(&cons.rest);
-            crate::value::cons(first, rest)
-        }
-        OldValue::Table(t) => {
-            let borrowed = t.borrow();
-            let mut new_table = std::collections::BTreeMap::new();
-            for (k, v) in borrowed.iter() {
-                new_table.insert(k.clone(), old_value_to_new(v));
-            }
-            Value::table_from(new_table)
-        }
-        OldValue::Struct(s) => {
-            let mut new_struct = std::collections::BTreeMap::new();
-            for (k, v) in s.iter() {
-                new_struct.insert(k.clone(), old_value_to_new(v));
-            }
-            Value::struct_from(new_struct)
-        }
-        OldValue::Vector(v) => {
-            let new_vals: Vec<Value> = v.iter().map(old_value_to_new).collect();
-            Value::vector(new_vals)
-        }
-        OldValue::Closure(c) => alloc(HeapObject::Closure(c.clone())),
-        OldValue::JitClosure(jc) => alloc(HeapObject::JitClosure(jc.clone())),
-        OldValue::NativeFn(f) => alloc(HeapObject::NativeFn(*f)),
-        OldValue::VmAwareFn(f) => alloc(HeapObject::VmAwareFn(*f)),
-        OldValue::LibHandle(h) => alloc(HeapObject::LibHandle(h.0)),
-        OldValue::CHandle(h) => alloc(HeapObject::CHandle(h.ptr, h.id)),
-        OldValue::Condition(c) => alloc(HeapObject::Condition(c.as_ref().clone())),
-        OldValue::ThreadHandle(_h) => alloc(HeapObject::ThreadHandle(
-            crate::value::heap::ThreadHandleData {
-                result: Arc::new(Mutex::new(None)),
-            },
-        )),
-        OldValue::Cell(c) => {
-            let borrowed = c.borrow();
-            let inner = old_value_to_new(&borrowed);
-            Value::cell(inner)
-        }
-        OldValue::LocalCell(c) => {
-            let borrowed = c.borrow();
-            let inner = old_value_to_new(&borrowed);
-            Value::cell(inner)
-        }
-        OldValue::Coroutine(co) => {
-            // co is Rc<RefCell<Coroutine>>, we need RefCell<Coroutine>
-            let borrowed = co.borrow();
-            alloc(HeapObject::Coroutine(Rc::new(std::cell::RefCell::new(
-                borrowed.clone(),
-            ))))
-        }
-    }
-}
-
-/// Convert a new Value to an old Value
-/// This is a utility function for the migration period between value representations
-pub fn new_value_to_old(val: Value) -> crate::value_old::Value {
-    use crate::value::heap::{deref, HeapObject};
-    use crate::value_old::Value as OldValue;
-
-    if let Some(b) = val.as_bool() {
-        OldValue::Bool(b)
-    } else if let Some(i) = val.as_int() {
-        OldValue::Int(i)
-    } else if let Some(f) = val.as_float() {
-        OldValue::Float(f)
-    } else if let Some(sym_id) = val.as_symbol() {
-        OldValue::Symbol(crate::value::SymbolId(sym_id))
-    } else if let Some(kw_id) = val.as_keyword() {
-        OldValue::Keyword(crate::value::SymbolId(kw_id))
-    } else if val.is_nil() {
-        OldValue::Nil
-    } else if val.is_heap() {
-        unsafe {
-            match deref(val) {
-                HeapObject::String(s) => OldValue::String(s.clone().into()),
-                HeapObject::Cons(cons) => {
-                    OldValue::Cons(std::rc::Rc::new(crate::value_old::Cons {
-                        first: new_value_to_old(cons.first),
-                        rest: new_value_to_old(cons.rest),
-                    }))
-                }
-                HeapObject::Vector(v) => {
-                    let borrowed = v.borrow();
-                    let old_vals: Vec<OldValue> =
-                        borrowed.iter().map(|v| new_value_to_old(*v)).collect();
-                    OldValue::Vector(std::rc::Rc::new(old_vals))
-                }
-                HeapObject::Table(t) => {
-                    let borrowed = t.borrow();
-                    let mut old_table = std::collections::BTreeMap::new();
-                    for (k, v) in borrowed.iter() {
-                        old_table.insert(k.clone(), new_value_to_old(*v));
-                    }
-                    OldValue::Table(std::rc::Rc::new(std::cell::RefCell::new(old_table)))
-                }
-                HeapObject::Struct(s) => {
-                    let mut old_struct = std::collections::BTreeMap::new();
-                    for (k, v) in s.iter() {
-                        old_struct.insert(k.clone(), new_value_to_old(*v));
-                    }
-                    OldValue::Struct(std::rc::Rc::new(old_struct))
-                }
-                HeapObject::Closure(_) => {
-                    // For now, we can't convert closures
-                    OldValue::Nil
-                }
-                HeapObject::JitClosure(_) => {
-                    // For now, we can't convert JIT closures
-                    OldValue::Nil
-                }
-                HeapObject::Condition(_) => {
-                    // For now, we can't convert conditions
-                    OldValue::Nil
-                }
-                HeapObject::Coroutine(_) => {
-                    // For now, we can't convert coroutines
-                    OldValue::Nil
-                }
-                HeapObject::Cell(c, _) => {
-                    let borrowed = c.borrow();
-                    OldValue::Cell(std::rc::Rc::new(std::cell::RefCell::new(Box::new(
-                        new_value_to_old(*borrowed),
-                    ))))
-                }
-                HeapObject::Float(_) => {
-                    // Float values should be handled above
-                    OldValue::Nil
-                }
-                HeapObject::NativeFn(_) => {
-                    // For now, we can't convert native functions
-                    OldValue::Nil
-                }
-                HeapObject::VmAwareFn(_) => {
-                    // For now, we can't convert VM-aware functions
-                    OldValue::Nil
-                }
-                _ => OldValue::Nil,
-            }
-        }
-    } else {
-        OldValue::Nil
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::effects::Effect;
     use crate::value::{Arity, Closure};
     use crate::vm::VM;
+    use std::rc::Rc;
 
     fn make_test_closure() -> Value {
         // Create a closure with bytecode that returns nil
@@ -624,10 +453,10 @@ mod tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![Value::NIL]),
-            source_ast: None,
             effect: Effect::Pure,
             cell_params_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),
+            location_map: Rc::new(crate::error::LocationMap::new()),
         })
     }
 
