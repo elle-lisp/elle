@@ -155,7 +155,7 @@ fn format_cons(
     let mut current = tail;
 
     loop {
-        if current.is_nil() {
+        if current.is_nil() || current.is_empty_list() {
             break;
         }
 

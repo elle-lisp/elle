@@ -228,7 +228,8 @@ impl Emitter {
                 self.bytecode.emit(Instruction::StoreUpvalue);
                 self.bytecode.emit_byte(0); // depth (currently unused)
                 self.bytecode.emit_byte(*index as u8);
-                self.pop();
+                // StoreCapture: VM pops value, stores in cell, pushes it back.
+                // Net stack effect is 0, so don't adjust simulated stack.
             }
 
             LirInstr::LoadGlobal { dst, sym } => {
@@ -289,7 +290,7 @@ impl Emitter {
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
                     constants: Rc::new(nested_bytecode.constants),
-                    effect: func.effect,
+                    effect: func.effect.clone(),
                     cell_params_mask: func.cell_params_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
                     location_map: Rc::new(nested_bytecode.location_map),

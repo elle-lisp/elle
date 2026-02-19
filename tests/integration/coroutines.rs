@@ -1313,6 +1313,65 @@ fn test_multiple_yields_with_intermediate_values() {
 }
 
 // ============================================================================
+// 16.6. RUNTIME EFFECT CHECKS (Pure closure warnings)
+// ============================================================================
+
+#[test]
+fn test_make_coroutine_pure_closure_still_works() {
+    // make-coroutine with a pure closure should still work (just warns to stderr)
+    // The closure has Pure effect because it never yields
+    let result = eval(
+        r#"
+        (let ((co (make-coroutine (fn () 42))))
+          (coroutine-resume co))
+        "#,
+    );
+    assert!(
+        result.is_ok(),
+        "Pure closure in coroutine should still work"
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_make_coroutine_yielding_closure_works() {
+    // make-coroutine with a yielding closure — no warning expected
+    let result = eval(
+        r#"
+        (let ((co (make-coroutine (fn () (yield 42)))))
+          (coroutine-resume co))
+        "#,
+    );
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_coroutine_resume_pure_closure_completes_immediately() {
+    // A pure closure in a coroutine completes on first resume without yielding
+    let result = eval(
+        r#"
+        (define co (make-coroutine (fn () (+ 1 2 3))))
+        (list
+          (coroutine-resume co)
+          (coroutine-status co))
+        "#,
+    );
+    assert!(result.is_ok());
+    // Should return 6 and status should be "done"
+    if let Some(cons) = result.unwrap().as_cons() {
+        assert_eq!(cons.first, Value::int(6), "Pure closure should return 6");
+        if let Some(cons2) = cons.rest.as_cons() {
+            assert_eq!(
+                cons2.first,
+                Value::string("done"),
+                "Status should be done after pure closure completes"
+            );
+        }
+    }
+}
+
+// ============================================================================
 // 17. DEEP CROSS-CALL YIELD TESTS (Phase 3 hardening)
 // ============================================================================
 

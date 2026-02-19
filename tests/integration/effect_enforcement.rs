@@ -13,6 +13,7 @@ use elle::pipeline::analyze_new;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::vm::VM;
+use std::collections::BTreeSet;
 
 fn setup() -> SymbolTable {
     let mut symbols = SymbolTable::new();
@@ -160,11 +161,11 @@ fn test_effect_polymorphic_local_higher_order() {
     // When we call (my-map gen ...), we look up my-map's effect
     // Since my-map is defined with a lambda, we track its body effect
     // The body calls f which is a parameter - we can't resolve that statically
-    // So this will be Pure (conservative)
+    // So this is Yields (sound: unknown callee may yield)
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
-        "Local higher-order function with unknown parameter effect is conservatively Pure"
+        Effect::Yields,
+        "Local higher-order function with unknown parameter effect is conservatively Yields"
     );
 }
 
@@ -181,11 +182,11 @@ fn test_effect_polymorphic_direct_call() {
     .unwrap();
     // apply-fn's body calls f which is a parameter
     // We can't statically resolve the parameter's effect
-    // So this is conservatively Pure
+    // So this is Yields (sound: unknown callee may yield)
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
-        "Higher-order function with parameter call is conservatively Pure"
+        Effect::Yields,
+        "Higher-order function with parameter call is conservatively Yields"
     );
 }
 
@@ -193,20 +194,20 @@ fn test_effect_polymorphic_direct_call() {
 fn test_effect_polymorphic_with_pure_arg() {
     // Calling a global function (map) with pure lambda
     // Since map isn't in primitive_effects (it's defined in stdlib),
-    // the call is conservatively Pure
+    // the call is conservatively Yields (sound: unknown global may yield)
     let mut symbols = setup();
     let result = analyze_new("(map (fn (x) (+ x 1)) (list 1 2 3))", &mut symbols).unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
-        "Call to unknown global with pure function is Pure"
+        Effect::Yields,
+        "Call to unknown global is Yields (sound default)"
     );
 }
 
 #[test]
 fn test_effect_polymorphic_with_yielding_arg_unknown_global() {
     // Calling a global function (map) that isn't in primitive_effects
-    // Even with a yielding argument, we can't resolve the effect
+    // Unknown globals default to Yields for soundness
     let mut symbols = setup();
     let result = analyze_new(
         "(begin (define gen (fn (x) (yield x))) (map gen (list 1 2 3)))",
@@ -214,11 +215,11 @@ fn test_effect_polymorphic_with_yielding_arg_unknown_global() {
     )
     .unwrap();
     // map is not in primitive_effects (it's defined in stdlib, not as a primitive)
-    // So we can't resolve its polymorphic effect
+    // Unknown globals are Yields for soundness
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
-        "Call to unknown global is conservatively Pure"
+        Effect::Yields,
+        "Call to unknown global is Yields (sound default)"
     );
 }
 
@@ -231,19 +232,19 @@ fn test_effect_set_invalidation() {
     // (define f (lambda () 42))
     // (set! f (lambda () (yield 1)))
     // After set!, effect tracking for f is invalidated
-    // Calling f should conservatively be Pure (we don't know the new effect)
+    // Calling f should be Yields (sound: we can't prove it's pure)
     let mut symbols = setup();
     let result = analyze_new(
         "(begin (define f (fn () 42)) (set! f (fn () (yield 1))) (f))",
         &mut symbols,
     )
     .unwrap();
-    // After set!, we conservatively treat the effect as Pure
-    // This is safe because we don't produce false positives
+    // After set!, we conservatively treat the effect as Yields
+    // This is sound: we can't prove the new value is pure
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
-        "After set!, effect should be conservatively Pure"
+        Effect::Yields,
+        "After set!, effect should be Yields (sound default)"
     );
 }
 
@@ -410,5 +411,362 @@ fn test_lambda_body_effect_nested_yield() {
         assert_eq!(body.effect, Effect::Yields);
     } else {
         panic!("Expected Lambda");
+    }
+}
+
+// ============================================================================
+// 9. UNKNOWN GLOBAL SOUNDNESS TESTS
+// ============================================================================
+
+#[test]
+fn test_effect_unknown_global_is_yields() {
+    // Unknown global functions default to Yields (sound)
+    // This is the fix for effect soundness: if we can't prove a global is pure,
+    // we must assume it may yield (since it could be redefined via set!)
+    let mut symbols = setup();
+    let result = analyze_new(
+        "(begin (define f (fn () 42)) (set! f (fn () (yield 1))) (f))",
+        &mut symbols,
+    )
+    .unwrap();
+    assert_eq!(
+        result.hir.effect,
+        Effect::Yields,
+        "Unknown global should be Yields for soundness"
+    );
+}
+
+// ============================================================================
+// 10. UNKNOWN CALLEE SOUNDNESS TESTS
+// ============================================================================
+
+#[test]
+fn test_effect_parameter_call_is_yields() {
+    // Calling a function parameter should be Yields (we can't know its effect)
+    let mut symbols = setup();
+    let result = analyze_new("(fn (f) (f 42))", &mut symbols).unwrap();
+    if let HirKind::Lambda { body, .. } = &result.hir.kind {
+        assert_eq!(
+            body.effect,
+            Effect::Yields,
+            "Calling a function parameter should be Yields (unknown effect)"
+        );
+    } else {
+        panic!("Expected Lambda");
+    }
+}
+
+#[test]
+fn test_effect_let_bound_non_lambda_call_is_yields() {
+    // Calling a let-bound non-lambda should be Yields
+    let mut symbols = setup();
+    let result = analyze_new("(let ((f (first fns))) (f 42))", &mut symbols).unwrap();
+    // f is not a lambda literal, effect unknown → Yields
+    assert_eq!(
+        result.hir.effect,
+        Effect::Yields,
+        "Calling a let-bound non-lambda should be Yields (unknown effect)"
+    );
+}
+
+// ============================================================================
+// 11. AUTOMATIC POLYMORPHIC EFFECT INFERENCE TESTS
+// ============================================================================
+
+#[test]
+fn test_polymorphic_inference_single_param() {
+    // Higher-order function should infer Polymorphic(0)
+    let mut symbols = setup();
+    let result = analyze_new("(define apply-fn (fn (f x) (f x)))", &mut symbols).unwrap();
+
+    // Check the lambda's inferred effect
+    if let HirKind::Define { value, .. } = &result.hir.kind {
+        if let HirKind::Lambda {
+            inferred_effect, ..
+        } = &value.kind
+        {
+            assert_eq!(
+                *inferred_effect,
+                Effect::polymorphic(0),
+                "apply-fn should have Polymorphic(0) effect"
+            );
+        } else {
+            panic!("Expected Lambda");
+        }
+    } else {
+        panic!("Expected Define");
+    }
+}
+
+#[test]
+fn test_polymorphic_inference_resolves_pure() {
+    // Calling apply-fn with a pure function should be Pure
+    let mut symbols = setup();
+    let result = analyze_new(
+        "(begin (define apply-fn (fn (f x) (f x))) (apply-fn + 42))",
+        &mut symbols,
+    )
+    .unwrap();
+    assert_eq!(
+        result.hir.effect,
+        Effect::Pure,
+        "Calling polymorphic function with pure arg should be Pure"
+    );
+}
+
+#[test]
+fn test_polymorphic_inference_resolves_yields() {
+    // Calling apply-fn with a yielding lambda should be Yields
+    let mut symbols = setup();
+    let result = analyze_new(
+        "(begin (define apply-fn (fn (f x) (f x))) (apply-fn (fn (x) (yield x)) 42))",
+        &mut symbols,
+    )
+    .unwrap();
+    assert_eq!(
+        result.hir.effect,
+        Effect::Yields,
+        "Calling polymorphic function with yielding arg should be Yields"
+    );
+}
+
+#[test]
+fn test_polymorphic_inference_my_map() {
+    // User-defined recursive map - the recursive call happens before my-map is
+    // fully defined, so the recursive call is treated as unknown (Yields).
+    // This is a known limitation of single-pass analysis.
+    let mut symbols = setup();
+    let result = analyze_new(
+        r#"(begin 
+           (define my-map (fn (f xs) 
+             (if (empty? xs) (list) 
+                 (cons (f (first xs)) (my-map f (rest xs))))))
+           (my-map + (list 1 2 3)))"#,
+        &mut symbols,
+    )
+    .unwrap();
+    // Due to the recursive call being analyzed before my-map is defined,
+    // my-map is Yields (not Polymorphic). This is sound but not precise.
+    assert_eq!(
+        result.hir.effect,
+        Effect::Yields,
+        "Recursive function with unknown recursive call effect is Yields"
+    );
+}
+
+#[test]
+fn test_polymorphic_inference_non_recursive_map() {
+    // Non-recursive higher-order function should be Polymorphic(0)
+    let mut symbols = setup();
+    let result = analyze_new(
+        r#"(begin 
+           (define apply-to-list (fn (f xs) 
+             (if (empty? xs) (list) 
+                 (cons (f (first xs)) (list)))))
+           (apply-to-list + (list 1 2 3)))"#,
+        &mut symbols,
+    )
+    .unwrap();
+    // apply-to-list is Polymorphic(0), + is Pure, so the call is Pure
+    assert_eq!(
+        result.hir.effect,
+        Effect::Pure,
+        "Non-recursive higher-order function with pure arg should be Pure"
+    );
+}
+
+#[test]
+fn test_polymorphic_inference_direct_yield_prevents() {
+    // A function that both calls a parameter AND yields directly is Yields, not Polymorphic
+    let mut symbols = setup();
+    let result = analyze_new(
+        "(define bad (fn (f x) (begin (yield 99) (f x))))",
+        &mut symbols,
+    )
+    .unwrap();
+
+    if let HirKind::Define { value, .. } = &result.hir.kind {
+        if let HirKind::Lambda {
+            inferred_effect, ..
+        } = &value.kind
+        {
+            assert_eq!(
+                *inferred_effect,
+                Effect::Yields,
+                "Function with direct yield should be Yields, not Polymorphic"
+            );
+        } else {
+            panic!("Expected Lambda");
+        }
+    } else {
+        panic!("Expected Define");
+    }
+}
+
+#[test]
+fn test_polymorphic_inference_two_params() {
+    // A function that calls two different parameters — should infer Polymorphic({0, 1})
+    let mut symbols = setup();
+    let result = analyze_new(
+        "(define apply-both (fn (f g x) (begin (f x) (g x))))",
+        &mut symbols,
+    )
+    .unwrap();
+
+    if let HirKind::Define { value, .. } = &result.hir.kind {
+        if let HirKind::Lambda {
+            inferred_effect, ..
+        } = &value.kind
+        {
+            assert_eq!(
+                *inferred_effect,
+                Effect::Polymorphic(BTreeSet::from([0, 1])),
+                "Function calling two params should be Polymorphic({{0, 1}})"
+            );
+        } else {
+            panic!("Expected Lambda");
+        }
+    } else {
+        panic!("Expected Define");
+    }
+}
+
+#[test]
+fn test_polymorphic_inference_two_params_resolves_pure() {
+    // Calling apply-both with two pure functions should be Pure
+    let mut symbols = setup();
+    let result = analyze_new(
+        "(begin (define apply-both (fn (f g x) (begin (f x) (g x)))) (apply-both + * 5))",
+        &mut symbols,
+    )
+    .unwrap();
+    assert_eq!(
+        result.hir.effect,
+        Effect::Pure,
+        "Calling Polymorphic({{0,1}}) with two pure args should be Pure"
+    );
+}
+
+#[test]
+fn test_polymorphic_inference_two_params_resolves_yields() {
+    // Calling apply-both with one yielding function should be Yields
+    let mut symbols = setup();
+    let result = analyze_new(
+        r#"(begin 
+           (define gen (fn () (yield 1)))
+           (define apply-both (fn (f g x) (begin (f x) (g x)))) 
+           (apply-both gen * 5))"#,
+        &mut symbols,
+    )
+    .unwrap();
+    assert_eq!(
+        result.hir.effect,
+        Effect::Yields,
+        "Calling Polymorphic({{0,1}}) with one yielding arg should be Yields"
+    );
+}
+
+#[test]
+fn test_polymorphic_inference_second_param() {
+    // Higher-order function where the second parameter is called
+    let mut symbols = setup();
+    let result = analyze_new("(define apply-second (fn (x f) (f x)))", &mut symbols).unwrap();
+
+    if let HirKind::Define { value, .. } = &result.hir.kind {
+        if let HirKind::Lambda {
+            inferred_effect, ..
+        } = &value.kind
+        {
+            assert_eq!(
+                *inferred_effect,
+                Effect::polymorphic(1),
+                "apply-second should have Polymorphic(1) effect"
+            );
+        } else {
+            panic!("Expected Lambda");
+        }
+    } else {
+        panic!("Expected Define");
+    }
+}
+
+#[test]
+fn test_polymorphic_inference_nested_call() {
+    // Nested higher-order function: outer calls inner which calls param
+    let mut symbols = setup();
+    let result = analyze_new(
+        r#"(begin 
+           (define apply-fn (fn (f x) (f x)))
+           (define wrapper (fn (g y) (apply-fn g y)))
+           (wrapper + 42))"#,
+        &mut symbols,
+    )
+    .unwrap();
+    // wrapper calls apply-fn with g, apply-fn is Polymorphic(0)
+    // So wrapper's body effect depends on g's effect
+    // wrapper should be Polymorphic(0) and the final call with + should be Pure
+    assert_eq!(
+        result.hir.effect,
+        Effect::Pure,
+        "Nested polymorphic calls with pure arg should be Pure"
+    );
+}
+
+#[test]
+fn test_polymorphic_inference_with_known_yielding_call() {
+    // A function that calls a parameter AND a known yielding function is Yields
+    let mut symbols = setup();
+    let result = analyze_new(
+        r#"(begin 
+           (define gen (fn () (yield 1)))
+           (define bad (fn (f x) (begin (gen) (f x)))))"#,
+        &mut symbols,
+    )
+    .unwrap();
+
+    // Find the 'bad' definition
+    if let HirKind::Begin(exprs) = &result.hir.kind {
+        if let HirKind::Define { value, .. } = &exprs[1].kind {
+            if let HirKind::Lambda {
+                inferred_effect, ..
+            } = &value.kind
+            {
+                assert_eq!(
+                    *inferred_effect,
+                    Effect::Yields,
+                    "Function calling known yielding function should be Yields"
+                );
+            } else {
+                panic!("Expected Lambda");
+            }
+        } else {
+            panic!("Expected Define");
+        }
+    } else {
+        panic!("Expected Begin");
+    }
+}
+
+#[test]
+fn test_polymorphic_inference_pure_function() {
+    // A pure function should have Pure effect, not Polymorphic
+    let mut symbols = setup();
+    let result = analyze_new("(define add1 (fn (x) (+ x 1)))", &mut symbols).unwrap();
+
+    if let HirKind::Define { value, .. } = &result.hir.kind {
+        if let HirKind::Lambda {
+            inferred_effect, ..
+        } = &value.kind
+        {
+            assert_eq!(
+                *inferred_effect,
+                Effect::Pure,
+                "Pure function should have Pure effect"
+            );
+        } else {
+            panic!("Expected Lambda");
+        }
+    } else {
+        panic!("Expected Define");
     }
 }

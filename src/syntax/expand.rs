@@ -127,6 +127,37 @@ impl Expander {
                         return self.handle_expand_macro(items, &syntax.span);
                     }
 
+                    // Handle (define (f x y) body...) shorthand
+                    // Desugar to (define f (fn (x y) body...))
+                    if name == "define" && items.len() >= 3 {
+                        if let SyntaxKind::List(name_and_params) = &items[1].kind {
+                            if !name_and_params.is_empty() {
+                                // (define (f x y) body...) → (define f (fn (x y) body...))
+                                let func_name = name_and_params[0].clone();
+                                let params = Syntax::new(
+                                    SyntaxKind::List(name_and_params[1..].to_vec()),
+                                    items[1].span.clone(),
+                                );
+                                let fn_sym = Syntax::new(
+                                    SyntaxKind::Symbol("fn".to_string()),
+                                    items[1].span.clone(),
+                                );
+                                let mut lambda_parts = vec![fn_sym, params];
+                                lambda_parts.extend(items[2..].iter().cloned());
+                                let lambda = Syntax::new(
+                                    SyntaxKind::List(lambda_parts),
+                                    syntax.span.clone(),
+                                );
+                                let define_sym = items[0].clone();
+                                let desugared = Syntax::new(
+                                    SyntaxKind::List(vec![define_sym, func_name, lambda]),
+                                    syntax.span.clone(),
+                                );
+                                return self.expand(desugared);
+                            }
+                        }
+                    }
+
                     // Check if it's a macro call
                     if let Some(macro_def) = self.macros.get(name).cloned() {
                         return self.expand_macro_call(&macro_def, &items[1..], &syntax);

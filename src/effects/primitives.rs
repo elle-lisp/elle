@@ -93,7 +93,7 @@ pub fn register_primitive_effects(
 
     for (name, param_idx) in polymorphic_primitives {
         let sym = symbols.intern(name);
-        effects.insert(sym, Effect::Polymorphic(param_idx));
+        effects.insert(sym, Effect::polymorphic(param_idx));
     }
 }
 
@@ -185,7 +185,7 @@ pub fn get_primitive_effects(symbols: &SymbolTable) -> HashMap<SymbolId, Effect>
 
     for (name, param_idx) in polymorphic_primitives {
         if let Some(sym) = symbols.get(name) {
-            effects.insert(sym, Effect::Polymorphic(param_idx));
+            effects.insert(sym, Effect::polymorphic(param_idx));
         }
     }
 
@@ -208,7 +208,7 @@ mod tests {
         register_primitive_effects(&mut symbols, &mut effects);
 
         assert_eq!(effects.get(&plus), Some(&Effect::Pure));
-        assert_eq!(effects.get(&map), Some(&Effect::Polymorphic(0)));
+        assert_eq!(effects.get(&map), Some(&Effect::polymorphic(0)));
     }
 
     #[test]
@@ -222,6 +222,6 @@ mod tests {
         let effects = get_primitive_effects(&symbols);
 
         assert_eq!(effects.get(&plus), Some(&Effect::Pure));
-        assert_eq!(effects.get(&map), Some(&Effect::Polymorphic(0)));
+        assert_eq!(effects.get(&map), Some(&Effect::polymorphic(0)));
     }
 }
