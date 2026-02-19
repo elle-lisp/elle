@@ -23,3 +23,6 @@ mod hir_debug {
 mod lir_debug {
     include!("lir_debug.rs");
 }
+mod jit {
+    include!("jit.rs");
+}

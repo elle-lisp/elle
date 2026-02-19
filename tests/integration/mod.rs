@@ -62,3 +62,7 @@ mod effect_enforcement {
 mod effect_unsoundness {
     include!("effect_unsoundness.rs");
 }
+#[cfg(feature = "jit")]
+mod jit {
+    include!("jit.rs");
+}

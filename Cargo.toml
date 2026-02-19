@@ -13,6 +13,18 @@ smallvec = "1.11"
 libloading = "0.8"
 rustyline = "14"
 
+# JIT compilation (optional)
+cranelift-codegen = { version = "0.116", optional = true }
+cranelift-frontend = { version = "0.116", optional = true }
+cranelift-module = { version = "0.116", optional = true }
+cranelift-jit = { version = "0.116", optional = true }
+cranelift-native = { version = "0.116", optional = true }
+target-lexicon = { version = "0.13", optional = true }
+
+[features]
+default = []
+jit = ["cranelift-codegen", "cranelift-frontend", "cranelift-module", "cranelift-jit", "cranelift-native", "target-lexicon"]
+
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.4"

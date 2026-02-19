@@ -15,5 +15,6 @@ mod types;
 pub use emit::Emitter;
 pub use lower::Lowerer;
 pub use types::{
-    BasicBlock, BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Reg, Terminator, UnaryOp,
+    BasicBlock, BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Reg, SpannedInstr,
+    SpannedTerminator, Terminator, UnaryOp,
 };

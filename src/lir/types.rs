@@ -41,6 +41,9 @@ pub struct LirFunction {
     pub num_regs: u32,
     /// Number of local slots needed
     pub num_locals: u16,
+    /// Number of captured variables
+    /// Used by JIT to distinguish captures (from env) from parameters (from args)
+    pub num_captures: u16,
     /// Bitmask indicating which parameters need to be wrapped in cells
     /// Bit i is set if parameter i needs a cell (for mutable parameters)
     pub cell_params_mask: u64,
@@ -58,6 +61,7 @@ impl LirFunction {
             constants: Vec::new(),
             num_regs: 0,
             num_locals: 0,
+            num_captures: 0,
             cell_params_mask: 0,
             effect: Effect::Pure,
         }

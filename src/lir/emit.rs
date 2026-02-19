@@ -294,6 +294,10 @@ impl Emitter {
                     cell_params_mask: func.cell_params_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
                     location_map: Rc::new(nested_bytecode.location_map),
+                    #[cfg(feature = "jit")]
+                    jit_code: None,
+                    #[cfg(feature = "jit")]
+                    lir_function: Some(Rc::new(func.as_ref().clone())),
                 };
 
                 // Add closure template to constants

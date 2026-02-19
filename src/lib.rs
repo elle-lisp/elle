@@ -40,6 +40,7 @@ pub mod error;
 pub mod ffi;
 pub mod formatter;
 pub mod hir;
+pub mod jit;
 pub mod lint;
 pub mod lir;
 pub mod pipeline;
