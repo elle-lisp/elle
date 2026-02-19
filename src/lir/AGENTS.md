@@ -132,8 +132,13 @@ The emitter preserves stack state across the yield boundary via
 |------|-------|---------|
 | `mod.rs` | 20 | Re-exports |
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
-| `lower.rs` | 1400+ | `Lowerer`, HIR→LIR translation |
-| `emit.rs` | 800 | `Emitter`, LIR→Bytecode with stack simulation |
+| `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point |
+| `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
+| `lower/binding.rs` | ~280 | Binding forms: `let`, `define`, `lambda` |
+| `lower/lambda.rs` | ~250 | Lambda lowering, closure capture, cell wrapping |
+| `lower/control.rs` | ~200 | Control flow: `if`, `begin`, `match` |
+| `lower/pattern.rs` | ~200 | Pattern matching lowering |
+| `emit.rs` | 902 | `Emitter`, LIR→Bytecode with stack simulation |
 
 ## Constants
 

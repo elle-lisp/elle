@@ -100,8 +100,14 @@ prevents accidental capture:
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 450 | `Syntax`, `SyntaxKind`, `ScopeId`, tests |
+| `mod.rs` | 454 | `Syntax`, `SyntaxKind`, `ScopeId` |
 | `span.rs` | ~50 | `Span` type |
-| `expand.rs` | ~300 | `Expander`, `MacroDef` |
+| `expand/mod.rs` | ~280 | `Expander` struct, context, entry point |
+| `expand/macro_expand.rs` | ~250 | Macro expansion logic |
+| `expand/quasiquote.rs` | ~200 | Quasiquote/unquote evaluation |
+| `expand/threading.rs` | ~150 | Threading macros (`->`, `->>`) |
+| `expand/introspection.rs` | ~100 | `macro?`, `expand-macro` |
+| `expand/qualified.rs` | ~100 | Module-qualified name resolution |
+| `expand/tests.rs` | ~537 | Expansion tests |
 | `convert.rs` | ~100 | `Syntax` ↔ `Value` conversion |
 | `display.rs` | ~100 | Pretty printing |

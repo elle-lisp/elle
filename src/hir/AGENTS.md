@@ -81,10 +81,14 @@ HIR + bindings HashMap
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | 25 | Re-exports |
-| `analyze.rs` | ~1400 | `Analyzer`, scope tracking, HIR construction |
+| `analyze/mod.rs` | ~470 | `Analyzer` struct, `AnalysisContext`, scope management |
+| `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
+| `analyze/binding.rs` | ~460 | Binding forms: `let`, `define`, `lambda` |
+| `analyze/special.rs` | ~310 | Special forms: `match`, `yield`, `handler-case` |
+| `analyze/call.rs` | ~200 | Call analysis and effect tracking |
 | `expr.rs` | 180 | `Hir`, `HirKind` |
 | `binding.rs` | 120 | `BindingId`, `BindingInfo`, `CaptureInfo` |
 | `pattern.rs` | ~100 | Pattern matching types |
-| `tailcall.rs` | ~80 | Post-analysis pass marking tail calls |
+| `tailcall.rs` | ~462 | Post-analysis pass marking tail calls |
 | `lint.rs` | ~150 | HIR-based linter (walks HirKind, produces Diagnostics) |
 | `symbols.rs` | ~200 | HIR-based symbol extraction (builds SymbolIndex) |
