@@ -1,10 +1,13 @@
 //! Runtime helper functions for JIT-compiled code
 //!
 //! These functions are called from JIT-compiled code to perform operations
-//! that are too complex to inline, such as heap allocation and type checking.
+//! that are too complex to inline, such as arithmetic with type checking.
 //!
 //! All functions use the C calling convention and operate on raw `u64` values
 //! (NaN-boxed Value bits).
+//!
+//! For data structure operations (cons, car, cdr, vectors), cell operations,
+//! global variable access, and function calls, see the `dispatch` module.
 
 use crate::value::repr::{PAYLOAD_MASK, TAG_FALSE, TAG_INT, TAG_INT_MASK, TAG_NIL};
 use crate::value::Value;
@@ -270,18 +273,6 @@ pub extern "C" fn elle_jit_ge(a: u64, b: u64) -> u64 {
 }
 
 // =============================================================================
-// Data Construction
-// =============================================================================
-
-/// Allocate a cons cell
-#[no_mangle]
-pub extern "C" fn elle_jit_cons(car: u64, cdr: u64) -> u64 {
-    let car = unsafe { Value::from_bits(car) };
-    let cdr = unsafe { Value::from_bits(cdr) };
-    Value::cons(car, cdr).to_bits()
-}
-
-// =============================================================================
 // Type Checking
 // =============================================================================
 
@@ -321,7 +312,8 @@ pub extern "C" fn elle_jit_type_error(expected: *const u8, expected_len: usize) 
 }
 
 /// Type error helper that takes a static string
-fn elle_jit_type_error_str(expected: &str) -> u64 {
+/// Used by both runtime.rs and dispatch.rs
+pub(super) fn elle_jit_type_error_str(expected: &str) -> u64 {
     eprintln!("JIT type error: expected {}", expected);
     TAG_NIL
 }

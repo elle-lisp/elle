@@ -18,7 +18,7 @@
 //!     env: *const Value,      // closure environment (captures array)
 //!     args: *const Value,     // arguments array
 //!     nargs: u32,             // number of arguments
-//!     globals: *mut (),       // pointer to VM globals
+//!     vm: *mut VM,            // pointer to VM (for globals, function calls)
 //! ) -> Value;
 //! ```
 
@@ -27,7 +27,11 @@ mod code;
 #[cfg(feature = "jit")]
 mod compiler;
 #[cfg(feature = "jit")]
+mod dispatch;
+#[cfg(feature = "jit")]
 mod runtime;
+#[cfg(feature = "jit")]
+mod translate;
 
 #[cfg(feature = "jit")]
 pub use code::JitCode;

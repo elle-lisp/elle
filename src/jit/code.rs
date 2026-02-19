@@ -54,18 +54,12 @@ impl JitCode {
     /// - `env` must point to a valid array of `Value` with at least as many
     ///   elements as the function expects captures
     /// - `args` must point to a valid array of `Value` with at least `nargs` elements
-    /// - `globals` must be a valid pointer to the VM globals structure
+    /// - `vm` must be a valid pointer to the VM struct
     #[inline]
-    pub unsafe fn call(
-        &self,
-        env: *const u64,
-        args: *const u64,
-        nargs: u32,
-        globals: *mut (),
-    ) -> u64 {
+    pub unsafe fn call(&self, env: *const u64, args: *const u64, nargs: u32, vm: *mut ()) -> u64 {
         let f: unsafe extern "C" fn(*const u64, *const u64, u32, *mut ()) -> u64 =
             std::mem::transmute(self.fn_ptr);
-        f(env, args, nargs, globals)
+        f(env, args, nargs, vm)
     }
 }
 
