@@ -37,11 +37,9 @@ pub struct Closure {
     pub location_map: Rc<LocationMap>,
     /// JIT-compiled native code for this closure (if available).
     /// Stored separately from bytecode to allow lazy JIT compilation.
-    #[cfg(feature = "jit")]
     pub jit_code: Option<Rc<crate::jit::JitCode>>,
     /// LIR function for deferred JIT compilation.
     /// Preserved from emission so the JIT can compile hot functions.
-    #[cfg(feature = "jit")]
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
 }
 
@@ -86,9 +84,7 @@ mod tests {
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            #[cfg(feature = "jit")]
             jit_code: None,
-            #[cfg(feature = "jit")]
             lir_function: None,
         };
         assert_eq!(closure.effect(), Effect::Pure);

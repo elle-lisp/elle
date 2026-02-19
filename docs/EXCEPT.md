@@ -2,7 +2,27 @@
 
 ## Status
 
-Complete. All four phases implemented.
+handler-case is fully implemented end-to-end. The following are not yet implemented:
+
+- **handler-bind**: Analysis parses the syntax and creates `HirKind::HandlerBind`,
+  but the lowerer ignores the handlers and just compiles the body. handler-bind
+  should establish handlers that run without unwinding the stack.
+
+- **throw special form**: The `throw` primitive function works (returns
+  `Err(Condition)` to the Call handler). The `(throw expr)` special form's LIR
+  emission is incomplete — it lowers to `LirInstr::Throw` but the emitter does
+  not emit bytecode that sets `current_exception`.
+
+- **Restarts**: `invoke-restart` bytecode opcode exists but the VM handler is a
+  no-op. No restart mechanism is implemented at any level (no `restart-case`,
+  no `invoke-restart`, no restart objects).
+
+- **signal/warn/error signaling**: These primitives create Condition values but
+  do not raise them. They return the condition as a normal value. To actually
+  raise an exception, use the `throw` primitive.
+
+- **finally**: The `ExceptionHandler` struct has a `finally_offset` field but it
+  is always `None`. No finally block logic is implemented.
 
 ## Problem
 
@@ -254,6 +274,34 @@ message is always present and sufficient for display.
 - The exception hierarchy (condition → error → type-error, etc.).
 - The `handler-case` / `handler-bind` surface syntax.
 - `NativeFn` remains a bare function pointer (`fn`), not a trait object.
+
+## JIT Exception Handling
+
+JIT-compiled functions handle exceptions by checking for pending exceptions
+after every function call (`Call` instruction). If `current_exception` is set
+after a call returns, the JIT immediately returns NIL, bailing out to the
+interpreter's exception handling machinery.
+
+This means:
+- Exceptions thrown by callees propagate correctly through JIT frames
+- `handler-case` handlers in the calling interpreter frame will fire
+- The JIT does NOT implement `PushHandler`/`PopHandler`/`MatchException` — 
+  functions containing these instructions are not JIT-compiled
+
+The effect system ensures pure functions (the only JIT candidates) don't
+contain exception handling instructions directly. But pure functions can
+call other functions that throw, so the bail-out mechanism is essential
+for correctness.
+
+Tail calls from JIT code (`TailCall` instruction) use `elle_jit_tail_call`
+which sets `vm.pending_tail_call` for closure targets. Native functions and
+VM-aware functions are called directly (no TCO needed). After JIT code returns,
+the VM detects `pending_tail_call` and hands off to the interpreter's trampoline
+loop, which handles chains of tail calls with O(1) stack usage.
+
+Future work: inline exception checks in JIT code (check a flag instead of
+calling a runtime helper), JIT-native handler-case (would require Cranelift
+landing pads or setjmp/longjmp).
 
 ## Resolved Questions
 

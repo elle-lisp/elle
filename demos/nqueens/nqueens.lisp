@@ -63,5 +63,5 @@
       (newline))))
 
 (display "=== N-Queens Solver (Elle) ===\n\n")
-(benchmark 8)
+(benchmark 12)
 (display "=== Complete ===\n")

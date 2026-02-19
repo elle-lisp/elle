@@ -32,9 +32,7 @@ pub fn handle_make_closure(
             cell_params_mask: template_closure.cell_params_mask,
             symbol_names: template_closure.symbol_names.clone(),
             location_map: template_closure.location_map.clone(),
-            #[cfg(feature = "jit")]
             jit_code: template_closure.jit_code.clone(),
-            #[cfg(feature = "jit")]
             lir_function: template_closure.lir_function.clone(),
         };
 

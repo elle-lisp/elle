@@ -1464,9 +1464,7 @@ fn test_spawn_primitive() {
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     });
 
@@ -1585,9 +1583,7 @@ fn test_profile_primitive() {
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     });
 
@@ -1940,9 +1936,7 @@ fn test_json_serialize_errors() {
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     });
     let result = call_primitive(&json_serialize, &[closure]);

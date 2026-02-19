@@ -19,24 +19,25 @@
 //!     args: *const Value,     // arguments array
 //!     nargs: u32,             // number of arguments
 //!     vm: *mut VM,            // pointer to VM (for globals, function calls)
+//!     self_bits: u64,         // NaN-boxed closure bits (for self-tail-call detection)
 //! ) -> Value;
 //! ```
+//!
+//! The 5th parameter `self_bits` enables self-tail-call optimization: when a
+//! function tail-calls itself, the JIT compares the callee against `self_bits`.
+//! If equal, it updates the arg variables and jumps to the loop header instead
+//! of calling `elle_jit_tail_call`. This turns self-recursive tail calls into
+//! native loops.
 
-#[cfg(feature = "jit")]
 mod code;
-#[cfg(feature = "jit")]
 mod compiler;
-#[cfg(feature = "jit")]
-mod dispatch;
-#[cfg(feature = "jit")]
+pub(crate) mod dispatch;
 mod runtime;
-#[cfg(feature = "jit")]
 mod translate;
 
-#[cfg(feature = "jit")]
 pub use code::JitCode;
-#[cfg(feature = "jit")]
 pub use compiler::JitCompiler;
+pub use dispatch::TAIL_CALL_SENTINEL;
 
 use std::fmt;
 

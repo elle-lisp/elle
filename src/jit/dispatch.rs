@@ -7,6 +7,27 @@ use crate::value::repr::TAG_NIL;
 use crate::value::Value;
 
 // =============================================================================
+// Tail Call Support
+// =============================================================================
+
+/// Sentinel value indicating a pending tail call.
+/// Using a specific bit pattern that can't be a valid Value.
+/// The VM checks for this after call_jit returns.
+pub const TAIL_CALL_SENTINEL: u64 = 0xDEAD_BEEF_DEAD_BEEFu64;
+
+// =============================================================================
+// Exception Checking
+// =============================================================================
+
+/// Check if an exception is pending on the VM
+/// Returns TRUE bits if exception is set, FALSE bits otherwise
+#[no_mangle]
+pub extern "C" fn elle_jit_has_exception(vm: *mut ()) -> u64 {
+    let vm = unsafe { &*(vm as *const crate::vm::VM) };
+    Value::bool(vm.current_exception.is_some()).to_bits()
+}
+
+// =============================================================================
 // Data Construction
 // =============================================================================
 
@@ -213,6 +234,69 @@ pub extern "C" fn elle_jit_call(
     }
 }
 
+/// Set up a pending tail call on the VM.
+/// This mirrors VM::handle_tail_call for closures.
+/// Returns TAIL_CALL_SENTINEL to signal the JIT to return immediately.
+#[no_mangle]
+pub extern "C" fn elle_jit_tail_call(
+    func_bits: u64,
+    args_ptr: *const u64,
+    nargs: u32,
+    vm: *mut (),
+) -> u64 {
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let func = unsafe { Value::from_bits(func_bits) };
+
+    // Reconstruct args
+    let args: Vec<Value> = (0..nargs as usize)
+        .map(|i| unsafe { Value::from_bits(*args_ptr.add(i)) })
+        .collect();
+
+    // Handle native functions — just call them directly (no tail call needed)
+    if let Some(f) = func.as_native_fn() {
+        match f(&args) {
+            Ok(val) => return val.to_bits(),
+            Err(cond) => {
+                vm.current_exception = Some(std::rc::Rc::new(cond));
+                return TAG_NIL;
+            }
+        }
+    }
+
+    // Handle VM-aware functions — call directly
+    if let Some(f) = func.as_vm_aware_fn() {
+        match f(&args, vm) {
+            Ok(val) => return val.to_bits(),
+            Err(e) => {
+                eprintln!("JIT tail call error: {}", e.description());
+                return TAG_NIL;
+            }
+        }
+    }
+
+    // Handle closures — set up pending_tail_call
+    if let Some(closure) = func.as_closure() {
+        if !vm.check_arity(&closure.arity, args.len()) {
+            return TAG_NIL;
+        }
+
+        // Build environment (same as handle_tail_call)
+        let new_env = build_closure_env_for_jit(closure, &args);
+
+        // Set pending tail call
+        vm.pending_tail_call = Some((
+            (*closure.bytecode).clone(),
+            (*closure.constants).clone(),
+            new_env,
+        ));
+
+        return TAIL_CALL_SENTINEL;
+    }
+
+    eprintln!("JIT tail call error: not a function");
+    TAG_NIL
+}
+
 /// Build a closure environment from captured variables and arguments.
 /// This is a copy of VM::build_closure_env but standalone for JIT use.
 fn build_closure_env_for_jit(
@@ -315,5 +399,39 @@ mod tests {
         let loaded2 = elle_jit_load_cell(cell_bits);
         let loaded_val2 = unsafe { Value::from_bits(loaded2) };
         assert_eq!(loaded_val2.as_int(), Some(100));
+    }
+
+    #[test]
+    fn test_has_exception() {
+        use crate::primitives::register_primitives;
+        use crate::symbol::SymbolTable;
+        use crate::vm::VM;
+
+        let mut symbols = SymbolTable::new();
+        let mut vm = VM::new();
+        register_primitives(&mut vm, &mut symbols);
+
+        // Initially no exception
+        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut ());
+        let val = unsafe { Value::from_bits(result) };
+        assert_eq!(val.as_bool(), Some(false));
+
+        // Set an exception using the public constructor
+        vm.current_exception = Some(std::rc::Rc::new(crate::value::Condition::division_by_zero(
+            "test",
+        )));
+
+        // Now should return true
+        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut ());
+        let val = unsafe { Value::from_bits(result) };
+        assert_eq!(val.as_bool(), Some(true));
+
+        // Clear exception
+        vm.current_exception = None;
+
+        // Should return false again
+        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut ());
+        let val = unsafe { Value::from_bits(result) };
+        assert_eq!(val.as_bool(), Some(false));
     }
 }
