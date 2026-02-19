@@ -1377,3 +1377,78 @@ fn test_closure_with_local_define_and_param_arithmetic() {
     // local = 1 * 2 = 2, y = 1, result = 2 + 1 = 3
     assert_eq!(eval(code).unwrap(), Value::int(3));
 }
+
+// ============================================================================
+// Bug fix tests: StoreCapture stack mismatch
+// ============================================================================
+
+#[test]
+fn test_let_inside_lambda_with_append() {
+    let result = eval(
+        "(define f (fn (x) (if (= x 0) (list) (let ((y x)) (append (list y) (f (- x 1))))))) (f 3)",
+    );
+    // Should be (3 2 1)
+    assert!(result.is_ok());
+    let val = result.unwrap();
+    let vec = val.list_to_vec().unwrap();
+    assert_eq!(vec, vec![Value::int(3), Value::int(2), Value::int(1)]);
+}
+
+#[test]
+fn test_let_inside_lambda_values_correct() {
+    let result = eval("(define f (fn (x) (let ((y x)) y))) (f 42)");
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_multiple_let_bindings_in_lambda() {
+    let result = eval("(define f (fn (x) (let ((y x) (z (+ x 1))) (+ y z)))) (f 10)");
+    assert_eq!(result.unwrap(), Value::int(21));
+}
+
+// ============================================================================
+// Bug fix tests: (define (f x) ...) shorthand
+// ============================================================================
+
+#[test]
+fn test_define_shorthand() {
+    let result = eval("(define (f x) (+ x 1)) (f 42)");
+    assert_eq!(result.unwrap(), Value::int(43));
+}
+
+#[test]
+fn test_define_shorthand_multiple_params() {
+    let result = eval("(define (add a b) (+ a b)) (add 3 4)");
+    assert_eq!(result.unwrap(), Value::int(7));
+}
+
+#[test]
+fn test_define_shorthand_with_body() {
+    let result = eval("(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)");
+    assert_eq!(result.unwrap(), Value::int(120));
+}
+
+// ============================================================================
+// Bug fix tests: List printing shows `. ()`
+// ============================================================================
+
+#[test]
+fn test_list_display_no_dot() {
+    let result = eval("(list 1 2 3)");
+    let val = result.unwrap();
+    assert_eq!(format!("{}", val), "(1 2 3)");
+}
+
+#[test]
+fn test_single_element_list_display() {
+    let result = eval("(list 1)");
+    let val = result.unwrap();
+    assert_eq!(format!("{}", val), "(1)");
+}
+
+#[test]
+fn test_empty_list_display() {
+    let result = eval("(list)");
+    let val = result.unwrap();
+    assert_eq!(format!("{}", val), "()");
+}

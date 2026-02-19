@@ -66,6 +66,12 @@ pub enum HirKind {
         body: Box<Hir>,
         /// Number of local slots needed (params + locals)
         num_locals: u16,
+        /// The inferred effect of CALLING this lambda.
+        /// This may differ from body.effect for higher-order functions:
+        /// - body.effect is the raw effect of the body expression
+        /// - inferred_effect may be Polymorphic(i) if the Yields comes solely
+        ///   from calling parameter i
+        inferred_effect: Effect,
     },
 
     // === Control Flow ===

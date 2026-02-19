@@ -130,7 +130,7 @@ impl Value {
         let mut first = true;
 
         loop {
-            if current.is_nil() {
+            if current.is_nil() || current.is_empty_list() {
                 break;
             }
 

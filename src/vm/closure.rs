@@ -28,7 +28,7 @@ pub fn handle_make_closure(
             num_locals: template_closure.num_locals,
             num_captures: template_closure.num_captures,
             constants: template_closure.constants.clone(),
-            effect: template_closure.effect,
+            effect: template_closure.effect.clone(),
             cell_params_mask: template_closure.cell_params_mask,
             symbol_names: template_closure.symbol_names.clone(),
             location_map: template_closure.location_map.clone(),

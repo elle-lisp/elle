@@ -40,7 +40,7 @@ pub struct Closure {
 impl Closure {
     /// Get the effect of this closure
     pub fn effect(&self) -> Effect {
-        self.effect
+        self.effect.clone()
     }
 }
 

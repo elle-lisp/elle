@@ -25,6 +25,9 @@ pub fn prim_make_coroutine(args: &[Value]) -> Result<Value, Condition> {
     }
 
     if let Some(c) = args[0].as_closure() {
+        if c.effect.is_pure() {
+            eprintln!("warning: make-coroutine: closure has Pure effect and will never yield");
+        }
         let coroutine = Coroutine::new((*c).clone());
         Ok(Value::coroutine(coroutine))
     } else {
@@ -206,6 +209,10 @@ pub fn prim_coroutine_resume(args: &[Value], vm: &mut VM) -> LResult<Value> {
 
         match &borrowed.state {
             CoroutineState::Created => {
+                // Warn on first resume if closure has Pure effect
+                if borrowed.closure.effect.is_pure() {
+                    eprintln!("warning: coroutine-resume: coroutine's closure has Pure effect; it will complete without yielding");
+                }
                 // First resume - start execution using bytecode path
                 borrowed.state = CoroutineState::Running;
 

@@ -21,7 +21,7 @@ use crate::effects::Effect;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
 use crate::value::SymbolId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Result of HIR analysis
 pub struct AnalysisResult {
@@ -76,6 +76,18 @@ impl Default for AnalysisContext {
     }
 }
 
+/// Tracks the sources of Yields effects within a lambda body.
+/// Used to infer Polymorphic effects for higher-order functions.
+#[derive(Debug, Clone, Default)]
+struct EffectSources {
+    /// Parameters whose calls contribute Yields effects (by their BindingId)
+    param_calls: HashSet<BindingId>,
+    /// Whether there's a direct yield (not from calling a parameter)
+    has_direct_yield: bool,
+    /// Whether there's a Yields from a non-parameter source (known yielding function, etc.)
+    has_non_param_yield: bool,
+}
+
 /// A lexical scope
 struct Scope {
     /// Bindings in this scope, by name
@@ -112,6 +124,10 @@ pub struct Analyzer<'a> {
     /// Maps SymbolId → Effect for primitive functions
     /// Built from `register_primitive_effects` and passed in at construction
     primitive_effects: HashMap<SymbolId, Effect>,
+    /// Tracks effect sources within the current lambda body for polymorphic inference
+    current_effect_sources: EffectSources,
+    /// Parameters of the current lambda being analyzed (for polymorphic inference)
+    current_lambda_params: Vec<BindingId>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -134,6 +150,8 @@ impl<'a> Analyzer<'a> {
             parent_captures: Vec::new(),
             effect_env: HashMap::new(),
             primitive_effects,
+            current_effect_sources: EffectSources::default(),
+            current_lambda_params: Vec::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
@@ -183,7 +201,7 @@ impl<'a> Analyzer<'a> {
                 let mut effect = Effect::Pure;
                 for item in items {
                     let hir = self.analyze_expr(item)?;
-                    effect = effect.combine(hir.effect);
+                    effect = effect.combine(hir.effect.clone());
                     args.push(hir);
                 }
                 // Look up the 'vector' primitive and call it with the elements
@@ -278,8 +296,9 @@ impl<'a> Analyzer<'a> {
 
         let effect = cond
             .effect
-            .combine(then_branch.effect)
-            .combine(else_branch.effect);
+            .clone()
+            .combine(then_branch.effect.clone())
+            .combine(else_branch.effect.clone());
 
         Ok(Hir::new(
             HirKind::If {
@@ -317,7 +336,7 @@ impl<'a> Analyzer<'a> {
                 .as_symbol()
                 .ok_or_else(|| format!("{}: let binding name must be a symbol", span))?;
             let value = self.analyze_expr(&pair[1])?;
-            effect = effect.combine(value.effect);
+            effect = effect.combine(value.effect.clone());
             names_and_values.push((name, value));
         }
 
@@ -333,8 +352,11 @@ impl<'a> Analyzer<'a> {
                 },
             );
             // Track effect for interprocedural analysis
-            if let HirKind::Lambda { ref body, .. } = value.kind {
-                self.effect_env.insert(id, body.effect);
+            if let HirKind::Lambda {
+                inferred_effect, ..
+            } = &value.kind
+            {
+                self.effect_env.insert(id, inferred_effect.clone());
             }
             bindings.push((id, value));
         }
@@ -345,7 +367,7 @@ impl<'a> Analyzer<'a> {
         } else {
             Hir::pure(HirKind::Nil, span.clone())
         };
-        effect = effect.combine(body.effect);
+        effect = effect.combine(body.effect.clone());
 
         self.pop_scope();
 
@@ -386,7 +408,7 @@ impl<'a> Analyzer<'a> {
                 .ok_or_else(|| format!("{}: let* binding name must be a symbol", span))?;
             // In let*, each value CAN see previous bindings
             let value = self.analyze_expr(&pair[1])?;
-            effect = effect.combine(value.effect);
+            effect = effect.combine(value.effect.clone());
 
             let id = self.bind(
                 name,
@@ -395,8 +417,11 @@ impl<'a> Analyzer<'a> {
                 },
             );
             // Track effect for interprocedural analysis
-            if let HirKind::Lambda { ref body, .. } = value.kind {
-                self.effect_env.insert(id, body.effect);
+            if let HirKind::Lambda {
+                inferred_effect, ..
+            } = &value.kind
+            {
+                self.effect_env.insert(id, inferred_effect.clone());
             }
             bindings.push((id, value));
         }
@@ -406,7 +431,7 @@ impl<'a> Analyzer<'a> {
         } else {
             Hir::pure(HirKind::Nil, span.clone())
         };
-        effect = effect.combine(body.effect);
+        effect = effect.combine(body.effect.clone());
 
         self.pop_scope();
 
@@ -458,18 +483,22 @@ impl<'a> Analyzer<'a> {
         for (i, binding) in bindings_syntax.iter().enumerate() {
             let pair = binding.as_list().unwrap();
             let value = self.analyze_expr(&pair[1])?;
-            effect = effect.combine(value.effect);
+            effect = effect.combine(value.effect.clone());
             // Track effect for interprocedural analysis
             // Note: For mutual recursion, effects may be incomplete at this point
             // since later bindings haven't been analyzed yet. This is conservative.
-            if let HirKind::Lambda { ref body, .. } = value.kind {
-                self.effect_env.insert(binding_ids[i], body.effect);
+            if let HirKind::Lambda {
+                inferred_effect, ..
+            } = &value.kind
+            {
+                self.effect_env
+                    .insert(binding_ids[i], inferred_effect.clone());
             }
             bindings.push((binding_ids[i], value));
         }
 
         let body = self.analyze_body(&items[2..], span.clone())?;
-        effect = effect.combine(body.effect);
+        effect = effect.combine(body.effect.clone());
 
         self.pop_scope();
 
@@ -512,6 +541,10 @@ impl<'a> Analyzer<'a> {
         let saved_captures = std::mem::take(&mut self.current_captures);
         let saved_parent_captures = std::mem::take(&mut self.parent_captures);
 
+        // Save and reset effect sources for polymorphic inference
+        let saved_effect_sources = std::mem::take(&mut self.current_effect_sources);
+        let saved_lambda_params = std::mem::take(&mut self.current_lambda_params);
+
         // For nested lambdas, the parent captures are the captures from the enclosing lambda
         self.parent_captures = saved_captures.clone();
 
@@ -526,6 +559,9 @@ impl<'a> Analyzer<'a> {
             let id = self.bind(name, BindingKind::Parameter { index: i as u16 });
             params.push(id);
         }
+
+        // Set current lambda params for effect source tracking
+        self.current_lambda_params = params.clone();
 
         // Analyze body
         // Skip docstring if present (string literal as first body expression)
@@ -543,9 +579,16 @@ impl<'a> Analyzer<'a> {
         let body = self.analyze_body(body_start, span.clone())?;
         let num_locals = self.current_local_count();
 
+        // Compute the inferred effect based on effect sources
+        let inferred_effect = self.compute_inferred_effect(&body, &params);
+
         self.pop_scope();
         let mut captures = std::mem::replace(&mut self.current_captures, saved_captures);
         self.parent_captures = saved_parent_captures;
+
+        // Restore effect sources
+        self.current_effect_sources = saved_effect_sources;
+        self.current_lambda_params = saved_lambda_params;
 
         // Update is_mutated flag in captures based on current binding info
         // This is needed because the capture info might have been created before
@@ -598,6 +641,7 @@ impl<'a> Analyzer<'a> {
                 captures,
                 body: Box::new(body),
                 num_locals,
+                inferred_effect,
             },
             span,
             Effect::Pure, // Creating a closure is pure
@@ -629,7 +673,7 @@ impl<'a> Analyzer<'a> {
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
-                effect = effect.combine(hir.effect);
+                effect = effect.combine(hir.effect.clone());
                 exprs.push(hir);
             }
 
@@ -641,7 +685,7 @@ impl<'a> Analyzer<'a> {
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
-                effect = effect.combine(hir.effect);
+                effect = effect.combine(hir.effect.clone());
                 exprs.push(hir);
             }
 
@@ -654,7 +698,7 @@ impl<'a> Analyzer<'a> {
         let result = self.analyze_begin(items, span.clone())?;
         self.pop_scope();
 
-        let effect = result.effect;
+        let effect = result.effect.clone();
         Ok(Hir::new(HirKind::Block(vec![result]), span, effect))
     }
 
@@ -695,8 +739,11 @@ impl<'a> Analyzer<'a> {
             let value = self.analyze_expr(&items[2])?;
 
             // Track effect for interprocedural analysis
-            if let HirKind::Lambda { ref body, .. } = value.kind {
-                self.effect_env.insert(binding_id, body.effect);
+            if let HirKind::Lambda {
+                inferred_effect, ..
+            } = &value.kind
+            {
+                self.effect_env.insert(binding_id, inferred_effect.clone());
             }
 
             // Emit a LocalDefine that stores to a local slot
@@ -717,8 +764,11 @@ impl<'a> Analyzer<'a> {
             let value = self.analyze_expr(&items[2])?;
 
             // Track effect for interprocedural analysis
-            if let HirKind::Lambda { ref body, .. } = value.kind {
-                self.effect_env.insert(binding_id, body.effect);
+            if let HirKind::Lambda {
+                inferred_effect, ..
+            } = &value.kind
+            {
+                self.effect_env.insert(binding_id, inferred_effect.clone());
             }
 
             Ok(Hir::new(
@@ -762,7 +812,7 @@ impl<'a> Analyzer<'a> {
         self.effect_env.remove(&target);
 
         let value = self.analyze_expr(&items[2])?;
-        let effect = value.effect;
+        let effect = value.effect.clone();
 
         Ok(Hir::new(
             HirKind::Set {
@@ -781,7 +831,7 @@ impl<'a> Analyzer<'a> {
 
         let cond = self.analyze_expr(&items[1])?;
         let body = self.analyze_expr(&items[2])?;
-        let effect = cond.effect.combine(body.effect);
+        let effect = cond.effect.clone().combine(body.effect.clone());
 
         Ok(Hir::new(
             HirKind::While {
@@ -827,7 +877,7 @@ impl<'a> Analyzer<'a> {
         let body = self.analyze_expr(&items[body_idx])?;
         self.pop_scope();
 
-        let effect = iter.effect.combine(body.effect);
+        let effect = iter.effect.clone().combine(body.effect.clone());
 
         Ok(Hir::new(
             HirKind::For {
@@ -850,7 +900,7 @@ impl<'a> Analyzer<'a> {
 
         for item in items {
             let hir = self.analyze_expr(item)?;
-            effect = effect.combine(hir.effect);
+            effect = effect.combine(hir.effect.clone());
             exprs.push(hir);
         }
 
@@ -867,7 +917,7 @@ impl<'a> Analyzer<'a> {
 
         for item in items {
             let hir = self.analyze_expr(item)?;
-            effect = effect.combine(hir.effect);
+            effect = effect.combine(hir.effect.clone());
             exprs.push(hir);
         }
 
@@ -880,6 +930,9 @@ impl<'a> Analyzer<'a> {
         }
 
         let value = self.analyze_expr(&items[1])?;
+
+        // Track that this lambda has a direct yield (not from calling a parameter)
+        self.current_effect_sources.has_direct_yield = true;
 
         Ok(Hir::new(
             HirKind::Yield(Box::new(value)),
@@ -894,7 +947,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let value = self.analyze_expr(&items[1])?;
-        let effect = value.effect;
+        let effect = value.effect.clone();
 
         Ok(Hir::new(HirKind::Throw(Box::new(value)), span, effect))
     }
@@ -908,7 +961,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let value = self.analyze_expr(&items[1])?;
-        let mut effect = value.effect;
+        let mut effect = value.effect.clone();
         let mut arms = Vec::new();
 
         for arm in &items[2..] {
@@ -925,14 +978,14 @@ impl<'a> Analyzer<'a> {
             // Check for guard
             let (guard, body_idx) = if parts.len() >= 3 && parts[1].as_symbol() == Some("when") {
                 let guard_expr = self.analyze_expr(&parts[2])?;
-                effect = effect.combine(guard_expr.effect);
+                effect = effect.combine(guard_expr.effect.clone());
                 (Some(guard_expr), 3)
             } else {
                 (None, 1)
             };
 
             let body = self.analyze_body(&parts[body_idx..], span.clone())?;
-            effect = effect.combine(body.effect);
+            effect = effect.combine(body.effect.clone());
             self.pop_scope();
 
             arms.push((pattern, guard, body));
@@ -1016,14 +1069,16 @@ impl<'a> Analyzer<'a> {
 
             if parts[0].as_symbol() == Some("else") {
                 let body = self.analyze_body(&parts[1..], span.clone())?;
-                effect = effect.combine(body.effect);
+                effect = effect.combine(body.effect.clone());
                 else_branch = Some(Box::new(body));
                 break;
             }
 
             let test = self.analyze_expr(&parts[0])?;
             let body = self.analyze_body(&parts[1..], span.clone())?;
-            effect = effect.combine(test.effect).combine(body.effect);
+            effect = effect
+                .combine(test.effect.clone())
+                .combine(body.effect.clone());
             clauses.push((test, body));
         }
 
@@ -1043,7 +1098,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let body = self.analyze_expr(&items[1])?;
-        let mut effect = body.effect;
+        let mut effect = body.effect.clone();
         let mut handlers = Vec::new();
 
         for handler_syntax in &items[2..] {
@@ -1083,7 +1138,7 @@ impl<'a> Analyzer<'a> {
             self.push_scope(false);
             let var_id = self.bind(var_name, BindingKind::Local { index: 0 });
             let handler_body = self.analyze_body(&parts[2..], span.clone())?;
-            effect = effect.combine(handler_body.effect);
+            effect = effect.combine(handler_body.effect.clone());
             self.pop_scope();
 
             handlers.push((cond_type, var_id, Box::new(handler_body)));
@@ -1128,12 +1183,12 @@ impl<'a> Analyzer<'a> {
             };
 
             let handler_fn = self.analyze_expr(&parts[1])?;
-            effect = effect.combine(handler_fn.effect);
+            effect = effect.combine(handler_fn.effect.clone());
             handlers.push((cond_type, Box::new(handler_fn)));
         }
 
         let body = self.analyze_body(&items[2..], span.clone())?;
-        effect = effect.combine(body.effect);
+        effect = effect.combine(body.effect.clone());
 
         Ok(Hir::new(
             HirKind::HandlerBind {
@@ -1177,7 +1232,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let body = self.analyze_body(&items[body_start..], span.clone())?;
-        let effect = body.effect;
+        let effect = body.effect.clone();
 
         Ok(Hir::new(
             HirKind::Module {
@@ -1205,17 +1260,26 @@ impl<'a> Analyzer<'a> {
 
     fn analyze_call(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         let func = self.analyze_expr(&items[0])?;
-        let mut effect = func.effect;
+        let mut effect = func.effect.clone();
 
         let mut args = Vec::new();
         for arg in &items[1..] {
             let hir = self.analyze_expr(arg)?;
-            effect = effect.combine(hir.effect);
+            effect = effect.combine(hir.effect.clone());
             args.push(hir);
         }
 
         // Interprocedural effect tracking: what effect does CALLING this function have?
-        let callee_effect = self.resolve_callee_effect(&func, &args);
+        // First, get the raw callee effect (before polymorphic resolution)
+        let raw_callee_effect = self.get_raw_callee_effect(&func);
+
+        // Track effect sources for polymorphic inference BEFORE resolving
+        // This handles the case where we call a polymorphic function with a parameter
+        self.track_effect_source_with_args(&func, &raw_callee_effect, &args);
+
+        // Now resolve the polymorphic effect
+        let callee_effect = self.resolve_polymorphic_effect(&raw_callee_effect, &args);
+
         effect = effect.combine(callee_effect);
 
         Ok(Hir::new(
@@ -1229,48 +1293,99 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    /// Resolve the effect of calling a function.
-    /// This implements interprocedural effect tracking.
-    fn resolve_callee_effect(&self, func: &Hir, args: &[Hir]) -> Effect {
+    /// Get the raw callee effect without resolving polymorphic effects.
+    fn get_raw_callee_effect(&self, func: &Hir) -> Effect {
         match &func.kind {
-            // Direct lambda call: ((lambda () (yield 1)))
-            HirKind::Lambda { body, .. } => body.effect,
-
-            // Variable call: (f) where f is bound to something
+            HirKind::Lambda {
+                inferred_effect, ..
+            } => inferred_effect.clone(),
             HirKind::Var(binding_id) => {
-                // Check effect_env first (for local bindings to lambdas)
-                if let Some(&effect) = self.effect_env.get(binding_id) {
-                    self.resolve_polymorphic_effect(effect, args)
+                if let Some(effect) = self.effect_env.get(binding_id) {
+                    effect.clone()
                 } else if let Some(info) = self.ctx.get_binding(*binding_id) {
-                    // For globals, check primitive effects
                     if matches!(info.kind, BindingKind::Global) {
-                        let effect = self
-                            .primitive_effects
+                        self.primitive_effects
                             .get(&info.name)
-                            .copied()
-                            .unwrap_or(Effect::Pure);
-                        self.resolve_polymorphic_effect(effect, args)
+                            .cloned()
+                            .unwrap_or(Effect::Yields)
                     } else {
-                        // Unknown local — conservatively Pure
-                        Effect::Pure
+                        Effect::Yields
                     }
                 } else {
-                    Effect::Pure
+                    Effect::Yields
                 }
             }
-
-            // Anything else (computed function): conservatively Pure
-            _ => Effect::Pure,
+            _ => Effect::Yields,
         }
     }
 
-    /// Resolve a polymorphic effect by examining the argument at the specified index.
-    fn resolve_polymorphic_effect(&self, effect: Effect, args: &[Hir]) -> Effect {
-        match effect {
-            Effect::Polymorphic(param_idx) if param_idx < args.len() => {
-                self.resolve_arg_effect(&args[param_idx])
+    /// Track the source of a Yields effect for polymorphic inference.
+    /// This handles both direct parameter calls and calls to polymorphic functions
+    /// with parameters as arguments.
+    fn track_effect_source_with_args(&mut self, func: &Hir, raw_effect: &Effect, args: &[Hir]) {
+        // Case 1: Direct call to a parameter
+        if let HirKind::Var(binding_id) = &func.kind {
+            if let Some(info) = self.ctx.get_binding(*binding_id) {
+                if matches!(info.kind, BindingKind::Parameter { .. })
+                    && self.current_lambda_params.contains(binding_id)
+                {
+                    self.current_effect_sources.param_calls.insert(*binding_id);
+                    return;
+                }
             }
-            other => other,
+        }
+
+        // Case 2: Call to a polymorphic function with parameters as the polymorphic arguments
+        if let Effect::Polymorphic(param_indices) = raw_effect {
+            let mut found_param = false;
+            for &param_idx in param_indices {
+                if param_idx < args.len() {
+                    if let HirKind::Var(arg_binding_id) = &args[param_idx].kind {
+                        if let Some(info) = self.ctx.get_binding(*arg_binding_id) {
+                            if matches!(info.kind, BindingKind::Parameter { .. })
+                                && self.current_lambda_params.contains(arg_binding_id)
+                            {
+                                // The polymorphic effect depends on a parameter
+                                self.current_effect_sources
+                                    .param_calls
+                                    .insert(*arg_binding_id);
+                                found_param = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if found_param {
+                return;
+            }
+        }
+
+        // Case 3: Yields from a non-parameter source
+        // Only mark as non-param yield if the resolved effect is Yields
+        let resolved_effect = self.resolve_polymorphic_effect(raw_effect, args);
+        if resolved_effect == Effect::Yields {
+            self.current_effect_sources.has_non_param_yield = true;
+        }
+    }
+
+    // resolve_callee_effect is no longer needed - we use get_raw_callee_effect + resolve_polymorphic_effect
+
+    /// Resolve a polymorphic effect by examining the arguments at the specified indices.
+    fn resolve_polymorphic_effect(&self, effect: &Effect, args: &[Hir]) -> Effect {
+        match effect {
+            Effect::Polymorphic(params) => {
+                let mut resolved = Effect::Pure;
+                for &param_idx in params {
+                    if param_idx < args.len() {
+                        resolved = resolved.combine(self.resolve_arg_effect(&args[param_idx]));
+                    } else {
+                        // Parameter index out of bounds — conservatively Yields
+                        return Effect::Yields;
+                    }
+                }
+                resolved
+            }
+            other => other.clone(),
         }
     }
 
@@ -1279,19 +1394,58 @@ impl<'a> Analyzer<'a> {
     /// we can determine its effect.
     fn resolve_arg_effect(&self, arg: &Hir) -> Effect {
         match &arg.kind {
-            HirKind::Lambda { body, .. } => body.effect,
+            HirKind::Lambda {
+                inferred_effect, ..
+            } => inferred_effect.clone(),
             HirKind::Var(id) => self
                 .effect_env
                 .get(id)
-                .copied()
+                .cloned()
                 .or_else(|| {
                     self.ctx
                         .get_binding(*id)
                         .filter(|info| matches!(info.kind, BindingKind::Global))
-                        .and_then(|info| self.primitive_effects.get(&info.name).copied())
+                        .and_then(|info| self.primitive_effects.get(&info.name).cloned())
                 })
-                .unwrap_or(Effect::Pure),
-            _ => Effect::Pure,
+                .unwrap_or(Effect::Yields),
+            // Unknown argument effect — conservatively Yields for soundness
+            _ => Effect::Yields,
+        }
+    }
+
+    /// Compute the inferred effect for a lambda based on effect sources.
+    /// This enables polymorphic effect inference: if the only sources of Yields
+    /// are calling parameters, we infer Polymorphic over all of them.
+    fn compute_inferred_effect(&self, body: &Hir, params: &[BindingId]) -> Effect {
+        // If body is pure, lambda is pure
+        if body.effect.is_pure() {
+            return Effect::Pure;
+        }
+
+        // If there's a direct yield or non-parameter yield, it's Yields
+        if self.current_effect_sources.has_direct_yield
+            || self.current_effect_sources.has_non_param_yield
+        {
+            return Effect::Yields;
+        }
+
+        // If param_calls is empty but body is Yields, fall back to Yields
+        if self.current_effect_sources.param_calls.is_empty() {
+            return body.effect.clone();
+        }
+
+        // All Yields come from parameter calls — infer Polymorphic over all of them
+        let param_indices: std::collections::BTreeSet<usize> = self
+            .current_effect_sources
+            .param_calls
+            .iter()
+            .filter_map(|binding_id| params.iter().position(|p| p == binding_id))
+            .collect();
+
+        if param_indices.is_empty() {
+            Effect::Yields // shouldn't happen
+        } else {
+            Effect::Polymorphic(param_indices)
         }
     }
 

@@ -11,7 +11,8 @@ Effects track whether an expression may suspend execution (yield).
 
 | Type/Function | Purpose |
 |---------------|---------|
-| `Effect` | `Pure`, `Yields`, `Polymorphic(usize)` |
+| `Effect` | `Pure`, `Yields`, `Polymorphic(BTreeSet<usize>)` |
+| `Effect::polymorphic(n)` | Helper to create single-param polymorphic effect |
 | `register_primitive_effects` | Populates effect map for primitives (mutable symbols) |
 | `get_primitive_effects` | Returns effect map for already-interned primitives |
 
@@ -59,9 +60,11 @@ Used across the pipeline and the runtime:
 2. **Yields propagates.** If any sub-expression yields, the parent yields.
    This includes call sites: calling a yielding function propagates `Yields`.
 
-3. **Polymorphic tracks parameter index.** `Polymorphic(i)` means the effect
-   depends on the i-th parameter's effect (for higher-order functions like
-   `map`, `filter`, `fold`).
+3. **Polymorphic tracks parameter indices.** `Polymorphic(set)` means the effect
+   depends on the parameters at the indices in the set (for higher-order functions
+   like `map`, `filter`, `fold`). A function calling multiple parameters will have
+   a set with multiple indices, e.g., `Polymorphic({0, 1})`. Use `Effect::polymorphic(n)`
+   to create a single-param polymorphic effect.
 
 4. **set! invalidates tracking.** When a binding is mutated via `set!`, its
    effect becomes uncertain and is removed from `effect_env`.
