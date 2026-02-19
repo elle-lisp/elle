@@ -5,20 +5,20 @@
 
 use std::collections::HashMap;
 
-use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::I64;
-use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, MemFlags, Signature, UserFuncName};
+use cranelift_codegen::ir::{AbiParam, Function, Signature, UserFuncName};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
-use crate::lir::{BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
-use crate::value::repr::{PAYLOAD_MASK, TAG_EMPTY_LIST, TAG_FALSE, TAG_INT, TAG_NIL, TAG_TRUE};
+use crate::lir::{Label, LirFunction};
 
 use super::code::JitCode;
+use super::dispatch;
 use super::runtime;
+use super::translate::FunctionTranslator;
 use super::JitError;
 
 /// Helper to create a Variable from a register/slot index
@@ -35,31 +35,41 @@ pub struct JitCompiler {
 }
 
 /// Pre-declared runtime helper function IDs
-struct RuntimeHelpers {
-    add: FuncId,
-    sub: FuncId,
-    mul: FuncId,
-    div: FuncId,
-    rem: FuncId,
-    bit_and: FuncId,
-    bit_or: FuncId,
-    bit_xor: FuncId,
-    shl: FuncId,
-    shr: FuncId,
-    neg: FuncId,
-    not: FuncId,
-    bit_not: FuncId,
-    eq: FuncId,
-    ne: FuncId,
-    lt: FuncId,
-    le: FuncId,
-    gt: FuncId,
-    ge: FuncId,
+pub(crate) struct RuntimeHelpers {
+    pub(crate) add: FuncId,
+    pub(crate) sub: FuncId,
+    pub(crate) mul: FuncId,
+    pub(crate) div: FuncId,
+    pub(crate) rem: FuncId,
+    pub(crate) bit_and: FuncId,
+    pub(crate) bit_or: FuncId,
+    pub(crate) bit_xor: FuncId,
+    pub(crate) shl: FuncId,
+    pub(crate) shr: FuncId,
+    pub(crate) neg: FuncId,
+    pub(crate) not: FuncId,
+    pub(crate) bit_not: FuncId,
+    pub(crate) eq: FuncId,
+    pub(crate) ne: FuncId,
+    pub(crate) lt: FuncId,
+    pub(crate) le: FuncId,
+    pub(crate) gt: FuncId,
+    pub(crate) ge: FuncId,
+    pub(crate) cons: FuncId,
+    pub(crate) car: FuncId,
+    pub(crate) cdr: FuncId,
+    pub(crate) make_vector: FuncId,
+    pub(crate) is_nil: FuncId,
+    pub(crate) is_pair: FuncId,
     #[allow(dead_code)]
-    cons: FuncId,
-    is_nil: FuncId,
-    #[allow(dead_code)]
-    is_truthy: FuncId,
+    pub(crate) is_truthy: FuncId,
+    pub(crate) make_cell: FuncId,
+    pub(crate) load_cell: FuncId,
+    pub(crate) store_cell: FuncId,
+    pub(crate) store_capture: FuncId,
+    pub(crate) load_global: FuncId,
+    pub(crate) store_global: FuncId,
+    pub(crate) call: FuncId,
 }
 
 impl JitCompiler {
@@ -86,7 +96,7 @@ impl JitCompiler {
         // Create JIT module with runtime symbols
         let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
 
-        // Register runtime helper symbols
+        // Register runtime helper symbols (arithmetic, comparison, type checking)
         builder.symbol("elle_jit_add", runtime::elle_jit_add as *const u8);
         builder.symbol("elle_jit_sub", runtime::elle_jit_sub as *const u8);
         builder.symbol("elle_jit_mul", runtime::elle_jit_mul as *const u8);
@@ -106,12 +116,46 @@ impl JitCompiler {
         builder.symbol("elle_jit_le", runtime::elle_jit_le as *const u8);
         builder.symbol("elle_jit_gt", runtime::elle_jit_gt as *const u8);
         builder.symbol("elle_jit_ge", runtime::elle_jit_ge as *const u8);
-        builder.symbol("elle_jit_cons", runtime::elle_jit_cons as *const u8);
         builder.symbol("elle_jit_is_nil", runtime::elle_jit_is_nil as *const u8);
         builder.symbol(
             "elle_jit_is_truthy",
             runtime::elle_jit_is_truthy as *const u8,
         );
+
+        // Register dispatch helper symbols (data structures, cells, globals, calls)
+        builder.symbol("elle_jit_cons", dispatch::elle_jit_cons as *const u8);
+        builder.symbol("elle_jit_car", dispatch::elle_jit_car as *const u8);
+        builder.symbol("elle_jit_cdr", dispatch::elle_jit_cdr as *const u8);
+        builder.symbol(
+            "elle_jit_make_vector",
+            dispatch::elle_jit_make_vector as *const u8,
+        );
+        builder.symbol("elle_jit_is_pair", dispatch::elle_jit_is_pair as *const u8);
+        builder.symbol(
+            "elle_jit_make_cell",
+            dispatch::elle_jit_make_cell as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_load_cell",
+            dispatch::elle_jit_load_cell as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_store_cell",
+            dispatch::elle_jit_store_cell as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_store_capture",
+            dispatch::elle_jit_store_capture as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_load_global",
+            dispatch::elle_jit_load_global as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_store_global",
+            dispatch::elle_jit_store_global as *const u8,
+        );
+        builder.symbol("elle_jit_call", dispatch::elle_jit_call as *const u8);
 
         let mut module = JITModule::new(builder);
 
@@ -133,6 +177,27 @@ impl JitCompiler {
         let mut unary_sig = module.make_signature();
         unary_sig.params.push(AbiParam::new(I64));
         unary_sig.returns.push(AbiParam::new(I64));
+
+        // Ternary function signature: (i64, i64, i64) -> i64
+        let mut ternary_sig = module.make_signature();
+        ternary_sig.params.push(AbiParam::new(I64));
+        ternary_sig.params.push(AbiParam::new(I64));
+        ternary_sig.params.push(AbiParam::new(I64));
+        ternary_sig.returns.push(AbiParam::new(I64));
+
+        // Make vector signature: (ptr, count) -> i64
+        let mut make_vector_sig = module.make_signature();
+        make_vector_sig.params.push(AbiParam::new(I64)); // elements ptr
+        make_vector_sig.params.push(AbiParam::new(I64)); // count (as i64)
+        make_vector_sig.returns.push(AbiParam::new(I64));
+
+        // Call signature: (func, args_ptr, nargs, vm) -> i64
+        let mut call_sig = module.make_signature();
+        call_sig.params.push(AbiParam::new(I64)); // func
+        call_sig.params.push(AbiParam::new(I64)); // args_ptr
+        call_sig.params.push(AbiParam::new(I64)); // nargs (as i64)
+        call_sig.params.push(AbiParam::new(I64)); // vm
+        call_sig.returns.push(AbiParam::new(I64));
 
         let declare =
             |module: &mut JITModule, name: &str, sig: &Signature| -> Result<FuncId, JitError> {
@@ -162,8 +227,19 @@ impl JitCompiler {
             gt: declare(module, "elle_jit_gt", &binary_sig)?,
             ge: declare(module, "elle_jit_ge", &binary_sig)?,
             cons: declare(module, "elle_jit_cons", &binary_sig)?,
+            car: declare(module, "elle_jit_car", &unary_sig)?,
+            cdr: declare(module, "elle_jit_cdr", &unary_sig)?,
+            make_vector: declare(module, "elle_jit_make_vector", &make_vector_sig)?,
             is_nil: declare(module, "elle_jit_is_nil", &unary_sig)?,
+            is_pair: declare(module, "elle_jit_is_pair", &unary_sig)?,
             is_truthy: declare(module, "elle_jit_is_truthy", &unary_sig)?,
+            make_cell: declare(module, "elle_jit_make_cell", &unary_sig)?,
+            load_cell: declare(module, "elle_jit_load_cell", &unary_sig)?,
+            store_cell: declare(module, "elle_jit_store_cell", &binary_sig)?,
+            store_capture: declare(module, "elle_jit_store_capture", &ternary_sig)?,
+            load_global: declare(module, "elle_jit_load_global", &binary_sig)?,
+            store_global: declare(module, "elle_jit_store_global", &ternary_sig)?,
+            call: declare(module, "elle_jit_call", &call_sig)?,
         })
     }
 
@@ -175,13 +251,13 @@ impl JitCompiler {
         }
 
         // Create function signature
-        // fn(env: *const Value, args: *const Value, nargs: u32, globals: *mut ()) -> Value
+        // fn(env: *const Value, args: *const Value, nargs: u32, vm: *mut VM) -> Value
         let mut sig = self.module.make_signature();
         sig.call_conv = CallConv::SystemV;
         sig.params.push(AbiParam::new(I64)); // env pointer
         sig.params.push(AbiParam::new(I64)); // args pointer
         sig.params.push(AbiParam::new(I64)); // nargs (as i64 for simplicity)
-        sig.params.push(AbiParam::new(I64)); // globals pointer
+        sig.params.push(AbiParam::new(I64)); // vm pointer
         sig.returns.push(AbiParam::new(I64)); // return value
 
         // Declare the function
@@ -248,11 +324,11 @@ impl JitCompiler {
         let env_ptr = builder.block_params(entry_block)[0];
         let args_ptr = builder.block_params(entry_block)[1];
         let _nargs = builder.block_params(entry_block)[2];
-        let globals_ptr = builder.block_params(entry_block)[3];
+        let vm_ptr = builder.block_params(entry_block)[3];
 
         translator.env_ptr = Some(env_ptr);
         translator.args_ptr = Some(args_ptr);
-        translator.globals_ptr = Some(globals_ptr);
+        translator.vm_ptr = Some(vm_ptr);
 
         // Note: We don't pre-load arguments into registers here.
         // The LIR uses LoadCapture instructions to access both captures and parameters.
@@ -270,12 +346,23 @@ impl JitCompiler {
             }
 
             // Translate instructions
+            let mut block_terminated = false;
             for spanned in &bb.instructions {
-                translator.translate_instr(&mut builder, &spanned.instr, &block_map)?;
+                if translator.translate_instr(&mut builder, &spanned.instr, &block_map)? {
+                    // Instruction emitted a terminator (e.g., TailCall)
+                    block_terminated = true;
+                    break;
+                }
             }
 
-            // Translate terminator
-            translator.translate_terminator(&mut builder, &bb.terminator.terminator, &block_map)?;
+            // Translate terminator (unless already terminated by an instruction)
+            if !block_terminated {
+                translator.translate_terminator(
+                    &mut builder,
+                    &bb.terminator.terminator,
+                    &block_map,
+                )?;
+            }
         }
 
         builder.finalize();
@@ -289,428 +376,13 @@ impl Default for JitCompiler {
     }
 }
 
-/// Translator for a single function
-struct FunctionTranslator<'a> {
-    module: &'a mut JITModule,
-    helpers: &'a RuntimeHelpers,
-    lir: &'a LirFunction,
-    env_ptr: Option<cranelift_codegen::ir::Value>,
-    args_ptr: Option<cranelift_codegen::ir::Value>,
-    #[allow(dead_code)]
-    globals_ptr: Option<cranelift_codegen::ir::Value>,
-}
-
-impl<'a> FunctionTranslator<'a> {
-    fn new(module: &'a mut JITModule, helpers: &'a RuntimeHelpers, lir: &'a LirFunction) -> Self {
-        FunctionTranslator {
-            module,
-            helpers,
-            lir,
-            env_ptr: None,
-            args_ptr: None,
-            globals_ptr: None,
-        }
-    }
-
-    /// Translate a single LIR instruction
-    fn translate_instr(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        instr: &LirInstr,
-        _block_map: &HashMap<Label, cranelift_codegen::ir::Block>,
-    ) -> Result<(), JitError> {
-        match instr {
-            LirInstr::Const { dst, value } => {
-                let val = self.translate_const(builder, value);
-                builder.def_var(var(dst.0), val);
-            }
-
-            LirInstr::ValueConst { dst, value } => {
-                let bits = value.to_bits();
-                let val = builder.ins().iconst(I64, bits as i64);
-                builder.def_var(var(dst.0), val);
-            }
-
-            LirInstr::Move { dst, src } => {
-                let val = builder.use_var(var(src.0));
-                builder.def_var(var(dst.0), val);
-            }
-
-            LirInstr::Dup { dst, src } => {
-                let val = builder.use_var(var(src.0));
-                builder.def_var(var(dst.0), val);
-            }
-
-            LirInstr::LoadLocal { dst, slot } => {
-                // In LIR, locals are just registers
-                let val = builder.use_var(var(*slot as u32));
-                builder.def_var(var(dst.0), val);
-            }
-
-            LirInstr::StoreLocal { slot, src } => {
-                let val = builder.use_var(var(src.0));
-                builder.def_var(var(*slot as u32), val);
-            }
-
-            LirInstr::LoadCapture { dst, index } => {
-                // The LIR uses indices where:
-                // - [0, num_captures) are captures (from env)
-                // - [num_captures, num_captures + arity) are parameters (from args)
-                let num_captures = self.lir.num_captures;
-                if *index < num_captures {
-                    // Load from closure environment (captures)
-                    let env_ptr = self.env_ptr.ok_or_else(|| {
-                        JitError::InvalidLir("LoadCapture without env pointer".to_string())
-                    })?;
-                    let offset = (*index as i32) * 8;
-                    let addr = builder.ins().iadd_imm(env_ptr, offset as i64);
-                    let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
-                    builder.def_var(var(dst.0), val);
-                } else {
-                    // Load from arguments array (parameters)
-                    let args_ptr = self.args_ptr.ok_or_else(|| {
-                        JitError::InvalidLir("LoadCapture without args pointer".to_string())
-                    })?;
-                    let param_index = *index - num_captures;
-                    let offset = (param_index as i32) * 8;
-                    let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
-                    let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
-                    builder.def_var(var(dst.0), val);
-                }
-            }
-
-            LirInstr::LoadCaptureRaw { dst, index } => {
-                // Same as LoadCapture for now (Phase 1 doesn't handle cells specially)
-                let num_captures = self.lir.num_captures;
-                if *index < num_captures {
-                    let env_ptr = self.env_ptr.ok_or_else(|| {
-                        JitError::InvalidLir("LoadCaptureRaw without env pointer".to_string())
-                    })?;
-                    let offset = (*index as i32) * 8;
-                    let addr = builder.ins().iadd_imm(env_ptr, offset as i64);
-                    let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
-                    builder.def_var(var(dst.0), val);
-                } else {
-                    let args_ptr = self.args_ptr.ok_or_else(|| {
-                        JitError::InvalidLir("LoadCaptureRaw without args pointer".to_string())
-                    })?;
-                    let param_index = *index - num_captures;
-                    let offset = (param_index as i32) * 8;
-                    let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
-                    let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
-                    builder.def_var(var(dst.0), val);
-                }
-            }
-
-            LirInstr::BinOp { dst, op, lhs, rhs } => {
-                let lhs_val = builder.use_var(var(lhs.0));
-                let rhs_val = builder.use_var(var(rhs.0));
-                let result = self.call_binary_helper(builder, *op, lhs_val, rhs_val)?;
-                builder.def_var(var(dst.0), result);
-            }
-
-            LirInstr::UnaryOp { dst, op, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_unary_helper(builder, *op, src_val)?;
-                builder.def_var(var(dst.0), result);
-            }
-
-            LirInstr::Compare { dst, op, lhs, rhs } => {
-                let lhs_val = builder.use_var(var(lhs.0));
-                let rhs_val = builder.use_var(var(rhs.0));
-                let result = self.call_compare_helper(builder, *op, lhs_val, rhs_val)?;
-                builder.def_var(var(dst.0), result);
-            }
-
-            LirInstr::IsNil { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.is_nil, src_val)?;
-                builder.def_var(var(dst.0), result);
-            }
-
-            LirInstr::IsPair { dst, src: _ } => {
-                // For Phase 1, just return false (not supported)
-                let false_val = builder.ins().iconst(I64, TAG_FALSE as i64);
-                builder.def_var(var(dst.0), false_val);
-            }
-
-            LirInstr::Pop { src: _ } => {
-                // No-op in JIT (stack operations are implicit)
-            }
-
-            // Unsupported instructions for Phase 1
-            LirInstr::Call { .. } => {
-                return Err(JitError::UnsupportedInstruction("Call".to_string()));
-            }
-            LirInstr::TailCall { .. } => {
-                return Err(JitError::UnsupportedInstruction("TailCall".to_string()));
-            }
-            LirInstr::MakeClosure { .. } => {
-                return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
-            }
-            LirInstr::Cons { .. } => {
-                return Err(JitError::UnsupportedInstruction("Cons".to_string()));
-            }
-            LirInstr::MakeVector { .. } => {
-                return Err(JitError::UnsupportedInstruction("MakeVector".to_string()));
-            }
-            LirInstr::Car { .. } => {
-                return Err(JitError::UnsupportedInstruction("Car".to_string()));
-            }
-            LirInstr::Cdr { .. } => {
-                return Err(JitError::UnsupportedInstruction("Cdr".to_string()));
-            }
-            LirInstr::MakeCell { .. } => {
-                return Err(JitError::UnsupportedInstruction("MakeCell".to_string()));
-            }
-            LirInstr::LoadCell { .. } => {
-                return Err(JitError::UnsupportedInstruction("LoadCell".to_string()));
-            }
-            LirInstr::StoreCell { .. } => {
-                return Err(JitError::UnsupportedInstruction("StoreCell".to_string()));
-            }
-            LirInstr::StoreCapture { .. } => {
-                return Err(JitError::UnsupportedInstruction("StoreCapture".to_string()));
-            }
-            LirInstr::LoadGlobal { .. } => {
-                return Err(JitError::UnsupportedInstruction("LoadGlobal".to_string()));
-            }
-            LirInstr::StoreGlobal { .. } => {
-                return Err(JitError::UnsupportedInstruction("StoreGlobal".to_string()));
-            }
-            LirInstr::LoadResumeValue { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "LoadResumeValue".to_string(),
-                ));
-            }
-            LirInstr::PushHandler { .. } => {
-                return Err(JitError::UnsupportedInstruction("PushHandler".to_string()));
-            }
-            LirInstr::PopHandler => {
-                return Err(JitError::UnsupportedInstruction("PopHandler".to_string()));
-            }
-            LirInstr::CheckException => {
-                return Err(JitError::UnsupportedInstruction(
-                    "CheckException".to_string(),
-                ));
-            }
-            LirInstr::MatchException { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "MatchException".to_string(),
-                ));
-            }
-            LirInstr::BindException { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "BindException".to_string(),
-                ));
-            }
-            LirInstr::LoadException { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "LoadException".to_string(),
-                ));
-            }
-            LirInstr::ClearException => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ClearException".to_string(),
-                ));
-            }
-            LirInstr::ReraiseException => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ReraiseException".to_string(),
-                ));
-            }
-            LirInstr::Throw { .. } => {
-                return Err(JitError::UnsupportedInstruction("Throw".to_string()));
-            }
-            LirInstr::JumpIfFalseInline { .. } => {
-                // These are handled by the emitter, not present in final LIR
-                return Err(JitError::UnsupportedInstruction(
-                    "JumpIfFalseInline".to_string(),
-                ));
-            }
-            LirInstr::JumpInline { .. } => {
-                return Err(JitError::UnsupportedInstruction("JumpInline".to_string()));
-            }
-            LirInstr::LabelMarker { .. } => {
-                // No-op marker
-            }
-        }
-        Ok(())
-    }
-
-    /// Translate a terminator
-    fn translate_terminator(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        term: &Terminator,
-        block_map: &HashMap<Label, cranelift_codegen::ir::Block>,
-    ) -> Result<(), JitError> {
-        match term {
-            Terminator::Return(reg) => {
-                let val = builder.use_var(var(reg.0));
-                builder.ins().return_(&[val]);
-            }
-
-            Terminator::Jump(label) => {
-                let target = block_map.get(label).ok_or_else(|| {
-                    JitError::InvalidLir(format!("Unknown jump target: {:?}", label))
-                })?;
-                builder.ins().jump(*target, &[]);
-            }
-
-            Terminator::Branch {
-                cond,
-                then_label,
-                else_label,
-            } => {
-                let cond_val = builder.use_var(var(cond.0));
-                let then_block = block_map.get(then_label).ok_or_else(|| {
-                    JitError::InvalidLir(format!("Unknown then target: {:?}", then_label))
-                })?;
-                let else_block = block_map.get(else_label).ok_or_else(|| {
-                    JitError::InvalidLir(format!("Unknown else target: {:?}", else_label))
-                })?;
-
-                // Check truthiness: value != NIL && value != FALSE
-                let nil = builder.ins().iconst(I64, TAG_NIL as i64);
-                let false_val = builder.ins().iconst(I64, TAG_FALSE as i64);
-                let not_nil = builder.ins().icmp(IntCC::NotEqual, cond_val, nil);
-                let not_false = builder.ins().icmp(IntCC::NotEqual, cond_val, false_val);
-                let is_truthy = builder.ins().band(not_nil, not_false);
-
-                builder
-                    .ins()
-                    .brif(is_truthy, *then_block, &[], *else_block, &[]);
-            }
-
-            Terminator::Yield { .. } => {
-                return Err(JitError::NotPure);
-            }
-
-            Terminator::Unreachable => {
-                builder
-                    .ins()
-                    .trap(cranelift_codegen::ir::TrapCode::unwrap_user(0));
-            }
-        }
-        Ok(())
-    }
-
-    /// Translate a constant to a Cranelift value
-    fn translate_const(
-        &self,
-        builder: &mut FunctionBuilder,
-        value: &LirConst,
-    ) -> cranelift_codegen::ir::Value {
-        let bits = match value {
-            LirConst::Nil => TAG_NIL,
-            LirConst::EmptyList => TAG_EMPTY_LIST,
-            LirConst::Bool(true) => TAG_TRUE,
-            LirConst::Bool(false) => TAG_FALSE,
-            LirConst::Int(n) => TAG_INT | ((*n as u64) & PAYLOAD_MASK),
-            LirConst::Float(f) => {
-                // Use Value::float to handle NaN-boxing correctly
-                crate::value::Value::float(*f).to_bits()
-            }
-            LirConst::String(_) => {
-                // Strings require heap allocation - not supported in Phase 1
-                // Return NIL as placeholder
-                TAG_NIL
-            }
-            LirConst::Symbol(id) => crate::value::Value::symbol(id.0).to_bits(),
-            LirConst::Keyword(id) => crate::value::Value::keyword(id.0).to_bits(),
-        };
-        builder.ins().iconst(I64, bits as i64)
-    }
-
-    /// Call a binary runtime helper
-    fn call_binary_helper(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        op: BinOp,
-        lhs: cranelift_codegen::ir::Value,
-        rhs: cranelift_codegen::ir::Value,
-    ) -> Result<cranelift_codegen::ir::Value, JitError> {
-        let func_id = match op {
-            BinOp::Add => self.helpers.add,
-            BinOp::Sub => self.helpers.sub,
-            BinOp::Mul => self.helpers.mul,
-            BinOp::Div => self.helpers.div,
-            BinOp::Rem => self.helpers.rem,
-            BinOp::BitAnd => self.helpers.bit_and,
-            BinOp::BitOr => self.helpers.bit_or,
-            BinOp::BitXor => self.helpers.bit_xor,
-            BinOp::Shl => self.helpers.shl,
-            BinOp::Shr => self.helpers.shr,
-        };
-        self.call_helper_binary(builder, func_id, lhs, rhs)
-    }
-
-    /// Call a unary runtime helper
-    fn call_unary_helper(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        op: UnaryOp,
-        src: cranelift_codegen::ir::Value,
-    ) -> Result<cranelift_codegen::ir::Value, JitError> {
-        let func_id = match op {
-            UnaryOp::Neg => self.helpers.neg,
-            UnaryOp::Not => self.helpers.not,
-            UnaryOp::BitNot => self.helpers.bit_not,
-        };
-        self.call_helper_unary(builder, func_id, src)
-    }
-
-    /// Call a comparison runtime helper
-    fn call_compare_helper(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        op: CmpOp,
-        lhs: cranelift_codegen::ir::Value,
-        rhs: cranelift_codegen::ir::Value,
-    ) -> Result<cranelift_codegen::ir::Value, JitError> {
-        let func_id = match op {
-            CmpOp::Eq => self.helpers.eq,
-            CmpOp::Ne => self.helpers.ne,
-            CmpOp::Lt => self.helpers.lt,
-            CmpOp::Le => self.helpers.le,
-            CmpOp::Gt => self.helpers.gt,
-            CmpOp::Ge => self.helpers.ge,
-        };
-        self.call_helper_binary(builder, func_id, lhs, rhs)
-    }
-
-    /// Call a binary helper function
-    fn call_helper_binary(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        func_id: FuncId,
-        a: cranelift_codegen::ir::Value,
-        b: cranelift_codegen::ir::Value,
-    ) -> Result<cranelift_codegen::ir::Value, JitError> {
-        let func_ref = self.module.declare_func_in_func(func_id, builder.func);
-        let call = builder.ins().call(func_ref, &[a, b]);
-        Ok(builder.inst_results(call)[0])
-    }
-
-    /// Call a unary helper function
-    fn call_helper_unary(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        func_id: FuncId,
-        a: cranelift_codegen::ir::Value,
-    ) -> Result<cranelift_codegen::ir::Value, JitError> {
-        let func_ref = self.module.declare_func_in_func(func_id, builder.func);
-        let call = builder.ins().call(func_ref, &[a]);
-        Ok(builder.inst_results(call)[0])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::effects::Effect;
-    use crate::lir::{BasicBlock, Reg, SpannedInstr, SpannedTerminator};
+    use crate::lir::{
+        BasicBlock, BinOp, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
+    };
     use crate::syntax::Span;
 
     fn make_simple_lir() -> LirFunction {

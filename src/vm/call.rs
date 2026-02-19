@@ -311,7 +311,7 @@ impl VM {
                 env_ptr,
                 args_bits.as_ptr(),
                 args.len() as u32,
-                &mut self.globals as *mut _ as *mut (),
+                self as *mut VM as *mut (),
             )
         };
 

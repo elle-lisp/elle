@@ -30,51 +30,62 @@ type JitFn = unsafe extern "C" fn(
     env: *const Value,      // closure environment (captures array)
     args: *const Value,     // arguments array
     nargs: u32,             // number of arguments
-    globals: *mut (),       // pointer to VM globals
+    vm: *mut VM,            // pointer to VM (for globals, function calls)
 ) -> Value;
 ```
 
 Values are 8 bytes (`u64` underneath the NaN-boxing).
 
-## Phase 1 Scope
+## Phase 3 Scope (Current)
 
 Supported instructions:
-- `Const` (Int, Float, Bool, Nil, EmptyList)
-- `BinOp` (all arithmetic/bitwise via runtime helpers)
-- `UnaryOp` (Neg, Not, BitNot via runtime helpers)
-- `Compare` (all via runtime helpers)
-- `Move`, `Dup`
-- `LoadLocal`, `StoreLocal`
-- `LoadCapture`, `LoadCaptureRaw`
-- Terminators: `Return`, `Jump`, `Branch`
+- **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`
+- **Arithmetic**: `BinOp` (all via runtime helpers), `UnaryOp` (Neg, Not, BitNot)
+- **Comparison**: `Compare` (all via runtime helpers)
+- **Variables**: `Move`, `Dup`, `LoadLocal`, `StoreLocal`, `LoadCapture`, `LoadCaptureRaw`
+- **Data structures**: `Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`
+- **Cells**: `MakeCell`, `LoadCell`, `StoreCell`, `StoreCapture`
+- **Globals**: `LoadGlobal`, `StoreGlobal`
+- **Function calls**: `Call`, `TailCall`
+- **Terminators**: `Return`, `Jump`, `Branch`
 
 Unsupported (returns `JitError::UnsupportedInstruction`):
-- `Call`, `TailCall`, `MakeClosure`
-- `Cons`, `MakeVector`, `Car`, `Cdr`
-- `MakeCell`, `LoadCell`, `StoreCell`
-- `LoadGlobal`, `StoreGlobal`
-- Exception handling instructions
-- `Yield` (returns `JitError::NotPure`)
+- `MakeClosure` (complex, rare in hot loops)
+- Exception handling: `PushHandler`, `PopHandler`, `CheckException`, `MatchException`,
+  `BindException`, `LoadException`, `ClearException`, `ReraiseException`, `Throw`
+- Coroutines: `LoadResumeValue`, `Yield` (returns `JitError::NotPure`)
+- Emitter-only: `JumpIfFalseInline`, `JumpInline`
 
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | ~60 | Public API, `JitError` type |
-| `compiler.rs` | ~600 | LIR -> Cranelift IR translation |
-| `runtime.rs` | ~350 | Runtime helpers callable from JIT code |
-| `code.rs` | ~70 | `JitCode` wrapper type |
+| `mod.rs` | ~70 | Public API, `JitError` type |
+| `compiler.rs` | ~500 | `JitCompiler`, `RuntimeHelpers`, compilation entry point |
+| `translate.rs` | ~630 | `FunctionTranslator`, LIR instruction translation |
+| `runtime.rs` | ~420 | Arithmetic, comparison, type-checking helpers |
+| `dispatch.rs` | ~320 | Data structure, cell, global, function call helpers |
+| `code.rs` | ~80 | `JitCode` wrapper type |
 
 ## Runtime Helpers
 
-All arithmetic operations go through `extern "C"` runtime helpers for safety.
-These handle type checking and NaN-boxing:
+All operations go through `extern "C"` runtime helpers for safety.
+These handle type checking and NaN-boxing.
 
-- `elle_jit_add`, `elle_jit_sub`, `elle_jit_mul`, `elle_jit_div`, `elle_jit_rem`
-- `elle_jit_bit_and`, `elle_jit_bit_or`, `elle_jit_bit_xor`, `elle_jit_shl`, `elle_jit_shr`
-- `elle_jit_neg`, `elle_jit_not`, `elle_jit_bit_not`
-- `elle_jit_eq`, `elle_jit_ne`, `elle_jit_lt`, `elle_jit_le`, `elle_jit_gt`, `elle_jit_ge`
-- `elle_jit_cons`, `elle_jit_is_nil`, `elle_jit_is_truthy`
+### runtime.rs (pure arithmetic on NaN-boxed values)
+
+- **Arithmetic**: `elle_jit_add`, `_sub`, `_mul`, `_div`, `_rem`
+- **Bitwise**: `elle_jit_bit_and`, `_or`, `_xor`, `_shl`, `_shr`
+- **Unary**: `elle_jit_neg`, `elle_jit_not`, `elle_jit_bit_not`
+- **Comparison**: `elle_jit_eq`, `_ne`, `_lt`, `_le`, `_gt`, `_ge`
+- **Type checking**: `elle_jit_is_nil`, `elle_jit_is_truthy`, `elle_jit_is_int`
+
+### dispatch.rs (heap/VM interaction)
+
+- **Data structures**: `elle_jit_cons`, `elle_jit_car`, `elle_jit_cdr`, `elle_jit_make_vector`, `elle_jit_is_pair`
+- **Cells**: `elle_jit_make_cell`, `elle_jit_load_cell`, `elle_jit_store_cell`, `elle_jit_store_capture`
+- **Globals**: `elle_jit_load_global`, `elle_jit_store_global` (require VM pointer)
+- **Function calls**: `elle_jit_call` (dispatches to native, VM-aware, or closures)
 
 ## Invariants
 
@@ -90,9 +101,11 @@ These handle type checking and NaN-boxing:
 4. **Feature-gated.** All JIT code is behind `#[cfg(feature = "jit")]`. The
    project compiles without the JIT.
 
+5. **VM pointer for runtime calls.** The 4th parameter changed from `globals`
+   to `vm` in Phase 3 to support function calls and global variable access.
+
 ## Future Phases
 
-- Phase 2: Function calls (intra-JIT and JIT-to-interpreter)
-- Phase 3: Data structures (cons, car, cdr, vectors)
 - Phase 4: Exception handling
-- Phase 5: Inline type checks for fast paths
+- Phase 5: MakeClosure support
+- Phase 6: Inline type checks for fast paths
