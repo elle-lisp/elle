@@ -1,18 +1,32 @@
 # Elle
 
-This is a vanity lisp written entirely by LLMs.  It gets direction from a human
-as to what to work on next.
+It's 2026. I talk to Claude. Soon, I'll talk to it the way I talk to a person -
+out loud, in real time.
 
-One goal is Janet ergonomics, so that it is pleasant to read and write. Let's
-be real, though; we'll never write it by hand. We'll probably read a lot, in
-the beginning.
+When that happens, I want my AI collaborator to be able to write and run
+programs as fast as it thinks. Not scaffolded around a slow language with
+ceremony and boilerplate. Not constrained by a sandboxed REPL. I want it to
+reach directly into the machine - any shared library on the system, any C ABI,
+any hardware - and act.
 
-A second goal is to be fast enough that LLMs can live-code with any shared
-object on the system. Let's be real, though; you can never be fast enough.
+The problem with existing languages is that every one of them is a fossil
+record of compromises: for human readability, for human development workflows,
+for interop with other human-written software, and for backward compatibility
+with all of the above going back decades. That's not a criticism. That's what
+languages are for - or were.
 
-One non-goal is to ever support backward compatibility. Instead, we will
-maintain a program to convert Elle code from the prior version to the new
-version.
+Elle is built for a different set of constraints. It's a Lisp, because
+obviously. Simple syntax. No backward compatibility baggage - ever. A real FFI
+that doesn't make you work for it. And an effect system: right now that means
+the runtime knows, at a fine grain, what any piece of code can and cannot do.
+That's the first control surface. I expect it won't be the last.
+
+The old objection to writing your own language was that it would have one user
+and no libraries. Now you can speak to a C library. The language just has to
+be fast to get in and out of. If it's slow today, it'll be faster tomorrow. If
+this is the fastest there is, what more do you want?
+
+Fast. Simple. Powerful. It's what you want in a language.
 
 ## License
 MIT
