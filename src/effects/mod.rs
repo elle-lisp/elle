@@ -5,7 +5,7 @@
 
 mod primitives;
 
-pub use primitives::register_primitive_effects;
+pub use primitives::{get_primitive_effects, register_primitive_effects};
 
 use std::fmt;
 
