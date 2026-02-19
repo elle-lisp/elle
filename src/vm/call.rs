@@ -6,11 +6,15 @@
 //! - Closure calls with environment setup
 //! - Coroutine-aware execution
 //! - Tail call optimization
+//! - JIT compilation and dispatch (when jit feature is enabled)
 
 use crate::value::{CoroutineState, Value};
 use std::rc::Rc;
 
 use super::core::{VmResult, VM};
+
+#[cfg(feature = "jit")]
+use crate::jit::{JitCode, JitCompiler};
 
 impl VM {
     /// Handle the Call instruction.
@@ -71,7 +75,7 @@ impl VM {
 
             // Record this closure call for profiling
             let bytecode_ptr = closure.bytecode.as_ptr();
-            let _is_hot = self.record_closure_call(bytecode_ptr);
+            let is_hot = self.record_closure_call(bytecode_ptr);
 
             // Validate argument count
             if !self.check_arity(&closure.arity, args.len()) {
@@ -80,10 +84,55 @@ impl VM {
                 return Ok(None);
             }
 
+            // JIT compilation and dispatch
+            #[cfg(feature = "jit")]
+            {
+                // Check if we already have JIT code for this closure
+                if let Some(jit_code) = self.jit_cache.get(&bytecode_ptr).cloned() {
+                    let result = self.call_jit(&jit_code, closure, &args);
+                    self.call_depth -= 1;
+                    self.stack.push(result);
+                    return Ok(None);
+                }
+
+                // If hot and pure, attempt JIT compilation
+                if is_hot && closure.effect.is_pure() {
+                    if let Some(ref lir_func) = closure.lir_function {
+                        match JitCompiler::new() {
+                            Ok(compiler) => {
+                                match compiler.compile(lir_func) {
+                                    Ok(jit_code) => {
+                                        let jit_code = Rc::new(jit_code);
+                                        // Cache the JIT code
+                                        self.jit_cache.insert(bytecode_ptr, jit_code.clone());
+                                        // Execute via JIT
+                                        let result = self.call_jit(&jit_code, closure, &args);
+                                        self.call_depth -= 1;
+                                        self.stack.push(result);
+                                        return Ok(None);
+                                    }
+                                    Err(_e) => {
+                                        // JIT compilation failed — fall back to interpreter
+                                        // Could log: eprintln!("JIT compilation failed: {}", _e);
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                // JIT compiler creation failed — fall back to interpreter
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Suppress unused variable warning when JIT is disabled
+            #[cfg(not(feature = "jit"))]
+            let _ = is_hot;
+
             // Build the new environment
             let new_env_rc = self.build_closure_env(closure, &args);
 
-            // Execute the closure
+            // Execute the closure (interpreter path)
             if self.in_coroutine() {
                 let result = self.execute_bytecode_coroutine(
                     &closure.bytecode,
@@ -229,6 +278,45 @@ impl VM {
         }
 
         Err(format!("Cannot call {:?}", func))
+    }
+
+    /// Call a JIT-compiled function.
+    ///
+    /// # Safety
+    /// The JIT code must have been compiled from the same LIR function that
+    /// produced the closure's bytecode. The calling convention must match.
+    #[cfg(feature = "jit")]
+    fn call_jit(
+        &mut self,
+        jit_code: &JitCode,
+        closure: &crate::value::Closure,
+        args: &[Value],
+    ) -> Value {
+        // Convert args to bits for the JIT calling convention
+        // We need to pass Value bits, not Value pointers
+        let args_bits: Vec<u64> = args.iter().map(|v| v.to_bits()).collect();
+
+        // Get environment pointer (captures)
+        // The JIT expects a pointer to an array of Value bits (u64)
+        let env_bits: Vec<u64> = closure.env.iter().map(|v| v.to_bits()).collect();
+        let env_ptr = if env_bits.is_empty() {
+            std::ptr::null()
+        } else {
+            env_bits.as_ptr()
+        };
+
+        // Call the JIT-compiled function
+        let result_bits = unsafe {
+            jit_code.call(
+                env_ptr,
+                args_bits.as_ptr(),
+                args.len() as u32,
+                &mut self.globals as *mut _ as *mut (),
+            )
+        };
+
+        // Convert result back to Value
+        unsafe { Value::from_bits(result_bits) }
     }
 
     /// Build a closure environment from captured variables and arguments.

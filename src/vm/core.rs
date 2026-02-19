@@ -8,6 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
+#[cfg(feature = "jit")]
+use crate::jit::JitCode;
+
 // Re-export ExceptionHandler from value::continuation where it's defined
 pub use crate::value::continuation::ExceptionHandler;
 
@@ -56,6 +59,12 @@ pub struct VM {
     pub coroutine_stack: Vec<Rc<RefCell<Coroutine>>>, // Stack of active coroutines
     pub current_source_loc: Option<crate::reader::SourceLoc>, // Current top-level form's location
     pub pending_yield: Option<Value>,    // Pending yield value from yield-from delegation
+    /// JIT code cache: bytecode pointer → compiled native code.
+    /// When a closure becomes hot (called 10+ times) and is pure, we attempt
+    /// JIT compilation and cache the result here. Subsequent calls use the
+    /// native code instead of interpreting bytecode.
+    #[cfg(feature = "jit")]
+    pub jit_cache: HashMap<*const u8, Rc<JitCode>>,
 }
 
 impl VM {
@@ -81,6 +90,8 @@ impl VM {
             coroutine_stack: Vec::new(),
             current_source_loc: None,
             pending_yield: None,
+            #[cfg(feature = "jit")]
+            jit_cache: HashMap::new(),
         }
     }
 
@@ -453,6 +464,10 @@ mod coroutine_vm_tests {
             cell_params_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
+            #[cfg(feature = "jit")]
+            jit_code: None,
+            #[cfg(feature = "jit")]
+            lir_function: None,
         });
         let co = Rc::new(RefCell::new(Coroutine::new(closure)));
 
@@ -483,6 +498,10 @@ mod coroutine_vm_tests {
                 cell_params_mask: 0,
                 symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(crate::error::LocationMap::new()),
+                #[cfg(feature = "jit")]
+                jit_code: None,
+                #[cfg(feature = "jit")]
+                lir_function: None,
             });
             Rc::new(RefCell::new(Coroutine::new(closure)))
         };

@@ -134,6 +134,7 @@ impl Lowerer {
         // The environment layout is: [captures..., parameters..., locally_defined_cells...]
         // But num_locals only counts the parameters and locally-defined variables
         self.current_func.num_locals = params.len() as u16;
+        self.current_func.num_captures = captures.len() as u16;
         self.in_lambda = true;
         self.num_captures = captures.len() as u16;
 
