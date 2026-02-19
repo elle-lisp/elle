@@ -235,6 +235,17 @@ impl<'a> Analyzer<'a> {
         // If so, define creates a local binding, not a global one
         let in_function = self.scopes.iter().any(|s| s.is_function);
 
+        // Check if the value is a lambda form (fn or lambda)
+        // If so, we'll seed effect_env with Pure before analyzing so self-recursive
+        // calls don't default to Yields
+        let is_lambda_form = if let Some(list) = items[2].as_list() {
+            list.first()
+                .and_then(|s| s.as_symbol())
+                .is_some_and(|s| s == "fn" || s == "lambda")
+        } else {
+            false
+        };
+
         if in_function {
             // Inside a function, define creates a local binding
             // Check if binding was pre-created by analyze_begin (for mutual recursion)
@@ -246,10 +257,16 @@ impl<'a> Analyzer<'a> {
                 self.bind(name, BindingKind::Local { index: local_index })
             };
 
+            // Seed effect_env with Pure for lambda forms so self-recursive calls
+            // don't default to Yields during analysis
+            if is_lambda_form {
+                self.effect_env.insert(binding_id, Effect::Pure);
+            }
+
             // Now analyze the value (which can reference the binding)
             let value = self.analyze_expr(&items[2])?;
 
-            // Track effect for interprocedural analysis
+            // Update effect_env with the actual inferred effect
             if let HirKind::Lambda {
                 inferred_effect, ..
             } = &value.kind
@@ -271,15 +288,25 @@ impl<'a> Analyzer<'a> {
             // Create binding first so recursive references work
             let binding_id = self.bind(name, BindingKind::Global);
 
+            // Seed effect_env with Pure for lambda forms so self-recursive calls
+            // don't default to Yields during analysis
+            if is_lambda_form {
+                self.effect_env.insert(binding_id, Effect::Pure);
+            }
+
             // Now analyze the value
             let value = self.analyze_expr(&items[2])?;
 
-            // Track effect for interprocedural analysis
+            // Update effect_env with the actual inferred effect
+            // Also record in defined_global_effects for cross-form tracking
             if let HirKind::Lambda {
                 inferred_effect, ..
             } = &value.kind
             {
                 self.effect_env.insert(binding_id, inferred_effect.clone());
+                // Record for cross-form effect tracking
+                self.defined_global_effects
+                    .insert(sym, inferred_effect.clone());
             }
 
             Ok(Hir::new(

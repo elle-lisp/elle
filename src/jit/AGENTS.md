@@ -31,12 +31,19 @@ type JitFn = unsafe extern "C" fn(
     args: *const Value,     // arguments array
     nargs: u32,             // number of arguments
     vm: *mut VM,            // pointer to VM (for globals, function calls)
+    self_bits: u64,         // NaN-boxed bits of the closure (for self-tail-call detection)
 ) -> Value;
 ```
 
 Values are 8 bytes (`u64` underneath the NaN-boxing).
 
-## Phase 3 Scope (Current)
+The 5th parameter `self_bits` enables self-tail-call optimization: when a
+function tail-calls itself, the JIT compares the callee against `self_bits`.
+If equal, it updates the arg variables and jumps to the loop header instead
+of calling `elle_jit_tail_call`. This turns self-recursive tail calls into
+native loops.
+
+## Phase 4 Scope (Current)
 
 Supported instructions:
 - **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`
@@ -46,15 +53,15 @@ Supported instructions:
 - **Data structures**: `Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`
 - **Cells**: `MakeCell`, `LoadCell`, `StoreCell`, `StoreCapture`
 - **Globals**: `LoadGlobal`, `StoreGlobal`
-- **Function calls**: `Call`, `TailCall`
+- **Function calls**: `Call`, `TailCall` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
 - **Terminators**: `Return`, `Jump`, `Branch`
 
-Unsupported (returns `JitError::UnsupportedInstruction`):
-- `MakeClosure` (complex, rare in hot loops)
-- Exception handling: `PushHandler`, `PopHandler`, `CheckException`, `MatchException`,
-  `BindException`, `LoadException`, `ClearException`, `ReraiseException`, `Throw`
-- Coroutines: `LoadResumeValue`, `Yield` (returns `JitError::NotPure`)
-- Emitter-only: `JumpIfFalseInline`, `JumpInline`
+Unsupported (returns JitError::UnsupportedInstruction):
+- `MakeClosure` — rare in hot loops, deferred
+- Exception handling: PushHandler, PopHandler, Throw, CheckException,
+  MatchException, BindException, LoadException, ClearException, ReraiseException
+  (effect system prevents pure functions from using these)
+- Coroutine: LoadResumeValue, Yield
 
 ## Files
 
@@ -87,6 +94,37 @@ These handle type checking and NaN-boxing.
 - **Globals**: `elle_jit_load_global`, `elle_jit_store_global` (require VM pointer)
 - **Function calls**: `elle_jit_call` (dispatches to native, VM-aware, or closures)
 
+## Self-Tail-Call Optimization
+
+Self-recursive tail calls (a function calling itself in tail position) are
+optimized to native loops. The JIT generates this block structure:
+
+```
+entry_block:
+    // Extract function params (env, args, nargs, vm, self_bits)
+    // Load initial args into arg variables
+    // Jump to loop_header
+
+loop_header:
+    // Merge point for self-tail-calls
+    // Jump to first LIR block
+
+lir_blocks:
+    // ... instructions ...
+    // TailCall: if func == self_bits, update arg vars, jump to loop_header
+    //           if func != self_bits, call elle_jit_tail_call, return
+```
+
+Key implementation details:
+- **Arg variables**: Parameters are stored in Cranelift variables (not read
+  from the args pointer). This allows self-tail-calls to update them.
+- **Loop header**: A merge block that self-tail-calls jump to. Sealed after
+  all LIR blocks are translated (to allow back-edges).
+- **Arity check**: Self-tail-call optimization only applies when the call
+  has the same number of arguments as the function's arity.
+- **Arg evaluation order**: New arg values are read before any are updated,
+  handling cases like `(f b a)` where args are swapped.
+
 ## Invariants
 
 1. **Only pure functions.** `JitCompiler::compile` returns `JitError::NotPure`
@@ -98,14 +136,19 @@ These handle type checking and NaN-boxing.
 3. **Module lifetime.** `JitCode` keeps the `JITModule` alive via `Arc` so the
    native code isn't freed while still in use.
 
-4. **Feature-gated.** All JIT code is behind `#[cfg(feature = "jit")]`. The
-   project compiles without the JIT.
+4. **Always enabled.** JIT is a required dependency (Cranelift). No feature gate.
 
 5. **VM pointer for runtime calls.** The 4th parameter changed from `globals`
    to `vm` in Phase 3 to support function calls and global variable access.
 
+6. **Self-tail-call identity.** The 5th parameter `self_bits` is the NaN-boxed
+   closure pointer. Self-tail-calls are detected by comparing the callee's bits
+   against `self_bits`.
+
 ## Future Phases
 
-- Phase 4: Exception handling
-- Phase 5: MakeClosure support
-- Phase 6: Inline type checks for fast paths
+- Phase 5:
+  - Intra-JIT calling (JIT functions calling other JIT functions directly)
+  - Inline type checks for arithmetic fast paths
+  - JIT-native exception handling (setjmp/longjmp or Cranelift exception tables)
+  - Benchmarks and profiling

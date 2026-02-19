@@ -55,11 +55,19 @@ impl JitCode {
     ///   elements as the function expects captures
     /// - `args` must point to a valid array of `Value` with at least `nargs` elements
     /// - `vm` must be a valid pointer to the VM struct
+    /// - `self_bits` is the NaN-boxed bits of the closure being executed (for self-tail-call detection)
     #[inline]
-    pub unsafe fn call(&self, env: *const u64, args: *const u64, nargs: u32, vm: *mut ()) -> u64 {
-        let f: unsafe extern "C" fn(*const u64, *const u64, u32, *mut ()) -> u64 =
+    pub unsafe fn call(
+        &self,
+        env: *const u64,
+        args: *const u64,
+        nargs: u32,
+        vm: *mut (),
+        self_bits: u64,
+    ) -> u64 {
+        let f: unsafe extern "C" fn(*const u64, *const u64, u32, *mut (), u64) -> u64 =
             std::mem::transmute(self.fn_ptr);
-        f(env, args, nargs, vm)
+        f(env, args, nargs, vm, self_bits)
     }
 }
 

@@ -9,7 +9,7 @@
 
 use elle::effects::Effect;
 use elle::hir::HirKind;
-use elle::pipeline::analyze_new;
+use elle::pipeline::{analyze_all_new, analyze_new};
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::vm::VM;
@@ -532,9 +532,9 @@ fn test_polymorphic_inference_resolves_yields() {
 
 #[test]
 fn test_polymorphic_inference_my_map() {
-    // User-defined recursive map - the recursive call happens before my-map is
-    // fully defined, so the recursive call is treated as unknown (Yields).
-    // This is a known limitation of single-pass analysis.
+    // User-defined recursive map - the recursive call is seeded with Pure
+    // during analysis (since define seeds lambda forms with Pure before
+    // analyzing the body), so the function correctly infers as Polymorphic(0).
     let mut symbols = setup();
     let result = analyze_new(
         r#"(begin 
@@ -545,12 +545,13 @@ fn test_polymorphic_inference_my_map() {
         &mut symbols,
     )
     .unwrap();
-    // Due to the recursive call being analyzed before my-map is defined,
-    // my-map is Yields (not Polymorphic). This is sound but not precise.
+    // my-map is Polymorphic(0) because the only Yields source is calling f.
+    // The recursive call to my-map is seeded as Pure during analysis.
+    // When called with +, which is Pure, the result is Pure.
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
-        "Recursive function with unknown recursive call effect is Yields"
+        Effect::Pure,
+        "Recursive higher-order function with pure arg should be Pure"
     );
 }
 
@@ -762,6 +763,116 @@ fn test_polymorphic_inference_pure_function() {
                 *inferred_effect,
                 Effect::Pure,
                 "Pure function should have Pure effect"
+            );
+        } else {
+            panic!("Expected Lambda");
+        }
+    } else {
+        panic!("Expected Define");
+    }
+}
+
+// ============================================================================
+// 8. CROSS-FORM EFFECT TRACKING TESTS
+// ============================================================================
+
+#[test]
+fn test_cross_form_effect_tracking_pure_helper() {
+    // When a pure helper function is defined in one form and called in another,
+    // the caller should know the helper is pure.
+    let mut symbols = setup();
+    let results = analyze_all_new(
+        r#"
+        (define helper (fn (x) (+ x 1)))
+        (define caller (fn (y) (helper y)))
+        "#,
+        &mut symbols,
+    )
+    .unwrap();
+
+    // The second form (caller) should have Pure effect because helper is pure
+    assert_eq!(results.len(), 2);
+
+    // Check that caller's lambda has Pure effect
+    if let HirKind::Define { value, .. } = &results[1].hir.kind {
+        if let HirKind::Lambda {
+            inferred_effect, ..
+        } = &value.kind
+        {
+            assert_eq!(
+                *inferred_effect,
+                Effect::Pure,
+                "Caller of pure helper should be Pure"
+            );
+        } else {
+            panic!("Expected Lambda");
+        }
+    } else {
+        panic!("Expected Define");
+    }
+}
+
+#[test]
+fn test_cross_form_effect_tracking_polymorphic_helper() {
+    // When a polymorphic helper is defined in one form and called in another,
+    // the caller should correctly resolve the polymorphic effect.
+    let mut symbols = setup();
+    let results = analyze_all_new(
+        r#"
+        (define apply-fn (fn (f x) (f x)))
+        (define use-apply (fn () (apply-fn + 5)))
+        "#,
+        &mut symbols,
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 2);
+
+    // Check that use-apply's lambda has Pure effect (because + is pure)
+    if let HirKind::Define { value, .. } = &results[1].hir.kind {
+        if let HirKind::Lambda {
+            inferred_effect, ..
+        } = &value.kind
+        {
+            assert_eq!(
+                *inferred_effect,
+                Effect::Pure,
+                "Caller of polymorphic helper with pure arg should be Pure"
+            );
+        } else {
+            panic!("Expected Lambda");
+        }
+    } else {
+        panic!("Expected Define");
+    }
+}
+
+#[test]
+fn test_cross_form_effect_tracking_mutual_recursion() {
+    // Test that mutually recursive functions across forms work correctly.
+    // safe? calls check-safe-helper, which should be known as pure.
+    let mut symbols = setup();
+    let results = analyze_all_new(
+        r#"
+        (define check-safe-helper (fn (x) (= x 0)))
+        (define safe? (fn (n) (check-safe-helper n)))
+        "#,
+        &mut symbols,
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 2);
+
+    // Check that safe?'s lambda has Pure effect
+    if let HirKind::Define { value, .. } = &results[1].hir.kind {
+        if let HirKind::Lambda {
+            inferred_effect, ..
+        } = &value.kind
+        {
+            assert_eq!(
+                *inferred_effect,
+                Effect::Pure,
+                "safe? calling pure check-safe-helper should be Pure"
             );
         } else {
             panic!("Expected Lambda");

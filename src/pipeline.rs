@@ -5,13 +5,14 @@
 //! existing Value-based pipeline until fully integrated.
 
 use crate::compiler::Bytecode;
-use crate::effects::get_primitive_effects;
+use crate::effects::{get_primitive_effects, Effect};
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, BindingId, BindingInfo, Hir};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
+use crate::value::SymbolId;
 use std::collections::HashMap;
 
 /// Compilation result
@@ -67,6 +68,8 @@ pub fn compile_all_new(
     let syntaxes = read_syntax_all(source)?;
     let mut expander = Expander::new();
     let mut results = Vec::new();
+    // Accumulate global effects across forms for cross-form effect tracking
+    let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
 
     for syntax in syntaxes {
         let expanded = expander.expand(syntax)?;
@@ -74,7 +77,15 @@ pub fn compile_all_new(
         // Create analyzer for each form with interprocedural effect tracking
         let primitive_effects = get_primitive_effects(symbols);
         let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+        // Pass accumulated global effects from previous forms
+        analyzer.set_global_effects(global_effects.clone());
+
         let mut analysis = analyzer.analyze(&expanded)?;
+
+        // Accumulate effects from this form's defines
+        for (sym, effect) in analyzer.take_defined_global_effects() {
+            global_effects.insert(sym, effect);
+        }
         // Analyzer is dropped here, releasing the mutable borrow
 
         // Mark tail calls
@@ -129,11 +140,23 @@ pub fn analyze_all_new(
     let syntaxes = read_syntax_all(source)?;
     let mut expander = Expander::new();
     let mut results = Vec::new();
+    // Accumulate global effects across forms for cross-form effect tracking
+    let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
+
     for syntax in syntaxes {
         let expanded = expander.expand(syntax)?;
         let primitive_effects = get_primitive_effects(symbols);
         let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+        // Pass accumulated global effects from previous forms
+        analyzer.set_global_effects(global_effects.clone());
+
         let analysis = analyzer.analyze(&expanded)?;
+
+        // Accumulate effects from this form's defines
+        for (sym, effect) in analyzer.take_defined_global_effects() {
+            global_effects.insert(sym, effect);
+        }
+
         results.push(AnalyzeResult {
             hir: analysis.hir,
             bindings: analysis.bindings,

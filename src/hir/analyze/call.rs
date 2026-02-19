@@ -51,8 +51,10 @@ impl<'a> Analyzer<'a> {
                     effect.clone()
                 } else if let Some(info) = self.ctx.get_binding(*binding_id) {
                     if matches!(info.kind, BindingKind::Global) {
+                        // Check primitive effects first, then global effects from previous forms
                         self.primitive_effects
                             .get(&info.name)
+                            .or_else(|| self.global_effects.get(&info.name))
                             .cloned()
                             .unwrap_or(Effect::Yields)
                     } else {
@@ -155,7 +157,13 @@ impl<'a> Analyzer<'a> {
                     self.ctx
                         .get_binding(*id)
                         .filter(|info| matches!(info.kind, BindingKind::Global))
-                        .and_then(|info| self.primitive_effects.get(&info.name).cloned())
+                        .and_then(|info| {
+                            // Check primitive effects first, then global effects from previous forms
+                            self.primitive_effects
+                                .get(&info.name)
+                                .or_else(|| self.global_effects.get(&info.name))
+                                .cloned()
+                        })
                 })
                 .unwrap_or(Effect::Yields),
             // Unknown argument effect - conservatively Yields for soundness

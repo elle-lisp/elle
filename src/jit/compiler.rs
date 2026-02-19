@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use cranelift_codegen::ir::types::I64;
-use cranelift_codegen::ir::{AbiParam, Function, Signature, UserFuncName};
+use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, MemFlags, Signature, UserFuncName};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
@@ -70,6 +70,8 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) load_global: FuncId,
     pub(crate) store_global: FuncId,
     pub(crate) call: FuncId,
+    pub(crate) tail_call: FuncId,
+    pub(crate) has_exception: FuncId,
 }
 
 impl JitCompiler {
@@ -156,6 +158,14 @@ impl JitCompiler {
             dispatch::elle_jit_store_global as *const u8,
         );
         builder.symbol("elle_jit_call", dispatch::elle_jit_call as *const u8);
+        builder.symbol(
+            "elle_jit_tail_call",
+            dispatch::elle_jit_tail_call as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_has_exception",
+            dispatch::elle_jit_has_exception as *const u8,
+        );
 
         let mut module = JITModule::new(builder);
 
@@ -240,6 +250,8 @@ impl JitCompiler {
             load_global: declare(module, "elle_jit_load_global", &binary_sig)?,
             store_global: declare(module, "elle_jit_store_global", &ternary_sig)?,
             call: declare(module, "elle_jit_call", &call_sig)?,
+            tail_call: declare(module, "elle_jit_tail_call", &call_sig)?,
+            has_exception: declare(module, "elle_jit_has_exception", &unary_sig)?,
         })
     }
 
@@ -251,13 +263,14 @@ impl JitCompiler {
         }
 
         // Create function signature
-        // fn(env: *const Value, args: *const Value, nargs: u32, vm: *mut VM) -> Value
+        // fn(env: *const Value, args: *const Value, nargs: u32, vm: *mut VM, self_bits: u64) -> Value
         let mut sig = self.module.make_signature();
         sig.call_conv = CallConv::SystemV;
         sig.params.push(AbiParam::new(I64)); // env pointer
         sig.params.push(AbiParam::new(I64)); // args pointer
         sig.params.push(AbiParam::new(I64)); // nargs (as i64 for simplicity)
         sig.params.push(AbiParam::new(I64)); // vm pointer
+        sig.params.push(AbiParam::new(I64)); // self_bits (closure identity for self-tail-call detection)
         sig.returns.push(AbiParam::new(I64)); // return value
 
         // Declare the function
@@ -291,6 +304,23 @@ impl JitCompiler {
     }
 
     /// Translate LIR function to Cranelift IR
+    ///
+    /// For self-tail-call optimization, we use this block structure:
+    /// ```text
+    /// entry_block:
+    ///     // Extract function params (env, args, nargs, vm, self_bits)
+    ///     // Load initial args into arg variables
+    ///     // Jump to loop_header
+    ///
+    /// loop_header:
+    ///     // Merge point for self-tail-calls
+    ///     // Jump to first LIR block
+    ///
+    /// lir_block_0 (first LIR block):
+    ///     // ... instructions ...
+    ///     // TailCall: if self-call, update arg vars, jump to loop_header
+    ///     //           if not self-call, call elle_jit_tail_call, return
+    /// ```
     fn translate_function(
         &mut self,
         lir: &LirFunction,
@@ -307,43 +337,63 @@ impl JitCompiler {
             builder.declare_var(var(i), I64);
         }
 
-        // Create Cranelift blocks for each LIR basic block
+        // Declare arg variables for self-tail-call support
+        // These are stored at indices [num_regs, num_regs + arity)
+        let arg_var_base = lir.num_regs;
+        for i in 0..lir.arity as u32 {
+            builder.declare_var(var(arg_var_base + i), I64);
+        }
+        translator.arg_var_base = arg_var_base;
+
+        // Create blocks: entry, loop_header, and LIR blocks
+        let entry_block = builder.create_block();
+        let loop_header = builder.create_block();
+
         let mut block_map: HashMap<Label, cranelift_codegen::ir::Block> = HashMap::new();
         for bb in &lir.blocks {
             let cl_block = builder.create_block();
             block_map.insert(bb.label, cl_block);
         }
 
-        // Entry block setup
-        let entry_block = block_map[&lir.entry];
+        // Entry block: extract params, load initial args into variables
         builder.append_block_params_for_function_params(entry_block);
         builder.switch_to_block(entry_block);
-        builder.seal_block(entry_block);
+        builder.seal_block(entry_block); // No predecessors
 
-        // Get function parameters
         let env_ptr = builder.block_params(entry_block)[0];
         let args_ptr = builder.block_params(entry_block)[1];
         let _nargs = builder.block_params(entry_block)[2];
         let vm_ptr = builder.block_params(entry_block)[3];
+        let self_bits = builder.block_params(entry_block)[4];
 
         translator.env_ptr = Some(env_ptr);
-        translator.args_ptr = Some(args_ptr);
         translator.vm_ptr = Some(vm_ptr);
+        translator.self_bits = Some(self_bits);
 
-        // Note: We don't pre-load arguments into registers here.
-        // The LIR uses LoadCapture instructions to access both captures and parameters.
-        // LoadCapture with index < num_captures loads from env (captures).
-        // LoadCapture with index >= num_captures loads from args (parameters).
+        // Load initial args into arg variables
+        for i in 0..lir.arity as u32 {
+            let offset = (i as i32) * 8;
+            let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
+            let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+            builder.def_var(var(arg_var_base + i), val);
+        }
 
-        // Translate each basic block
+        builder.ins().jump(loop_header, &[]);
+
+        // Loop header: merge point for self-tail-calls
+        // DON'T seal yet — self-tail-calls will add back-edges
+        builder.switch_to_block(loop_header);
+        let first_lir_block = block_map[&lir.entry];
+        builder.ins().jump(first_lir_block, &[]);
+
+        // Store loop_header for TailCall to jump to
+        translator.loop_header = Some(loop_header);
+
+        // Translate LIR blocks
         for bb in &lir.blocks {
             let cl_block = block_map[&bb.label];
-
-            // Skip entry block (already set up)
-            if bb.label != lir.entry {
-                builder.switch_to_block(cl_block);
-                builder.seal_block(cl_block);
-            }
+            builder.switch_to_block(cl_block);
+            builder.seal_block(cl_block);
 
             // Translate instructions
             let mut block_terminated = false;
@@ -364,6 +414,9 @@ impl JitCompiler {
                 )?;
             }
         }
+
+        // NOW seal loop_header — all self-tail-call back-edges have been emitted
+        builder.seal_block(loop_header);
 
         builder.finalize();
         Ok(())
@@ -459,8 +512,10 @@ mod tests {
         let code = compiler.compile(&lir).expect("Failed to compile");
 
         // Call the compiled function
+        // self_bits = 0 since we're not testing self-tail-calls here
         let args = [crate::value::Value::int(42).to_bits()];
-        let result = unsafe { code.call(std::ptr::null(), args.as_ptr(), 1, std::ptr::null_mut()) };
+        let result =
+            unsafe { code.call(std::ptr::null(), args.as_ptr(), 1, std::ptr::null_mut(), 0) };
         let value = unsafe { crate::value::Value::from_bits(result) };
         assert_eq!(value.as_int(), Some(42));
     }
@@ -472,11 +527,13 @@ mod tests {
         let code = compiler.compile(&lir).expect("Failed to compile");
 
         // Call the compiled function
+        // self_bits = 0 since we're not testing self-tail-calls here
         let args = [
             crate::value::Value::int(10).to_bits(),
             crate::value::Value::int(32).to_bits(),
         ];
-        let result = unsafe { code.call(std::ptr::null(), args.as_ptr(), 2, std::ptr::null_mut()) };
+        let result =
+            unsafe { code.call(std::ptr::null(), args.as_ptr(), 2, std::ptr::null_mut(), 0) };
         let value = unsafe { crate::value::Value::from_bits(result) };
         assert_eq!(value.as_int(), Some(42));
     }

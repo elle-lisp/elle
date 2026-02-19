@@ -590,9 +590,7 @@ mod tests {
             cell_params_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
-            #[cfg(feature = "jit")]
             jit_code: None,
-            #[cfg(feature = "jit")]
             lir_function: None,
         })
     }

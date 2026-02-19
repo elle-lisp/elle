@@ -13,8 +13,7 @@ use std::rc::Rc;
 
 use super::core::{VmResult, VM};
 
-#[cfg(feature = "jit")]
-use crate::jit::{JitCode, JitCompiler};
+use crate::jit::{JitCode, JitCompiler, TAIL_CALL_SENTINEL};
 
 impl VM {
     /// Handle the Call instruction.
@@ -73,10 +72,6 @@ impl VM {
                 return Err("Stack overflow".to_string());
             }
 
-            // Record this closure call for profiling
-            let bytecode_ptr = closure.bytecode.as_ptr();
-            let is_hot = self.record_closure_call(bytecode_ptr);
-
             // Validate argument count
             if !self.check_arity(&closure.arity, args.len()) {
                 self.call_depth -= 1;
@@ -84,19 +79,47 @@ impl VM {
                 return Ok(None);
             }
 
-            // JIT compilation and dispatch
-            #[cfg(feature = "jit")]
-            {
+            // JIT compilation and dispatch — only for pure closures
+            // Non-pure closures can never be JIT-compiled, so skip profiling overhead
+            if closure.effect.is_pure() {
+                let bytecode_ptr = closure.bytecode.as_ptr();
+                let is_hot = self.record_closure_call(bytecode_ptr);
+
                 // Check if we already have JIT code for this closure
                 if let Some(jit_code) = self.jit_cache.get(&bytecode_ptr).cloned() {
-                    let result = self.call_jit(&jit_code, closure, &args);
+                    let result = self.call_jit(&jit_code, closure, &args, func);
+                    // Check if the JIT function (or a callee) set an exception
+                    if self.current_exception.is_some() {
+                        self.call_depth -= 1;
+                        self.stack.push(Value::NIL);
+                        return Ok(None); // Let the dispatch loop's interrupt handler deal with it
+                    }
+                    // Check for pending tail call (JIT function did a TailCall)
+                    if result.to_bits() == TAIL_CALL_SENTINEL {
+                        if let Some((tail_bc, tail_consts, tail_env)) =
+                            self.pending_tail_call.take()
+                        {
+                            // Hand off to interpreter's trampoline which handles further tail calls
+                            match self.execute_bytecode(&tail_bc, &tail_consts, Some(&tail_env)) {
+                                Ok(val) => {
+                                    self.call_depth -= 1;
+                                    self.stack.push(val);
+                                    return Ok(None);
+                                }
+                                Err(e) => {
+                                    self.call_depth -= 1;
+                                    return Err(e);
+                                }
+                            }
+                        }
+                    }
                     self.call_depth -= 1;
                     self.stack.push(result);
                     return Ok(None);
                 }
 
-                // If hot and pure, attempt JIT compilation
-                if is_hot && closure.effect.is_pure() {
+                // If hot, attempt JIT compilation
+                if is_hot {
                     if let Some(ref lir_func) = closure.lir_function {
                         match JitCompiler::new() {
                             Ok(compiler) => {
@@ -106,7 +129,36 @@ impl VM {
                                         // Cache the JIT code
                                         self.jit_cache.insert(bytecode_ptr, jit_code.clone());
                                         // Execute via JIT
-                                        let result = self.call_jit(&jit_code, closure, &args);
+                                        let result = self.call_jit(&jit_code, closure, &args, func);
+                                        // Check if the JIT function (or a callee) set an exception
+                                        if self.current_exception.is_some() {
+                                            self.call_depth -= 1;
+                                            self.stack.push(Value::NIL);
+                                            return Ok(None); // Let the dispatch loop's interrupt handler deal with it
+                                        }
+                                        // Check for pending tail call (JIT function did a TailCall)
+                                        if result.to_bits() == TAIL_CALL_SENTINEL {
+                                            if let Some((tail_bc, tail_consts, tail_env)) =
+                                                self.pending_tail_call.take()
+                                            {
+                                                // Hand off to interpreter's trampoline
+                                                match self.execute_bytecode(
+                                                    &tail_bc,
+                                                    &tail_consts,
+                                                    Some(&tail_env),
+                                                ) {
+                                                    Ok(val) => {
+                                                        self.call_depth -= 1;
+                                                        self.stack.push(val);
+                                                        return Ok(None);
+                                                    }
+                                                    Err(e) => {
+                                                        self.call_depth -= 1;
+                                                        return Err(e);
+                                                    }
+                                                }
+                                            }
+                                        }
                                         self.call_depth -= 1;
                                         self.stack.push(result);
                                         return Ok(None);
@@ -124,10 +176,6 @@ impl VM {
                     }
                 }
             }
-
-            // Suppress unused variable warning when JIT is disabled
-            #[cfg(not(feature = "jit"))]
-            let _ = is_hot;
 
             // Build the new environment
             let new_env_rc = self.build_closure_env(closure, &args);
@@ -285,12 +333,15 @@ impl VM {
     /// # Safety
     /// The JIT code must have been compiled from the same LIR function that
     /// produced the closure's bytecode. The calling convention must match.
-    #[cfg(feature = "jit")]
+    ///
+    /// `func_value` is the original Value representing the closure, used for
+    /// self-tail-call detection in the JIT code.
     fn call_jit(
         &mut self,
         jit_code: &JitCode,
         closure: &crate::value::Closure,
         args: &[Value],
+        func_value: Value,
     ) -> Value {
         // Convert args to bits for the JIT calling convention
         // We need to pass Value bits, not Value pointers
@@ -306,12 +357,14 @@ impl VM {
         };
 
         // Call the JIT-compiled function
+        // Pass func_value.to_bits() as self_bits for self-tail-call detection
         let result_bits = unsafe {
             jit_code.call(
                 env_ptr,
                 args_bits.as_ptr(),
                 args.len() as u32,
                 self as *mut VM as *mut (),
+                func_value.to_bits(),
             )
         };
 

@@ -128,6 +128,12 @@ pub struct Analyzer<'a> {
     /// Maps SymbolId -> Effect for primitive functions
     /// Built from `register_primitive_effects` and passed in at construction
     primitive_effects: HashMap<SymbolId, Effect>,
+    /// Maps SymbolId -> Effect for user-defined global functions from previous forms.
+    /// This enables cross-form effect tracking in compile_all_new.
+    global_effects: HashMap<SymbolId, Effect>,
+    /// Effects of globally-defined functions in this form (for cross-form tracking)
+    /// Populated during analysis, extracted after analysis completes.
+    defined_global_effects: HashMap<SymbolId, Effect>,
     /// Tracks effect sources within the current lambda body for polymorphic inference
     current_effect_sources: EffectSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
@@ -154,12 +160,24 @@ impl<'a> Analyzer<'a> {
             parent_captures: Vec::new(),
             effect_env: HashMap::new(),
             primitive_effects,
+            global_effects: HashMap::new(),
+            defined_global_effects: HashMap::new(),
             current_effect_sources: EffectSources::default(),
             current_lambda_params: Vec::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
         analyzer
+    }
+
+    /// Set global effects from previous forms (for cross-form effect tracking)
+    pub fn set_global_effects(&mut self, global_effects: HashMap<SymbolId, Effect>) {
+        self.global_effects = global_effects;
+    }
+
+    /// Take the defined global effects (consumes them, for use after analysis)
+    pub fn take_defined_global_effects(&mut self) -> HashMap<SymbolId, Effect> {
+        std::mem::take(&mut self.defined_global_effects)
     }
 
     /// Analyze a syntax tree into HIR

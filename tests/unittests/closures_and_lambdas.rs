@@ -35,9 +35,7 @@ fn test_closure_type_identification() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     let value = Value::closure(closure);
@@ -63,9 +61,7 @@ fn test_closure_display() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     let value = Value::closure(closure);
@@ -88,9 +84,7 @@ fn test_closure_clone() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     let value1 = Value::closure(closure.clone());
@@ -159,9 +153,7 @@ fn test_closure_empty_environment() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert_eq!(closure.env.len(), 0);
@@ -183,9 +175,7 @@ fn test_closure_single_captured_variable() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert_eq!(closure.env.len(), 1);
@@ -213,9 +203,7 @@ fn test_closure_multiple_captured_variables() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert_eq!(closure.env.len(), 4);
@@ -240,9 +228,7 @@ fn test_closure_environment_sharing() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 
@@ -258,9 +244,7 @@ fn test_closure_environment_sharing() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 
@@ -289,9 +273,7 @@ fn test_closure_bytecode_storage() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert_eq!(*closure.bytecode, bytecode);
@@ -313,9 +295,7 @@ fn test_closure_constants_storage() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert_eq!(*closure.constants, constants);
@@ -337,9 +317,7 @@ fn test_closure_num_locals() {
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            #[cfg(feature = "jit")]
             jit_code: None,
-            #[cfg(feature = "jit")]
             lir_function: None,
         };
         assert_eq!(closure.num_locals, num_locals);
@@ -364,9 +342,7 @@ fn test_closure_zero_parameters() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert!(closure.arity.matches(0));
@@ -387,9 +363,7 @@ fn test_closure_single_parameter() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert!(closure.arity.matches(1));
@@ -409,9 +383,7 @@ fn test_closure_multiple_parameters() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert!(closure.arity.matches(3));
@@ -433,9 +405,7 @@ fn test_closure_variadic_parameters() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert!(closure.arity.matches(1));
@@ -462,9 +432,7 @@ fn test_closures_never_equal() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     });
 
@@ -480,9 +448,7 @@ fn test_closures_never_equal() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     });
 
@@ -505,9 +471,7 @@ fn test_same_closure_reference_equality() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     });
 
@@ -540,9 +504,7 @@ fn test_closure_with_nested_captured_values() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 
@@ -564,9 +526,7 @@ fn test_closure_with_closure_in_constants() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     });
 
@@ -582,9 +542,7 @@ fn test_closure_with_closure_in_constants() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 
@@ -608,9 +566,7 @@ fn test_closure_with_many_upvalues() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 
@@ -637,9 +593,7 @@ fn test_closure_as_method() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 
@@ -668,9 +622,7 @@ fn test_closure_type_check() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     });
 
@@ -702,9 +654,7 @@ fn test_closure_environment_isolation() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 
@@ -720,9 +670,7 @@ fn test_closure_environment_isolation() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 
@@ -745,9 +693,7 @@ fn test_closure_local_variables_count() {
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            #[cfg(feature = "jit")]
             jit_code: None,
-            #[cfg(feature = "jit")]
             lir_function: None,
         };
         assert_eq!(closure.num_locals, locals);
@@ -772,9 +718,7 @@ fn test_closure_with_empty_bytecode() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert_eq!(closure.bytecode.len(), 0);
@@ -796,9 +740,7 @@ fn test_closure_with_large_bytecode() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
     assert_eq!(closure.bytecode.len(), 10000);
@@ -822,9 +764,7 @@ fn test_closure_rc_reference_counting() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 
@@ -851,9 +791,7 @@ fn test_closure_debug_format() {
         cell_params_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
-        #[cfg(feature = "jit")]
         jit_code: None,
-        #[cfg(feature = "jit")]
         lir_function: None,
     };
 

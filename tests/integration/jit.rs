@@ -35,12 +35,14 @@ fn load_arg(dst: Reg, arg_index: u16) -> SpannedInstr {
 fn compile_and_call(lir: &LirFunction, args: &[u64]) -> Result<Value, JitError> {
     let compiler = JitCompiler::new()?;
     let code = compiler.compile(lir)?;
+    // self_bits = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(
             std::ptr::null(),
             args.as_ptr(),
             args.len() as u32,
             std::ptr::null_mut(),
+            0,
         )
     };
     Ok(unsafe { Value::from_bits(result) })
@@ -1340,4 +1342,143 @@ fn test_jit_store_cell() {
     let cell = Value::local_cell(Value::int(0));
     let result = compile_and_call(&func, &[cell.to_bits(), Value::int(42).to_bits()]).unwrap();
     assert_eq!(result.as_int(), Some(42));
+}
+
+// =============================================================================
+// TailCall Tests
+// =============================================================================
+
+#[test]
+fn test_jit_tail_call_compiles() {
+    // TailCall should now compile (not return UnsupportedInstruction)
+    // Build a simple function: fn(x) -> tail_call(x)
+    let mut func = LirFunction::new(1);
+    func.num_regs = 2;
+    func.num_captures = 0;
+    func.effect = Effect::Pure;
+
+    let mut entry = BasicBlock::new(Label(0));
+    entry.instructions.push(load_arg(Reg(0), 0));
+    entry.instructions.push(SpannedInstr::new(
+        LirInstr::TailCall {
+            func: Reg(0),
+            args: vec![],
+        },
+        span(),
+    ));
+    // TailCall emits a return, so we need Unreachable as the terminator
+    entry.terminator = SpannedTerminator::new(Terminator::Unreachable, span());
+    func.blocks.push(entry);
+    func.entry = Label(0);
+
+    let compiler = JitCompiler::new().unwrap();
+    let result = compiler.compile(&func);
+    // TailCall should now compile successfully
+    assert!(result.is_ok(), "TailCall should compile: {:?}", result);
+}
+
+// =============================================================================
+// Self-Tail-Call Optimization Tests (End-to-End)
+// =============================================================================
+
+#[test]
+fn test_jit_self_tail_call_loop() {
+    // This should compile to a native loop, not bounce to interpreter
+    use elle::pipeline::eval_new;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    register_primitives(&mut vm, &mut symbols);
+
+    // Use begin to wrap multiple expressions
+    let result = eval_new(
+        r#"(begin
+        (define (count-down n)
+            (if (= n 0) 0 (count-down (- n 1))))
+        (count-down 100000))"#,
+        &mut symbols,
+        &mut vm,
+    );
+    assert!(result.is_ok(), "count-down failed: {:?}", result);
+    assert_eq!(result.unwrap().as_int(), Some(0));
+}
+
+#[test]
+fn test_jit_self_tail_call_accumulator() {
+    use elle::pipeline::eval_new;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    register_primitives(&mut vm, &mut symbols);
+
+    let result = eval_new(
+        r#"(begin
+        (define (sum-to n acc)
+            (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
+        (sum-to 10000 0))"#,
+        &mut symbols,
+        &mut vm,
+    );
+    assert!(result.is_ok(), "sum-to failed: {:?}", result);
+    // sum 1..10000 = 50005000
+    let val = result.unwrap();
+    assert_eq!(val.as_int(), Some(50005000));
+}
+
+#[test]
+fn test_jit_self_tail_call_with_swapped_args() {
+    // Test that self-tail-calls correctly handle argument swapping
+    // e.g., (f b a) where args are swapped
+    use elle::pipeline::eval_new;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    register_primitives(&mut vm, &mut symbols);
+
+    // Simple test: swap args and decrement
+    // Trace: (3,10) -> (10,2) -> (2,9) -> (9,1) -> (1,8) -> (8,0) -> (0,7) -> 7
+    let result = eval_new(
+        r#"(begin
+        (define (swap-test a b)
+            (if (= a 0) b (swap-test b (- a 1))))
+        (swap-test 3 10))"#,
+        &mut symbols,
+        &mut vm,
+    );
+    assert!(result.is_ok(), "swap-test failed: {:?}", result);
+    assert_eq!(result.unwrap().as_int(), Some(7));
+}
+
+#[test]
+fn test_jit_self_tail_call_fibonacci_iterative() {
+    // Iterative fibonacci using tail recursion
+    use elle::pipeline::eval_new;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    register_primitives(&mut vm, &mut symbols);
+
+    let result = eval_new(
+        r#"(begin
+        (define (fib-iter n a b)
+            (if (= n 0) a (fib-iter (- n 1) b (+ a b))))
+        (fib-iter 20 0 1))"#,
+        &mut symbols,
+        &mut vm,
+    );
+    assert!(result.is_ok(), "fib-iter failed: {:?}", result);
+    // fib(20) = 6765
+    assert_eq!(result.unwrap().as_int(), Some(6765));
 }

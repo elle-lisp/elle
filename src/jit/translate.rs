@@ -30,8 +30,13 @@ pub(crate) struct FunctionTranslator<'a> {
     helpers: &'a RuntimeHelpers,
     pub(crate) lir: &'a crate::lir::LirFunction,
     pub(crate) env_ptr: Option<cranelift_codegen::ir::Value>,
-    pub(crate) args_ptr: Option<cranelift_codegen::ir::Value>,
     pub(crate) vm_ptr: Option<cranelift_codegen::ir::Value>,
+    /// NaN-boxed bits of the closure being executed (for self-tail-call detection)
+    pub(crate) self_bits: Option<cranelift_codegen::ir::Value>,
+    /// Base index for arg variables (= num_regs)
+    pub(crate) arg_var_base: u32,
+    /// Loop header block for self-tail-call jumps
+    pub(crate) loop_header: Option<cranelift_codegen::ir::Block>,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -45,8 +50,10 @@ impl<'a> FunctionTranslator<'a> {
             helpers,
             lir,
             env_ptr: None,
-            args_ptr: None,
             vm_ptr: None,
+            self_bits: None,
+            arg_var_base: 0,
+            loop_header: None,
         }
     }
 
@@ -106,20 +113,16 @@ impl<'a> FunctionTranslator<'a> {
                     let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
                     builder.def_var(var(dst.0), val);
                 } else {
-                    // Load from arguments array (parameters)
-                    let args_ptr = self.args_ptr.ok_or_else(|| {
-                        JitError::InvalidLir("LoadCapture without args pointer".to_string())
-                    })?;
+                    // Load from arg variables (NOT args pointer)
+                    // This allows self-tail-calls to update args and loop back
                     let param_index = *index - num_captures;
-                    let offset = (param_index as i32) * 8;
-                    let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
-                    let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+                    let val = builder.use_var(var(self.arg_var_base + param_index as u32));
                     builder.def_var(var(dst.0), val);
                 }
             }
 
             LirInstr::LoadCaptureRaw { dst, index } => {
-                // Same as LoadCapture for now (Phase 1 doesn't handle cells specially)
+                // Same as LoadCapture but doesn't unwrap cells (for forwarding)
                 let num_captures = self.lir.num_captures;
                 if *index < num_captures {
                     let env_ptr = self.env_ptr.ok_or_else(|| {
@@ -130,13 +133,9 @@ impl<'a> FunctionTranslator<'a> {
                     let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
                     builder.def_var(var(dst.0), val);
                 } else {
-                    let args_ptr = self.args_ptr.ok_or_else(|| {
-                        JitError::InvalidLir("LoadCaptureRaw without args pointer".to_string())
-                    })?;
+                    // Load from arg variables (NOT args pointer)
                     let param_index = *index - num_captures;
-                    let offset = (param_index as i32) * 8;
-                    let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
-                    let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+                    let val = builder.use_var(var(self.arg_var_base + param_index as u32));
                     builder.def_var(var(dst.0), val);
                 }
             }
@@ -329,20 +328,82 @@ impl<'a> FunctionTranslator<'a> {
                     let result = self.call_helper_call(builder, func_val, args_addr, nargs, vm)?;
                     builder.def_var(var(dst.0), result);
                 }
+                // Check for exception after call - if set, bail out to interpreter
+                self.emit_exception_check_after_call(builder)?;
             }
 
             LirInstr::TailCall { func, args } => {
-                // For now, treat TailCall as a regular call that returns immediately
-                // True TCO in JIT would require more complex handling
                 let func_val = builder.use_var(var(func.0));
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("TailCall without vm pointer".to_string())
                 })?;
 
+                // Check if this is a self-tail-call (func == self_bits)
+                // Only do this optimization if we have self_bits and loop_header
+                if let (Some(self_bits), Some(loop_header)) = (self.self_bits, self.loop_header) {
+                    // Check arity matches (self-call must have same number of args)
+                    if args.len() == self.lir.arity as usize {
+                        let is_self = builder.ins().icmp(IntCC::Equal, func_val, self_bits);
+
+                        let self_call_block = builder.create_block();
+                        let other_call_block = builder.create_block();
+
+                        builder
+                            .ins()
+                            .brif(is_self, self_call_block, &[], other_call_block, &[]);
+
+                        // Self-call path: update arg variables and jump to loop header
+                        builder.switch_to_block(self_call_block);
+                        builder.seal_block(self_call_block);
+
+                        // Read all new arg values first (before updating any variables)
+                        // This handles cases like (f b a) where args are swapped
+                        let new_arg_vals: Vec<_> = args
+                            .iter()
+                            .map(|arg_reg| builder.use_var(var(arg_reg.0)))
+                            .collect();
+
+                        // Now update arg variables
+                        for (i, arg_val) in new_arg_vals.into_iter().enumerate() {
+                            builder.def_var(var(self.arg_var_base + i as u32), arg_val);
+                        }
+
+                        builder.ins().jump(loop_header, &[]);
+
+                        // Other-call path: use elle_jit_tail_call trampoline
+                        builder.switch_to_block(other_call_block);
+                        builder.seal_block(other_call_block);
+
+                        let result = if args.is_empty() {
+                            let null_ptr = builder.ins().iconst(I64, 0);
+                            let nargs = builder.ins().iconst(I64, 0);
+                            self.call_helper_tail_call(builder, func_val, null_ptr, nargs, vm)?
+                        } else {
+                            let slot = builder.create_sized_stack_slot(
+                                cranelift_codegen::ir::StackSlotData::new(
+                                    cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                                    (args.len() * 8) as u32,
+                                    0,
+                                ),
+                            );
+                            for (i, arg_reg) in args.iter().enumerate() {
+                                let arg_val = builder.use_var(var(arg_reg.0));
+                                builder.ins().stack_store(arg_val, slot, (i * 8) as i32);
+                            }
+                            let args_addr = builder.ins().stack_addr(I64, slot, 0);
+                            let nargs = builder.ins().iconst(I64, args.len() as i64);
+                            self.call_helper_tail_call(builder, func_val, args_addr, nargs, vm)?
+                        };
+                        builder.ins().return_(&[result]);
+                        return Ok(true); // Block is terminated
+                    }
+                }
+
+                // Fallback: no self-tail-call optimization (arity mismatch or no self_bits)
                 let result = if args.is_empty() {
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let nargs = builder.ins().iconst(I64, 0);
-                    self.call_helper_call(builder, func_val, null_ptr, nargs, vm)?
+                    self.call_helper_tail_call(builder, func_val, null_ptr, nargs, vm)?
                 } else {
                     let slot =
                         builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
@@ -356,9 +417,10 @@ impl<'a> FunctionTranslator<'a> {
                     }
                     let args_addr = builder.ins().stack_addr(I64, slot, 0);
                     let nargs = builder.ins().iconst(I64, args.len() as i64);
-                    self.call_helper_call(builder, func_val, args_addr, nargs, vm)?
+                    self.call_helper_tail_call(builder, func_val, args_addr, nargs, vm)?
                 };
-                // Return the result immediately
+                // Return the result (either the direct result for native/vm-aware,
+                // or TAIL_CALL_SENTINEL for closures)
                 builder.ins().return_(&[result]);
                 return Ok(true); // Block is terminated
             }
@@ -622,5 +684,61 @@ impl<'a> FunctionTranslator<'a> {
             .declare_func_in_func(self.helpers.call, builder.func);
         let call = builder.ins().call(func_ref, &[func, args_ptr, nargs, vm]);
         Ok(builder.inst_results(call)[0])
+    }
+
+    /// Call the elle_jit_tail_call helper (4 args: func, args_ptr, nargs, vm)
+    fn call_helper_tail_call(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        func: cranelift_codegen::ir::Value,
+        args_ptr: cranelift_codegen::ir::Value,
+        nargs: cranelift_codegen::ir::Value,
+        vm: cranelift_codegen::ir::Value,
+    ) -> Result<cranelift_codegen::ir::Value, JitError> {
+        let func_ref = self
+            .module
+            .declare_func_in_func(self.helpers.tail_call, builder.func);
+        let call = builder.ins().call(func_ref, &[func, args_ptr, nargs, vm]);
+        Ok(builder.inst_results(call)[0])
+    }
+
+    /// Emit exception check after a call instruction.
+    /// If an exception is pending, return NIL immediately to bail out to the
+    /// interpreter's exception handling.
+    pub(crate) fn emit_exception_check_after_call(
+        &mut self,
+        builder: &mut FunctionBuilder,
+    ) -> Result<(), JitError> {
+        let vm = self.vm_ptr.ok_or_else(|| {
+            JitError::InvalidLir("emit_exception_check without vm pointer".to_string())
+        })?;
+
+        // Call has_exception helper
+        let has_exc = self.call_helper_unary(builder, self.helpers.has_exception, vm)?;
+
+        // Check truthiness: value != NIL && value != FALSE
+        let nil = builder.ins().iconst(I64, TAG_NIL as i64);
+        let false_val = builder.ins().iconst(I64, TAG_FALSE as i64);
+        let not_nil = builder.ins().icmp(IntCC::NotEqual, has_exc, nil);
+        let not_false = builder.ins().icmp(IntCC::NotEqual, has_exc, false_val);
+        let is_truthy = builder.ins().band(not_nil, not_false);
+
+        // Create exception return block and continue block
+        let exc_block = builder.create_block();
+        let cont_block = builder.create_block();
+        builder
+            .ins()
+            .brif(is_truthy, exc_block, &[], cont_block, &[]);
+
+        // Exception block: return NIL to bail out
+        builder.switch_to_block(exc_block);
+        builder.seal_block(exc_block);
+        builder.ins().return_(&[nil]);
+
+        // Continue block: normal execution continues
+        builder.switch_to_block(cont_block);
+        builder.seal_block(cont_block);
+
+        Ok(())
     }
 }
