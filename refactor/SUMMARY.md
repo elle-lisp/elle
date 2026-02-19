@@ -69,12 +69,22 @@ HIR tail-call marking pass (`hir/tailcall.rs`). Lowerer emits
 Both products use the new pipeline exclusively. HIR-based linter and symbol
 extraction. No dependency on old `Expr` type.
 
+### Interprocedural effect tracking (Feb 2026)
+
+Effect tracking now propagates across function boundaries:
+- `effect_env` in Analyzer maps `BindingId` → `Effect` for locally-defined lambdas
+- `primitive_effects` maps `SymbolId` → `Effect` for primitive functions
+- Call sites resolve callee effects and propagate `Yields` appropriately
+- Polymorphic effects (like `map`) resolve based on argument effects
+- `set!` invalidates effect tracking for the mutated binding
+
+Limitations: effects tracked within single compilation unit only.
+
 ## Not yet done
 
 ### Semantic gaps
 - `handler-bind` (non-unwinding handlers): stub
 - Signal/restart system: `InvokeRestart` opcode is a no-op
-- Effect enforcement at compile time: not started
 - Module system: `import` emits nil (module-qualified names now supported)
 
 ### Error system

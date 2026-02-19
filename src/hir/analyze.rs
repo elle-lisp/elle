@@ -3,8 +3,16 @@
 //! This module converts expanded Syntax trees into HIR by:
 //! 1. Resolving all variable references to BindingIds
 //! 2. Computing captures for closures
-//! 3. Inferring effects
+//! 3. Inferring effects (including interprocedural effect tracking)
 //! 4. Validating scope rules
+//!
+//! ## Interprocedural Effect Tracking
+//!
+//! The analyzer tracks effects across function boundaries:
+//! - When a binding is defined with a lambda, we record the lambda body's effect
+//! - When a call is analyzed, we look up the callee's effect and propagate it
+//! - Polymorphic effects (like `map`) are resolved by examining the argument's effect
+//! - `set!` invalidates effect tracking for the mutated binding
 
 use super::binding::{BindingId, BindingInfo, BindingKind, CaptureInfo, CaptureKind};
 use super::expr::{Hir, HirKind};
@@ -12,6 +20,7 @@ use super::pattern::{HirPattern, PatternLiteral};
 use crate::effects::Effect;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::value::SymbolId;
 use std::collections::HashMap;
 
 /// Result of HIR analysis
@@ -96,16 +105,35 @@ pub struct Analyzer<'a> {
     current_captures: Vec<CaptureInfo>,
     /// Captures from the parent function (for nested closures)
     parent_captures: Vec<CaptureInfo>,
+    /// Maps BindingId → known effect of the bound value (if it's a callable)
+    /// This enables interprocedural effect tracking: when we call a function,
+    /// we can look up its effect and propagate it to the call site.
+    effect_env: HashMap<BindingId, Effect>,
+    /// Maps SymbolId → Effect for primitive functions
+    /// Built from `register_primitive_effects` and passed in at construction
+    primitive_effects: HashMap<SymbolId, Effect>,
 }
 
 impl<'a> Analyzer<'a> {
+    /// Create a new analyzer without primitive effects
+    /// Use `new_with_primitive_effects` for full interprocedural effect tracking
     pub fn new(symbols: &'a mut SymbolTable) -> Self {
+        Self::new_with_primitive_effects(symbols, HashMap::new())
+    }
+
+    /// Create a new analyzer with primitive effects for interprocedural tracking
+    pub fn new_with_primitive_effects(
+        symbols: &'a mut SymbolTable,
+        primitive_effects: HashMap<SymbolId, Effect>,
+    ) -> Self {
         let mut analyzer = Analyzer {
             ctx: AnalysisContext::new(),
             symbols,
             scopes: Vec::new(),
             current_captures: Vec::new(),
             parent_captures: Vec::new(),
+            effect_env: HashMap::new(),
+            primitive_effects,
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
@@ -304,6 +332,10 @@ impl<'a> Analyzer<'a> {
                     index: self.current_local_index(),
                 },
             );
+            // Track effect for interprocedural analysis
+            if let HirKind::Lambda { ref body, .. } = value.kind {
+                self.effect_env.insert(id, body.effect);
+            }
             bindings.push((id, value));
         }
 
@@ -362,6 +394,10 @@ impl<'a> Analyzer<'a> {
                     index: self.current_local_index(),
                 },
             );
+            // Track effect for interprocedural analysis
+            if let HirKind::Lambda { ref body, .. } = value.kind {
+                self.effect_env.insert(id, body.effect);
+            }
             bindings.push((id, value));
         }
 
@@ -423,6 +459,12 @@ impl<'a> Analyzer<'a> {
             let pair = binding.as_list().unwrap();
             let value = self.analyze_expr(&pair[1])?;
             effect = effect.combine(value.effect);
+            // Track effect for interprocedural analysis
+            // Note: For mutual recursion, effects may be incomplete at this point
+            // since later bindings haven't been analyzed yet. This is conservative.
+            if let HirKind::Lambda { ref body, .. } = value.kind {
+                self.effect_env.insert(binding_ids[i], body.effect);
+            }
             bindings.push((binding_ids[i], value));
         }
 
@@ -652,6 +694,11 @@ impl<'a> Analyzer<'a> {
             // Now analyze the value (which can reference the binding)
             let value = self.analyze_expr(&items[2])?;
 
+            // Track effect for interprocedural analysis
+            if let HirKind::Lambda { ref body, .. } = value.kind {
+                self.effect_env.insert(binding_id, body.effect);
+            }
+
             // Emit a LocalDefine that stores to a local slot
             Ok(Hir::new(
                 HirKind::LocalDefine {
@@ -664,10 +711,15 @@ impl<'a> Analyzer<'a> {
         } else {
             // At top level, define creates a global binding
             // Create binding first so recursive references work
-            self.bind(name, BindingKind::Global);
+            let binding_id = self.bind(name, BindingKind::Global);
 
             // Now analyze the value
             let value = self.analyze_expr(&items[2])?;
+
+            // Track effect for interprocedural analysis
+            if let HirKind::Lambda { ref body, .. } = value.kind {
+                self.effect_env.insert(binding_id, body.effect);
+            }
 
             Ok(Hir::new(
                 HirKind::Define {
@@ -704,6 +756,10 @@ impl<'a> Analyzer<'a> {
         if let Some(info) = self.ctx.get_binding_mut(target) {
             info.mark_mutated();
         }
+
+        // Invalidate effect tracking for this binding since it's being mutated
+        // The binding's effect is now uncertain
+        self.effect_env.remove(&target);
 
         let value = self.analyze_expr(&items[2])?;
         let effect = value.effect;
@@ -1158,6 +1214,10 @@ impl<'a> Analyzer<'a> {
             args.push(hir);
         }
 
+        // Interprocedural effect tracking: what effect does CALLING this function have?
+        let callee_effect = self.resolve_callee_effect(&func, &args);
+        effect = effect.combine(callee_effect);
+
         Ok(Hir::new(
             HirKind::Call {
                 func: Box::new(func),
@@ -1167,6 +1227,72 @@ impl<'a> Analyzer<'a> {
             span,
             effect,
         ))
+    }
+
+    /// Resolve the effect of calling a function.
+    /// This implements interprocedural effect tracking.
+    fn resolve_callee_effect(&self, func: &Hir, args: &[Hir]) -> Effect {
+        match &func.kind {
+            // Direct lambda call: ((lambda () (yield 1)))
+            HirKind::Lambda { body, .. } => body.effect,
+
+            // Variable call: (f) where f is bound to something
+            HirKind::Var(binding_id) => {
+                // Check effect_env first (for local bindings to lambdas)
+                if let Some(&effect) = self.effect_env.get(binding_id) {
+                    self.resolve_polymorphic_effect(effect, args)
+                } else if let Some(info) = self.ctx.get_binding(*binding_id) {
+                    // For globals, check primitive effects
+                    if matches!(info.kind, BindingKind::Global) {
+                        let effect = self
+                            .primitive_effects
+                            .get(&info.name)
+                            .copied()
+                            .unwrap_or(Effect::Pure);
+                        self.resolve_polymorphic_effect(effect, args)
+                    } else {
+                        // Unknown local — conservatively Pure
+                        Effect::Pure
+                    }
+                } else {
+                    Effect::Pure
+                }
+            }
+
+            // Anything else (computed function): conservatively Pure
+            _ => Effect::Pure,
+        }
+    }
+
+    /// Resolve a polymorphic effect by examining the argument at the specified index.
+    fn resolve_polymorphic_effect(&self, effect: Effect, args: &[Hir]) -> Effect {
+        match effect {
+            Effect::Polymorphic(param_idx) if param_idx < args.len() => {
+                self.resolve_arg_effect(&args[param_idx])
+            }
+            other => other,
+        }
+    }
+
+    /// Resolve the effect of an argument (used for polymorphic effect resolution).
+    /// When the polymorphic parameter is itself a lambda or known function,
+    /// we can determine its effect.
+    fn resolve_arg_effect(&self, arg: &Hir) -> Effect {
+        match &arg.kind {
+            HirKind::Lambda { body, .. } => body.effect,
+            HirKind::Var(id) => self
+                .effect_env
+                .get(id)
+                .copied()
+                .or_else(|| {
+                    self.ctx
+                        .get_binding(*id)
+                        .filter(|info| matches!(info.kind, BindingKind::Global))
+                        .and_then(|info| self.primitive_effects.get(&info.name).copied())
+                })
+                .unwrap_or(Effect::Pure),
+            _ => Effect::Pure,
+        }
     }
 
     // === Scope Management ===

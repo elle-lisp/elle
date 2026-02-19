@@ -56,3 +56,6 @@ mod pipeline_point {
 mod thread_transfer {
     include!("thread_transfer.rs");
 }
+mod effect_enforcement {
+    include!("effect_enforcement.rs");
+}

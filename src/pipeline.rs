@@ -5,6 +5,7 @@
 //! existing Value-based pipeline until fully integrated.
 
 use crate::compiler::Bytecode;
+use crate::effects::get_primitive_effects;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, BindingId, BindingInfo, Hir};
 use crate::lir::{Emitter, Lowerer};
@@ -35,8 +36,9 @@ pub fn compile_new(source: &str, symbols: &mut SymbolTable) -> Result<CompileRes
     let mut expander = Expander::new();
     let expanded = expander.expand(syntax)?;
 
-    // Phase 3: Analyze to HIR
-    let mut analyzer = Analyzer::new(symbols);
+    // Phase 3: Analyze to HIR with interprocedural effect tracking
+    let primitive_effects = get_primitive_effects(symbols);
+    let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
     let mut analysis = analyzer.analyze(&expanded)?;
 
     // Phase 3.5: Mark tail calls
@@ -69,8 +71,9 @@ pub fn compile_all_new(
     for syntax in syntaxes {
         let expanded = expander.expand(syntax)?;
 
-        // Create analyzer for each form to avoid borrow conflicts
-        let mut analyzer = Analyzer::new(symbols);
+        // Create analyzer for each form with interprocedural effect tracking
+        let primitive_effects = get_primitive_effects(symbols);
+        let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
         let mut analysis = analyzer.analyze(&expanded)?;
         // Analyzer is dropped here, releasing the mutable borrow
 
@@ -109,7 +112,8 @@ pub fn analyze_new(source: &str, symbols: &mut SymbolTable) -> Result<AnalyzeRes
     let syntax = read_syntax(source)?;
     let mut expander = Expander::new();
     let expanded = expander.expand(syntax)?;
-    let mut analyzer = Analyzer::new(symbols);
+    let primitive_effects = get_primitive_effects(symbols);
+    let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
     let analysis = analyzer.analyze(&expanded)?;
     Ok(AnalyzeResult {
         hir: analysis.hir,
@@ -127,7 +131,8 @@ pub fn analyze_all_new(
     let mut results = Vec::new();
     for syntax in syntaxes {
         let expanded = expander.expand(syntax)?;
-        let mut analyzer = Analyzer::new(symbols);
+        let primitive_effects = get_primitive_effects(symbols);
+        let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
         let analysis = analyzer.analyze(&expanded)?;
         results.push(AnalyzeResult {
             hir: analysis.hir,
