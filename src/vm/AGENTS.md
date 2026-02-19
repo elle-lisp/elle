@@ -141,8 +141,11 @@ Exception handling across resume:
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | ~1200 | Main execution loop, instruction dispatch |
-| `core.rs` | ~600 | `VM` struct, `VmResult`, `resume_continuation` |
+| `mod.rs` | ~350 | VM struct, VmResult, public interface |
+| `dispatch.rs` | ~556 | Main execution loop, instruction dispatch |
+| `call.rs` | ~250 | Call, TailCall, Return, exception handling |
+| `execute.rs` | ~300 | Helper functions for instruction execution |
+| `core.rs` | ~590 | `resume_continuation`, continuation replay |
 | `stack.rs` | ~100 | Stack operations: LoadConst, Pop, Dup |
 | `variables.rs` | ~150 | LoadGlobal, StoreGlobal, LoadUpvalue, etc. |
 | `control.rs` | ~100 | Jump, JumpIfFalse, Return |

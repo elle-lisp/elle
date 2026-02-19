@@ -101,7 +101,7 @@ cargo run --release -- nqueens/nqueens.lisp
 chezscheme --script matrix-ops/matrix-pure.scm
 
 # SBCL
-sbcl --script matrix-ops/matrix-pure.lisp
+sbcl --script matrix-ops/matrix-pure.lisp.cl
 ```
 
 ### AWS SigV4 Signing

@@ -422,12 +422,12 @@ impl Emitter {
                     BinOp::Sub => Instruction::Sub,
                     BinOp::Mul => Instruction::Mul,
                     BinOp::Div => Instruction::Div,
-                    BinOp::Rem => Instruction::Div, // TODO: handle Rem properly
-                    BinOp::BitAnd => Instruction::Add, // TODO: handle bitwise ops
-                    BinOp::BitOr => Instruction::Add,
-                    BinOp::BitXor => Instruction::Add,
-                    BinOp::Shl => Instruction::Add,
-                    BinOp::Shr => Instruction::Add,
+                    BinOp::Rem => Instruction::Rem,
+                    BinOp::BitAnd => Instruction::BitAnd,
+                    BinOp::BitOr => Instruction::BitOr,
+                    BinOp::BitXor => Instruction::BitXor,
+                    BinOp::Shl => Instruction::Shl,
+                    BinOp::Shr => Instruction::Shr,
                 };
                 self.bytecode.emit(instr);
                 self.pop();
@@ -469,8 +469,7 @@ impl Emitter {
                         self.bytecode.emit(Instruction::Sub);
                     }
                     UnaryOp::BitNot => {
-                        // TODO: implement bitwise not
-                        self.bytecode.emit(Instruction::Not);
+                        self.bytecode.emit(Instruction::BitNot);
                     }
                 }
                 self.pop();

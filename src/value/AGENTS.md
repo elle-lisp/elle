@@ -12,7 +12,11 @@ Runtime value representation using NaN-boxing.
 
 | Module | Purpose |
 |--------|---------|
-| `repr.rs` | NaN-boxed `Value` type, tag encoding, immediate values |
+| `repr/mod.rs` | NaN-boxed `Value` type, tag encoding |
+| `repr/constructors.rs` | Value construction methods |
+| `repr/accessors.rs` | Value field access and type checking |
+| `repr/traits.rs` | `Display`, `Debug`, `Clone` implementations |
+| `repr/tests.rs` | NaN-boxing tests |
 | `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `VmAwareFn`, `TableKey` |
 | `closure.rs` | `Closure` struct with bytecode, env, and `location_map` |
 | `coroutine.rs` | `Coroutine`, `CoroutineState` for suspendable computation |
@@ -67,7 +71,11 @@ Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | ~50 | Re-exports |
-| `repr.rs` | ~400 | NaN-boxed Value type |
+| `repr/mod.rs` | ~280 | NaN-boxed Value type, tag encoding |
+| `repr/constructors.rs` | ~250 | Value construction methods |
+| `repr/accessors.rs` | ~420 | Value field access and type checking |
+| `repr/traits.rs` | ~150 | Display, Debug, Clone implementations |
+| `repr/tests.rs` | ~100 | NaN-boxing tests |
 | `types.rs` | ~150 | Arity, SymbolId, NativeFn, etc. |
 | `closure.rs` | ~70 | Closure struct |
 | `coroutine.rs` | ~100 | Coroutine, CoroutineState |

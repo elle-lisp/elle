@@ -90,6 +90,15 @@ pub enum Instruction {
     Sub,
     Mul,
     Div,
+    Rem,
+
+    /// Bitwise operations
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitNot,
+    Shl,
+    Shr,
 
     /// Comparisons
     Eq,
@@ -316,5 +325,31 @@ mod tests {
         let idx2 = bc.add_constant(Value::int(42));
         assert_eq!(idx1, idx2);
         assert_eq!(bc.constants.len(), 1);
+    }
+
+    #[test]
+    fn test_instruction_roundtrip() {
+        // Test that all arithmetic/bitwise instructions can be emitted and decoded
+        let instructions = [
+            Instruction::Add,
+            Instruction::Sub,
+            Instruction::Mul,
+            Instruction::Div,
+            Instruction::Rem,
+            Instruction::BitAnd,
+            Instruction::BitOr,
+            Instruction::BitXor,
+            Instruction::BitNot,
+            Instruction::Shl,
+            Instruction::Shr,
+        ];
+
+        for instr in instructions {
+            let mut bc = Bytecode::new();
+            bc.emit(instr);
+            let byte = bc.instructions[0];
+            let decoded: Instruction = unsafe { std::mem::transmute(byte) };
+            assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
+        }
     }
 }
