@@ -181,13 +181,13 @@ mod tests {
             make_span(),
         );
         let func = lowerer.lower(&hir).unwrap();
-        // If is now emitted inline in a single block
-        assert_eq!(func.blocks.len(), 1);
-        // Should have inline jump instructions
-        assert!(func.blocks[0]
-            .instructions
-            .iter()
-            .any(|si| matches!(si.instr, LirInstr::JumpIfFalseInline { .. })));
+        // If now creates multiple blocks: entry, then, else, merge
+        assert_eq!(func.blocks.len(), 4);
+        // Entry block should have a Branch terminator
+        assert!(matches!(
+            func.blocks[0].terminator.terminator,
+            Terminator::Branch { .. }
+        ));
     }
 
     #[test]

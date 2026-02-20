@@ -40,47 +40,63 @@ impl Lowerer {
         if exprs.is_empty() {
             return self.emit_const(LirConst::Bool(true));
         }
+        if exprs.len() == 1 {
+            return self.lower_expr(&exprs[0]);
+        }
 
-        let exit_label_id = self.next_label;
-        self.next_label += 1;
-
+        // Use a shared result register. Each branch leaves its result on the stack.
+        // At the merge point, the result is on top of the stack.
         let result_reg = self.fresh_reg();
+        let done_label = self.fresh_label();
 
         for (i, expr) in exprs.iter().enumerate() {
-            let expr_reg = self.lower_expr(expr)?;
+            let val_reg = self.lower_expr(expr)?;
 
             if i < exprs.len() - 1 {
-                // Not the last expression - need to handle short-circuit
-                // Dup the value: one copy for potential return, one for the test
+                // Not the last expression — branch on truthiness
+                // If falsy, short-circuit to done with this value
+                // If truthy, pop this value and continue to next expression
+                //
+                // Dup the value: one copy for the branch test, one for the result
+                let dup_reg = self.fresh_reg();
                 self.emit(LirInstr::Dup {
-                    dst: result_reg,
-                    src: expr_reg,
+                    dst: dup_reg,
+                    src: val_reg,
                 });
 
-                // If false, jump to exit (short-circuit)
-                // Test the duplicate (result_reg) which is on top of the stack.
-                // This pops result_reg, leaving expr_reg on the stack.
-                self.emit(LirInstr::JumpIfFalseInline {
-                    cond: result_reg,
-                    label_id: exit_label_id,
-                });
-
-                // If we didn't short-circuit, pop the original
-                // (we'll compute a new result in the next iteration)
-                self.emit(LirInstr::Pop { src: expr_reg });
-            } else {
-                // Last expression - just move to result_reg
+                // Use Move to track the result with result_reg
+                // This ensures the emitter knows result_reg is at the same position as val_reg
                 self.emit(LirInstr::Move {
                     dst: result_reg,
-                    src: expr_reg,
+                    src: val_reg,
                 });
+
+                let next_label = self.fresh_label();
+                // Branch on the duplicate (which will be popped by JumpIfFalse)
+                self.terminate(Terminator::Branch {
+                    cond: dup_reg,
+                    then_label: next_label,
+                    else_label: done_label,
+                });
+                self.finish_block();
+
+                // Next block: pop the original value and continue
+                self.current_block = BasicBlock::new(next_label);
+                self.emit(LirInstr::Pop { src: result_reg });
+            } else {
+                // Last expression — this is the result, jump to done
+                self.emit(LirInstr::Move {
+                    dst: result_reg,
+                    src: val_reg,
+                });
+                self.terminate(Terminator::Jump(done_label));
+                self.finish_block();
             }
         }
 
-        // Exit label
-        self.emit(LirInstr::LabelMarker {
-            label_id: exit_label_id,
-        });
+        // Done block (continue here)
+        // The result is on top of the stack from whichever branch was taken
+        self.current_block = BasicBlock::new(done_label);
 
         Ok(result_reg)
     }
@@ -89,61 +105,64 @@ impl Lowerer {
         if exprs.is_empty() {
             return self.emit_const(LirConst::Bool(false));
         }
+        if exprs.len() == 1 {
+            return self.lower_expr(&exprs[0]);
+        }
 
-        let exit_label_id = self.next_label;
-        self.next_label += 1;
-
+        // Use a shared result register. Each branch leaves its result on the stack.
+        // At the merge point, the result is on top of the stack.
         let result_reg = self.fresh_reg();
+        let done_label = self.fresh_label();
 
         for (i, expr) in exprs.iter().enumerate() {
-            let expr_reg = self.lower_expr(expr)?;
+            let val_reg = self.lower_expr(expr)?;
 
             if i < exprs.len() - 1 {
-                // Not the last expression - need to handle short-circuit
-                // Dup the value: one copy for potential return, one for the test
+                // Not the last expression — branch on truthiness
+                // If truthy, short-circuit to done with this value
+                // If falsy, pop this value and continue to next expression
+                //
+                // Dup the value: one copy for the branch test, one for the result
+                let dup_reg = self.fresh_reg();
                 self.emit(LirInstr::Dup {
-                    dst: result_reg,
-                    src: expr_reg,
+                    dst: dup_reg,
+                    src: val_reg,
                 });
 
-                // If true, jump to exit (short-circuit)
-                // We use JumpIfFalseInline to skip to next, then JumpInline to exit
-                let next_label_id = self.next_label;
-                self.next_label += 1;
-
-                // If false, jump to next (don't short-circuit)
-                // Test the duplicate (result_reg) which is on top of the stack.
-                // This pops result_reg, leaving expr_reg on the stack.
-                self.emit(LirInstr::JumpIfFalseInline {
-                    cond: result_reg,
-                    label_id: next_label_id,
-                });
-
-                // If we get here, expr was true - short-circuit to exit
-                // expr_reg is still on stack and will be our result
-                self.emit(LirInstr::JumpInline {
-                    label_id: exit_label_id,
-                });
-
-                // Next label - we didn't short-circuit (expr was false)
-                self.emit(LirInstr::LabelMarker {
-                    label_id: next_label_id,
-                });
-
-                // Pop the original (we'll compute a new result in the next iteration)
-                self.emit(LirInstr::Pop { src: expr_reg });
-            } else {
-                // Last expression - just move to result_reg
+                // Use Move to track the result with result_reg
+                // This ensures the emitter knows result_reg is at the same position as val_reg
                 self.emit(LirInstr::Move {
                     dst: result_reg,
-                    src: expr_reg,
+                    src: val_reg,
                 });
+
+                let next_label = self.fresh_label();
+                // Branch on the duplicate (which will be popped by JumpIfFalse)
+                self.terminate(Terminator::Branch {
+                    cond: dup_reg,
+                    then_label: done_label,
+                    else_label: next_label,
+                });
+                self.finish_block();
+
+                // Next block: pop the original value and continue
+                self.current_block = BasicBlock::new(next_label);
+                self.emit(LirInstr::Pop { src: result_reg });
+            } else {
+                // Last expression — this is the result, jump to done
+                self.emit(LirInstr::Move {
+                    dst: result_reg,
+                    src: val_reg,
+                });
+                self.terminate(Terminator::Jump(done_label));
+                self.finish_block();
             }
         }
 
-        self.emit(LirInstr::LabelMarker {
-            label_id: exit_label_id,
-        });
+        // Done block (continue here)
+        // The result is on top of the stack from whichever branch was taken
+        self.current_block = BasicBlock::new(done_label);
+
         Ok(result_reg)
     }
 
@@ -191,15 +210,20 @@ impl Lowerer {
         // Allocate result register
         let result_reg = self.fresh_reg();
 
-        // Allocate end label
-        let end_label_id = self.next_label;
-        self.next_label += 1;
+        // Allocate done label
+        let done_label = self.fresh_label();
+
+        // Pre-allocate labels for each arm
+        let arm_labels: Vec<Label> = (0..arms.len()).map(|_| self.fresh_label()).collect();
+        let no_match_label = self.fresh_label();
 
         // Process each arm
-        for (pattern, guard, body) in arms {
-            // Allocate label for next arm (if pattern doesn't match)
-            let next_arm_label_id = self.next_label;
-            self.next_label += 1;
+        for (i, (pattern, guard, body)) in arms.iter().enumerate() {
+            let next_arm_label = if i + 1 < arms.len() {
+                arm_labels[i + 1]
+            } else {
+                no_match_label
+            };
 
             // Reload the match value from the local slot for each arm.
             // This ensures the value is available even after control flow jumps.
@@ -210,17 +234,22 @@ impl Lowerer {
             });
 
             // Generate pattern matching code
-            // This will emit JumpIfFalseInline to next_arm_label_id if pattern doesn't match
-            self.lower_pattern_match(pattern, arm_value_reg, next_arm_label_id)?;
+            // This will branch to next_arm_label if pattern doesn't match
+            self.lower_pattern_match(pattern, arm_value_reg, next_arm_label)?;
 
             // If we reach here, pattern matched
             // Check guard if present
             if let Some(guard_expr) = guard {
                 let guard_reg = self.lower_expr(guard_expr)?;
-                self.emit(LirInstr::JumpIfFalseInline {
+                // If guard fails, go to next arm
+                let guard_pass_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
                     cond: guard_reg,
-                    label_id: next_arm_label_id,
+                    then_label: guard_pass_label,
+                    else_label: next_arm_label,
                 });
+                self.finish_block();
+                self.current_block = BasicBlock::new(guard_pass_label);
             }
 
             // Lower body
@@ -230,28 +259,28 @@ impl Lowerer {
                 src: body_reg,
             });
 
-            // Jump to end
-            self.emit(LirInstr::JumpInline {
-                label_id: end_label_id,
-            });
+            // Jump to done
+            self.terminate(Terminator::Jump(done_label));
+            self.finish_block();
 
-            // Next arm label
-            self.emit(LirInstr::LabelMarker {
-                label_id: next_arm_label_id,
-            });
+            // Start next arm block
+            if i + 1 < arms.len() {
+                self.current_block = BasicBlock::new(arm_labels[i + 1]);
+            }
         }
 
-        // If no arm matched, return nil (or could be an error)
+        // No match block: return nil
+        self.current_block = BasicBlock::new(no_match_label);
         let nil_reg = self.emit_const(LirConst::Nil)?;
         self.emit(LirInstr::Move {
             dst: result_reg,
             src: nil_reg,
         });
+        self.terminate(Terminator::Jump(done_label));
+        self.finish_block();
 
-        // End label
-        self.emit(LirInstr::LabelMarker {
-            label_id: end_label_id,
-        });
+        // Done block (continue here)
+        self.current_block = BasicBlock::new(done_label);
 
         Ok(result_reg)
     }
@@ -264,14 +293,12 @@ impl Lowerer {
         let result_reg = self.fresh_reg();
 
         // Labels
-        let handler_start_label = self.next_label;
-        self.next_label += 1;
-        let end_label = self.next_label;
-        self.next_label += 1;
+        let handler_start_label = self.fresh_label();
+        let done_label = self.fresh_label();
 
         // Emit PushHandler pointing to handler code
         self.emit(LirInstr::PushHandler {
-            handler_label: Label(handler_start_label),
+            handler_label: handler_start_label,
         });
 
         // Compile protected body
@@ -281,22 +308,27 @@ impl Lowerer {
             src: body_reg,
         });
 
-        // Success path: pop handler and jump to end
+        // Success path: pop handler and jump to done
         self.emit(LirInstr::PopHandler);
-        self.emit(LirInstr::JumpInline {
-            label_id: end_label,
-        });
+        self.terminate(Terminator::Jump(done_label));
+        self.finish_block();
 
         // Handler code starts here
-        self.emit(LirInstr::LabelMarker {
-            label_id: handler_start_label,
-        });
+        self.current_block = BasicBlock::new(handler_start_label);
         self.emit(LirInstr::CheckException);
 
+        // Pre-allocate labels for each handler test block and body block
+        let reraise_label = self.fresh_label();
+
         // Compile each handler clause
-        for (exception_id, var_id, handler_body) in handlers.iter() {
-            let next_handler_label = self.next_label;
-            self.next_label += 1;
+        for (i, (exception_id, var_id, handler_body)) in handlers.iter().enumerate() {
+            // Determine where to jump if this handler doesn't match
+            let next_test_label = self.fresh_label();
+            let next_handler_label = if i + 1 < handlers.len() {
+                next_test_label
+            } else {
+                reraise_label
+            };
 
             // Match exception type
             let match_result = self.fresh_reg();
@@ -304,10 +336,17 @@ impl Lowerer {
                 dst: match_result,
                 exception_id: *exception_id as u16,
             });
-            self.emit(LirInstr::JumpIfFalseInline {
+
+            let handler_body_label = self.fresh_label();
+            self.terminate(Terminator::Branch {
                 cond: match_result,
-                label_id: next_handler_label,
+                then_label: handler_body_label,
+                else_label: next_handler_label,
             });
+            self.finish_block();
+
+            // Handler body block
+            self.current_block = BasicBlock::new(handler_body_label);
 
             // Allocate slot for the exception variable and store exception to it
             let var_slot = self.allocate_slot(*var_id);
@@ -332,34 +371,26 @@ impl Lowerer {
                 src: handler_reg,
             });
 
-            // Jump to end
-            self.emit(LirInstr::JumpInline {
-                label_id: end_label,
-            });
+            // Jump to done
+            self.terminate(Terminator::Jump(done_label));
+            self.finish_block();
 
-            // Next handler label
-            self.emit(LirInstr::LabelMarker {
-                label_id: next_handler_label,
-            });
+            // Start next handler test block (if not last handler)
+            if i + 1 < handlers.len() {
+                self.current_block = BasicBlock::new(next_test_label);
+            }
         }
 
-        // No handler matched — re-raise exception to propagate
+        // Reraise block: no handler matched — re-raise exception to propagate
         // to next enclosing handler
+        self.current_block = BasicBlock::new(reraise_label);
         self.emit(LirInstr::ReraiseException);
-        // Jump to unreachable label to prevent fall-through to ClearException
-        // The exception interrupt mechanism will jump to the next handler
-        let unreachable_label = self.next_label;
-        self.next_label += 1;
-        self.emit(LirInstr::JumpInline {
-            label_id: unreachable_label,
-        });
+        // Terminate with Unreachable since ReraiseException doesn't return normally
+        self.terminate(Terminator::Unreachable);
+        self.finish_block();
 
-        // End label (reached by success path and matched handler paths)
-        self.emit(LirInstr::LabelMarker {
-            label_id: end_label,
-        });
-        // Note: ClearException is now emitted BEFORE the handler body,
-        // not after, to ensure it's executed even if the handler yields.
+        // Done block (continue here)
+        self.current_block = BasicBlock::new(done_label);
 
         Ok(result_reg)
     }

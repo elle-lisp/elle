@@ -5,6 +5,7 @@
 //! from innermost to outermost.
 
 use crate::value::Value;
+use smallvec::SmallVec;
 use std::rc::Rc;
 
 /// An active exception handler in a frame.
@@ -40,7 +41,7 @@ pub struct ContinuationFrame {
     /// The operand stack state for this frame
     pub stack: Vec<Value>,
     /// Exception handlers active in this frame when it was captured
-    pub exception_handlers: Vec<ExceptionHandler>,
+    pub exception_handlers: SmallVec<[ExceptionHandler; 2]>,
     /// Whether this frame was in the middle of handling an exception
     pub handling_exception: bool,
 }
@@ -103,7 +104,7 @@ mod tests {
             env: Rc::new(vec![]),
             ip: 10,
             stack: vec![Value::int(1), Value::int(2)],
-            exception_handlers: vec![],
+            exception_handlers: SmallVec::new(),
             handling_exception: false,
         };
 
@@ -124,7 +125,7 @@ mod tests {
             env: Rc::new(vec![]),
             ip: 10,
             stack: vec![],
-            exception_handlers: vec![handler],
+            exception_handlers: smallvec::smallvec![handler],
             handling_exception: true,
         };
 
@@ -141,7 +142,7 @@ mod tests {
             env: Rc::new(vec![]),
             ip: 5,
             stack: vec![],
-            exception_handlers: vec![],
+            exception_handlers: SmallVec::new(),
             handling_exception: false,
         };
 
@@ -154,7 +155,7 @@ mod tests {
             env: Rc::new(vec![]),
             ip: 10,
             stack: vec![],
-            exception_handlers: vec![],
+            exception_handlers: SmallVec::new(),
             handling_exception: false,
         };
 

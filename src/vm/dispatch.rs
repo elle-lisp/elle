@@ -532,7 +532,11 @@ impl VM {
                 if let Some(sym_id) = const_val.as_symbol() {
                     use crate::value::heap::{alloc, HeapObject};
                     let exc_value = alloc(HeapObject::Condition((**exc).clone()));
-                    self.globals.insert(sym_id, exc_value);
+                    let idx = sym_id as usize;
+                    if idx >= self.globals.len() {
+                        self.globals.resize(idx + 1, Value::UNDEFINED);
+                    }
+                    self.globals[idx] = exc_value;
                 } else {
                     return Err("BindException: Expected symbol in constants".to_string());
                 }

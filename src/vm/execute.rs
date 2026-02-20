@@ -3,6 +3,7 @@
 //! This module contains the public execution methods and the tail call loop.
 
 use crate::value::{ExceptionHandler, Value};
+use smallvec::SmallVec;
 use std::rc::Rc;
 
 use super::core::{VmResult, VM};
@@ -68,7 +69,7 @@ impl VM {
         constants: &[Value],
         closure_env: Option<&Rc<Vec<Value>>>,
         start_ip: usize,
-        handlers: Vec<ExceptionHandler>,
+        handlers: SmallVec<[ExceptionHandler; 2]>,
         handling: bool,
     ) -> Result<VmResult, String> {
         // Save outer state

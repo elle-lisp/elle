@@ -39,7 +39,7 @@ pub struct CallFrame {
 
 pub struct VM {
     pub stack: StackVec,
-    pub globals: HashMap<u32, Value>,
+    pub globals: Vec<Value>,
     pub call_depth: usize,
     pub call_stack: Vec<CallFrame>,
     pub ffi: FFISubsystem,
@@ -48,7 +48,7 @@ pub struct VM {
     pub loaded_modules: HashSet<String>, // Track loaded module paths to prevent circular deps
     pub module_search_paths: Vec<PathBuf>, // Directories to search for modules
     pub scope_stack: ScopeStack,         // Runtime scope stack for variable management
-    pub exception_handlers: Vec<ExceptionHandler>, // Stack of active exception handlers
+    pub exception_handlers: SmallVec<[ExceptionHandler; 2]>, // Stack of active exception handlers
     pub current_exception: Option<Rc<Condition>>, // Current exception being handled
     pub handling_exception: bool,        // True if we're currently in exception handler code
     pub closure_call_counts: std::collections::HashMap<*const u8, usize>, // Track closure call frequencies for JIT
@@ -69,7 +69,7 @@ impl VM {
     pub fn new() -> Self {
         VM {
             stack: SmallVec::new(),
-            globals: HashMap::new(),
+            globals: vec![Value::UNDEFINED; 256],
             call_depth: 0,
             call_stack: Vec::new(),
             ffi: FFISubsystem::new(),
@@ -78,7 +78,7 @@ impl VM {
             loaded_modules: HashSet::new(),
             module_search_paths: vec![PathBuf::from(".")],
             scope_stack: ScopeStack::new(),
-            exception_handlers: Vec::new(),
+            exception_handlers: SmallVec::new(),
             current_exception: None,
             handling_exception: false,
             closure_call_counts: std::collections::HashMap::new(),
@@ -93,11 +93,16 @@ impl VM {
     }
 
     pub fn set_global(&mut self, sym_id: u32, value: Value) {
-        self.globals.insert(sym_id, value);
+        let idx = sym_id as usize;
+        if idx >= self.globals.len() {
+            self.globals.resize(idx + 1, Value::UNDEFINED);
+        }
+        self.globals[idx] = value;
     }
 
     pub fn get_global(&self, sym_id: u32) -> Option<&Value> {
-        self.globals.get(&sym_id)
+        let idx = sym_id as usize;
+        self.globals.get(idx).filter(|v| !v.is_undefined())
     }
 
     /// Set the location map for mapping bytecode instructions to source locations
