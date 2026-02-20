@@ -48,6 +48,18 @@ impl Closure {
     pub fn effect(&self) -> Effect {
         self.effect.clone()
     }
+
+    /// Calculate the total environment capacity needed for a call.
+    /// This is: existing captures + parameters + locally-defined variables.
+    pub fn env_capacity(&self) -> usize {
+        let num_params = match self.arity {
+            Arity::Exact(n) => n,
+            Arity::AtLeast(n) => n,
+            Arity::Range(min, _) => min,
+        };
+        let num_locally_defined = self.num_locals.saturating_sub(num_params);
+        self.env.len() + num_params + num_locally_defined
+    }
 }
 
 impl PartialEq for Closure {
@@ -88,5 +100,62 @@ mod tests {
             lir_function: None,
         };
         assert_eq!(closure.effect(), Effect::Pure);
+    }
+
+    #[test]
+    fn test_closure_env_capacity() {
+        // Closure with 2 captures, 3 params, 5 total locals (so 2 locally-defined)
+        let closure = Closure {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Exact(3),
+            env: Rc::new(vec![Value::NIL, Value::NIL]), // 2 captures
+            num_locals: 5,                              // 3 params + 2 locally-defined
+            num_captures: 2,
+            constants: Rc::new(vec![]),
+            effect: Effect::Pure,
+            cell_params_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+        };
+        // env_capacity = 2 (captures) + 3 (params) + 2 (locally-defined) = 7
+        assert_eq!(closure.env_capacity(), 7);
+
+        // Closure with AtLeast arity
+        let closure_variadic = Closure {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::AtLeast(2),
+            env: Rc::new(vec![Value::NIL]), // 1 capture
+            num_locals: 4,                  // 2 required params + 2 locally-defined
+            num_captures: 1,
+            constants: Rc::new(vec![]),
+            effect: Effect::Pure,
+            cell_params_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+        };
+        // env_capacity = 1 (captures) + 2 (params) + 2 (locally-defined) = 5
+        assert_eq!(closure_variadic.env_capacity(), 5);
+
+        // Closure with Range arity
+        let closure_range = Closure {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Range(1, 3),
+            env: Rc::new(vec![]), // 0 captures
+            num_locals: 2,        // 1 min param + 1 locally-defined
+            num_captures: 0,
+            constants: Rc::new(vec![]),
+            effect: Effect::Pure,
+            cell_params_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+        };
+        // env_capacity = 0 (captures) + 1 (min params) + 1 (locally-defined) = 2
+        assert_eq!(closure_range.env_capacity(), 2);
     }
 }

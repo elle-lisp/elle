@@ -18,6 +18,10 @@ impl fmt::Display for Value {
             return write!(f, "()");
         }
 
+        if self.is_undefined() {
+            return write!(f, "#<undefined>");
+        }
+
         if let Some(b) = self.as_bool() {
             return write!(f, "{}", b);
         }

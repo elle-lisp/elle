@@ -47,6 +47,9 @@ pub const TAG_TRUE: u64 = 0x7FFC_0000_0000_0002;
 /// Empty list value - uses QNAN + 4 in upper 16 bits, no payload needed
 pub const TAG_EMPTY_LIST: u64 = 0x7FFC_0000_0000_0003;
 
+/// Undefined value - sentinel for uninitialized global slots
+pub const TAG_UNDEFINED: u64 = 0x7FFC_0000_0000_0004;
+
 /// Integer tag - uses QNAN exactly (0x7FF8), payload is 48-bit signed int
 pub const TAG_INT: u64 = 0x7FF8_0000_0000_0000;
 pub(crate) const TAG_INT_MASK: u64 = 0xFFFF_0000_0000_0000;
@@ -99,6 +102,7 @@ impl Value {
     pub const TRUE: Value = Value(TAG_TRUE);
     pub const FALSE: Value = Value(TAG_FALSE);
     pub const EMPTY_LIST: Value = Value(TAG_EMPTY_LIST);
+    pub const UNDEFINED: Value = Value(TAG_UNDEFINED);
 
     // =========================================================================
     // Type Predicates
@@ -114,6 +118,12 @@ impl Value {
     #[inline]
     pub fn is_empty_list(&self) -> bool {
         self.0 == TAG_EMPTY_LIST
+    }
+
+    /// Check if this is the undefined sentinel value.
+    #[inline]
+    pub fn is_undefined(&self) -> bool {
+        self.0 == TAG_UNDEFINED
     }
 
     /// Check if this is a boolean (true or false).
@@ -162,8 +172,13 @@ impl Value {
     }
 
     /// Check if this value is truthy (everything except nil and false).
+    /// UNDEFINED should never appear in user-visible evaluation - debug_assert catches leaks.
     #[inline]
     pub fn is_truthy(&self) -> bool {
+        debug_assert!(
+            !self.is_undefined(),
+            "UNDEFINED leaked into truthiness check"
+        );
         self.0 != TAG_FALSE && self.0 != TAG_NIL
     }
 

@@ -35,6 +35,11 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) self_bits: Option<cranelift_codegen::ir::Value>,
     /// Base index for arg variables (= num_regs)
     pub(crate) arg_var_base: u32,
+    /// Base index for locally-defined variable Cranelift variables
+    /// These are variables for let-bindings inside the function body.
+    /// Layout: [num_captures..., params..., locally_defined...]
+    /// In the JIT, locally_defined vars use Cranelift variables starting at this base.
+    pub(crate) local_var_base: u32,
     /// Loop header block for self-tail-call jumps
     pub(crate) loop_header: Option<cranelift_codegen::ir::Block>,
 }
@@ -53,8 +58,30 @@ impl<'a> FunctionTranslator<'a> {
             vm_ptr: None,
             self_bits: None,
             arg_var_base: 0,
+            local_var_base: 0,
             loop_header: None,
         }
+    }
+
+    /// Initialize locally-defined variables to LocalCell(NIL)
+    /// These are let-bindings inside the function body that need cell wrapping.
+    pub(crate) fn init_locally_defined_vars(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        num_locally_defined: u32,
+    ) -> Result<(), JitError> {
+        use crate::value::Value;
+
+        // Create NIL constant
+        let nil_bits = builder.ins().iconst(I64, Value::NIL.to_bits() as i64);
+
+        // For each locally-defined variable, create a LocalCell(NIL) and store it
+        for i in 0..num_locally_defined {
+            let cell = self.call_helper_unary(builder, self.helpers.make_cell, nil_bits)?;
+            builder.def_var(var(self.local_var_base + i), cell);
+        }
+
+        Ok(())
     }
 
     /// Translate a single LIR instruction
@@ -102,28 +129,42 @@ impl<'a> FunctionTranslator<'a> {
                 // The LIR uses indices where:
                 // - [0, num_captures) are captures (from env)
                 // - [num_captures, num_captures + arity) are parameters (from args)
+                // - [num_captures + arity, ...) are locally-defined variables
                 let num_captures = self.lir.num_captures;
+                let arity = self.lir.arity;
                 if *index < num_captures {
                     // Load from closure environment (captures)
+                    // Must auto-unwrap LocalCell if present (matches interpreter's LoadUpvalue)
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("LoadCapture without env pointer".to_string())
                     })?;
                     let offset = (*index as i32) * 8;
                     let addr = builder.ins().iadd_imm(env_ptr, offset as i64);
-                    let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+                    let raw = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+                    let val = self.call_helper_unary(builder, self.helpers.load_capture, raw)?;
                     builder.def_var(var(dst.0), val);
-                } else {
+                } else if *index < num_captures + arity {
                     // Load from arg variables (NOT args pointer)
                     // This allows self-tail-calls to update args and loop back
                     let param_index = *index - num_captures;
                     let val = builder.use_var(var(self.arg_var_base + param_index as u32));
                     builder.def_var(var(dst.0), val);
+                } else {
+                    // Locally-defined variable - use Cranelift variable
+                    // These are initialized to LocalCell(NIL) at function entry
+                    let local_index = *index - num_captures - arity;
+                    let cell_val = builder.use_var(var(self.local_var_base + local_index as u32));
+                    // LoadCapture auto-unwraps LocalCells, so call load_cell
+                    let result =
+                        self.call_helper_unary(builder, self.helpers.load_cell, cell_val)?;
+                    builder.def_var(var(dst.0), result);
                 }
             }
 
             LirInstr::LoadCaptureRaw { dst, index } => {
                 // Same as LoadCapture but doesn't unwrap cells (for forwarding)
                 let num_captures = self.lir.num_captures;
+                let arity = self.lir.arity;
                 if *index < num_captures {
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("LoadCaptureRaw without env pointer".to_string())
@@ -132,10 +173,16 @@ impl<'a> FunctionTranslator<'a> {
                     let addr = builder.ins().iadd_imm(env_ptr, offset as i64);
                     let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
                     builder.def_var(var(dst.0), val);
-                } else {
+                } else if *index < num_captures + arity {
                     // Load from arg variables (NOT args pointer)
                     let param_index = *index - num_captures;
                     let val = builder.use_var(var(self.arg_var_base + param_index as u32));
+                    builder.def_var(var(dst.0), val);
+                } else {
+                    // Locally-defined variable - use Cranelift variable directly
+                    // LoadCaptureRaw doesn't unwrap cells, so return the cell itself
+                    let local_index = *index - num_captures - arity;
+                    let val = builder.use_var(var(self.local_var_base + local_index as u32));
                     builder.def_var(var(dst.0), val);
                 }
             }
@@ -257,18 +304,30 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::StoreCapture { index, src } => {
-                let env_ptr = self.env_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("StoreCapture without env pointer".to_string())
-                })?;
-                let idx_val = builder.ins().iconst(I64, *index as i64);
+                let num_captures = self.lir.num_captures;
+                let arity = self.lir.arity;
                 let val = builder.use_var(var(src.0));
-                let _result = self.call_helper_ternary(
-                    builder,
-                    self.helpers.store_capture,
-                    env_ptr,
-                    idx_val,
-                    val,
-                )?;
+
+                if *index < num_captures + arity {
+                    // Captures and parameters: use env pointer
+                    let env_ptr = self.env_ptr.ok_or_else(|| {
+                        JitError::InvalidLir("StoreCapture without env pointer".to_string())
+                    })?;
+                    let idx_val = builder.ins().iconst(I64, *index as i64);
+                    let _result = self.call_helper_ternary(
+                        builder,
+                        self.helpers.store_capture,
+                        env_ptr,
+                        idx_val,
+                        val,
+                    )?;
+                } else {
+                    // Locally-defined variable: store into the cell in the Cranelift variable
+                    let local_index = *index - num_captures - arity;
+                    let cell_val = builder.use_var(var(self.local_var_base + local_index as u32));
+                    let _result =
+                        self.call_helper_binary(builder, self.helpers.store_cell, cell_val, val)?;
+                }
             }
 
             // === Phase 3: Global variables ===
@@ -473,18 +532,6 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::Throw { .. } => {
                 return Err(JitError::UnsupportedInstruction("Throw".to_string()));
             }
-            LirInstr::JumpIfFalseInline { .. } => {
-                // These are handled by the emitter, not present in final LIR
-                return Err(JitError::UnsupportedInstruction(
-                    "JumpIfFalseInline".to_string(),
-                ));
-            }
-            LirInstr::JumpInline { .. } => {
-                return Err(JitError::UnsupportedInstruction("JumpInline".to_string()));
-            }
-            LirInstr::LabelMarker { .. } => {
-                // No-op marker
-            }
         }
         Ok(false)
     }
@@ -563,10 +610,12 @@ impl<'a> FunctionTranslator<'a> {
                 // Use Value::float to handle NaN-boxing correctly
                 crate::value::Value::float(*f).to_bits()
             }
-            LirConst::String(_) => {
-                // Strings require heap allocation - not supported in Phase 1
-                // Return NIL as placeholder
-                TAG_NIL
+            LirConst::String(s) => {
+                // Create the heap-allocated string Value at compile time
+                // and embed its NaN-boxed bits as a constant.
+                // The string lives on the Rc heap and will be kept alive
+                // by the LirFunction's constant pool.
+                crate::value::Value::string(s.clone()).to_bits()
             }
             LirConst::Symbol(id) => crate::value::Value::symbol(id.0).to_bits(),
             LirConst::Keyword(id) => crate::value::Value::keyword(id.0).to_bits(),

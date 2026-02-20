@@ -24,9 +24,6 @@ pub struct Emitter {
     stack: Vec<Reg>,
     /// Register to stack position mapping (for finding values)
     reg_to_stack: HashMap<Reg, usize>,
-    /// Stack depth at branch points (label_id -> depth)
-    /// Used to reset stack state at control flow merge points
-    branch_stack_depth: HashMap<u32, usize>,
     /// Symbol ID → name mapping for cross-thread portability
     symbol_names: HashMap<u32, String>,
     /// Saved stack state from yield terminators, keyed by resume label.
@@ -44,7 +41,6 @@ impl Emitter {
             pending_handler_jumps: Vec::new(),
             stack: Vec::new(),
             reg_to_stack: HashMap::new(),
-            branch_stack_depth: HashMap::new(),
             symbol_names: HashMap::new(),
             yield_stack_state: HashMap::new(),
         }
@@ -59,7 +55,6 @@ impl Emitter {
             pending_handler_jumps: Vec::new(),
             stack: Vec::new(),
             reg_to_stack: HashMap::new(),
-            branch_stack_depth: HashMap::new(),
             symbol_names,
             yield_stack_state: HashMap::new(),
         }
@@ -76,7 +71,6 @@ impl Emitter {
         self.pending_handler_jumps.clear();
         self.stack.clear();
         self.reg_to_stack.clear();
-        self.branch_stack_depth.clear();
         self.yield_stack_state.clear();
 
         // First pass: record label offsets (simplified - emit all blocks in order)
@@ -120,7 +114,6 @@ impl Emitter {
         let saved_pending_handler_jumps = std::mem::take(&mut self.pending_handler_jumps);
         let saved_stack = std::mem::take(&mut self.stack);
         let saved_reg_to_stack = std::mem::take(&mut self.reg_to_stack);
-        let saved_branch_stack_depth = std::mem::take(&mut self.branch_stack_depth);
         let saved_yield_stack_state = std::mem::take(&mut self.yield_stack_state);
 
         // Emit the nested function
@@ -133,7 +126,6 @@ impl Emitter {
         self.pending_handler_jumps = saved_pending_handler_jumps;
         self.stack = saved_stack;
         self.reg_to_stack = saved_reg_to_stack;
-        self.branch_stack_depth = saved_branch_stack_depth;
         self.yield_stack_state = saved_yield_stack_state;
 
         result
@@ -150,22 +142,11 @@ impl Emitter {
             self.reg_to_stack.clear();
         }
 
-        // First pass: record label positions within the block
-        let mut label_positions: HashMap<u32, usize> = HashMap::new();
-        let mut current_pos = self.bytecode.current_pos();
-        for spanned in &block.instructions {
-            if let LirInstr::LabelMarker { label_id } = &spanned.instr {
-                label_positions.insert(*label_id, current_pos);
-            }
-            // Estimate bytecode size (rough approximation)
-            current_pos += 4; // Conservative estimate
-        }
-
-        // Second pass: emit instructions
+        // Emit instructions
         for spanned in &block.instructions {
             // Record source location before emitting the instruction
             self.bytecode.record_location(&spanned.span);
-            self.emit_instr(&spanned.instr, func, &label_positions);
+            self.emit_instr(&spanned.instr, func);
         }
 
         // Record source location for the terminator
@@ -173,12 +154,7 @@ impl Emitter {
         self.emit_terminator(&block.terminator.terminator);
     }
 
-    fn emit_instr(
-        &mut self,
-        instr: &LirInstr,
-        func: &LirFunction,
-        _label_positions: &HashMap<u32, usize>,
-    ) {
+    fn emit_instr(&mut self, instr: &LirInstr, func: &LirFunction) {
         match instr {
             LirInstr::Const { dst, value } => {
                 self.emit_const(value, func);
@@ -618,43 +594,6 @@ impl Emitter {
                 // Use existing exception mechanism
                 // For now, just leave value on stack
             }
-
-            LirInstr::JumpIfFalseInline { cond, label_id } => {
-                self.ensure_on_top(*cond);
-                self.bytecode.emit(Instruction::JumpIfFalse);
-                let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i16(0); // placeholder - will be patched
-                self.pending_jumps.push((pos, Label(*label_id)));
-                self.pop();
-                // Save stack depth for the else branch (jump target)
-                // At runtime, if we jump here, the then branch was skipped
-                self.branch_stack_depth.insert(*label_id, self.stack.len());
-            }
-
-            LirInstr::JumpInline { label_id } => {
-                self.bytecode.emit(Instruction::Jump);
-                let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i16(0); // placeholder - will be patched
-                self.pending_jumps.push((pos, Label(*label_id)));
-                // Save stack depth for the merge point
-                // At runtime, if we jump here, the else branch was skipped
-                self.branch_stack_depth.insert(*label_id, self.stack.len());
-            }
-
-            LirInstr::LabelMarker { label_id } => {
-                // Record the current bytecode position for this label
-                self.label_offsets
-                    .insert(Label(*label_id), self.bytecode.current_pos());
-
-                // If this label is a jump target, reset stack to the expected depth
-                // This handles control flow merge points (e.g., end of if expressions)
-                if let Some(&expected_depth) = self.branch_stack_depth.get(label_id) {
-                    // Reset stack to the expected depth
-                    while self.stack.len() > expected_depth {
-                        self.pop();
-                    }
-                }
-            }
         }
     }
 
@@ -666,6 +605,16 @@ impl Emitter {
             }
 
             Terminator::Jump(label) => {
+                // Save stack state for the target block, but only if it hasn't
+                // been processed yet. This is used for control flow merges
+                // (e.g., if/and/or) where multiple blocks jump to the same target.
+                // If the target block has already been processed (because blocks
+                // are sorted by label), we don't overwrite the saved state.
+                if !self.label_offsets.contains_key(label) {
+                    self.yield_stack_state
+                        .insert(*label, (self.stack.clone(), self.reg_to_stack.clone()));
+                }
+
                 self.bytecode.emit(Instruction::Jump);
                 let pos = self.bytecode.current_pos();
                 self.bytecode.emit_i16(0); // placeholder
@@ -678,6 +627,22 @@ impl Emitter {
                 else_label,
             } => {
                 self.ensure_on_top(*cond);
+
+                // JumpIfFalse pops the condition from the stack
+                self.pop();
+
+                // Save stack state for both branches, but only if they haven't
+                // been processed yet. This handles the case where blocks are
+                // sorted by label and a target block might be processed before
+                // the branch that jumps to it.
+                if !self.label_offsets.contains_key(then_label) {
+                    self.yield_stack_state
+                        .insert(*then_label, (self.stack.clone(), self.reg_to_stack.clone()));
+                }
+                if !self.label_offsets.contains_key(else_label) {
+                    self.yield_stack_state
+                        .insert(*else_label, (self.stack.clone(), self.reg_to_stack.clone()));
+                }
 
                 // JumpIfFalse to else_label
                 self.bytecode.emit(Instruction::JumpIfFalse);
@@ -708,10 +673,16 @@ impl Emitter {
                     *resume_label,
                     (self.stack.clone(), self.reg_to_stack.clone()),
                 );
-                // Note: we don't emit a jump to the resume block because
-                // the blocks are emitted sequentially and the VM resumes
-                // at the saved IP (right after the Yield byte), which is
-                // exactly where the resume block starts.
+
+                // Emit a jump to the resume block.
+                // This is necessary because blocks are sorted by label number,
+                // so the resume block may not be immediately after the yield.
+                // When the coroutine is resumed, the VM continues from the IP
+                // after the yield, which is this jump instruction.
+                self.bytecode.emit(Instruction::Jump);
+                let pos = self.bytecode.current_pos();
+                self.bytecode.emit_i16(0); // placeholder
+                self.pending_jumps.push((pos, *resume_label));
             }
 
             Terminator::Unreachable => {

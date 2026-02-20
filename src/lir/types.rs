@@ -207,12 +207,6 @@ pub enum LirInstr {
     Dup { dst: Reg, src: Reg },
     /// Pop a register's value from the stack (discard it).
     Pop { src: Reg },
-    /// Inline conditional jump (for if expressions)
-    JumpIfFalseInline { cond: Reg, label_id: u32 },
-    /// Inline unconditional jump (for if expressions)
-    JumpInline { label_id: u32 },
-    /// Label marker for inline jumps (not emitted, just marks position)
-    LabelMarker { label_id: u32 },
 
     // === Coroutines ===
     /// Load the resume value after a yield.

@@ -318,6 +318,46 @@ proptest! {
 }
 
 // ============================================================================
+// Bug 4: or expression corrupts return value in recursive calls
+// ============================================================================
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(50))]
+
+    /// Property: or in recursive check function doesn't corrupt append arguments
+    #[test]
+    fn or_in_recursive_check_with_append(n in 3usize..8) {
+        let code = format!(r#"
+            (define check
+              (fn (x remaining)
+                (if (empty? remaining)
+                  #t
+                  (if (or (= x 1) (= x 2))
+                    #f
+                    (check x (rest remaining))))))
+
+            (define foo
+              (fn (n seen)
+                (if (= n 0)
+                  (list)
+                  (if (check n seen)
+                    (append (list n) (foo (- n 1) (cons n seen)))
+                    (foo (- n 1) seen)))))
+
+            (length (foo {} (list 0)))
+        "#, n);
+        let result = eval(&code);
+        prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
+        // n=3: 3 is safe, 2 is not, 1 is not, 0 is base -> (3) -> length 1
+        // n=4: 4,3 are safe, 2,1 are not -> (4 3) -> length 2
+        // n=5: 5,4,3 are safe -> (5 4 3) -> length 3
+        // Pattern: n - 2 elements (since 1 and 2 are filtered out)
+        let expected = if n >= 3 { n - 2 } else { 0 };
+        prop_assert_eq!(result.unwrap(), Value::int(expected as i64));
+    }
+}
+
+// ============================================================================
 // Combined property tests: interactions between fixes
 // ============================================================================
 

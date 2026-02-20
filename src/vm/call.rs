@@ -163,14 +163,29 @@ impl VM {
                                         self.stack.push(result);
                                         return Ok(None);
                                     }
-                                    Err(_e) => {
-                                        // JIT compilation failed — fall back to interpreter
-                                        // Could log: eprintln!("JIT compilation failed: {}", _e);
+                                    Err(e) => {
+                                        match &e {
+                                            crate::jit::JitError::UnsupportedInstruction(_) => {
+                                                // MakeClosure and other instructions not yet in JIT.
+                                                // Fall back to interpreter — the function still works.
+                                            }
+                                            _ => {
+                                                panic!(
+                                                    "JIT compilation failed for pure function: {}. \
+                                                     This is a bug — pure functions should be JIT-compilable. \
+                                                     Error: {}",
+                                                    closure.lir_function.as_ref()
+                                                        .map(|f| f.name.as_deref().unwrap_or("<anon>"))
+                                                        .unwrap_or("<no lir>"),
+                                                    e
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            Err(_) => {
-                                // JIT compiler creation failed — fall back to interpreter
+                            Err(e) => {
+                                panic!("JIT compiler creation failed: {}. This is a bug.", e);
                             }
                         }
                     }
@@ -289,6 +304,11 @@ impl VM {
 
             // Build proper environment using cached vector
             self.tail_call_env_cache.clear();
+            let needed = closure.env_capacity();
+            if self.tail_call_env_cache.capacity() < needed {
+                self.tail_call_env_cache
+                    .reserve(needed - self.tail_call_env_cache.len());
+            }
             self.tail_call_env_cache
                 .extend((*closure.env).iter().cloned());
 
@@ -374,7 +394,7 @@ impl VM {
 
     /// Build a closure environment from captured variables and arguments.
     fn build_closure_env(&self, closure: &crate::value::Closure, args: &[Value]) -> Rc<Vec<Value>> {
-        let mut new_env = Vec::new();
+        let mut new_env = Vec::with_capacity(closure.env_capacity());
         new_env.extend((*closure.env).iter().cloned());
 
         // Add parameters, wrapping in local cells if cell_params_mask indicates

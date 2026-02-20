@@ -18,6 +18,25 @@ fn test_nil() {
 }
 
 #[test]
+fn test_undefined() {
+    let v = Value::UNDEFINED;
+    assert!(v.is_undefined());
+    assert!(!v.is_nil());
+    assert!(!v.is_bool());
+    assert!(!v.is_int());
+    assert!(!v.is_float());
+    assert!(!v.is_empty_list());
+    // Note: is_truthy() now debug_asserts that UNDEFINED never reaches it.
+    // UNDEFINED should never appear in user-visible evaluation.
+
+    // Verify UNDEFINED is distinct from all other special constants
+    assert_ne!(Value::UNDEFINED.to_bits(), Value::NIL.to_bits());
+    assert_ne!(Value::UNDEFINED.to_bits(), Value::TRUE.to_bits());
+    assert_ne!(Value::UNDEFINED.to_bits(), Value::FALSE.to_bits());
+    assert_ne!(Value::UNDEFINED.to_bits(), Value::EMPTY_LIST.to_bits());
+}
+
+#[test]
 fn test_bool() {
     assert!(Value::TRUE.is_bool());
     assert!(Value::FALSE.is_bool());

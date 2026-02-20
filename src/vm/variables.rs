@@ -19,7 +19,11 @@ pub fn handle_load_global(
         }
 
         // Fall back to global scope
-        if let Some(val) = vm.globals.get(&sym_id) {
+        if let Some(val) = vm
+            .globals
+            .get(sym_id as usize)
+            .filter(|v| !v.is_undefined())
+        {
             // Don't automatically unwrap cells in global scope
             // Cells created by the box primitive should remain as cells
             vm.stack.push(*val);
@@ -65,15 +69,27 @@ pub fn handle_store_global(
                     vm.scope_stack.define_local(sym_id, val);
                 }
             }
-        } else if vm.globals.contains_key(&sym_id) {
+        } else if vm
+            .globals
+            .get(sym_id as usize)
+            .is_some_and(|v| !v.is_undefined())
+        {
             // Exists in global scope — update there
-            vm.globals.insert(sym_id, val);
+            let idx = sym_id as usize;
+            if idx >= vm.globals.len() {
+                vm.globals.resize(idx + 1, Value::UNDEFINED);
+            }
+            vm.globals[idx] = val;
         } else if vm.scope_stack.depth() > 1 {
             // New variable in a local scope — define locally
             vm.scope_stack.define_local(sym_id, val);
         } else {
             // New variable at global scope
-            vm.globals.insert(sym_id, val);
+            let idx = sym_id as usize;
+            if idx >= vm.globals.len() {
+                vm.globals.resize(idx + 1, Value::UNDEFINED);
+            }
+            vm.globals[idx] = val;
         }
         vm.stack.push(val);
     } else {
@@ -196,7 +212,11 @@ pub fn handle_store_upvalue(
                 Ok(())
             } else if let Some(sym) = env_val.as_symbol() {
                 // This is a global variable reference - update it in the global scope
-                vm.globals.insert(sym, val);
+                let idx = sym as usize;
+                if idx >= vm.globals.len() {
+                    vm.globals.resize(idx + 1, Value::UNDEFINED);
+                }
+                vm.globals[idx] = val;
                 vm.stack.push(val);
                 Ok(())
             } else {

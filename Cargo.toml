@@ -30,7 +30,7 @@ iai-callgrind = "0.11"
 lto = "fat"
 codegen-units = 1
 opt-level = 3
-strip = true
+debug = true
 
 [profile.bench]
 inherits = "release"

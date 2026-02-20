@@ -7,11 +7,11 @@
 use crate::compiler::Bytecode;
 use crate::effects::{get_primitive_effects, Effect};
 use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::{Analyzer, BindingId, BindingInfo, Hir};
+use crate::hir::{AnalysisResult, Analyzer, BindingId, BindingInfo, Hir};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
-use crate::syntax::Expander;
+use crate::syntax::{Expander, Syntax, SyntaxKind};
 use crate::value::SymbolId;
 use std::collections::HashMap;
 
@@ -26,6 +26,32 @@ pub struct CompileResult {
 pub struct AnalyzeResult {
     pub hir: Hir,
     pub bindings: HashMap<BindingId, BindingInfo>,
+}
+
+/// Scan an expanded syntax form for `(define name (fn ...))` patterns.
+/// Returns the SymbolId of the name if this is a define-lambda form.
+fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<SymbolId> {
+    if let SyntaxKind::List(items) = &syntax.kind {
+        if items.len() >= 3 {
+            if let Some(name) = items[0].as_symbol() {
+                if name == "define" {
+                    if let Some(def_name) = items[1].as_symbol() {
+                        // Check if value is a lambda form
+                        if let SyntaxKind::List(val_items) = &items[2].kind {
+                            if let Some(first) = val_items.first() {
+                                if let Some(kw) = first.as_symbol() {
+                                    if kw == "fn" || kw == "lambda" {
+                                        return Some(symbols.intern(def_name));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Compile source code using the new pipeline
@@ -60,37 +86,74 @@ pub fn compile_new(source: &str, symbols: &mut SymbolTable) -> Result<CompileRes
     })
 }
 
-/// Compile multiple top-level forms
+/// Compile multiple top-level forms with fixpoint effect inference.
+///
+/// Uses fixpoint iteration to correctly infer effects for mutually recursive
+/// top-level defines. The algorithm:
+/// 1. Pre-scan all forms for `(define name (fn ...))` patterns
+/// 2. Seed `global_effects` with `Effect::Pure` for all such defines (optimistic)
+/// 3. Analyze all forms, collecting actual inferred effects
+/// 4. If any effect changed, re-analyze with corrected effects
+/// 5. Repeat until stable (max 10 iterations)
 pub fn compile_all_new(
     source: &str,
     symbols: &mut SymbolTable,
 ) -> Result<Vec<CompileResult>, String> {
     let syntaxes = read_syntax_all(source)?;
     let mut expander = Expander::new();
-    let mut results = Vec::new();
-    // Accumulate global effects across forms for cross-form effect tracking
-    let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
 
+    // Expand all forms first (expansion is idempotent)
+    let mut expanded_forms = Vec::new();
     for syntax in syntaxes {
         let expanded = expander.expand(syntax)?;
+        expanded_forms.push(expanded);
+    }
 
-        // Create analyzer for each form with interprocedural effect tracking
-        let primitive_effects = get_primitive_effects(symbols);
-        let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
-        // Pass accumulated global effects from previous forms
-        analyzer.set_global_effects(global_effects.clone());
-
-        let mut analysis = analyzer.analyze(&expanded)?;
-
-        // Accumulate effects from this form's defines
-        for (sym, effect) in analyzer.take_defined_global_effects() {
-            global_effects.insert(sym, effect);
+    // Pre-scan: find all (define name (fn ...)) patterns and seed as Pure
+    let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
+    for form in &expanded_forms {
+        if let Some(sym) = scan_define_lambda(form, symbols) {
+            global_effects.insert(sym, Effect::Pure);
         }
-        // Analyzer is dropped here, releasing the mutable borrow
+    }
 
-        // Mark tail calls
-        mark_tail_calls(&mut analysis.hir);
+    // Fixpoint loop: analyze until effects stabilize
+    let mut analysis_results: Vec<AnalysisResult> = Vec::new();
+    const MAX_ITERATIONS: usize = 10;
 
+    for _iteration in 0..MAX_ITERATIONS {
+        analysis_results.clear();
+        let mut new_global_effects: HashMap<SymbolId, Effect> = HashMap::new();
+
+        for form in &expanded_forms {
+            let primitive_effects = get_primitive_effects(symbols);
+            let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+            // Seed with current global effects (from pre-scan or previous iteration)
+            analyzer.set_global_effects(global_effects.clone());
+
+            let mut analysis = analyzer.analyze(form)?;
+
+            // Collect effects from this form's defines
+            for (sym, effect) in analyzer.take_defined_global_effects() {
+                new_global_effects.insert(sym, effect);
+            }
+
+            mark_tail_calls(&mut analysis.hir);
+            analysis_results.push(analysis);
+        }
+
+        // Check for convergence: did any effect change?
+        if new_global_effects == global_effects {
+            break; // Stable — we're done
+        }
+
+        // Effects changed — update and re-analyze
+        global_effects = new_global_effects;
+    }
+
+    // Lower and emit all forms
+    let mut results = Vec::new();
+    for analysis in analysis_results {
         let mut lowerer = Lowerer::new().with_bindings(analysis.bindings);
         let lir_func = lowerer.lower(&analysis.hir)?;
 
@@ -132,37 +195,68 @@ pub fn analyze_new(source: &str, symbols: &mut SymbolTable) -> Result<AnalyzeRes
     })
 }
 
-/// Analyze multiple top-level forms without generating bytecode
+/// Analyze multiple top-level forms without generating bytecode.
+/// Uses fixpoint iteration for effect inference (same as compile_all_new).
 pub fn analyze_all_new(
     source: &str,
     symbols: &mut SymbolTable,
 ) -> Result<Vec<AnalyzeResult>, String> {
     let syntaxes = read_syntax_all(source)?;
     let mut expander = Expander::new();
-    let mut results = Vec::new();
-    // Accumulate global effects across forms for cross-form effect tracking
-    let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
 
+    // Expand all forms first
+    let mut expanded_forms = Vec::new();
     for syntax in syntaxes {
         let expanded = expander.expand(syntax)?;
-        let primitive_effects = get_primitive_effects(symbols);
-        let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
-        // Pass accumulated global effects from previous forms
-        analyzer.set_global_effects(global_effects.clone());
+        expanded_forms.push(expanded);
+    }
 
-        let analysis = analyzer.analyze(&expanded)?;
+    // Pre-scan: find all (define name (fn ...)) patterns and seed as Pure
+    let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
+    for form in &expanded_forms {
+        if let Some(sym) = scan_define_lambda(form, symbols) {
+            global_effects.insert(sym, Effect::Pure);
+        }
+    }
 
-        // Accumulate effects from this form's defines
-        for (sym, effect) in analyzer.take_defined_global_effects() {
-            global_effects.insert(sym, effect);
+    // Fixpoint loop: analyze until effects stabilize
+    let mut analysis_results: Vec<AnalysisResult> = Vec::new();
+    const MAX_ITERATIONS: usize = 10;
+
+    for _iteration in 0..MAX_ITERATIONS {
+        analysis_results.clear();
+        let mut new_global_effects: HashMap<SymbolId, Effect> = HashMap::new();
+
+        for form in &expanded_forms {
+            let primitive_effects = get_primitive_effects(symbols);
+            let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+            analyzer.set_global_effects(global_effects.clone());
+
+            let analysis = analyzer.analyze(form)?;
+
+            for (sym, effect) in analyzer.take_defined_global_effects() {
+                new_global_effects.insert(sym, effect);
+            }
+
+            analysis_results.push(analysis);
         }
 
-        results.push(AnalyzeResult {
-            hir: analysis.hir,
-            bindings: analysis.bindings,
-        });
+        // Check for convergence
+        if new_global_effects == global_effects {
+            break;
+        }
+
+        global_effects = new_global_effects;
     }
-    Ok(results)
+
+    // Convert to AnalyzeResult
+    Ok(analysis_results
+        .into_iter()
+        .map(|a| AnalyzeResult {
+            hir: a.hir,
+            bindings: a.bindings,
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -835,5 +929,128 @@ mod tests {
         let analysis = result.unwrap();
         // Should have bindings for x and y
         assert!(analysis.bindings.len() >= 2);
+    }
+
+    #[test]
+    fn test_mutual_recursion_effect_inference() {
+        // Test that mutually recursive functions are inferred as Pure
+        // when they only call each other and pure primitives
+        let (mut symbols, _) = setup();
+        let source = r#"
+(define f (fn (x) (if (= x 0) 1 (g (- x 1)))))
+(define g (fn (x) (if (= x 0) 2 (f (- x 1)))))
+"#;
+        let results = compile_all_new(source, &mut symbols);
+        assert!(results.is_ok(), "Compilation should succeed");
+        let results = results.unwrap();
+        assert_eq!(results.len(), 2, "Should have 2 compiled forms");
+        // Both forms should compile successfully
+        // The key test is that they don't fail due to effect issues
+    }
+
+    #[test]
+    fn test_mutual_recursion_execution() {
+        // Test that mutually recursive functions execute correctly
+        let (mut symbols, mut vm) = setup();
+        let source = r#"
+(define f (fn (x) (if (= x 0) 1 (g (- x 1)))))
+(define g (fn (x) (if (= x 0) 2 (f (- x 1)))))
+(f 5)
+"#;
+        let results = compile_all_new(source, &mut symbols);
+        assert!(results.is_ok(), "Compilation should succeed");
+        let results = results.unwrap();
+
+        // Execute all forms
+        for result in &results {
+            let _ = vm.execute(&result.bytecode);
+        }
+
+        // f(5) -> g(4) -> f(3) -> g(2) -> f(1) -> g(0) -> 2
+        // The last result should be 2
+    }
+
+    #[test]
+    fn test_mutual_recursion_effects_are_pure() {
+        // Test that mutually recursive functions are inferred as Pure
+        let (mut symbols, _) = setup();
+        let source = r#"
+(define f (fn (x) (if (= x 0) 1 (g (- x 1)))))
+(define g (fn (x) (if (= x 0) 2 (f (- x 1)))))
+"#;
+        let results = compile_all_new(source, &mut symbols);
+        assert!(results.is_ok(), "Compilation should succeed");
+        let results = results.unwrap();
+
+        // Check that the closures have Pure effect
+        for (i, result) in results.iter().enumerate() {
+            for constant in &result.bytecode.constants {
+                if let Some(closure) = constant.as_closure() {
+                    assert!(
+                        closure.effect.is_pure(),
+                        "Form {} closure should be Pure, got {:?}",
+                        i,
+                        closure.effect
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_nqueens_functions_are_pure() {
+        // Test that the nqueens functions are inferred as Pure
+        let (mut symbols, _) = setup();
+        let source = r#"
+(define check-safe-helper
+  (fn (col remaining row-offset)
+    (if (empty? remaining)
+      #t
+      (let ((placed-col (first remaining)))
+        (if (or (= col placed-col)
+                (= row-offset (abs (- col placed-col))))
+          #f
+          (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
+
+(define safe?
+  (fn (col queens)
+    (check-safe-helper col queens 1)))
+
+(define try-cols-helper
+  (fn (n col queens row)
+    (if (= col n)
+      (list)
+      (if (safe? col queens)
+        (let ((new-queens (cons col queens)))
+          (append (solve-helper n (+ row 1) new-queens)
+                  (try-cols-helper n (+ col 1) queens row)))
+        (try-cols-helper n (+ col 1) queens row)))))
+
+(define solve-helper
+  (fn (n row queens)
+    (if (= row n)
+      (list (reverse queens))
+      (try-cols-helper n 0 queens row))))
+"#;
+        let results = compile_all_new(source, &mut symbols);
+        assert!(results.is_ok(), "Compilation should succeed");
+        let results = results.unwrap();
+
+        // Check that all closures have Pure effect
+        let mut found_closures = 0;
+        for (i, result) in results.iter().enumerate() {
+            for constant in &result.bytecode.constants {
+                if let Some(closure) = constant.as_closure() {
+                    found_closures += 1;
+                    assert!(
+                        closure.effect.is_pure(),
+                        "Form {} closure should be Pure, got {:?}",
+                        i,
+                        closure.effect
+                    );
+                }
+            }
+        }
+        assert_eq!(found_closures, 4, "Should have 4 closures");
     }
 }

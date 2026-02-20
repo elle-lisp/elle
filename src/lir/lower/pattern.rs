@@ -6,13 +6,13 @@ use crate::hir::{HirPattern, PatternLiteral};
 impl Lowerer {
     /// Lower pattern matching code
     /// Emits code that checks if value_reg matches the pattern
-    /// If it doesn't match, jumps to fail_label_id
-    /// If it matches, binds any variables and falls through
+    /// If it doesn't match, branches to fail_label
+    /// If it matches, binds any variables and continues in the current block
     pub(super) fn lower_pattern_match(
         &mut self,
         pattern: &HirPattern,
         value_reg: Reg,
-        fail_label_id: u32,
+        fail_label: Label,
     ) -> Result<(), String> {
         match pattern {
             HirPattern::Wildcard => {
@@ -28,11 +28,15 @@ impl Lowerer {
                     src: value_reg,
                 });
 
-                // If NOT nil, fail
-                self.emit(LirInstr::JumpIfFalseInline {
+                // If NOT nil, fail; otherwise continue
+                let continue_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
                     cond: is_nil_reg,
-                    label_id: fail_label_id,
+                    then_label: continue_label,
+                    else_label: fail_label,
                 });
+                self.finish_block();
+                self.current_block = BasicBlock::new(continue_label);
 
                 Ok(())
             }
@@ -53,50 +57,118 @@ impl Lowerer {
                     lhs: value_reg,
                     rhs: lit_reg,
                 });
-                self.emit(LirInstr::JumpIfFalseInline {
+
+                let continue_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
                     cond: eq_reg,
-                    label_id: fail_label_id,
+                    then_label: continue_label,
+                    else_label: fail_label,
                 });
+                self.finish_block();
+                self.current_block = BasicBlock::new(continue_label);
+
                 Ok(())
             }
             HirPattern::Var(binding_id) => {
                 // Bind the value to the variable
                 let slot = self.allocate_slot(*binding_id);
-                self.emit(LirInstr::StoreLocal {
-                    slot,
-                    src: value_reg,
-                });
+                // Inside lambdas, pattern-bound variables are part of the closure environment
+                if self.in_lambda {
+                    self.upvalue_bindings.insert(*binding_id);
+                    self.emit(LirInstr::StoreCapture {
+                        index: slot,
+                        src: value_reg,
+                    });
+                } else {
+                    self.emit(LirInstr::StoreLocal {
+                        slot,
+                        src: value_reg,
+                    });
+                }
                 Ok(())
             }
             HirPattern::Cons { head, tail } => {
+                // Store value to temp slot before any operations, so we can
+                // reload it after the block boundary.
+                // Inside a lambda, slots need to account for the captures offset.
+                let temp_slot = if self.in_lambda {
+                    self.num_captures + self.current_func.num_locals
+                } else {
+                    self.current_func.num_locals
+                };
+                self.current_func.num_locals += 1;
+
+                if self.in_lambda {
+                    self.emit(LirInstr::StoreCapture {
+                        index: temp_slot,
+                        src: value_reg,
+                    });
+                } else {
+                    self.emit(LirInstr::StoreLocal {
+                        slot: temp_slot,
+                        src: value_reg,
+                    });
+                }
+
                 // Check if value is a pair
                 let is_pair_reg = self.fresh_reg();
                 self.emit(LirInstr::IsPair {
                     dst: is_pair_reg,
                     src: value_reg,
                 });
-                self.emit(LirInstr::JumpIfFalseInline {
-                    cond: is_pair_reg,
-                    label_id: fail_label_id,
-                });
 
-                // Extract head and tail
+                let continue_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
+                    cond: is_pair_reg,
+                    then_label: continue_label,
+                    else_label: fail_label,
+                });
+                self.finish_block();
+                self.current_block = BasicBlock::new(continue_label);
+
+                // Reload for car
+                let reloaded_for_car = self.fresh_reg();
+                if self.in_lambda {
+                    self.emit(LirInstr::LoadCapture {
+                        dst: reloaded_for_car,
+                        index: temp_slot,
+                    });
+                } else {
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded_for_car,
+                        slot: temp_slot,
+                    });
+                }
+
                 let head_reg = self.fresh_reg();
                 self.emit(LirInstr::Car {
                     dst: head_reg,
-                    pair: value_reg,
+                    pair: reloaded_for_car,
                 });
+
+                // Reload for cdr
+                let reloaded_for_cdr = self.fresh_reg();
+                if self.in_lambda {
+                    self.emit(LirInstr::LoadCapture {
+                        dst: reloaded_for_cdr,
+                        index: temp_slot,
+                    });
+                } else {
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded_for_cdr,
+                        slot: temp_slot,
+                    });
+                }
 
                 let tail_reg = self.fresh_reg();
                 self.emit(LirInstr::Cdr {
                     dst: tail_reg,
-                    pair: value_reg,
+                    pair: reloaded_for_cdr,
                 });
 
                 // Recursively match head and tail
-                // Both must match, so they both jump to fail_label_id on failure
-                self.lower_pattern_match(head, head_reg, fail_label_id)?;
-                self.lower_pattern_match(tail, tail_reg, fail_label_id)?;
+                self.lower_pattern_match(head, head_reg, fail_label)?;
+                self.lower_pattern_match(tail, tail_reg, fail_label)?;
 
                 Ok(())
             }
@@ -107,38 +179,57 @@ impl Lowerer {
                 let mut current_reg = value_reg;
 
                 for pat in patterns.iter() {
-                    // Duplicate current so we can check if it's a pair without losing it
-                    let current_dup = self.fresh_reg();
-                    self.emit(LirInstr::Dup {
-                        dst: current_dup,
-                        src: current_reg,
-                    });
+                    // Store current to a temporary slot BEFORE IsPair, so we can
+                    // reload it after the block boundary.
+                    // Inside a lambda, slots need to account for the captures offset.
+                    let temp_slot = if self.in_lambda {
+                        self.num_captures + self.current_func.num_locals
+                    } else {
+                        self.current_func.num_locals
+                    };
+                    self.current_func.num_locals += 1;
 
-                    // Check if current is a pair (using the duplicate)
+                    if self.in_lambda {
+                        self.emit(LirInstr::StoreCapture {
+                            index: temp_slot,
+                            src: current_reg,
+                        });
+                    } else {
+                        self.emit(LirInstr::StoreLocal {
+                            slot: temp_slot,
+                            src: current_reg,
+                        });
+                    }
+
+                    // Check if current is a pair
                     let is_pair_reg = self.fresh_reg();
                     self.emit(LirInstr::IsPair {
                         dst: is_pair_reg,
-                        src: current_dup,
-                    });
-                    self.emit(LirInstr::JumpIfFalseInline {
-                        cond: is_pair_reg,
-                        label_id: fail_label_id,
-                    });
-
-                    // Store current to a temporary slot so we can load it twice
-                    let temp_slot = self.current_func.num_locals;
-                    self.current_func.num_locals += 1;
-                    self.emit(LirInstr::StoreLocal {
-                        slot: temp_slot,
                         src: current_reg,
                     });
 
+                    let continue_label = self.fresh_label();
+                    self.terminate(Terminator::Branch {
+                        cond: is_pair_reg,
+                        then_label: continue_label,
+                        else_label: fail_label,
+                    });
+                    self.finish_block();
+                    self.current_block = BasicBlock::new(continue_label);
+
                     // Load for car extraction
                     let current_for_car = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: current_for_car,
-                        slot: temp_slot,
-                    });
+                    if self.in_lambda {
+                        self.emit(LirInstr::LoadCapture {
+                            dst: current_for_car,
+                            index: temp_slot,
+                        });
+                    } else {
+                        self.emit(LirInstr::LoadLocal {
+                            dst: current_for_car,
+                            slot: temp_slot,
+                        });
+                    }
 
                     // Extract head
                     let head_reg = self.fresh_reg();
@@ -148,14 +239,21 @@ impl Lowerer {
                     });
 
                     // Match head against pattern
-                    self.lower_pattern_match(pat, head_reg, fail_label_id)?;
+                    self.lower_pattern_match(pat, head_reg, fail_label)?;
 
                     // Load for cdr extraction
                     let current_for_cdr = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: current_for_cdr,
-                        slot: temp_slot,
-                    });
+                    if self.in_lambda {
+                        self.emit(LirInstr::LoadCapture {
+                            dst: current_for_cdr,
+                            index: temp_slot,
+                        });
+                    } else {
+                        self.emit(LirInstr::LoadLocal {
+                            dst: current_for_cdr,
+                            slot: temp_slot,
+                        });
+                    }
 
                     // Extract tail for next iteration
                     let tail_reg = self.fresh_reg();
@@ -183,11 +281,16 @@ impl Lowerer {
                     lhs: current_reg,
                     rhs: empty_list_reg,
                 });
+
                 // If NOT empty_list, fail
-                self.emit(LirInstr::JumpIfFalseInline {
+                let continue_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
                     cond: is_empty_reg,
-                    label_id: fail_label_id,
+                    then_label: continue_label,
+                    else_label: fail_label,
                 });
+                self.finish_block();
+                self.current_block = BasicBlock::new(continue_label);
 
                 Ok(())
             }

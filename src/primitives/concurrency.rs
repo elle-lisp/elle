@@ -188,8 +188,17 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
                 if new_id.0 != *old_id {
                     // The bytecode expects this symbol under old_id, but register_primitives
                     // put it under new_id. Copy the value to the old_id slot.
-                    if let Some(val) = vm.globals.get(&new_id.0).copied() {
-                        vm.globals.insert(*old_id, val);
+                    if let Some(val) = vm
+                        .globals
+                        .get(new_id.0 as usize)
+                        .filter(|v| !v.is_undefined())
+                        .copied()
+                    {
+                        let idx = *old_id as usize;
+                        if idx >= vm.globals.len() {
+                            vm.globals.resize(idx + 1, Value::UNDEFINED);
+                        }
+                        vm.globals[idx] = val;
                     }
                 }
             }
