@@ -14,7 +14,7 @@ mod jit_tests {
     fn eval(code: &str) -> Result<Value, String> {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
-        register_primitives(&mut vm, &mut symbols);
+        let _effects = register_primitives(&mut vm, &mut symbols);
         eval_new(code, &mut symbols, &mut vm)
     }
 

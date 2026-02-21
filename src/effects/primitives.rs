@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 /// Register known effects of primitive functions.
 /// This interns the primitive names if they aren't already interned.
+#[allow(dead_code)]
 pub fn register_primitive_effects(
     symbols: &mut SymbolTable,
     effects: &mut HashMap<SymbolId, Effect>,
@@ -77,7 +78,7 @@ pub fn register_primitive_effects(
 
     for name in pure_primitives {
         let sym = symbols.intern(name);
-        effects.insert(sym, Effect::Pure);
+        effects.insert(sym, Effect::pure());
     }
 
     // Higher-order functions are polymorphic in their function argument
@@ -99,6 +100,10 @@ pub fn register_primitive_effects(
 
 /// Build the primitive effects map without modifying the symbol table.
 /// Only includes effects for primitives that are already interned.
+///
+/// NOTE: This is a fallback for pipeline paths that don't call `register_primitives`.
+/// The authoritative source of primitive effects is now `register_primitives` in
+/// `primitives/registration.rs`, which declares effects at the point of registration.
 pub fn get_primitive_effects(symbols: &SymbolTable) -> HashMap<SymbolId, Effect> {
     let mut effects = HashMap::new();
 
@@ -168,7 +173,7 @@ pub fn get_primitive_effects(symbols: &SymbolTable) -> HashMap<SymbolId, Effect>
 
     for name in pure_primitives {
         if let Some(sym) = symbols.get(name) {
-            effects.insert(sym, Effect::Pure);
+            effects.insert(sym, Effect::pure());
         }
     }
 
@@ -207,7 +212,7 @@ mod tests {
 
         register_primitive_effects(&mut symbols, &mut effects);
 
-        assert_eq!(effects.get(&plus), Some(&Effect::Pure));
+        assert_eq!(effects.get(&plus), Some(&Effect::pure()));
         assert_eq!(effects.get(&map), Some(&Effect::polymorphic(0)));
     }
 
@@ -221,7 +226,7 @@ mod tests {
 
         let effects = get_primitive_effects(&symbols);
 
-        assert_eq!(effects.get(&plus), Some(&Effect::Pure));
+        assert_eq!(effects.get(&plus), Some(&Effect::pure()));
         assert_eq!(effects.get(&map), Some(&Effect::polymorphic(0)));
     }
 }

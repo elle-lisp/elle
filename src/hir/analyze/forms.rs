@@ -36,7 +36,7 @@ impl<'a> Analyzer<'a> {
             // Vector literal - call vector primitive
             SyntaxKind::Vector(items) => {
                 let mut args = Vec::new();
-                let mut effect = Effect::Pure;
+                let mut effect = Effect::pure();
                 for item in items {
                     let hir = self.analyze_expr(item)?;
                     effect = effect.combine(hir.effect.clone());
@@ -46,7 +46,7 @@ impl<'a> Analyzer<'a> {
                 let sym = self.symbols.intern("vector");
                 let id = self.ctx.fresh_binding();
                 self.ctx.register_binding(BindingInfo::global(id, sym));
-                let func = Hir::new(HirKind::Var(id), span.clone(), Effect::Pure);
+                let func = Hir::new(HirKind::Var(id), span.clone(), Effect::pure());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -170,7 +170,7 @@ impl<'a> Analyzer<'a> {
 
             // Pass 2: Analyze all expressions (all bindings now visible)
             let mut exprs = Vec::new();
-            let mut effect = Effect::Pure;
+            let mut effect = Effect::pure();
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
@@ -182,7 +182,7 @@ impl<'a> Analyzer<'a> {
         } else {
             // At top level, sequential semantics are fine
             let mut exprs = Vec::new();
-            let mut effect = Effect::Pure;
+            let mut effect = Effect::pure();
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
@@ -283,7 +283,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let mut exprs = Vec::new();
-        let mut effect = Effect::Pure;
+        let mut effect = Effect::pure();
 
         for item in items {
             let hir = self.analyze_expr(item)?;
@@ -300,7 +300,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let mut exprs = Vec::new();
-        let mut effect = Effect::Pure;
+        let mut effect = Effect::pure();
 
         for item in items {
             let hir = self.analyze_expr(item)?;
@@ -318,7 +318,7 @@ impl<'a> Analyzer<'a> {
 
         let mut clauses = Vec::new();
         let mut else_branch = None;
-        let mut effect = Effect::Pure;
+        let mut effect = Effect::pure();
 
         for clause in &items[1..] {
             let parts = clause

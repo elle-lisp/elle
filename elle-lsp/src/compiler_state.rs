@@ -48,7 +48,7 @@ impl CompilerState {
     pub fn new() -> Self {
         let mut symbol_table = SymbolTable::new();
         let mut vm = VM::new();
-        register_primitives(&mut vm, &mut symbol_table);
+        let _effects = register_primitives(&mut vm, &mut symbol_table);
         init_stdlib(&mut vm, &mut symbol_table);
 
         Self {

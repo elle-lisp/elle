@@ -1,6 +1,7 @@
 // DEFENSE: Primitives are the building blocks - must be correct
 use elle::error::LError;
 use elle::ffi::primitives::context::{clear_symbol_table, set_symbol_table};
+use elle::pipeline::eval_new;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::value::{list, Closure, Value};
@@ -9,7 +10,7 @@ use elle::vm::VM;
 fn setup() -> (VM, SymbolTable) {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
     (vm, symbols)
 }
 
@@ -1212,7 +1213,7 @@ fn test_stdlib_initialization() {
     let mut symbols = SymbolTable::new();
 
     // Register primitives
-    elle::register_primitives(&mut vm, &mut symbols);
+    let _effects = elle::register_primitives(&mut vm, &mut symbols);
 
     // Initialize stdlib
     init_stdlib(&mut vm, &mut symbols);
@@ -1237,7 +1238,7 @@ fn test_module_qualified_access() {
 
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    elle::register_primitives(&mut vm, &mut symbols);
+    let _effects = elle::register_primitives(&mut vm, &mut symbols);
     init_stdlib(&mut vm, &mut symbols);
 
     // Test getting functions from modules
@@ -1297,7 +1298,7 @@ fn test_import_file_with_valid_file() {
     // Set up VM and register primitives
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Set VM context for file loading
     ffi_primitives::set_vm_context(&mut vm as *mut VM);
@@ -1320,7 +1321,7 @@ fn test_import_file_with_invalid_file() {
     // Set up VM
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Set VM context
     ffi_primitives::set_vm_context(&mut vm as *mut VM);
@@ -1344,7 +1345,7 @@ fn test_import_file_circular_dependency_prevention() {
     // Set up VM
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Set VM context
     ffi_primitives::set_vm_context(&mut vm as *mut VM);
@@ -1389,7 +1390,7 @@ fn test_add_module_path_with_vm_context() {
     // Set up VM
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Set VM context
     ffi_primitives::set_vm_context(&mut vm as *mut VM);
@@ -1460,7 +1461,7 @@ fn test_spawn_primitive() {
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
 
-        effect: elle::effects::Effect::Pure,
+        effect: elle::effects::Effect::pure(),
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
@@ -1579,7 +1580,7 @@ fn test_profile_primitive() {
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
 
-        effect: elle::effects::Effect::Pure,
+        effect: elle::effects::Effect::pure(),
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
@@ -1932,7 +1933,7 @@ fn test_json_serialize_errors() {
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
 
-        effect: elle::effects::Effect::Pure,
+        effect: elle::effects::Effect::pure(),
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
@@ -1946,4 +1947,83 @@ fn test_json_serialize_errors() {
     let fn_val = Value::native_fn(native_fn);
     let result = call_primitive(&json_serialize, &[fn_val]);
     assert!(result.is_err());
+}
+
+// Disassembly tests
+#[test]
+fn test_disbit_returns_vector_of_strings() {
+    let (vm, mut symbols) = setup();
+    let disbit = get_primitive(&vm, &mut symbols, "disbit");
+
+    let mut vm2 = VM::new();
+    let mut symbols2 = SymbolTable::new();
+    let _effects = register_primitives(&mut vm2, &mut symbols2);
+    let result = eval_new("(lambda (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+
+    let disasm = call_primitive(&disbit, &[result]).unwrap();
+    let vec = disasm.as_vector().expect("disbit should return a vector");
+    let vec = vec.borrow();
+    assert!(!vec.is_empty(), "disbit should return non-empty vector");
+    for elem in vec.iter() {
+        assert!(
+            elem.as_string().is_some(),
+            "each element should be a string"
+        );
+    }
+}
+
+#[test]
+fn test_disbit_type_error_on_non_closure() {
+    let (vm, mut symbols) = setup();
+    let disbit = get_primitive(&vm, &mut symbols, "disbit");
+    let result = call_primitive(&disbit, &[Value::int(42)]);
+    assert!(result.is_err(), "disbit on non-closure should error");
+}
+
+#[test]
+fn test_disbit_arity_error() {
+    let (vm, mut symbols) = setup();
+    let disbit = get_primitive(&vm, &mut symbols, "disbit");
+    let result = call_primitive(&disbit, &[]);
+    assert!(result.is_err(), "disbit with no args should error");
+}
+
+#[test]
+fn test_disjit_returns_vector_for_pure_closure() {
+    let (vm, mut symbols) = setup();
+    let disjit = get_primitive(&vm, &mut symbols, "disjit");
+
+    let mut vm2 = VM::new();
+    let mut symbols2 = SymbolTable::new();
+    let _effects = register_primitives(&mut vm2, &mut symbols2);
+    let result = eval_new("(lambda (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+
+    let ir = call_primitive(&disjit, &[result]).unwrap();
+    if !ir.is_nil() {
+        let vec = ir.as_vector().expect("disjit should return a vector");
+        let vec = vec.borrow();
+        assert!(!vec.is_empty(), "disjit should return non-empty vector");
+        for elem in vec.iter() {
+            assert!(
+                elem.as_string().is_some(),
+                "each element should be a string"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_disjit_type_error_on_non_closure() {
+    let (vm, mut symbols) = setup();
+    let disjit = get_primitive(&vm, &mut symbols, "disjit");
+    let result = call_primitive(&disjit, &[Value::int(42)]);
+    assert!(result.is_err(), "disjit on non-closure should error");
+}
+
+#[test]
+fn test_disjit_arity_error() {
+    let (vm, mut symbols) = setup();
+    let disjit = get_primitive(&vm, &mut symbols, "disjit");
+    let result = call_primitive(&disjit, &[]);
+    assert!(result.is_err(), "disjit with no args should error");
 }

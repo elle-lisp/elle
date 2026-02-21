@@ -1,6 +1,7 @@
 //! Call analysis and effect tracking
 
 use super::*;
+use crate::effects::YieldBehavior;
 use crate::syntax::Syntax;
 use std::collections::BTreeSet;
 
@@ -56,15 +57,15 @@ impl<'a> Analyzer<'a> {
                             .get(&info.name)
                             .or_else(|| self.global_effects.get(&info.name))
                             .cloned()
-                            .unwrap_or(Effect::Yields)
+                            .unwrap_or(Effect::yields())
                     } else {
-                        Effect::Yields
+                        Effect::yields()
                     }
                 } else {
-                    Effect::Yields
+                    Effect::yields()
                 }
             }
-            _ => Effect::Yields,
+            _ => Effect::yields(),
         }
     }
 
@@ -90,7 +91,7 @@ impl<'a> Analyzer<'a> {
         }
 
         // Case 2: Call to a polymorphic function with parameters as the polymorphic arguments
-        if let Effect::Polymorphic(param_indices) = raw_effect {
+        if let YieldBehavior::Polymorphic(param_indices) = &raw_effect.yield_behavior {
             let mut found_param = false;
             for &param_idx in param_indices {
                 if param_idx < args.len() {
@@ -117,27 +118,27 @@ impl<'a> Analyzer<'a> {
         // Case 3: Yields from a non-parameter source
         // Only mark as non-param yield if the resolved effect is Yields
         let resolved_effect = self.resolve_polymorphic_effect(raw_effect, args);
-        if resolved_effect == Effect::Yields {
+        if resolved_effect == Effect::yields() {
             self.current_effect_sources.has_non_param_yield = true;
         }
     }
 
     /// Resolve a polymorphic effect by examining the arguments at the specified indices.
     pub(crate) fn resolve_polymorphic_effect(&self, effect: &Effect, args: &[Hir]) -> Effect {
-        match effect {
-            Effect::Polymorphic(params) => {
-                let mut resolved = Effect::Pure;
+        match &effect.yield_behavior {
+            YieldBehavior::Polymorphic(params) => {
+                let mut resolved = Effect::pure();
                 for &param_idx in params {
                     if param_idx < args.len() {
                         resolved = resolved.combine(self.resolve_arg_effect(&args[param_idx]));
                     } else {
                         // Parameter index out of bounds - conservatively Yields
-                        return Effect::Yields;
+                        return Effect::yields();
                     }
                 }
                 resolved
             }
-            other => other.clone(),
+            _ => effect.clone(),
         }
     }
 
@@ -165,9 +166,9 @@ impl<'a> Analyzer<'a> {
                                 .cloned()
                         })
                 })
-                .unwrap_or(Effect::Yields),
+                .unwrap_or(Effect::yields()),
             // Unknown argument effect - conservatively Yields for soundness
-            _ => Effect::Yields,
+            _ => Effect::yields(),
         }
     }
 
@@ -177,14 +178,14 @@ impl<'a> Analyzer<'a> {
     pub(crate) fn compute_inferred_effect(&self, body: &Hir, params: &[BindingId]) -> Effect {
         // If body is pure, lambda is pure
         if body.effect.is_pure() {
-            return Effect::Pure;
+            return Effect::pure();
         }
 
         // If there's a direct yield or non-parameter yield, it's Yields
         if self.current_effect_sources.has_direct_yield
             || self.current_effect_sources.has_non_param_yield
         {
-            return Effect::Yields;
+            return Effect::yields();
         }
 
         // If param_calls is empty but body is Yields, fall back to Yields
@@ -201,9 +202,12 @@ impl<'a> Analyzer<'a> {
             .collect();
 
         if param_indices.is_empty() {
-            Effect::Yields // shouldn't happen
+            Effect::yields() // shouldn't happen
         } else {
-            Effect::Polymorphic(param_indices)
+            Effect {
+                yield_behavior: YieldBehavior::Polymorphic(param_indices),
+                may_raise: false,
+            }
         }
     }
 }

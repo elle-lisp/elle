@@ -92,14 +92,14 @@ mod tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![]),
-            effect: Effect::Pure,
+            effect: Effect::pure(),
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
         };
-        assert_eq!(closure.effect(), Effect::Pure);
+        assert_eq!(closure.effect(), Effect::pure());
     }
 
     #[test]
@@ -112,7 +112,7 @@ mod tests {
             num_locals: 5,                              // 3 params + 2 locally-defined
             num_captures: 2,
             constants: Rc::new(vec![]),
-            effect: Effect::Pure,
+            effect: Effect::pure(),
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
@@ -130,7 +130,7 @@ mod tests {
             num_locals: 4,                  // 2 required params + 2 locally-defined
             num_captures: 1,
             constants: Rc::new(vec![]),
-            effect: Effect::Pure,
+            effect: Effect::pure(),
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
@@ -148,7 +148,7 @@ mod tests {
             num_locals: 2,        // 1 min param + 1 locally-defined
             num_captures: 0,
             constants: Rc::new(vec![]),
-            effect: Effect::Pure,
+            effect: Effect::pure(),
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),

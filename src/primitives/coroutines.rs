@@ -586,7 +586,7 @@ mod tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![Value::NIL]),
-            effect: Effect::Pure,
+            effect: Effect::pure(),
             cell_params_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),

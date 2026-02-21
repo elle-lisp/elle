@@ -175,7 +175,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         let mut vm = VM::new();
         let mut symbols = SymbolTable::new();
         // Register primitives so they're available in the spawned thread
-        register_primitives(&mut vm, &mut symbols);
+        let _effects = register_primitives(&mut vm, &mut symbols);
 
         // Remap globals so bytecode symbol IDs resolve correctly.
         // The bytecode was compiled with symbol IDs from the parent thread's symbol table.

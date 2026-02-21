@@ -4,6 +4,7 @@ pub mod comparison;
 pub mod concurrency;
 pub mod coroutines;
 pub mod debug;
+pub mod debugging;
 pub mod display;
 pub mod exception;
 pub mod file_io;

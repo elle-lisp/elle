@@ -11,7 +11,7 @@ use elle::{SymbolTable, Value, VM};
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
     eval_new(input, &mut symbols, &mut vm)
 }
 
@@ -558,7 +558,7 @@ fn test_trace_vm_execution() {
     // Also try with the non-begin version to compare
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Define process
     let code2a =

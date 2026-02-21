@@ -91,7 +91,7 @@ pub fn compile_new(source: &str, symbols: &mut SymbolTable) -> Result<CompileRes
 /// Uses fixpoint iteration to correctly infer effects for mutually recursive
 /// top-level defines. The algorithm:
 /// 1. Pre-scan all forms for `(define name (fn ...))` patterns
-/// 2. Seed `global_effects` with `Effect::Pure` for all such defines (optimistic)
+/// 2. Seed `global_effects` with `Effect::pure()` for all such defines (optimistic)
 /// 3. Analyze all forms, collecting actual inferred effects
 /// 4. If any effect changed, re-analyze with corrected effects
 /// 5. Repeat until stable (max 10 iterations)
@@ -113,7 +113,7 @@ pub fn compile_all_new(
     let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
     for form in &expanded_forms {
         if let Some(sym) = scan_define_lambda(form, symbols) {
-            global_effects.insert(sym, Effect::Pure);
+            global_effects.insert(sym, Effect::pure());
         }
     }
 
@@ -215,7 +215,7 @@ pub fn analyze_all_new(
     let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
     for form in &expanded_forms {
         if let Some(sym) = scan_define_lambda(form, symbols) {
-            global_effects.insert(sym, Effect::Pure);
+            global_effects.insert(sym, Effect::pure());
         }
     }
 
@@ -268,7 +268,7 @@ mod tests {
     fn setup() -> (SymbolTable, VM) {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
-        register_primitives(&mut vm, &mut symbols);
+        let _effects = register_primitives(&mut vm, &mut symbols);
         (symbols, vm)
     }
 

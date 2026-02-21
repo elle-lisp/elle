@@ -54,7 +54,7 @@ impl Linter {
     pub fn lint_str(&mut self, code: &str, _filename: &str) -> Result<(), String> {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
-        register_primitives(&mut vm, &mut symbols);
+        let _effects = register_primitives(&mut vm, &mut symbols);
         init_stdlib(&mut vm, &mut symbols);
 
         // Use new pipeline: parse → expand → analyze → HIR

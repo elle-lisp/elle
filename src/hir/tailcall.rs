@@ -223,7 +223,7 @@ mod tests {
     fn analyze_and_mark(source: &str) -> Hir {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
-        register_primitives(&mut vm, &mut symbols);
+        let _effects = register_primitives(&mut vm, &mut symbols);
 
         let syntax = read_syntax(source).expect("parse failed");
         let mut expander = Expander::new();

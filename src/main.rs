@@ -372,8 +372,8 @@ fn main() {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
 
-    // Register primitive functions
-    register_primitives(&mut vm, &mut symbols);
+    // Register primitive functions (effects map not needed in main)
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Initialize standard library modules
     init_stdlib(&mut vm, &mut symbols);

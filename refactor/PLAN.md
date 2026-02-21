@@ -47,68 +47,69 @@ blocks. The emitter carries stack simulation state across yield boundaries.
 
 See `docs/DEBUGGING.md` for the full design. Implementation steps below.
 
-### Step 1: Introspection primitives (~2-3 hours)
+### Step 1: Value types and debugging primitives (~4-5 hours)
 
-Add primitives that inspect closure properties from Elle code.
+Add `Instant` and `Duration` heap types, then implement all debugging
+toolkit primitives in a single file.
 
-**New file**: `src/primitives/introspect.rs`
-- `closure?` — `value.as_closure().is_some()`
-- `jit?` — closure with `jit_code.is_some()`
-- `pure?` — closure with `effect == Effect::Pure`
-- `coro?` — closure with `effect == Effect::Yields`
-- `mutable?` — closure with `cell_params_mask != 0`
-- `arity` — closure arity as int, pair, or nil
-- `captures` — number of captures as int, or nil
-- `bytecode-size` — bytecode length as int, or nil
+**Modify**: `src/value/heap.rs`
+- Add `HeapObject::Instant(std::time::Instant)` variant
+- Add `HeapObject::Duration(std::time::Duration)` variant
+- Update `HeapTag`, `tag()`, `type_name()`, `Debug`
 
-**New file**: `src/primitives/jit_ops.rs` (VmAwareFn)
-- `global?` — check if symbol is bound as global
-- `jit` — trigger JIT compilation of a closure value, return it
-- `jit!` — trigger JIT compilation of a global by symbol, mutate in place
-- `call-count` — read VM's closure_call_counts for a closure
+**Modify**: `src/value/repr/constructors.rs`, `accessors.rs`, `traits.rs`
+- Add `Value::instant()`, `Value::duration()` constructors
+- Add `as_instant()`, `as_duration()`, `is_instant()`, `is_duration()`
+- Add `PartialEq` arms for Instant and Duration
 
-**Modify**: `src/primitives/registration.rs` — register all new primitives
-**Modify**: `src/primitives/mod.rs` — add module declarations
-**Modify**: `src/effects/primitives.rs` — add Pure annotations
+**Modify**: `src/value/display.rs`
+- Add display formatting for `#<instant>` and `#<duration ...>`
+
+**Modify**: `src/value/send.rs`
+- Add `SendValue` handling for Instant and Duration
+
+**New file**: `src/primitives/debugging.rs`
+All debugging toolkit primitives in one file:
+- Introspection: `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`,
+  `arity`, `captures`, `bytecode-size`, `raises?`
+- Time: `now`, `elapsed`, `cpu-time`, `duration`, `duration->seconds`,
+  `duration->nanoseconds`, `duration<`, `instant?`, `duration?`
+- JIT control (VmAwareFn): `global?`, `jit`, `jit!`, `call-count`
+
 **Modify**: `src/primitives/debug.rs` — remove placeholder `profile`
+**Modify**: `src/primitives/concurrency.rs` — `sleep` accepts duration only
+**Modify**: `src/primitives/mod.rs` — add `debugging` module
+
+**Dependency**: Add `cpu-time` to `Cargo.toml`.
 
 **Tests**: Unit tests in `tests/unittests/primitives.rs`. Integration tests
 in new `tests/integration/debugging.rs`.
 
 **Verification**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`
 
-### Step 2: Clock API (~2-3 hours)
+### Step 2: Raises effect tracking and registration unification (~4-5 hours)
 
-POSIX clock primitives. All return `(seconds . nanoseconds)` cons pairs.
-
-**New file**: `src/primitives/clock.rs`
-- `clock-realtime` — `CLOCK_REALTIME`
-- `clock-monotonic` — `CLOCK_MONOTONIC`
-- `clock-process` — `CLOCK_PROCESS_CPUTIME_ID`
-- `clock-thread` — `CLOCK_THREAD_CPUTIME_ID`
-- `clock-resolution` — `clock_getres` with keyword argument
-- `clock-nanosleep` — `clock_nanosleep` relative to MONOTONIC
-- `timespec-diff` — subtract two timespecs with borrow
-- `timespec->float` — convert to float seconds
-- `timespec->ns` — convert to nanoseconds integer
-
-**Dependency**: Add `libc` as direct dependency in `Cargo.toml` (already
-transitive via cranelift, but make it explicit).
-
-**Modify**: `src/primitives/registration.rs`, `mod.rs`, `effects/primitives.rs`
-
-**Tests**: Unit tests for arithmetic, integration tests for clock reads.
-
-**Verification**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`
-
-### Step 3: Raises effect tracking (~3-4 hours)
-
-Extend the effect system with a boolean `may_raise` field.
+Extend the effect system with `may_raise`, then unify effect declaration
+into primitive registration (eliminating the separate side-table).
 
 **Modify**: `src/effects/mod.rs`
-- Add `may_raise: bool` field to `Effect` (or as a parallel field on `Hir`)
-- Update `combine` to OR the raises flags
-- Update `Display`
+- Restructure `Effect` as struct: `YieldBehavior` enum + `may_raise: bool`
+- Add convenience constructors: `pure()`, `pure_raises()`, `yields()`,
+  `yields_raises()`, `polymorphic(n)`, `polymorphic_raises(n)`
+- Update `combine` to OR `may_raise` alongside yield combination
+- Update `Display`, `Hash`, `Eq`, `Default`
+
+**Modify**: `src/primitives/registration.rs`
+- Add `Effect` parameter to `register_fn` and `register_vm_aware_fn`
+- Migrate all existing primitive registrations with correct effects
+- Register all new debugging toolkit primitives with effects
+- Default: `Effect::pure_raises()` (conservative), then tighten where
+  appropriate (type predicates, boolean ops, constants → `Effect::pure()`)
+
+**Delete**: `src/effects/primitives.rs`
+- Side-table replaced by registration-time effect declarations
+- `register_primitive_effects` and `get_primitive_effects` removed
+- Analyzer reads effects from the registration-populated map
 
 **Modify**: `src/hir/analyze/special.rs`
 - `analyze_throw`: set `may_raise = true` on the Hir node
@@ -117,6 +118,7 @@ Extend the effect system with a boolean `may_raise` field.
 
 **Modify**: `src/hir/analyze/call.rs`
 - Propagate callee's `may_raise` into call expression
+- For primitive calls, use the registered `Effect` (not a hardcoded default)
 
 **Modify**: `src/hir/analyze/binding.rs`
 - Store `may_raise` in `effect_env` alongside yield effects
@@ -129,27 +131,25 @@ Extend the effect system with a boolean `may_raise` field.
 
 **Modify**: `src/pipeline.rs`
 - Track `may_raise` during fixpoint iteration
-
-**New primitive**: `raises?` in `src/primitives/introspect.rs`
+- Update primitive effects map construction (now from registration, not side-table)
 
 **Tests**: Integration tests in `tests/integration/effect_enforcement.rs`
 (extend existing) and `tests/integration/debugging.rs`.
 
 **Verification**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`
 
-### Step 4: Benchmarking macros and example (~1-2 hours)
+### Step 3: Benchmarking macros and example (~1-2 hours)
 
-Elle-level benchmarking built on the clock primitives.
+Elle-level benchmarking built on the time primitives.
 
 **New file**: `lib/bench.lisp`
 - `bench` macro — time a single expression
 - `bench-n` macro — time N iterations
 - `bench-compare` macro — compare two expressions
-- `assert-faster` macro — assertion that one is faster
 
 **New file**: `examples/debugging.lisp` — replaces `debugging-profiling.lisp`
 - Demonstrates all introspection primitives
-- Demonstrates clock API
+- Demonstrates time API
 - Demonstrates benchmarking macros
 - Uses assertions to verify results
 
@@ -158,7 +158,7 @@ Elle-level benchmarking built on the clock primitives.
 **Verification**: `cargo test --workspace`, example execution via
 `cargo run -- examples/debugging.lisp`
 
-### Step 5: Documentation and cleanup (~1 hour)
+### Step 4: Documentation and cleanup (~1 hour)
 
 - Update `docs/BUILTINS.md` with new primitives
 - Update `src/primitives/AGENTS.md` with new modules
@@ -262,7 +262,7 @@ SmallVec handlers, pre-allocated envs, inline jump elimination).
 | TCO via trampoline | `pending_tail_call` on VM. Works for mutual recursion. |
 | JIT always enabled | Cranelift required. No feature gate. |
 | Conservative raises tracking | `bool` not `BTreeSet`. Correct first. |
-| All clocks return pairs | `(seconds . nanoseconds)`. Consistent, no overflow. |
+| First-class instant/duration | Mirrors Rust's `std::time`. Type-safe, no cons allocation. |
 | Debugging from Elle, not Rust | No recompilation for instrumentation. |
 
 ## Known defects
