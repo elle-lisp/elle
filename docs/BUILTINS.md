@@ -1781,25 +1781,25 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 ## Concurrency
 
-### `spawn` (Spawn Thread)
+### `thread/spawn` (Spawn Thread)
 
 **Semantics**: Creates new thread that executes function.
 
 **Usage**:
 ```lisp
-(define t (spawn (lambda () (display "Running in thread"))))
+(define t (thread/spawn (lambda () (display "Running in thread"))))
 (thread?)
 ⟹ (thread object)
 ```
 
-### `join` (Wait for Thread)
+### `thread/join` (Wait for Thread)
 
 **Semantics**: Waits for thread to complete.
 
 **Usage**:
 ```lisp
-(define t (spawn (lambda () (sleep 1) (display "Done"))))
-(join t)
+(define t (thread/spawn (lambda () (sleep 1) (display "Done"))))
+(thread/join t)
 ⟹ (waits for thread)
 ```
 
@@ -2213,6 +2213,9 @@ Parse JSON, modify, and serialize back:
 ```
 
 ## Condition System
+
+> **Deprecated.** These primitives will be replaced by the fiber/signal
+> model. See `docs/FIBERS.md`. They still work but will be removed.
 
 The condition system provides sophisticated error handling beyond simple exceptions, allowing custom signal types with registered handlers.
 

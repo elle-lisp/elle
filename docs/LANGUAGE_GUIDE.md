@@ -402,6 +402,10 @@ Get information from exceptions:
 
 ## The Condition System
 
+> **Deprecated.** The condition system described below will be replaced by
+> the fiber/signal model with `try`/`catch`/`finally` surface syntax. See
+> `docs/FIBERS.md`. These primitives still work but will be removed.
+
 Elle provides a modern condition system for sophisticated error handling and signaling.
 
 ### Signals and Handlers
@@ -764,11 +768,11 @@ e                  ⟹ 2.71828...
 ### Concurrency
 
 ```lisp
-(spawn (fn () (display "Hello from thread") (newline)))
+(thread/spawn (fn () (display "Hello from thread") (newline)))
 ; Creates a new thread and runs the function
 
-(define t (spawn (fn () (+ 2 2))))
-(join t)          ; Wait for thread to complete, returns its result
+(define t (thread/spawn (fn () (+ 2 2))))
+(thread/join t)          ; Wait for thread to complete, returns its result
 
 (sleep 1000)      ; Sleep for 1000 milliseconds
 

@@ -2,27 +2,22 @@
 
 ## Status
 
-handler-case is fully implemented end-to-end. The following are not yet implemented:
+The exception system is transitioning from the old `handler-case`/`handler-bind`
+model to a modern `try`/`catch`/`finally` model backed by fibers and signals.
 
-- **handler-bind**: Analysis parses the syntax and creates `HirKind::HandlerBind`,
-  but the lowerer ignores the handlers and just compiles the body. handler-bind
-  should establish handlers that run without unwinding the stack.
+**Current implementation** (pre-fiber):
+- `handler-case` is fully implemented end-to-end
+- `handler-bind`, `throw`, restarts, and `finally` are partially or not implemented
+- The old `Condition` type and exception hierarchy exist but will be replaced
 
-- **throw special form**: The `throw` primitive function works (returns
-  `Err(Condition)` to the Call handler). The `(throw expr)` special form's LIR
-  emission is incomplete — it lowers to `LirInstr::Throw` but the emitter does
-  not emit bytecode that sets `current_exception`.
+**Target implementation** (fiber-backed):
+- `try`/`catch`/`finally` as the primary exception handling mechanism
+- Exceptions are first-class values that can be caught, inspected, and resumed
+- Recovery via `signal`/`resume` in the fiber model (no restart machinery)
+- Proper cleanup via `finally` blocks
+- Non-unwinding recovery patterns via fiber suspension and resumption
 
-- **Restarts**: `invoke-restart` bytecode opcode exists but the VM handler is a
-  no-op. No restart mechanism is implemented at any level (no `restart-case`,
-  no `invoke-restart`, no restart objects).
-
-- **signal/warn/error signaling**: These primitives create Condition values but
-  do not raise them. They return the condition as a normal value. To actually
-  raise an exception, use the `throw` primitive.
-
-- **finally**: The `ExceptionHandler` struct has a `finally_offset` field but it
-  is always `None`. No finally block logic is implemented.
+This document describes the **target state**. Implementation is ongoing.
 
 ## Problem
 
@@ -36,17 +31,17 @@ together:
 
 2. **`Err(LError)`** — Primitives (`NativeFn`, `VmAwareFn`) return
    `Result<Value, LError>`. The `Call` handler translates some `LError` variants
-   to `Condition` objects. `TailCall` does not — it converts to `Err(String)`
+   to `Exception` objects. `TailCall` does not — it converts to `Err(String)`
    via `.description()`.
 
-3. **`current_exception`** (`Option<Rc<Condition>>`) — The Elle-level exception
+3. **`current_exception`** (`Option<Rc<Exception>>`) — The Elle-level exception
    channel. Set directly by `handle_div_int`, `handle_load_global`, and
    `prim_div_vm`. Checked at the bottom of every instruction dispatch. Caught by
-   `handler-case`/`handler-bind`.
+   `try`/`catch` blocks.
 
-These don't compose. `(handler-case (+ 1 "a") (error e 99))` — the `+`
+These don't compose. `(try (+ 1 "a") (catch error e 99))` — the `+`
 produces `Err("Expected integer")` through channel 1. The `?` operator
-propagates it past the handler-case machinery. The handler never fires.
+propagates it past the try/catch machinery. The handler never fires.
 
 Only division-by-zero and undefined-variable were special-cased to use
 channel 3.
@@ -61,7 +56,7 @@ channel 3.
 
 - **Runtime errors** (type mismatch, arity error, division by zero, undefined
   variable) — program behavior on bad data. Elle code should catch and handle
-  them via `handler-case`.
+  them via `try`/`catch` blocks.
 
 **Primitives are already coupled to the runtime.** They construct `Value::int()`,
 `Value::cons()`, `Value::string()`. Asking them to construct `Condition` objects
@@ -88,7 +83,7 @@ uncatchable.
 ### C: Convert at the Call boundary
 
 Primitives keep returning `Err(LError)`. The `Call` handler converts to
-`Condition` and sets `current_exception`.
+`Exception` and sets `current_exception`.
 
 Rejected for three reasons:
 
@@ -96,7 +91,7 @@ Rejected for three reasons:
    uncatchable Rust error. `(apply + (list 1 "a"))` compiled as `Call` produces
    a catchable exception. Same operation, different catchability.
 
-2. **Translation seam.** A mapping from every `ErrorKind` variant to condition
+2. **Translation seam.** A mapping from every `ErrorKind` variant to exception
    fields must be maintained at the `Call` boundary. This seam rots.
 
 3. **Inconsistent state window.** After conversion, `Call` pushes NIL and
@@ -105,16 +100,16 @@ Rejected for three reasons:
 
 ## Chosen Design
 
-### `NativeFn`: `Result<Value, Condition>`
+### `NativeFn`: `Result<Value, Exception>`
 
-Primitives return `Condition` directly as their error type. The `Call` and
+Primitives return `Exception` directly as their error type. The `Call` and
 `TailCall` handlers receive it and set `current_exception`. No translation, no
 inconsistency, no gap.
 
 ```rust
 // Call handler for NativeFn
-Err(cond) => {
-    self.current_exception = Some(Rc::new(cond));
+Err(exc) => {
+    self.current_exception = Some(Rc::new(exc));
     Value::NIL  // pushed to keep stack consistent
 }
 ```
@@ -136,7 +131,7 @@ Instruction handlers return `Result<(), String>`. The convention:
   Propagated via `?`. Uncatchable.
 
 - **`Ok(())` with `current_exception` set** — Runtime error on bad data. The
-  handler constructs a `Condition`, sets `vm.current_exception`, pushes
+  handler constructs an `Exception`, sets `vm.current_exception`, pushes
   `Value::NIL` to keep the stack consistent, and returns `Ok(())`. The
   interrupt mechanism at the bottom of the instruction loop handles it.
 
@@ -148,17 +143,17 @@ to all instruction-level data errors (`Add`, `Sub`, `Mul`, `Car`, `Cdr`,
 
 Stack underflow, instruction pointer out of bounds, "cannot call non-function",
 bytecode corruption — these stay in the Rust error channel. They are not
-`Condition` objects. They cannot be caught by `handler-case`.
+`Exception` objects. They cannot be caught by `try`/`catch` blocks.
 
-## Condition Struct
+## Exception Struct
 
 ### Message is mandatory
 
-Every `Condition` carries a human-readable message. An error without a message
+Every `Exception` carries a human-readable message. An error without a message
 is a defect in the error producer.
 
 ```rust
-pub struct Condition {
+pub struct Exception {
     pub exception_id: u32,
     pub message: String,
     pub fields: HashMap<u32, Value>,
@@ -173,16 +168,16 @@ dividend, divisor, etc.). Field semantics are per-exception-type.
 
 ### Named constructors are the only public API
 
-`Condition::new(id)` is private. All construction goes through named
+`Exception::new(id)` is private. All construction goes through named
 constructors that enforce the message requirement:
 
 ```rust
-Condition::type_error(msg)          // ID 3
-Condition::division_by_zero(msg)    // ID 4
-Condition::undefined_variable(msg)  // ID 5
-Condition::arity_error(msg)         // ID 6
-Condition::generic(msg)             // ID 0
-Condition::error(msg)               // ID 2
+Exception::type_error(msg)          // ID 3
+Exception::division_by_zero(msg)    // ID 4
+Exception::undefined_variable(msg)  // ID 5
+Exception::arity_error(msg)         // ID 6
+Exception::generic(msg)             // ID 0
+Exception::error(msg)               // ID 2
 ```
 
 Primitives never see a numeric ID. If the hierarchy changes, the constructors
@@ -190,12 +185,12 @@ change in one place.
 
 ### Exception hierarchy is data
 
-The parent-child relationships live in `condition.rs` as a data table, not a
-match statement scattered across modules. Both `Condition::is_instance_of` and
+The parent-child relationships live in `exception.rs` as a data table, not a
+match statement scattered across modules. Both `Exception::is_instance_of` and
 the VM's `MatchException` instruction use the same source of truth.
 
 ```
-condition (1)
+exception (1)
 ├── error (2)
 │   ├── type-error (3)
 │   ├── division-by-zero (4)
@@ -203,7 +198,7 @@ condition (1)
 │   └── arity-error (6)
 ├── warning (7)
 │   └── style-warning (8)
-└── generic (0) — legacy, treated as child of condition
+└── generic (0) — legacy, treated as child of exception
 ```
 
 ### Structured fields
@@ -211,69 +206,143 @@ condition (1)
 Named constructors can attach structured data via builder methods:
 
 ```rust
-Condition::type_error("car: expected pair, got integer")
+Exception::type_error("car: expected pair, got integer")
     .with_field(FIELD_EXPECTED, Value::string("pair"))
     .with_field(FIELD_GOT, Value::string("integer"))
 
-Condition::division_by_zero("division by zero")
+Exception::division_by_zero("division by zero")
     .with_field(FIELD_DIVIDEND, Value::int(42))
     .with_field(FIELD_DIVISOR, Value::int(0))
 ```
 
-Field IDs are constants on `Condition`. Structured fields are optional — the
+Field IDs are constants on `Exception`. Structured fields are optional — the
 message is always present and sufficient for display.
 
-## Migration Plan
+## Implementation Plan
 
-### Phase 1: Condition struct rework (current)
+### Phase 1: Exception struct rework (current)
 
-1. Add `message: String` as a struct field on `Condition`.
-2. Make `Condition::new` private (`pub(crate)` during transition).
+1. Add `message: String` as a struct field on `Exception`.
+2. Make `Exception::new` private (`pub(crate)` during transition).
 3. Add named constructors: `type_error`, `division_by_zero`,
    `undefined_variable`, `arity_error`, `generic`, `error`.
 4. Move exception hierarchy (`exception_parent`, `is_exception_subclass`) from
-   `vm/core.rs` to `value/condition.rs`. Single source of truth.
+   `vm/core.rs` to `value/exception.rs`. Single source of truth.
 5. Remove `FIELD_MESSAGE` constant — message is no longer in the fields map.
-6. Update all `Condition::new(N)` call sites to use named constructors.
+6. Update all `Exception::new(N)` call sites to use named constructors.
 7. Update tests.
 
 ### Phase 2: NativeFn signature change
 
 1. Change `NativeFn` from `fn(&[Value]) -> Result<Value, LError>` to
-   `fn(&[Value]) -> Result<Value, Condition>`.
+   `fn(&[Value]) -> Result<Value, Exception>`.
 2. Migrate primitives mechanically: `LError::type_mismatch(...)` →
-   `Condition::type_error(...)`. The compiler catches every site.
-3. In the `Call` handler: `Err(cond)` → set `current_exception`, push NIL.
+   `Exception::type_error(...)`. The compiler catches every site.
+3. In the `Call` handler: `Err(exc)` → set `current_exception`, push NIL.
    Remove the `ErrorKind` → exception ID translation.
-4. In the `TailCall` handler: same treatment. `Err(cond)` → set
+4. In the `TailCall` handler: same treatment. `Err(exc)` → set
    `current_exception`, return `Ok(VmResult::Done(Value::NIL))`. **TailCall
    must not convert to `Err(String)` — that bypasses all handlers.**
 
 ### Phase 3: Instruction handler migration
 
 1. In instruction handlers (`Add`, `Sub`, `Mul`, `Car`, `Cdr`, `VectorRef`,
-   `VectorSet`): on data error, construct `Condition` via named constructor,
+   `VectorSet`): on data error, construct `Exception` via named constructor,
    set `current_exception`, push NIL, return `Ok(())`.
 2. Stack underflow and bytecode errors remain as `Err(String)`.
 3. Top-level `execute()` checks `current_exception` after execution. If set,
-   formats using the condition's message and returns `Err(String)`.
+   formats using the exception's message and returns `Err(String)`.
 
-### Phase 4: Cleanup
+### Phase 4: try/catch/finally implementation
+
+1. Implement `try`/`catch`/`finally` as the primary exception handling syntax
+   (replacing `handler-case`/`handler-bind`/`unwind-protect`).
+2. `try` evaluates a body and catches exceptions via `catch` clauses.
+3. `catch` clauses match exception types and bind the exception value.
+4. `finally` blocks execute regardless of success or exception.
+5. Non-unwinding recovery via fiber suspension: a `catch` clause can call
+   `signal` to suspend the current fiber, allowing the caller to inspect the
+   exception and decide whether to `resume` with a recovery value or let the
+   exception propagate.
+
+### Phase 5: Fiber-backed exception handling
+
+1. Integrate exceptions with the fiber system: exceptions become first-class
+   values that can be caught, inspected, and resumed.
+2. Replace restart machinery with fiber suspension/resumption patterns.
+3. `signal` suspends the current fiber with an exception, returning control to
+   the caller.
+4. `resume` resumes a suspended fiber with a recovery value.
+5. This enables non-unwinding recovery without the complexity of restart objects.
+
+### Phase 6: Cleanup
 
 1. Remove `ErrorKind` → exception ID translation from `Call` handler.
 2. `LError` remains for VM-internal use. It is never exposed to Elle code.
 3. Update tests that checked for specific `Err(String)` messages.
+4. Deprecate and eventually remove `handler-case`/`handler-bind` syntax.
 
-## What This Does NOT Change
+## What This Does NOT Change (in current implementation)
 
 - The interrupt mechanism (check `current_exception` at bottom of instruction
   loop, jump to handler offset).
 - `PushHandler`/`PopHandler`/`CheckException`/`MatchException`/`ClearException`/
-  `ReraiseException` bytecode instructions.
+  `ReraiseException` bytecode instructions (will be replaced by fiber-aware
+  equivalents).
 - Handler isolation (save/restore `exception_handlers` across call boundaries).
-- The exception hierarchy (condition → error → type-error, etc.).
-- The `handler-case` / `handler-bind` surface syntax.
+- The exception hierarchy (exception → error → type-error, etc.).
 - `NativeFn` remains a bare function pointer (`fn`), not a trait object.
+
+## Surface Syntax: try/catch/finally
+
+The target syntax for exception handling is:
+
+```lisp
+(try
+  (risky-operation)
+  (catch type-error (e)
+    (handle-type-error e))
+  (catch error (e)
+    (handle-any-error e))
+  (finally
+    (cleanup)))
+```
+
+- **`try`** evaluates its body. If an exception is raised, control jumps to the
+  first matching `catch` clause.
+- **`catch`** clauses match exception types. The exception is bound to the
+  variable and the clause body is evaluated.
+- **`finally`** blocks execute regardless of success or exception. They are
+  useful for cleanup (closing files, releasing locks, etc.).
+- Multiple `catch` clauses are tried in order; the first match wins.
+- If no `catch` clause matches, the exception propagates to the enclosing
+  `try` or to the top level.
+
+### Non-unwinding recovery via signal/resume
+
+For cases where you want to recover without unwinding the stack, use fiber
+suspension:
+
+```lisp
+(try
+  (risky-operation)
+  (catch error (e)
+    (signal e)))  ; Suspend and return control to caller
+```
+
+The caller can then:
+
+```lisp
+(let ((fiber (spawn-fiber (lambda () ...))))
+  (match (resume fiber)
+    ((exception? e)
+     (let ((recovery-value (ask-user-for-recovery e)))
+       (resume fiber recovery-value)))
+    (result result)))
+```
+
+This pattern replaces the old `restart-case`/`invoke-restart` machinery with
+a simpler fiber-based model.
 
 ## JIT Exception Handling
 
@@ -284,7 +353,7 @@ interpreter's exception handling machinery.
 
 This means:
 - Exceptions thrown by callees propagate correctly through JIT frames
-- `handler-case` handlers in the calling interpreter frame will fire
+- `try`/`catch` handlers in the calling interpreter frame will fire
 - The JIT does NOT implement `PushHandler`/`PopHandler`/`MatchException` — 
   functions containing these instructions are not JIT-compiled
 
@@ -300,7 +369,7 @@ the VM detects `pending_tail_call` and hands off to the interpreter's trampoline
 loop, which handles chains of tail calls with O(1) stack usage.
 
 Future work: inline exception checks in JIT code (check a flag instead of
-calling a runtime helper), JIT-native handler-case (would require Cranelift
+calling a runtime helper), JIT-native try/catch (would require Cranelift
 landing pads or setjmp/longjmp).
 
 ## Resolved Questions
@@ -320,4 +389,15 @@ landing pads or setjmp/longjmp).
   reserved for VM bugs.
 
 - **TailCall is in scope.** It's a separate code path from Call and must
-  convert `Err(Condition)` to `current_exception`, not to `Err(String)`.
+  convert `Err(Exception)` to `current_exception`, not to `Err(String)`.
+
+- **try/catch replaces handler-case.** The new syntax is simpler and more
+  familiar to users coming from other languages. It integrates naturally with
+  the fiber model for non-unwinding recovery.
+
+- **finally replaces unwind-protect.** Cleanup blocks are now a first-class
+  part of the exception handling syntax, not a separate mechanism.
+
+- **signal/resume replaces restart machinery.** Fiber suspension is simpler
+  and more composable than restart objects. A suspended fiber is just a value
+  that can be inspected and resumed.

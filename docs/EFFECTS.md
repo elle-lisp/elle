@@ -8,7 +8,7 @@ trade-offs and pick up where we left off.
 
 ## Motivation
 
-Elle has delimited continuations, `handler-case`, coroutines, and a JIT
+Elle has delimited continuations, `try`/`catch`, coroutines, and a JIT
 compiler. These are currently separate mechanisms with separate
 implementations:
 
@@ -44,16 +44,16 @@ Key insights from Janet:
 - **Masks over handlers.** Instead of a handler chain with runtime dispatch,
   a bitmask determines catch-or-propagate at O(1). Branch-predictor-friendly.
 
-- **Fibers over try/catch.** `try` is sugar for "create a fiber that catches
-  errors, resume it, check the result." No special VM support.
+- **Fibers over try/catch.** `try`/`catch` is sugar for "create a fiber that catches
+   errors, resume it, check the result." No special VM support.
 
 - **Declarations at instantiation.** The signal mask lives on the fiber, set
   at creation time. The *caller* decides what to handle, not the function.
   Functions are colorless; fibers are colored.
 
-- **Composition over special forms.** `defer`, `with`, `try`, `protect`,
-  `generate` — all macros over `fiber/new` + `resume` + `fiber/status` +
-  `propagate`. One runtime primitive; the language provides sugar.
+- **Composition over special forms.** `try`, `catch`, `finally`,
+   `generate` — all macros over `fiber/new` + `resume` + `fiber/status` +
+   `propagate`. One runtime primitive; the language provides sugar.
 
 Janet's limitation: signals are a single integer (one thing happened), and
 there's no static tracking of effects. You can't look at a function and know
@@ -145,7 +145,7 @@ effect bit, but effects describe *possibility* while signals describe *events*.
 **Handler**: Code that catches a specific signal type and provides a response.
 In Elle, a handler is a fiber with the appropriate mask bit set. Catching is
 determined by the mask; handling is whatever code runs after the resume
-returns.
+returns. Surface syntax: `catch` in a `try` block.
 
 **Signal mask**: A bitfield on a fiber indicating which signal types it catches
 from its children. Set at fiber creation time. The caller decides what to
@@ -211,6 +211,13 @@ This is capability-based security applied to control flow:
 - **A signal means a boundary was hit.** The callee couldn't proceed without
   something it wasn't granted. The handler decides what happens next.
 
+**Note on implementation phases**: Phases 1–5 of the migration (below) implement
+signal routing and effect tracking. Capability enforcement — checking what a
+fiber is allowed to do and signaling when it exceeds its grant — is future work
+requiring a different mechanism (likely a capability field on fibers and checks
+at signal emission points). The vision is complete, but the early phases focus
+on the signal infrastructure that makes capability enforcement possible.
+
 ### Examples
 
 **"Let me know if you want to switch threads"**: The caller grants all
@@ -271,44 +278,53 @@ interesting happens.
 
 ### Signal Types
 
-Signal types are bit positions in a bitfield. The first N are
-compiler-known:
+Signal types are bit positions in a bitfield. The first 16 are
+compiler-reserved:
 
 | Bit | Name | Meaning |
 |-----|------|---------|
-| 0 | ok | Normal return (implicit — no bit set) |
-| 1 | error | Exception / panic |
-| 2 | yield | Cooperative suspension |
-| 3 | debug | Breakpoint |
-| 4–7 | reserved | Future compiler-known signals |
-| 8+ | user | User-defined signal types |
+| — | ok | Normal return (implicit — no bit set) |
+| 0 | error | Exception / panic |
+| 1 | yield | Cooperative suspension |
+| 2 | debug | Breakpoint |
+| 3 | resume | Fiber resumption request |
+| 4–15 | reserved | Future compiler-known signals |
+| 16+ | user | User-defined signal types |
 
 Bit 0 is special: "ok" means no bits are set. A normal return has an empty
 signal bitfield.
 
+`SIG_RESUME` is how `fiber/resume` works without VM access. The
+primitive returns `(SIG_RESUME, fiber_value)` and the VM dispatch
+loop performs the actual context switch.
+
 ### Signal Values
 
 A signal carries a type (which bit) and a payload (an Elle Value). The
-return from any function call is:
+return from `run()` is:
 
 ```
-(signal_bits: EffectBits, value: Value)
+signal_bits: SignalBits
 ```
 
-Where `signal_bits == 0` means normal return with `value` as the result.
-Non-zero `signal_bits` means something happened that may require handling.
+Where `signal_bits == 0` means normal return with the result on the fiber's
+operand stack. Non-zero `signal_bits` means something happened that may require
+handling — the signal value is stored in `fiber.signal` (the canonical location).
 
-At the Rust level, this should be stack-allocated and alloc-free:
+**Signal payloads are arbitrary Values.** Any value can be an error payload,
+a yield value, or a user-defined signal payload. There is no Condition type
+or exception hierarchy. Pattern matching on the payload replaces hierarchy
+checks — the handler inspects the signal value and dispatches accordingly.
+
+At the Rust level, the signal is stored on the fiber:
 
 ```rust
-struct Signal {
-    bits: u32,   // which signal(s) — usually exactly one non-zero bit
-    value: Value, // payload
-}
+pub signal: Option<(SignalBits, Value)>
 ```
 
-The fast path (normal return) is `bits == 0`, which is a single branch.
-The Rust compiler can optimize this to a register pair.
+The `run()` function returns only the `SignalBits`. The value is stored on the
+fiber's `signal` field — the canonical location. The fast path (normal return)
+is `bits == 0`, which is a single branch.
 
 ### One Signal or Many?
 
@@ -331,33 +347,53 @@ The payload value can carry additional context that doesn't need to be in the
 signal bits. "I'm yielding, and here's a struct describing what IO I need" is
 a single yield signal with a rich payload.
 
+### Terminal vs Resumable Signals
+
+**Whether a signal is terminal or resumable is a handler decision, not a
+signal property.** The handler catches the signal and either resumes the child
+(resumable) or doesn't (terminal). The same signal type can be handled
+resumably in one context and terminally in another, depending on the handler's
+choice.
+
 ### Propagation
 
-When a fiber resumes a child and the child signals:
+Signal propagation (Janet model):
 
-1. Check the child's signal bits against the parent fiber's mask
-2. If `signal_bits & mask != 0` → **caught**: the parent handles it
-3. If `signal_bits & mask == 0` → **propagates**: the parent returns the
-   same signal to its own parent
+1. Child fiber emits signal: stores value in `child.signal`, sets status → Suspended
+2. `run()` returns signal bits to the parent
+3. Parent checks: `child.mask & bits != 0`?
+   (The child's mask records what signals the parent should catch from it)
+    - **Caught**: Parent handles the signal. Child is suspended and
+      reachable via parent's `child` pointer.
+    - **Not caught**: Parent also suspends (entire chain freezes).
+      Signal propagates up until caught or reaches root.
+4. Handler walks `child` chain to find originator. Every fiber in the
+   chain is suspended and inspectable via `fiber/value`.
 
-This is O(1) — a single AND operation. No handler chain traversal.
+This is O(1) dispatch — a single AND operation. No handler chain traversal.
+When a handler catches a signal, it can walk the fiber chain to inspect the
+propagation path. Every fiber in the chain is suspended and can be resumed
+independently for non-unwinding recovery.
 
 ### The Fiber Structure
 
 ```
 Fiber {
-    stack: [Value]          -- call stack (frames + locals + temporaries)
-    status: FiberStatus     -- current state (new, alive, suspended, dead, ...)
-    signal_mask: EffectBits -- which signals this fiber catches
-    last_signal: Signal     -- most recent signal (type + value)
-    parent: Option<Fiber>   -- parent fiber (for propagation)
-    child: Option<Fiber>    -- child fiber (for resume routing + traces)
-    env: Option<Table>      -- dynamic bindings
-    effects: EffectBits     -- static effect annotation (what signals this fiber's
-                            -- function might emit — set at creation, used for
-                            -- optimization and boundary checks)
+    stack: [Value]              -- operand stack (temporaries)
+    frames: [Frame]             -- call frame stack
+    status: FiberStatus         -- new/alive/suspended/dead/error
+    mask: SignalBits            -- which of this fiber's signals are caught by its parent
+    parent: Weak<Fiber>         -- weak ref to avoid cycles
+    child: Option<Fiber>        -- most recently resumed child (strong)
+    closure: Closure            -- the closure this fiber was created from
+    env: Option<HashMap>        -- dynamic bindings (fiber-scoped state)
+    signal: Option<(SignalBits, Value)>  -- canonical signal value
 }
 ```
+
+Note: The closure already carries its effect bits. The fiber's mask determines
+which signals it catches from children. There is no `effects` field on the Fiber
+itself — effects are a compile-time property of the closure, not the fiber.
 
 
 ## The Effect System
@@ -368,7 +404,7 @@ An effect is a set of signal types that a function might emit. Represented
 as a bitfield (same type as signal bits).
 
 ```
-type EffectBits = u32  // or u64 if we need more room
+type EffectBits = SignalBits  -- same bitfield type, same bit positions
 ```
 
 Operations:
@@ -397,29 +433,26 @@ Higher-order functions propagate their arguments' effects. `map`'s effect is
 representation:
 
 ```
-FunctionEffectInfo {
-    base: EffectBits,                        // from own body
-    propagates_from: Set<ParamIndex>,        // which params' effects propagate
-    bounds: Map<ParamIndex, EffectBits>,     // max effects allowed on params
+Effect {
+    bits: SignalBits,           -- from own body
+    propagates: u32,            -- bitmask of parameter indices
 }
 ```
 
 Resolved effect at a call site:
 
 ```
-call_effect = f.base | union(effect(arg[i]) for i in f.propagates_from)
-```
-
-Boundary check at each parameter:
-
-```
-for i in f.propagates_from:
-    assert effect(arg[i]) & ~f.bounds[i] == 0
+call_effect = f.bits | union(effect(arg[i]) for i in 0..param_count if (propagates & (1 << i)) != 0)
 ```
 
 If the compiler can see the concrete argument (e.g., it's the `+` primitive),
 it can resolve the polymorphism statically and potentially prove the call site
 has fewer effects than the general case.
+
+**Note**: Effect bounds on parameters (constraining what effects callbacks may
+have) are deferred to a future phase. When needed, they'll be tracked in the
+analysis environment, not on the Effect struct itself — keeping Effect as a
+simple Copy pair.
 
 ### Effect Declarations
 
@@ -468,11 +501,10 @@ complex and platform-specific.
 In the fiber model, a JIT-compiled function is just another frame on the
 fiber's stack. When it calls a function that signals:
 
-1. The callee returns `(signal_bits, value)` — a register pair
+1. The callee returns `signal_bits` — the value is on the fiber
 2. The JIT code checks `signal_bits == 0`
-3. If zero: continue with `value` as the result
-4. If non-zero: save any necessary state to the fiber's stack, return the
-   signal to the caller
+3. If zero: continue with the value from the fiber's stack
+4. If non-zero: propagate the signal to the caller
 
 The JIT doesn't need to capture continuations or switch stacks. It just
 checks a return code and propagates. This is the same thing Janet's C code
@@ -498,56 +530,72 @@ The compiler's effect information guides JIT decisions:
 
 ## Surface Syntax
 
-### Fiber Creation
+### Fiber Primitives
 
 ```lisp
-(fiber (fn [] body) :mask)
+;; === Creation and control ===
+
+;; Create a fiber from a closure with a signal mask
+(fiber/new fn mask) → fiber
+
+;; Resume a fiber, delivering a value
+(fiber/resume fiber value) → signal-bits
+
+;; Emit a signal from the current fiber (suspends it)
+(fiber/signal bits value) → (suspends)
+
+;; === Introspection ===
+
+;; Lifecycle status
+(fiber/status fiber) → keyword  ; :new :alive :suspended :dead :error
+
+;; Signal payload from last signal or return value
+(fiber/value fiber) → value
+
+;; Signal bits from last signal
+(fiber/bits fiber) → int
+
+;; Capability mask (set at creation, immutable)
+(fiber/mask fiber) → int
+
+;; === Chain traversal ===
+
+;; Parent fiber (nil at root)
+(fiber/parent fiber) → fiber | nil
+
+;; Most recently resumed child fiber (nil if none)
+(fiber/child fiber) → fiber | nil
+
+;; === Internals (for debugging/tooling) ===
+
+;; The closure this fiber wraps
+(fiber/closure fiber) → closure
+
+;; The operand stack (for debugging)
+(fiber/stack fiber) → vector
+
+;; Dynamic bindings (fiber-scoped state)
+(fiber/env fiber) → table | nil
 ```
 
-Where `:mask` is a set of signal types to catch. Sugar for common patterns:
+### Sugar and Backward Compatibility
 
 ```lisp
-(fiber/try body)        ;; catches :error
-(fiber/gen body)        ;; catches :yield
-(fiber/task body)       ;; catches :error :yield (for green threads)
-```
-
-### Signal Emission
-
-```lisp
-(signal :yield value)   ;; emit a yield signal with payload
-(signal :error value)   ;; emit an error signal (replaces raise/throw)
-(signal :my-signal val) ;; emit a user-defined signal
-```
-
-### Resume
-
-```lisp
-(resume fiber value)    ;; resume a suspended fiber, delivering value
-```
-
-Returns the fiber's signal. The caller inspects `(fiber/status fiber)` and
-`(fiber/value fiber)` — or uses destructuring sugar.
-
-### Existing Forms as Sugar
-
-```lisp
-;; try/catch becomes:
+;; try/catch/finally
 (try body
-  (catch :error e handler))
-;; expands to:
-(let [f (fiber (fn [] body) #{:error})]
-  (let [r (resume f)]
-    (if (= (fiber/status f) :error)
-      (let [e r] handler)
-      r)))
+  (catch e handler)
+  (finally cleanup))
 
-;; yield becomes:
-(yield value)
-;; expands to:
-(signal :yield value)
+;; yield
+(yield value) → (fiber/signal :yield value)
 
-;; handler-case becomes fiber creation with appropriate mask
+;; throw
+(throw value) → (fiber/signal :error value)
+
+;; Backward compat (thin aliases)
+(make-coroutine fn) → (fiber/new fn :yield)
+(coroutine-resume co val) → (fiber/resume co val)
+(coroutine-status co) → (fiber/status co)
 ```
 
 ### Effect Declarations
@@ -570,7 +618,7 @@ Returns the fiber's signal. The caller inspects `(fiber/status fiber)` and
 ## Migration Path
 
 The current system has:
-- `handler-case` for exception handling
+- `try`/`catch` for exception handling
 - `yield` for coroutine suspension
 - `make-coroutine` / `coroutine-resume` for coroutine management
 - `Effect` struct with `yield_behavior` and `may_raise` fields
@@ -581,7 +629,7 @@ The migration:
 1. **Implement fibers** as the execution context, replacing the current
    coroutine implementation. A coroutine becomes a fiber with a yield mask.
 
-2. **Unify signals.** Error and yield become signal types. `handler-case`
+2. **Unify signals.** Error and yield become signal types. `try`/`catch`
    compiles to fiber creation + resume + signal dispatch.
 
 3. **Replace the Effect type** with a bitfield. Update inference to track
@@ -604,6 +652,74 @@ foundation. Step 3–4 is optimization. Step 5–6 is expressiveness. Step 7
 is the long game.
 
 
+## Non-Unwinding Recovery
+
+The fiber model supports non-unwinding recovery without additional mechanism.
+Recovery options emerge from the interaction of signals and resume.
+
+### How it works
+
+When a fiber signals, it **suspends** — its frames remain intact. The
+parent fiber (or any ancestor in the chain) catches the signal and
+decides what to do. If the signaling fiber advertised recovery options in its
+payload, the handler picks one and resumes the child with that choice.
+The child receives the resume value, dispatches on it, and continues.
+
+Signals travel **up** the fiber chain (parent links). Recovery choices
+travel back **down** the chain (resume calls). This is bidirectional
+communication along the chain, not unwinding.
+
+### Two recovery patterns
+
+**Non-unwinding recovery**: The handler catches the signal,
+inspects it, resumes the child with a recovery choice. The child
+continues from where it suspended. The child's frames are never
+discarded.
+
+**Unwinding recovery** (via `try`/`catch`): The handler catches the signal and does
+NOT resume the child. The child fiber becomes garbage. The handler
+runs its own code in the parent fiber. This is a one-way trip.
+
+Both patterns are just different uses of the same mechanism — resume vs.
+don't resume. No special syntax or VM support is needed.
+
+### Why this is strictly more powerful than traditional restart systems
+
+- **Recovery options are data, not syntax.** The signal payload is a value, so
+   available recovery options can be computed dynamically.
+- **Multiple round-trips.** The handler resumes the child, the child
+   signals again ("your suggestion also failed"), the handler tries
+   something else. Arbitrary dialogue along the chain.
+- **Composition through the chain.** If the immediate parent doesn't
+   know what to do, it propagates the signal up the chain. An ancestor
+   that understands the situation handles it and the recovery choice travels
+   back down through resume calls.
+- **The handler has full context.** It's running code in its own fiber
+   with access to its own state. It can query databases, ask the user,
+   or try multiple strategies before deciding.
+
+### Example
+
+```lisp
+;; The callee: signals with available recovery options
+(define (safe-divide a b)
+  (if (= b 0)
+    (fiber/signal :error
+      (table :error :division-by-zero
+             :options [:use-value :return-zero]))
+    (/ a b)))
+
+;; The handler: catches the signal, picks a recovery option
+(define (compute)
+  (let ((f (fiber/new (fn () (safe-divide 10 0)) :error)))
+    (let ((result (fiber/resume f nil)))
+      (if (= (fiber/status f) :suspended)
+        ;; Child is suspended — we can resume it with a recovery choice
+        (fiber/resume f (table :option :use-value :value 1))
+        result))))
+```
+
+
 ## Open Questions
 
 ### Compound signals
@@ -614,8 +730,8 @@ it. Revisit if we find a use case.
 
 ### Signal bit allocation
 
-How many bits? 32 is probably enough (8 compiler-known + 24 user). 64 gives
-more room. The choice affects the size of effect annotations on closures.
+32 bits: 16 compiler-reserved + 16 user-defined. If users need more than
+16 signal types, bump SignalBits to u64.
 
 ### Effect erasure
 
@@ -635,11 +751,10 @@ Elle doesn't have a static type system (yet). Effects are the closest thing
 to static types. Should they evolve toward a type system, or remain a
 separate concern?
 
-### Handler resumption
+### Signal resumption
 
-Can a handler resume the signaling fiber with a value (like CL restarts)?
-Janet's model supports this — `resume` delivers a value to the suspended
-fiber. Algebraic effects require it. We should support it.
+**Resolved.** Yes. A handler can resume the signaling fiber with a value (like recovery options).
+The resume value is pushed onto the child's operand stack. See FIBERS.md 'Resume value destination'.
 
 ### Effect subtyping
 
@@ -649,6 +764,10 @@ a hierarchy. Flat is simpler and faster.
 
 ### Backward compatibility
 
-Existing Elle code uses `handler-case`, `yield`, `make-coroutine`, etc.
-These should continue to work as sugar over the new mechanism. The migration
-should be invisible to existing programs.
+Existing Elle code uses `try`/`catch`, `yield`, `make-coroutine`, etc.
+These should continue to work as sugar over the new mechanism. Specifically:
+- `try`/`catch` compiles to `fiber/new` + `fiber/resume` + signal dispatch
+- `yield` expands to `signal :yield`
+- `make-coroutine` / `coroutine-resume` become `fiber/new` / `fiber/resume`
+
+The migration should be invisible to existing programs.
