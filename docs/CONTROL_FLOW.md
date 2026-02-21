@@ -394,6 +394,12 @@ Extract information from exceptions:
 
 ## The Condition System
 
+> **Deprecated.** The condition system (`define-condition`, `catch-condition`,
+> `condition-get`, `signal`) will be replaced by the fiber/signal model with
+> `try`/`catch`/`finally` surface syntax. See `docs/FIBERS.md` for the new
+> design. The primitives below still work but will be removed in a future
+> release.
+
 The condition system is a more sophisticated approach to error handling than simple exceptions. It allows defining custom signal types with handlers that can respond gracefully.
 
 ### Defining Conditions

@@ -184,6 +184,8 @@ Elle now provides comprehensive exception handling with the `try-catch-finally` 
 
 ### Condition System
 
+> **Deprecated.** See `docs/FIBERS.md` for the replacement design.
+
 Beyond simple exceptions, Elle provides a sophisticated condition system for handling expected error scenarios:
 
 ```lisp
@@ -494,13 +496,13 @@ Call a function with arguments from a list:
 
 ```lisp
 ; Create and run a thread
-(spawn (fn ()
+(thread/spawn (fn ()
   (display "Running in thread")
   (newline)))
 
 ; Create and wait for result
-(define t (spawn (fn () (+ 2 2))))
-(join t)  ⟹ 4
+(define t (thread/spawn (fn () (+ 2 2))))
+(thread/join t)  ⟹ 4
 
 ; Sleep current thread
 (sleep 1000)  ; Sleep 1000ms

@@ -23,7 +23,7 @@ blocks. The emitter carries stack simulation state across yield boundaries.
 
 ### What works
 
-- Full pipeline with property tests (~1,130+ tests, zero ignored)
+- Full pipeline with property tests (1,768 tests, zero ignored)
 - TCO via trampoline (50,000+ depth) and JIT native loops (self-tail-call)
 - First-class continuations for coroutines across call boundaries
 - Exception handlers preserved across yield/resume
@@ -36,141 +36,22 @@ blocks. The emitter carries stack simulation state across yield boundaries.
 ### What needs work
 
 - JIT intra-calling: JIT code bounces to interpreter for non-self calls
-- No debugging/introspection primitives from Elle code
 - No timing/clock primitives
-- `profile` primitive is a placeholder
-- No `raises` tracking in the effect system
-- `handler-bind` is a stub
-- `signal`/`warn`/`error` are constructors, not signaling primitives
+- `handler-bind` stub — replaced by fiber/signal model (see docs/FIBERS.md)
+- `signal`/`error` are constructors — will become actual signal primitives in fiber model
 
-## Current work: Debugging Toolkit (PR TBD)
+## Current work: Fiber/Signal System (see docs/FIBERS.md)
 
-See `docs/DEBUGGING.md` for the full design. Implementation steps below.
+The next major milestone unifies exception handling, coroutines, and effect
+inference into a single fiber/signal mechanism. Surface syntax: `try`/`catch`/
+`finally`. See `docs/FIBERS.md` for the implementation plan and
+`docs/EFFECTS.md` for the design rationale.
 
-### Step 1: Value types and debugging primitives (~4-5 hours)
+### Remaining from Debugging Toolkit
 
-Add `Instant` and `Duration` heap types, then implement all debugging
-toolkit primitives in a single file.
-
-**Modify**: `src/value/heap.rs`
-- Add `HeapObject::Instant(std::time::Instant)` variant
-- Add `HeapObject::Duration(std::time::Duration)` variant
-- Update `HeapTag`, `tag()`, `type_name()`, `Debug`
-
-**Modify**: `src/value/repr/constructors.rs`, `accessors.rs`, `traits.rs`
-- Add `Value::instant()`, `Value::duration()` constructors
-- Add `as_instant()`, `as_duration()`, `is_instant()`, `is_duration()`
-- Add `PartialEq` arms for Instant and Duration
-
-**Modify**: `src/value/display.rs`
-- Add display formatting for `#<instant>` and `#<duration ...>`
-
-**Modify**: `src/value/send.rs`
-- Add `SendValue` handling for Instant and Duration
-
-**New file**: `src/primitives/debugging.rs`
-All debugging toolkit primitives in one file:
-- Introspection: `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`,
-  `arity`, `captures`, `bytecode-size`, `raises?`
-- Time: `now`, `elapsed`, `cpu-time`, `duration`, `duration->seconds`,
-  `duration->nanoseconds`, `duration<`, `instant?`, `duration?`
-- JIT control (VmAwareFn): `global?`, `jit`, `jit!`, `call-count`
-
-**Modify**: `src/primitives/debug.rs` — remove placeholder `profile`
-**Modify**: `src/primitives/concurrency.rs` — `sleep` accepts duration only
-**Modify**: `src/primitives/mod.rs` — add `debugging` module
-
-**Dependency**: Add `cpu-time` to `Cargo.toml`.
-
-**Tests**: Unit tests in `tests/unittests/primitives.rs`. Integration tests
-in new `tests/integration/debugging.rs`.
-
-**Verification**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`
-
-### Step 2: Raises effect tracking and registration unification (~4-5 hours)
-
-Extend the effect system with `may_raise`, then unify effect declaration
-into primitive registration (eliminating the separate side-table).
-
-**Modify**: `src/effects/mod.rs`
-- Restructure `Effect` as struct: `YieldBehavior` enum + `may_raise: bool`
-- Add convenience constructors: `pure()`, `pure_raises()`, `yields()`,
-  `yields_raises()`, `polymorphic(n)`, `polymorphic_raises(n)`
-- Update `combine` to OR `may_raise` alongside yield combination
-- Update `Display`, `Hash`, `Eq`, `Default`
-
-**Modify**: `src/primitives/registration.rs`
-- Add `Effect` parameter to `register_fn` and `register_vm_aware_fn`
-- Migrate all existing primitive registrations with correct effects
-- Register all new debugging toolkit primitives with effects
-- Default: `Effect::pure_raises()` (conservative), then tighten where
-  appropriate (type predicates, boolean ops, constants → `Effect::pure()`)
-
-**Delete**: `src/effects/primitives.rs`
-- Side-table replaced by registration-time effect declarations
-- `register_primitive_effects` and `get_primitive_effects` removed
-- Analyzer reads effects from the registration-populated map
-
-**Modify**: `src/hir/analyze/special.rs`
-- `analyze_throw`: set `may_raise = true` on the Hir node
-- `analyze_handler_case`: clear `may_raise` only when handler catches
-  `condition` (ID 1, the root type)
-
-**Modify**: `src/hir/analyze/call.rs`
-- Propagate callee's `may_raise` into call expression
-- For primitive calls, use the registered `Effect` (not a hardcoded default)
-
-**Modify**: `src/hir/analyze/binding.rs`
-- Store `may_raise` in `effect_env` alongside yield effects
-
-**Modify**: `src/value/closure.rs`
-- Add `may_raise: bool` to `Closure`
-
-**Modify**: `src/lir/emit.rs`
-- Emit `may_raise` on closures
-
-**Modify**: `src/pipeline.rs`
-- Track `may_raise` during fixpoint iteration
-- Update primitive effects map construction (now from registration, not side-table)
-
-**Tests**: Integration tests in `tests/integration/effect_enforcement.rs`
-(extend existing) and `tests/integration/debugging.rs`.
-
-**Verification**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`
-
-### Step 3: Benchmarking macros and example (~1-2 hours)
-
-Elle-level benchmarking built on the time primitives.
-
-**New file**: `lib/bench.lisp`
-- `bench` macro — time a single expression
-- `bench-n` macro — time N iterations
-- `bench-compare` macro — compare two expressions
-
-**New file**: `examples/debugging.lisp` — replaces `debugging-profiling.lisp`
-- Demonstrates all introspection primitives
-- Demonstrates time API
-- Demonstrates benchmarking macros
-- Uses assertions to verify results
-
-**Tests**: `tests/integration/benchmarks.rs`
-
-**Verification**: `cargo test --workspace`, example execution via
-`cargo run -- examples/debugging.lisp`
-
-### Step 4: Documentation and cleanup (~1 hour)
-
-- Update `docs/BUILTINS.md` with new primitives
-- Update `src/primitives/AGENTS.md` with new modules
-- Update `src/effects/AGENTS.md` with raises tracking
-- Update root `AGENTS.md` if needed
-- Remove `examples/debugging-profiling.lisp` (replaced)
-- Update `refactor/SUMMARY.md`
-
-**Verification**: Full CI check: `cargo test --workspace`,
-`cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo fmt -- --check`,
-`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+- `Instant`/`Duration` heap types not yet implemented
+- `profile` primitive is still a placeholder
+- Benchmarking macros (`lib/bench.lisp`) not yet written
 
 ## Future work
 
@@ -189,17 +70,17 @@ improvement from Elle code.
 - JIT-native exception handling
 - Arena allocation for hot-path allocations
 
-### Effect system extensions
+### Effect system: fiber/signal migration
 
-- Specific exception type tracking (`BTreeSet<u32>`)
-- Primitive raises annotations (`/` raises division-by-zero, etc.)
-- `handler-case` subtype subtraction
+- Replace `Effect { yield_behavior, may_raise }` with `SignalBits` bitfield
+- 16 compiler-reserved bits + 16 user-defined bits
+- Effect declarations as contracts (not hints)
+- See docs/EFFECTS.md and docs/FIBERS.md
 
 ### Semantic gaps
 
-- `handler-bind` (non-unwinding handlers): stub
-- Signal/restart system: `InvokeRestart` opcode is a no-op
 - Module system: `import` emits nil
+- `higher_order.rs` map/filter/fold don't support closures (only native fns)
 
 ## Completed phases
 
@@ -256,7 +137,7 @@ SmallVec handlers, pre-allocated envs, inline jump elimination).
 | Full first-class continuations | Composable and future-proof. |
 | Yield as LIR terminator | Proper control flow; prerequisite for JIT. |
 | Single execution path (bytecode) | One thing to optimize. |
-| `handler-case` not try/catch | Condition system is the mechanism. |
+| `try`/`catch`/`finally` over fibers | Familiar syntax, full power via signal/resume underneath. |
 | Nil ≠ empty list | `nil` falsy, `()` truthy. Lists end with `()`. |
 | New pipeline skips Expr | Syntax → HIR directly. No reason to generate Expr. |
 | TCO via trampoline | `pending_tail_call` on VM. Works for mutual recursion. |
@@ -267,8 +148,7 @@ SmallVec handlers, pre-allocated envs, inline jump elimination).
 
 ## Known defects
 
-- `handler-bind` is a stub (parsed, codegen ignores handlers)
-- `InvokeRestart` opcode allocated but VM handler is no-op
-- `signal`/`warn`/`error` are constructors, not signaling primitives
+- `handler-bind` is a stub (replaced by fiber model — see docs/FIBERS.md)
+- `InvokeRestart` opcode is a no-op (replaced by signal/resume)
 - JIT-compiled code bounces to interpreter for non-self calls
 - `higher_order.rs` map/filter/fold don't support closures (only native fns)

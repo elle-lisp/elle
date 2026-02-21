@@ -7,7 +7,7 @@
 ### Value representation (Feb 2025)
 NaN-boxed 8-byte `Value` with tagged pointers. Immediate encoding for nil,
 bool, int (i48), symbol, keyword, float. Heap allocation via `HeapObject`
-for strings, cons cells, vectors, tables, closures, conditions, coroutines,
+for strings, cons cells, vectors, tables, closures, exceptions, coroutines,
 cells, continuations. `Value` is `Copy`. Two cell types: `Cell`
 (user-created via `box`) and `LocalCell` (compiler-created for mutable
 captures) — distinguished by a bool flag on `HeapObject::Cell`.
@@ -99,9 +99,18 @@ Performance optimizations:
 - Locally-defined variable support in JIT
 - Panic on JIT compile failure for pure functions
 
+### Debugging toolkit and effect unification (PR #291, Feb 2026)
+- `disbit`/`disjit` primitives for bytecode and Cranelift IR inspection
+- Introspection predicates: `closure?`, `jit?`, `pure?`, `coro?`, `raises?`,
+  `arity`, `captures`, `bytecode-size`
+- Effect type reworked to struct `{ yield_behavior, may_raise }`
+- `is_pure()` fixed — pure functions CAN raise
+- Every primitive declares its effect at registration time
+- Design docs: `docs/EFFECTS.md`, `docs/JANET.md`
+
 ## Current state
 
-~1,130+ tests passing. Zero ignored (except 2 doc-tests). Clean clippy,
+1,768 tests passing. Zero ignored (except 2 doc-tests). Clean clippy,
 fmt, rustdoc. nqueens N=12 produces 14,200 solutions (~18-19s release).
 
 ### Remaining bottleneck
@@ -109,25 +118,24 @@ JIT-compiled code calls `elle_jit_call` for non-self calls, which always
 routes through the interpreter (`vm.execute_bytecode`). JIT code is only
 0.36% of nqueens runtime; 59% is interpreter overhead from JIT→VM bounces.
 
-### Next: Debugging Toolkit
-See `docs/DEBUGGING.md` for design, `refactor/PLAN.md` for implementation
-steps. Introspection primitives, clock API, raises tracking, benchmarking
-macros — all from Elle code, no recompilation needed.
+### Next: Fiber/Signal System
+See `docs/FIBERS.md` for the implementation plan and `docs/EFFECTS.md` for
+the design rationale. Unifies exception handling, coroutines, and effects
+into a single fiber/signal mechanism. Surface syntax: `try`/`catch`/`finally`.
 
 ## Not yet done
 
 ### Semantic gaps
-- `handler-bind` (non-unwinding handlers): stub
-- Signal/restart system: `InvokeRestart` opcode is a no-op
 - Module system: `import` emits nil (module-qualified names now supported)
+- `higher_order.rs` map/filter/fold don't support closures (only native fns)
 
 ### Error system
-The unified `LError` from the original plan was never implemented. Current
-system uses two channels:
+Current system uses two error channels:
 - `Err(String)` = VM bug (uncatchable)
-- `vm.current_exception` = runtime error (catchable by `handler-case`)
+- `vm.current_exception` = runtime error (catchable by `try`/`catch`)
 
-Documented in `docs/EXCEPT.md`. Functional but not elegant.
+Being replaced by the unified fiber/signal model where all non-local
+control flow is a signal. See `docs/FIBERS.md`.
 
 ## What was planned but won't happen
 
@@ -141,6 +149,7 @@ Documented in `docs/EXCEPT.md`. Functional but not elegant.
 | Tiered JIT | Deferred to future Phase E |
 | Bytecode format redesign (32-bit instructions) | Not planned |
 | Inline jump instructions in LIR | Eliminated in favor of proper basic blocks |
+| CL condition/restart system | Replaced by try/catch/finally over fibers |
 
 ## File inventory
 

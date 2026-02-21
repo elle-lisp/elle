@@ -322,7 +322,7 @@ method ORs `may_raise` alongside the existing yield combination logic.
 
 We do NOT attempt to track specific exception types in this iteration. Any
 `throw` is conservatively marked as "raises." Specific type tracking (which
-would let `handler-case` subtract known types) is a future refinement.
+would let `try`/`catch` subtract known types) is a future refinement.
 
 **New field on Closure**: `may_raise: bool`.
 
@@ -331,8 +331,8 @@ would let `handler-case` subtract known types) is a future refinement.
 | Form | Raises |
 |------|--------|
 | `(throw expr)` | `true` — always, regardless of argument |
-| `(handler-case body (condition e ...))` | `false` — condition is the root type, catches everything |
-| `(handler-case body (error e ...))` | body.raises — catching a subtype doesn't guarantee all exceptions are caught |
+| `(try body (catch exception e ...))` | `false` — exception is the root type, catches everything |
+| `(try body (catch error e ...))` | body.raises — catching a subtype doesn't guarantee all exceptions are caught |
 | `(begin a b)` | a.raises ∨ b.raises |
 | `(if c t e)` | c.raises ∨ t.raises ∨ e.raises |
 | `(f args...)` | args.raises ∨ f.may_raise |
@@ -345,7 +345,7 @@ Every `throw` is an unknown exception. We don't peek into the argument to
 determine the type — `(throw (error "x"))` and `(throw some-variable)` both
 produce `raises = true`.
 
-The only way to clear `raises` is `handler-case` catching `condition` (ID 1),
+The only way to clear `raises` is `try`/`catch` catching `exception` (ID 1),
 which is the root of the hierarchy and catches everything. Catching a specific
 subtype like `error` does NOT clear `raises` because the throw could be a
 `warning` or any other type.
@@ -374,7 +374,7 @@ that don't.
 
 Once the boolean tracking is proven correct, we can extend to
 `BTreeSet<u32>` tracking specific exception IDs. This would enable:
-- `handler-case` catching `error` to subtract error and its children
+- `try`/`catch` catching `error` to subtract error and its children
 - `raises?` returning a vector of specific exception type keywords
 - Primitive annotations (e.g., `/` raises `:division-by-zero`)
 

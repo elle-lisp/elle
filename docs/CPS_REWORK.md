@@ -14,7 +14,7 @@ Elle now has a **single execution path** for all coroutines:
    IP, stack, and exception handler state
 3. **Frame chain mechanism**: When yield propagates through call boundaries,
    each caller's frame is appended to the continuation chain
-4. **Exception handler preservation**: `handler-case` blocks active at yield
+4. **Exception handler preservation**: `try`/`catch` blocks active at yield
    time remain active after resume
 
 The CPS interpreter has been deleted (~4,400 lines removed).
@@ -55,7 +55,7 @@ built incrementally as yields propagate through call boundaries.
 ### Phase 3: Harden Continuations
 - [x] 3.1: Exception handler state saved in continuation frames
 - [x] 3.2: `ContinuationData` frame ordering optimized (O(1) append)
-- [x] 3.3: Edge case tests (handler-case+yield, deep call chains, tail calls)
+- [x] 3.3: Edge case tests (try/catch+yield, deep call chains, tail calls)
 - [x] 3.4: Documentation updated
 - [x] 3.5: Exception check at start of instruction loop (for cross-frame propagation)
 - [x] 3.6: Tail call handling in `execute_bytecode_from_ip_with_state`
