@@ -10,7 +10,7 @@ use elle::{SymbolTable, Value, VM};
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
     set_symbol_table(&mut symbols as *mut SymbolTable);
 
     match compile_new(input, &mut symbols) {

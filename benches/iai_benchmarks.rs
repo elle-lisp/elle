@@ -26,7 +26,7 @@ use iai_callgrind::black_box;
 fn setup() -> (VM, SymbolTable) {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
     (vm, symbols)
 }
 

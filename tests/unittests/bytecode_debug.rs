@@ -5,7 +5,7 @@ use elle::symbol::SymbolTable;
 fn setup() -> (SymbolTable, elle::vm::VM) {
     let mut vm = elle::vm::VM::new();
     let mut symbols = SymbolTable::new();
-    elle::primitives::register_primitives(&mut vm, &mut symbols);
+    let _effects = elle::primitives::register_primitives(&mut vm, &mut symbols);
     (symbols, vm)
 }
 

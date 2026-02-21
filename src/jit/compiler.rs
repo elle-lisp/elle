@@ -309,6 +309,38 @@ impl JitCompiler {
         Ok(JitCode::new(fn_ptr, self.module))
     }
 
+    /// Build Cranelift IR for a LirFunction and return it as lines of text.
+    /// Does NOT compile to native code — this is for diagnostic display only.
+    pub fn clif_text(mut self, lir: &LirFunction) -> Result<Vec<String>, JitError> {
+        if !lir.effect.is_pure() {
+            return Err(JitError::NotPure);
+        }
+
+        let mut sig = self.module.make_signature();
+        sig.call_conv = CallConv::SystemV;
+        sig.params.push(AbiParam::new(I64));
+        sig.params.push(AbiParam::new(I64));
+        sig.params.push(AbiParam::new(I64));
+        sig.params.push(AbiParam::new(I64));
+        sig.params.push(AbiParam::new(I64));
+        sig.returns.push(AbiParam::new(I64));
+
+        let func_name = lir.name.as_deref().unwrap_or("jit_func");
+        let func_id = self
+            .module
+            .declare_function(func_name, Linkage::Local, &sig)
+            .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
+
+        let mut ctx = self.module.make_context();
+        ctx.func.signature = sig;
+        ctx.func.name = UserFuncName::user(0, func_id.as_u32());
+
+        self.translate_function(lir, &mut ctx.func)?;
+
+        let text = format!("{}", ctx.func);
+        Ok(text.lines().map(String::from).collect())
+    }
+
     /// Translate LIR function to Cranelift IR
     ///
     /// For self-tail-call optimization, we use this block structure:
@@ -465,7 +497,7 @@ mod tests {
         let mut func = LirFunction::new(1);
         func.num_regs = 1;
         func.num_captures = 0;
-        func.effect = Effect::Pure;
+        func.effect = Effect::pure();
 
         let mut entry = BasicBlock::new(Label(0));
         // Load argument 0 into register 0
@@ -490,7 +522,7 @@ mod tests {
         let mut func = LirFunction::new(2);
         func.num_regs = 3;
         func.num_captures = 0;
-        func.effect = Effect::Pure;
+        func.effect = Effect::pure();
 
         let mut entry = BasicBlock::new(Label(0));
         // Load arguments into registers
@@ -560,7 +592,7 @@ mod tests {
     #[test]
     fn test_reject_non_pure() {
         let mut lir = make_simple_lir();
-        lir.effect = Effect::Yields;
+        lir.effect = Effect::yields();
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let result = compiler.compile(&lir);

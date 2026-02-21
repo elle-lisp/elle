@@ -1,8 +1,10 @@
+use crate::effects::Effect;
 use crate::error::LResult;
 use crate::ffi_primitives;
 use crate::symbol::SymbolTable;
-use crate::value::Value;
+use crate::value::{SymbolId, Value};
 use crate::vm::VM;
+use std::collections::HashMap;
 
 use super::arithmetic::{
     prim_abs, prim_add, prim_div_vm, prim_even, prim_max, prim_min, prim_mod, prim_mul, prim_odd,
@@ -17,6 +19,10 @@ use super::coroutines::{
     prim_yield_from,
 };
 use super::debug::{prim_debug_print, prim_memory_usage, prim_profile, prim_trace};
+use super::debugging::{
+    prim_arity, prim_bytecode_size, prim_captures, prim_disbit, prim_disjit, prim_is_closure,
+    prim_is_coro, prim_is_jit, prim_is_pure, prim_mutates_params, prim_raises,
+};
 use super::display::{prim_display, prim_newline, prim_print};
 use super::exception::{prim_exception, prim_exception_data, prim_exception_message, prim_throw};
 use super::file_io::{
@@ -62,352 +68,1497 @@ use super::type_check::{
 };
 use super::vector::{prim_vector, prim_vector_ref, prim_vector_set};
 
-/// Register all primitive functions with the VM
-pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
-    // Arithmetic
-    register_fn(vm, symbols, "+", prim_add);
-    register_fn(vm, symbols, "-", prim_sub);
-    register_fn(vm, symbols, "*", prim_mul);
-    register_vm_aware_fn(vm, symbols, "/", prim_div_vm);
+/// Register all primitive functions with the VM.
+/// Returns a map of primitive effects for use by the analyzer.
+pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<SymbolId, Effect> {
+    let mut effects = HashMap::new();
 
-    // Comparisons
-    register_fn(vm, symbols, "=", prim_eq);
-    register_fn(vm, symbols, "eq?", prim_eq); // Alias for =
-    register_fn(vm, symbols, "<", prim_lt);
-    register_fn(vm, symbols, ">", prim_gt);
-    register_fn(vm, symbols, "<=", prim_le);
-    register_fn(vm, symbols, ">=", prim_ge);
+    // Arithmetic - all can raise (arity/type errors)
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "+",
+        prim_add,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "-",
+        prim_sub,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "*",
+        prim_mul,
+        Effect::pure_raises(),
+    );
+    register_vm_aware_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "/",
+        prim_div_vm,
+        Effect::pure_raises(),
+    );
+
+    // Comparisons - can raise on type errors
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "=",
+        prim_eq,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "eq?",
+        prim_eq,
+        Effect::pure_raises(),
+    ); // Alias for =
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "<",
+        prim_lt,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        ">",
+        prim_gt,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "<=",
+        prim_le,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        ">=",
+        prim_ge,
+        Effect::pure_raises(),
+    );
 
     // List operations
-    register_fn(vm, symbols, "cons", prim_cons);
-    register_fn(vm, symbols, "first", prim_first);
-    register_fn(vm, symbols, "rest", prim_rest);
-    register_fn(vm, symbols, "list", prim_list);
+    register_fn(vm, symbols, &mut effects, "cons", prim_cons, Effect::pure());
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "first",
+        prim_first,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "rest",
+        prim_rest,
+        Effect::pure_raises(),
+    );
+    register_fn(vm, symbols, &mut effects, "list", prim_list, Effect::pure());
 
-    // Type predicates
-    register_fn(vm, symbols, "nil?", prim_is_nil);
-    register_fn(vm, symbols, "pair?", prim_is_pair);
-    register_fn(vm, symbols, "list?", prim_is_list);
-    register_fn(vm, symbols, "number?", prim_is_number);
-    register_fn(vm, symbols, "symbol?", prim_is_symbol);
-    register_fn(vm, symbols, "string?", prim_is_string);
-    register_fn(vm, symbols, "boolean?", prim_is_boolean);
-    register_fn(vm, symbols, "keyword?", prim_is_keyword);
+    // Type predicates - all pure
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "nil?",
+        prim_is_nil,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "pair?",
+        prim_is_pair,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "list?",
+        prim_is_list,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "number?",
+        prim_is_number,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "symbol?",
+        prim_is_symbol,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string?",
+        prim_is_string,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "boolean?",
+        prim_is_boolean,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "keyword?",
+        prim_is_keyword,
+        Effect::pure(),
+    );
 
-    // Logic
-    register_fn(vm, symbols, "not", prim_not);
-    register_fn(vm, symbols, "and", prim_and);
-    register_fn(vm, symbols, "or", prim_or);
-    register_fn(vm, symbols, "xor", prim_xor);
+    // Logic - pure
+    register_fn(vm, symbols, &mut effects, "not", prim_not, Effect::pure());
+    register_fn(vm, symbols, &mut effects, "and", prim_and, Effect::pure());
+    register_fn(vm, symbols, &mut effects, "or", prim_or, Effect::pure());
+    register_fn(vm, symbols, &mut effects, "xor", prim_xor, Effect::pure());
 
-    // Display
-    register_fn(vm, symbols, "display", prim_display);
-    register_fn(vm, symbols, "print", prim_print);
-    register_fn(vm, symbols, "newline", prim_newline);
+    // Display - pure (no yield)
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "display",
+        prim_display,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "print",
+        prim_print,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "newline",
+        prim_newline,
+        Effect::pure(),
+    );
 
     // Additional list operations
-    register_fn(vm, symbols, "length", prim_length);
-    register_fn(vm, symbols, "empty?", prim_empty);
-    register_fn(vm, symbols, "append", prim_append);
-    register_fn(vm, symbols, "reverse", prim_reverse);
-
-    // Type conversions
-    register_fn(vm, symbols, "int", prim_to_int);
-    register_fn(vm, symbols, "float", prim_to_float);
-    register_fn(vm, symbols, "string", prim_to_string);
-    // Scheme-style conversion names
-    register_fn(vm, symbols, "string->int", prim_string_to_int);
-    register_fn(vm, symbols, "string->float", prim_string_to_float);
-    register_fn(vm, symbols, "any->string", prim_any_to_string);
-
-    // Min/Max
-    register_fn(vm, symbols, "min", prim_min);
-    register_fn(vm, symbols, "max", prim_max);
-
-    // Absolute value
-    register_fn(vm, symbols, "abs", prim_abs);
-
-    // String operations
-    register_fn(vm, symbols, "string-append", prim_string_append);
-    register_fn(vm, symbols, "string-upcase", prim_string_upcase);
-    register_fn(vm, symbols, "string-downcase", prim_string_downcase);
-    register_fn(vm, symbols, "substring", prim_substring);
-    register_fn(vm, symbols, "string-index", prim_string_index);
-    register_fn(vm, symbols, "char-at", prim_char_at);
-    register_fn(vm, symbols, "string-split", prim_string_split);
-    register_fn(vm, symbols, "string-replace", prim_string_replace);
-    register_fn(vm, symbols, "string-trim", prim_string_trim);
-    register_fn(vm, symbols, "string-contains?", prim_string_contains);
-    register_fn(vm, symbols, "string-starts-with?", prim_string_starts_with);
-    register_fn(vm, symbols, "string-ends-with?", prim_string_ends_with);
-    register_fn(vm, symbols, "string-join", prim_string_join);
-    register_fn(vm, symbols, "number->string", prim_number_to_string);
-    register_vm_aware_fn(vm, symbols, "symbol->string", prim_symbol_to_string);
-
-    // List utilities
-    register_fn(vm, symbols, "nth", prim_nth);
-    register_fn(vm, symbols, "last", prim_last);
-    register_fn(vm, symbols, "take", prim_take);
-    register_fn(vm, symbols, "drop", prim_drop);
-
-    // Vector operations
-    register_fn(vm, symbols, "vector", prim_vector);
-    register_fn(vm, symbols, "vector-ref", prim_vector_ref);
-    register_fn(vm, symbols, "vector-set!", prim_vector_set);
-
-    // Table/Struct operations (polymorphic)
-    register_fn(vm, symbols, "table", prim_table);
-    register_fn(vm, symbols, "struct", prim_struct);
-    register_fn(vm, symbols, "get", prim_get); // Polymorphic: works on tables and structs
-    register_fn(vm, symbols, "put", prim_put); // Polymorphic: mutates tables, returns new struct
-    register_fn(vm, symbols, "put!", prim_put); // Explicit mutation marker (same as put)
-    register_fn(vm, symbols, "del", prim_del); // Polymorphic: mutates tables, returns new struct
-    register_fn(vm, symbols, "del!", prim_del); // Explicit mutation marker (same as del)
-    register_fn(vm, symbols, "keys", prim_keys); // Polymorphic: works on tables and structs
-    register_fn(vm, symbols, "values", prim_values); // Polymorphic: works on tables and structs
-    register_fn(vm, symbols, "has-key?", prim_has_key); // Polymorphic: works on tables and structs
-    register_fn(vm, symbols, "struct-del", prim_struct_del); // Deprecated: use del instead
-
-    // Type info
-    register_fn(vm, symbols, "type-of", prim_type_of);
-
-    // Math functions
-    register_fn(vm, symbols, "sqrt", prim_sqrt);
-    register_fn(vm, symbols, "sin", prim_sin);
-    register_fn(vm, symbols, "cos", prim_cos);
-    register_fn(vm, symbols, "tan", prim_tan);
-    register_fn(vm, symbols, "log", prim_log);
-    register_fn(vm, symbols, "exp", prim_exp);
-    register_fn(vm, symbols, "pow", prim_pow);
-    register_fn(vm, symbols, "floor", prim_floor);
-    register_fn(vm, symbols, "ceil", prim_ceil);
-    register_fn(vm, symbols, "round", prim_round);
-
-    // Math constants
-    register_fn(vm, symbols, "pi", prim_pi);
-    register_fn(vm, symbols, "e", prim_e);
-
-    // Additional utilities
-    register_fn(vm, symbols, "mod", prim_mod);
-    register_fn(vm, symbols, "%", prim_mod); // % as alias for mod
-    register_fn(vm, symbols, "rem", prim_rem);
-    register_fn(vm, symbols, "even?", prim_even);
-    register_fn(vm, symbols, "odd?", prim_odd);
-
-    // FFI primitives
     register_fn(
         vm,
         symbols,
+        &mut effects,
+        "length",
+        prim_length,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "empty?",
+        prim_empty,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "append",
+        prim_append,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "reverse",
+        prim_reverse,
+        Effect::pure_raises(),
+    );
+
+    // Type conversions - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "int",
+        prim_to_int,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "float",
+        prim_to_float,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string",
+        prim_to_string,
+        Effect::pure_raises(),
+    );
+    // Scheme-style conversion names
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string->int",
+        prim_string_to_int,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string->float",
+        prim_string_to_float,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "any->string",
+        prim_any_to_string,
+        Effect::pure_raises(),
+    );
+
+    // Min/Max - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "min",
+        prim_min,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "max",
+        prim_max,
+        Effect::pure_raises(),
+    );
+
+    // Absolute value - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "abs",
+        prim_abs,
+        Effect::pure_raises(),
+    );
+
+    // String operations - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-append",
+        prim_string_append,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-upcase",
+        prim_string_upcase,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-downcase",
+        prim_string_downcase,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "substring",
+        prim_substring,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-index",
+        prim_string_index,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "char-at",
+        prim_char_at,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-split",
+        prim_string_split,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-replace",
+        prim_string_replace,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-trim",
+        prim_string_trim,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-contains?",
+        prim_string_contains,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-starts-with?",
+        prim_string_starts_with,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-ends-with?",
+        prim_string_ends_with,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string-join",
+        prim_string_join,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "number->string",
+        prim_number_to_string,
+        Effect::pure_raises(),
+    );
+    register_vm_aware_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "symbol->string",
+        prim_symbol_to_string,
+        Effect::pure_raises(),
+    );
+
+    // List utilities - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "nth",
+        prim_nth,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "last",
+        prim_last,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "take",
+        prim_take,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "drop",
+        prim_drop,
+        Effect::pure_raises(),
+    );
+
+    // Vector operations - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "vector",
+        prim_vector,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "vector-ref",
+        prim_vector_ref,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "vector-set!",
+        prim_vector_set,
+        Effect::pure_raises(),
+    );
+
+    // Table/Struct operations (polymorphic) - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "table",
+        prim_table,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "struct",
+        prim_struct,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "get",
+        prim_get,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "put",
+        prim_put,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "put!",
+        prim_put,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "del",
+        prim_del,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "del!",
+        prim_del,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "keys",
+        prim_keys,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "values",
+        prim_values,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "has-key?",
+        prim_has_key,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "struct-del",
+        prim_struct_del,
+        Effect::pure_raises(),
+    );
+
+    // Type info - pure
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "type-of",
+        prim_type_of,
+        Effect::pure(),
+    );
+
+    // Math functions - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "sqrt",
+        prim_sqrt,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "sin",
+        prim_sin,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "cos",
+        prim_cos,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "tan",
+        prim_tan,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "log",
+        prim_log,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "exp",
+        prim_exp,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "pow",
+        prim_pow,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "floor",
+        prim_floor,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "ceil",
+        prim_ceil,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "round",
+        prim_round,
+        Effect::pure_raises(),
+    );
+
+    // Math constants - pure
+    register_fn(vm, symbols, &mut effects, "pi", prim_pi, Effect::pure());
+    register_fn(vm, symbols, &mut effects, "e", prim_e, Effect::pure());
+
+    // Additional utilities - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "mod",
+        prim_mod,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "%",
+        prim_mod,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "rem",
+        prim_rem,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "even?",
+        prim_even,
+        Effect::pure(),
+    );
+    register_fn(vm, symbols, &mut effects, "odd?", prim_odd, Effect::pure());
+
+    // FFI primitives - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
         "load-library",
         ffi_primitives::prim_load_library_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "list-libraries",
         ffi_primitives::prim_list_libraries_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "call-c-function",
         ffi_primitives::prim_call_c_function_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "load-header-with-lib",
         ffi_primitives::prim_load_header_with_lib_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "define-enum",
         ffi_primitives::prim_define_enum_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "make-c-callback",
         ffi_primitives::prim_make_c_callback_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "free-callback",
         ffi_primitives::prim_free_callback_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "register-allocation",
         ffi_primitives::prim_register_allocation_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "memory-stats",
         ffi_primitives::prim_memory_stats_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "type-check",
         ffi_primitives::prim_type_check_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "null-pointer?",
         ffi_primitives::prim_null_pointer_wrapper,
+        Effect::pure(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "ffi-last-error",
         ffi_primitives::prim_ffi_last_error_wrapper,
+        Effect::pure_raises(),
     );
     register_fn(
         vm,
         symbols,
+        &mut effects,
         "with-ffi-safety-checks",
         ffi_primitives::prim_with_ffi_safety_checks_wrapper,
+        Effect::pure_raises(),
     );
 
-    // Exception handling (old string-based)
-    register_fn(vm, symbols, "throw", prim_throw);
-    register_fn(vm, symbols, "exception", prim_exception);
-    register_fn(vm, symbols, "exception-message", prim_exception_message);
-    register_fn(vm, symbols, "exception-data", prim_exception_data);
-
-    // Condition system (new CL-style)
-    register_fn(vm, symbols, "signal", prim_signal);
-    register_fn(vm, symbols, "warn", prim_warn);
-    register_fn(vm, symbols, "error", prim_error);
-
-    // Exception introspection (Phase 8)
-    register_fn(vm, symbols, "exception-id", prim_exception_id);
-    register_fn(vm, symbols, "condition-field", prim_condition_field);
+    // Exception handling (old string-based) - can raise
     register_fn(
         vm,
         symbols,
+        &mut effects,
+        "throw",
+        prim_throw,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "exception",
+        prim_exception,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "exception-message",
+        prim_exception_message,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "exception-data",
+        prim_exception_data,
+        Effect::pure_raises(),
+    );
+
+    // Condition system (new CL-style) - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "signal",
+        prim_signal,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "warn",
+        prim_warn,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "error",
+        prim_error,
+        Effect::pure_raises(),
+    );
+
+    // Exception introspection (Phase 8) - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "exception-id",
+        prim_exception_id,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "condition-field",
+        prim_condition_field,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
         "condition-matches-type",
         prim_condition_matches_type,
+        Effect::pure_raises(),
     );
-    register_fn(vm, symbols, "condition-backtrace", prim_condition_backtrace);
-
-    // Quoting and meta-programming
-    register_fn(vm, symbols, "gensym", prim_gensym);
-
-    // Package manager
-    register_fn(vm, symbols, "package-version", prim_package_version);
-    register_fn(vm, symbols, "package-info", prim_package_info);
-
-    // Module loading
-    register_fn(vm, symbols, "import-file", prim_import_file);
-    register_fn(vm, symbols, "add-module-path", prim_add_module_path);
-
-    // Macro expansion
-    register_fn(vm, symbols, "expand-macro", prim_expand_macro);
-    register_fn(vm, symbols, "macro?", prim_is_macro);
-
-    // Concurrency primitives
-    register_fn(vm, symbols, "spawn", prim_spawn);
-    register_fn(vm, symbols, "join", prim_join);
-    register_fn(vm, symbols, "sleep", prim_sleep);
-    register_fn(vm, symbols, "current-thread-id", prim_current_thread_id);
-
-    // Process control
-    register_fn(vm, symbols, "exit", prim_exit);
-
-    // Debugging and profiling primitives
-    register_fn(vm, symbols, "debug-print", prim_debug_print);
-    register_fn(vm, symbols, "trace", prim_trace);
-    register_fn(vm, symbols, "profile", prim_profile);
-    register_fn(vm, symbols, "memory-usage", prim_memory_usage);
-
-    // File I/O primitives
-    register_fn(vm, symbols, "slurp", prim_slurp);
-    register_fn(vm, symbols, "spit", prim_spit);
-    register_fn(vm, symbols, "append-file", prim_append_file);
-    register_fn(vm, symbols, "file-exists?", prim_file_exists);
-    register_fn(vm, symbols, "directory?", prim_is_directory);
-    register_fn(vm, symbols, "file?", prim_is_file);
-    register_fn(vm, symbols, "delete-file", prim_delete_file);
-    register_fn(vm, symbols, "delete-directory", prim_delete_directory);
-    register_fn(vm, symbols, "create-directory", prim_create_directory);
     register_fn(
         vm,
         symbols,
+        &mut effects,
+        "condition-backtrace",
+        prim_condition_backtrace,
+        Effect::pure_raises(),
+    );
+
+    // Quoting and meta-programming - pure
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "gensym",
+        prim_gensym,
+        Effect::pure(),
+    );
+
+    // Package manager - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "package-version",
+        prim_package_version,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "package-info",
+        prim_package_info,
+        Effect::pure_raises(),
+    );
+
+    // Module loading - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "import-file",
+        prim_import_file,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "add-module-path",
+        prim_add_module_path,
+        Effect::pure_raises(),
+    );
+
+    // Macro expansion - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "expand-macro",
+        prim_expand_macro,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "macro?",
+        prim_is_macro,
+        Effect::pure(),
+    );
+
+    // Concurrency primitives - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "spawn",
+        prim_spawn,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "join",
+        prim_join,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "sleep",
+        prim_sleep,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "current-thread-id",
+        prim_current_thread_id,
+        Effect::pure(),
+    );
+
+    // Process control - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "exit",
+        prim_exit,
+        Effect::pure_raises(),
+    );
+
+    // Debugging and profiling primitives - pure
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "debug-print",
+        prim_debug_print,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "trace",
+        prim_trace,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "profile",
+        prim_profile,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "memory-usage",
+        prim_memory_usage,
+        Effect::pure(),
+    );
+
+    // Closure introspection - pure
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "closure?",
+        prim_is_closure,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "jit?",
+        prim_is_jit,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "pure?",
+        prim_is_pure,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "coro?",
+        prim_is_coro,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "mutates-params?",
+        prim_mutates_params,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "raises?",
+        prim_raises,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "arity",
+        prim_arity,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "captures",
+        prim_captures,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "bytecode-size",
+        prim_bytecode_size,
+        Effect::pure(),
+    );
+
+    // Bytecode and JIT disassembly - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "disbit",
+        prim_disbit,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "disjit",
+        prim_disjit,
+        Effect::pure_raises(),
+    );
+
+    // File I/O primitives - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "slurp",
+        prim_slurp,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "spit",
+        prim_spit,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "append-file",
+        prim_append_file,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "file-exists?",
+        prim_file_exists,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "directory?",
+        prim_is_directory,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "file?",
+        prim_is_file,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "delete-file",
+        prim_delete_file,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "delete-directory",
+        prim_delete_directory,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "create-directory",
+        prim_create_directory,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
         "create-directory-all",
         prim_create_directory_all,
+        Effect::pure_raises(),
     );
-    register_fn(vm, symbols, "rename-file", prim_rename_file);
-    register_fn(vm, symbols, "copy-file", prim_copy_file);
-    register_fn(vm, symbols, "file-size", prim_file_size);
-    register_fn(vm, symbols, "list-directory", prim_list_directory);
-    register_fn(vm, symbols, "absolute-path", prim_absolute_path);
-    register_fn(vm, symbols, "current-directory", prim_current_directory);
-    register_fn(vm, symbols, "change-directory", prim_change_directory);
-    register_fn(vm, symbols, "join-path", prim_join_path);
-    register_fn(vm, symbols, "file-extension", prim_file_extension);
-    register_fn(vm, symbols, "file-name", prim_file_name);
-    register_fn(vm, symbols, "parent-directory", prim_parent_directory);
-    register_fn(vm, symbols, "read-lines", prim_read_lines);
-
-    // JSON operations
-    register_fn(vm, symbols, "json-parse", prim_json_parse);
-    register_fn(vm, symbols, "json-serialize", prim_json_serialize);
     register_fn(
         vm,
         symbols,
+        &mut effects,
+        "rename-file",
+        prim_rename_file,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "copy-file",
+        prim_copy_file,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "file-size",
+        prim_file_size,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "list-directory",
+        prim_list_directory,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "absolute-path",
+        prim_absolute_path,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "current-directory",
+        prim_current_directory,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "change-directory",
+        prim_change_directory,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "join-path",
+        prim_join_path,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "file-extension",
+        prim_file_extension,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "file-name",
+        prim_file_name,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "parent-directory",
+        prim_parent_directory,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "read-lines",
+        prim_read_lines,
+        Effect::pure_raises(),
+    );
+
+    // JSON operations - can raise
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "json-parse",
+        prim_json_parse,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "json-serialize",
+        prim_json_serialize,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
         "json-serialize-pretty",
         prim_json_serialize_pretty,
+        Effect::pure_raises(),
     );
 
     // Cell/Box primitives (mutable storage)
-    register_fn(vm, symbols, "box", prim_box);
-    register_fn(vm, symbols, "unbox", prim_unbox);
-    register_fn(vm, symbols, "box-set!", prim_box_set);
-    register_fn(vm, symbols, "box?", prim_box_p);
-
-    // Coroutine primitives (Phase 6)
-    register_fn(vm, symbols, "make-coroutine", prim_make_coroutine);
-    register_fn(vm, symbols, "coroutine-status", prim_coroutine_status);
-    register_fn(vm, symbols, "coroutine-done?", prim_coroutine_done);
-    register_fn(vm, symbols, "coroutine-value", prim_coroutine_value);
-    register_fn(vm, symbols, "coroutine?", prim_is_coroutine);
-
-    // VM-aware coroutine primitives (Phase 6)
-    register_vm_aware_fn(vm, symbols, "coroutine-resume", prim_coroutine_resume);
-    register_vm_aware_fn(vm, symbols, "yield-from", prim_yield_from);
+    register_fn(vm, symbols, &mut effects, "box", prim_box, Effect::pure());
     register_fn(
         vm,
         symbols,
+        &mut effects,
+        "unbox",
+        prim_unbox,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "box-set!",
+        prim_box_set,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "box?",
+        prim_box_p,
+        Effect::pure(),
+    );
+
+    // Coroutine primitives (Phase 6)
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "make-coroutine",
+        prim_make_coroutine,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "coroutine-status",
+        prim_coroutine_status,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "coroutine-done?",
+        prim_coroutine_done,
+        Effect::pure(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "coroutine-value",
+        prim_coroutine_value,
+        Effect::pure_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "coroutine?",
+        prim_is_coroutine,
+        Effect::pure(),
+    );
+
+    // VM-aware coroutine primitives (Phase 6) - yields
+    register_vm_aware_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "coroutine-resume",
+        prim_coroutine_resume,
+        Effect::yields_raises(),
+    );
+    register_vm_aware_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "yield-from",
+        prim_yield_from,
+        Effect::yields_raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
         "coroutine->iterator",
         prim_coroutine_to_iterator,
+        Effect::pure_raises(),
     );
-    register_vm_aware_fn(vm, symbols, "coroutine-next", prim_coroutine_next);
+    register_vm_aware_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "coroutine-next",
+        prim_coroutine_next,
+        Effect::yields_raises(),
+    );
+
+    effects
 }
 
 /// Register a primitive function with the VM
 fn register_fn(
     vm: &mut VM,
     symbols: &mut SymbolTable,
+    effects: &mut HashMap<SymbolId, Effect>,
     name: &str,
     func: fn(&[Value]) -> Result<Value, crate::value::Condition>,
+    effect: Effect,
 ) {
     let sym_id = symbols.intern(name);
     vm.set_global(sym_id.0, Value::native_fn(func));
+    effects.insert(sym_id, effect);
 }
 
 /// Register a VM-aware primitive function with the VM
 fn register_vm_aware_fn(
     vm: &mut VM,
     symbols: &mut SymbolTable,
+    effects: &mut HashMap<SymbolId, Effect>,
     name: &str,
     func: fn(&[Value], &mut VM) -> LResult<Value>,
+    effect: Effect,
 ) {
     let sym_id = symbols.intern(name);
     vm.set_global(sym_id.0, Value::vm_aware_fn(func));
+    effects.insert(sym_id, effect);
 }

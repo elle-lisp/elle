@@ -2,24 +2,22 @@
 
 use crate::compiler::bytecode::Instruction;
 
-/// Disassemble bytecode with proper instruction names and operands
-pub fn disassemble(instructions: &[u8]) -> String {
-    let mut output = String::new();
+/// Disassemble bytecode and return one string per instruction
+pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
     let mut i = 0;
 
     while i < instructions.len() {
         let byte = instructions[i];
         let instr: Instruction = unsafe { std::mem::transmute(byte) };
-
-        output.push_str(&format!("  [{}] = {:?}", i, instr));
+        let mut line = format!("[{}] {:?}", i, instr);
         i += 1;
 
-        // Parse and display operands based on instruction type
         match instr {
             Instruction::LoadConst | Instruction::LoadGlobal | Instruction::StoreGlobal => {
                 if i + 1 < instructions.len() {
                     let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    output.push_str(&format!(" (const_idx={})", idx));
+                    line.push_str(&format!(" (const_idx={})", idx));
                     i += 2;
                 }
             }
@@ -29,7 +27,7 @@ pub fn disassemble(instructions: &[u8]) -> String {
                     let low = instructions[i + 1] as i16;
                     let offset = (high << 8) | (low & 0xFF);
                     let target = (i + 2) as i32 + offset as i32;
-                    output.push_str(&format!(" (offset={}, target={})", offset, target));
+                    line.push_str(&format!(" (offset={}, target={})", offset, target));
                     i += 2;
                 }
             }
@@ -37,7 +35,7 @@ pub fn disassemble(instructions: &[u8]) -> String {
                 if i + 1 < instructions.len() {
                     let depth = instructions[i];
                     let index = instructions[i + 1];
-                    output.push_str(&format!(" (depth={}, index={})", depth, index));
+                    line.push_str(&format!(" (depth={}, index={})", depth, index));
                     i += 2;
                 }
             }
@@ -45,21 +43,21 @@ pub fn disassemble(instructions: &[u8]) -> String {
                 if i + 1 < instructions.len() {
                     let depth = instructions[i];
                     let index = instructions[i + 1];
-                    output.push_str(&format!(" (depth={}, index={})", depth, index));
+                    line.push_str(&format!(" (depth={}, index={})", depth, index));
                     i += 2;
                 }
             }
             Instruction::Call | Instruction::TailCall => {
                 if i < instructions.len() {
                     let arg_count = instructions[i];
-                    output.push_str(&format!(" (args={})", arg_count));
+                    line.push_str(&format!(" (args={})", arg_count));
                     i += 1;
                 }
             }
             Instruction::DupN => {
                 if i < instructions.len() {
                     let offset = instructions[i];
-                    output.push_str(&format!(" (offset={})", offset));
+                    line.push_str(&format!(" (offset={})", offset));
                     i += 1;
                 }
             }
@@ -67,7 +65,7 @@ pub fn disassemble(instructions: &[u8]) -> String {
                 if i + 2 < instructions.len() {
                     let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                     let num_captures = instructions[i + 2];
-                    output.push_str(&format!(
+                    line.push_str(&format!(
                         " (const_idx={}, num_captures={})",
                         const_idx, num_captures
                     ));
@@ -77,10 +75,20 @@ pub fn disassemble(instructions: &[u8]) -> String {
             _ => {}
         }
 
-        output.push('\n');
+        lines.push(line);
     }
 
-    output
+    lines
+}
+
+/// Disassemble bytecode with proper instruction names and operands
+pub fn disassemble(instructions: &[u8]) -> String {
+    disassemble_lines(instructions)
+        .iter()
+        .map(|line| format!("  {}", line))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }
 
 /// Pretty print bytecode with constants

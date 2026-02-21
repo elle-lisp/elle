@@ -7,7 +7,7 @@ use elle::{list, SymbolTable, Value, VM};
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Set symbol table context for primitives that need it (like type-of)
     set_symbol_table(&mut symbols as *mut SymbolTable);

@@ -58,7 +58,7 @@ fn test_jit_identity() {
     let mut func = LirFunction::new(1);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -76,7 +76,7 @@ fn test_jit_constant() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -100,7 +100,7 @@ fn test_jit_nil() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -124,7 +124,7 @@ fn test_jit_bool_true() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -148,7 +148,7 @@ fn test_jit_bool_false() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -172,7 +172,7 @@ fn test_jit_empty_list() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -200,7 +200,7 @@ fn test_jit_add() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -229,7 +229,7 @@ fn test_jit_sub() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -258,7 +258,7 @@ fn test_jit_mul() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -287,7 +287,7 @@ fn test_jit_div() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -316,7 +316,7 @@ fn test_jit_rem() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -345,7 +345,7 @@ fn test_jit_neg() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -375,7 +375,7 @@ fn test_jit_lt_true() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -403,7 +403,7 @@ fn test_jit_lt_false() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -431,7 +431,7 @@ fn test_jit_eq() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -468,7 +468,7 @@ fn test_jit_branch_true() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     // Entry block: load arg, branch on x
     let mut entry = BasicBlock::new(Label(0));
@@ -520,7 +520,7 @@ fn test_jit_branch_false() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -569,7 +569,7 @@ fn test_jit_branch_nil() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -617,7 +617,7 @@ fn test_jit_branch_integer_truthy() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -668,7 +668,7 @@ fn test_jit_rejects_yielding() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::Yields;
+    func.effect = Effect::yields();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -693,7 +693,7 @@ fn test_jit_call_compiles() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -721,7 +721,7 @@ fn test_jit_rejects_make_closure() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let inner_func = Box::new(LirFunction::new(0));
     let mut entry = BasicBlock::new(Label(0));
@@ -752,7 +752,7 @@ fn test_jit_conditional_arithmetic() {
     let mut func = LirFunction::new(1);
     func.num_regs = 4;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     // Entry: load arg, compare x == 0
     let mut entry = BasicBlock::new(Label(0));
@@ -833,7 +833,7 @@ fn test_jit_chained_arithmetic() {
     let mut func = LirFunction::new(3);
     func.num_regs = 5;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -883,7 +883,7 @@ fn test_jit_bit_and() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -912,7 +912,7 @@ fn test_jit_bit_or() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -941,7 +941,7 @@ fn test_jit_shl() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -974,7 +974,7 @@ fn test_jit_not_true() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -999,7 +999,7 @@ fn test_jit_not_false() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1024,7 +1024,7 @@ fn test_jit_not_nil() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1053,7 +1053,7 @@ fn test_jit_float_constant() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -1076,7 +1076,7 @@ fn test_jit_float_add() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1112,7 +1112,7 @@ fn test_jit_cons() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1144,7 +1144,7 @@ fn test_jit_car_cdr() {
     let mut func = LirFunction::new(1);
     func.num_regs = 4;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1187,7 +1187,7 @@ fn test_jit_is_pair() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1218,7 +1218,7 @@ fn test_jit_make_vector() {
     let mut func = LirFunction::new(3);
     func.num_regs = 4;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1263,7 +1263,7 @@ fn test_jit_make_cell() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1290,7 +1290,7 @@ fn test_jit_load_cell() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1316,7 +1316,7 @@ fn test_jit_store_cell() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0)); // cell
@@ -1355,7 +1355,7 @@ fn test_jit_tail_call_compiles() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::Pure;
+    func.effect = Effect::pure();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1391,7 +1391,7 @@ fn test_jit_self_tail_call_loop() {
 
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Use begin to wrap multiple expressions
     let result = eval_new(
@@ -1415,7 +1415,7 @@ fn test_jit_self_tail_call_accumulator() {
 
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     let result = eval_new(
         r#"(begin
@@ -1442,7 +1442,7 @@ fn test_jit_self_tail_call_with_swapped_args() {
 
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Simple test: swap args and decrement
     // Trace: (3,10) -> (10,2) -> (2,9) -> (9,1) -> (1,8) -> (8,0) -> (0,7) -> 7
@@ -1468,7 +1468,7 @@ fn test_jit_self_tail_call_fibonacci_iterative() {
 
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
 
     let result = eval_new(
         r#"(begin

@@ -12,7 +12,7 @@ use proptest::prelude::*;
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
     init_stdlib(&mut vm, &mut symbols);
     eval_new(input, &mut symbols, &mut vm)
 }

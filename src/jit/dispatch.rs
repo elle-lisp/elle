@@ -431,7 +431,7 @@ mod tests {
 
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
-        register_primitives(&mut vm, &mut symbols);
+        let _effects = register_primitives(&mut vm, &mut symbols);
 
         // Initially no exception
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut ());

@@ -17,7 +17,7 @@ use elle::{SymbolTable, Value, VM};
 fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
     set_symbol_table(&mut symbols as *mut SymbolTable);
 
     match compile_new(input, &mut symbols) {
@@ -42,7 +42,7 @@ fn eval(input: &str) -> Result<Value, String> {
 fn eval_with_stdlib(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
     init_stdlib(&mut vm, &mut symbols);
     set_symbol_table(&mut symbols as *mut SymbolTable);
 
@@ -246,7 +246,7 @@ fn test_pure_function_no_cps() {
 
 #[test]
 fn test_yielding_function_detected() {
-    // A function with yield should have Effect::Yields
+    // A function with yield should have Effect::yields()
     // This is more of a compiler-level test, but we can verify it works
     let result = eval(
         r#"

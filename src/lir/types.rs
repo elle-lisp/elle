@@ -63,7 +63,7 @@ impl LirFunction {
             num_locals: 0,
             num_captures: 0,
             cell_params_mask: 0,
-            effect: Effect::Pure,
+            effect: Effect::pure(),
         }
     }
 }

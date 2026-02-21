@@ -1,7 +1,7 @@
 //! JIT compilation for Elle
 //!
 //! This module provides JIT compilation of pure LIR functions to native code
-//! using Cranelift. Only `Effect::Pure` functions are JIT candidates.
+//! using Cranelift. Only `Effect::pure()` functions are JIT candidates.
 //!
 //! ## Architecture
 //!

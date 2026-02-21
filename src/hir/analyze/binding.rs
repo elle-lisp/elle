@@ -15,7 +15,7 @@ impl<'a> Analyzer<'a> {
 
         // Phase 1: Analyze all value expressions in the OUTER scope
         let mut names_and_values = Vec::new();
-        let mut effect = Effect::Pure;
+        let mut effect = Effect::pure();
 
         for binding in bindings_syntax {
             let pair = binding
@@ -86,7 +86,7 @@ impl<'a> Analyzer<'a> {
         self.push_scope(false);
 
         let mut bindings = Vec::new();
-        let mut effect = Effect::Pure;
+        let mut effect = Effect::pure();
 
         for binding in bindings_syntax {
             let pair = binding
@@ -172,7 +172,7 @@ impl<'a> Analyzer<'a> {
 
         // Second pass: analyze values
         let mut bindings = Vec::new();
-        let mut effect = Effect::Pure;
+        let mut effect = Effect::pure();
         for (i, binding) in bindings_syntax.iter().enumerate() {
             let pair = binding.as_list().unwrap();
             let value = self.analyze_expr(&pair[1])?;
@@ -260,7 +260,7 @@ impl<'a> Analyzer<'a> {
             // Seed effect_env with Pure for lambda forms so self-recursive calls
             // don't default to Yields during analysis
             if is_lambda_form {
-                self.effect_env.insert(binding_id, Effect::Pure);
+                self.effect_env.insert(binding_id, Effect::pure());
             }
 
             // Now analyze the value (which can reference the binding)
@@ -281,7 +281,7 @@ impl<'a> Analyzer<'a> {
                     value: Box::new(value),
                 },
                 span,
-                Effect::Pure,
+                Effect::pure(),
             ))
         } else {
             // At top level, define creates a global binding
@@ -291,7 +291,7 @@ impl<'a> Analyzer<'a> {
             // Seed effect_env with Pure for lambda forms so self-recursive calls
             // don't default to Yields during analysis
             if is_lambda_form {
-                self.effect_env.insert(binding_id, Effect::Pure);
+                self.effect_env.insert(binding_id, Effect::pure());
             }
 
             // Now analyze the value
@@ -315,7 +315,7 @@ impl<'a> Analyzer<'a> {
                     value: Box::new(value),
                 },
                 span,
-                Effect::Pure,
+                Effect::pure(),
             ))
         }
     }
@@ -478,7 +478,7 @@ impl<'a> Analyzer<'a> {
                 inferred_effect,
             },
             span,
-            Effect::Pure, // Creating a closure is pure
+            Effect::pure(), // Creating a closure is pure
         ))
     }
 }

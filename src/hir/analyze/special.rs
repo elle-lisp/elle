@@ -18,7 +18,7 @@ impl<'a> Analyzer<'a> {
         Ok(Hir::new(
             HirKind::Yield(Box::new(value)),
             span,
-            Effect::Yields, // Yield always has Yields effect
+            Effect::yields(), // Yield always has Yields effect
         ))
     }
 
@@ -211,7 +211,7 @@ impl<'a> Analyzer<'a> {
             .ok_or_else(|| format!("{}: handler-bind handlers must be a list", span))?;
 
         let mut handlers = Vec::new();
-        let mut effect = Effect::Pure;
+        let mut effect = Effect::pure();
 
         for handler_syntax in handlers_syntax {
             let parts = handler_syntax

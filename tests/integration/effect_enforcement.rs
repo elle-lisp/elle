@@ -7,7 +7,7 @@
 // - Pure functions remain pure
 // - set! invalidates effect tracking
 
-use elle::effects::Effect;
+use elle::effects::{Effect, YieldBehavior};
 use elle::hir::HirKind;
 use elle::pipeline::{analyze_all_new, analyze_new};
 use elle::primitives::register_primitives;
@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 fn setup() -> SymbolTable {
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
     symbols
 }
 
@@ -34,11 +34,11 @@ fn test_effect_direct_yield() {
     let result = analyze_new("(fn () (yield 1))", &mut symbols).unwrap();
 
     // Lambda creation is pure
-    assert_eq!(result.hir.effect, Effect::Pure);
+    assert_eq!(result.hir.effect, Effect::pure());
 
     // But the body should be Yields
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.effect, Effect::Yields);
+        assert_eq!(body.effect, Effect::yields());
     } else {
         panic!("Expected Lambda");
     }
@@ -49,7 +49,7 @@ fn test_effect_yield_in_begin() {
     // (begin (yield 1) (yield 2)) should have Yields effect
     let mut symbols = setup();
     let result = analyze_new("(begin (yield 1) (yield 2))", &mut symbols).unwrap();
-    assert_eq!(result.hir.effect, Effect::Yields);
+    assert_eq!(result.hir.effect, Effect::yields());
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn test_effect_yield_in_if() {
     // (if #t (yield 1) 2) should have Yields effect
     let mut symbols = setup();
     let result = analyze_new("(if #t (yield 1) 2)", &mut symbols).unwrap();
-    assert_eq!(result.hir.effect, Effect::Yields);
+    assert_eq!(result.hir.effect, Effect::yields());
 }
 
 // ============================================================================
@@ -72,7 +72,7 @@ fn test_effect_call_propagation() {
     let result = analyze_new("(begin (define gen (fn () (yield 1))) (gen))", &mut symbols).unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Calling a yielding function should propagate Yields effect"
     );
 }
@@ -90,7 +90,7 @@ fn test_effect_nested_propagation() {
     .unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Nested call to yielding function should propagate Yields effect"
     );
 }
@@ -103,7 +103,7 @@ fn test_effect_pure_call() {
     let result = analyze_new("(begin (define f (fn (x) (+ x 1))) (f 42))", &mut symbols).unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
+        Effect::pure(),
         "Calling a pure function should remain Pure"
     );
 }
@@ -115,7 +115,7 @@ fn test_effect_let_bound_lambda() {
     let result = analyze_new("(let ((gen (fn () (yield 1)))) (gen))", &mut symbols).unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Calling a let-bound yielding lambda should propagate Yields effect"
     );
 }
@@ -127,7 +127,7 @@ fn test_effect_letrec_bound_lambda() {
     let result = analyze_new("(letrec ((gen (fn () (yield 1)))) (gen) 42)", &mut symbols).unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Calling a letrec-bound yielding lambda should propagate Yields effect"
     );
 }
@@ -164,7 +164,7 @@ fn test_effect_polymorphic_local_higher_order() {
     // So this is Yields (sound: unknown callee may yield)
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Local higher-order function with unknown parameter effect is conservatively Yields"
     );
 }
@@ -185,7 +185,7 @@ fn test_effect_polymorphic_direct_call() {
     // So this is Yields (sound: unknown callee may yield)
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Higher-order function with parameter call is conservatively Yields"
     );
 }
@@ -199,7 +199,7 @@ fn test_effect_polymorphic_with_pure_arg() {
     let result = analyze_new("(map (fn (x) (+ x 1)) (list 1 2 3))", &mut symbols).unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Call to unknown global is Yields (sound default)"
     );
 }
@@ -218,7 +218,7 @@ fn test_effect_polymorphic_with_yielding_arg_unknown_global() {
     // Unknown globals are Yields for soundness
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Call to unknown global is Yields (sound default)"
     );
 }
@@ -243,7 +243,7 @@ fn test_effect_set_invalidation() {
     // This is sound: we can't prove the new value is pure
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "After set!, effect should be Yields (sound default)"
     );
 }
@@ -259,7 +259,7 @@ fn test_effect_direct_lambda_call_yields() {
     let result = analyze_new("((fn () (yield 1)))", &mut symbols).unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Direct call to yielding lambda should have Yields effect"
     );
 }
@@ -271,7 +271,7 @@ fn test_effect_direct_lambda_call_pure() {
     let result = analyze_new("((fn () 42))", &mut symbols).unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
+        Effect::pure(),
         "Direct call to pure lambda should be Pure"
     );
 }
@@ -295,7 +295,7 @@ fn test_effect_multiple_calls_mixed() {
     .unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Sequence with yielding call should have Yields effect"
     );
 }
@@ -312,7 +312,7 @@ fn test_effect_conditional_yield() {
     .unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Call to function with conditional yield should have Yields effect"
     );
 }
@@ -331,7 +331,7 @@ fn test_effect_closure_captures_yielding() {
     .unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Nested closure calling yielding function should have Yields effect"
     );
 }
@@ -367,7 +367,7 @@ fn test_effect_pure_primitives() {
         let result = analyze_new(call, &mut symbols).unwrap();
         assert_eq!(
             result.hir.effect,
-            Effect::Pure,
+            Effect::pure(),
             "Primitive call '{}' should be Pure",
             call
         );
@@ -384,7 +384,7 @@ fn test_lambda_body_effect_pure() {
     let result = analyze_new("(fn (x) (+ x 1))", &mut symbols).unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.effect, Effect::Pure);
+        assert_eq!(body.effect, Effect::pure());
     } else {
         panic!("Expected Lambda");
     }
@@ -396,7 +396,7 @@ fn test_lambda_body_effect_yields() {
     let result = analyze_new("(fn (x) (yield x))", &mut symbols).unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.effect, Effect::Yields);
+        assert_eq!(body.effect, Effect::yields());
     } else {
         panic!("Expected Lambda");
     }
@@ -408,7 +408,7 @@ fn test_lambda_body_effect_nested_yield() {
     let result = analyze_new("(fn (x) (begin (+ x 1) (yield x) (+ x 2)))", &mut symbols).unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.effect, Effect::Yields);
+        assert_eq!(body.effect, Effect::yields());
     } else {
         panic!("Expected Lambda");
     }
@@ -431,7 +431,7 @@ fn test_effect_unknown_global_is_yields() {
     .unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Unknown global should be Yields for soundness"
     );
 }
@@ -448,7 +448,7 @@ fn test_effect_parameter_call_is_yields() {
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
         assert_eq!(
             body.effect,
-            Effect::Yields,
+            Effect::yields(),
             "Calling a function parameter should be Yields (unknown effect)"
         );
     } else {
@@ -464,7 +464,7 @@ fn test_effect_let_bound_non_lambda_call_is_yields() {
     // f is not a lambda literal, effect unknown → Yields
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Calling a let-bound non-lambda should be Yields (unknown effect)"
     );
 }
@@ -509,7 +509,7 @@ fn test_polymorphic_inference_resolves_pure() {
     .unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
+        Effect::pure(),
         "Calling polymorphic function with pure arg should be Pure"
     );
 }
@@ -525,7 +525,7 @@ fn test_polymorphic_inference_resolves_yields() {
     .unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Calling polymorphic function with yielding arg should be Yields"
     );
 }
@@ -550,7 +550,7 @@ fn test_polymorphic_inference_my_map() {
     // When called with +, which is Pure, the result is Pure.
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
+        Effect::pure(),
         "Recursive higher-order function with pure arg should be Pure"
     );
 }
@@ -571,7 +571,7 @@ fn test_polymorphic_inference_non_recursive_map() {
     // apply-to-list is Polymorphic(0), + is Pure, so the call is Pure
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
+        Effect::pure(),
         "Non-recursive higher-order function with pure arg should be Pure"
     );
 }
@@ -593,7 +593,7 @@ fn test_polymorphic_inference_direct_yield_prevents() {
         {
             assert_eq!(
                 *inferred_effect,
-                Effect::Yields,
+                Effect::yields(),
                 "Function with direct yield should be Yields, not Polymorphic"
             );
         } else {
@@ -621,7 +621,10 @@ fn test_polymorphic_inference_two_params() {
         {
             assert_eq!(
                 *inferred_effect,
-                Effect::Polymorphic(BTreeSet::from([0, 1])),
+                Effect {
+                    yield_behavior: YieldBehavior::Polymorphic(BTreeSet::from([0, 1])),
+                    may_raise: false,
+                },
                 "Function calling two params should be Polymorphic({{0, 1}})"
             );
         } else {
@@ -643,7 +646,7 @@ fn test_polymorphic_inference_two_params_resolves_pure() {
     .unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
+        Effect::pure(),
         "Calling Polymorphic({{0,1}}) with two pure args should be Pure"
     );
 }
@@ -662,7 +665,7 @@ fn test_polymorphic_inference_two_params_resolves_yields() {
     .unwrap();
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Calling Polymorphic({{0,1}}) with one yielding arg should be Yields"
     );
 }
@@ -708,7 +711,7 @@ fn test_polymorphic_inference_nested_call() {
     // wrapper should be Polymorphic(0) and the final call with + should be Pure
     assert_eq!(
         result.hir.effect,
-        Effect::Pure,
+        Effect::pure(),
         "Nested polymorphic calls with pure arg should be Pure"
     );
 }
@@ -734,7 +737,7 @@ fn test_polymorphic_inference_with_known_yielding_call() {
             {
                 assert_eq!(
                     *inferred_effect,
-                    Effect::Yields,
+                    Effect::yields(),
                     "Function calling known yielding function should be Yields"
                 );
             } else {
@@ -761,7 +764,7 @@ fn test_polymorphic_inference_pure_function() {
         {
             assert_eq!(
                 *inferred_effect,
-                Effect::Pure,
+                Effect::pure(),
                 "Pure function should have Pure effect"
             );
         } else {
@@ -801,7 +804,7 @@ fn test_cross_form_effect_tracking_pure_helper() {
         {
             assert_eq!(
                 *inferred_effect,
-                Effect::Pure,
+                Effect::pure(),
                 "Caller of pure helper should be Pure"
             );
         } else {
@@ -836,7 +839,7 @@ fn test_cross_form_effect_tracking_polymorphic_helper() {
         {
             assert_eq!(
                 *inferred_effect,
-                Effect::Pure,
+                Effect::pure(),
                 "Caller of polymorphic helper with pure arg should be Pure"
             );
         } else {
@@ -871,7 +874,7 @@ fn test_cross_form_effect_tracking_mutual_recursion() {
         {
             assert_eq!(
                 *inferred_effect,
-                Effect::Pure,
+                Effect::pure(),
                 "safe? calling pure check-safe-helper should be Pure"
             );
         } else {

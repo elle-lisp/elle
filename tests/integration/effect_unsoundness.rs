@@ -5,7 +5,7 @@
 // pure when it might yield at runtime.
 //
 // Fixed in src/hir/analyze.rs line 1251:
-//   .unwrap_or(Effect::Yields)
+//   .unwrap_or(Effect::yields())
 
 use elle::effects::Effect;
 use elle::pipeline::analyze_new;
@@ -16,7 +16,7 @@ use elle::vm::VM;
 fn setup() -> SymbolTable {
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    register_primitives(&mut vm, &mut symbols);
+    let _effects = register_primitives(&mut vm, &mut symbols);
     symbols
 }
 
@@ -28,7 +28,7 @@ fn setup() -> SymbolTable {
 ///     (set! f (fn () (yield 1))) ; set! removes f from effect_env
 ///     (f))                       ; f is now unknown global → defaults to Yields
 ///
-/// Result: Effect::Yields (conservative, since we don't know f's effect after set!)
+/// Result: Effect::yields() (conservative, since we don't know f's effect after set!)
 #[test]
 fn test_unsound_effect_after_set() {
     let mut symbols = setup();
@@ -41,7 +41,7 @@ fn test_unsound_effect_after_set() {
     // After set!, the effect is conservatively Yields (sound)
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "After set!, unknown global defaults to Yields (sound)"
     );
 }
@@ -52,7 +52,7 @@ fn test_unsound_effect_after_set() {
 /// The code:
 ///   (map gen (list 1 2 3))
 ///
-/// Result: Effect::Yields (conservative, since map is not a known primitive)
+/// Result: Effect::yields() (conservative, since map is not a known primitive)
 #[test]
 fn test_unsound_effect_unknown_global() {
     let mut symbols = setup();
@@ -68,7 +68,7 @@ fn test_unsound_effect_unknown_global() {
     // Unknown global defaults to Yields (sound)
     assert_eq!(
         result.hir.effect,
-        Effect::Yields,
+        Effect::yields(),
         "Call to unknown global is Yields (sound)"
     );
 }
