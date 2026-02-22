@@ -127,7 +127,7 @@ mask at resume time) would be more flexible but harder to reason about.
 
 ### No Stack Switching
 
-Janet does **not** use coroutine-style C stack switching. When fiber A resumes
+Janet does **not** use coro/style C stack switching. When fiber A resumes
 fiber B, the VM function `run_vm` is called recursively on the C stack. This
 means:
 

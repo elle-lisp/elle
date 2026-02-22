@@ -236,7 +236,7 @@ fn test_coroutine_captures_from_nested_let() {
           (let ((y 20))
             (let ((gen (fn () (yield (+ x y)))))
               (let ((co (make-coroutine gen)))
-                (coroutine-resume co)))))
+                (coro/resume co)))))
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(30));
 }
@@ -247,7 +247,7 @@ fn test_coroutine_captures_lambda_param() {
         ((fn (base)
            (let ((gen (fn () (yield base))))
              (let ((co (make-coroutine gen)))
-               (coroutine-resume co)))) 42)
+               (coro/resume co)))) 42)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(42));
 }
@@ -259,7 +259,7 @@ fn test_coroutine_captures_multiple_levels() {
            ((fn (b)
               (let ((gen (fn () (yield (+ a b)))))
                 (let ((co (make-coroutine gen)))
-                  (coroutine-resume co)))) 20)) 10)
+                  (coro/resume co)))) 20)) 10)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(30));
 }
@@ -270,7 +270,7 @@ fn test_coroutine_with_mutable_capture() {
         (let ((counter 0))
           (let ((gen (fn () (begin (set! counter (+ counter 1)) (yield counter)))))
             (let ((co (make-coroutine gen)))
-              (coroutine-resume co))))
+              (coro/resume co))))
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(1));
 }
@@ -282,7 +282,7 @@ fn test_coroutine_captures_let_star_binding() {
                (y (+ x 10))
                (gen (fn () (yield (+ x y))))
                (co (make-coroutine gen)))
-          (coroutine-resume co))
+          (coro/resume co))
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(20));
 }

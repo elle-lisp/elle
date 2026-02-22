@@ -82,9 +82,9 @@ Coroutines are suspendable computations:
 
 ```lisp
 (define gen (coroutine (fn () (yield 1) (yield 2) 3)))
-(coroutine-resume gen)  ; → 1
-(coroutine-resume gen)  ; → 2
-(coroutine-resume gen)  ; → 3
+(coro/resume gen)  ; → 1
+(coro/resume gen)  ; → 2
+(coro/resume gen)  ; → 3
 ```
 
 On `yield`:

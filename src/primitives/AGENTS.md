@@ -99,7 +99,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `type_check.rs` | `nil?`, `pair?`, `number?`, `string?`, etc. |
 | `higher_order.rs` | `map`, `filter`, `fold`, `apply` |
 | `concurrency.rs` | `spawn`, `join`, `channel`, `send`, `receive` |
-| `coroutines.rs` | `make-coroutine`, `coroutine-resume`, `coroutine-done?` (fiber wrappers) |
+| `coro.rs` | `coro/new`, `coro/resume`, `coro/done?` (fiber wrappers) |
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value`, `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `macros.rs` | `defmacro` (compile-time; `macro?` and `expand-macro` are now Expander operations) |
 | `debug.rs` | `debug-print`, `trace` |

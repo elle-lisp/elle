@@ -2,7 +2,7 @@
 ;
 ; This example demonstrates Elle's type system:
 ; - type-of: Get the type of any value
-; - Type predicates: number?, symbol?, string?, list?, vector?, table?, closure?, coroutine?
+; - Type predicates: number?, symbol?, string?, list?, vector?, table?, closure?, coro?
 ; - Type conversions: string, number, symbol
 ; - Type checking patterns
 ; - Assertions verifying type operations

@@ -259,8 +259,8 @@ yields:
 (fiber/resume gen nil)  ; → SIG_OK, (fiber/value gen) → nil
 ```
 
-Legacy coroutine primitives (`make-coroutine`, `coroutine-resume`,
-`coroutine-done?`) are thin wrappers around fiber operations.
+Legacy coroutine primitives (`coro/new`, `coro/resume`,
+`coro/done?`) are thin wrappers around fiber operations.
 
 
 ## Error Handling
