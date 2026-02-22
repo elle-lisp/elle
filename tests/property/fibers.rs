@@ -355,7 +355,7 @@ proptest! {
                  (define helper (fn (x) (yield (* x 2))))
                  (define caller (fn (x) (+ (helper x) 1)))
                  (define co (make-coroutine (fn () (caller {}))))
-                 (list (coroutine-resume co) (coroutine-resume co {})))"#,
+                 (list (coro/resume co) (coro/resume co {})))"#,
             base, resume_val
         );
         let result = eval(&code);
@@ -405,10 +405,10 @@ proptest! {
                    42))
                  (define co (make-coroutine gen))
                  (list
-                   (coroutine-resume co)
-                   (coroutine-resume co {})
-                   (coroutine-resume co)
-                   (keyword->string (coroutine-status co))))"#,
+                   (coro/resume co)
+                   (coro/resume co {})
+                   (coro/resume co)
+                   (keyword->string (coro/status co))))"#,
             val1, val2, resume1
         );
         let result = eval(&code);
@@ -459,8 +459,8 @@ proptest! {
                    (/ 1 0)))
                  (define gen (fn () (+ (helper {}) 1)))
                  (define co (make-coroutine gen))
-                 (coroutine-resume co)
-                 (coroutine-resume co))"#,
+                 (coro/resume co)
+                 (coro/resume co))"#,
             val
         );
         let result = eval(&code);

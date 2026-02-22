@@ -595,9 +595,9 @@ The compiler's effect information guides JIT decisions:
 (throw value) → (fiber/signal :error value)
 
 ;; Backward compat (thin aliases)
-(make-coroutine fn) → (fiber/new fn :yield)
-(coroutine-resume co val) → (fiber/resume co val)
-(coroutine-status co) → (fiber/status co)
+(coro/new fn) → (fiber/new fn :yield)
+(coro/resume co val) → (fiber/resume co val)
+(coro/status co) → (fiber/status co)
 ```
 
 ### Effect Declarations
@@ -753,7 +753,7 @@ and faster. Current implementation: flat.
   replaces hierarchy checks.
 
 - **Backward compatibility**: `yield` works as a special form (emits
-  `SIG_YIELD`). `make-coroutine` / `coroutine-resume` are thin wrappers
+  `SIG_YIELD`). `make-coroutine` / `coro/resume` are thin wrappers
   around `fiber/new` / `fiber/resume`. `try`/`catch` macro is blocked on
   macro system work.
 

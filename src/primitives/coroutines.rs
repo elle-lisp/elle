@@ -5,13 +5,13 @@
 //! to the fiber system.
 //!
 //! Primitives:
-//! - make-coroutine: Create a fiber with SIG_YIELD mask
-//! - coroutine-resume: Resume via fiber/resume
-//! - coroutine-status: Fiber status with coroutine-compatible names
-//! - coroutine-done?: Check if fiber is dead or errored
-//! - coroutine-value: Get fiber signal value
-//! - coroutine?: Check if value is a fiber
-//! - coroutine->iterator: Identity (fibers are iterable)
+//! - coro/new: Create a fiber with SIG_YIELD mask
+//! - coro/resume: Resume via fiber/resume
+//! - coro/status: Fiber status with coro/compatible names
+//! - coro/done?: Check if fiber is dead or errored
+//! - coro/value: Get fiber signal value
+//! - coro?: Check if value is a fiber
+//! - coro/>iterator: Identity (fibers are iterable)
 //! - yield-from: Stub (not yet supported)
 
 use crate::value::fiber::{
@@ -19,7 +19,7 @@ use crate::value::fiber::{
 };
 use crate::value::{error_val, Value};
 
-/// (make-coroutine fn) → fiber
+/// (coro/new fn) → fiber
 ///
 /// Creates a fiber with SIG_YIELD mask from a closure.
 pub fn prim_make_coroutine(args: &[Value]) -> (SignalBits, Value) {
@@ -28,7 +28,7 @@ pub fn prim_make_coroutine(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("make-coroutine: expected 1 argument, got {}", args.len()),
+                format!("coro/new: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -41,16 +41,13 @@ pub fn prim_make_coroutine(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!(
-                    "make-coroutine: expected function, got {}",
-                    args[0].type_name()
-                ),
+                format!("coro/new: expected function, got {}", args[0].type_name()),
             ),
         )
     }
 }
 
-/// (coroutine-status co) → keyword
+/// (coro/status co) → keyword
 ///
 /// Returns the fiber's status as a keyword, mapped to coroutine names:
 /// :new → :created, :alive → :running, :dead → :done,
@@ -61,7 +58,7 @@ pub fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("coroutine-status: expected 1 argument, got {}", args.len()),
+                format!("coro/status: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -74,7 +71,7 @@ pub fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "coroutine-status: expected coroutine, got {}",
+                        "coro/status: expected coroutine, got {}",
                         args[0].type_name()
                     ),
                 ),
@@ -102,14 +99,14 @@ pub fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (coroutine-done? co) → bool
+/// (coro/done? co) → bool
 pub fn prim_coroutine_done(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("coroutine-done?: expected 1 argument, got {}", args.len()),
+                format!("coro/done?: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -122,7 +119,7 @@ pub fn prim_coroutine_done(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "coroutine-done?: expected coroutine, got {}",
+                        "coro/done?: expected coroutine, got {}",
                         args[0].type_name()
                     ),
                 ),
@@ -137,7 +134,7 @@ pub fn prim_coroutine_done(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// (coroutine-value co) → value
+/// (coro/value co) → value
 ///
 /// Returns the signal payload from the fiber's last signal.
 pub fn prim_coroutine_value(args: &[Value]) -> (SignalBits, Value) {
@@ -146,7 +143,7 @@ pub fn prim_coroutine_value(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("coroutine-value: expected 1 argument, got {}", args.len()),
+                format!("coro/value: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -159,7 +156,7 @@ pub fn prim_coroutine_value(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "coroutine-value: expected coroutine, got {}",
+                        "coro/value: expected coroutine, got {}",
                         args[0].type_name()
                     ),
                 ),
@@ -171,7 +168,7 @@ pub fn prim_coroutine_value(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, value)
 }
 
-/// (coroutine? val) → bool
+/// (coro? val) → bool
 ///
 /// Returns true if the value is a fiber (coroutines are fibers).
 pub fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
@@ -180,7 +177,7 @@ pub fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("coroutine?: expected 1 argument, got {}", args.len()),
+                format!("coro?: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -188,8 +185,8 @@ pub fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].is_fiber()))
 }
 
-/// (coroutine-resume co) → value
-/// (coroutine-resume co val) → value
+/// (coro/resume co) → value
+/// (coro/resume co val) → value
 ///
 /// Resume a fiber. Returns SIG_RESUME for the VM to handle.
 pub fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
@@ -198,10 +195,7 @@ pub fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!(
-                    "coroutine-resume: expected 1-2 arguments, got {}",
-                    args.len()
-                ),
+                format!("coro/resume: expected 1-2 arguments, got {}", args.len()),
             ),
         );
     }
@@ -214,7 +208,7 @@ pub fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "coroutine-resume: expected coroutine, got {}",
+                        "coro/resume: expected coroutine, got {}",
                         args[0].type_name()
                     ),
                 ),
@@ -232,15 +226,15 @@ pub fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
         }
         FiberStatus::Alive => Some(error_val(
             "error",
-            "coroutine-resume: coroutine is already running",
+            "coro/resume: coroutine is already running",
         )),
         FiberStatus::Dead => Some(error_val(
             "error",
-            "coroutine-resume: cannot resume completed coroutine",
+            "coro/resume: cannot resume completed coroutine",
         )),
         FiberStatus::Error => Some(error_val(
             "error",
-            "coroutine-resume: cannot resume errored coroutine",
+            "coro/resume: cannot resume errored coroutine",
         )),
     });
 
@@ -265,7 +259,7 @@ pub fn prim_yield_from(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// (coroutine->iterator co) → co
+/// (coro/>iterator co) → co
 ///
 /// Identity — fibers are iterable.
 pub fn prim_coroutine_to_iterator(args: &[Value]) -> (SignalBits, Value) {
@@ -274,10 +268,7 @@ pub fn prim_coroutine_to_iterator(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!(
-                    "coroutine->iterator: expected 1 argument, got {}",
-                    args.len()
-                ),
+                format!("coro/>iterator: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -290,7 +281,7 @@ pub fn prim_coroutine_to_iterator(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "type-error",
                 format!(
-                    "coroutine->iterator: expected coroutine, got {}",
+                    "coro/>iterator: expected coroutine, got {}",
                     args[0].type_name()
                 ),
             ),
@@ -335,10 +326,7 @@ mod tests {
         let closure = make_test_closure();
         let (sig, result_val) = prim_make_coroutine(&[closure]);
         assert_eq!(sig, SIG_OK);
-        assert!(
-            result_val.is_fiber(),
-            "make-coroutine should create a fiber"
-        );
+        assert!(result_val.is_fiber(), "coro/new should create a fiber");
         let handle = result_val.as_fiber().unwrap();
         handle.with(|fiber| {
             assert_eq!(fiber.status, FiberStatus::New);

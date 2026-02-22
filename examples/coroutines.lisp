@@ -1,12 +1,12 @@
 ; Coroutines Example - Comprehensive Test Suite
 ;
 ; This example exercises all coroutine functionality in Elle:
-; - make-coroutine: Create a coroutine from a closure
-; - coroutine-resume: Resume execution, optionally passing a value
-; - coroutine-status: Get current state (created/running/suspended/done/error)
-; - coroutine-done?: Check if coroutine has completed
-; - coroutine-value: Get the last yielded/returned value
-; - coroutine?: Type predicate
+; - coro/new: Create a coroutine from a closure
+; - coro/resume: Resume execution, optionally passing a value
+; - coro/status: Get current state (created/running/suspended/done/error)
+; - coro/done?: Check if coroutine has completed
+; - coro/value: Get the last yielded/returned value
+; - coro?: Type predicate
 ; - yield: Suspend execution and return a value
 ; - Generator patterns
 ; - Nested coroutines
@@ -22,15 +22,15 @@
 (display "=== 1. Basic Coroutine Creation ===\n")
 
 (define simple-gen (fn () (yield 42)))
-(define co (make-coroutine simple-gen))
-(assert-true (coroutine? co) "make-coroutine returns a coroutine")
-(assert-eq (coroutine-status co) :created "Initial status is created")
-(assert-eq (coroutine-resume co) 42 "First resume returns yielded value")
-(assert-eq (coroutine-status co) :suspended "Status after yield is suspended")
-(assert-false (coroutine-done? co) "coroutine-done? returns false while suspended")
-(coroutine-resume co)
-(assert-eq (coroutine-status co) :done "Status after completion is done")
-(assert-true (coroutine-done? co) "coroutine-done? returns true after completion")
+(define co (coro/new simple-gen))
+(assert-true (coro? co) "coro/new returns a coroutine")
+(assert-eq (coro/status co) :created "Initial status is created")
+(assert-eq (coro/resume co) 42 "First resume returns yielded value")
+(assert-eq (coro/status co) :suspended "Status after yield is suspended")
+(assert-false (coro/done? co) "coro/done? returns false while suspended")
+(coro/resume co)
+(assert-eq (coro/status co) :done "Status after completion is done")
+(assert-true (coro/done? co) "coro/done? returns true after completion")
 (display "✓ Basic coroutine creation and yield\n")
 
 ; ========================================
@@ -42,12 +42,12 @@
   (yield 1)
   (yield 2)
   (yield 3)))
-(define co-multi (make-coroutine multi-gen))
-(assert-eq (coroutine-resume co-multi) 1 "First yield")
-(assert-eq (coroutine-status co-multi) :suspended "Suspended after yield")
-(assert-eq (coroutine-resume co-multi) 2 "Second yield")
-(assert-eq (coroutine-resume co-multi) 3 "Third yield")
-(assert-eq (coroutine-status co-multi) :suspended "Suspended after final yield")
+(define co-multi (coro/new multi-gen))
+(assert-eq (coro/resume co-multi) 1 "First yield")
+(assert-eq (coro/status co-multi) :suspended "Suspended after yield")
+(assert-eq (coro/resume co-multi) 2 "Second yield")
+(assert-eq (coro/resume co-multi) 3 "Third yield")
+(assert-eq (coro/status co-multi) :suspended "Suspended after final yield")
 (display "✓ Multiple yields work correctly\n")
 
 ; ========================================
@@ -61,15 +61,15 @@
     (yield (+ start 1))
     (yield (+ start 2)))))
 
-(define co-100 (make-coroutine (make-counter 100)))
-(define co-200 (make-coroutine (make-counter 200)))
+(define co-100 (coro/new (make-counter 100)))
+(define co-200 (coro/new (make-counter 200)))
 
-(assert-eq (coroutine-resume co-100) 100 "Counter 100 first")
-(assert-eq (coroutine-resume co-200) 200 "Counter 200 first")
-(assert-eq (coroutine-resume co-100) 101 "Counter 100 second")
-(assert-eq (coroutine-resume co-200) 201 "Counter 200 second")
-(assert-eq (coroutine-resume co-100) 102 "Counter 100 third")
-(assert-eq (coroutine-resume co-200) 202 "Counter 200 third")
+(assert-eq (coro/resume co-100) 100 "Counter 100 first")
+(assert-eq (coro/resume co-200) 200 "Counter 200 first")
+(assert-eq (coro/resume co-100) 101 "Counter 100 second")
+(assert-eq (coro/resume co-200) 201 "Counter 200 second")
+(assert-eq (coro/resume co-100) 102 "Counter 100 third")
+(assert-eq (coro/resume co-200) 202 "Counter 200 third")
 (display "✓ Closure captures preserved across yields\n")
 
 ; ========================================
@@ -79,18 +79,18 @@
 
 (define gen-a (fn () (yield 1) (yield 2) (yield 3)))
 (define gen-b (fn () (yield 10) (yield 20) (yield 30)))
-(define co-a (make-coroutine gen-a))
-(define co-b (make-coroutine gen-b))
+(define co-a (coro/new gen-a))
+(define co-b (coro/new gen-b))
 
 ; Interleave resumes
-(assert-eq (coroutine-resume co-a) 1 "A first")
-(assert-eq (coroutine-resume co-b) 10 "B first")
-(assert-eq (coroutine-status co-a) :suspended "A suspended")
-(assert-eq (coroutine-status co-b) :suspended "B suspended")
-(assert-eq (coroutine-resume co-a) 2 "A second")
-(assert-eq (coroutine-resume co-b) 20 "B second")
-(assert-eq (coroutine-resume co-a) 3 "A third")
-(assert-eq (coroutine-resume co-b) 30 "B third")
+(assert-eq (coro/resume co-a) 1 "A first")
+(assert-eq (coro/resume co-b) 10 "B first")
+(assert-eq (coro/status co-a) :suspended "A suspended")
+(assert-eq (coro/status co-b) :suspended "B suspended")
+(assert-eq (coro/resume co-a) 2 "A second")
+(assert-eq (coro/resume co-b) 20 "B second")
+(assert-eq (coro/resume co-a) 3 "A third")
+(assert-eq (coro/resume co-b) 30 "B third")
 (display "✓ Interleaved coroutines maintain independent state\n")
 
 ; ========================================
@@ -103,15 +103,15 @@
   (yield 'world)
   (yield '(a b c))))
 
-(define co-sym (make-coroutine symbol-gen))
-(define sym1 (coroutine-resume co-sym))
+(define co-sym (coro/new symbol-gen))
+(define sym1 (coro/resume co-sym))
 (assert-true (symbol? sym1) "Yielded symbol is a symbol")
 (assert-eq sym1 'hello "Symbol value is correct")
 
-(define sym2 (coroutine-resume co-sym))
+(define sym2 (coro/resume co-sym))
 (assert-eq sym2 'world "Second symbol correct")
 
-(define lst (coroutine-resume co-sym))
+(define lst (coro/resume co-sym))
 (assert-true (list? lst) "Yielded list is a list")
 (display "✓ Quoted symbols and lists yield correctly\n")
 
@@ -121,13 +121,13 @@
 (display "\n=== 6. Coroutine Value ===\n")
 
 (define val-gen (fn () (yield 10) (yield 20)))
-(define co-val (make-coroutine val-gen))
+(define co-val (coro/new val-gen))
 
-(coroutine-resume co-val)
-(assert-eq (coroutine-value co-val) 10 "Value after first yield")
-(coroutine-resume co-val)
-(assert-eq (coroutine-value co-val) 20 "Value after second yield")
-(display "✓ coroutine-value tracks yielded/returned values\n")
+(coro/resume co-val)
+(assert-eq (coro/value co-val) 10 "Value after first yield")
+(coro/resume co-val)
+(assert-eq (coro/value co-val) 20 "Value after second yield")
+(display "✓ coro/value tracks yielded/returned values\n")
 
 ; ========================================
 ; 7. Yield with expressions
@@ -139,10 +139,10 @@
   (yield (* 4 5))
   (yield (if #t 100 200))))
 
-(define co-expr (make-coroutine expr-gen))
-(assert-eq (coroutine-resume co-expr) 6 "Sum expression")
-(assert-eq (coroutine-resume co-expr) 20 "Product expression")
-(assert-eq (coroutine-resume co-expr) 100 "Conditional expression")
+(define co-expr (coro/new expr-gen))
+(assert-eq (coro/resume co-expr) 6 "Sum expression")
+(assert-eq (coro/resume co-expr) 20 "Product expression")
+(assert-eq (coro/resume co-expr) 100 "Conditional expression")
 (display "✓ Expressions evaluated before yield\n")
 
 ; ========================================
@@ -152,13 +152,13 @@
 
 (define inner-gen (fn () (yield 100) (yield 200)))
 (define outer-gen (fn ()
-  (define inner-co (make-coroutine inner-gen))
-  (yield (coroutine-resume inner-co))
-  (yield (coroutine-resume inner-co))))
+  (define inner-co (coro/new inner-gen))
+  (yield (coro/resume inner-co))
+  (yield (coro/resume inner-co))))
 
-(define co-outer (make-coroutine outer-gen))
-(assert-eq (coroutine-resume co-outer) 100 "Nested inner first")
-(assert-eq (coroutine-resume co-outer) 200 "Nested inner second")
+(define co-outer (coro/new outer-gen))
+(assert-eq (coro/resume co-outer) 100 "Nested inner first")
+(assert-eq (coro/resume co-outer) 200 "Nested inner second")
 (display "✓ Nested coroutines work correctly\n")
 
 ; ========================================
@@ -174,10 +174,10 @@
   (yield 20)
   (yield 30)))
 
-(define co-state (make-coroutine stateful-gen))
-(assert-eq (coroutine-resume co-state) 10 "First yield")
-(assert-eq (coroutine-resume co-state) 20 "Second yield")
-(assert-eq (coroutine-resume co-state) 30 "Third yield")
+(define co-state (coro/new stateful-gen))
+(assert-eq (coro/resume co-state) 10 "First yield")
+(assert-eq (coro/resume co-state) 20 "Second yield")
+(assert-eq (coro/resume co-state) 30 "Third yield")
 (display "✓ Coroutine state management works\n")
 
 ; ========================================
@@ -192,12 +192,12 @@
   (yield 3)
   (yield 4)))
 
-(define counter (make-coroutine count-gen))
-(assert-eq (coroutine-resume counter) 0 "Count 0")
-(assert-eq (coroutine-resume counter) 1 "Count 1")
-(assert-eq (coroutine-resume counter) 2 "Count 2")
-(assert-eq (coroutine-resume counter) 3 "Count 3")
-(assert-eq (coroutine-resume counter) 4 "Count 4")
+(define counter (coro/new count-gen))
+(assert-eq (coro/resume counter) 0 "Count 0")
+(assert-eq (coro/resume counter) 1 "Count 1")
+(assert-eq (coro/resume counter) 2 "Count 2")
+(assert-eq (coro/resume counter) 3 "Count 3")
+(assert-eq (coro/resume counter) 4 "Count 4")
 (display "✓ Generator pattern works\n")
 
 ; ========================================
@@ -214,14 +214,14 @@
   (yield 5)
   (yield 8)))
 
-(define fibs (make-coroutine fib-gen))
-(assert-eq (coroutine-resume fibs) 0 "Fib 0")
-(assert-eq (coroutine-resume fibs) 1 "Fib 1")
-(assert-eq (coroutine-resume fibs) 1 "Fib 2")
-(assert-eq (coroutine-resume fibs) 2 "Fib 3")
-(assert-eq (coroutine-resume fibs) 3 "Fib 4")
-(assert-eq (coroutine-resume fibs) 5 "Fib 5")
-(assert-eq (coroutine-resume fibs) 8 "Fib 6")
+(define fibs (coro/new fib-gen))
+(assert-eq (coro/resume fibs) 0 "Fib 0")
+(assert-eq (coro/resume fibs) 1 "Fib 1")
+(assert-eq (coro/resume fibs) 1 "Fib 2")
+(assert-eq (coro/resume fibs) 2 "Fib 3")
+(assert-eq (coro/resume fibs) 3 "Fib 4")
+(assert-eq (coro/resume fibs) 5 "Fib 5")
+(assert-eq (coro/resume fibs) 8 "Fib 6")
 (display "✓ Fibonacci sequence works\n")
 
 ; ========================================
@@ -229,12 +229,12 @@
 ; ========================================
 (display "\n=== 12. Type Predicate ===\n")
 
-(define test-co (make-coroutine (fn () (yield 1))))
-(assert-true (coroutine? test-co) "Coroutine is a coroutine")
-(assert-false (coroutine? 42) "Number is not a coroutine")
-(assert-false (coroutine? (fn () 1)) "Function is not a coroutine")
-(assert-false (coroutine? '()) "Empty list is not a coroutine")
-(display "✓ coroutine? predicate works\n")
+(define test-co (coro/new (fn () (yield 1))))
+(assert-true (coro? test-co) "Coroutine is a coroutine")
+(assert-false (coro? 42) "Number is not a coroutine")
+(assert-false (coro? (fn () 1)) "Function is not a coroutine")
+(assert-false (coro? '()) "Empty list is not a coroutine")
+(display "✓ coro? predicate works\n")
 
 ; ========================================
 ; Summary
@@ -271,7 +271,7 @@
 (display "  - Generators produce sequences of values\n")
 (display "  - Coroutines maintain independent state\n")
 (display "  - Multiple coroutines can run interleaved\n")
-(display "  - coroutine-done? detects completion\n")
+(display "  - coro/done? detects completion\n")
 (display "  - Nested coroutines enable complex patterns\n")
 
 (display "\n")
@@ -296,22 +296,22 @@
   (yield 3)
   (yield 4)))
 
-(define range-co (make-coroutine simple-range-gen))
+(define range-co (coro/new simple-range-gen))
 
 (display "Range generator (0-4):\n")
 (display "  ")
-(display (coroutine-resume range-co))
+(display (coro/resume range-co))
 (display " ")
-(display (coroutine-resume range-co))
+(display (coro/resume range-co))
 (display " ")
-(display (coroutine-resume range-co))
+(display (coro/resume range-co))
 (display " ")
-(display (coroutine-resume range-co))
+(display (coro/resume range-co))
 (display " ")
-(display (coroutine-resume range-co))
+(display (coro/resume range-co))
 (newline)
 
-(assert-eq (coroutine-status range-co) :suspended "Range generator status")
+(assert-eq (coro/status range-co) :suspended "Range generator status")
 
 (display "✓ Range generator pattern works\n")
 
@@ -330,28 +330,28 @@
   (yield 8)
   (yield 13)))
 
-(define fib-co-extended (make-coroutine fib-gen-extended))
+(define fib-co-extended (coro/new fib-gen-extended))
 
 (display "Fibonacci sequence:\n")
 (display "  ")
-(display (coroutine-resume fib-co-extended))
+(display (coro/resume fib-co-extended))
 (display " ")
-(display (coroutine-resume fib-co-extended))
+(display (coro/resume fib-co-extended))
 (display " ")
-(display (coroutine-resume fib-co-extended))
+(display (coro/resume fib-co-extended))
 (display " ")
-(display (coroutine-resume fib-co-extended))
+(display (coro/resume fib-co-extended))
 (display " ")
-(display (coroutine-resume fib-co-extended))
+(display (coro/resume fib-co-extended))
 (display " ")
-(display (coroutine-resume fib-co-extended))
+(display (coro/resume fib-co-extended))
 (display " ")
-(display (coroutine-resume fib-co-extended))
+(display (coro/resume fib-co-extended))
 (display " ")
-(display (coroutine-resume fib-co-extended))
+(display (coro/resume fib-co-extended))
 (newline)
 
-(assert-eq (coroutine-status fib-co-extended) :suspended "Fibonacci generator status")
+(assert-eq (coro/status fib-co-extended) :suspended "Fibonacci generator status")
 
 (display "✓ Fibonacci generator pattern works\n")
 
@@ -365,27 +365,27 @@
   (yield 200)))
 
 (define outer-nested-gen (fn ()
-  (define inner-co-nested (make-coroutine inner-nested-gen))
-  (yield (coroutine-resume inner-co-nested))
-  (yield (coroutine-resume inner-co-nested))
+  (define inner-co-nested (coro/new inner-nested-gen))
+  (yield (coro/resume inner-co-nested))
+  (yield (coro/resume inner-co-nested))
   (yield 300)))
 
-(define nested-co-adv (make-coroutine outer-nested-gen))
+(define nested-co-adv (coro/new outer-nested-gen))
 
 (display "Nested coroutines:\n")
 (display "  Inner first: ")
-(display (coroutine-resume nested-co-adv))
+(display (coro/resume nested-co-adv))
 (newline)
 
 (display "  Inner second: ")
-(display (coroutine-resume nested-co-adv))
+(display (coro/resume nested-co-adv))
 (newline)
 
 (display "  Outer: ")
-(display (coroutine-resume nested-co-adv))
+(display (coro/resume nested-co-adv))
 (newline)
 
-(assert-eq (coroutine-status nested-co-adv) :suspended "Nested coroutine status")
+(assert-eq (coro/status nested-co-adv) :suspended "Nested coroutine status")
 
 (display "✓ Nested coroutines work correctly\n")
 
@@ -404,30 +404,30 @@
   (yield 'b2)
   (yield 'b3)))
 
-(define co-a-adv (make-coroutine gen-a-adv))
-(define co-b-adv (make-coroutine gen-b-adv))
+(define co-a-adv (coro/new gen-a-adv))
+(define co-b-adv (coro/new gen-b-adv))
 
 (display "Interleaving two coroutines:\n")
 (display "  A: ")
-(display (coroutine-resume co-a-adv))
+(display (coro/resume co-a-adv))
 (display ", B: ")
-(display (coroutine-resume co-b-adv))
+(display (coro/resume co-b-adv))
 (newline)
 
 (display "  A: ")
-(display (coroutine-resume co-a-adv))
+(display (coro/resume co-a-adv))
 (display ", B: ")
-(display (coroutine-resume co-b-adv))
+(display (coro/resume co-b-adv))
 (newline)
 
 (display "  A: ")
-(display (coroutine-resume co-a-adv))
+(display (coro/resume co-a-adv))
 (display ", B: ")
-(display (coroutine-resume co-b-adv))
+(display (coro/resume co-b-adv))
 (newline)
 
-(assert-eq (coroutine-status co-a-adv) :suspended "Coroutine A status")
-(assert-eq (coroutine-status co-b-adv) :suspended "Coroutine B status")
+(assert-eq (coro/status co-a-adv) :suspended "Coroutine A status")
+(assert-eq (coro/status co-b-adv) :suspended "Coroutine B status")
 
 (display "✓ Interleaving coroutines works\n")
 
@@ -442,26 +442,26 @@
   (yield 30)
   (yield 40)))
 
-(define state-co-adv (make-coroutine stateful-gen-adv))
+(define state-co-adv (coro/new stateful-gen-adv))
 
 (display "Coroutine state tracking:\n")
 
-(coroutine-resume state-co-adv)
+(coro/resume state-co-adv)
 (display "  After first yield, value: ")
-(display (coroutine-value state-co-adv))
+(display (coro/value state-co-adv))
 (newline)
 
-(coroutine-resume state-co-adv)
+(coro/resume state-co-adv)
 (display "  After second yield, value: ")
-(display (coroutine-value state-co-adv))
+(display (coro/value state-co-adv))
 (newline)
 
-(coroutine-resume state-co-adv)
+(coro/resume state-co-adv)
 (display "  After third yield, value: ")
-(display (coroutine-value state-co-adv))
+(display (coro/value state-co-adv))
 (newline)
 
-(assert-eq (coroutine-value state-co-adv) 30 "Coroutine value tracking")
+(assert-eq (coro/value state-co-adv) 30 "Coroutine value tracking")
 
 (display "✓ Coroutine state tracking works\n")
 
@@ -475,31 +475,31 @@
   (yield 2)
   (yield 3)))
 
-(define co-1-adv (make-coroutine shared-gen-adv))
-(define co-2-adv (make-coroutine shared-gen-adv))
-(define co-3-adv (make-coroutine shared-gen-adv))
+(define co-1-adv (coro/new shared-gen-adv))
+(define co-2-adv (coro/new shared-gen-adv))
+(define co-3-adv (coro/new shared-gen-adv))
 
 (display "Three independent coroutines:\n")
 
 (display "  CO1: ")
-(display (coroutine-resume co-1-adv))
+(display (coro/resume co-1-adv))
 (display ", CO2: ")
-(display (coroutine-resume co-2-adv))
+(display (coro/resume co-2-adv))
 (display ", CO3: ")
-(display (coroutine-resume co-3-adv))
+(display (coro/resume co-3-adv))
 (newline)
 
 (display "  CO1: ")
-(display (coroutine-resume co-1-adv))
+(display (coro/resume co-1-adv))
 (display ", CO2: ")
-(display (coroutine-resume co-2-adv))
+(display (coro/resume co-2-adv))
 (display ", CO3: ")
-(display (coroutine-resume co-3-adv))
+(display (coro/resume co-3-adv))
 (newline)
 
-(assert-eq (coroutine-status co-1-adv) :suspended "CO1 status")
-(assert-eq (coroutine-status co-2-adv) :suspended "CO2 status")
-(assert-eq (coroutine-status co-3-adv) :suspended "CO3 status")
+(assert-eq (coro/status co-1-adv) :suspended "CO1 status")
+(assert-eq (coro/status co-2-adv) :suspended "CO2 status")
+(assert-eq (coro/status co-3-adv) :suspended "CO3 status")
 
 (display "✓ Multiple independent coroutines work\n")
 
@@ -512,29 +512,29 @@
   (yield 1)
   (yield 2)))
 
-(define short-co-adv (make-coroutine short-gen-adv))
+(define short-co-adv (coro/new short-gen-adv))
 
 (display "Detecting coroutine completion:\n")
 
 (display "  First resume: ")
-(display (coroutine-resume short-co-adv))
+(display (coro/resume short-co-adv))
 (display ", done? ")
-(display (coroutine-done? short-co-adv))
+(display (coro/done? short-co-adv))
 (newline)
 
 (display "  Second resume: ")
-(display (coroutine-resume short-co-adv))
+(display (coro/resume short-co-adv))
 (display ", done? ")
-(display (coroutine-done? short-co-adv))
+(display (coro/done? short-co-adv))
 (newline)
 
 (display "  After completion: ")
-(coroutine-resume short-co-adv)
+(coro/resume short-co-adv)
 (display "done? ")
-(display (coroutine-done? short-co-adv))
+(display (coro/done? short-co-adv))
 (newline)
 
-(assert-true (coroutine-done? short-co-adv) "Coroutine completion detection")
+(assert-true (coro/done? short-co-adv) "Coroutine completion detection")
 
 (display "✓ Coroutine completion detection works\n")
 
@@ -550,22 +550,22 @@
   (yield 3)
   (yield 4)))
 
-(define counter-adv (make-coroutine count-gen-adv))
+(define counter-adv (coro/new count-gen-adv))
 
 (display "Counting generator:\n")
 (display "  ")
-(display (coroutine-resume counter-adv))
+(display (coro/resume counter-adv))
 (display " ")
-(display (coroutine-resume counter-adv))
+(display (coro/resume counter-adv))
 (display " ")
-(display (coroutine-resume counter-adv))
+(display (coro/resume counter-adv))
 (display " ")
-(display (coroutine-resume counter-adv))
+(display (coro/resume counter-adv))
 (display " ")
-(display (coroutine-resume counter-adv))
+(display (coro/resume counter-adv))
 (newline)
 
-(assert-eq (coroutine-status counter-adv) :suspended "Counter status")
+(assert-eq (coro/status counter-adv) :suspended "Counter status")
 
 (display "✓ Counting generator works\n")
 
@@ -581,21 +581,21 @@
   (yield 'd)
   (yield 'e)))
 
-(define alpha-co (make-coroutine alpha-gen))
+(define alpha-co (coro/new alpha-gen))
 
 (display "Alphabet generator:\n")
 (display "  ")
-(display (coroutine-resume alpha-co))
+(display (coro/resume alpha-co))
 (display " ")
-(display (coroutine-resume alpha-co))
+(display (coro/resume alpha-co))
 (display " ")
-(display (coroutine-resume alpha-co))
+(display (coro/resume alpha-co))
 (display " ")
-(display (coroutine-resume alpha-co))
+(display (coro/resume alpha-co))
 (display " ")
-(display (coroutine-resume alpha-co))
+(display (coro/resume alpha-co))
 (newline)
 
-(assert-eq (coroutine-status alpha-co) :suspended "Alphabet generator status")
+(assert-eq (coro/status alpha-co) :suspended "Alphabet generator status")
 
 (display "✓ Alphabet generator works\n")

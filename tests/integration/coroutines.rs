@@ -86,11 +86,11 @@ fn collect_list_ints(value: &Value) -> Vec<i64> {
 #[test]
 fn test_simple_yield() {
     // (define co (make-coroutine (fn () (yield 42))))
-    // (coroutine-resume co) => 42
+    // (coro/resume co) => 42
     let result = eval(
         r#"
         (define co (make-coroutine (fn () (yield 42))))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(42));
@@ -107,10 +107,10 @@ fn test_multiple_yields() {
         r#"
         (define co (make-coroutine (fn () (yield 1) (yield 2) (yield 3) 4)))
         (list
-          (coroutine-resume co)
-          (coroutine-resume co)
-          (coroutine-resume co)
-          (coroutine-resume co))
+          (coro/resume co)
+          (coro/resume co)
+          (coro/resume co)
+          (coro/resume co))
         "#,
     );
     assert!(result.is_ok(), "Multiple yields should work");
@@ -125,14 +125,14 @@ fn test_multiple_yields() {
 #[test]
 fn test_yield_with_resume_value() {
     // (define co (make-coroutine (fn () (+ 10 (yield 1)))))
-    // (coroutine-resume co) => 1
-    // (coroutine-resume co 5) => 15
+    // (coro/resume co) => 1
+    // (coro/resume co 5) => 15
     let result = eval(
         r#"
         (define co (make-coroutine (fn () (+ 10 (yield 1)))))
         (list
-          (coroutine-resume co)
-          (coroutine-resume co 5))
+          (coro/resume co)
+          (coro/resume co 5))
         "#,
     );
     assert!(result.is_ok(), "Resume with value should work");
@@ -154,7 +154,7 @@ fn test_coroutine_status_created() {
     let result = eval(
         r#"
         (define co (make-coroutine (fn () 42)))
-        (keyword->string (coroutine-status co))
+        (keyword->string (coro/status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("created"));
@@ -166,8 +166,8 @@ fn test_coroutine_status_done() {
     let result = eval(
         r#"
         (define co (make-coroutine (fn () 42)))
-        (coroutine-resume co)
-        (keyword->string (coroutine-status co))
+        (coro/resume co)
+        (keyword->string (coro/status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("done"));
@@ -175,13 +175,13 @@ fn test_coroutine_status_done() {
 
 #[test]
 fn test_coroutine_done_predicate() {
-    // (coroutine-done? co) should return #f initially, #t after completion
+    // (coro/done? co) should return #f initially, #t after completion
     let result = eval(
         r#"
          (define co (make-coroutine (fn () 42)))
          (list
-           (coroutine-done? co)
-           (begin (coroutine-resume co) (coroutine-done? co)))
+           (coro/done? co)
+           (begin (coro/resume co) (coro/done? co)))
          "#,
     );
     assert!(result.is_ok());
@@ -200,8 +200,8 @@ fn test_resume_done_coroutine_fails() {
     let result = eval(
         r#"
         (define co (make-coroutine (fn () 42)))
-        (coroutine-resume co)
-        (coroutine-resume co)
+        (coro/resume co)
+        (coro/resume co)
         "#,
     );
     assert!(result.is_err());
@@ -212,12 +212,12 @@ fn test_resume_done_coroutine_fails() {
 
 #[test]
 fn test_coroutine_value_after_yield() {
-    // (coroutine-value co) should return the last yielded value
+    // (coro/value co) should return the last yielded value
     let result = eval(
         r#"
         (define co (make-coroutine (fn () (yield 42))))
-        (coroutine-resume co)
-        (coroutine-value co)
+        (coro/resume co)
+        (coro/value co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(42));
@@ -254,7 +254,7 @@ fn test_yielding_function_detected() {
            (yield 1)
            (yield 2)))
          (define co (make-coroutine gen))
-         (coroutine-resume co)
+         (coro/resume co)
          "#,
     );
     assert_eq!(result.unwrap(), Value::int(1));
@@ -271,7 +271,7 @@ fn test_calling_yielding_function_propagates_effect() {
            (f)
            (yield 2)))
          (define co (make-coroutine g))
-         (coroutine-resume co)
+         (coro/resume co)
          "#,
     );
     // Should yield 1 from f, then 2 from g
@@ -297,7 +297,7 @@ fn test_yield_from_basic() {
         (define inner (fn () (yield 1) (yield 2)))
         (define outer (fn () (yield-from (make-coroutine inner)) (yield 3)))
         (define co (make-coroutine outer))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert!(
@@ -314,7 +314,7 @@ fn test_yield_from_completion() {
         (define inner (fn () (yield 1) 42))
         (define outer (fn () (yield-from (make-coroutine inner))))
         (define co (make-coroutine outer))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert!(
@@ -346,12 +346,12 @@ fn test_coroutine_as_iterator() {
 
 #[test]
 fn test_coroutine_to_iterator() {
-    // (coroutine->iterator co) should convert a coroutine to an iterator
+    // (coro/>iterator co) should convert a coroutine to an iterator
     let result = eval(
         r#"
         (define co (make-coroutine (fn () (yield 1))))
-        (define iter (coroutine->iterator co))
-        (coroutine? iter)
+        (define iter (coro/>iterator co))
+        (coro? iter)
         "#,
     );
     assert_eq!(result.unwrap(), Value::bool(true));
@@ -369,9 +369,9 @@ fn test_nested_coroutines() {
         (define inner-gen (fn () (yield 10)))
         (define outer-gen (fn ()
           (define inner-co (make-coroutine inner-gen))
-          (yield (coroutine-resume inner-co))))
+          (yield (coro/resume inner-co))))
         (define co (make-coroutine outer-gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(10));
@@ -385,12 +385,12 @@ fn test_nested_coroutines_multiple_levels() {
         (define level3 (fn () (yield 3)))
         (define level2 (fn ()
           (define co3 (make-coroutine level3))
-          (yield (coroutine-resume co3))))
+          (yield (coro/resume co3))))
         (define level1 (fn ()
           (define co2 (make-coroutine level2))
-          (yield (coroutine-resume co2))))
+          (yield (coro/resume co2))))
         (define co1 (make-coroutine level1))
-        (coroutine-resume co1)
+        (coro/resume co1)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(3));
@@ -409,7 +409,7 @@ fn test_coroutine_with_captured_variables() {
         r#"
         (let ((x 10))
           (define co (make-coroutine (fn () (yield x))))
-          (coroutine-resume co))
+          (coro/resume co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(10));
@@ -422,7 +422,7 @@ fn test_coroutine_with_multiple_captured_variables() {
         r#"
         (let ((x 10) (y 20))
           (define co (make-coroutine (fn () (yield (+ x y)))))
-          (coroutine-resume co))
+          (coro/resume co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(30));
@@ -437,7 +437,7 @@ fn test_coroutine_captures_mutable_state() {
           (define co (make-coroutine (fn ()
             (box-set! counter (+ (unbox counter) 1))
             (yield (unbox counter)))))
-          (coroutine-resume co))
+          (coro/resume co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(1));
@@ -461,9 +461,9 @@ fn test_closure_captured_var_after_resume_issue_258() {
             (yield (+ start 2)))))
         (define co-100 (make-coroutine (make-counter 100)))
         (list
-          (coroutine-resume co-100)
-          (coroutine-resume co-100)
-          (coroutine-resume co-100))
+          (coro/resume co-100)
+          (coro/resume co-100)
+          (coro/resume co-100))
         "#,
     );
     assert!(result.is_ok());
@@ -488,12 +488,12 @@ fn test_interleaved_coroutines_issue_259() {
         (define co-100 (make-coroutine (make-counter 100)))
         (define co-200 (make-coroutine (make-counter 200)))
         (list
-          (coroutine-resume co-100)
-          (coroutine-resume co-200)
-          (coroutine-resume co-100)
-          (coroutine-resume co-200)
-          (coroutine-resume co-100)
-          (coroutine-resume co-200))
+          (coro/resume co-100)
+          (coro/resume co-200)
+          (coro/resume co-100)
+          (coro/resume co-200)
+          (coro/resume co-100)
+          (coro/resume co-200))
         "#,
     );
     assert!(result.is_ok());
@@ -506,8 +506,8 @@ fn test_coroutine_status_suspended_after_yield() {
         r#"
         (define gen (fn () (yield 1) (yield 2)))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
-        (keyword->string (coroutine-status co))
+        (coro/resume co)
+        (keyword->string (coro/status co))
         "#,
     );
     assert_eq!(
@@ -527,8 +527,8 @@ fn test_coroutine_state_after_error_during_resume() {
           (yield 1)
           (/ 1 0)))
         (define co (make-coroutine bad-gen))
-        (coroutine-resume co)
-        (coroutine-resume co)
+        (coro/resume co)
+        (coro/resume co)
         "#,
     );
     // The second resume should error (division by zero)
@@ -544,10 +544,10 @@ fn test_coroutine_state_error_not_running_after_failure() {
           (yield 1)
           (undefined-variable-that-does-not-exist)))
         (define co (make-coroutine bad-gen))
-        (coroutine-resume co)
-        (let ((f (fiber/new (fn () (coroutine-resume co)) 1)))
+        (coro/resume co)
+        (let ((f (fiber/new (fn () (coro/resume co)) 1)))
           (fiber/resume f))
-        (keyword->string (coroutine-status co))
+        (keyword->string (coro/status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("error"));
@@ -563,14 +563,14 @@ fn test_multiple_coroutines_independent_state() {
         (define co1 (make-coroutine gen1))
         (define co2 (make-coroutine gen2))
         (list
-          (coroutine-status co1)
-          (coroutine-status co2)
-          (coroutine-resume co1)
-          (coroutine-status co1)
-          (coroutine-status co2)
-          (coroutine-resume co2)
-          (coroutine-status co1)
-          (coroutine-status co2))
+          (coro/status co1)
+          (coro/status co2)
+          (coro/resume co1)
+          (coro/status co1)
+          (coro/status co2)
+          (coro/resume co2)
+          (coro/status co1)
+          (coro/status co2))
         "#,
     );
     assert!(result.is_ok());
@@ -585,12 +585,12 @@ fn test_nested_coroutine_resume_from_coroutine() {
         (define inner-gen (fn () (yield 10) (yield 20)))
         (define outer-gen (fn ()
           (define inner-co (make-coroutine inner-gen))
-          (yield (+ 1 (coroutine-resume inner-co)))
-          (yield (+ 1 (coroutine-resume inner-co)))))
+          (yield (+ 1 (coro/resume inner-co)))
+          (yield (+ 1 (coro/resume inner-co)))))
         (define outer-co (make-coroutine outer-gen))
         (list
-          (coroutine-resume outer-co)
-          (coroutine-resume outer-co))
+          (coro/resume outer-co)
+          (coro/resume outer-co))
         "#,
     );
     assert!(result.is_ok());
@@ -605,9 +605,9 @@ fn test_coroutine_state_not_stuck_running_on_cps_error() {
           (+ undefined-at-start 1)
           (yield 1)))
         (define co (make-coroutine bad-start-gen))
-        (let ((f (fiber/new (fn () (coroutine-resume co)) 1)))
+        (let ((f (fiber/new (fn () (coro/resume co)) 1)))
           (fiber/resume f))
-        (keyword->string (coroutine-status co))
+        (keyword->string (coro/status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("error"));
@@ -623,7 +623,7 @@ fn test_error_in_coroutine() {
     let result = eval(
         r#"
         (define co (make-coroutine (fn () (/ 1 0))))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert!(result.is_err());
@@ -635,9 +635,9 @@ fn test_error_in_coroutine_status() {
     let result = eval(
         r#"
         (define co (make-coroutine (fn () (/ 1 0))))
-        (let ((f (fiber/new (fn () (coroutine-resume co)) 1)))
+        (let ((f (fiber/new (fn () (coro/resume co)) 1)))
           (fiber/resume f))
-        (keyword->string (coroutine-status co))
+        (keyword->string (coro/status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("error"));
@@ -649,7 +649,7 @@ fn test_cannot_resume_errored_coroutine() {
     let result = eval(
         r#"
         (define co (make-coroutine (fn () (/ 1 0))))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert!(result.is_err());
@@ -661,14 +661,14 @@ fn test_cannot_resume_errored_coroutine() {
 
 #[test]
 fn test_coroutine_predicate() {
-    // (coroutine? val) should return #t for coroutines
+    // (coro? val) should return #t for coroutines
     let result = eval(
         r#"
          (define co (make-coroutine (fn () 42)))
          (list
-           (coroutine? co)
-           (coroutine? 42)
-           (coroutine? (fn () 42)))
+           (coro? co)
+           (coro? 42)
+           (coro? (fn () 42)))
          "#,
     );
     assert!(result.is_ok());
@@ -690,7 +690,7 @@ fn test_coroutine_with_recursion() {
               (yield n)
               (countdown (- n 1))))))
         (define co (make-coroutine (fn () (countdown 3))))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     // Should yield 3
@@ -704,7 +704,7 @@ fn test_coroutine_with_higher_order_functions() {
         r#"
         (define co (make-coroutine (fn ()
           (yield (map (fn (x) (* x 2)) (list 1 2 3))))))
-         (coroutine-resume co)
+         (coro/resume co)
         "#,
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -720,7 +720,7 @@ fn test_coroutine_with_no_yield() {
     let result = eval(
         r#"
         (define co (make-coroutine (fn () 42)))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(42));
@@ -732,7 +732,7 @@ fn test_coroutine_with_nil_yield() {
     let result = eval(
         r#"
         (define co (make-coroutine (fn () (yield nil))))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::NIL);
@@ -745,7 +745,7 @@ fn test_coroutine_with_complex_yielded_value() {
         r#"
         (define co (make-coroutine (fn ()
           (yield (list 1 2 3)))))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert!(result.is_ok());
@@ -757,7 +757,7 @@ fn test_coroutine_with_empty_body() {
     let result = eval(
         r#"
          (define co (make-coroutine (fn () nil)))
-         (coroutine-resume co)
+         (coro/resume co)
          "#,
     );
     assert_eq!(result.unwrap(), Value::NIL);
@@ -778,7 +778,7 @@ fn test_cps_simple_yield() {
         r#"
         (define gen (fn () (yield 42)))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(42));
@@ -794,7 +794,7 @@ fn test_cps_yield_in_if() {
                 (yield 1)
                 (yield 2))))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(1));
@@ -810,7 +810,7 @@ fn test_cps_yield_in_else() {
                 (yield 1)
                 (yield 2))))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(2));
@@ -826,7 +826,7 @@ fn test_cps_yield_in_begin() {
                 (yield 1)
                 (yield 2))))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(1));
@@ -840,7 +840,7 @@ fn test_cps_yield_with_computation() {
         (define gen (fn ()
             (yield (+ 10 20 12))))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(42));
@@ -855,7 +855,7 @@ fn test_cps_yield_in_let() {
             (let ((x 10))
                 (yield x))))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(10));
@@ -869,7 +869,7 @@ fn test_cps_yield_with_captured_var() {
         (let ((x 42))
             (define gen (fn () (yield x)))
             (define co (make-coroutine gen))
-            (coroutine-resume co))
+            (coro/resume co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(42));
@@ -883,7 +883,7 @@ fn test_cps_yield_in_and() {
         (define gen (fn ()
             (and #t (yield 42))))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(42));
@@ -897,7 +897,7 @@ fn test_cps_yield_in_or() {
         (define gen (fn ()
             (or #f (yield 42))))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(42));
@@ -914,7 +914,7 @@ fn test_cps_yield_in_cond() {
                 (#t (yield 2))
                 (else (yield 3)))))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert_eq!(result.unwrap(), Value::int(2));
@@ -931,7 +931,7 @@ fn test_coroutine_with_large_yielded_value() {
         r#"
         (define co (make-coroutine (fn ()
           (yield (list 1 2 3 4 5 6 7 8 9 10)))))
-         (coroutine-resume co)
+         (coro/resume co)
          "#,
     );
     assert!(result.is_ok());
@@ -945,8 +945,8 @@ fn test_multiple_coroutines_independent() {
          (define co1 (make-coroutine (fn () (yield 1))))
          (define co2 (make-coroutine (fn () (yield 2))))
          (list
-           (coroutine-resume co1)
-           (coroutine-resume co2))
+           (coro/resume co1)
+           (coro/resume co2))
          "#,
     );
     assert!(result.is_ok());
@@ -966,9 +966,9 @@ fn test_yield_quoted_symbol_issue_260() {
         (define gen-sym (fn () (yield 'a) (yield 'b) (yield 'c)))
         (define co (make-coroutine gen-sym))
         (list
-          (coroutine-resume co)
-          (coroutine-resume co)
-          (coroutine-resume co))
+          (coro/resume co)
+          (coro/resume co)
+          (coro/resume co))
         "#,
     );
     assert!(result.is_ok());
@@ -982,7 +982,7 @@ fn test_yield_quoted_symbol_is_value_not_variable() {
         r#"
         (define gen (fn () (yield 'test-symbol)))
         (define co (make-coroutine gen))
-        (define result (coroutine-resume co))
+        (define result (coro/resume co))
         (symbol? result)
         "#,
     );
@@ -1007,11 +1007,11 @@ fn test_yield_various_literal_types() {
           (yield nil)))
         (define co (make-coroutine gen))
         (list
-          (symbol? (coroutine-resume co))
-          (number? (coroutine-resume co))
-          (string? (coroutine-resume co))
-          (coroutine-resume co)
-          (coroutine-resume co))
+          (symbol? (coro/resume co))
+          (number? (coro/resume co))
+          (string? (coro/resume co))
+          (coro/resume co)
+          (coro/resume co))
         "#,
     );
     assert!(result.is_ok());
@@ -1024,7 +1024,7 @@ fn test_yield_quoted_list() {
         r#"
         (define gen (fn () (yield '(1 2 3))))
         (define co (make-coroutine gen))
-        (coroutine-resume co)
+        (coro/resume co)
         "#,
     );
     assert!(result.is_ok());
@@ -1043,8 +1043,8 @@ fn test_yield_with_intermediate_values_on_stack() {
         r#"
         (define co (make-coroutine (fn () (+ 1 (yield 2) 3))))
         (list
-          (coroutine-resume co)
-          (coroutine-resume co 10))
+          (coro/resume co)
+          (coro/resume co 10))
         "#,
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -1062,8 +1062,8 @@ fn test_yield_with_multiple_intermediate_values() {
         r#"
         (define co (make-coroutine (fn () (+ 1 2 (yield 3) 4 5))))
         (list
-          (coroutine-resume co)
-          (coroutine-resume co 100))
+          (coro/resume co)
+          (coro/resume co 100))
         "#,
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -1084,8 +1084,8 @@ fn test_yield_in_nested_call_with_intermediate_values() {
         r#"
         (define co (make-coroutine (fn () (* 2 (+ 1 (yield 5) 3)))))
         (list
-          (coroutine-resume co)
-          (coroutine-resume co 10))
+          (coro/resume co)
+          (coro/resume co 10))
         "#,
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -1108,9 +1108,9 @@ fn test_multiple_yields_with_intermediate_values() {
           (+ (+ 1 (yield 2) 3)
              (+ 4 (yield 5) 6)))))
         (list
-          (coroutine-resume co)
-          (coroutine-resume co 10)
-          (coroutine-resume co 20))
+          (coro/resume co)
+          (coro/resume co 10)
+          (coro/resume co 20))
         "#,
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -1137,7 +1137,7 @@ fn test_make_coroutine_pure_closure_still_works() {
     let result = eval(
         r#"
         (let ((co (make-coroutine (fn () 42))))
-          (coroutine-resume co))
+          (coro/resume co))
         "#,
     );
     assert!(
@@ -1153,7 +1153,7 @@ fn test_make_coroutine_yielding_closure_works() {
     let result = eval(
         r#"
         (let ((co (make-coroutine (fn () (yield 42)))))
-          (coroutine-resume co))
+          (coro/resume co))
         "#,
     );
     assert!(result.is_ok());
@@ -1167,8 +1167,8 @@ fn test_coroutine_resume_pure_closure_completes_immediately() {
         r#"
         (define co (make-coroutine (fn () (+ 1 2 3))))
         (list
-          (coroutine-resume co)
-          (keyword->string (coroutine-status co)))
+          (coro/resume co)
+          (keyword->string (coro/status co)))
         "#,
     );
     assert!(result.is_ok());
@@ -1199,7 +1199,7 @@ fn test_yield_across_three_call_levels() {
         (define b (fn (x) (+ (a x) 1)))
         (define c (fn (x) (+ (b x) 1)))
         (define co (make-coroutine (fn () (c 10))))
-        (list (coroutine-resume co) (coroutine-resume co 20))
+        (list (coro/resume co) (coro/resume co 20))
         "#,
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -1219,10 +1219,10 @@ fn test_yield_in_tail_position() {
           (yield 1)
           (yield 2))))
         (list
-          (coroutine-resume co)
-          (coroutine-resume co)
-          (coroutine-resume co)
-          (coroutine-status co))
+          (coro/resume co)
+          (coro/resume co)
+          (coro/resume co)
+          (coro/status co))
         "#,
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -1245,10 +1245,10 @@ fn test_deep_call_chain_with_multiple_yields() {
           "done"))
         (define co (make-coroutine level1))
         (list
-          (coroutine-resume co)
-          (coroutine-resume co)
-          (coroutine-resume co)
-          (coroutine-resume co))
+          (coro/resume co)
+          (coro/resume co)
+          (coro/resume co)
+          (coro/resume co))
         "#,
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);

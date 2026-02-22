@@ -97,7 +97,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 6. **Yield is a block terminator, not an instruction.** `Terminator::Yield`
    splits the block: the current block ends with yield, and a new resume block
    begins. The resume block starts with `LoadResumeValue` to capture the value
-   passed to `coroutine-resume`.
+   passed to `coro/resume`.
 
 ## Key instructions
 

@@ -77,7 +77,7 @@ proptest! {
                 (define co (make-coroutine gen))
                 (list {}))"#,
             gen_body,
-            (0..=n).map(|_| "(coroutine-resume co)".to_string()).collect::<Vec<_>>().join(" ")
+            (0..=n).map(|_| "(coro/resume co)".to_string()).collect::<Vec<_>>().join(" ")
         );
 
         let result = eval(&code);
@@ -119,9 +119,9 @@ proptest! {
         }
 
         // Build resume calls: first one starts, then n-1 with values, then final
-        let mut resume_calls = String::from("(coroutine-resume co) "); // Start
+        let mut resume_calls = String::from("(coro/resume co) "); // Start
         for v in &resume_values[..n.saturating_sub(1)] {
-            resume_calls.push_str(&format!("(coroutine-resume co {}) ", v));
+            resume_calls.push_str(&format!("(coro/resume co {}) ", v));
         }
         // Final resume gets the return value
         let final_value = resume_values.last().copied().unwrap_or(0);
@@ -133,7 +133,7 @@ proptest! {
                         (begin {} acc))))
                 (define co (make-coroutine gen))
                 {}
-                (coroutine-resume co {}))"#,
+                (coro/resume co {}))"#,
             yield_exprs,
             resume_calls,
             final_value
@@ -163,7 +163,7 @@ proptest! {
             r#"(begin
                 (define gen (fn () (if {} (yield {}) (yield {}))))
                 (define co (make-coroutine gen))
-                (coroutine-resume co))"#,
+                (coro/resume co))"#,
             cond_str, a, b
         );
 
@@ -198,7 +198,7 @@ proptest! {
                 (define co (make-coroutine gen))
                 (list {}))"#,
             n,
-            (0..=n).map(|_| "(coroutine-resume co)".to_string()).collect::<Vec<_>>().join(" ")
+            (0..=n).map(|_| "(coro/resume co)".to_string()).collect::<Vec<_>>().join(" ")
         );
 
         let result = eval(&code);
@@ -231,16 +231,16 @@ proptest! {
                 (define gen (fn () {} 999))
                 (define co (make-coroutine gen))
                 (define states (list))
-                (set! states (cons (keyword->string (coroutine-status co)) states))
+                (set! states (cons (keyword->string (coro/status co)) states))
                 {}
-                (set! states (cons (keyword->string (coroutine-status co)) states))
-                (coroutine-resume co)
-                (set! states (cons (keyword->string (coroutine-status co)) states))
+                (set! states (cons (keyword->string (coro/status co)) states))
+                (coro/resume co)
+                (set! states (cons (keyword->string (coro/status co)) states))
                 states)"#,
             yields.join(" "),
             (0..num_yields).map(|_| {
-                r#"(coroutine-resume co)
-                   (set! states (cons (keyword->string (coroutine-status co)) states))"#.to_string()
+                r#"(coro/resume co)
+                   (set! states (cons (keyword->string (coro/status co)) states))"#.to_string()
             }).collect::<Vec<_>>().join(" ")
         );
 
@@ -301,8 +301,8 @@ proptest! {
             start2,
             // Interleave resumes: co1, co2, co1, co2, ...
             (0..=num_yields).flat_map(|_| vec![
-                "(set! results (cons (coroutine-resume co1) results))".to_string(),
-                "(set! results (cons (coroutine-resume co2) results))".to_string(),
+                "(set! results (cons (coro/resume co1) results))".to_string(),
+                "(set! results (cons (coro/resume co2) results))".to_string(),
             ]).collect::<Vec<_>>().join(" ")
         );
 
@@ -342,7 +342,7 @@ fn yield_across_call_boundaries() {
             (define helper (fn (x) (yield (* x 2))))
             (define gen (fn () (helper 21)))
             (define co (make-coroutine gen))
-            (coroutine-resume co))
+            (coro/resume co))
     "#;
 
     let result = eval(code);
@@ -358,7 +358,7 @@ fn yield_across_two_call_levels() {
             (define outer (fn (x) (inner (+ x 1))))
             (define gen (fn () (outer 10)))
             (define co (make-coroutine gen))
-            (coroutine-resume co))
+            (coro/resume co))
     "#;
 
     let result = eval(code);
@@ -377,9 +377,9 @@ fn yield_across_call_then_resume_then_yield() {
             (define gen (fn () (helper 10)))
             (define co (make-coroutine gen))
             (list
-                (coroutine-resume co)
-                (coroutine-resume co 5)
-                (coroutine-status co)))
+                (coro/resume co)
+                (coro/resume co 5)
+                (coro/status co)))
     "#;
 
     let result = eval(code);
@@ -405,9 +405,9 @@ fn yield_across_call_with_return_value() {
                     (+ result 100))))
             (define co (make-coroutine gen))
             (list
-                (coroutine-resume co)
-                (coroutine-resume co)
-                (keyword->string (coroutine-status co))))
+                (coro/resume co)
+                (coro/resume co)
+                (keyword->string (coro/status co))))
     "#;
 
     let result = eval(code);
@@ -450,8 +450,8 @@ fn resume_completed_coroutine_errors() {
     let code = r#"
         (begin
             (define co (make-coroutine (fn () 42)))
-            (coroutine-resume co)
-            (coroutine-resume co))
+            (coro/resume co)
+            (coro/resume co))
     "#;
     let result = eval(code);
     // Should error because coroutine is already done
@@ -474,7 +474,7 @@ fn coroutine_that_never_yields() {
     let code = r#"
         (begin
             (define co (make-coroutine (fn () (+ 1 2 3))))
-            (coroutine-resume co))
+            (coro/resume co))
     "#;
     let result = eval(code);
     assert!(result.is_ok(), "Pure function as coroutine should work");
@@ -495,9 +495,9 @@ fn mutable_local_preserved_across_resume() {
                     x)))
             (define co (make-coroutine gen))
             (list
-                (coroutine-resume co)
-                (coroutine-resume co)
-                (coroutine-resume co)))
+                (coro/resume co)
+                (coro/resume co)
+                (coro/resume co)))
     "#;
     let result = eval(code);
     assert!(result.is_ok(), "Evaluation failed: {:?}", result);
@@ -522,7 +522,7 @@ fn effect_threading_yields_effect_on_closure() {
         (begin
             (define gen (fn () (yield 42) (yield 43) 44))
             (define co (make-coroutine gen))
-            (keyword->string (coroutine-status co)))
+            (keyword->string (coro/status co)))
     "#;
     let result = eval(code);
     assert!(result.is_ok(), "Evaluation failed: {:?}", result);
@@ -545,8 +545,8 @@ proptest! {
             r#"(begin
                 (define gen (fn () (yield {}) 999))
                 (define co (make-coroutine gen))
-                (define first-result (coroutine-resume co))
-                (define status-after (keyword->string (coroutine-status co)))
+                (define first-result (coro/resume co))
+                (define status-after (keyword->string (coro/status co)))
                 (list first-result status-after))"#,
             value
         );
