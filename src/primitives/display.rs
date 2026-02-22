@@ -1,20 +1,21 @@
-use crate::value::{Condition, Value};
+use crate::value::fiber::{SignalBits, SIG_OK};
+use crate::value::Value;
 
 /// Display values to standard output
-pub fn prim_display(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_display(args: &[Value]) -> (SignalBits, Value) {
     for arg in args {
         print!("{}", format_value(arg));
     }
-    Ok(Value::NIL)
+    (SIG_OK, Value::NIL)
 }
 
 /// Print values followed by a newline (Common Lisp-style print)
-pub fn prim_print(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_print(args: &[Value]) -> (SignalBits, Value) {
     for arg in args {
         print!("{}", format_value(arg));
     }
     println!();
-    Ok(Value::NIL)
+    (SIG_OK, Value::NIL)
 }
 
 /// Format a value for display, using the symbol table if available
@@ -48,7 +49,7 @@ fn format_value(value: &Value) -> String {
 }
 
 /// Print a newline
-pub fn prim_newline(_args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_newline(_args: &[Value]) -> (SignalBits, Value) {
     println!();
-    Ok(Value::NIL)
+    (SIG_OK, Value::NIL)
 }

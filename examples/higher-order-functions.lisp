@@ -40,8 +40,8 @@
 (newline)
 (assert-list-eq as-strings (list "1" "2" "3" "4" "5") "map to-string")
 
-;; Example 1c: Map with lambda (anonymous function)
-(define squared (my-map (lambda (x) (* x x)) numbers))
+;; Example 1c: Map with anonymous function
+(define squared (my-map (fn (x) (* x x)) numbers))
 (display "Square each number: ")
 (display squared)
 (newline)
@@ -50,7 +50,7 @@
 
 ;; Example 1d: Map with closure (captures outer variable)
 (define multiplier 3)
-(define multiply-by-multiplier (lambda (x) (* x multiplier)))
+(define multiply-by-multiplier (fn (x) (* x multiplier)))
 (define tripled (my-map multiply-by-multiplier numbers))
 (display "Multiply by 3 (closure): ")
 (display tripled)
@@ -94,8 +94,8 @@
 (assert-list-eq odds (list 1 3 5 7 9) "filter odd: [1..10] -> [1,3,5,7,9]")
 (newline)
 
-;; Example 2c: Filter with lambda
-(define large-numbers (my-filter (lambda (x) (> x 5)) (list 1 3 5 7 9 11)))
+;; Example 2c: Filter with anonymous function
+(define large-numbers (my-filter (fn (x) (> x 5)) (list 1 3 5 7 9 11)))
 (display "Numbers > 5: ")
 (display large-numbers)
 (newline)
@@ -104,7 +104,7 @@
 
 ;; Example 2d: Filter with closure (captures threshold)
 (define threshold 50)
-(define above-threshold (lambda (x) (> x threshold)))
+(define above-threshold (fn (x) (> x threshold)))
 (define high-values (my-filter above-threshold (list 10 30 50 70 90)))
 (display "Values > 50: ")
 (display high-values)
@@ -184,7 +184,7 @@
 ;; Compose two functions: (compose f g)(x) = f(g(x))
 (define compose (fn (f g)
   "Return a new function that applies g then f"
-  (lambda (x) (f (g x)))))
+  (fn (x) (f (g x)))))
 
 ;; Example 4a: Compose double and add-one
 (define add-one (fn (x) (+ x 1)))
@@ -225,7 +225,7 @@
 ;; Pattern 1: Function that returns a function (currying)
 (define make-multiplier (fn (n)
   "Return a function that multiplies by n"
-  (lambda (x) (* x n))))
+  (fn (x) (* x n))))
 
 (define times-5 (make-multiplier 5))
 (define times-10 (make-multiplier 10))
@@ -244,7 +244,7 @@
 ;; Pattern 2: Function that returns a predicate
 (define make-threshold-checker (fn (threshold)
    "Return a predicate that checks if value exceeds threshold"
-   (lambda (x) (> x threshold))))
+   (fn (x) (> x threshold))))
 
 (define above-100 (make-threshold-checker 100))
 (define above-50 (make-threshold-checker 50))
@@ -291,7 +291,7 @@
 ;; Pattern 2: Conditional transformation
 (define transform-if (fn (predicate transformer lst)
    "Apply transformer only to elements matching predicate"
-   (my-map (lambda (x)
+   (my-map (fn (x)
      (if (predicate x) (transformer x) x))
      lst)))
 
@@ -339,13 +339,13 @@
 ;; Pattern 1: Partial application
 (define partial (fn (f . args)
   "Create a new function with some arguments pre-filled"
-  (lambda (. rest-args)
+  (fn (. rest-args)
     (f . (append args rest-args)))))
 
 ;; Pattern 2: Memoization (simple version)
 (define make-memoized (fn (f)
   "Create a memoized version of function f (simplified)"
-  (lambda (x) (f x))))
+  (fn (x) (f x))))
 
 ;; Pattern 3: Function that validates input
 (define validate-then-apply (fn (validator transformer value)

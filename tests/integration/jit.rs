@@ -58,7 +58,7 @@ fn test_jit_identity() {
     let mut func = LirFunction::new(1);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -76,7 +76,7 @@ fn test_jit_constant() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -100,7 +100,7 @@ fn test_jit_nil() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -124,7 +124,7 @@ fn test_jit_bool_true() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -148,7 +148,7 @@ fn test_jit_bool_false() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -172,7 +172,7 @@ fn test_jit_empty_list() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -200,7 +200,7 @@ fn test_jit_add() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -229,7 +229,7 @@ fn test_jit_sub() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -258,7 +258,7 @@ fn test_jit_mul() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -287,7 +287,7 @@ fn test_jit_div() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -316,7 +316,7 @@ fn test_jit_rem() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -345,7 +345,7 @@ fn test_jit_neg() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -375,7 +375,7 @@ fn test_jit_lt_true() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -403,7 +403,7 @@ fn test_jit_lt_false() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -431,7 +431,7 @@ fn test_jit_eq() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -468,7 +468,7 @@ fn test_jit_branch_true() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     // Entry block: load arg, branch on x
     let mut entry = BasicBlock::new(Label(0));
@@ -520,7 +520,7 @@ fn test_jit_branch_false() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -569,7 +569,7 @@ fn test_jit_branch_nil() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -617,7 +617,7 @@ fn test_jit_branch_integer_truthy() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -693,7 +693,7 @@ fn test_jit_call_compiles() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -721,7 +721,7 @@ fn test_jit_rejects_make_closure() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let inner_func = Box::new(LirFunction::new(0));
     let mut entry = BasicBlock::new(Label(0));
@@ -752,7 +752,7 @@ fn test_jit_conditional_arithmetic() {
     let mut func = LirFunction::new(1);
     func.num_regs = 4;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     // Entry: load arg, compare x == 0
     let mut entry = BasicBlock::new(Label(0));
@@ -833,7 +833,7 @@ fn test_jit_chained_arithmetic() {
     let mut func = LirFunction::new(3);
     func.num_regs = 5;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -883,7 +883,7 @@ fn test_jit_bit_and() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -912,7 +912,7 @@ fn test_jit_bit_or() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -941,7 +941,7 @@ fn test_jit_shl() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -974,7 +974,7 @@ fn test_jit_not_true() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -999,7 +999,7 @@ fn test_jit_not_false() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1024,7 +1024,7 @@ fn test_jit_not_nil() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1053,7 +1053,7 @@ fn test_jit_float_constant() {
     let mut func = LirFunction::new(0);
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -1076,7 +1076,7 @@ fn test_jit_float_add() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1112,7 +1112,7 @@ fn test_jit_cons() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1144,7 +1144,7 @@ fn test_jit_car_cdr() {
     let mut func = LirFunction::new(1);
     func.num_regs = 4;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1187,7 +1187,7 @@ fn test_jit_is_pair() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1218,7 +1218,7 @@ fn test_jit_make_vector() {
     let mut func = LirFunction::new(3);
     func.num_regs = 4;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1263,7 +1263,7 @@ fn test_jit_make_cell() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1290,7 +1290,7 @@ fn test_jit_load_cell() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1316,7 +1316,7 @@ fn test_jit_store_cell() {
     let mut func = LirFunction::new(2);
     func.num_regs = 3;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0)); // cell
@@ -1355,7 +1355,7 @@ fn test_jit_tail_call_compiles() {
     let mut func = LirFunction::new(1);
     func.num_regs = 2;
     func.num_captures = 0;
-    func.effect = Effect::pure();
+    func.effect = Effect::none();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1481,4 +1481,70 @@ fn test_jit_self_tail_call_fibonacci_iterative() {
     assert!(result.is_ok(), "fib-iter failed: {:?}", result);
     // fib(20) = 6765
     assert_eq!(result.unwrap().as_int(), Some(6765));
+}
+
+// =============================================================================
+// Fiber + JIT Gate Tests
+// =============================================================================
+
+#[test]
+fn test_jit_rejects_yields_raises_effect() {
+    // Effect::yields_raises() has may_suspend() = true.
+    // The JIT gate must reject this — fiber/resume and fiber/signal
+    // propagate this effect to their callers.
+    let mut func = LirFunction::new(0);
+    func.num_regs = 1;
+    func.num_captures = 0;
+    func.effect = Effect::yields_raises();
+
+    let mut entry = BasicBlock::new(Label(0));
+    entry.instructions.push(SpannedInstr::new(
+        LirInstr::Const {
+            dst: Reg(0),
+            value: LirConst::Int(42),
+        },
+        span(),
+    ));
+    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), span());
+    func.blocks.push(entry);
+    func.entry = Label(0);
+
+    let compiler = JitCompiler::new().unwrap();
+    let result = compiler.compile(&func);
+    assert!(
+        matches!(result, Err(JitError::NotPure)),
+        "JIT should reject yields_raises effect: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_jit_accepts_raises_only_effect() {
+    // Effect::raises() has may_suspend() = false.
+    // The JIT gate should accept this — fiber/new, fiber/status, etc.
+    // have this effect and are safe to call from JIT code.
+    let mut func = LirFunction::new(0);
+    func.num_regs = 1;
+    func.num_captures = 0;
+    func.effect = Effect::raises();
+
+    let mut entry = BasicBlock::new(Label(0));
+    entry.instructions.push(SpannedInstr::new(
+        LirInstr::Const {
+            dst: Reg(0),
+            value: LirConst::Int(42),
+        },
+        span(),
+    ));
+    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), span());
+    func.blocks.push(entry);
+    func.entry = Label(0);
+
+    let compiler = JitCompiler::new().unwrap();
+    let result = compiler.compile(&func);
+    assert!(
+        result.is_ok(),
+        "JIT should accept raises-only effect: {:?}",
+        result
+    );
 }

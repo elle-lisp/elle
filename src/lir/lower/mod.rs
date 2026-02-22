@@ -74,7 +74,7 @@ impl Lowerer {
         self.current_func.entry = Label(0);
         self.current_func.num_regs = self.next_reg;
         // Propagate effect from HIR to top-level LIR function
-        self.current_func.effect = hir.effect.clone();
+        self.current_func.effect = hir.effect;
 
         Ok(std::mem::replace(
             &mut self.current_func,

@@ -217,7 +217,6 @@ pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
         "begin" => "Sequential execution: (begin expr1 expr2 ...)",
         "let" => "Local bindings: (let ((var val) ...) body)",
         "fn" => "Function definition: (fn (params ...) body)",
-        "lambda" => "Function definition (alias for fn): (lambda (params ...) body)",
         "match" => "Pattern matching: (match value (pattern body) ...)",
         "while" => "Loop: (while condition body)",
         "each" => "Each loop: (each var iterable body) - iterate over a collection",

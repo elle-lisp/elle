@@ -98,19 +98,26 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             HeapTag::Table => Err("Table should have been handled above".to_string()),
             HeapTag::Struct => Err("Struct should have been handled above".to_string()),
             HeapTag::Closure => Err("Cannot serialize closures to JSON".to_string()),
-            HeapTag::Condition => Err("Cannot serialize conditions to JSON".to_string()),
-            HeapTag::Coroutine => Err("Cannot serialize coroutines to JSON".to_string()),
+            HeapTag::Tuple => {
+                if let Some(elems) = value.as_tuple() {
+                    let items: Result<Vec<String>, String> =
+                        elems.iter().map(serialize_value).collect();
+                    Ok(format!("[{}]", items?.join(",")))
+                } else {
+                    Err("Tuple should have been accessible".to_string())
+                }
+            }
             HeapTag::Cell => Err("Cell should have been handled above".to_string()),
             HeapTag::Float => {
                 // This is a heap-allocated float (for NaN values)
                 Err("Cannot serialize non-finite float value to JSON".to_string())
             }
             HeapTag::NativeFn => Err("Cannot serialize native functions to JSON".to_string()),
-            HeapTag::VmAwareFn => Err("Cannot serialize VM-aware functions to JSON".to_string()),
+
             HeapTag::LibHandle => Err("Cannot serialize library handles to JSON".to_string()),
             HeapTag::CHandle => Err("Cannot serialize C handles to JSON".to_string()),
             HeapTag::ThreadHandle => Err("Cannot serialize thread handles to JSON".to_string()),
-            HeapTag::Continuation => Err("Cannot serialize continuations to JSON".to_string()),
+            HeapTag::Fiber => Err("Cannot serialize fibers to JSON".to_string()),
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())
@@ -229,19 +236,33 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             HeapTag::Table => Err("Table should have been handled above".to_string()),
             HeapTag::Struct => Err("Struct should have been handled above".to_string()),
             HeapTag::Closure => Err("Cannot serialize closures to JSON".to_string()),
-            HeapTag::Condition => Err("Cannot serialize conditions to JSON".to_string()),
-            HeapTag::Coroutine => Err("Cannot serialize coroutines to JSON".to_string()),
+            HeapTag::Tuple => {
+                if let Some(elems) = value.as_tuple() {
+                    let items: Result<Vec<String>, String> = elems
+                        .iter()
+                        .map(|v| serialize_value_pretty(v, indent_level + 1))
+                        .collect();
+                    Ok(format!(
+                        "[\n{}{}\n{}]",
+                        next_indent,
+                        items?.join(&format!(",\n{}", next_indent)),
+                        indent
+                    ))
+                } else {
+                    Err("Tuple should have been accessible".to_string())
+                }
+            }
             HeapTag::Cell => Err("Cell should have been handled above".to_string()),
             HeapTag::Float => {
                 // This is a heap-allocated float (for NaN values)
                 Err("Cannot serialize non-finite float value to JSON".to_string())
             }
             HeapTag::NativeFn => Err("Cannot serialize native functions to JSON".to_string()),
-            HeapTag::VmAwareFn => Err("Cannot serialize VM-aware functions to JSON".to_string()),
+
             HeapTag::LibHandle => Err("Cannot serialize library handles to JSON".to_string()),
             HeapTag::CHandle => Err("Cannot serialize C handles to JSON".to_string()),
             HeapTag::ThreadHandle => Err("Cannot serialize thread handles to JSON".to_string()),
-            HeapTag::Continuation => Err("Cannot serialize continuations to JSON".to_string()),
+            HeapTag::Fiber => Err("Cannot serialize fibers to JSON".to_string()),
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())

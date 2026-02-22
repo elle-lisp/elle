@@ -110,14 +110,24 @@ impl fmt::Display for Value {
             return write!(f, "<cell {}>", val);
         }
 
-        // Coroutine
-        if self.is_coroutine() {
-            return write!(f, "<coroutine>");
+        // Fiber
+        if let Some(handle) = self.as_fiber() {
+            return match handle.try_with(|fib| fib.status.as_str()) {
+                Some(status) => write!(f, "<fiber:{}>", status),
+                None => write!(f, "<fiber:taken>"),
+            };
         }
 
-        // Condition
-        if let Some(_cond) = self.as_condition() {
-            return write!(f, "<condition>");
+        // Tuple
+        if let Some(elems) = self.as_tuple() {
+            write!(f, "[")?;
+            for (i, v) in elems.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}", v)?;
+            }
+            return write!(f, "]");
         }
 
         // Default for unknown heap types

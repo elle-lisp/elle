@@ -88,7 +88,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with
    "unknown binding," the HIR→LIR mapping is incomplete.
 
-4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside lambdas,
+4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies,
    captures and parameters are upvalues; they use LoadCapture, not LoadLocal.
 
 5. **`cell_params_mask` is set for mutable parameters.** Bit i set means
@@ -134,8 +134,8 @@ The emitter preserves stack state across the yield boundary via
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
 | `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point |
 | `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
-| `lower/binding.rs` | ~280 | Binding forms: `let`, `define`, `lambda` |
-| `lower/lambda.rs` | ~250 | Lambda lowering, closure capture, cell wrapping |
+| `lower/binding.rs` | ~280 | Binding forms: `let`, `define`, `fn` |
+| `lower/lambda.rs` | ~250 | fn lowering, closure capture, cell wrapping |
 | `lower/control.rs` | ~200 | Control flow: `if`, `begin`, `match` |
 | `lower/pattern.rs` | ~200 | Pattern matching lowering |
 | `emit.rs` | 902 | `Emitter`, LIR→Bytecode with stack simulation |

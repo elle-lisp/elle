@@ -4,10 +4,10 @@
 //! - `SymbolId` - Interned symbol identifier
 //! - `Arity` - Function arity specification
 //! - `TableKey` - Keys for tables and structs
-//! - `NativeFn` / `VmAwareFn` - Native function type aliases
+//! - `NativeFn` - Unified primitive function type
 
 use crate::error::{LError, LResult};
-use crate::value::{Condition, Value};
+use crate::value::Value;
 use std::fmt;
 
 /// Symbol ID for interned symbols.
@@ -106,18 +106,17 @@ impl std::hash::Hash for TableKey {
     }
 }
 
-/// Native function type.
+/// Unified primitive function type.
 ///
-/// Simple primitives that don't need VM access. Return `Condition` for
-/// user-facing errors (type, arity, etc.).
-pub type NativeFn = fn(&[Value]) -> Result<Value, Condition>;
-
-/// VM-aware native function type.
+/// All primitives return (signal_bits, value):
+/// - (SIG_OK, value) → push value onto stack
+/// - (SIG_ERROR, condition_value) → set fiber.current_exception
+/// - (SIG_YIELD, value) → store in fiber.signal, suspend
+/// - (SIG_RESUME, fiber_value) → VM does fiber swap
 ///
-/// Primitives that need to execute bytecode or access VM state.
-/// Set `vm.current_exception` directly for user-facing errors, return `Ok(Value::NIL)`.
-/// Return `Err(LError)` only for VM bugs.
-pub type VmAwareFn = fn(&[Value], &mut crate::vm::VM) -> LResult<Value>;
+/// No primitive has VM access. Operations that formerly needed the VM
+/// now emit signals that the VM dispatch loop handles.
+pub type NativeFn = fn(&[Value]) -> (crate::value::fiber::SignalBits, Value);
 
 #[cfg(test)]
 mod tests {

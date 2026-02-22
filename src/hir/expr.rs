@@ -25,7 +25,7 @@ impl Hir {
         Hir {
             kind,
             span,
-            effect: Effect::pure(),
+            effect: Effect::none(),
         }
     }
 }
@@ -139,19 +139,6 @@ pub enum HirKind {
     Match {
         value: Box<Hir>,
         arms: Vec<(HirPattern, Option<Hir>, Hir)>, // pattern, guard, body
-    },
-
-    // === Exception Handling ===
-    Throw(Box<Hir>),
-
-    HandlerCase {
-        body: Box<Hir>,
-        handlers: Vec<(u32, BindingId, Box<Hir>)>,
-    },
-
-    HandlerBind {
-        handlers: Vec<(u32, Box<Hir>)>,
-        body: Box<Hir>,
     },
 
     // === Short-circuit Boolean ===

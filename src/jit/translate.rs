@@ -493,45 +493,6 @@ impl<'a> FunctionTranslator<'a> {
                     "LoadResumeValue".to_string(),
                 ));
             }
-            LirInstr::PushHandler { .. } => {
-                return Err(JitError::UnsupportedInstruction("PushHandler".to_string()));
-            }
-            LirInstr::PopHandler => {
-                return Err(JitError::UnsupportedInstruction("PopHandler".to_string()));
-            }
-            LirInstr::CheckException => {
-                return Err(JitError::UnsupportedInstruction(
-                    "CheckException".to_string(),
-                ));
-            }
-            LirInstr::MatchException { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "MatchException".to_string(),
-                ));
-            }
-            LirInstr::BindException { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "BindException".to_string(),
-                ));
-            }
-            LirInstr::LoadException { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "LoadException".to_string(),
-                ));
-            }
-            LirInstr::ClearException => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ClearException".to_string(),
-                ));
-            }
-            LirInstr::ReraiseException => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ReraiseException".to_string(),
-                ));
-            }
-            LirInstr::Throw { .. } => {
-                return Err(JitError::UnsupportedInstruction("Throw".to_string()));
-            }
         }
         Ok(false)
     }

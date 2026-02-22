@@ -2,43 +2,42 @@ use super::core::VM;
 use crate::value::{Closure, Value};
 use std::rc::Rc;
 
-pub fn handle_make_closure(
-    vm: &mut VM,
-    bytecode: &[u8],
-    ip: &mut usize,
-    constants: &[Value],
-) -> Result<(), String> {
+pub fn handle_make_closure(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
     let idx = vm.read_u16(bytecode, ip) as usize;
     let num_upvalues = vm.read_u8(bytecode, ip) as usize;
 
     // Get the closure template from constants
-    if let Some(template_closure) = constants[idx].as_closure() {
-        // Collect captured values from stack
-        let mut captured = Vec::with_capacity(num_upvalues);
-        for _ in 0..num_upvalues {
-            captured.push(vm.stack.pop().ok_or("Stack underflow")?);
-        }
-        captured.reverse();
+    let template_closure = constants[idx]
+        .as_closure()
+        .expect("VM bug: MakeClosure expects closure constant");
 
-        // Create closure with captured values in environment
-        let closure = Closure {
-            bytecode: template_closure.bytecode.clone(),
-            arity: template_closure.arity,
-            env: Rc::new(captured),
-            num_locals: template_closure.num_locals,
-            num_captures: template_closure.num_captures,
-            constants: template_closure.constants.clone(),
-            effect: template_closure.effect.clone(),
-            cell_params_mask: template_closure.cell_params_mask,
-            symbol_names: template_closure.symbol_names.clone(),
-            location_map: template_closure.location_map.clone(),
-            jit_code: template_closure.jit_code.clone(),
-            lir_function: template_closure.lir_function.clone(),
-        };
-
-        vm.stack.push(Value::closure(closure));
-    } else {
-        return Err("MakeClosure expects closure constant".to_string());
+    // Collect captured values from stack
+    let mut captured = Vec::with_capacity(num_upvalues);
+    for _ in 0..num_upvalues {
+        captured.push(
+            vm.fiber
+                .stack
+                .pop()
+                .expect("VM bug: Stack underflow on MakeClosure"),
+        );
     }
-    Ok(())
+    captured.reverse();
+
+    // Create closure with captured values in environment
+    let closure = Closure {
+        bytecode: template_closure.bytecode.clone(),
+        arity: template_closure.arity,
+        env: Rc::new(captured),
+        num_locals: template_closure.num_locals,
+        num_captures: template_closure.num_captures,
+        constants: template_closure.constants.clone(),
+        effect: template_closure.effect,
+        cell_params_mask: template_closure.cell_params_mask,
+        symbol_names: template_closure.symbol_names.clone(),
+        location_map: template_closure.location_map.clone(),
+        jit_code: template_closure.jit_code.clone(),
+        lir_function: template_closure.lir_function.clone(),
+    };
+
+    vm.fiber.stack.push(Value::closure(closure));
 }

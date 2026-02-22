@@ -8,21 +8,14 @@ trade-offs and pick up where we left off.
 
 ## Motivation
 
-Elle has delimited continuations, `try`/`catch`, coroutines, and a JIT
-compiler. These are currently separate mechanisms with separate
-implementations:
+Elle previously had separate mechanisms for coroutines (continuation
+capture/replay), exception handling (handler stack with unwind semantics),
+and effect inference (boolean fields for yields and raises). The JIT could
+only compile pure functions.
 
-- Coroutines use continuation capture/replay machinery in the VM
-- Exception handling uses a handler stack with unwind semantics
-- The JIT can only compile "pure" functions (no yields, no raises)
-- Effect inference tracks yields and raises as separate boolean fields
-
-This creates tension. The continuation machinery for yield is different from
-the exception machinery. The JIT draws a hard line at purity. Adding a new
-kind of control flow (IO interception, debug breakpoints, user-defined
-protocols) would require yet another mechanism.
-
-We want one mechanism that subsumes all of these.
+These have been unified into a single mechanism: **fibers with signals**.
+Coroutines are fibers that yield. Errors are signals. The effect system
+tracks signal bits. See `docs/FIBERS.md` for the implementation reference.
 
 
 ## Prior Art
@@ -281,15 +274,18 @@ interesting happens.
 Signal types are bit positions in a bitfield. The first 16 are
 compiler-reserved:
 
-| Bit | Name | Meaning |
-|-----|------|---------|
-| — | ok | Normal return (implicit — no bit set) |
-| 0 | error | Exception / panic |
-| 1 | yield | Cooperative suspension |
-| 2 | debug | Breakpoint |
-| 3 | resume | Fiber resumption request |
-| 4–15 | reserved | Future compiler-known signals |
-| 16+ | user | User-defined signal types |
+| Bit | Name | Value | Meaning |
+|-----|------|-------|---------|
+| — | ok | 0 | Normal return (no bits set) |
+| 0 | error | 1 | Error |
+| 1 | yield | 2 | Cooperative suspension |
+| 2 | debug | 4 | Breakpoint / trace |
+| 3 | resume | 8 | VM-internal: fiber resume request |
+| 4 | ffi | 16 | Calls foreign code |
+| 5 | propagate | 32 | VM-internal: re-raise caught signal |
+| 6 | cancel | 64 | VM-internal: inject error into fiber |
+| 7–15 | reserved | — | Future compiler-known signals |
+| 16+ | user | — | User-defined signal types |
 
 Bit 0 is special: "ok" means no bits are set. A normal return has an empty
 signal bitfield.
@@ -379,21 +375,27 @@ independently for non-unwinding recovery.
 
 ```
 Fiber {
-    stack: [Value]              -- operand stack (temporaries)
-    frames: [Frame]             -- call frame stack
-    status: FiberStatus         -- new/alive/suspended/dead/error
-    mask: SignalBits            -- which of this fiber's signals are caught by its parent
-    parent: Weak<Fiber>         -- weak ref to avoid cycles
-    child: Option<Fiber>        -- most recently resumed child (strong)
-    closure: Closure            -- the closure this fiber was created from
-    env: Option<HashMap>        -- dynamic bindings (fiber-scoped state)
-    signal: Option<(SignalBits, Value)>  -- canonical signal value
+    stack: SmallVec<[Value; 256]>           -- operand stack
+    frames: Vec<Frame>                       -- call frames (closure + ip + base)
+    status: FiberStatus                      -- New/Alive/Suspended/Dead/Error
+    mask: SignalBits                          -- which signals parent catches
+    parent: Option<WeakFiberHandle>          -- weak back-pointer (avoids Rc cycles)
+    child: Option<FiberHandle>               -- most recently resumed child
+    closure: Rc<Closure>                     -- the closure this fiber wraps
+    env: Option<HashMap<u32, Value>>         -- dynamic bindings (future)
+    signal: Option<(SignalBits, Value)>       -- signal payload or return value
+    suspended: Option<Vec<SuspendedFrame>>   -- frames for resumption
+    call_depth: usize                        -- stack overflow detection
+    call_stack: Vec<CallFrame>               -- for stack traces
 }
 ```
 
-Note: The closure already carries its effect bits. The fiber's mask determines
-which signals it catches from children. There is no `effects` field on the Fiber
-itself — effects are a compile-time property of the closure, not the fiber.
+The closure carries its effect bits. The fiber's mask determines which
+signals it catches from children. There is no `effects` field on the Fiber
+— effects are a compile-time property of the closure, not the fiber.
+
+See `docs/FIBERS.md` for the full Fiber, SuspendedFrame, and FiberHandle
+documentation.
 
 
 ## The Effect System
@@ -615,41 +617,31 @@ The compiler's effect information guides JIT decisions:
 ```
 
 
-## Migration Path
+## Migration Status
 
-The current system has:
-- `try`/`catch` for exception handling
-- `yield` for coroutine suspension
-- `make-coroutine` / `coroutine-resume` for coroutine management
-- `Effect` struct with `yield_behavior` and `may_raise` fields
-- JIT restricted to pure functions
+Steps 1–3 are complete. Steps 4–7 are future work.
 
-The migration:
+1. ✅ **Fibers as execution context.** Fiber struct, FiberHandle,
+   parent/child chain, signal mask, all fiber primitives implemented.
+   Coroutines are fibers that yield.
 
-1. **Implement fibers** as the execution context, replacing the current
-   coroutine implementation. A coroutine becomes a fiber with a yield mask.
+2. ✅ **Unified signals.** Error and yield are signal types. `Condition`
+   type removed. Errors are `[:keyword "message"]` tuples.
 
-2. **Unify signals.** Error and yield become signal types. `try`/`catch`
-   compiles to fiber creation + resume + signal dispatch.
+3. ✅ **Signal-bits-based Effect type.** `Effect { bits: SignalBits,
+   propagates: u32 }`. Inference tracks signal bits. Old `yield_behavior`
+   and `may_raise` fields replaced.
 
-3. **Replace the Effect type** with a bitfield. Update inference to track
-   signal bits instead of the current struct.
+4. ❌ **Relax JIT restrictions.** JIT still restricted to pure functions.
+   Signal-aware calling convention not yet implemented.
 
-4. **Relax JIT restrictions.** JIT-compiled functions check signal returns
-   from callees. Pure functions get the fast path (no checks).
+5. ❌ **User-defined signals.** Bit positions 16–31 reserved but no
+   allocation API.
 
-5. **Add user-defined signals.** `define-signal` allocates a bit. Signal
-   masks accept user-defined signal types.
+6. ❌ **Effect declarations.** `declare` forms for effect contracts not
+   yet implemented.
 
-6. **Add effect declarations.** `declare` forms for effect contracts on
-   functions and parameters.
-
-7. **Erlang-style processes.** Fibers on an event loop with a scheduler.
-   Inter-process communication via signals and channels.
-
-Each step is independently valuable and testable. Step 1–2 is the
-foundation. Step 3–4 is optimization. Step 5–6 is expressiveness. Step 7
-is the long game.
+7. ❌ **Erlang-style processes.** Fibers on an event loop with a scheduler.
 
 
 ## Non-Unwinding Recovery
@@ -730,14 +722,8 @@ it. Revisit if we find a use case.
 
 ### Signal bit allocation
 
-32 bits: 16 compiler-reserved + 16 user-defined. If users need more than
-16 signal types, bump SignalBits to u64.
-
-### Effect erasure
-
-Do effect bits on closures cost anything at runtime beyond storage? If we
-store them in the closure's header (one word), the cost is one word per
-closure. This seems acceptable.
+32 bits: 7 used (0–6) + 9 reserved (7–15) + 16 user-defined (16–31). If
+users need more than 16 signal types, bump SignalBits to u64.
 
 ### Dynamic effect checking overhead
 
@@ -751,23 +737,25 @@ Elle doesn't have a static type system (yet). Effects are the closest thing
 to static types. Should they evolve toward a type system, or remain a
 separate concern?
 
-### Signal resumption
-
-**Resolved.** Yes. A handler can resume the signaling fiber with a value (like recovery options).
-The resume value is pushed onto the child's operand stack. See FIBERS.md 'Resume value destination'.
-
 ### Effect subtyping
 
-Is `:error` a subtype of `:condition`? Should there be a hierarchy of signal
-types, or is the flat bitfield sufficient? Janet uses a flat space. Koka uses
-a hierarchy. Flat is simpler and faster.
+Should there be a hierarchy of signal types, or is the flat bitfield
+sufficient? Janet uses a flat space. Koka uses a hierarchy. Flat is simpler
+and faster. Current implementation: flat.
 
-### Backward compatibility
+## Resolved Questions
 
-Existing Elle code uses `try`/`catch`, `yield`, `make-coroutine`, etc.
-These should continue to work as sugar over the new mechanism. Specifically:
-- `try`/`catch` compiles to `fiber/new` + `fiber/resume` + signal dispatch
-- `yield` expands to `signal :yield`
-- `make-coroutine` / `coroutine-resume` become `fiber/new` / `fiber/resume`
+- **Signal resumption**: Yes. Resume value is pushed onto the child's operand
+  stack. See `docs/FIBERS.md`.
 
-The migration should be invisible to existing programs.
+- **Error representation**: Errors are `[:keyword "message"]` tuples. No
+  `Condition` type, no exception hierarchy. Pattern matching on the payload
+  replaces hierarchy checks.
+
+- **Backward compatibility**: `yield` works as a special form (emits
+  `SIG_YIELD`). `make-coroutine` / `coroutine-resume` are thin wrappers
+  around `fiber/new` / `fiber/resume`. `try`/`catch` macro is blocked on
+  macro system work.
+
+- **Effect erasure**: Effect bits are stored on the `Closure` struct (one
+  `Effect` value = 8 bytes). Acceptable cost.

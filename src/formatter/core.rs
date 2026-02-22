@@ -122,17 +122,19 @@ fn format_value(
             }
             HeapObject::Closure(_) => return "#<closure>".to_string(),
             HeapObject::NativeFn(_) => return "#<native-fn>".to_string(),
-            HeapObject::VmAwareFn(_) => return "#<vm-aware-fn>".to_string(),
             HeapObject::LibHandle(_) => return "#<lib-handle>".to_string(),
             HeapObject::CHandle(_, _) => return "#<c-handle>".to_string(),
-            HeapObject::Condition(_) => return "#<condition>".to_string(),
+            HeapObject::Tuple(elems) => {
+                let items: Vec<String> = elems
+                    .iter()
+                    .map(|e| format_value(e, indent, config, symbol_table))
+                    .collect();
+                return format!("[{}]", items.join(" "));
+            }
             HeapObject::ThreadHandle(_) => return "#<thread-handle>".to_string(),
             HeapObject::Cell(_, _) => return "#<cell>".to_string(),
             HeapObject::Float(_) => return "#<float>".to_string(),
-            HeapObject::Coroutine(_) => return "#<coroutine>".to_string(),
-            HeapObject::Continuation(c) => {
-                return format!("#<continuation:{} frames>", c.frames.len())
-            }
+            HeapObject::Fiber(_) => return "#<fiber>".to_string(),
         }
     }
 

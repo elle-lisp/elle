@@ -1,19 +1,17 @@
 //! Call analysis and effect tracking
 
 use super::*;
-use crate::effects::YieldBehavior;
 use crate::syntax::Syntax;
-use std::collections::BTreeSet;
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_call(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         let func = self.analyze_expr(&items[0])?;
-        let mut effect = func.effect.clone();
+        let mut effect = func.effect;
 
         let mut args = Vec::new();
         for arg in &items[1..] {
             let hir = self.analyze_expr(arg)?;
-            effect = effect.combine(hir.effect.clone());
+            effect = effect.combine(hir.effect);
             args.push(hir);
         }
 
@@ -46,10 +44,10 @@ impl<'a> Analyzer<'a> {
         match &func.kind {
             HirKind::Lambda {
                 inferred_effect, ..
-            } => inferred_effect.clone(),
+            } => *inferred_effect,
             HirKind::Var(binding_id) => {
                 if let Some(effect) = self.effect_env.get(binding_id) {
-                    effect.clone()
+                    *effect
                 } else if let Some(info) = self.ctx.get_binding(*binding_id) {
                     if matches!(info.kind, BindingKind::Global) {
                         // Check primitive effects first, then global effects from previous forms
@@ -69,7 +67,7 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// Track the source of a Yields effect for polymorphic inference.
+    /// Track the source of a suspending effect for polymorphic inference.
     /// This handles both direct parameter calls and calls to polymorphic functions
     /// with parameters as arguments.
     pub(crate) fn track_effect_source_with_args(
@@ -91,9 +89,9 @@ impl<'a> Analyzer<'a> {
         }
 
         // Case 2: Call to a polymorphic function with parameters as the polymorphic arguments
-        if let YieldBehavior::Polymorphic(param_indices) = &raw_effect.yield_behavior {
+        if raw_effect.is_polymorphic() {
             let mut found_param = false;
-            for &param_idx in param_indices {
+            for param_idx in raw_effect.propagated_params() {
                 if param_idx < args.len() {
                     if let HirKind::Var(arg_binding_id) = &args[param_idx].kind {
                         if let Some(info) = self.ctx.get_binding(*arg_binding_id) {
@@ -115,30 +113,29 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Case 3: Yields from a non-parameter source
-        // Only mark as non-param yield if the resolved effect is Yields
+        // Case 3: Suspension from a non-parameter source
+        // Only mark as non-param yield if the resolved effect may suspend
         let resolved_effect = self.resolve_polymorphic_effect(raw_effect, args);
-        if resolved_effect == Effect::yields() {
+        if resolved_effect.may_suspend() {
             self.current_effect_sources.has_non_param_yield = true;
         }
     }
 
     /// Resolve a polymorphic effect by examining the arguments at the specified indices.
     pub(crate) fn resolve_polymorphic_effect(&self, effect: &Effect, args: &[Hir]) -> Effect {
-        match &effect.yield_behavior {
-            YieldBehavior::Polymorphic(params) => {
-                let mut resolved = Effect::pure();
-                for &param_idx in params {
-                    if param_idx < args.len() {
-                        resolved = resolved.combine(self.resolve_arg_effect(&args[param_idx]));
-                    } else {
-                        // Parameter index out of bounds - conservatively Yields
-                        return Effect::yields();
-                    }
+        if effect.is_polymorphic() {
+            let mut resolved = Effect::none();
+            for param_idx in effect.propagated_params() {
+                if param_idx < args.len() {
+                    resolved = resolved.combine(self.resolve_arg_effect(&args[param_idx]));
+                } else {
+                    // Parameter index out of bounds - conservatively Yields
+                    return Effect::yields();
                 }
-                resolved
             }
-            _ => effect.clone(),
+            resolved
+        } else {
+            *effect
         }
     }
 
@@ -149,7 +146,7 @@ impl<'a> Analyzer<'a> {
         match &arg.kind {
             HirKind::Lambda {
                 inferred_effect, ..
-            } => inferred_effect.clone(),
+            } => *inferred_effect,
             HirKind::Var(id) => self
                 .effect_env
                 .get(id)
@@ -173,12 +170,12 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Compute the inferred effect for a lambda based on effect sources.
-    /// This enables polymorphic effect inference: if the only sources of Yields
-    /// are calling parameters, we infer Polymorphic over all of them.
+    /// This enables polymorphic effect inference: if the only sources of
+    /// suspension are calling parameters, we infer Polymorphic over them.
     pub(crate) fn compute_inferred_effect(&self, body: &Hir, params: &[BindingId]) -> Effect {
-        // If body is pure, lambda is pure
-        if body.effect.is_pure() {
-            return Effect::pure();
+        // If body doesn't suspend, lambda doesn't suspend
+        if !body.effect.may_suspend() {
+            return Effect::none();
         }
 
         // If there's a direct yield or non-parameter yield, it's Yields
@@ -188,25 +185,25 @@ impl<'a> Analyzer<'a> {
             return Effect::yields();
         }
 
-        // If param_calls is empty but body is Yields, fall back to Yields
+        // If param_calls is empty but body suspends, fall back to body's effect
         if self.current_effect_sources.param_calls.is_empty() {
-            return body.effect.clone();
+            return body.effect;
         }
 
-        // All Yields come from parameter calls - infer Polymorphic over all of them
-        let param_indices: BTreeSet<usize> = self
-            .current_effect_sources
-            .param_calls
-            .iter()
-            .filter_map(|binding_id| params.iter().position(|p| p == binding_id))
-            .collect();
+        // All suspension comes from parameter calls - infer Polymorphic over them
+        let mut propagates: u32 = 0;
+        for binding_id in &self.current_effect_sources.param_calls {
+            if let Some(idx) = params.iter().position(|p| p == binding_id) {
+                propagates |= 1 << idx;
+            }
+        }
 
-        if param_indices.is_empty() {
+        if propagates == 0 {
             Effect::yields() // shouldn't happen
         } else {
             Effect {
-                yield_behavior: YieldBehavior::Polymorphic(param_indices),
-                may_raise: false,
+                bits: 0,
+                propagates,
             }
         }
     }

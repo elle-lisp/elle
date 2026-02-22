@@ -13,7 +13,6 @@ use std::collections::HashMap;
 const RESERVED_WORDS: &[&str] = &[
     "define",
     "fn",
-    "lambda",
     "if",
     "cond",
     "quote",
@@ -294,7 +293,6 @@ mod tests {
     #[test]
     fn test_validate_new_name_reserved_word() {
         assert!(validate_new_name("define").is_err());
-        assert!(validate_new_name("lambda").is_err());
         assert!(validate_new_name("if").is_err());
     }
 

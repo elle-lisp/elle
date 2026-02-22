@@ -1,19 +1,24 @@
 //! Call and TailCall instruction handlers.
 //!
-//! These are the most complex instructions in the VM, handling:
-//! - Native function calls
-//! - VM-aware function calls
+//! Handles:
+//! - Native function calls (routes to signal dispatch in signal.rs)
 //! - Closure calls with environment setup
-//! - Coroutine-aware execution
+//! - Yield-through-calls (suspended frame chain building)
 //! - Tail call optimization
-//! - JIT compilation and dispatch (when jit feature is enabled)
+//! - JIT compilation and dispatch
 
-use crate::value::{CoroutineState, Value};
+use crate::value::error_val;
+use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK, SIG_YIELD};
 use std::rc::Rc;
 
-use super::core::{VmResult, VM};
+use super::core::VM;
 
 use crate::jit::{JitCode, JitCompiler, TAIL_CALL_SENTINEL};
+
+/// Helper: set an error signal on the fiber.
+fn set_error(fiber: &mut crate::value::Fiber, kind: &str, msg: impl Into<String>) {
+    fiber.signal = Some((SIG_ERROR, error_val(kind, msg)));
+}
 
 impl VM {
     /// Handle the Call instruction.
@@ -21,285 +26,165 @@ impl VM {
     /// Pops the function and arguments from the stack, calls the function,
     /// and pushes the result. Handles native functions, VM-aware functions,
     /// and closures with proper environment setup.
+    ///
+    /// Returns `Some(SignalBits)` if execution should return immediately,
+    /// or `None` if the dispatch loop should continue.
     pub(super) fn handle_call(
         &mut self,
-        bytecode: &[u8],
-        constants: &[Value],
-        closure_env: Option<&Rc<Vec<Value>>>,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
         ip: &mut usize,
-    ) -> Result<Option<VmResult>, String> {
-        let arg_count = self.read_u8(bytecode, ip) as usize;
-        let func = self.stack.pop().ok_or("Stack underflow")?;
+    ) -> Option<SignalBits> {
+        let bc: &[u8] = bytecode;
+        let arg_count = self.read_u8(bc, ip) as usize;
+        let func = self
+            .fiber
+            .stack
+            .pop()
+            .expect("VM bug: Stack underflow on Call");
 
         let mut args = Vec::with_capacity(arg_count);
         for _ in 0..arg_count {
-            args.push(self.stack.pop().ok_or("Stack underflow")?);
+            args.push(
+                self.fiber
+                    .stack
+                    .pop()
+                    .expect("VM bug: Stack underflow on Call"),
+            );
         }
         args.reverse();
 
         if let Some(f) = func.as_native_fn() {
-            let result = match f(args.as_slice()) {
-                Ok(val) => val,
-                Err(cond) => {
-                    self.current_exception = Some(std::rc::Rc::new(cond));
-                    Value::NIL
-                }
-            };
-            self.stack.push(result);
-            return Ok(None);
-        }
-
-        if let Some(f) = func.as_vm_aware_fn() {
-            let result = f(args.as_slice(), self)?;
-            self.stack.push(result);
-
-            // Check for pending yield from yield-from delegation
-            if let Some(yielded_value) = self.take_pending_yield() {
-                return self.handle_pending_yield_after_call(
-                    bytecode,
-                    constants,
-                    closure_env,
-                    *ip,
-                    yielded_value,
-                );
-            }
-            return Ok(None);
+            let (bits, value) = f(args.as_slice());
+            return self.handle_primitive_signal(bits, value, bytecode, constants, closure_env, ip);
         }
 
         if let Some(closure) = func.as_closure() {
-            self.call_depth += 1;
-            if self.call_depth > 1000 {
-                return Err("Stack overflow".to_string());
+            self.fiber.call_depth += 1;
+            if self.fiber.call_depth > 1000 {
+                set_error(&mut self.fiber, "error", "Stack overflow");
+                return Some(SIG_ERROR);
             }
 
             // Validate argument count
             if !self.check_arity(&closure.arity, args.len()) {
-                self.call_depth -= 1;
-                self.stack.push(Value::NIL);
-                return Ok(None);
+                self.fiber.call_depth -= 1;
+                self.fiber.stack.push(Value::NIL);
+                return None;
             }
 
-            // JIT compilation and dispatch — only for pure closures
-            // Non-pure closures can never be JIT-compiled, so skip profiling overhead
-            if closure.effect.is_pure() {
-                let bytecode_ptr = closure.bytecode.as_ptr();
-                let is_hot = self.record_closure_call(bytecode_ptr);
-
-                // Check if we already have JIT code for this closure
-                if let Some(jit_code) = self.jit_cache.get(&bytecode_ptr).cloned() {
-                    let result = self.call_jit(&jit_code, closure, &args, func);
-                    // Check if the JIT function (or a callee) set an exception
-                    if self.current_exception.is_some() {
-                        self.call_depth -= 1;
-                        self.stack.push(Value::NIL);
-                        return Ok(None); // Let the dispatch loop's interrupt handler deal with it
-                    }
-                    // Check for pending tail call (JIT function did a TailCall)
-                    if result.to_bits() == TAIL_CALL_SENTINEL {
-                        if let Some((tail_bc, tail_consts, tail_env)) =
-                            self.pending_tail_call.take()
-                        {
-                            // Hand off to interpreter's trampoline which handles further tail calls
-                            match self.execute_bytecode(&tail_bc, &tail_consts, Some(&tail_env)) {
-                                Ok(val) => {
-                                    self.call_depth -= 1;
-                                    self.stack.push(val);
-                                    return Ok(None);
-                                }
-                                Err(e) => {
-                                    self.call_depth -= 1;
-                                    return Err(e);
-                                }
-                            }
-                        }
-                    }
-                    self.call_depth -= 1;
-                    self.stack.push(result);
-                    return Ok(None);
-                }
-
-                // If hot, attempt JIT compilation
-                if is_hot {
-                    if let Some(ref lir_func) = closure.lir_function {
-                        match JitCompiler::new() {
-                            Ok(compiler) => {
-                                match compiler.compile(lir_func) {
-                                    Ok(jit_code) => {
-                                        let jit_code = Rc::new(jit_code);
-                                        // Cache the JIT code
-                                        self.jit_cache.insert(bytecode_ptr, jit_code.clone());
-                                        // Execute via JIT
-                                        let result = self.call_jit(&jit_code, closure, &args, func);
-                                        // Check if the JIT function (or a callee) set an exception
-                                        if self.current_exception.is_some() {
-                                            self.call_depth -= 1;
-                                            self.stack.push(Value::NIL);
-                                            return Ok(None); // Let the dispatch loop's interrupt handler deal with it
-                                        }
-                                        // Check for pending tail call (JIT function did a TailCall)
-                                        if result.to_bits() == TAIL_CALL_SENTINEL {
-                                            if let Some((tail_bc, tail_consts, tail_env)) =
-                                                self.pending_tail_call.take()
-                                            {
-                                                // Hand off to interpreter's trampoline
-                                                match self.execute_bytecode(
-                                                    &tail_bc,
-                                                    &tail_consts,
-                                                    Some(&tail_env),
-                                                ) {
-                                                    Ok(val) => {
-                                                        self.call_depth -= 1;
-                                                        self.stack.push(val);
-                                                        return Ok(None);
-                                                    }
-                                                    Err(e) => {
-                                                        self.call_depth -= 1;
-                                                        return Err(e);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        self.call_depth -= 1;
-                                        self.stack.push(result);
-                                        return Ok(None);
-                                    }
-                                    Err(e) => {
-                                        match &e {
-                                            crate::jit::JitError::UnsupportedInstruction(_) => {
-                                                // MakeClosure and other instructions not yet in JIT.
-                                                // Fall back to interpreter — the function still works.
-                                            }
-                                            _ => {
-                                                panic!(
-                                                    "JIT compilation failed for pure function: {}. \
-                                                     This is a bug — pure functions should be JIT-compilable. \
-                                                     Error: {}",
-                                                    closure.lir_function.as_ref()
-                                                        .map(|f| f.name.as_deref().unwrap_or("<anon>"))
-                                                        .unwrap_or("<no lir>"),
-                                                    e
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                panic!("JIT compiler creation failed: {}. This is a bug.", e);
-                            }
-                        }
-                    }
+            // JIT compilation and dispatch — only for non-suspending closures
+            // Suspending closures can never be JIT-compiled, so skip profiling overhead
+            if !closure.effect.may_suspend() {
+                if let Some(bits) = self.try_jit_call(closure, &args, func) {
+                    self.fiber.call_depth -= 1;
+                    return bits;
                 }
             }
 
             // Build the new environment
             let new_env_rc = self.build_closure_env(closure, &args);
 
-            // Execute the closure (interpreter path)
-            if self.in_coroutine() {
-                let result = self.execute_bytecode_coroutine(
-                    &closure.bytecode,
-                    &closure.constants,
-                    Some(&new_env_rc),
-                )?;
+            // Execute the closure, saving/restoring the caller's stack.
+            // Essential for fiber/signal propagation and yield-through-nested-calls.
+            let (bits, _ip) = self.execute_bytecode_saving_stack(
+                &closure.bytecode,
+                &closure.constants,
+                &new_env_rc,
+            );
 
-                self.call_depth -= 1;
+            self.fiber.call_depth -= 1;
 
-                match result {
-                    VmResult::Done(v) => {
-                        self.stack.push(v);
-                    }
-                    VmResult::Yielded {
-                        value,
-                        continuation,
-                    } => {
-                        // Capture the caller's frame and append it to the continuation
-                        let caller_stack: Vec<Value> = self.stack.drain(..).collect();
+            match bits {
+                SIG_OK => {
+                    let (_, value) = self.fiber.signal.take().unwrap();
+                    self.fiber.stack.push(value);
+                }
+                SIG_YIELD => {
+                    // Yield propagated from a nested call. Two cases:
+                    //
+                    // 1. yield instruction: suspended frames exist — append the
+                    //    caller's frame so resume replays the full call stack.
+                    //
+                    // 2. fiber/signal: no suspended frames — just propagate the
+                    //    signal. The fiber saves its own context for resumption.
+                    if let Some(mut frames) = self.fiber.suspended.take() {
+                        let (_, value) = self.fiber.signal.take().unwrap();
 
-                        let caller_frame = crate::value::ContinuationFrame {
-                            bytecode: Rc::new(bytecode.to_vec()),
-                            constants: Rc::new(constants.to_vec()),
-                            env: closure_env.cloned().unwrap_or_else(|| Rc::new(vec![])),
+                        let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+                        let caller_frame = SuspendedFrame {
+                            bytecode: bytecode.clone(),
+                            constants: constants.clone(),
+                            env: closure_env.clone(),
                             ip: *ip,
                             stack: caller_stack,
-                            exception_handlers: self.exception_handlers.clone(),
-                            handling_exception: self.handling_exception,
                         };
 
-                        let mut cont_data = continuation
-                            .as_continuation()
-                            .expect("Yielded continuation must be a continuation value")
-                            .as_ref()
-                            .clone();
-                        cont_data.append_frame(caller_frame);
-
-                        let new_continuation = Value::continuation(cont_data);
-                        return Ok(Some(VmResult::Yielded {
-                            value,
-                            continuation: new_continuation,
-                        }));
+                        frames.push(caller_frame);
+                        self.fiber.signal = Some((SIG_YIELD, value));
+                        self.fiber.suspended = Some(frames);
                     }
+                    return Some(SIG_YIELD);
                 }
-            } else {
-                let result = self.execute_bytecode(
-                    &closure.bytecode,
-                    &closure.constants,
-                    Some(&new_env_rc),
-                )?;
-
-                self.call_depth -= 1;
-                self.stack.push(result);
+                _ => {
+                    // Other signal (error, etc.) — propagate to caller.
+                    return Some(bits);
+                }
             }
-            return Ok(None);
+            return None;
         }
 
-        Err(format!("Cannot call {:?}", func))
+        // Cannot call this value
+        set_error(
+            &mut self.fiber,
+            "type-error",
+            format!("Cannot call {:?}", func),
+        );
+        self.fiber.stack.push(Value::NIL);
+        None
     }
 
     /// Handle the TailCall instruction.
     ///
     /// Similar to Call but sets up a pending tail call instead of recursing,
     /// enabling tail call optimization.
+    ///
+    /// Returns `Some(SignalBits)` if execution should return immediately,
+    /// or `None` if the dispatch loop should continue.
     pub(super) fn handle_tail_call(
         &mut self,
         ip: &mut usize,
         bytecode: &[u8],
-    ) -> Result<Option<VmResult>, String> {
+    ) -> Option<SignalBits> {
         let arg_count = self.read_u8(bytecode, ip) as usize;
-        let func = self.stack.pop().ok_or("Stack underflow")?;
+        let func = self
+            .fiber
+            .stack
+            .pop()
+            .expect("VM bug: Stack underflow on TailCall");
 
         let mut args = Vec::with_capacity(arg_count);
         for _ in 0..arg_count {
-            args.push(self.stack.pop().ok_or("Stack underflow")?);
+            args.push(
+                self.fiber
+                    .stack
+                    .pop()
+                    .expect("VM bug: Stack underflow on TailCall"),
+            );
         }
         args.reverse();
 
         if let Some(f) = func.as_native_fn() {
-            match f(&args) {
-                Ok(val) => return Ok(Some(VmResult::Done(val))),
-                Err(cond) => {
-                    self.current_exception = Some(std::rc::Rc::new(cond));
-                    return Ok(Some(VmResult::Done(Value::NIL)));
-                }
-            }
-        }
-
-        if let Some(f) = func.as_vm_aware_fn() {
-            return f(&args, self)
-                .map(|v| Some(VmResult::Done(v)))
-                .map_err(|e| e.description());
+            let (bits, value) = f(&args);
+            return Some(self.handle_primitive_signal_tail(bits, value));
         }
 
         if let Some(closure) = func.as_closure() {
             // Validate argument count
             if !self.check_arity(&closure.arity, args.len()) {
-                if self.current_exception.is_some()
-                    && !self.handling_exception
-                    && self.exception_handlers.is_empty()
-                {
-                    return Ok(Some(VmResult::Done(Value::NIL)));
-                }
-                return Ok(Some(VmResult::Done(Value::NIL)));
+                // check_arity sets fiber.signal to (SIG_ERROR, ...)
+                return Some(SIG_ERROR);
             }
 
             // Build proper environment using cached vector
@@ -333,19 +218,128 @@ impl VM {
                 self.tail_call_env_cache.push(Value::local_cell(Value::NIL));
             }
 
-            let new_env_rc = std::rc::Rc::new(self.tail_call_env_cache.clone());
+            let new_env_rc = Rc::new(self.tail_call_env_cache.clone());
 
-            // Store the tail call information
+            // Store the tail call information (Rc clones, not data copies)
             self.pending_tail_call = Some((
-                (*closure.bytecode).clone(),
-                (*closure.constants).clone(),
+                closure.bytecode.clone(),
+                closure.constants.clone(),
                 new_env_rc,
             ));
 
-            return Ok(Some(VmResult::Done(Value::NIL)));
+            self.fiber.signal = Some((SIG_OK, Value::NIL));
+            return Some(SIG_OK);
         }
 
-        Err(format!("Cannot call {:?}", func))
+        // Cannot call this value
+        set_error(
+            &mut self.fiber,
+            "type-error",
+            format!("Cannot call {:?}", func),
+        );
+        Some(SIG_ERROR)
+    }
+
+    // ── JIT ─────────────────────────────────────────────────────────
+
+    /// Try JIT compilation/dispatch for a closure call.
+    ///
+    /// Returns `Some(Option<SignalBits>)` if JIT handled the call (the inner
+    /// Option follows handle_call's convention), or `None` to fall through
+    /// to the interpreter path. Caller is responsible for decrementing
+    /// call_depth on the `Some` path.
+    fn try_jit_call(
+        &mut self,
+        closure: &crate::value::Closure,
+        args: &[Value],
+        func: Value,
+    ) -> Option<Option<SignalBits>> {
+        let bytecode_ptr = closure.bytecode.as_ptr();
+        let is_hot = self.record_closure_call(bytecode_ptr);
+
+        // Check if we already have JIT code for this closure
+        if let Some(jit_code) = self.jit_cache.get(&bytecode_ptr).cloned() {
+            return Some(self.run_jit(&jit_code, closure, args, func));
+        }
+
+        // If hot, attempt JIT compilation
+        if is_hot {
+            if let Some(ref lir_func) = closure.lir_function {
+                match JitCompiler::new() {
+                    Ok(compiler) => match compiler.compile(lir_func) {
+                        Ok(jit_code) => {
+                            let jit_code = Rc::new(jit_code);
+                            self.jit_cache.insert(bytecode_ptr, jit_code.clone());
+                            return Some(self.run_jit(&jit_code, closure, args, func));
+                        }
+                        Err(e) => match &e {
+                            crate::jit::JitError::UnsupportedInstruction(_) => {
+                                // MakeClosure and other instructions not yet in JIT.
+                                // Fall back to interpreter — the function still works.
+                            }
+                            _ => {
+                                panic!(
+                                    "JIT compilation failed for pure function: {}. \
+                                     This is a bug — pure functions should be JIT-compilable. \
+                                     Error: {}",
+                                    closure
+                                        .lir_function
+                                        .as_ref()
+                                        .map(|f| f.name.as_deref().unwrap_or("<anon>"))
+                                        .unwrap_or("<no lir>"),
+                                    e
+                                );
+                            }
+                        },
+                    },
+                    Err(e) => {
+                        panic!("JIT compiler creation failed: {}. This is a bug.", e);
+                    }
+                }
+            }
+        }
+
+        None // Fall through to interpreter
+    }
+
+    /// Run JIT-compiled code and handle the result.
+    ///
+    /// Returns `Option<SignalBits>` following handle_call's convention:
+    /// `None` to continue dispatch, `Some(bits)` to return immediately.
+    fn run_jit(
+        &mut self,
+        jit_code: &JitCode,
+        closure: &crate::value::Closure,
+        args: &[Value],
+        func: Value,
+    ) -> Option<SignalBits> {
+        let result = self.call_jit(jit_code, closure, args, func);
+
+        // Check if the JIT function (or a callee) set an error
+        if matches!(self.fiber.signal, Some((SIG_ERROR, _))) {
+            self.fiber.stack.push(Value::NIL);
+            return None; // Let the dispatch loop's error check deal with it
+        }
+
+        // Check for pending tail call (JIT function did a TailCall)
+        if result.to_bits() == TAIL_CALL_SENTINEL {
+            if let Some((tail_bc, tail_consts, tail_env)) = self.pending_tail_call.take() {
+                match self.execute_bytecode(&tail_bc, &tail_consts, Some(&tail_env)) {
+                    Ok(val) => {
+                        self.fiber.stack.push(val);
+                        return None;
+                    }
+                    Err(e) => {
+                        set_error(&mut self.fiber, "error", e);
+                        self.fiber.stack.push(Value::NIL);
+                        return None;
+                    }
+                }
+            }
+        }
+
+        self.fiber.stack.push(result);
+        None
     }
 
     /// Call a JIT-compiled function.
@@ -363,12 +357,8 @@ impl VM {
         args: &[Value],
         func_value: Value,
     ) -> Value {
-        // Convert args to bits for the JIT calling convention
-        // We need to pass Value bits, not Value pointers
         let args_bits: Vec<u64> = args.iter().map(|v| v.to_bits()).collect();
 
-        // Get environment pointer (captures)
-        // The JIT expects a pointer to an array of Value bits (u64)
         let env_bits: Vec<u64> = closure.env.iter().map(|v| v.to_bits()).collect();
         let env_ptr = if env_bits.is_empty() {
             std::ptr::null()
@@ -376,8 +366,6 @@ impl VM {
             env_bits.as_ptr()
         };
 
-        // Call the JIT-compiled function
-        // Pass func_value.to_bits() as self_bits for self-tail-call detection
         let result_bits = unsafe {
             jit_code.call(
                 env_ptr,
@@ -388,12 +376,17 @@ impl VM {
             )
         };
 
-        // Convert result back to Value
         unsafe { Value::from_bits(result_bits) }
     }
 
+    // ── Environment building ────────────────────────────────────────
+
     /// Build a closure environment from captured variables and arguments.
-    fn build_closure_env(&self, closure: &crate::value::Closure, args: &[Value]) -> Rc<Vec<Value>> {
+    pub(super) fn build_closure_env(
+        &self,
+        closure: &crate::value::Closure,
+        args: &[Value],
+    ) -> Rc<Vec<Value>> {
         let mut new_env = Vec::with_capacity(closure.env_capacity());
         new_env.extend((*closure.env).iter().cloned());
 
@@ -420,48 +413,5 @@ impl VM {
         }
 
         Rc::new(new_env)
-    }
-
-    /// Handle a pending yield after a VmAwareFn call.
-    fn handle_pending_yield_after_call(
-        &mut self,
-        bytecode: &[u8],
-        constants: &[Value],
-        closure_env: Option<&Rc<Vec<Value>>>,
-        ip: usize,
-        yielded_value: Value,
-    ) -> Result<Option<VmResult>, String> {
-        let coroutine = match self.current_coroutine() {
-            Some(co) => co.clone(),
-            None => {
-                return Err("pending yield outside of coroutine".to_string());
-            }
-        };
-
-        let saved_stack: Vec<Value> = self.stack.drain(..).collect();
-
-        let frame = crate::value::ContinuationFrame {
-            bytecode: Rc::new(bytecode.to_vec()),
-            constants: Rc::new(constants.to_vec()),
-            env: closure_env.cloned().unwrap_or_else(|| Rc::new(vec![])),
-            ip,
-            stack: saved_stack,
-            exception_handlers: self.exception_handlers.clone(),
-            handling_exception: self.handling_exception,
-        };
-
-        let cont_data = crate::value::ContinuationData::new(frame);
-        let continuation = Value::continuation(cont_data);
-
-        {
-            let mut co = coroutine.borrow_mut();
-            co.state = CoroutineState::Suspended;
-            co.yielded_value = Some(yielded_value);
-        }
-
-        Ok(Some(VmResult::Yielded {
-            value: yielded_value,
-            continuation,
-        }))
     }
 }

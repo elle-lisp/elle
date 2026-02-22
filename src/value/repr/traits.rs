@@ -42,14 +42,8 @@ impl PartialEq for Value {
                 // Closure comparison (compare by reference)
                 (HeapObject::Closure(c1), HeapObject::Closure(c2)) => std::rc::Rc::ptr_eq(c1, c2),
 
-                // Condition comparison
-                (HeapObject::Condition(cond1), HeapObject::Condition(cond2)) => cond1 == cond2,
-
-                // Coroutine comparison (compare by reference)
-                (HeapObject::Coroutine(co1), HeapObject::Coroutine(co2)) => {
-                    // Coroutines are compared by reference since they have mutable state
-                    std::ptr::eq(co1 as *const _, co2 as *const _)
-                }
+                // Tuple comparison (compare contents element-wise)
+                (HeapObject::Tuple(t1), HeapObject::Tuple(t2)) => t1 == t2,
 
                 // Cell comparison (compare contents)
                 (HeapObject::Cell(c1, _), HeapObject::Cell(c2, _)) => *c1.borrow() == *c2.borrow(),
@@ -59,13 +53,6 @@ impl PartialEq for Value {
 
                 // NativeFn comparison (compare by reference)
                 (HeapObject::NativeFn(_), HeapObject::NativeFn(_)) => {
-                    // Function pointers are compared by reference (pointer equality)
-                    // Since they're stored in an Rc, we compare the Rc pointers
-                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
-                }
-
-                // VmAwareFn comparison (compare by reference)
-                (HeapObject::VmAwareFn(_), HeapObject::VmAwareFn(_)) => {
                     // Function pointers are compared by reference (pointer equality)
                     // Since they're stored in an Rc, we compare the Rc pointers
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
@@ -82,8 +69,8 @@ impl PartialEq for Value {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
-                // Continuation comparison (compare by reference)
-                (HeapObject::Continuation(_), HeapObject::Continuation(_)) => {
+                // Fiber comparison (compare by reference)
+                (HeapObject::Fiber(_), HeapObject::Fiber(_)) => {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 

@@ -145,18 +145,11 @@ impl Value {
         self.heap_tag() == Some(HeapTag::Cell)
     }
 
-    /// Check if this is a coroutine.
+    /// Check if this is a fiber.
     #[inline]
-    pub fn is_coroutine(&self) -> bool {
+    pub fn is_fiber(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Coroutine)
-    }
-
-    /// Check if this is a continuation.
-    #[inline]
-    pub fn is_continuation(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Continuation)
+        self.heap_tag() == Some(HeapTag::Fiber)
     }
 
     /// Check if this is a proper list (nil or cons ending in nil).
@@ -308,45 +301,23 @@ impl Value {
         }
     }
 
-    /// Extract as VM-aware function if this is a VM-aware function.
+    /// Extract as tuple if this is a tuple.
     #[inline]
-    pub fn as_vm_aware_fn(&self) -> Option<&crate::value::heap::VmAwareFn> {
+    pub fn as_tuple(&self) -> Option<&[Value]> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::VmAwareFn(f) => Some(f),
+            HeapObject::Tuple(elems) => Some(elems),
             _ => None,
         }
     }
 
-    /// Extract as condition if this is a condition.
+    /// Check if this value is a tuple.
     #[inline]
-    pub fn as_condition(&self) -> Option<&crate::value::Condition> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::Condition(c) => Some(c),
-            _ => None,
-        }
-    }
-
-    /// Extract as coroutine if this is a coroutine.
-    #[inline]
-    pub fn as_coroutine(
-        &self,
-    ) -> Option<&std::rc::Rc<std::cell::RefCell<crate::value::Coroutine>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::Coroutine(c) => Some(c),
-            _ => None,
-        }
+    pub fn is_tuple(&self) -> bool {
+        self.as_tuple().is_some()
     }
 
     /// Extract as thread handle if this is a thread handle.
@@ -362,17 +333,15 @@ impl Value {
         }
     }
 
-    /// Extract as continuation if this is a continuation.
+    /// Extract as fiber handle if this is a fiber.
     #[inline]
-    pub fn as_continuation(
-        &self,
-    ) -> Option<&std::rc::Rc<crate::value::continuation::ContinuationData>> {
+    pub fn as_fiber(&self) -> Option<&crate::value::fiber::FiberHandle> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Continuation(c) => Some(c),
+            HeapObject::Fiber(handle) => Some(handle),
             _ => None,
         }
     }

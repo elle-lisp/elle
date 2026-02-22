@@ -1,4 +1,4 @@
-//! Special forms: yield, throw, match, handler-case, handler-bind, module, import
+//! Special forms: yield, match, module, import
 
 use super::*;
 use crate::hir::pattern::{HirPattern, PatternLiteral};
@@ -22,17 +22,6 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    pub(crate) fn analyze_throw(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() != 2 {
-            return Err(format!("{}: throw requires 1 argument", span));
-        }
-
-        let value = self.analyze_expr(&items[1])?;
-        let effect = value.effect.clone();
-
-        Ok(Hir::new(HirKind::Throw(Box::new(value)), span, effect))
-    }
-
     pub(crate) fn analyze_match(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() < 3 {
             return Err(format!(
@@ -42,7 +31,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let value = self.analyze_expr(&items[1])?;
-        let mut effect = value.effect.clone();
+        let mut effect = value.effect;
         let mut arms = Vec::new();
 
         for arm in &items[2..] {
@@ -59,14 +48,14 @@ impl<'a> Analyzer<'a> {
             // Check for guard
             let (guard, body_idx) = if parts.len() >= 3 && parts[1].as_symbol() == Some("when") {
                 let guard_expr = self.analyze_expr(&parts[2])?;
-                effect = effect.combine(guard_expr.effect.clone());
+                effect = effect.combine(guard_expr.effect);
                 (Some(guard_expr), 3)
             } else {
                 (None, 1)
             };
 
             let body = self.analyze_body(&parts[body_idx..], span.clone())?;
-            effect = effect.combine(body.effect.clone());
+            effect = effect.combine(body.effect);
             self.pop_scope();
 
             arms.push((pattern, guard, body));
@@ -131,122 +120,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    pub(crate) fn analyze_handler_case(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-    ) -> Result<Hir, String> {
-        if items.len() < 2 {
-            return Err(format!("{}: handler-case requires a body", span));
-        }
-
-        let body = self.analyze_expr(&items[1])?;
-        let mut effect = body.effect.clone();
-        let mut handlers = Vec::new();
-
-        for handler_syntax in &items[2..] {
-            let parts = handler_syntax
-                .as_list()
-                .ok_or_else(|| format!("{}: handler must be a list", span))?;
-            if parts.len() < 3 {
-                return Err(format!(
-                    "{}: handler requires condition type, var, and body",
-                    span
-                ));
-            }
-
-            // Map condition names to IDs per src/vm/core.rs
-            let cond_type = match &parts[0].kind {
-                SyntaxKind::Int(n) => *n as u32,
-                SyntaxKind::Symbol(s) => {
-                    match s.as_str() {
-                        "condition" => 1,
-                        "error" => 2,
-                        "type-error" => 3,
-                        "division-by-zero" => 4,
-                        "undefined-variable" => 5,
-                        "arity-error" => 6,
-                        "warning" => 7,
-                        "style-warning" => 8,
-                        _ => 2, // default to error
-                    }
-                }
-                _ => 2, // default to error
-            };
-
-            let var_name = parts[1]
-                .as_symbol()
-                .ok_or_else(|| format!("{}: handler variable must be a symbol", span))?;
-
-            self.push_scope(false);
-            let var_id = self.bind(var_name, BindingKind::Local { index: 0 });
-            let handler_body = self.analyze_body(&parts[2..], span.clone())?;
-            effect = effect.combine(handler_body.effect.clone());
-            self.pop_scope();
-
-            handlers.push((cond_type, var_id, Box::new(handler_body)));
-        }
-
-        Ok(Hir::new(
-            HirKind::HandlerCase {
-                body: Box::new(body),
-                handlers,
-            },
-            span,
-            effect,
-        ))
-    }
-
-    pub(crate) fn analyze_handler_bind(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-    ) -> Result<Hir, String> {
-        if items.len() < 2 {
-            return Err(format!("{}: handler-bind requires handlers and body", span));
-        }
-
-        let handlers_syntax = items[1]
-            .as_list()
-            .ok_or_else(|| format!("{}: handler-bind handlers must be a list", span))?;
-
-        let mut handlers = Vec::new();
-        let mut effect = Effect::pure();
-
-        for handler_syntax in handlers_syntax {
-            let parts = handler_syntax
-                .as_list()
-                .ok_or_else(|| format!("{}: handler must be a list", span))?;
-            if parts.len() != 2 {
-                return Err(format!(
-                    "{}: handler requires condition type and function",
-                    span
-                ));
-            }
-
-            let cond_type = match &parts[0].kind {
-                SyntaxKind::Int(n) => *n as u32,
-                _ => 0,
-            };
-
-            let handler_fn = self.analyze_expr(&parts[1])?;
-            effect = effect.combine(handler_fn.effect.clone());
-            handlers.push((cond_type, Box::new(handler_fn)));
-        }
-
-        let body = self.analyze_body(&items[2..], span.clone())?;
-        effect = effect.combine(body.effect.clone());
-
-        Ok(Hir::new(
-            HirKind::HandlerBind {
-                handlers,
-                body: Box::new(body),
-            },
-            span,
-            effect,
-        ))
-    }
-
     pub(crate) fn analyze_module(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() < 2 {
             return Err(format!("{}: module requires a name", span));
@@ -279,7 +152,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let body = self.analyze_body(&items[body_start..], span.clone())?;
-        let effect = body.effect.clone();
+        let effect = body.effect;
 
         Ok(Hir::new(
             HirKind::Module {

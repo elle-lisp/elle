@@ -4,11 +4,10 @@
 //! a technique that encodes multiple types into a single 64-bit IEEE 754 double.
 
 pub mod closure;
-pub mod condition;
-pub mod continuation;
-pub mod coroutine;
 pub mod display;
+pub mod error;
 pub mod ffi;
+pub mod fiber;
 pub mod heap;
 pub mod intern;
 pub mod repr;
@@ -21,21 +20,21 @@ pub use repr::{cons, list, Value};
 // Export heap types
 pub use heap::{Cons, HeapObject, HeapTag};
 
-// Export Condition for exception handling
-pub use condition::Condition;
+// Export error value construction
+pub use error::{error_val, format_error};
 
 // Export SendValue for thread-safe value transmission
 pub use send::SendValue;
 
-// Export continuation types
-pub use continuation::{ContinuationData, ContinuationFrame, ExceptionHandler};
-
 // Export core types
-pub use types::{Arity, NativeFn, SymbolId, TableKey, VmAwareFn};
+pub use types::{Arity, NativeFn, SymbolId, TableKey};
 
-// Export closure and coroutine types
+// Export closure and fiber types
 pub use closure::Closure;
-pub use coroutine::{Coroutine, CoroutineState};
+pub use fiber::{
+    CallFrame, Fiber, FiberHandle, FiberStatus, Frame, SignalBits, SuspendedFrame, WeakFiberHandle,
+    SIG_CANCEL, SIG_DEBUG, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_RESUME, SIG_YIELD,
+};
 
 // Export FFI types
 pub use ffi::{CHandle, LibHandle, ThreadHandle};

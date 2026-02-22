@@ -45,7 +45,7 @@ representation. Create values via methods like `Value::int()`, `Value::cons()`,
 `Value::closure()` rather than enum variants. Notable types:
 - `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>`
 - `Cell` / `LocalCell` - mutable cells for captured variables
-- `Coroutine` - suspendable computation with saved context
+- `Fiber` - independent execution context with stack, frames, and signal mask
 
 All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 `SendValue` wrapper exists for thread-safety when needed.
@@ -133,8 +133,10 @@ Things that look wrong but aren't:
 
 - Two cell types exist: `Cell` (user-created via `box`, explicit) and
   `LocalCell` (compiler-created for mutable captures, auto-unwrapped).
-- `VmAwareFn` exists because some primitives (like `coroutine-resume`) need
-  to execute bytecode, so they need VM access.
+- Coroutine primitives (`coroutine-resume`) are implemented as fiber wrappers.
+  They return `(SIG_RESUME, fiber_value)` and the VM's SIG_RESUME handler in
+  `vm/call.rs` performs the actual fiber execution. This avoids primitives
+  needing VM access.
 - The `Cons` type in `value/heap.rs` is the heap-allocated cons cell data.
   `Value::cons(car, cdr)` creates a NaN-boxed pointer to a heap Cons.
 - `nil` and empty list `()` are distinct values with different truthiness:

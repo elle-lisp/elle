@@ -8,7 +8,8 @@
 //! not at the Value level. These primitives provide limited runtime introspection
 //! but cannot perform full macro expansion since that happens during compilation.
 
-use crate::value::{Condition, Value};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::{error_val, Value};
 
 /// Check if a value is a macro
 ///
@@ -22,17 +23,20 @@ use crate::value::{Condition, Value};
 /// (macro? +)         ; => #f
 /// (macro? 42)        ; => #f
 /// ```
-pub fn prim_is_macro(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_is_macro(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(format!(
-            "macro?: expected 1 argument, got {}",
-            args.len()
-        )));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("macro?: expected 1 argument, got {}", args.len()),
+            ),
+        );
     }
 
     // In the new pipeline, macros are expanded at compile time.
     // At runtime, we cannot query macro definitions.
-    Ok(Value::bool(false))
+    (SIG_OK, Value::bool(false))
 }
 
 /// Expand a macro call and return the expanded form
@@ -46,15 +50,18 @@ pub fn prim_is_macro(args: &[Value]) -> Result<Value, Condition> {
 /// ```lisp
 /// (expand-macro '(+ 1 2))  ; => (+ 1 2)
 /// ```
-pub fn prim_expand_macro(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_expand_macro(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(format!(
-            "expand-macro: expected 1 argument, got {}",
-            args.len()
-        )));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("expand-macro: expected 1 argument, got {}", args.len()),
+            ),
+        );
     }
 
     // In the new pipeline, macros are expanded at compile time.
     // At runtime, we cannot expand macros - just return the form unchanged.
-    Ok(args[0])
+    (SIG_OK, args[0])
 }

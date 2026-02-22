@@ -1,172 +1,206 @@
-//! Effect system for tracking which expressions may yield and raise
+//! Effect system for tracking which signals a function may emit.
 //!
-//! This module implements effect inference for colorless coroutines and
-//! exception tracking. Effects track whether an expression may suspend
-//! execution (yield) and whether it may raise an exception.
+//! Effects are signal-bits-based: they track which signals a function
+//! might emit (error, yield, debug, ffi, user-defined) and which
+//! parameter indices propagate their callee's effects (for higher-order
+//! functions like map/filter/fold).
 
 mod primitives;
 
 pub use primitives::get_primitive_effects;
 
-use std::collections::BTreeSet;
+use crate::value::fiber::SignalBits;
+use crate::value::fiber::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_YIELD};
 use std::fmt;
-
-/// Yield behavior classification
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub enum YieldBehavior {
-    /// Expression never yields - can be compiled to native code
-    #[default]
-    Pure,
-    /// Expression may yield - requires CPS transformation
-    Yields,
-    /// Effect depends on function parameters (for higher-order functions)
-    /// The BTreeSet contains the indices of parameters whose effects this depends on (0-indexed)
-    Polymorphic(BTreeSet<usize>),
-}
 
 /// Effect classification for expressions and functions.
 ///
-/// Tracks two orthogonal axes:
-/// - `yield_behavior`: whether the expression may yield (suspend)
-/// - `may_raise`: whether the expression may raise an exception
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+/// Two fields:
+/// - `bits`: which signals this function itself might emit
+/// - `propagates`: bitmask of parameter indices whose effects this
+///   function propagates (bit i set = parameter i's effects flow through)
+///
+/// `Copy` and `const fn` constructors — no allocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Effect {
-    pub yield_behavior: YieldBehavior,
-    pub may_raise: bool,
+    /// Signal bits this function itself might emit.
+    pub bits: SignalBits,
+    /// Bitmask of parameter indices whose effects this function propagates.
+    /// Bit i set means this function may exhibit parameter i's effects.
+    pub propagates: u32,
 }
 
+impl Default for Effect {
+    fn default() -> Self {
+        Effect::none()
+    }
+}
+
+// ── Constructors ────────────────────────────────────────────────────
+
 impl Effect {
-    /// Pure effect: does not yield, does not raise
-    pub const fn pure() -> Effect {
+    /// No effects: does not signal, does not propagate.
+    pub const fn none() -> Self {
         Effect {
-            yield_behavior: YieldBehavior::Pure,
-            may_raise: false,
+            bits: 0,
+            propagates: 0,
         }
     }
 
-    /// Pure but may raise (most primitives: arity/type errors)
-    pub fn pure_raises() -> Effect {
+    /// May raise an error (most primitives: arity/type errors).
+    pub const fn raises() -> Self {
         Effect {
-            yield_behavior: YieldBehavior::Pure,
-            may_raise: true,
+            bits: SIG_ERROR,
+            propagates: 0,
         }
     }
 
-    /// May yield, does not raise
-    pub fn yields() -> Effect {
+    /// May yield (cooperative suspension).
+    pub const fn yields() -> Self {
         Effect {
-            yield_behavior: YieldBehavior::Yields,
-            may_raise: false,
+            bits: SIG_YIELD,
+            propagates: 0,
         }
     }
 
-    /// May yield and may raise
-    pub fn yields_raises() -> Effect {
+    /// May yield and may raise.
+    pub const fn yields_raises() -> Self {
         Effect {
-            yield_behavior: YieldBehavior::Yields,
-            may_raise: true,
+            bits: SIG_YIELD | SIG_ERROR,
+            propagates: 0,
         }
     }
 
-    /// Create a polymorphic effect depending on a single parameter (no raise)
-    pub fn polymorphic(param: usize) -> Effect {
+    /// Calls foreign code via FFI.
+    pub const fn ffi() -> Self {
         Effect {
-            yield_behavior: YieldBehavior::Polymorphic(BTreeSet::from([param])),
-            may_raise: false,
+            bits: SIG_FFI,
+            propagates: 0,
         }
     }
 
-    /// Create a polymorphic effect depending on a single parameter (may raise)
-    pub fn polymorphic_raises(param: usize) -> Effect {
+    /// Polymorphic: effect depends on a single parameter (no raise).
+    pub const fn polymorphic(param: usize) -> Self {
         Effect {
-            yield_behavior: YieldBehavior::Polymorphic(BTreeSet::from([param])),
-            may_raise: true,
+            bits: 0,
+            propagates: 1 << param,
         }
     }
 
-    /// Combine two effects (used for sequencing)
-    /// Returns the "maximum" effect - if either yields, result yields.
-    /// may_raise is ORed.
-    pub fn combine(self, other: Effect) -> Effect {
-        let yield_behavior = match (self.yield_behavior, other.yield_behavior) {
-            (YieldBehavior::Pure, YieldBehavior::Pure) => YieldBehavior::Pure,
-            (YieldBehavior::Yields, _) | (_, YieldBehavior::Yields) => YieldBehavior::Yields,
-            (YieldBehavior::Polymorphic(s), YieldBehavior::Pure)
-            | (YieldBehavior::Pure, YieldBehavior::Polymorphic(s)) => YieldBehavior::Polymorphic(s),
-            (YieldBehavior::Polymorphic(mut a), YieldBehavior::Polymorphic(b)) => {
-                a.extend(b);
-                YieldBehavior::Polymorphic(a)
-            }
-        };
+    /// Polymorphic: effect depends on a single parameter (may raise).
+    pub const fn polymorphic_raises(param: usize) -> Self {
         Effect {
-            yield_behavior,
-            may_raise: self.may_raise || other.may_raise,
+            bits: SIG_ERROR,
+            propagates: 1 << param,
         }
     }
 
-    /// Combine multiple effects
+    /// Combine two effects (used for sequencing).
+    /// Signal bits are ORed. Propagation masks are ORed.
+    pub const fn combine(self, other: Effect) -> Effect {
+        Effect {
+            bits: self.bits | other.bits,
+            propagates: self.propagates | other.propagates,
+        }
+    }
+
+    /// Combine multiple effects.
     pub fn combine_all(effects: impl IntoIterator<Item = Effect>) -> Effect {
-        effects.into_iter().fold(Effect::pure(), Effect::combine)
-    }
-
-    /// Check if this effect is pure (no yield)
-    pub fn is_pure(&self) -> bool {
-        self.yield_behavior == YieldBehavior::Pure
-    }
-
-    /// Check if this effect may yield
-    pub fn may_yield(&self) -> bool {
-        self.yield_behavior == YieldBehavior::Yields
-    }
-
-    /// Check if this effect is polymorphic
-    pub fn is_polymorphic(&self) -> bool {
-        matches!(self.yield_behavior, YieldBehavior::Polymorphic(_))
+        effects
+            .into_iter()
+            .fold(Effect::none(), |a, b| a.combine(b))
     }
 }
 
-// Backward compatibility: allow comparing with the old enum-style patterns.
-// These constants match the old Effect::pure(), Effect::yields() usage.
-impl Effect {
-    /// The old Effect::pure() equivalent
-    pub const PURE: Effect = Effect {
-        yield_behavior: YieldBehavior::Pure,
-        may_raise: false,
-    };
+// ── Predicates ──────────────────────────────────────────────────────
+//
+// Each predicate asks a specific question. No vague "is_pure".
 
-    /// The old Effect::yields() equivalent
-    pub const YIELDS: Effect = Effect {
-        yield_behavior: YieldBehavior::Yields,
-        may_raise: false,
-    };
+impl Effect {
+    /// Can this function suspend execution?
+    /// Suspension signals: yield, debug. Polymorphic effects may also
+    /// suspend (depends on the argument's effect at the call site).
+    pub const fn may_suspend(&self) -> bool {
+        const SUSPENSION_BITS: SignalBits = SIG_YIELD | SIG_DEBUG;
+        (self.bits & SUSPENSION_BITS) != 0 || self.propagates != 0
+    }
+
+    /// Can this function yield (cooperative suspension)?
+    pub const fn may_yield(&self) -> bool {
+        self.bits & SIG_YIELD != 0
+    }
+
+    /// Can this function raise an error?
+    pub const fn may_raise(&self) -> bool {
+        self.bits & SIG_ERROR != 0
+    }
+
+    /// Does this function call foreign code?
+    pub const fn may_ffi(&self) -> bool {
+        self.bits & SIG_FFI != 0
+    }
+
+    /// Does this function's effect depend on its arguments?
+    pub const fn is_polymorphic(&self) -> bool {
+        self.propagates != 0
+    }
+
+    /// Get the set of parameter indices this effect propagates.
+    pub fn propagated_params(&self) -> impl Iterator<Item = usize> {
+        let mask = self.propagates;
+        (0..32).filter(move |i| mask & (1 << i) != 0)
+    }
+}
+
+// ── Backward compatibility ──────────────────────────────────────────
+
+impl Effect {
+    /// Alias for `none()`. Deprecated — use `none()` or a specific
+    /// constructor instead.
+    pub const fn pure() -> Self {
+        Self::none()
+    }
+
+    /// Alias for `raises()`. Deprecated — use `raises()` directly.
+    pub const fn pure_raises() -> Self {
+        Self::raises()
+    }
+
+    /// Deprecated — use `!may_suspend()` or check specific capabilities.
+    pub const fn is_pure(&self) -> bool {
+        !self.may_suspend()
+    }
+
+    pub const PURE: Effect = Effect::none();
+    pub const YIELDS: Effect = Effect::yields();
 }
 
 impl fmt::Display for Effect {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.yield_behavior {
-            YieldBehavior::Pure => {
-                if self.may_raise {
-                    write!(f, "pure+raises")
-                } else {
-                    write!(f, "pure")
-                }
-            }
-            YieldBehavior::Yields => {
-                if self.may_raise {
-                    write!(f, "yields+raises")
-                } else {
-                    write!(f, "yields")
-                }
-            }
-            YieldBehavior::Polymorphic(params) => {
-                let indices: Vec<_> = params.iter().map(|i| i.to_string()).collect();
-                if self.may_raise {
-                    write!(f, "polymorphic({})+raises", indices.join(","))
-                } else {
-                    write!(f, "polymorphic({})", indices.join(","))
-                }
-            }
+        if self.propagates != 0 {
+            let indices: Vec<_> = self.propagated_params().map(|i| i.to_string()).collect();
+            write!(f, "polymorphic({})", indices.join(","))?;
+        } else if self.bits & SIG_YIELD != 0 {
+            write!(f, "yields")?;
+        } else {
+            write!(f, "none")?;
         }
+
+        // Append capability flags
+        let mut flags = Vec::new();
+        if self.bits & SIG_ERROR != 0 {
+            flags.push("raises");
+        }
+        if self.bits & SIG_FFI != 0 {
+            flags.push("ffi");
+        }
+        if self.bits & SIG_DEBUG != 0 {
+            flags.push("debug");
+        }
+        if !flags.is_empty() {
+            write!(f, "+{}", flags.join("+"))?;
+        }
+        Ok(())
     }
 }
 
@@ -175,31 +209,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_effect_combine_pure() {
-        assert_eq!(Effect::pure().combine(Effect::pure()), Effect::pure());
+    fn test_effect_combine_none() {
+        assert_eq!(Effect::none().combine(Effect::none()), Effect::none());
     }
 
     #[test]
     fn test_effect_combine_yields() {
-        assert_eq!(Effect::pure().combine(Effect::yields()), Effect::yields());
-        assert_eq!(Effect::yields().combine(Effect::pure()), Effect::yields());
+        assert_eq!(Effect::none().combine(Effect::yields()), Effect::yields());
+        assert_eq!(Effect::yields().combine(Effect::none()), Effect::yields());
         assert_eq!(Effect::yields().combine(Effect::yields()), Effect::yields());
     }
 
     #[test]
     fn test_effect_combine_polymorphic() {
         assert_eq!(
-            Effect::pure().combine(Effect::polymorphic(0)),
+            Effect::none().combine(Effect::polymorphic(0)),
             Effect::polymorphic(0)
         );
         assert_eq!(
-            Effect::polymorphic(1).combine(Effect::pure()),
+            Effect::polymorphic(1).combine(Effect::none()),
             Effect::polymorphic(1)
         );
-        assert_eq!(
-            Effect::polymorphic(0).combine(Effect::yields()),
-            Effect::yields()
-        );
+        // Polymorphic + Yields = both
+        let combined = Effect::polymorphic(0).combine(Effect::yields());
+        assert!(combined.may_yield());
+        assert!(combined.is_polymorphic());
     }
 
     #[test]
@@ -208,8 +242,8 @@ mod tests {
         assert_eq!(
             combined,
             Effect {
-                yield_behavior: YieldBehavior::Polymorphic(BTreeSet::from([0, 1])),
-                may_raise: false,
+                bits: 0,
+                propagates: 0b11,
             }
         );
 
@@ -220,79 +254,101 @@ mod tests {
     #[test]
     fn test_effect_combine_all() {
         assert_eq!(
-            Effect::combine_all([Effect::pure(), Effect::pure(), Effect::pure()]),
-            Effect::pure()
+            Effect::combine_all([Effect::none(), Effect::none(), Effect::none()]),
+            Effect::none()
         );
         assert_eq!(
-            Effect::combine_all([Effect::pure(), Effect::yields(), Effect::pure()]),
+            Effect::combine_all([Effect::none(), Effect::yields(), Effect::none()]),
             Effect::yields()
         );
     }
 
     #[test]
-    fn test_effect_predicates() {
-        assert!(Effect::pure().is_pure());
-        assert!(!Effect::yields().is_pure());
-        assert!(!Effect::polymorphic(0).is_pure());
+    fn test_may_suspend() {
+        assert!(!Effect::none().may_suspend());
+        assert!(!Effect::raises().may_suspend());
+        assert!(Effect::yields().may_suspend());
+        assert!(Effect::polymorphic(0).may_suspend());
+        assert!(Effect {
+            bits: SIG_DEBUG,
+            propagates: 0
+        }
+        .may_suspend());
+    }
 
-        assert!(!Effect::pure().may_yield());
+    #[test]
+    fn test_may_yield() {
+        assert!(!Effect::none().may_yield());
         assert!(Effect::yields().may_yield());
+        assert!(!Effect::raises().may_yield());
+    }
 
-        assert!(!Effect::pure().is_polymorphic());
+    #[test]
+    fn test_may_raise() {
+        assert!(!Effect::none().may_raise());
+        assert!(Effect::raises().may_raise());
+        assert!(!Effect::yields().may_raise());
+        assert!(Effect::yields_raises().may_raise());
+
+        // Combining raises
+        let combined = Effect::none().combine(Effect::raises());
+        assert!(combined.may_raise());
+        assert!(!combined.may_suspend());
+    }
+
+    #[test]
+    fn test_may_ffi() {
+        assert!(!Effect::none().may_ffi());
+        assert!(Effect::ffi().may_ffi());
+    }
+
+    #[test]
+    fn test_is_polymorphic() {
+        assert!(!Effect::none().is_polymorphic());
         assert!(Effect::polymorphic(0).is_polymorphic());
     }
 
     #[test]
-    fn test_effect_may_raise() {
-        assert!(!Effect::pure().may_raise);
-        assert!(Effect::pure_raises().may_raise);
-        assert!(!Effect::yields().may_raise);
-        assert!(Effect::yields_raises().may_raise);
-
-        // Combining raises
-        let combined = Effect::pure().combine(Effect::pure_raises());
-        assert!(combined.may_raise);
-        assert!(combined.is_pure());
-
-        // Both raise
-        let combined2 = Effect::pure_raises().combine(Effect::pure_raises());
-        assert!(combined2.may_raise);
-    }
-
-    #[test]
     fn test_effect_display() {
-        assert_eq!(format!("{}", Effect::pure()), "pure");
+        assert_eq!(format!("{}", Effect::none()), "none");
         assert_eq!(format!("{}", Effect::yields()), "yields");
-        assert_eq!(format!("{}", Effect::pure_raises()), "pure+raises");
+        assert_eq!(format!("{}", Effect::raises()), "none+raises");
         assert_eq!(format!("{}", Effect::yields_raises()), "yields+raises");
         assert_eq!(format!("{}", Effect::polymorphic(0)), "polymorphic(0)");
         assert_eq!(
             format!("{}", Effect::polymorphic_raises(0)),
             "polymorphic(0)+raises"
         );
+        assert_eq!(format!("{}", Effect::ffi()), "none+ffi");
     }
 
-    // Backward compat constants
     #[test]
-    fn test_backward_compat_constants() {
-        assert_eq!(Effect::PURE, Effect::pure());
+    fn test_propagated_params() {
+        let e = Effect {
+            bits: 0,
+            propagates: 0b101, // params 0 and 2
+        };
+        let params: Vec<_> = e.propagated_params().collect();
+        assert_eq!(params, vec![0, 2]);
+    }
+
+    #[test]
+    fn test_effect_is_copy() {
+        let e = Effect::yields();
+        let e2 = e; // Copy
+        assert_eq!(e, e2);
+    }
+
+    #[test]
+    fn test_backward_compat() {
+        assert_eq!(Effect::pure(), Effect::none());
+        assert_eq!(Effect::pure_raises(), Effect::raises());
+        assert_eq!(Effect::PURE, Effect::none());
         assert_eq!(Effect::YIELDS, Effect::yields());
-    }
-
-    #[test]
-    fn test_pure_raises_is_pure() {
-        // A function that may raise but doesn't yield is considered pure
-        // (is_pure only checks yield behavior, not raise behavior)
-        assert!(
-            Effect::pure_raises().is_pure(),
-            "pure_raises should be pure (no yield)"
-        );
-
-        // Combining pure with pure_raises should still be pure
-        let combined = Effect::pure().combine(Effect::pure_raises());
-        assert!(
-            combined.is_pure(),
-            "pure combined with pure_raises should be pure (no yield)"
-        );
+        // is_pure() = !may_suspend()
+        assert!(Effect::none().is_pure());
+        assert!(Effect::raises().is_pure()); // raises doesn't suspend
+        assert!(!Effect::yields().is_pure());
+        assert!(!Effect::polymorphic(0).is_pure());
     }
 }

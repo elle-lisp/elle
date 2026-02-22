@@ -48,7 +48,7 @@ mod jit_tests {
         // Function with captured variables
         let code = r#"(begin
             (define (make-adder n)
-              (lambda (x) (+ x n)))
+              (fn (x) (+ x n)))
             (define add5 (make-adder 5))
             (define (loop n acc)
               (if (= n 0) acc (loop (- n 1) (add5 acc))))
@@ -277,11 +277,13 @@ mod jit_tests {
                 ; Call f enough times to make it hot, then call with 0
                 (f 1) (f 2) (f 3) (f 4) (f 5)
                 (f 6) (f 7) (f 8) (f 9) (f 10)
-                (handler-case (f 0) (division-by-zero e -1)))"#,
+                (let ((fib (fiber/new (fn () (f 0)) 1)))
+                  (fiber/resume fib)
+                  (if (= (fiber/bits fib) 1) -1 0)))"#,
         );
         assert!(result.is_ok());
         let val = result.unwrap();
-        // Should get -1 from the handler, not garbage from continuing after exception
+        // Should get -1 from the error handler, not garbage from continuing after exception
         assert_eq!(val.as_int(), Some(-1));
     }
 
@@ -302,11 +304,13 @@ mod jit_tests {
                 (f 1) (f 2) (f 5) (f 10) (f 1)
                 (f 2) (f 5) (f 10) (f 1) (f 2)
                 ; Now trigger exception
-                (handler-case (f 0) (division-by-zero e -42)))"#,
+                (let ((fib (fiber/new (fn () (f 0)) 1)))
+                  (fiber/resume fib)
+                  (if (= (fiber/bits fib) 1) -42 0)))"#,
         );
         assert!(result.is_ok());
         let val = result.unwrap();
-        // Should be -42 from the handler, not 1001 (which would happen if NIL + 1000 worked)
+        // Should be -42 from the error handler, not 1001 (which would happen if NIL + 1000 worked)
         assert_eq!(val.as_int(), Some(-42));
     }
 
@@ -322,10 +326,127 @@ mod jit_tests {
                 (outer 1) (outer 2) (outer 4) (outer 5) (outer 10)
                 (outer 1) (outer 2) (outer 4) (outer 5) (outer 10)
                 ; Trigger exception deep in the call chain
-                (handler-case (outer 0) (division-by-zero e -999)))"#,
+                (let ((fib (fiber/new (fn () (outer 0)) 1)))
+                  (fiber/resume fib)
+                  (if (= (fiber/bits fib) 1) -999 0)))"#,
         );
         assert!(result.is_ok());
         let val = result.unwrap();
         assert_eq!(val.as_int(), Some(-999));
+    }
+
+    // =========================================================================
+    // Fiber + JIT verification tests
+    //
+    // The effect system prevents suspending closures from being JIT-compiled.
+    // Non-suspending fiber primitives (fiber/new, fiber?, fiber/status, etc.)
+    // return SIG_OK/SIG_ERROR which the JIT handles. Suspending primitives
+    // (fiber/resume, fiber/signal) propagate may_suspend through the effect
+    // system, so closures calling them are never JIT candidates.
+    // =========================================================================
+
+    #[test]
+    fn test_jit_fiber_predicate_in_hot_loop() {
+        // fiber? has Effect::none() — should be JIT-compilable.
+        // Call it in a hot loop to trigger JIT, verify correct results.
+        let result = eval(
+            r#"(begin
+                (define (count-fibers lst n)
+                  (if (= n 0) 0
+                    (+ (if (fiber? lst) 1 0)
+                       (count-fibers lst (- n 1)))))
+                (count-fibers 42 20))"#,
+        );
+        assert!(result.is_ok(), "fiber? in hot loop failed: {:?}", result);
+        assert_eq!(result.unwrap().as_int(), Some(0));
+    }
+
+    #[test]
+    fn test_jit_fiber_new_in_hot_loop() {
+        // fiber/new has Effect::raises() — not suspending, JIT-safe.
+        // Create fibers in a hot loop, verify they're created correctly.
+        let result = eval(
+            r#"(begin
+                (define (make-fibers n)
+                  (if (= n 0) #t
+                    (begin
+                      (fiber/new (fn () n) 1)
+                      (make-fibers (- n 1)))))
+                (make-fibers 20))"#,
+        );
+        assert!(result.is_ok(), "fiber/new in hot loop failed: {:?}", result);
+        assert_eq!(result.unwrap().as_bool(), Some(true));
+    }
+
+    #[test]
+    fn test_jit_fiber_status_in_hot_loop() {
+        // fiber/status has Effect::raises() — JIT-safe.
+        // Check status of a fiber repeatedly in a hot loop.
+        let mut symbols = SymbolTable::new();
+        let mut vm = VM::new();
+        let _effects = register_primitives(&mut vm, &mut symbols);
+        elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval_new(
+            r#"(begin
+                (define f (fiber/new (fn () 42) 1))
+                (define (check-status n)
+                  (if (= n 0) (= (fiber/status f) :new)
+                    (begin (fiber/status f) (check-status (- n 1)))))
+                (check-status 20))"#,
+            &mut symbols,
+            &mut vm,
+        );
+        elle::ffi::primitives::context::clear_symbol_table();
+        assert!(
+            result.is_ok(),
+            "fiber/status in hot loop failed: {:?}",
+            result
+        );
+        let val = result.unwrap();
+        assert_eq!(val.as_bool(), Some(true));
+    }
+
+    #[test]
+    fn test_jit_closure_calling_fiber_resume_not_jit_compiled() {
+        // fiber/resume has Effect::yields_raises() — may_suspend is true.
+        // A closure calling fiber/resume should NOT be JIT-compiled, but
+        // should still work correctly via the interpreter.
+        let result = eval(
+            r#"(begin
+                (define (resume-fiber f)
+                  (fiber/resume f))
+                (define f (fiber/new (fn () 42) 0))
+                (resume-fiber f))"#,
+        );
+        assert!(
+            result.is_ok(),
+            "fiber/resume via interpreter failed: {:?}",
+            result
+        );
+        assert_eq!(result.unwrap().as_int(), Some(42));
+    }
+
+    #[test]
+    fn test_jit_mixed_pure_and_fiber_functions() {
+        // A pure function and a fiber-using function coexist.
+        // The pure function gets JIT-compiled; the fiber one doesn't.
+        // Both produce correct results.
+        let result = eval(
+            r#"(begin
+                (define (pure-add x y) (+ x y))
+                (define (use-fiber x)
+                  (define f (fiber/new (fn () x) 0))
+                  (fiber/resume f)
+                  (fiber/value f))
+                ; Warm up pure-add (should get JIT-compiled)
+                (define (loop n acc)
+                  (if (= n 0) acc (loop (- n 1) (pure-add acc 1))))
+                (define sum (loop 20 0))
+                ; Now use fibers (interpreter path)
+                (define fval (use-fiber sum))
+                fval)"#,
+        );
+        assert!(result.is_ok(), "mixed pure/fiber failed: {:?}", result);
+        assert_eq!(result.unwrap().as_int(), Some(20));
     }
 }

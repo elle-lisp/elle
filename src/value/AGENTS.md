@@ -5,7 +5,7 @@ Runtime value representation using NaN-boxing.
 ## Responsibility
 
 - Define the `Value` type (NaN-boxed 8-byte representation)
-- Provide heap-allocated types (Closure, Coroutine, Cons, etc.)
+- Provide heap-allocated types (Closure, Fiber, Cons, etc.)
 - Handle value display and thread-safe transfer
 
 ## Submodules
@@ -17,11 +17,10 @@ Runtime value representation using NaN-boxing.
 | `repr/accessors.rs` | Value field access and type checking |
 | `repr/traits.rs` | `Display`, `Debug`, `Clone` implementations |
 | `repr/tests.rs` | NaN-boxing tests |
-| `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `VmAwareFn`, `TableKey` |
+| `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey` |
 | `closure.rs` | `Closure` struct with bytecode, env, and `location_map` |
-| `coroutine.rs` | `Coroutine`, `CoroutineState` for suspendable computation |
-| `continuation.rs` | `ContinuationData`, `ContinuationFrame` for first-class continuations |
-| `condition.rs` | `Condition` for the condition/restart system |
+| `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`, `SignalBits` |
+| `error.rs` | `error_val()` and `format_error()` helpers for error tuples |
 | `ffi.rs` | `LibHandle`, `CHandle` for C interop |
 | `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle` |
 | `send.rs` | `SendValue` wrapper for thread-safe transfer |
@@ -34,7 +33,28 @@ Runtime value representation using NaN-boxing.
 |------|----------|---------|
 | `Value` | `repr.rs` | NaN-boxed 8-byte value (Copy) |
 | `Closure` | `closure.rs` | Bytecode + env + arity + effect + location_map |
-| `Coroutine` | `coroutine.rs` | Suspendable computation with continuation |
+| `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
+| `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
+| `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
+
+### Fiber fields for parent/child chain
+
+Fibers maintain cached NaN-boxed `Value`s alongside their handle references
+so that `fiber/parent` and `fiber/child` return identity-preserving values
+(i.e., `(eq? (fiber/parent f) (fiber/parent f))` is `#t`):
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
+| `parent_value` | `Option<Value>` | Cached NaN-boxed Value for parent |
+| `child` | `Option<FiberHandle>` | Strong pointer to child fiber |
+| `child_value` | `Option<Value>` | Cached NaN-boxed Value for child |
+
+These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
+| `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
+| `Frame` | `fiber.rs` | Single call frame (closure + ip + base) |
+| `FiberStatus` | `fiber.rs` | Fiber lifecycle: New, Alive, Suspended, Dead, Error |
+| `SignalBits` | `fiber.rs` | u32 bitmask: SIG_OK(0), SIG_ERROR(1), SIG_YIELD(2), SIG_DEBUG(4), SIG_RESUME(8), SIG_FFI(16), SIG_PROPAGATE(32), SIG_CANCEL(64) |
 | `Arity` | `types.rs` | Function arity (Exact, AtLeast, Range) |
 | `SymbolId` | `types.rs` | Interned symbol identifier |
 | `SendValue` | `send.rs` | Thread-safe value wrapper |
@@ -56,12 +76,17 @@ Runtime value representation using NaN-boxing.
 5. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
    transfer between threads, cloning `Rc` contents as needed.
 
+6. **`SuspendedFrame` replaces both `SavedContext` and `ContinuationFrame`.**
+   A single type captures everything needed to resume: bytecode (`Rc<Vec<u8>>`),
+   constants (`Rc<Vec<Value>>`), env (`Rc<Vec<Value>>`), IP, and operand stack.
+   Signal suspension has an empty stack; yield suspension captures the stack.
+
 ## Value encoding
 
 NaN-boxing uses the NaN space of IEEE 754 doubles:
 
 - **Immediate**: nil, bool, int (i48), symbol, keyword, float
-- **Heap pointer**: cons, vector, table, closure, coroutine, cell, etc.
+- **Heap pointer**: cons, vector, table, closure, fiber, cell, etc.
 
 Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
 `Value::closure(c)`. Don't construct enum variants directly.
@@ -70,7 +95,7 @@ Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | ~50 | Re-exports |
+| `mod.rs` | ~40 | Re-exports |
 | `repr/mod.rs` | ~280 | NaN-boxed Value type, tag encoding |
 | `repr/constructors.rs` | ~250 | Value construction methods |
 | `repr/accessors.rs` | ~420 | Value field access and type checking |
@@ -78,9 +103,8 @@ Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
 | `repr/tests.rs` | ~100 | NaN-boxing tests |
 | `types.rs` | ~150 | Arity, SymbolId, NativeFn, etc. |
 | `closure.rs` | ~70 | Closure struct |
-| `coroutine.rs` | ~100 | Coroutine, CoroutineState |
-| `continuation.rs` | ~200 | ContinuationData, ContinuationFrame |
-| `condition.rs` | ~50 | Condition type |
+| `fiber.rs` | ~515 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
+| `error.rs` | ~50 | error_val() and format_error() helpers |
 | `ffi.rs` | ~50 | LibHandle, CHandle |
 | `heap.rs` | ~300 | HeapObject, Cons, ThreadHandle |
 | `send.rs` | ~150 | SendValue for thread transfer |

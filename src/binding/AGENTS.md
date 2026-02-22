@@ -25,10 +25,10 @@ This module answers: "Where does this variable live?" It does NOT:
 ```
 AST traversal
     │
-    ├─► push scope (entering lambda/let)
+    ├─► push scope (entering fn/let)
     ├─► bind (defining variable)
     ├─► lookup (referencing variable) → VarRef
-    ├─► mark_captured/mark_mutated (set!/nested lambda)
+    ├─► mark_captured/mark_mutated (set!/nested fn)
     └─► pop scope (leaving)
 ```
 

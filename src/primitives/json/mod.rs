@@ -9,50 +9,73 @@ mod serializer;
 pub use parser::JsonParser;
 pub use serializer::{escape_json_string, serialize_value, serialize_value_pretty};
 
-use crate::value::{Condition, Value};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::{error_val, Value};
 
 /// Parse a JSON string into Elle values
-pub fn prim_json_parse(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(
-            "json-parse: expected 1 argument".to_string(),
-        ));
+        return (
+            SIG_ERROR,
+            error_val("arity-error", "json-parse: expected 1 argument".to_string()),
+        );
     }
 
     let json_str = if let Some(s) = args[0].as_string() {
         s
     } else {
-        return Err(Condition::type_error(
-            "json-parse: expected string argument".to_string(),
-        ));
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                "json-parse: expected string argument".to_string(),
+            ),
+        );
     };
 
     let mut parser = JsonParser::new(json_str);
-    parser.parse().map_err(Condition::error)
+    match parser.parse() {
+        Ok(v) => (SIG_OK, v),
+        Err(e) => (SIG_ERROR, error_val("error", e)),
+    }
 }
 
 /// Serialize an Elle value to compact JSON
-pub fn prim_json_serialize(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_json_serialize(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(
-            "json-serialize: expected 1 argument".to_string(),
-        ));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                "json-serialize: expected 1 argument".to_string(),
+            ),
+        );
     }
 
-    let json_str = serialize_value(&args[0]).map_err(Condition::error)?;
-    Ok(Value::string(json_str))
+    let json_str = match serialize_value(&args[0]) {
+        Ok(s) => s,
+        Err(e) => return (SIG_ERROR, error_val("error", e)),
+    };
+    (SIG_OK, Value::string(json_str))
 }
 
 /// Serialize an Elle value to pretty-printed JSON with 2-space indentation
-pub fn prim_json_serialize_pretty(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_json_serialize_pretty(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(
-            "json-serialize-pretty: expected 1 argument".to_string(),
-        ));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                "json-serialize-pretty: expected 1 argument".to_string(),
+            ),
+        );
     }
 
-    let json_str = serialize_value_pretty(&args[0], 0).map_err(Condition::error)?;
-    Ok(Value::string(json_str))
+    let json_str = match serialize_value_pretty(&args[0], 0) {
+        Ok(s) => s,
+        Err(e) => return (SIG_ERROR, error_val("error", e)),
+    };
+    (SIG_OK, Value::string(json_str))
 }
 
 #[cfg(test)]
@@ -340,7 +363,7 @@ mod tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![]),
-            effect: crate::effects::Effect::pure(),
+            effect: crate::effects::Effect::none(),
             cell_params_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
@@ -349,7 +372,7 @@ mod tests {
         });
         assert!(serialize_value(&closure).is_err());
 
-        let native_fn: crate::value::NativeFn = |_| Ok(Value::NIL);
+        let native_fn: crate::value::NativeFn = |_| (crate::value::fiber::SIG_OK, Value::NIL);
         let fn_val = Value::native_fn(native_fn);
         assert!(serialize_value(&fn_val).is_err());
     }
@@ -432,18 +455,18 @@ mod tests {
     #[test]
     fn test_json_parse_wrong_type() {
         // json-parse requires a string argument
-        let result = prim_json_parse(&[Value::int(42)]);
-        assert!(result.is_err());
+        let (bits, _) = prim_json_parse(&[Value::int(42)]);
+        assert_eq!(bits, crate::value::fiber::SIG_ERROR);
     }
 
     #[test]
     fn test_json_serialize_wrong_arity() {
         // json-serialize requires exactly 1 argument
-        let result = prim_json_serialize(&[]);
-        assert!(result.is_err());
+        let (bits, _) = prim_json_serialize(&[]);
+        assert_eq!(bits, crate::value::fiber::SIG_ERROR);
 
-        let result = prim_json_serialize(&[Value::int(1), Value::int(2)]);
-        assert!(result.is_err());
+        let (bits, _) = prim_json_serialize(&[Value::int(1), Value::int(2)]);
+        assert_eq!(bits, crate::value::fiber::SIG_ERROR);
     }
 
     #[test]

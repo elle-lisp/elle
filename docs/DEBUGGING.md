@@ -35,7 +35,7 @@ APIs and the `libc` crate, the design now uses Rust-native equivalents from
 ## 1. Introspection Primitives
 
 These operate on **values**, not symbols. Pass a closure (or any value) and
-get information about it. All are `NativeFn` unless noted otherwise.
+get information about it. All are `NativeFn`. Primitives that need VM access use the SIG_RESUME pattern.
 
 ### 1.1 Compiler/runtime predicates
 
@@ -44,7 +44,7 @@ get information about it. All are `NativeFn` unless noted otherwise.
 | `jit?` | `(jit? value)` | `#t` or `#f` | True if value is a closure with JIT-compiled native code |
 | `pure?` | `(pure? value)` | `#t` or `#f` | True if value is a closure with `Effect::Pure` |
 | `coro?` | `(coro? value)` | `#t` or `#f` | True if value is a closure with `Effect::Yields` |
-| `global?` | `(global? sym)` | `#t` or `#f` | True if symbol is bound as a global. VmAwareFn. |
+| `global?` | `(global? sym)` | `#t` or `#f` | True if symbol is bound as a global. Requires VM access (SIG_RESUME). |
 | `mutates-params?` | `(mutates-params? value)` | `#t` or `#f` | True if value is a closure whose body mutates any of its own parameters (i.e., `cell_params_mask != 0`) |
 | `closure?` | `(closure? value)` | `#t` or `#f` | True if value is a closure (bytecode, not native/vm-aware) |
 
@@ -68,8 +68,8 @@ require scanning `env`, which is a different (and more expensive) operation.
 
 | Primitive | Signature | Returns | Notes |
 |-----------|-----------|---------|-------|
-| `jit` | `(jit value)` | closure | Triggers JIT compilation if value is a closure with `lir_function`. Returns the closure (with `jit_code` populated if compilation succeeded). Does not mutate any global. VmAwareFn. |
-| `jit!` | `(jit! sym)` | closure | Takes a symbol, looks up the global, JIT-compiles it, and **replaces the global binding** with the JIT-compiled closure. Returns the new value. VmAwareFn. |
+| `jit` | `(jit value)` | closure | Triggers JIT compilation if value is a closure with `lir_function`. Returns the closure (with `jit_code` populated if compilation succeeded). Does not mutate any global. Requires VM access (SIG_RESUME). |
+| `jit!` | `(jit! sym)` | closure | Takes a symbol, looks up the global, JIT-compiles it, and **replaces the global binding** with the JIT-compiled closure. Returns the new value. Requires VM access (SIG_RESUME). |
 
 `jit` is the pure-style API: give it a closure, get back a closure that may
 now have JIT code. `jit!` is the imperative API: give it a symbol naming a
@@ -97,7 +97,7 @@ This requires the `Raises` effect extension (§4).
 |-----------|-----------|---------|-------|
 | `arity` | `(arity value)` | int, pair, or nil | For closures: exact arity as int, or `(min . max)` pair for range, or `(min . nil)` for variadic. Nil for non-closures. |
 | `captures` | `(captures value)` | int or nil | Number of captured variables, or nil for non-closures. |
-| `call-count` | `(call-count value)` | int | Number of times this closure has been called (from VM's hotness tracker). VmAwareFn. |
+| `call-count` | `(call-count value)` | int | Number of times this closure has been called (from VM's hotness tracker). Requires VM access (SIG_RESUME). |
 | `bytecode-size` | `(bytecode-size value)` | int or nil | Size of closure's bytecode in bytes. Nil for non-closures. |
 
 ## 2. Time API
@@ -390,14 +390,14 @@ registration itself.
 
 ### 5.1 New registration signature
 
-`register_fn` and `register_vm_aware_fn` gain an `Effect` parameter:
+`register_fn` gains an `Effect` parameter:
 
 ```rust
 fn register_fn(
     vm: &mut VM,
     symbols: &mut SymbolTable,
     name: &str,
-    func: fn(&[Value]) -> Result<Value, Condition>,
+    func: fn(&[Value]) -> (SignalBits, Value),
     effect: Effect,
 )
 ```
@@ -421,8 +421,8 @@ register_fn(vm, symbols, "nil?", prim_is_nil, Effect::pure());
 // Higher-order: polymorphic yield, may raise
 register_fn(vm, symbols, "map", prim_map, Effect::polymorphic_raises(0));
 
-// Division: VM-aware, may raise (division by zero)
-register_vm_aware_fn(vm, symbols, "/", prim_div_vm, Effect::pure_raises());
+// Division: may raise (division by zero)
+register_fn(vm, symbols, "/", prim_div, Effect::pure_raises());
 ```
 
 Convenience constructors on `Effect`:
@@ -508,10 +508,10 @@ New file: `tests/integration/benchmarks.rs`
 | `src/value/repr/traits.rs` | Modify | Add `PartialEq` arms for Instant and Duration |
 | `src/value/display.rs` | Modify | Add display formatting for `#<instant>` and `#<duration ...>` |
 | `src/value/send.rs` | Modify | Add `SendValue` handling (Instant is Send; Duration is Send) |
-| `src/primitives/debugging.rs` | New | All debugging toolkit primitives: introspection (`jit?`, `pure?`, `coro?`, `closure?`, `mutates-params?`, `arity`, `captures`, `bytecode-size`, `raises?`), time (`now`, `elapsed`, `cpu-time`, `duration`, `duration->seconds`, `duration->nanoseconds`, `duration<`, `instant?`, `duration?`), JIT control (`jit`, `jit!`, `call-count`). NativeFn and VmAwareFn. |
+| `src/primitives/debugging.rs` | New | All debugging toolkit primitives: introspection (`jit?`, `pure?`, `coro?`, `closure?`, `mutates-params?`, `arity`, `captures`, `bytecode-size`, `raises?`), time (`now`, `elapsed`, `cpu-time`, `duration`, `duration->seconds`, `duration->nanoseconds`, `duration<`, `instant?`, `duration?`), JIT control (`jit`, `jit!`, `call-count`). All NativeFn; VM-access primitives use SIG_RESUME. |
 | `src/primitives/debug.rs` | Modify | Remove placeholder `profile`. Keep `debug-print`, `trace`, `memory-usage`. |
 | `src/primitives/concurrency.rs` | Modify | Update `sleep` to accept duration values only |
-| `src/primitives/registration.rs` | Modify | Add `Effect` parameter to `register_fn`/`register_vm_aware_fn`; register all new primitives with effects; migrate all existing registrations |
+| `src/primitives/registration.rs` | Modify | Add `Effect` parameter to `register_fn`; register all new primitives with effects; migrate all existing registrations |
 | `src/primitives/mod.rs` | Modify | Add `debugging` module |
 | `src/effects/mod.rs` | Modify | Restructure `Effect` as struct with `YieldBehavior` + `may_raise` |
 | `src/effects/primitives.rs` | Delete | Side-table replaced by registration-time effect declarations |

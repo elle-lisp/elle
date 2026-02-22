@@ -5,3 +5,6 @@ mod coroutines {
 mod bugfixes {
     include!("bugfixes.rs");
 }
+mod fibers {
+    include!("fibers.rs");
+}
