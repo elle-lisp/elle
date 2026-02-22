@@ -173,22 +173,8 @@ impl HirLinter {
                 }
             }
 
-            HirKind::Throw(expr) | HirKind::Yield(expr) => {
+            HirKind::Yield(expr) => {
                 self.check(expr, symbols);
-            }
-
-            HirKind::HandlerCase { body, handlers } => {
-                self.check(body, symbols);
-                for (_, _, handler) in handlers {
-                    self.check(handler, symbols);
-                }
-            }
-
-            HirKind::HandlerBind { handlers, body } => {
-                self.check(body, symbols);
-                for (_, handler) in handlers {
-                    self.check(handler, symbols);
-                }
             }
 
             HirKind::And(exprs) | HirKind::Or(exprs) => {

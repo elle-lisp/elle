@@ -15,31 +15,28 @@ Primitives are automatically available after VM initialization:
 (print "Hello!")    ; I/O
 ```
 
-## Two Function Types
+## Unified Function Type
 
-**NativeFn**: Simple functions that operate on values.
+All primitives use a single type: `fn(&[Value]) -> (SignalBits, Value)`.
 
 ```rust
-fn prim_add(args: &[Value]) -> Result<Value, Condition> {
+fn prim_add(args: &[Value]) -> (SignalBits, Value) {
     let mut sum = 0i64;
     for arg in args {
-        sum += arg.as_int()?;
+        match arg.as_int() {
+            Some(n) => sum += n,
+            None => return (SIG_ERROR, Value::condition(
+                Condition::type_error("expected integer".to_string())
+            )),
+        }
     }
-    Ok(Value::int(sum))
+    (SIG_OK, Value::int(sum))
 }
 ```
 
-**VmAwareFn**: Functions that need VM access (for executing closures,
-managing coroutines, etc.).
-
-```rust
-fn prim_apply(args: &[Value], vm: &mut VM) -> LResult<Value> {
-    let func = &args[0];
-    let arg_list = args[1].list_to_vec()?;
-    // Need VM to call the function
-    vm.call_function(func, &arg_list)
-}
-```
+No primitive has VM access. Operations that need the VM
+(fiber execution) return `(SIG_RESUME, fiber_value)` and the
+VM's dispatch loop handles the actual execution.
 
 ## Adding a New Primitive
 
@@ -47,60 +44,36 @@ fn prim_apply(args: &[Value], vm: &mut VM) -> LResult<Value> {
 
 2. **Implement the function**:
    ```rust
-   pub fn prim_my_func(args: &[Value]) -> Result<Value, Condition> {
+   pub fn prim_my_func(args: &[Value]) -> (SignalBits, Value) {
        if args.len() != 2 {
-           return Err(Condition::arity_error(2, args.len()));
+           return (SIG_ERROR, Value::condition(
+               Condition::arity_error("my-func: expected 2 arguments".to_string())
+           ));
        }
        // Implementation...
+       (SIG_OK, result)
    }
    ```
 
-3. **Register it**:
+3. **Register it** in `registration.rs`:
    ```rust
-    pub fn register_my_module(vm: &mut VM, symbols: &mut SymbolTable) {
-        let sym = symbols.intern("my-func");
-        vm.set_global(sym.0, Value::native_fn(prim_my_func));
-    }
+   register_fn(vm, symbols, &mut effects, "my-func", prim_my_func, Effect::raises());
    ```
-
-4. **Call from `registration.rs`**:
-   ```rust
-   pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) {
-       // ... existing registrations ...
-       my_module::register_my_module(vm, symbols);
-   }
-   ```
-
-## Variadic Functions
-
-Use `Arity::AtLeast(n)` for functions that take a minimum number of arguments:
-
-```rust
-// (+ a b ...) - at least 0 arguments
-fn prim_add(args: &[Value]) -> Result<Value, Condition> {
-    args.iter().try_fold(0i64, |acc, v| {
-        Ok(acc + v.as_int()?)
-    }).map(Value::int)
-}
-```
 
 ## Error Handling
 
-NativeFn uses `Result<Value, Condition>` with `Condition` builders:
+All errors use `(SIG_ERROR, Value::condition(...))`:
 
 ```rust
 // Type mismatch
-return Err(Condition::type_error("integer", value.type_name()));
+return (SIG_ERROR, Value::condition(Condition::type_error("expected integer".to_string())));
 
 // Wrong number of arguments
-return Err(Condition::arity_error(2, args.len()));
+return (SIG_ERROR, Value::condition(Condition::arity_error("expected 2 arguments".to_string())));
 ```
-
-VmAwareFn uses `LResult<Value>` but sets `vm.current_exception` for user-facing
-errors and returns `Ok(Value::NIL)`. Only return `Err(LError)` for VM bugs.
 
 ## See Also
 
 - [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- `src/vm/` - executes primitive calls
+- `src/vm/call.rs` - dispatches primitive calls, handles signal bits
 - `docs/BUILTINS.md` - user-facing primitive documentation

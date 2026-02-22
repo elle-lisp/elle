@@ -4,9 +4,9 @@ use crate::vm::VM;
 
 /// Define map, filter, and fold as Lisp functions that support closures
 pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
-    // Define map: (lambda (f lst) (if (empty? lst) () (cons (f (first lst)) (map f (rest lst)))))
+    // Define map: (fn (f lst) (if (empty? lst) () (cons (f (first lst)) (map f (rest lst)))))
     let map_code = r#"
-        (define map (lambda (f lst)
+        (define map (fn (f lst)
           (if (empty? lst)
             ()
             (cons (f (first lst)) (map f (rest lst))))))
@@ -14,7 +14,7 @@ pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Define filter
     let filter_code = r#"
-        (define filter (lambda (p lst)
+        (define filter (fn (p lst)
           (if (empty? lst)
             ()
             (if (p (first lst))
@@ -24,7 +24,7 @@ pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Define fold
     let fold_code = r#"
-        (define fold (lambda (f init lst)
+        (define fold (fn (f init lst)
           (if (empty? lst)
             init
             (fold f (f init (first lst)) (rest lst)))))

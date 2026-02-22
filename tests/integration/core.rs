@@ -741,7 +741,7 @@ fn test_even_odd() {
 fn test_recursive_lambda_fibonacci() {
     // Test basic recursive lambda
     let code = r#"
-        (define fib (lambda (n) 
+        (define fib (fn (n) 
           (if (< n 2) 
             n 
             (+ (fib (- n 1)) (fib (- n 2))))))
@@ -754,7 +754,7 @@ fn test_recursive_lambda_fibonacci() {
 fn test_recursive_lambda_fibonacci_10() {
     // Test fibonacci(10) = 55
     let code = r#"
-        (define fib (lambda (n) 
+        (define fib (fn (n) 
           (if (< n 2) 
             n 
             (+ (fib (- n 1)) (fib (- n 2))))))
@@ -767,7 +767,7 @@ fn test_recursive_lambda_fibonacci_10() {
 fn test_tail_recursive_sum() {
     // Test tail-recursive sum accumulation
     let code = r#"
-        (define sum-to (lambda (n acc)
+        (define sum-to (fn (n acc)
           (if (= n 0) acc (sum-to (- n 1) (+ acc n)))))
         (sum-to 100 0)
     "#;
@@ -778,7 +778,7 @@ fn test_tail_recursive_sum() {
 fn test_recursive_countdown() {
     // Test simple countdown recursion
     let code = r#"
-        (define countdown (lambda (n)
+        (define countdown (fn (n)
           (if (<= n 0)
             0
             (+ n (countdown (- n 1))))))
@@ -791,8 +791,8 @@ fn test_recursive_countdown() {
 fn test_nested_recursive_functions() {
     // Test nested function definitions with recursion
     let code = r#"
-        (define outer (lambda (n)
-          (define inner (lambda (x)
+        (define outer (fn (n)
+          (define inner (fn (x)
             (if (< x 1) 0 (+ x (inner (- x 1))))))
           (inner n)))
         (outer 5)
@@ -804,7 +804,7 @@ fn test_nested_recursive_functions() {
 fn test_simple_lambda_call() {
     // Simple lambda that takes a parameter and returns it
     let code = r#"
-        (define identity (lambda (x) x))
+        (define identity (fn (x) x))
         (identity 42)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(42));
@@ -814,7 +814,7 @@ fn test_simple_lambda_call() {
 fn test_lambda_with_arithmetic() {
     // Lambda that does arithmetic on its parameter
     let code = r#"
-        (define double (lambda (x) (* x 2)))
+        (define double (fn (x) (* x 2)))
         (double 21)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(42));
@@ -824,7 +824,7 @@ fn test_lambda_with_arithmetic() {
 fn test_lambda_with_comparison() {
     // Lambda that uses comparison on its parameter
     let code = r#"
-        (define is-positive (lambda (x) (> x 0)))
+        (define is-positive (fn (x) (> x 0)))
         (is-positive 5)
     "#;
     assert_eq!(eval(code).unwrap(), Value::bool(true));
@@ -837,7 +837,7 @@ fn test_lambda_with_comparison() {
 fn test_closure_captures_outer_variable() {
     let code = r#"
         (define x 100)
-        ((lambda (y) (+ x y)) 20)
+        ((fn (y) (+ x y)) 20)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(120));
 }
@@ -846,7 +846,7 @@ fn test_closure_captures_outer_variable() {
 fn test_closure_parameter_shadowing() {
     let code = r#"
         (define x 100)
-        ((lambda (x) (+ x 1)) 50)
+        ((fn (x) (+ x 1)) 50)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(51));
 }
@@ -857,7 +857,7 @@ fn test_closure_captures_multiple_variables() {
         (define x 10)
         (define y 20)
         (define z 30)
-        ((lambda (a b c) (+ a b c x y z)) 1 2 3)
+        ((fn (a b c) (+ a b c x y z)) 1 2 3)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(66));
 }
@@ -865,7 +865,7 @@ fn test_closure_captures_multiple_variables() {
 #[test]
 fn test_closure_parameter_in_nested_expression() {
     let code = r#"
-        ((lambda (x)
+        ((fn (x)
           (if (> x 50) (* x 2) (+ x 100))) 25)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(125));
@@ -874,8 +874,8 @@ fn test_closure_parameter_in_nested_expression() {
 #[test]
 fn test_multiple_closures_independent_params() {
     let code = r#"
-        (define f1 (lambda (x) (+ x 10)))
-        (define f2 (lambda (x) (* x 2)))
+        (define f1 (fn (x) (+ x 10)))
+        (define f2 (fn (x) (* x 2)))
         (+ (f1 5) (f2 5))
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(25));
@@ -884,8 +884,8 @@ fn test_multiple_closures_independent_params() {
 #[test]
 fn test_closure_captured_function_call() {
     let code = r#"
-        (define add (lambda (a b) (+ a b)))
-        ((lambda (x y) (add x y)) 10 20)
+        (define add (fn (a b) (+ a b)))
+        ((fn (x y) (add x y)) 10 20)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(30));
 }
@@ -894,7 +894,7 @@ fn test_closure_captured_function_call() {
 fn test_closure_with_list_operations() {
     let code = r#"
         (define numbers (list 1 2 3 4 5))
-        ((lambda (lst) (first lst)) numbers)
+        ((fn (lst) (first lst)) numbers)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(1));
 }
@@ -902,7 +902,7 @@ fn test_closure_with_list_operations() {
 #[test]
 fn test_closure_parameter_in_conditional() {
     let code = r#"
-        ((lambda (n)
+        ((fn (n)
           (if (nil? n) "empty" "nonempty"))
          (list 1))
     "#;
@@ -912,7 +912,7 @@ fn test_closure_parameter_in_conditional() {
 #[test]
 fn test_closure_preserves_parameter_type() {
     let code = r#"
-        ((lambda (s) (string? s)) "hello")
+        ((fn (s) (string? s)) "hello")
     "#;
     assert_eq!(eval(code).unwrap(), Value::bool(true));
 }
@@ -1067,7 +1067,7 @@ fn test_let_shadowing_with_calculation() {
 #[test]
 fn test_let_with_builtin_functions() {
     let code = r#"
-         (let ((len (lambda (x) 42)))
+         (let ((len (fn (x) 42)))
            (len nil))
      "#;
     assert_eq!(eval(code).unwrap(), Value::int(42));
@@ -1249,8 +1249,8 @@ fn test_cond_with_else_body_multiple_expressions() {
 fn test_nested_lambda_single_capture() {
     // Test that nested lambdas can access outer lambda parameters (capture only)
     let code = r#"
-        (define make-const (lambda (x)
-          (lambda (y)
+        (define make-const (fn (x)
+          (fn (y)
             x)))
         
         (define f (make-const 42))
@@ -1263,8 +1263,8 @@ fn test_nested_lambda_single_capture() {
 fn test_nested_lambda_parameter_only() {
     // Test that nested lambdas can access their own parameters (no captures)
     let code = r#"
-         (define make-id (lambda (x)
-           (lambda (y)
+         (define make-id (fn (x)
+           (fn (y)
              y)))
          
          (define f (make-id 100))
@@ -1280,9 +1280,9 @@ fn test_nested_lambda_parameter_only() {
 // #[test]
 // fn test_triple_nested_closure_with_multiple_captures() {
 //     let code = r#"
-//          (define make-multiplier (lambda (a)
-//            (lambda (b)
-//              (lambda (c)
+//          (define make-multiplier (fn (a)
+//            (fn (b)
+//              (fn (c)
 //                (* a (* b c))))))
 //          (((make-multiplier 2) 3) 4)
 //      "#;

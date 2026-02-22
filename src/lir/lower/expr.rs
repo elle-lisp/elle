@@ -55,16 +55,12 @@ impl Lowerer {
 
             HirKind::Yield(value) => self.lower_yield(value),
             HirKind::Quote(value) => self.emit_value_const(*value),
-            HirKind::Throw(value) => self.lower_throw(value),
-
             HirKind::Cond {
                 clauses,
                 else_branch,
             } => self.lower_cond(clauses, else_branch),
 
             HirKind::Match { value, arms } => self.lower_match(value, arms),
-            HirKind::HandlerCase { body, handlers } => self.lower_handler_case(body, handlers),
-            HirKind::HandlerBind { body, .. } => self.lower_expr(body),
             HirKind::Module { body, .. } => self.lower_expr(body),
             HirKind::Import { .. } => self.emit_const(LirConst::Nil),
             HirKind::ModuleRef { .. } => self.emit_const(LirConst::Nil),
@@ -420,12 +416,6 @@ impl Lowerer {
         // Done block
         self.current_block = BasicBlock::new(done_label);
         Ok(result_reg)
-    }
-
-    fn lower_throw(&mut self, value: &Hir) -> Result<Reg, String> {
-        let value_reg = self.lower_expr(value)?;
-        self.emit(LirInstr::Throw { value: value_reg });
-        self.emit_const(LirConst::Nil) // Unreachable but need a result
     }
 
     fn lower_cond(

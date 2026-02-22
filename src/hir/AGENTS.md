@@ -67,9 +67,9 @@ HIR + bindings HashMap
    it's captured AND mutated, or if it's a local that's captured.
 
 4. **Effects combine upward.** A `begin` has the combined effect of its
-   children. A `lambda` body's effect is stored but the lambda itself is Pure.
+   children. A `fn` body's effect is stored but the fn itself is Pure.
 
-5. **Captures are computed per-lambda.** Each `HirKind::Lambda` carries its
+5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its
    own `Vec<CaptureInfo>` listing what it captures and how.
 
 6. **Empty lists become `HirKind::EmptyList`, not `HirKind::Nil`.** The analyzer
@@ -83,8 +83,8 @@ HIR + bindings HashMap
 | `mod.rs` | 25 | Re-exports |
 | `analyze/mod.rs` | ~470 | `Analyzer` struct, `AnalysisContext`, scope management |
 | `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
-| `analyze/binding.rs` | ~460 | Binding forms: `let`, `define`, `lambda` |
-| `analyze/special.rs` | ~310 | Special forms: `match`, `yield`, `handler-case` |
+| `analyze/binding.rs` | ~460 | Binding forms: `let`, `define`, `fn` |
+| `analyze/special.rs` | ~180 | Special forms: `match`, `yield`, `module` |
 | `analyze/call.rs` | ~200 | Call analysis and effect tracking |
 | `expr.rs` | 180 | `Hir`, `HirKind` |
 | `binding.rs` | 120 | `BindingId`, `BindingInfo`, `CaptureInfo` |

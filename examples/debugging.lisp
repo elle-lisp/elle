@@ -32,7 +32,7 @@
 
 ;; captures
 (define x 10)
-(define (make-adder n) (lambda (x) (+ x n)))
+(define (make-adder n) (fn (x) (+ x n)))
 (define add5 (make-adder 5))
 (assert-eq (captures add) 0 "add captures nothing")
 (assert-eq (captures add5) 1 "add5 captures one variable")

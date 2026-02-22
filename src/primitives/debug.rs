@@ -1,27 +1,34 @@
-use crate::value::{list, Condition, Value};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::{error_val, list, Value};
 
 /// Prints a value with debug information
 /// (debug-print value)
-pub fn prim_debug_print(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_debug_print(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(format!(
-            "debug-print: expected 1 argument, got {}",
-            args.len()
-        )));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("debug-print: expected 1 argument, got {}", args.len()),
+            ),
+        );
     }
 
     eprintln!("[DEBUG] {:?}", args[0]);
-    Ok(args[0])
+    (SIG_OK, args[0])
 }
 
 /// Traces execution with a label
 /// (trace name value)
-pub fn prim_trace(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
-        return Err(Condition::arity_error(format!(
-            "trace: expected 2 arguments, got {}",
-            args.len()
-        )));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("trace: expected 2 arguments, got {}", args.len()),
+            ),
+        );
     }
 
     if let Some(_label) = args[0].as_heap_ptr() {
@@ -30,59 +37,77 @@ pub fn prim_trace(args: &[Value]) -> Result<Value, Condition> {
         match unsafe { deref(args[0]) } {
             HeapObject::String(s) => {
                 eprintln!("[TRACE] {}: {:?}", s, args[1]);
-                Ok(args[1])
+                (SIG_OK, args[1])
             }
             _ => {
                 if let Some(sym_id) = args[0].as_symbol() {
                     eprintln!("[TRACE] {:?}: {:?}", sym_id, args[1]);
-                    Ok(args[1])
+                    (SIG_OK, args[1])
                 } else {
-                    Err(Condition::type_error(
-                        "trace: first argument must be a string or symbol".to_string(),
-                    ))
+                    (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            "trace: first argument must be a string or symbol".to_string(),
+                        ),
+                    )
                 }
             }
         }
     } else if let Some(sym_id) = args[0].as_symbol() {
         eprintln!("[TRACE] {:?}: {:?}", sym_id, args[1]);
-        Ok(args[1])
+        (SIG_OK, args[1])
     } else {
-        Err(Condition::type_error(
-            "trace: first argument must be a string or symbol".to_string(),
-        ))
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                "trace: first argument must be a string or symbol".to_string(),
+            ),
+        )
     }
 }
 
 /// Times the execution of a thunk
 /// (profile thunk)
-pub fn prim_profile(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_profile(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(format!(
-            "profile: expected 1 argument, got {}",
-            args.len()
-        )));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("profile: expected 1 argument, got {}", args.len()),
+            ),
+        );
     }
 
     // In production, would time execution of closure
     // For now, just return a placeholder timing
     if args[0].as_closure().is_some() || args[0].as_native_fn().is_some() {
-        Ok(Value::string("profiling-not-yet-implemented"))
+        (SIG_OK, Value::string("profiling-not-yet-implemented"))
     } else {
-        Err(Condition::type_error(
-            "profile: argument must be a function".to_string(),
-        ))
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                "profile: argument must be a function".to_string(),
+            ),
+        )
     }
 }
 
 /// Returns memory usage statistics
 /// (memory-usage)
 /// Returns a list: (rss-bytes virtual-bytes)
-pub fn prim_memory_usage(_args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_memory_usage(_args: &[Value]) -> (SignalBits, Value) {
     let (rss_bytes, virtual_bytes) = get_memory_usage();
-    Ok(list(vec![
-        Value::int(rss_bytes as i64),
-        Value::int(virtual_bytes as i64),
-    ]))
+    (
+        SIG_OK,
+        list(vec![
+            Value::int(rss_bytes as i64),
+            Value::int(virtual_bytes as i64),
+        ]),
+    )
 }
 
 #[cfg(target_os = "linux")]

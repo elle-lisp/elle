@@ -1,7 +1,7 @@
-use crate::error::{LError, LResult};
 use crate::primitives::registration::register_primitives;
 use crate::symbol::SymbolTable;
-use crate::value::{Condition, Value};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::{error_val, Value};
 use crate::vm::VM;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -53,6 +53,9 @@ fn is_value_sendable(value: &Value) -> bool {
         }
         HeapObject::Struct(s) => s.iter().all(|(_, v)| is_value_sendable(v)),
 
+        // Tuples are safe if their contents are
+        HeapObject::Tuple(elems) => elems.iter().all(is_value_sendable),
+
         // Cons cells are safe if their contents are
         HeapObject::Cons(cons) => is_value_sendable(&cons.first) && is_value_sendable(&cons.rest),
 
@@ -66,14 +69,8 @@ fn is_value_sendable(value: &Value) -> bool {
         // Unsafe: native functions (contain function pointers)
         HeapObject::NativeFn(_) => false,
 
-        // Unsafe: VM-aware functions (contain function pointers)
-        HeapObject::VmAwareFn(_) => false,
-
         // Unsafe: FFI handles
         HeapObject::LibHandle(_) | HeapObject::CHandle(_, _) => false,
-
-        // Unsafe: conditions (may contain non-sendable data)
-        HeapObject::Condition(_) => false,
 
         // Unsafe: thread handles
         HeapObject::ThreadHandle(_) => false,
@@ -88,42 +85,39 @@ fn is_value_sendable(value: &Value) -> bool {
             }
         }
 
-        // Coroutines are not sendable (contain closures with mutable state)
-        HeapObject::Coroutine(_) => false,
-
         // Float values that couldn't be stored inline
         HeapObject::Float(_) => true,
 
-        // Continuations are not sendable (contain frame data with closures)
-        HeapObject::Continuation(_) => false,
+        // Fibers are not sendable (contain execution state with closures)
+        HeapObject::Fiber(_) => false,
     }
 }
 
 /// Helper function to spawn a closure in a new thread
 /// Extracts closure data, validates sendability, and executes in a fresh VM
-fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
+fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> {
     use crate::value::SendValue;
     use std::collections::HashMap;
 
     // Check that all captured values are sendable
     for (i, captured) in closure.env.iter().enumerate() {
         if !is_value_sendable(captured) {
-            return Err(LError::from(format!(
+            return Err(format!(
                 "spawn: closure captures mutable or unsafe value at position {} ({})",
                 i,
                 captured.type_name()
-            )));
+            ));
         }
     }
 
     // Also check constants for sendability
     for (i, constant) in closure.constants.iter().enumerate() {
         if !is_value_sendable(constant) {
-            return Err(LError::from(format!(
+            return Err(format!(
                 "spawn: closure has non-sendable constant at position {} ({})",
                 i,
                 constant.type_name()
-            )));
+            ));
         }
     }
 
@@ -133,16 +127,15 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         .iter()
         .map(|v| SendValue::from_value(*v))
         .collect();
-    let env_send =
-        env_send.map_err(|e| LError::from(format!("spawn: failed to copy environment: {}", e)))?;
+    let env_send = env_send.map_err(|e| format!("spawn: failed to copy environment: {}", e))?;
 
     let constants_send: Result<Vec<SendValue>, String> = closure
         .constants
         .iter()
         .map(|v| SendValue::from_value(*v))
         .collect();
-    let constants_send = constants_send
-        .map_err(|e| LError::from(format!("spawn: failed to copy constants: {}", e)))?;
+    let constants_send =
+        constants_send.map_err(|e| format!("spawn: failed to copy constants: {}", e))?;
 
     // Extract the closure bytecode for thread safety
     let bytecode_data: Vec<u8> = (*closure.bytecode).clone();
@@ -232,17 +225,9 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 
         let result = vm.execute_bytecode(&bytecode_rc, &constants_rc, Some(&env_rc));
 
-        // Convert result to SendValue to preserve heap objects across thread boundary
-        // Also check for exceptions that were set but not returned as errors
         let send_result = match result {
             Ok(val) => {
-                // Check if an exception escaped all handlers
-                if let Some(exc) = &vm.current_exception {
-                    Err(format!("{}", exc))
-                } else {
-                    SendValue::from_value(val)
-                        .map_err(|e| format!("Failed to serialize result: {}", e))
-                }
+                SendValue::from_value(val).map_err(|e| format!("Failed to serialize result: {}", e))
             }
             Err(e) => Err(e.to_string()),
         };
@@ -273,24 +258,38 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 /// The closure's bytecode is compiled and executed in that VM.
 ///
 /// For JIT-compiled closures, falls back to the source closure for thread-safe execution.
-pub fn prim_spawn(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_spawn(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(format!(
-            "spawn: expected 1 argument, got {}",
-            args.len()
-        )));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("spawn: expected 1 argument, got {}", args.len()),
+            ),
+        );
     }
 
     if let Some(closure) = args[0].as_closure() {
-        spawn_closure_impl(closure).map_err(|e| Condition::error(e.to_string()))
+        match spawn_closure_impl(closure) {
+            Ok(val) => (SIG_OK, val),
+            Err(e) => (SIG_ERROR, error_val("error", e)),
+        }
     } else if args[0].as_native_fn().is_some() {
-        Err(Condition::error(
-            "spawn: native functions cannot be spawned. Use closures instead.".to_string(),
-        ))
+        (
+            SIG_ERROR,
+            error_val(
+                "error",
+                "spawn: native functions cannot be spawned. Use closures instead.".to_string(),
+            ),
+        )
     } else {
-        Err(Condition::type_error(
-            "spawn: argument must be a closure".to_string(),
-        ))
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                "spawn: argument must be a closure".to_string(),
+            ),
+        )
     }
 }
 
@@ -299,14 +298,15 @@ pub fn prim_spawn(args: &[Value]) -> Result<Value, Condition> {
 ///
 /// Blocks until the spawned thread completes and returns the actual Value result.
 /// If the thread produced an error, that error is re-raised.
-pub fn prim_join(args: &[Value]) -> Result<Value, Condition> {
-    use crate::value::SendValue;
-
+pub fn prim_join(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(format!(
-            "join: expected 1 argument, got {}",
-            args.len()
-        )));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("join: expected 1 argument, got {}", args.len()),
+            ),
+        );
     }
 
     if let Some(handle) = args[0].as_thread_handle() {
@@ -319,66 +319,77 @@ pub fn prim_join(args: &[Value]) -> Result<Value, Condition> {
             if let Ok(holder) = handle.result.lock() {
                 if let Some(result) = holder.as_ref() {
                     // Result is ready - convert from SendValue back to Value
-                    return result
-                        .as_ref()
-                        .map(|send_val: &SendValue| send_val.clone().into_value())
-                        .map_err(|e: &String| Condition::error(e.clone()));
+                    return match result {
+                        Ok(send_val) => (SIG_OK, send_val.clone().into_value()),
+                        Err(e) => (SIG_ERROR, error_val("error", e.clone())),
+                    };
                 }
             }
 
             attempts += 1;
             if attempts >= MAX_ATTEMPTS {
-                return Err(Condition::error(
-                    "join: thread did not complete in time".to_string(),
-                ));
+                return (
+                    SIG_ERROR,
+                    error_val("error", "join: thread did not complete in time".to_string()),
+                );
             }
 
             // Sleep briefly to avoid busy-waiting
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
     } else {
-        Err(Condition::type_error(
-            "join: argument must be a thread handle".to_string(),
-        ))
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                "join: argument must be a thread handle".to_string(),
+            ),
+        )
     }
 }
 
 /// Sleeps for the specified number of seconds
 /// (sleep seconds)
-pub fn prim_sleep(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(format!(
-            "sleep: expected 1 argument, got {}",
-            args.len()
-        )));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("sleep: expected 1 argument, got {}", args.len()),
+            ),
+        );
     }
 
     if let Some(n) = args[0].as_int() {
         if n < 0 {
-            return Err(Condition::error(
-                "sleep: duration must be non-negative".to_string(),
-            ));
+            return (
+                SIG_ERROR,
+                error_val("error", "sleep: duration must be non-negative".to_string()),
+            );
         }
         std::thread::sleep(std::time::Duration::from_secs(n as u64));
-        Ok(Value::NIL)
+        (SIG_OK, Value::NIL)
     } else if let Some(f) = args[0].as_float() {
         if f < 0.0 {
-            return Err(Condition::error(
-                "sleep: duration must be non-negative".to_string(),
-            ));
+            return (
+                SIG_ERROR,
+                error_val("error", "sleep: duration must be non-negative".to_string()),
+            );
         }
         std::thread::sleep(std::time::Duration::from_secs_f64(f));
-        Ok(Value::NIL)
+        (SIG_OK, Value::NIL)
     } else {
-        Err(Condition::type_error(
-            "sleep: argument must be a number".to_string(),
-        ))
+        (
+            SIG_ERROR,
+            error_val("type-error", "sleep: argument must be a number".to_string()),
+        )
     }
 }
 
 /// Returns the ID of the current thread
 /// (current-thread-id)
-pub fn prim_current_thread_id(_args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_current_thread_id(_args: &[Value]) -> (SignalBits, Value) {
     let thread_id = std::thread::current().id();
-    Ok(Value::string(format!("{:?}", thread_id)))
+    (SIG_OK, Value::string(format!("{:?}", thread_id)))
 }

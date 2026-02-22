@@ -910,24 +910,9 @@ proptest! {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(30))]
 
-    #[test]
-    fn handler_case_no_error(a in -100i64..100) {
-        // No error, returns body value
-        let expr = format!("(handler-case {} (error e -1))", a);
-        let result = eval(&expr);
 
-        prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::int(a));
-    }
 
-    #[test]
-    fn handler_case_catches_division_by_zero(a in 1i64..100) {
-        let expr = format!("(handler-case (/ {} 0) (error e {}))", a, -a);
-        let result = eval(&expr);
 
-        prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::int(-a));
-    }
 }
 
 // ============================================================================

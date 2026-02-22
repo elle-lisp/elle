@@ -1,6 +1,5 @@
 // DEFENSE: Primitives are the building blocks - must be correct
 use elle::error::LError;
-use elle::ffi::primitives::context::{clear_symbol_table, set_symbol_table};
 use elle::pipeline::eval_new;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
@@ -22,19 +21,14 @@ fn get_primitive(vm: &VM, symbols: &mut SymbolTable, name: &str) -> Value {
 #[allow(clippy::result_large_err)]
 fn call_primitive(prim: &Value, args: &[Value]) -> Result<Value, LError> {
     if let Some(f) = prim.as_native_fn() {
-        f(args).map_err(|c| LError::from(c.to_string()))
-    } else if let Some(f) = prim.as_vm_aware_fn() {
-        // VM-aware functions need a VM instance
-        let mut vm = VM::new();
-        let result = f(args, &mut vm);
-        // Check if an exception was set
-        if let Some(exc) = &vm.current_exception {
-            return Err(LError::from(format!(
-                "Unhandled exception: {}",
-                exc.exception_id
-            )));
+        let (bits, value) = f(args);
+        if bits == elle::value::fiber::SIG_OK {
+            Ok(value)
+        } else {
+            // SIG_ERROR or other — extract error message from error value
+            let msg = elle::value::format_error(value);
+            Err(LError::from(msg))
         }
-        result
     } else {
         panic!("Not a function");
     }
@@ -395,86 +389,6 @@ fn test_arity_errors() {
     // = requires exactly 2 arguments
     let eq = get_primitive(&vm, &mut symbols, "=");
     assert!(call_primitive(&eq, &[Value::int(1)]).is_err());
-}
-
-// Exception handling tests
-#[test]
-fn test_exception_creation() {
-    let (vm, mut symbols) = setup();
-    let exception_fn = get_primitive(&vm, &mut symbols, "exception");
-
-    // Create exception with message
-    let exc = call_primitive(&exception_fn, &[Value::string("Error message")]).unwrap();
-    assert_eq!(exc.type_name(), "condition");
-}
-
-#[test]
-fn test_exception_message() {
-    let (vm, mut symbols) = setup();
-    let exception_fn = get_primitive(&vm, &mut symbols, "exception");
-    let message_fn = get_primitive(&vm, &mut symbols, "exception-message");
-
-    // Create exception and extract message
-    let exc = call_primitive(&exception_fn, &[Value::string("Test error")]).unwrap();
-    let msg = call_primitive(&message_fn, &[exc]).unwrap();
-
-    match msg {
-        v if v.is_string() => {
-            let s = v.as_string().unwrap();
-            assert_eq!(s, "Test error")
-        }
-        _ => panic!("Expected string"),
-    }
-}
-
-#[test]
-fn test_exception_data() {
-    let (vm, mut symbols) = setup();
-    let exception_fn = get_primitive(&vm, &mut symbols, "exception");
-    let data_fn = get_primitive(&vm, &mut symbols, "exception-data");
-
-    // Exception without data
-    let exc1 = call_primitive(&exception_fn, &[Value::string("Error")]).unwrap();
-    let data1 = call_primitive(&data_fn, &[exc1]).unwrap();
-    assert_eq!(data1, Value::NIL);
-
-    // Exception with data
-    let exc2 = call_primitive(&exception_fn, &[Value::string("Error"), Value::int(42)]).unwrap();
-    let data2 = call_primitive(&data_fn, &[exc2]).unwrap();
-    assert_eq!(data2, Value::int(42));
-}
-
-#[test]
-fn test_throw() {
-    let (vm, mut symbols) = setup();
-    let throw_fn = get_primitive(&vm, &mut symbols, "throw");
-
-    // throw with string message should produce error
-    let result = call_primitive(&throw_fn, &[Value::string("Test error")]);
-    assert!(result.is_err());
-    // Condition::error formats as "error: {message}", then LError wraps as "Error: ..."
-    assert_eq!(result.unwrap_err().to_string(), "Error: error: Test error");
-}
-
-#[test]
-fn test_exception_is_value() {
-    let (vm, mut symbols) = setup();
-    let exception_fn = get_primitive(&vm, &mut symbols, "exception");
-    let type_fn = get_primitive(&vm, &mut symbols, "type-of");
-
-    // Set symbol table context for type-of to work properly
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    // Exception should be a value with type :condition
-    let exc = call_primitive(&exception_fn, &[Value::string("Error")]).unwrap();
-    let type_val = call_primitive(&type_fn, &[exc]).unwrap();
-
-    clear_symbol_table();
-
-    match type_val {
-        v if v.is_keyword() => {} // type-of returns a keyword
-        _ => panic!("Expected keyword type, got {}", type_val.type_name()),
-    }
 }
 
 // Macro and meta-programming tests
@@ -1461,7 +1375,7 @@ fn test_spawn_primitive() {
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
 
-        effect: elle::effects::Effect::pure(),
+        effect: elle::effects::Effect::none(),
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
@@ -1580,7 +1494,7 @@ fn test_profile_primitive() {
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
 
-        effect: elle::effects::Effect::pure(),
+        effect: elle::effects::Effect::none(),
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
@@ -1933,7 +1847,7 @@ fn test_json_serialize_errors() {
         num_captures: 0,
         constants: std::rc::Rc::new(vec![]),
 
-        effect: elle::effects::Effect::pure(),
+        effect: elle::effects::Effect::none(),
         cell_params_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
@@ -1943,7 +1857,7 @@ fn test_json_serialize_errors() {
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());
 
-    let native_fn: elle::value::NativeFn = |_| Ok(Value::NIL);
+    let native_fn: elle::value::NativeFn = |_| (elle::value::fiber::SIG_OK, Value::NIL);
     let fn_val = Value::native_fn(native_fn);
     let result = call_primitive(&json_serialize, &[fn_val]);
     assert!(result.is_err());
@@ -1958,7 +1872,7 @@ fn test_disbit_returns_vector_of_strings() {
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _effects = register_primitives(&mut vm2, &mut symbols2);
-    let result = eval_new("(lambda (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+    let result = eval_new("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
 
     let disasm = call_primitive(&disbit, &[result]).unwrap();
     let vec = disasm.as_vector().expect("disbit should return a vector");
@@ -1996,7 +1910,7 @@ fn test_disjit_returns_vector_for_pure_closure() {
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _effects = register_primitives(&mut vm2, &mut symbols2);
-    let result = eval_new("(lambda (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+    let result = eval_new("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
 
     let ir = call_primitive(&disjit, &[result]).unwrap();
     if !ir.is_nil() {

@@ -3,7 +3,8 @@
 use super::types::parse_ctype;
 use crate::ffi::memory::{get_memory_stats, register_allocation, MemoryOwner};
 use crate::ffi::safety::{get_last_error, NullPointerChecker, TypeChecker};
-use crate::value::{Condition, Value};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::{error_val, Value};
 use crate::vm::VM;
 
 /// (register-allocation ptr type-name size owner) -> alloc-id
@@ -125,57 +126,69 @@ pub fn prim_with_ffi_safety_checks(_vm: &mut VM, args: &[Value]) -> Result<Value
     Ok(args[0])
 }
 
-pub fn prim_register_allocation_wrapper(_args: &[Value]) -> Result<Value, Condition> {
-    Ok(Value::int(1))
+pub fn prim_register_allocation_wrapper(_args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, Value::int(1))
 }
 
-pub fn prim_memory_stats_wrapper(_args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_memory_stats_wrapper(_args: &[Value]) -> (SignalBits, Value) {
     let (total_bytes, alloc_count) = get_memory_stats();
-    Ok(Value::cons(
-        Value::int(total_bytes as i64),
-        Value::cons(Value::int(alloc_count as i64), Value::EMPTY_LIST),
-    ))
+    (
+        SIG_OK,
+        Value::cons(
+            Value::int(total_bytes as i64),
+            Value::cons(Value::int(alloc_count as i64), Value::EMPTY_LIST),
+        ),
+    )
 }
 
-pub fn prim_type_check_wrapper(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_type_check_wrapper(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
-        return Err(Condition::arity_error(
-            "type-check: expected 2 arguments".to_string(),
-        ));
+        return (
+            SIG_ERROR,
+            error_val("arity-error", "type-check: expected 2 arguments"),
+        );
     }
 
     let value = &args[0];
-    let expected = parse_ctype(&args[1]).map_err(Condition::error)?;
+    let expected = match parse_ctype(&args[1]) {
+        Ok(ct) => ct,
+        Err(e) => return (SIG_ERROR, error_val("error", e)),
+    };
 
     match TypeChecker::check_type(value, &expected) {
-        Ok(()) => Ok(Value::int(1)),
-        Err(_) => Ok(Value::int(0)),
+        Ok(()) => (SIG_OK, Value::int(1)),
+        Err(_) => (SIG_OK, Value::int(0)),
     }
 }
 
-pub fn prim_null_pointer_wrapper(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_null_pointer_wrapper(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
-        return Err(Condition::arity_error(
-            "null-pointer?: expected at least 1 argument".to_string(),
-        ));
+        return (
+            SIG_ERROR,
+            error_val("arity-error", "null-pointer?: expected at least 1 argument"),
+        );
     }
 
     let is_null = NullPointerChecker::is_null(&args[0]);
-    Ok(Value::int(if is_null { 1 } else { 0 }))
+    (SIG_OK, Value::int(if is_null { 1 } else { 0 }))
 }
 
-pub fn prim_ffi_last_error_wrapper(_args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_ffi_last_error_wrapper(_args: &[Value]) -> (SignalBits, Value) {
     match get_last_error() {
-        Some(err) => Ok(Value::string(format!("{}", err))),
-        None => Ok(Value::EMPTY_LIST),
+        Some(err) => (SIG_OK, Value::string(format!("{}", err))),
+        None => (SIG_OK, Value::EMPTY_LIST),
     }
 }
 
-pub fn prim_with_ffi_safety_checks_wrapper(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_with_ffi_safety_checks_wrapper(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
-        return Err(Condition::arity_error(
-            "with-ffi-safety-checks: expected at least 1 argument".to_string(),
-        ));
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                "with-ffi-safety-checks: expected at least 1 argument".to_string(),
+            ),
+        );
     }
-    Ok(args[0])
+    (SIG_OK, args[0])
 }

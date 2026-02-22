@@ -17,9 +17,6 @@ pub struct Emitter {
     label_offsets: HashMap<Label, usize>,
     /// Pending jumps that need patching (instruction position, target label)
     pending_jumps: Vec<(usize, Label)>,
-    /// Pending handler jumps that need patching (instruction position, target label)
-    /// These use absolute offsets instead of relative offsets
-    pending_handler_jumps: Vec<(usize, Label)>,
     /// Stack simulation: which register's value is at each stack position
     stack: Vec<Reg>,
     /// Register to stack position mapping (for finding values)
@@ -38,7 +35,6 @@ impl Emitter {
             bytecode: Bytecode::new(),
             label_offsets: HashMap::new(),
             pending_jumps: Vec::new(),
-            pending_handler_jumps: Vec::new(),
             stack: Vec::new(),
             reg_to_stack: HashMap::new(),
             symbol_names: HashMap::new(),
@@ -52,7 +48,6 @@ impl Emitter {
             bytecode: Bytecode::new(),
             label_offsets: HashMap::new(),
             pending_jumps: Vec::new(),
-            pending_handler_jumps: Vec::new(),
             stack: Vec::new(),
             reg_to_stack: HashMap::new(),
             symbol_names,
@@ -68,7 +63,6 @@ impl Emitter {
         self.bytecode = bytecode;
         self.label_offsets.clear();
         self.pending_jumps.clear();
-        self.pending_handler_jumps.clear();
         self.stack.clear();
         self.reg_to_stack.clear();
         self.yield_stack_state.clear();
@@ -94,14 +88,6 @@ impl Emitter {
             }
         }
 
-        // Patch handler jumps (absolute offsets)
-        for (pos, label) in &self.pending_handler_jumps {
-            if let Some(&target) = self.label_offsets.get(label) {
-                let offset = target as i16;
-                self.bytecode.patch_jump(*pos, offset);
-            }
-        }
-
         std::mem::take(&mut self.bytecode)
     }
 
@@ -111,7 +97,6 @@ impl Emitter {
         let saved_bytecode = std::mem::take(&mut self.bytecode);
         let saved_label_offsets = std::mem::take(&mut self.label_offsets);
         let saved_pending_jumps = std::mem::take(&mut self.pending_jumps);
-        let saved_pending_handler_jumps = std::mem::take(&mut self.pending_handler_jumps);
         let saved_stack = std::mem::take(&mut self.stack);
         let saved_reg_to_stack = std::mem::take(&mut self.reg_to_stack);
         let saved_yield_stack_state = std::mem::take(&mut self.yield_stack_state);
@@ -123,7 +108,6 @@ impl Emitter {
         self.bytecode = saved_bytecode;
         self.label_offsets = saved_label_offsets;
         self.pending_jumps = saved_pending_jumps;
-        self.pending_handler_jumps = saved_pending_handler_jumps;
         self.stack = saved_stack;
         self.reg_to_stack = saved_reg_to_stack;
         self.yield_stack_state = saved_yield_stack_state;
@@ -266,7 +250,7 @@ impl Emitter {
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
                     constants: Rc::new(nested_bytecode.constants),
-                    effect: func.effect.clone(),
+                    effect: func.effect,
                     cell_params_mask: func.cell_params_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
                     location_map: Rc::new(nested_bytecode.location_map),
@@ -538,61 +522,6 @@ impl Emitter {
                 // The stack simulation already has the pre-yield state.
                 // Just register the resume value.
                 self.push_reg(*dst);
-            }
-
-            LirInstr::PushHandler { handler_label } => {
-                self.bytecode.emit(Instruction::PushHandler);
-                // Placeholder for handler offset - will need patching
-                // Note: handler offset is absolute, not relative
-                let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i16(0);
-                self.bytecode.emit_i16(-1); // no finally
-                self.pending_handler_jumps.push((pos, *handler_label));
-            }
-
-            LirInstr::PopHandler => {
-                self.bytecode.emit(Instruction::PopHandler);
-            }
-
-            LirInstr::CheckException => {
-                self.bytecode.emit(Instruction::CheckException);
-            }
-
-            LirInstr::MatchException { dst, exception_id } => {
-                self.bytecode.emit(Instruction::MatchException);
-                self.bytecode.emit_u16(*exception_id);
-                // MatchException pushes a boolean result
-                self.push_reg(*dst);
-            }
-
-            LirInstr::BindException { var_name } => {
-                self.bytecode.emit(Instruction::BindException);
-                let name = self
-                    .symbol_names
-                    .get(&var_name.0)
-                    .cloned()
-                    .unwrap_or_default();
-                let const_idx = self.bytecode.add_symbol(var_name.0, &name);
-                self.bytecode.emit_u16(const_idx);
-            }
-
-            LirInstr::LoadException { dst } => {
-                self.bytecode.emit(Instruction::LoadException);
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ClearException => {
-                self.bytecode.emit(Instruction::ClearException);
-            }
-
-            LirInstr::ReraiseException => {
-                self.bytecode.emit(Instruction::ReraiseException);
-            }
-
-            LirInstr::Throw { value } => {
-                self.ensure_on_top(*value);
-                // Use existing exception mechanism
-                // For now, just leave value on stack
             }
         }
     }

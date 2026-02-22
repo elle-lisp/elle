@@ -27,32 +27,32 @@
 (newline)
 
 ;; Identity function - returns its argument unchanged
-(define identity (lambda (x) x))
+(define identity (fn (x) x))
 (display "Identity function: (identity 42) = ")
 (display (identity 42))
 (newline)
 
 ;; Addition function - adds two numbers
-(define add (lambda (x y) (+ x y)))
+(define add (fn (x y) (+ x y)))
 (display "Addition function: (add 5 3) = ")
 (display (add 5 3))
 (newline)
 
 ;; Doubling function - multiplies by 2
-(define double (lambda (x) (* x 2)))
+(define double (fn (x) (* x 2)))
 (display "Doubling function: (double 21) = ")
 (display (double 21))
 (newline)
 
 ;; Absolute value function
-(define abs-val (lambda (x)
+(define abs-val (fn (x)
   (if (< x 0) (- x) x)))
 (display "Absolute value: (abs-val -15) = ")
 (display (abs-val -15))
 (newline)
 
 ;; Maximum of two values
-(define max-of-two (lambda (x y)
+(define max-of-two (fn (x y)
   (if (> x y) x y)))
 (display "Maximum of two: (max-of-two 10 25) = ")
 (display (max-of-two 10 25))
@@ -77,21 +77,21 @@
 
 ;; Create a closure that captures the outer variable 'base'
 (define base 100)
-(define add-to-base (lambda (x) (+ base x)))
+(define add-to-base (fn (x) (+ base x)))
 (display "Closure capturing 'base' (100): (add-to-base 50) = ")
 (display (add-to-base 50))
 (newline)
 
 ;; Multiple variables captured from outer scope
 (define multiplier 2)
-(define compute (lambda (x) (+ base (* multiplier x))))
+(define compute (fn (x) (+ base (* multiplier x))))
 (display "Capturing 'base' and 'multiplier': (compute 25) = ")
 (display (compute 25))
 (newline)
 
 ;; Captured value changes persist in closure
 (define offset 10)
-(define apply-offset (lambda (x) (+ offset x)))
+(define apply-offset (fn (x) (+ offset x)))
 (display "With offset 10: (apply-offset 5) = ")
 (display (apply-offset 5))
 (newline)
@@ -107,8 +107,8 @@
 (newline)
 
 ;; Create specialized functions that work together
-(define add-one (lambda (x) (+ x 1)))
-(define times-two (lambda (x) (* x 2)))
+(define add-one (fn (x) (+ x 1)))
+(define times-two (fn (x) (* x 2)))
 
 ;; Apply functions in sequence
 (define x-value 5)
@@ -143,10 +143,10 @@
 (newline)
 
 ;; Create predicates (functions returning boolean)
-(define is-positive (lambda (x) (> x 0)))
-(define is-negative (lambda (x) (< x 0)))
-(define is-zero (lambda (x) (= x 0)))
-(define is-even (lambda (x) (= (mod x 2) 0)))
+(define is-positive (fn (x) (> x 0)))
+(define is-negative (fn (x) (< x 0)))
+(define is-zero (fn (x) (= x 0)))
+(define is-even (fn (x) (= (mod x 2) 0)))
 
 (display "is-positive(5) = ")
 (display (is-positive 5))
@@ -186,7 +186,7 @@
 (newline)
 
 ;; List manipulation functions
-(define list-sum (lambda (lst)
+(define list-sum (fn (lst)
   (if (= (length lst) 0)
     0
     (+ (first lst) (list-sum (rest lst))))))
@@ -197,7 +197,7 @@
 (newline)
 
 ;; List length counter
-(define list-count (lambda (lst)
+(define list-count (fn (lst)
   (if (= (length lst) 0)
     0
     (+ 1 (list-count (rest lst))))))
@@ -207,7 +207,7 @@
 (newline)
 
 ;; List doubler
-(define double-all (lambda (lst)
+(define double-all (fn (lst)
   (if (= (length lst) 0)
     (list)
     (cons (* 2 (first lst)) (double-all (rest lst))))))
@@ -217,7 +217,7 @@
 (newline)
 
 ;; Find maximum in list
-(define find-max (lambda (lst)
+(define find-max (fn (lst)
   (if (= (length lst) 1)
     (first lst)
     (max-of-two (first lst) (find-max (rest lst))))))
@@ -243,8 +243,8 @@
 
 ;; Each closure has its own captured environment
 (define outer-base 42)
-(define closure-1 (lambda (x) (+ outer-base x)))
-(define closure-2 (lambda (x) (* outer-base x)))
+(define closure-1 (fn (x) (+ outer-base x)))
+(define closure-2 (fn (x) (* outer-base x)))
 
 (display "Both closures capture outer-base (42)")
 (newline)
@@ -259,10 +259,10 @@
 
 ;; Multiple closures with different captured context
 (define threshold-1 50)
-(define above-50 (lambda (x) (> x threshold-1)))
+(define above-50 (fn (x) (> x threshold-1)))
 
 (define threshold-2 100)
-(define above-100 (lambda (x) (> x threshold-2)))
+(define above-100 (fn (x) (> x threshold-2)))
 
 (display "Is 75 above 50? ")
 (display (above-50 75))
@@ -291,8 +291,8 @@
 ;; Outer and inner scopes
 (define outer-x 10)
 
-;; This lambda shadows the outer-x with its parameter
-(define shadow-test (lambda (outer-x)
+;; This closure shadows the outer-x with its parameter
+(define shadow-test (fn (outer-x)
   (+ outer-x 5)))
 
 (display "Outer outer-x: 10")
@@ -303,7 +303,7 @@
 (newline)
 
 ;; The original outer-x is unchanged
-(define use-outer (lambda (y)
+(define use-outer (fn (y)
   (+ outer-x y)))
 
 (display "use-outer still sees original: (use-outer 15) = ")
@@ -326,13 +326,13 @@
 
 ;; Environment variables are accessed from closure scope
 (define env-var 30)
-(define uses-env (lambda (x) (+ env-var x)))
+(define uses-env (fn (x) (+ env-var x)))
 (display "Environment variable capture: (uses-env 20) = ")
 (display (uses-env 20))
 (newline)
 
 ;; Parameters are local to the function
-(define add-params (lambda (a b c)
+(define add-params (fn (a b c)
   (+ a b c)))
 (display "Function parameters: (add-params 10 20 30) = ")
 (display (add-params 10 20 30))
@@ -340,7 +340,7 @@
 
 ;; Both parameters and environment variables work together
 (define mixed-context 50)
-(define mixed-func (lambda (param)
+(define mixed-func (fn (param)
   (+ mixed-context param)))
 (display "Mixed (env + param): (mixed-func 10) = ")
 (display (mixed-func 10))
@@ -362,7 +362,7 @@
 (newline)
 
 ;; Complex conditional logic
-(define classify (lambda (n)
+(define classify (fn (n)
   (if (< n 0)
     "negative"
     (if (= n 0)
@@ -412,7 +412,7 @@
 
 ;; Template pattern - parameterized function behavior
 (define threshold 10)
-(define filter-above (lambda (lst)
+(define filter-above (fn (lst)
   (if (= (length lst) 0)
     (list)
     (if (> (first lst) threshold)
@@ -426,7 +426,7 @@
 ;; String builder with captured parts
 (define greeting-start "Hello")
 (define greeting-end "!")
-(define make-greeting (lambda (name)
+(define make-greeting (fn (name)
   (string-append greeting-start ", " name greeting-end)))
 
 (display "Greeting: ")
@@ -693,7 +693,7 @@
 
 (display "=== SUMMARY ===")
 (newline)
-(display "Closures and lambdas enable:")
+(display "Closures enable:")
 (newline)
 (display "  • Anonymous functions - define functions without names")
 (newline)
@@ -714,11 +714,11 @@
 (newline)
 (display "Phase 4 enables shared mutable captures via cell boxing:")
 (newline)
-(display "  • Local variables in fn bodies - define inside lambdas")
+(display "  • Local variables in fn bodies - define inside closures")
 (newline)
 (display "  • Mutation with set! - modify locally-defined variables")
 (newline)
-(display "  • Nested closure capture - inner lambdas capture outer locals")
+(display "  • Nested closure capture - inner closures capture outer locals")
 (newline)
 (display "  • Shared mutable state - closures share cells, not copies")
 (newline)
@@ -752,7 +752,7 @@
 (newline)
 
 ;; Define a recursive Fibonacci function
-(define fib (lambda (n)
+(define fib (fn (n)
   (if (= n 0)
     0
     (if (= n 1)
@@ -807,8 +807,8 @@
 (newline)
 (newline)
 
-(define fib-acc (lambda (n)
-  (define helper (lambda (n acc1 acc2)
+(define fib-acc (fn (n)
+  (define helper (fn (n acc1 acc2)
     (if (= n 0)
       acc1
       (helper (- n 1) acc2 (+ acc1 acc2)))))
@@ -840,7 +840,7 @@
 (newline)
 (newline)
 
-(define factorial (lambda (n)
+(define factorial (fn (n)
   (if (= n 0)
     1
     (* n (factorial (- n 1))))))

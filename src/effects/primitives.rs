@@ -78,7 +78,7 @@ pub fn register_primitive_effects(
 
     for name in pure_primitives {
         let sym = symbols.intern(name);
-        effects.insert(sym, Effect::pure());
+        effects.insert(sym, Effect::none());
     }
 
     // Higher-order functions are polymorphic in their function argument
@@ -173,7 +173,7 @@ pub fn get_primitive_effects(symbols: &SymbolTable) -> HashMap<SymbolId, Effect>
 
     for name in pure_primitives {
         if let Some(sym) = symbols.get(name) {
-            effects.insert(sym, Effect::pure());
+            effects.insert(sym, Effect::none());
         }
     }
 
@@ -212,7 +212,7 @@ mod tests {
 
         register_primitive_effects(&mut symbols, &mut effects);
 
-        assert_eq!(effects.get(&plus), Some(&Effect::pure()));
+        assert_eq!(effects.get(&plus), Some(&Effect::none()));
         assert_eq!(effects.get(&map), Some(&Effect::polymorphic(0)));
     }
 
@@ -226,7 +226,7 @@ mod tests {
 
         let effects = get_primitive_effects(&symbols);
 
-        assert_eq!(effects.get(&plus), Some(&Effect::pure()));
+        assert_eq!(effects.get(&plus), Some(&Effect::none()));
         assert_eq!(effects.get(&map), Some(&Effect::polymorphic(0)));
     }
 }

@@ -63,7 +63,7 @@ impl LirFunction {
             num_locals: 0,
             num_captures: 0,
             cell_params_mask: 0,
-            effect: Effect::pure(),
+            effect: Effect::none(),
         }
     }
 }
@@ -214,26 +214,6 @@ pub enum LirInstr {
     /// At runtime, the resume value is on top of the operand stack
     /// (pushed by the VM's resume_continuation).
     LoadResumeValue { dst: Reg },
-
-    // === Exception Handling ===
-    /// Push exception handler
-    PushHandler { handler_label: Label },
-    /// Pop exception handler
-    PopHandler,
-    /// Check if exception occurred
-    CheckException,
-    /// Match exception against handler exception ID (produces boolean result)
-    MatchException { dst: Reg, exception_id: u16 },
-    /// Bind caught exception to variable (by symbol name)
-    BindException { var_name: SymbolId },
-    /// Load current exception onto stack
-    LoadException { dst: Reg },
-    /// Clear current exception state
-    ClearException,
-    /// Re-raise: pop handler, reset handling flag, leave exception set
-    ReraiseException,
-    /// Throw exception
-    Throw { value: Reg },
 }
 
 /// Binary operations

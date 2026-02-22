@@ -231,16 +231,16 @@ proptest! {
                 (define gen (fn () {} 999))
                 (define co (make-coroutine gen))
                 (define states (list))
-                (set! states (cons (coroutine-status co) states))
+                (set! states (cons (keyword->string (coroutine-status co)) states))
                 {}
-                (set! states (cons (coroutine-status co) states))
+                (set! states (cons (keyword->string (coroutine-status co)) states))
                 (coroutine-resume co)
-                (set! states (cons (coroutine-status co) states))
+                (set! states (cons (keyword->string (coroutine-status co)) states))
                 states)"#,
             yields.join(" "),
             (0..num_yields).map(|_| {
                 r#"(coroutine-resume co)
-                   (set! states (cons (coroutine-status co) states))"#.to_string()
+                   (set! states (cons (keyword->string (coroutine-status co)) states))"#.to_string()
             }).collect::<Vec<_>>().join(" ")
         );
 
@@ -407,7 +407,7 @@ fn yield_across_call_with_return_value() {
             (list
                 (coroutine-resume co)
                 (coroutine-resume co)
-                (coroutine-status co)))
+                (keyword->string (coroutine-status co))))
     "#;
 
     let result = eval(code);
@@ -522,7 +522,7 @@ fn effect_threading_yields_effect_on_closure() {
         (begin
             (define gen (fn () (yield 42) (yield 43) 44))
             (define co (make-coroutine gen))
-            (coroutine-status co))
+            (keyword->string (coroutine-status co)))
     "#;
     let result = eval(code);
     assert!(result.is_ok(), "Evaluation failed: {:?}", result);
@@ -546,7 +546,7 @@ proptest! {
                 (define gen (fn () (yield {}) 999))
                 (define co (make-coroutine gen))
                 (define first-result (coroutine-resume co))
-                (define status-after (coroutine-status co))
+                (define status-after (keyword->string (coroutine-status co)))
                 (list first-result status-after))"#,
             value
         );

@@ -50,7 +50,7 @@
       (fold
         (fn (state part)
           ;; state is [result, is-active]
-          ;; Avoid variable definitions in lambda to work around compiler bug
+          ;; Avoid variable definitions in fn to work around compiler bug
           (list
             (if (first (rest state))
               (string-append (first state) "<" tag ">" part "</" tag ">")
@@ -401,7 +401,7 @@ tbody tr:nth-child(even) {
 
 ;; Render a list block using fold
 ;; NOTE: We call format-inline directly without storing in a variable
-;; to work around a compiler bug with variable definitions in fold lambdas
+;; to work around a compiler bug with variable definitions in fold closures
 (define render-list
   (fn (block)
     (string-append 
@@ -491,7 +491,7 @@ tbody tr:nth-child(even) {
 
 ;; Render all sections using fold
 ;; NOTE: We call render-section directly without storing in a variable
-;; to work around a compiler bug with variable definitions in fold lambdas
+;; to work around a compiler bug with variable definitions in fold closures
 (define render-sections
   (fn (sections)
     (fold

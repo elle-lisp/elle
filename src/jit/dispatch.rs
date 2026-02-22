@@ -3,8 +3,38 @@
 //! These functions handle complex operations that interact with heap types
 //! or require VM access: data structures, cells, globals, and function calls.
 
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::repr::TAG_NIL;
-use crate::value::Value;
+use crate::value::{error_val, Value};
+
+// =============================================================================
+// Primitive Signal Handling (for JIT dispatch)
+// =============================================================================
+
+/// Handle signal bits from a primitive call in JIT context.
+///
+/// JIT-compiled code only runs non-suspending functions, so SIG_YIELD and
+/// SIG_RESUME should never appear here. SIG_ERROR sets the exception on
+/// the fiber for the JIT caller to check.
+fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: Value) -> u64 {
+    match bits {
+        SIG_OK => value.to_bits(),
+        SIG_ERROR => {
+            vm.fiber.signal = Some((SIG_ERROR, value));
+            TAG_NIL
+        }
+        _ => {
+            // Reaching here means the effect system has a bug: a suspending
+            // primitive was called from JIT-compiled code, which should be
+            // impossible since the JIT gate rejects may_suspend() closures.
+            panic!(
+                "Effect system bug: signal {} reached JIT-compiled code. \
+                 Only SIG_OK and SIG_ERROR should appear in JIT context.",
+                bits
+            );
+        }
+    }
+}
 
 // =============================================================================
 // Tail Call Support
@@ -19,12 +49,12 @@ pub const TAIL_CALL_SENTINEL: u64 = 0xDEAD_BEEF_DEAD_BEEFu64;
 // Exception Checking
 // =============================================================================
 
-/// Check if an exception is pending on the VM
-/// Returns TRUE bits if exception is set, FALSE bits otherwise
+/// Check if an error signal is pending on the VM.
+/// Returns TRUE bits if error is set, FALSE bits otherwise.
 #[no_mangle]
 pub extern "C" fn elle_jit_has_exception(vm: *mut ()) -> u64 {
     let vm = unsafe { &*(vm as *const crate::vm::VM) };
-    Value::bool(vm.current_exception.is_some()).to_bits()
+    Value::bool(matches!(vm.fiber.signal, Some((SIG_ERROR, _)))).to_bits()
 }
 
 // =============================================================================
@@ -166,7 +196,10 @@ pub extern "C" fn elle_jit_load_global(sym_id: u64, vm: *mut ()) -> u64 {
     match vm.globals.get(sym as usize).filter(|v| !v.is_undefined()) {
         Some(val) => val.to_bits(),
         None => {
-            eprintln!("JIT: undefined global {}", sym);
+            vm.fiber.signal = Some((
+                SIG_ERROR,
+                error_val("error", format!("Undefined global: {}", sym)),
+            ));
             TAG_NIL
         }
     }
@@ -191,7 +224,7 @@ pub extern "C" fn elle_jit_store_global(sym_id: u64, value: u64, vm: *mut ()) ->
 // =============================================================================
 
 /// Call a function from JIT code
-/// Dispatches to native functions, VM-aware functions, or closures
+/// Dispatches to native functions or closures
 #[no_mangle]
 pub extern "C" fn elle_jit_call(
     func_bits: u64,
@@ -207,26 +240,10 @@ pub extern "C" fn elle_jit_call(
         .map(|i| unsafe { Value::from_bits(*args_ptr.add(i)) })
         .collect();
 
-    // Dispatch to native function
+    // Dispatch to native function (unified signal-based)
     if let Some(f) = func.as_native_fn() {
-        match f(&args) {
-            Ok(val) => return val.to_bits(),
-            Err(cond) => {
-                vm.current_exception = Some(std::rc::Rc::new(cond));
-                return TAG_NIL;
-            }
-        }
-    }
-
-    // Dispatch to VM-aware function
-    if let Some(f) = func.as_vm_aware_fn() {
-        match f(&args, vm) {
-            Ok(val) => return val.to_bits(),
-            Err(e) => {
-                eprintln!("JIT call error: {}", e.description());
-                return TAG_NIL;
-            }
-        }
+        let (bits, value) = f(&args);
+        return jit_handle_primitive_signal(vm, bits, value);
     }
 
     // Dispatch to closure
@@ -239,19 +256,22 @@ pub extern "C" fn elle_jit_call(
         // Build environment
         let new_env = build_closure_env_for_jit(closure, &args);
 
-        vm.call_depth += 1;
+        vm.fiber.call_depth += 1;
         let result = vm.execute_bytecode(&closure.bytecode, &closure.constants, Some(&new_env));
-        vm.call_depth -= 1;
+        vm.fiber.call_depth -= 1;
 
         match result {
             Ok(val) => val.to_bits(),
             Err(e) => {
-                eprintln!("JIT call error: {}", e);
+                vm.fiber.signal = Some((SIG_ERROR, error_val("error", e)));
                 TAG_NIL
             }
         }
     } else {
-        eprintln!("JIT call error: not a function");
+        vm.fiber.signal = Some((
+            SIG_ERROR,
+            error_val("type-error", format!("Cannot call {:?}", func)),
+        ));
         TAG_NIL
     }
 }
@@ -276,24 +296,8 @@ pub extern "C" fn elle_jit_tail_call(
 
     // Handle native functions — just call them directly (no tail call needed)
     if let Some(f) = func.as_native_fn() {
-        match f(&args) {
-            Ok(val) => return val.to_bits(),
-            Err(cond) => {
-                vm.current_exception = Some(std::rc::Rc::new(cond));
-                return TAG_NIL;
-            }
-        }
-    }
-
-    // Handle VM-aware functions — call directly
-    if let Some(f) = func.as_vm_aware_fn() {
-        match f(&args, vm) {
-            Ok(val) => return val.to_bits(),
-            Err(e) => {
-                eprintln!("JIT tail call error: {}", e.description());
-                return TAG_NIL;
-            }
-        }
+        let (bits, value) = f(&args);
+        return jit_handle_primitive_signal(vm, bits, value);
     }
 
     // Handle closures — set up pending_tail_call
@@ -305,17 +309,16 @@ pub extern "C" fn elle_jit_tail_call(
         // Build environment (same as handle_tail_call)
         let new_env = build_closure_env_for_jit(closure, &args);
 
-        // Set pending tail call
-        vm.pending_tail_call = Some((
-            (*closure.bytecode).clone(),
-            (*closure.constants).clone(),
-            new_env,
-        ));
+        // Set pending tail call (Rc clones, not data copies)
+        vm.pending_tail_call = Some((closure.bytecode.clone(), closure.constants.clone(), new_env));
 
         return TAIL_CALL_SENTINEL;
     }
 
-    eprintln!("JIT tail call error: not a function");
+    vm.fiber.signal = Some((
+        SIG_ERROR,
+        error_val("type-error", format!("Cannot call {:?}", func)),
+    ));
     TAG_NIL
 }
 
@@ -438,18 +441,19 @@ mod tests {
         let val = unsafe { Value::from_bits(result) };
         assert_eq!(val.as_bool(), Some(false));
 
-        // Set an exception using the public constructor
-        vm.current_exception = Some(std::rc::Rc::new(crate::value::Condition::division_by_zero(
-            "test",
-        )));
+        // Set an error signal
+        vm.fiber.signal = Some((
+            crate::value::SIG_ERROR,
+            crate::value::error_val("division-by-zero", "test"),
+        ));
 
         // Now should return true
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut ());
         let val = unsafe { Value::from_bits(result) };
         assert_eq!(val.as_bool(), Some(true));
 
-        // Clear exception
-        vm.current_exception = None;
+        // Clear signal
+        vm.fiber.signal = None;
 
         // Should return false again
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut ());

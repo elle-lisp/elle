@@ -263,8 +263,8 @@ impl JitCompiler {
 
     /// Compile a LirFunction to native code
     pub fn compile(mut self, lir: &LirFunction) -> Result<JitCode, JitError> {
-        // Check that function is pure
-        if !lir.effect.is_pure() {
+        // JIT can't handle suspension (yield/debug) — only non-suspending functions
+        if lir.effect.may_suspend() {
             return Err(JitError::NotPure);
         }
 
@@ -312,7 +312,7 @@ impl JitCompiler {
     /// Build Cranelift IR for a LirFunction and return it as lines of text.
     /// Does NOT compile to native code — this is for diagnostic display only.
     pub fn clif_text(mut self, lir: &LirFunction) -> Result<Vec<String>, JitError> {
-        if !lir.effect.is_pure() {
+        if lir.effect.may_suspend() {
             return Err(JitError::NotPure);
         }
 
@@ -497,7 +497,7 @@ mod tests {
         let mut func = LirFunction::new(1);
         func.num_regs = 1;
         func.num_captures = 0;
-        func.effect = Effect::pure();
+        func.effect = Effect::none();
 
         let mut entry = BasicBlock::new(Label(0));
         // Load argument 0 into register 0
@@ -522,7 +522,7 @@ mod tests {
         let mut func = LirFunction::new(2);
         func.num_regs = 3;
         func.num_captures = 0;
-        func.effect = Effect::pure();
+        func.effect = Effect::none();
 
         let mut entry = BasicBlock::new(Label(0));
         // Load arguments into registers

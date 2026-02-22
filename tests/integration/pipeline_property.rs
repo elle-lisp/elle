@@ -304,66 +304,8 @@ proptest! {
         prop_assert_eq!(result.unwrap(), Value::string("hit"));
     }
 }
-
 // ============================================================================
-// 5. Exception/Condition Handling (30 cases)
-// ============================================================================
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
-
-    #[test]
-    fn handler_case_no_error_returns_body(n in -100i64..100) {
-        let expr = format!("(handler-case {} (error e -1))", n);
-        let result = eval(&expr);
-
-        prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::int(n));
-    }
-
-    #[test]
-    fn handler_case_catches_division_by_zero(a in 1i64..100, sentinel in -1000i64..-1) {
-        let expr = format!("(handler-case (/ {} 0) (error e {}))", a, sentinel);
-        let result = eval(&expr);
-
-        prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::int(sentinel));
-    }
-
-    #[test]
-    fn nested_handler_case_inner_catches(a in 1i64..100) {
-        // Inner handler catches first
-        let expr = format!(
-            "(handler-case (handler-case (/ {} 0) (error e 50)) (error e 100))",
-            a
-        );
-        let result = eval(&expr);
-
-        prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::int(50));
-    }
-
-    #[test]
-    fn exception_message_roundtrip(s in "[a-z]{1,10}") {
-        let expr = format!("(exception-message (exception \"{}\" nil))", s);
-        let result = eval(&expr);
-
-        prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::string(s.as_str()));
-    }
-
-    #[test]
-    fn exception_data_roundtrip(data in -100i64..100) {
-        let expr = format!("(exception-data (exception \"test\" {}))", data);
-        let result = eval(&expr);
-
-        prop_assert!(result.is_ok(), "failed: {:?}", result);
-        prop_assert_eq!(result.unwrap(), Value::int(data));
-    }
-}
-
-// ============================================================================
-// 6. Deep Tail Recursion (10 cases — expensive)
+// 5. Deep Tail Recursion (10 cases — expensive)
 // ============================================================================
 
 proptest! {

@@ -1,6 +1,7 @@
 //! Library loading and management primitives.
 
-use crate::value::{Condition, Value};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::{error_val, Value};
 use crate::vm::VM;
 
 /// (load-library path) -> library-handle
@@ -33,30 +34,49 @@ pub fn prim_list_libraries(vm: &VM, _args: &[Value]) -> Result<Value, String> {
     Ok(result)
 }
 
-pub fn prim_load_library_wrapper(args: &[Value]) -> Result<Value, Condition> {
+pub fn prim_load_library_wrapper(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
-        return Err(Condition::arity_error(
-            "load-library: expected 1 argument".to_string(),
-        ));
+        return (
+            SIG_ERROR,
+            error_val("arity-error", "load-library: expected 1 argument"),
+        );
     }
 
-    let path = args[0]
-        .as_string()
-        .ok_or_else(|| Condition::type_error("load-library: expected string path".to_string()))?;
+    let path = match args[0].as_string() {
+        Some(p) => p,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val("type-error", "load-library: expected string path"),
+            );
+        }
+    };
 
     // Get VM context
-    let vm_ptr = super::context::get_vm_context()
-        .ok_or_else(|| Condition::error("FFI not initialized".to_string()))?;
+    let vm_ptr = match super::context::get_vm_context() {
+        Some(ptr) => ptr,
+        None => {
+            return (SIG_ERROR, error_val("error", "FFI not initialized"));
+        }
+    };
+
     unsafe {
         let vm = &mut *vm_ptr;
-        let lib_id = vm.ffi_mut().load_library(path).map_err(Condition::error)?;
-        Ok(Value::int(lib_id as i64))
+        match vm.ffi_mut().load_library(path) {
+            Ok(lib_id) => (SIG_OK, Value::int(lib_id as i64)),
+            Err(e) => (SIG_ERROR, error_val("error", e)),
+        }
     }
 }
 
-pub fn prim_list_libraries_wrapper(_args: &[Value]) -> Result<Value, Condition> {
-    let vm_ptr = super::context::get_vm_context()
-        .ok_or_else(|| Condition::error("FFI not initialized".to_string()))?;
+pub fn prim_list_libraries_wrapper(_args: &[Value]) -> (SignalBits, Value) {
+    let vm_ptr = match super::context::get_vm_context() {
+        Some(ptr) => ptr,
+        None => {
+            return (SIG_ERROR, error_val("error", "FFI not initialized"));
+        }
+    };
+
     unsafe {
         let vm = &*vm_ptr;
         let libs = vm.ffi().loaded_libraries();
@@ -68,6 +88,6 @@ pub fn prim_list_libraries_wrapper(_args: &[Value]) -> Result<Value, Condition> 
             );
             result = crate::value::cons(entry, result);
         }
-        Ok(result)
+        (SIG_OK, result)
     }
 }

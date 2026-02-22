@@ -222,7 +222,7 @@
 ; ============================================================================
 
 ;; Parameters are local to the function
-(define add-numbers (lambda (x y)
+(define add-numbers (fn (x y)
   (+ x y)))
 
 (display "PART 5: Function Scope (Local Variables)")
@@ -237,7 +237,7 @@
 
 ;; Parameters shadow outer variables
 (define x 1000)
-(define shadowing-function (lambda (x)
+(define shadowing-function (fn (x)
   (+ x 1)))
 
 (display "Inner x (1) + 1: ")
@@ -457,8 +457,8 @@
 ; ============================================================================
 
 ;; Closures can capture variables from their defining scope
-(define make-counter (lambda (start)
-  (lambda ()
+(define make-counter (fn (start)
+  (fn ()
     (set! start (+ start 1))
     start)))
 
@@ -500,8 +500,8 @@
 (newline)
 (newline)
 
-(define outer-function (lambda (x)
-  (define inner-function (lambda (y)
+(define outer-function (fn (x)
+  (define inner-function (fn (y)
     (+ x y outer-var)))
   (inner-function 10)))
 
@@ -732,12 +732,12 @@
 ;; MISTAKE 2: Modifying global instead of local
 (define count 0)
 
-(lambda ()
+(fn ()
   (set! count (+ count 1))  ; Modifies global!
   count)
 
 ;; To fix, use a parameter:
-(lambda (count)
+(fn (count)
   (+ count 1))
 
 ;; MISTAKE 3: Expecting sequential binding in let (use let* instead)

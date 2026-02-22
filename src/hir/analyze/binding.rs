@@ -15,7 +15,7 @@ impl<'a> Analyzer<'a> {
 
         // Phase 1: Analyze all value expressions in the OUTER scope
         let mut names_and_values = Vec::new();
-        let mut effect = Effect::pure();
+        let mut effect = Effect::none();
 
         for binding in bindings_syntax {
             let pair = binding
@@ -29,7 +29,7 @@ impl<'a> Analyzer<'a> {
                 .as_symbol()
                 .ok_or_else(|| format!("{}: let binding name must be a symbol", span))?;
             let value = self.analyze_expr(&pair[1])?;
-            effect = effect.combine(value.effect.clone());
+            effect = effect.combine(value.effect);
             names_and_values.push((name, value));
         }
 
@@ -49,7 +49,7 @@ impl<'a> Analyzer<'a> {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(id, inferred_effect.clone());
+                self.effect_env.insert(id, *inferred_effect);
             }
             bindings.push((id, value));
         }
@@ -60,7 +60,7 @@ impl<'a> Analyzer<'a> {
         } else {
             Hir::pure(HirKind::Nil, span.clone())
         };
-        effect = effect.combine(body.effect.clone());
+        effect = effect.combine(body.effect);
 
         self.pop_scope();
 
@@ -86,7 +86,7 @@ impl<'a> Analyzer<'a> {
         self.push_scope(false);
 
         let mut bindings = Vec::new();
-        let mut effect = Effect::pure();
+        let mut effect = Effect::none();
 
         for binding in bindings_syntax {
             let pair = binding
@@ -101,7 +101,7 @@ impl<'a> Analyzer<'a> {
                 .ok_or_else(|| format!("{}: let* binding name must be a symbol", span))?;
             // In let*, each value CAN see previous bindings
             let value = self.analyze_expr(&pair[1])?;
-            effect = effect.combine(value.effect.clone());
+            effect = effect.combine(value.effect);
 
             let id = self.bind(
                 name,
@@ -114,7 +114,7 @@ impl<'a> Analyzer<'a> {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(id, inferred_effect.clone());
+                self.effect_env.insert(id, *inferred_effect);
             }
             bindings.push((id, value));
         }
@@ -124,7 +124,7 @@ impl<'a> Analyzer<'a> {
         } else {
             Hir::pure(HirKind::Nil, span.clone())
         };
-        effect = effect.combine(body.effect.clone());
+        effect = effect.combine(body.effect);
 
         self.pop_scope();
 
@@ -172,11 +172,11 @@ impl<'a> Analyzer<'a> {
 
         // Second pass: analyze values
         let mut bindings = Vec::new();
-        let mut effect = Effect::pure();
+        let mut effect = Effect::none();
         for (i, binding) in bindings_syntax.iter().enumerate() {
             let pair = binding.as_list().unwrap();
             let value = self.analyze_expr(&pair[1])?;
-            effect = effect.combine(value.effect.clone());
+            effect = effect.combine(value.effect);
             // Track effect for interprocedural analysis
             // Note: For mutual recursion, effects may be incomplete at this point
             // since later bindings haven't been analyzed yet. This is conservative.
@@ -184,14 +184,13 @@ impl<'a> Analyzer<'a> {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env
-                    .insert(binding_ids[i], inferred_effect.clone());
+                self.effect_env.insert(binding_ids[i], *inferred_effect);
             }
             bindings.push((binding_ids[i], value));
         }
 
         let body = self.analyze_body(&items[2..], span.clone())?;
-        effect = effect.combine(body.effect.clone());
+        effect = effect.combine(body.effect);
 
         self.pop_scope();
 
@@ -241,7 +240,7 @@ impl<'a> Analyzer<'a> {
         let is_lambda_form = if let Some(list) = items[2].as_list() {
             list.first()
                 .and_then(|s| s.as_symbol())
-                .is_some_and(|s| s == "fn" || s == "lambda")
+                .is_some_and(|s| s == "fn")
         } else {
             false
         };
@@ -260,7 +259,7 @@ impl<'a> Analyzer<'a> {
             // Seed effect_env with Pure for lambda forms so self-recursive calls
             // don't default to Yields during analysis
             if is_lambda_form {
-                self.effect_env.insert(binding_id, Effect::pure());
+                self.effect_env.insert(binding_id, Effect::none());
             }
 
             // Now analyze the value (which can reference the binding)
@@ -271,7 +270,7 @@ impl<'a> Analyzer<'a> {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(binding_id, inferred_effect.clone());
+                self.effect_env.insert(binding_id, *inferred_effect);
             }
 
             // Emit a LocalDefine that stores to a local slot
@@ -281,7 +280,7 @@ impl<'a> Analyzer<'a> {
                     value: Box::new(value),
                 },
                 span,
-                Effect::pure(),
+                Effect::none(),
             ))
         } else {
             // At top level, define creates a global binding
@@ -291,7 +290,7 @@ impl<'a> Analyzer<'a> {
             // Seed effect_env with Pure for lambda forms so self-recursive calls
             // don't default to Yields during analysis
             if is_lambda_form {
-                self.effect_env.insert(binding_id, Effect::pure());
+                self.effect_env.insert(binding_id, Effect::none());
             }
 
             // Now analyze the value
@@ -303,10 +302,9 @@ impl<'a> Analyzer<'a> {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(binding_id, inferred_effect.clone());
+                self.effect_env.insert(binding_id, *inferred_effect);
                 // Record for cross-form effect tracking
-                self.defined_global_effects
-                    .insert(sym, inferred_effect.clone());
+                self.defined_global_effects.insert(sym, *inferred_effect);
             }
 
             Ok(Hir::new(
@@ -315,7 +313,7 @@ impl<'a> Analyzer<'a> {
                     value: Box::new(value),
                 },
                 span,
-                Effect::pure(),
+                Effect::none(),
             ))
         }
     }
@@ -350,7 +348,7 @@ impl<'a> Analyzer<'a> {
         self.effect_env.remove(&target);
 
         let value = self.analyze_expr(&items[2])?;
-        let effect = value.effect.clone();
+        let effect = value.effect;
 
         Ok(Hir::new(
             HirKind::Set {
@@ -478,7 +476,7 @@ impl<'a> Analyzer<'a> {
                 inferred_effect,
             },
             span,
-            Effect::pure(), // Creating a closure is pure
+            Effect::none(), // Creating a closure is pure
         ))
     }
 }

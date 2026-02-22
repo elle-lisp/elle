@@ -67,8 +67,6 @@ See `assertions.lisp` for the standard assertion library documentation.
 - **json.lisp** - JSON parsing and encoding
 
 ### Advanced (Tier 4)
-- **exceptions.lisp** - Try/catch/finally exception handling, finally clause semantics, and safe operations
-- **conditions.lisp** - Advanced condition system, exception inheritance, filtering, and introspection
 - **concurrency.lisp** - Thread creation and joining with spawn/join
 - **io.lisp** - File reading, writing, and directory operations
 - **modules.lisp** - Module system (import-file, add-module-path, organization patterns, file-based module integration)
@@ -244,7 +242,7 @@ echo $?
   - Interleaved coroutines and value tracking
   - Quoted symbols and expression evaluation
   - Nested coroutines and generator patterns
-  - Advanced features: coroutine-next, range/fibonacci generators
+  - Advanced features: range/fibonacci generators
   - Multiple independent coroutines and completion detection
 
 - `type-conversion.lisp` + `type-checking.lisp` → **type-checking.lisp**
@@ -253,13 +251,6 @@ echo $?
   - String parsing (string->int, string->float)
   - Number/symbol/any to string conversions
   - Round-trip conversions and conversion chains
-
-- `finally-clause.lisp` → merged into **exceptions.lisp**
-  - Try/catch/finally exception handling
-  - Finally clause semantics and behavior
-  - Finally with side effects and nested blocks
-  - Finally with complex expressions
-  - Safe arithmetic operations with error handling
 
 - `threading-operators.lisp` → renamed to **syntax-sugar.lisp**
   - Thread-first (->) operator

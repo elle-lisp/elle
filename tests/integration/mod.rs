@@ -5,9 +5,6 @@ mod core {
 mod advanced {
     include!("advanced.rs");
 }
-mod exception_handling {
-    include!("exception_handling.rs");
-}
 mod ffi_marshaling {
     include!("ffi-marshaling.rs");
 }
@@ -64,4 +61,7 @@ mod effect_unsoundness {
 }
 mod jit {
     include!("jit.rs");
+}
+mod fibers {
+    include!("fibers.rs");
 }

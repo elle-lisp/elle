@@ -10,7 +10,7 @@ Single error type for the entire crate. Provides:
 - Stack traces (VM or CPS)
 - Human-readable formatting
 
-Does NOT handle Elle-level exceptions (`Value::Exception`, `Value::Condition`).
+Does NOT handle Elle-level errors (error tuples `[:keyword "message"]`).
 Those are user-facing; this module is for Rust-level errors.
 
 ## Interface

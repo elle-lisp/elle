@@ -9,15 +9,13 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use crate::value::continuation::ContinuationData;
 use crate::value::ffi::ThreadHandle;
+use crate::value::fiber::FiberHandle;
 use crate::value::Value;
 
 // Re-export types for convenience
 pub use crate::value::closure::Closure;
-pub use crate::value::condition::Condition;
-pub use crate::value::coroutine::Coroutine;
-pub use crate::value::types::{Arity, NativeFn, TableKey, VmAwareFn};
+pub use crate::value::types::{Arity, NativeFn, TableKey};
 
 /// Cons cell for list construction using NaN-boxed values.
 #[derive(Debug, Clone, PartialEq)]
@@ -43,16 +41,14 @@ pub enum HeapTag {
     Table = 3,
     Struct = 4,
     Closure = 5,
-    Condition = 6,
-    Coroutine = 7,
+    Tuple = 7,
     Cell = 8,
     Float = 9, // For NaN values that can't be inline
     NativeFn = 10,
-    VmAwareFn = 11,
     LibHandle = 12,
     CHandle = 13,
     ThreadHandle = 14,
-    Continuation = 15,
+    Fiber = 16,
 }
 
 /// All heap-allocated value types.
@@ -79,11 +75,8 @@ pub enum HeapObject {
     /// Function closure (interpreted)
     Closure(Rc<Closure>),
 
-    /// Exception/condition object
-    Condition(Condition),
-
-    /// Suspendable computation
-    Coroutine(Rc<RefCell<Coroutine>>),
+    /// Immutable tuple (fixed-length sequence)
+    Tuple(Vec<Value>),
 
     /// Mutable cell for captured variables.
     /// The boolean distinguishes compiler-created cells (true, auto-unwrapped
@@ -96,9 +89,6 @@ pub enum HeapObject {
     /// Native function (Rust function)
     NativeFn(NativeFn),
 
-    /// VM-aware native function
-    VmAwareFn(VmAwareFn),
-
     /// FFI library handle
     LibHandle(u32),
 
@@ -108,8 +98,8 @@ pub enum HeapObject {
     /// Thread handle for concurrent execution
     ThreadHandle(ThreadHandleData),
 
-    /// First-class continuation for yield across call boundaries
-    Continuation(Rc<ContinuationData>),
+    /// Fiber: independent execution context with its own stack and frames
+    Fiber(FiberHandle),
 }
 
 /// Data for thread handles.
@@ -138,16 +128,14 @@ impl HeapObject {
             HeapObject::Table(_) => HeapTag::Table,
             HeapObject::Struct(_) => HeapTag::Struct,
             HeapObject::Closure(_) => HeapTag::Closure,
-            HeapObject::Condition(_) => HeapTag::Condition,
-            HeapObject::Coroutine(_) => HeapTag::Coroutine,
+            HeapObject::Tuple(_) => HeapTag::Tuple,
             HeapObject::Cell(_, _) => HeapTag::Cell,
             HeapObject::Float(_) => HeapTag::Float,
             HeapObject::NativeFn(_) => HeapTag::NativeFn,
-            HeapObject::VmAwareFn(_) => HeapTag::VmAwareFn,
             HeapObject::LibHandle(_) => HeapTag::LibHandle,
             HeapObject::CHandle(_, _) => HeapTag::CHandle,
             HeapObject::ThreadHandle(_) => HeapTag::ThreadHandle,
-            HeapObject::Continuation(_) => HeapTag::Continuation,
+            HeapObject::Fiber(_) => HeapTag::Fiber,
         }
     }
 
@@ -160,16 +148,14 @@ impl HeapObject {
             HeapObject::Table(_) => "table",
             HeapObject::Struct(_) => "struct",
             HeapObject::Closure(_) => "closure",
-            HeapObject::Condition(_) => "condition",
-            HeapObject::Coroutine(_) => "coroutine",
+            HeapObject::Tuple(_) => "tuple",
             HeapObject::Cell(_, _) => "cell",
             HeapObject::Float(_) => "float",
             HeapObject::NativeFn(_) => "native-function",
-            HeapObject::VmAwareFn(_) => "vm-aware-function",
             HeapObject::LibHandle(_) => "library-handle",
             HeapObject::CHandle(_, _) => "c-handle",
             HeapObject::ThreadHandle(_) => "thread-handle",
-            HeapObject::Continuation(_) => "continuation",
+            HeapObject::Fiber(_) => "fiber",
         }
     }
 }
@@ -189,16 +175,26 @@ impl std::fmt::Debug for HeapObject {
             HeapObject::Table(_) => write!(f, "<table>"),
             HeapObject::Struct(_) => write!(f, "<struct>"),
             HeapObject::Closure(_) => write!(f, "<closure>"),
-            HeapObject::Condition(c) => write!(f, "<condition:{}>", c.exception_id),
-            HeapObject::Coroutine(_) => write!(f, "<coroutine>"),
+            HeapObject::Tuple(elems) => {
+                write!(f, "[")?;
+                for (i, v) in elems.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{:?}", v)?;
+                }
+                write!(f, "]")
+            }
             HeapObject::Cell(_, _) => write!(f, "<cell>"),
             HeapObject::Float(n) => write!(f, "{}", n),
             HeapObject::NativeFn(_) => write!(f, "<native-fn>"),
-            HeapObject::VmAwareFn(_) => write!(f, "<vm-aware-fn>"),
             HeapObject::LibHandle(id) => write!(f, "<lib-handle:{}>", id),
             HeapObject::CHandle(_, id) => write!(f, "<c-handle:{}>", id),
             HeapObject::ThreadHandle(_) => write!(f, "<thread-handle>"),
-            HeapObject::Continuation(c) => write!(f, "<continuation:{} frames>", c.frames.len()),
+            HeapObject::Fiber(handle) => match handle.try_with(|fib| fib.status.as_str()) {
+                Some(status) => write!(f, "<fiber:{}>", status),
+                None => write!(f, "<fiber:taken>"),
+            },
         }
     }
 }

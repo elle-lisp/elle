@@ -219,22 +219,8 @@ impl<'a> HirSymbolExtractor<'a> {
                 }
             }
 
-            HirKind::Throw(e) | HirKind::Yield(e) => {
+            HirKind::Yield(e) => {
                 self.walk(e, index, symbols);
-            }
-
-            HirKind::HandlerCase { body, handlers } => {
-                self.walk(body, index, symbols);
-                for (_, _, handler) in handlers {
-                    self.walk(handler, index, symbols);
-                }
-            }
-
-            HirKind::HandlerBind { handlers, body } => {
-                self.walk(body, index, symbols);
-                for (_, handler) in handlers {
-                    self.walk(handler, index, symbols);
-                }
             }
 
             HirKind::Module { body, .. } => {

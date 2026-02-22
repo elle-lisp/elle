@@ -1,4 +1,5 @@
 /target
+/.cargo/
 /elle-lint/target
 /elle-lsp/target
 site/

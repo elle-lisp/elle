@@ -93,7 +93,7 @@ impl Lowerer {
 
         // Lower the lambda body to a separate LirFunction
         let nested_lir =
-            self.lower_lambda_body(params, captures, body, num_locals, inferred_effect.clone())?;
+            self.lower_lambda_body(params, captures, body, num_locals, *inferred_effect)?;
 
         // Create closure with the nested function
         let dst = self.fresh_reg();
@@ -181,7 +181,7 @@ impl Lowerer {
         self.current_func.entry = Label(0);
         self.current_func.num_regs = self.next_reg;
         // Propagate inferred effect to LIR function
-        self.current_func.effect = inferred_effect.clone();
+        self.current_func.effect = inferred_effect;
 
         let func = std::mem::replace(&mut self.current_func, saved_func);
 

@@ -35,6 +35,9 @@ pub enum SendValue {
     /// Deep copy of structs (immutable maps)
     Struct(BTreeMap<crate::value::heap::TableKey, SendValue>),
 
+    /// Deep copy of tuples (immutable fixed-length sequences)
+    Tuple(Vec<SendValue>),
+
     /// Deep copy of mutable cells (if contents are sendable)
     /// The bool indicates if it's a local cell (auto-unwrapped) or user cell
     Cell(Box<SendValue>, bool),
@@ -100,6 +103,13 @@ impl SendValue {
                 Ok(SendValue::Struct(copied))
             }
 
+            // Tuples - deep copy all elements
+            HeapObject::Tuple(elems) => {
+                let copied: Result<Vec<SendValue>, String> =
+                    elems.iter().map(|v| SendValue::from_value(*v)).collect();
+                Ok(SendValue::Tuple(copied?))
+            }
+
             // Cells - deep copy the contents if sendable
             HeapObject::Cell(cell_ref, is_local) => {
                 let borrowed = cell_ref
@@ -121,24 +131,15 @@ impl SendValue {
             // Unsafe: native functions (contain function pointers)
             HeapObject::NativeFn(_) => Err("Cannot send native function".to_string()),
 
-            // Unsafe: VM-aware functions (contain function pointers)
-            HeapObject::VmAwareFn(_) => Err("Cannot send VM-aware function".to_string()),
-
             // Unsafe: FFI handles
             HeapObject::LibHandle(_) => Err("Cannot send library handle".to_string()),
             HeapObject::CHandle(_, _) => Err("Cannot send C handle".to_string()),
 
-            // Unsafe: conditions (may contain non-sendable data)
-            HeapObject::Condition(_) => Err("Cannot send condition".to_string()),
-
             // Unsafe: thread handles
             HeapObject::ThreadHandle(_) => Err("Cannot send thread handle".to_string()),
 
-            // Unsafe: coroutines (contain closures with mutable state)
-            HeapObject::Coroutine(_) => Err("Cannot send coroutine".to_string()),
-
-            // Unsafe: continuations (contain frame data with closures)
-            HeapObject::Continuation(_) => Err("Cannot send continuation".to_string()),
+            // Unsafe: fibers (contain execution state with closures)
+            HeapObject::Fiber(_) => Err("Cannot send fiber".to_string()),
         }
     }
 
@@ -167,6 +168,10 @@ impl SendValue {
                     .map(|(k, sv)| (k, sv.into_value()))
                     .collect();
                 alloc(HeapObject::Struct(values))
+            }
+            SendValue::Tuple(items) => {
+                let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
+                alloc(HeapObject::Tuple(values))
             }
             SendValue::Cell(contents, is_local) => {
                 let val = contents.into_value();

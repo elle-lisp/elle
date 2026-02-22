@@ -114,25 +114,6 @@ fn mark(hir: &mut Hir, in_tail: bool) {
             }
         }
 
-        // HandlerCase: body is NOT in tail position (calls in the protected
-        // body must not tail-call because the handler frame must remain active
-        // to catch exceptions). Handler bodies inherit tail position since the
-        // exception has been caught and cleared before they execute.
-        HirKind::HandlerCase { body, handlers } => {
-            mark(body, false);
-            for (_, _, handler_body) in handlers {
-                mark(handler_body, in_tail);
-            }
-        }
-
-        // HandlerBind: handler functions are not tail, body inherits tail position
-        HirKind::HandlerBind { handlers, body } => {
-            for (_, handler_fn) in handlers {
-                mark(handler_fn, false);
-            }
-            mark(body, in_tail);
-        }
-
         // And/Or: only the last expression inherits tail position
         HirKind::And(exprs) | HirKind::Or(exprs) => {
             if let Some((last, rest)) = exprs.split_last_mut() {
@@ -178,11 +159,6 @@ fn mark(hir: &mut Hir, in_tail: bool) {
         // LocalDefine: value is not in tail position
         HirKind::LocalDefine { value, .. } => {
             mark(value, false);
-        }
-
-        // Throw: value is not in tail position
-        HirKind::Throw(expr) => {
-            mark(expr, false);
         }
 
         // Yield: value is not in tail position
@@ -306,21 +282,8 @@ mod tests {
             HirKind::Set { value, .. }
             | HirKind::Define { value, .. }
             | HirKind::LocalDefine { value, .. }
-            | HirKind::Throw(value)
             | HirKind::Yield(value) => {
                 collect_calls(value, calls);
-            }
-            HirKind::HandlerCase { body, handlers } => {
-                collect_calls(body, calls);
-                for (_, _, handler_body) in handlers {
-                    collect_calls(handler_body, calls);
-                }
-            }
-            HirKind::HandlerBind { handlers, body } => {
-                for (_, handler_fn) in handlers {
-                    collect_calls(handler_fn, calls);
-                }
-                collect_calls(body, calls);
             }
             HirKind::Block(exprs) => {
                 for expr in exprs {
@@ -448,15 +411,5 @@ mod tests {
         let calls = find_calls(&hir);
         // Calls: = (not tail), f (tail), = (not tail), g (tail), h (tail)
         assert_eq!(calls, vec![false, true, false, true, true]);
-    }
-
-    #[test]
-    fn test_handler_case_body_not_tail() {
-        // (fn () (handler-case (f) (error e (g))))
-        // f is in the protected body — NOT tail (handler must stay active)
-        // g is in the handler body — IS tail (exception already caught)
-        let hir = analyze_and_mark("(fn () (handler-case (f) (error e (g))))");
-        let calls = find_calls(&hir);
-        assert_eq!(calls, vec![false, true]);
     }
 }

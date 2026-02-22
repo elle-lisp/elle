@@ -173,15 +173,6 @@ impl Value {
         alloc(HeapObject::Cell(RefCell::new(value), true))
     }
 
-    /// Create a coroutine value.
-    #[inline]
-    pub fn coroutine(c: crate::value::heap::Coroutine) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
-        use std::cell::RefCell;
-        use std::rc::Rc;
-        alloc(HeapObject::Coroutine(Rc::new(RefCell::new(c))))
-    }
-
     /// Create a native function value.
     #[inline]
     pub fn native_fn(f: crate::value::heap::NativeFn) -> Self {
@@ -189,18 +180,25 @@ impl Value {
         alloc(HeapObject::NativeFn(f))
     }
 
-    /// Create a VM-aware native function value.
+    /// Create an immutable tuple value.
     #[inline]
-    pub fn vm_aware_fn(f: crate::value::heap::VmAwareFn) -> Self {
+    pub fn tuple(elements: Vec<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::VmAwareFn(f))
+        alloc(HeapObject::Tuple(elements))
     }
 
-    /// Create a continuation value.
+    /// Create a fiber value.
     #[inline]
-    pub fn continuation(c: crate::value::continuation::ContinuationData) -> Self {
+    pub fn fiber(f: crate::value::fiber::Fiber) -> Self {
+        use crate::value::fiber::FiberHandle;
         use crate::value::heap::{alloc, HeapObject};
-        use std::rc::Rc;
-        alloc(HeapObject::Continuation(Rc::new(c)))
+        alloc(HeapObject::Fiber(FiberHandle::new(f)))
+    }
+
+    /// Create a fiber value from an existing FiberHandle.
+    #[inline]
+    pub fn fiber_from_handle(handle: crate::value::fiber::FiberHandle) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
+        alloc(HeapObject::Fiber(handle))
     }
 }

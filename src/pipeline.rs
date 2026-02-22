@@ -40,7 +40,7 @@ fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<Symb
                         if let SyntaxKind::List(val_items) = &items[2].kind {
                             if let Some(first) = val_items.first() {
                                 if let Some(kw) = first.as_symbol() {
-                                    if kw == "fn" || kw == "lambda" {
+                                    if kw == "fn" {
                                         return Some(symbols.intern(def_name));
                                     }
                                 }
@@ -91,7 +91,7 @@ pub fn compile_new(source: &str, symbols: &mut SymbolTable) -> Result<CompileRes
 /// Uses fixpoint iteration to correctly infer effects for mutually recursive
 /// top-level defines. The algorithm:
 /// 1. Pre-scan all forms for `(define name (fn ...))` patterns
-/// 2. Seed `global_effects` with `Effect::pure()` for all such defines (optimistic)
+/// 2. Seed `global_effects` with `Effect::none()` for all such defines (optimistic)
 /// 3. Analyze all forms, collecting actual inferred effects
 /// 4. If any effect changed, re-analyze with corrected effects
 /// 5. Repeat until stable (max 10 iterations)
@@ -113,7 +113,7 @@ pub fn compile_all_new(
     let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
     for form in &expanded_forms {
         if let Some(sym) = scan_define_lambda(form, symbols) {
-            global_effects.insert(sym, Effect::pure());
+            global_effects.insert(sym, Effect::none());
         }
     }
 
@@ -215,7 +215,7 @@ pub fn analyze_all_new(
     let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
     for form in &expanded_forms {
         if let Some(sym) = scan_define_lambda(form, symbols) {
-            global_effects.insert(sym, Effect::pure());
+            global_effects.insert(sym, Effect::none());
         }
     }
 
@@ -982,13 +982,13 @@ mod tests {
         assert!(results.is_ok(), "Compilation should succeed");
         let results = results.unwrap();
 
-        // Check that the closures have Pure effect
+        // Check that the closures don't suspend
         for (i, result) in results.iter().enumerate() {
             for constant in &result.bytecode.constants {
                 if let Some(closure) = constant.as_closure() {
                     assert!(
-                        closure.effect.is_pure(),
-                        "Form {} closure should be Pure, got {:?}",
+                        !closure.effect.may_suspend(),
+                        "Form {} closure should not suspend, got {:?}",
                         i,
                         closure.effect
                     );
@@ -1036,15 +1036,15 @@ mod tests {
         assert!(results.is_ok(), "Compilation should succeed");
         let results = results.unwrap();
 
-        // Check that all closures have Pure effect
+        // Check that all closures don't suspend
         let mut found_closures = 0;
         for (i, result) in results.iter().enumerate() {
             for constant in &result.bytecode.constants {
                 if let Some(closure) = constant.as_closure() {
                     found_closures += 1;
                     assert!(
-                        closure.effect.is_pure(),
-                        "Form {} closure should be Pure, got {:?}",
+                        !closure.effect.may_suspend(),
+                        "Form {} closure should not suspend, got {:?}",
                         i,
                         closure.effect
                     );
@@ -1052,5 +1052,152 @@ mod tests {
             }
         }
         assert_eq!(found_closures, 4, "Should have 4 closures");
+    }
+
+    // === Fiber integration tests ===
+
+    #[test]
+    fn test_fiber_new_and_status() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval_new(
+            r#"(let ((f (fiber/new (fn () 42) 0)))
+                 (= (fiber/status f) :new))"#,
+            &mut symbols,
+            &mut vm,
+        );
+        crate::ffi::primitives::context::clear_symbol_table();
+        match result {
+            Ok(v) => assert_eq!(v, crate::value::Value::bool(true)),
+            Err(e) => panic!("Expected Ok(#t), got Err: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_fiber_resume_simple() {
+        // A fiber that just returns a value
+        let (mut symbols, mut vm) = setup();
+        let result = eval_new(
+            r#"(let ((f (fiber/new (fn () 42) 0)))
+                 (fiber/resume f))"#,
+            &mut symbols,
+            &mut vm,
+        );
+        match result {
+            Ok(v) => assert_eq!(v, crate::value::Value::int(42)),
+            Err(e) => panic!("Expected Ok(42), got Err: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_fiber_resume_dead_status() {
+        // After a fiber completes, its status should be :dead
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval_new(
+            r#"(let ((f (fiber/new (fn () 42) 0)))
+                 (fiber/resume f)
+                 (= (fiber/status f) :dead))"#,
+            &mut symbols,
+            &mut vm,
+        );
+        crate::ffi::primitives::context::clear_symbol_table();
+        match result {
+            Ok(v) => assert_eq!(v, crate::value::Value::bool(true)),
+            Err(e) => panic!("Expected Ok(#t), got Err: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_fiber_signal_and_resume() {
+        // A fiber that signals, then is resumed to completion
+        let (mut symbols, mut vm) = setup();
+        // SIG_YIELD = 2, mask catches it
+        let result = eval_new(
+            r#"(let ((f (fiber/new (fn () (fiber/signal 2 99) 42) 2)))
+                 (fiber/resume f)
+                 (fiber/value f))"#,
+            &mut symbols,
+            &mut vm,
+        );
+        match result {
+            Ok(v) => assert_eq!(v, crate::value::Value::int(99)),
+            Err(e) => panic!("Expected Ok(99), got Err: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_fiber_signal_resume_continues() {
+        // Resume after signal should continue execution and return final value
+        let (mut symbols, mut vm) = setup();
+        let result = eval_new(
+            r#"(let ((f (fiber/new (fn () (fiber/signal 2 99) 42) 2)))
+                 (fiber/resume f)
+                 (fiber/resume f))"#,
+            &mut symbols,
+            &mut vm,
+        );
+        match result {
+            Ok(v) => assert_eq!(v, crate::value::Value::int(42)),
+            Err(e) => panic!("Expected Ok(42), got Err: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_fiber_is_fiber() {
+        let (mut symbols, mut vm) = setup();
+        let result = eval_new(
+            r#"(fiber? (fiber/new (fn () 42) 0))"#,
+            &mut symbols,
+            &mut vm,
+        );
+        match result {
+            Ok(v) => assert_eq!(v, crate::value::Value::bool(true)),
+            Err(e) => panic!("Expected Ok(#t), got Err: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_fiber_not_fiber() {
+        let (mut symbols, mut vm) = setup();
+        let result = eval_new(r#"(fiber? 42)"#, &mut symbols, &mut vm);
+        match result {
+            Ok(v) => assert_eq!(v, crate::value::Value::bool(false)),
+            Err(e) => panic!("Expected Ok(#f), got Err: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_fiber_signal_through_nested_call() {
+        // A fiber whose body calls a function that signals.
+        // This tests yield propagation through nested calls.
+        let (mut symbols, mut vm) = setup();
+        let result = eval_new(
+            r#"(begin
+                 (define (inner) (fiber/signal 2 99))
+                 (let ((f (fiber/new (fn () (inner) 42) 2)))
+                   (fiber/resume f)
+                   (fiber/value f)))"#,
+            &mut symbols,
+            &mut vm,
+        );
+        match result {
+            Ok(v) => assert_eq!(v, crate::value::Value::int(99)),
+            Err(e) => panic!("Expected Ok(99), got Err: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_fiber_mask() {
+        let (mut symbols, mut vm) = setup();
+        let result = eval_new(
+            r#"(fiber/mask (fiber/new (fn () 42) 3))"#,
+            &mut symbols,
+            &mut vm,
+        );
+        match result {
+            Ok(v) => assert_eq!(v, crate::value::Value::int(3)),
+            Err(e) => panic!("Expected Ok(3), got Err: {}", e),
+        }
     }
 }

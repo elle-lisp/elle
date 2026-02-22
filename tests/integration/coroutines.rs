@@ -150,11 +150,11 @@ fn test_yield_with_resume_value() {
 
 #[test]
 fn test_coroutine_status_created() {
-    // Check status is "created" initially
+    // Check status is :created keyword initially
     let result = eval(
         r#"
         (define co (make-coroutine (fn () 42)))
-        (coroutine-status co)
+        (keyword->string (coroutine-status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("created"));
@@ -162,12 +162,12 @@ fn test_coroutine_status_created() {
 
 #[test]
 fn test_coroutine_status_done() {
-    // After completion, status is "done"
+    // After completion, status is :done keyword
     let result = eval(
         r#"
         (define co (make-coroutine (fn () 42)))
         (coroutine-resume co)
-        (coroutine-status co)
+        (keyword->string (coroutine-status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("done"));
@@ -290,9 +290,8 @@ fn test_calling_yielding_function_propagates_effect() {
 
 #[test]
 fn test_yield_from_basic() {
-    // (define inner (fn () (yield 1) (yield 2)))
-    // (define outer (fn () (yield-from (make-coroutine inner)) (yield 3)))
-    // Should yield 1, 2, 3
+    // yield-from is dropped in the fiber migration (see issue #294 for yield*).
+    // It should return an error.
     let result = eval(
         r#"
         (define inner (fn () (yield 1) (yield 2)))
@@ -301,20 +300,15 @@ fn test_yield_from_basic() {
         (coroutine-resume co)
         "#,
     );
-    // Should get the first yielded value from inner
-    assert!(result.is_ok());
-    // yield-from should delegate to inner coroutine, so first resume yields 1
-    // Currently yields 3 because yield-from doesn't properly delegate
-    assert_eq!(
-        result.unwrap(),
-        Value::int(1),
-        "First yield-from should yield 1 from inner"
+    assert!(
+        result.is_err(),
+        "yield-from should error (dropped, see issue #294)"
     );
 }
 
 #[test]
 fn test_yield_from_completion() {
-    // yield-from should return the final value of the sub-coroutine
+    // yield-from is dropped in the fiber migration (see issue #294 for yield*).
     let result = eval(
         r#"
         (define inner (fn () (yield 1) 42))
@@ -323,8 +317,10 @@ fn test_yield_from_completion() {
         (coroutine-resume co)
         "#,
     );
-    // Should eventually return 42 (the final value of inner)
-    assert!(result.is_ok());
+    assert!(
+        result.is_err(),
+        "yield-from should error (dropped, see issue #294)"
+    );
 }
 
 // ============================================================================
@@ -511,13 +507,13 @@ fn test_coroutine_status_suspended_after_yield() {
         (define gen (fn () (yield 1) (yield 2)))
         (define co (make-coroutine gen))
         (coroutine-resume co)
-        (coroutine-status co)
+        (keyword->string (coroutine-status co))
         "#,
     );
     assert_eq!(
         result.unwrap(),
         Value::string("suspended"),
-        "Coroutine should be suspended after yield, not running"
+        "Coroutine should be suspended after yield"
     );
 }
 
@@ -541,7 +537,7 @@ fn test_coroutine_state_after_error_during_resume() {
 
 #[test]
 fn test_coroutine_state_error_not_running_after_failure() {
-    // After a coroutine fails, its state should be "error", not "running"
+    // After a coroutine fails, its state should be :error, not :running
     let result = eval(
         r#"
         (define bad-gen (fn ()
@@ -549,10 +545,9 @@ fn test_coroutine_state_error_not_running_after_failure() {
           (undefined-variable-that-does-not-exist)))
         (define co (make-coroutine bad-gen))
         (coroutine-resume co)
-        (handler-case
-          (coroutine-resume co)
-          (error e nil))
-        (coroutine-status co)
+        (let ((f (fiber/new (fn () (coroutine-resume co)) 1)))
+          (fiber/resume f))
+        (keyword->string (coroutine-status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("error"));
@@ -603,17 +598,16 @@ fn test_nested_coroutine_resume_from_coroutine() {
 
 #[test]
 fn test_coroutine_state_not_stuck_running_on_cps_error() {
-    // If error occurs before first yield, state should be "error", not stuck on "running"
+    // If error occurs before first yield, state should be :error, not stuck on :running
     let result = eval(
         r#"
         (define bad-start-gen (fn ()
           (+ undefined-at-start 1)
           (yield 1)))
         (define co (make-coroutine bad-start-gen))
-        (handler-case
-          (coroutine-resume co)
-          (error e nil))
-        (coroutine-status co)
+        (let ((f (fiber/new (fn () (coroutine-resume co)) 1)))
+          (fiber/resume f))
+        (keyword->string (coroutine-status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("error"));
@@ -637,14 +631,13 @@ fn test_error_in_coroutine() {
 
 #[test]
 fn test_error_in_coroutine_status() {
-    // After error, status should be "error"
+    // After error, status should be :error keyword
     let result = eval(
         r#"
         (define co (make-coroutine (fn () (/ 1 0))))
-        (handler-case
-          (coroutine-resume co)
-          (error e nil))
-        (coroutine-status co)
+        (let ((f (fiber/new (fn () (coroutine-resume co)) 1)))
+          (fiber/resume f))
+        (keyword->string (coroutine-status co))
         "#,
     );
     assert_eq!(result.unwrap(), Value::string("error"));
@@ -715,21 +708,6 @@ fn test_coroutine_with_higher_order_functions() {
         "#,
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-}
-
-#[test]
-fn test_coroutine_with_exception_handling() {
-    // Coroutine with try-catch
-    let result = eval(
-        r#"
-         (define co (make-coroutine (fn ()
-           (handler-case
-             (yield (/ 1 0))
-             (division-by-zero e (yield "error"))))))
-        (coroutine-resume co)
-        "#,
-    );
-    assert!(result.is_ok());
 }
 
 // ============================================================================
@@ -1053,170 +1031,6 @@ fn test_yield_quoted_list() {
 }
 
 // ============================================================================
-// 16. HANDLER-CASE + YIELD TESTS (Phase 3 hardening)
-// ============================================================================
-
-#[test]
-fn test_yield_inside_handler_case_then_exception() {
-    // Bug fix test: handler-case should still catch exceptions after yield/resume
-    // When yield occurs inside a handler-case body, the exception handler state
-    // must be saved in the continuation and restored on resume.
-    let result = eval(
-        r#"
-        (define co (make-coroutine (fn ()
-          (handler-case
-            (begin
-              (yield 1)       ; handler is active here
-              (/ 1 0))        ; after resume, handler should still be active
-            (division-by-zero e "caught")))))
-        (list
-          (coroutine-resume co)
-          (coroutine-resume co))
-        "#,
-    );
-    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-    let list_vals = collect_list_ints(&result.unwrap());
-    // First resume: yields 1
-    // Second resume: (/ 1 0) -> caught by handler-case -> "caught"
-    // But "caught" is a string, not an int, so we check differently
-    assert_eq!(list_vals[0], 1, "First yield should be 1");
-    // The second element is "caught" string, not an int
-}
-
-#[test]
-fn test_yield_inside_handler_case_string_result() {
-    // Same as above but verify the string result
-    let result = eval(
-        r#"
-        (define co (make-coroutine (fn ()
-          (handler-case
-            (begin
-              (yield 1)
-              (/ 1 0))
-            (division-by-zero e "caught")))))
-        (coroutine-resume co)
-        (coroutine-resume co)
-        "#,
-    );
-    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-    assert_eq!(
-        result.unwrap(),
-        Value::string("caught"),
-        "Exception should be caught after resume"
-    );
-}
-
-#[test]
-fn test_yield_inside_nested_handler_case() {
-    // Nested handler-case blocks should both survive yield/resume
-    let result = eval(
-        r#"
-        (define co (make-coroutine (fn ()
-          (handler-case
-            (handler-case
-              (begin
-                (yield 1)
-                (/ 1 0))
-              (type-error e "inner-type-error"))
-            (division-by-zero e "outer-div-zero")))))
-        (list
-          (coroutine-resume co)
-          (coroutine-resume co))
-        "#,
-    );
-    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-    // First resume yields 1, second resume triggers div-by-zero caught by outer handler
-}
-
-#[test]
-fn test_handler_case_outside_coroutine_wrapping_yield() {
-    // Handler-case outside the coroutine should not affect yield/resume
-    // The handler is in the caller's context, not the coroutine's
-    let result = eval(
-        r#"
-        (define co (make-coroutine (fn ()
-          (yield 1)
-          (/ 1 0))))
-        (handler-case
-          (begin
-            (coroutine-resume co)
-            (coroutine-resume co))
-          (division-by-zero e "outer-caught"))
-        "#,
-    );
-    // The outer handler-case should catch the exception from the coroutine
-    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-    assert_eq!(
-        result.unwrap(),
-        Value::string("outer-caught"),
-        "Outer handler should catch coroutine exception"
-    );
-}
-
-#[test]
-fn test_exception_before_yield_caught_normally() {
-    // Exception before yield should be caught normally (no resume involved)
-    let result = eval(
-        r#"
-        (define co (make-coroutine (fn ()
-          (handler-case
-            (begin
-              (/ 1 0)
-              (yield 1))
-            (division-by-zero e "caught-before-yield")))))
-        (coroutine-resume co)
-        "#,
-    );
-    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-    assert_eq!(
-        result.unwrap(),
-        Value::string("caught-before-yield"),
-        "Exception before yield should be caught"
-    );
-}
-
-#[test]
-fn test_multiple_yields_inside_handler_case() {
-    // Multiple yields inside handler-case, exception after last yield
-    let result = eval(
-        r#"
-        (define co (make-coroutine (fn ()
-          (handler-case
-            (begin
-              (yield 1)
-              (yield 2)
-              (yield 3)
-              (/ 1 0))
-            (division-by-zero e "caught-after-3-yields")))))
-        (list
-          (coroutine-resume co)
-          (coroutine-resume co)
-          (coroutine-resume co)
-          (coroutine-resume co))
-        "#,
-    );
-    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-}
-
-#[test]
-fn test_yield_across_call_with_handler_case() {
-    // Yield from a called function, with handler-case in the caller
-    let result = eval(
-        r#"
-        (define inner (fn () (yield 1) (/ 1 0)))
-        (define co (make-coroutine (fn ()
-          (handler-case
-            (inner)
-            (division-by-zero e "caught-from-inner")))))
-        (list
-          (coroutine-resume co)
-          (coroutine-resume co))
-        "#,
-    );
-    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-}
-
-// ============================================================================
 // 16.5. YIELD WITH INTERMEDIATE VALUES ON STACK (Phase 4 - LIR Yield Terminator)
 // ============================================================================
 
@@ -1354,7 +1168,7 @@ fn test_coroutine_resume_pure_closure_completes_immediately() {
         (define co (make-coroutine (fn () (+ 1 2 3))))
         (list
           (coroutine-resume co)
-          (coroutine-status co))
+          (keyword->string (coroutine-status co)))
         "#,
     );
     assert!(result.is_ok());

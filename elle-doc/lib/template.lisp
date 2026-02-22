@@ -2,9 +2,9 @@
 
 ;; Generate navigation HTML using fold
 (define generate-nav
-  (lambda (nav-items current-slug)
+  (fn (nav-items current-slug)
     (fold
-      (lambda (acc item)
+      (fn (acc item)
         (let ((slug (get item "slug"))
               (title (get item "title"))
               (active-class (if (string-contains? slug current-slug) " active" "")))
@@ -16,7 +16,7 @@
 
 ;; Generate the full HTML page
 (define generate-page
-  (lambda (site page nav css body)
+  (fn (site page nav css body)
     (let ((site-title (get site "title"))
           (page-title (get page "title"))
           (page-desc (get page "description"))

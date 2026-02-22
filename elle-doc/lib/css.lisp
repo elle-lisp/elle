@@ -1,7 +1,7 @@
 ;; CSS stylesheet generation
 
 (define generate-css
-  (lambda ()
+  (fn ()
     "/* Elle Documentation Site Stylesheet */
 
 :root {

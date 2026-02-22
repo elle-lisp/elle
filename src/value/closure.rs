@@ -46,7 +46,7 @@ pub struct Closure {
 impl Closure {
     /// Get the effect of this closure
     pub fn effect(&self) -> Effect {
-        self.effect.clone()
+        self.effect
     }
 
     /// Calculate the total environment capacity needed for a call.
@@ -92,14 +92,14 @@ mod tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![]),
-            effect: Effect::pure(),
+            effect: Effect::none(),
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
         };
-        assert_eq!(closure.effect(), Effect::pure());
+        assert_eq!(closure.effect(), Effect::none());
     }
 
     #[test]
@@ -112,7 +112,7 @@ mod tests {
             num_locals: 5,                              // 3 params + 2 locally-defined
             num_captures: 2,
             constants: Rc::new(vec![]),
-            effect: Effect::pure(),
+            effect: Effect::none(),
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
@@ -130,7 +130,7 @@ mod tests {
             num_locals: 4,                  // 2 required params + 2 locally-defined
             num_captures: 1,
             constants: Rc::new(vec![]),
-            effect: Effect::pure(),
+            effect: Effect::none(),
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
@@ -148,7 +148,7 @@ mod tests {
             num_locals: 2,        // 1 min param + 1 locally-defined
             num_captures: 0,
             constants: Rc::new(vec![]),
-            effect: Effect::pure(),
+            effect: Effect::none(),
             cell_params_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),

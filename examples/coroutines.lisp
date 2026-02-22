@@ -8,7 +8,6 @@
 ; - coroutine-value: Get the last yielded/returned value
 ; - coroutine?: Type predicate
 ; - yield: Suspend execution and return a value
-; - coroutine-next: Get next value from coroutine
 ; - Generator patterns
 ; - Nested coroutines
 ; - Interleaving coroutines
@@ -25,12 +24,12 @@
 (define simple-gen (fn () (yield 42)))
 (define co (make-coroutine simple-gen))
 (assert-true (coroutine? co) "make-coroutine returns a coroutine")
-(assert-eq (coroutine-status co) "created" "Initial status is created")
+(assert-eq (coroutine-status co) :created "Initial status is created")
 (assert-eq (coroutine-resume co) 42 "First resume returns yielded value")
-(assert-eq (coroutine-status co) "suspended" "Status after yield is suspended")
+(assert-eq (coroutine-status co) :suspended "Status after yield is suspended")
 (assert-false (coroutine-done? co) "coroutine-done? returns false while suspended")
 (coroutine-resume co)
-(assert-eq (coroutine-status co) "done" "Status after completion is done")
+(assert-eq (coroutine-status co) :done "Status after completion is done")
 (assert-true (coroutine-done? co) "coroutine-done? returns true after completion")
 (display "✓ Basic coroutine creation and yield\n")
 
@@ -45,10 +44,10 @@
   (yield 3)))
 (define co-multi (make-coroutine multi-gen))
 (assert-eq (coroutine-resume co-multi) 1 "First yield")
-(assert-eq (coroutine-status co-multi) "suspended" "Suspended after yield")
+(assert-eq (coroutine-status co-multi) :suspended "Suspended after yield")
 (assert-eq (coroutine-resume co-multi) 2 "Second yield")
 (assert-eq (coroutine-resume co-multi) 3 "Third yield")
-(assert-eq (coroutine-status co-multi) "suspended" "Suspended after final yield")
+(assert-eq (coroutine-status co-multi) :suspended "Suspended after final yield")
 (display "✓ Multiple yields work correctly\n")
 
 ; ========================================
@@ -86,8 +85,8 @@
 ; Interleave resumes
 (assert-eq (coroutine-resume co-a) 1 "A first")
 (assert-eq (coroutine-resume co-b) 10 "B first")
-(assert-eq (coroutine-status co-a) "suspended" "A suspended")
-(assert-eq (coroutine-status co-b) "suspended" "B suspended")
+(assert-eq (coroutine-status co-a) :suspended "A suspended")
+(assert-eq (coroutine-status co-b) :suspended "B suspended")
 (assert-eq (coroutine-resume co-a) 2 "A second")
 (assert-eq (coroutine-resume co-b) 20 "B second")
 (assert-eq (coroutine-resume co-a) 3 "A third")
@@ -258,7 +257,6 @@
 (display "  ✓ Generator pattern\n")
 (display "  ✓ Fibonacci sequence\n")
 (display "  ✓ Type predicate\n")
-(display "  ✓ coroutine-next - Get next value\n")
 (display "  ✓ Range generator pattern\n")
 (display "  ✓ Extended Fibonacci generator pattern\n")
 (display "  ✓ Nested coroutines (advanced)\n")
@@ -270,7 +268,6 @@
 (display "  ✓ Alphabet generator pattern\n")
 
 (display "\nKey concepts:\n")
-(display "  - coroutine-next is an alias for coroutine-resume\n")
 (display "  - Generators produce sequences of values\n")
 (display "  - Coroutines maintain independent state\n")
 (display "  - Multiple coroutines can run interleaved\n")
@@ -283,44 +280,12 @@
 (display "========================================\n")
 (display "\n")
 
-(exit 0)
-
 ; ========================================
 ; ADVANCED COROUTINE FEATURES
 ; ========================================
 
 ; ========================================
-; 13. coroutine-next: Get next value
-; ========================================
-(display "\n=== 13. coroutine-next: Get Next Value ===\n")
-
-(define simple-gen-next (fn ()
-  (yield 10)
-  (yield 20)
-  (yield 30)))
-
-(define co-simple-next (make-coroutine simple-gen-next))
-
-(display "Using coroutine-next:\n")
-
-(display "  Next: ")
-(display (coroutine-next co-simple-next))
-(newline)
-
-(display "  Next: ")
-(display (coroutine-next co-simple-next))
-(newline)
-
-(display "  Next: ")
-(display (coroutine-next co-simple-next))
-(newline)
-
-(assert-eq (coroutine-status co-simple-next) "suspended" "Status after coroutine-next")
-
-(display "✓ coroutine-next works correctly\n")
-
-; ========================================
-; 14. Generator pattern: Range generator
+; 13. Generator pattern: Range generator
 ; ========================================
 (display "\n=== 14. Generator Pattern: Range ===\n")
 
@@ -346,7 +311,7 @@
 (display (coroutine-resume range-co))
 (newline)
 
-(assert-eq (coroutine-status range-co) "suspended" "Range generator status")
+(assert-eq (coroutine-status range-co) :suspended "Range generator status")
 
 (display "✓ Range generator pattern works\n")
 
@@ -386,7 +351,7 @@
 (display (coroutine-resume fib-co-extended))
 (newline)
 
-(assert-eq (coroutine-status fib-co-extended) "suspended" "Fibonacci generator status")
+(assert-eq (coroutine-status fib-co-extended) :suspended "Fibonacci generator status")
 
 (display "✓ Fibonacci generator pattern works\n")
 
@@ -420,7 +385,7 @@
 (display (coroutine-resume nested-co-adv))
 (newline)
 
-(assert-eq (coroutine-status nested-co-adv) "suspended" "Nested coroutine status")
+(assert-eq (coroutine-status nested-co-adv) :suspended "Nested coroutine status")
 
 (display "✓ Nested coroutines work correctly\n")
 
@@ -461,8 +426,8 @@
 (display (coroutine-resume co-b-adv))
 (newline)
 
-(assert-eq (coroutine-status co-a-adv) "suspended" "Coroutine A status")
-(assert-eq (coroutine-status co-b-adv) "suspended" "Coroutine B status")
+(assert-eq (coroutine-status co-a-adv) :suspended "Coroutine A status")
+(assert-eq (coroutine-status co-b-adv) :suspended "Coroutine B status")
 
 (display "✓ Interleaving coroutines works\n")
 
@@ -532,9 +497,9 @@
 (display (coroutine-resume co-3-adv))
 (newline)
 
-(assert-eq (coroutine-status co-1-adv) "suspended" "CO1 status")
-(assert-eq (coroutine-status co-2-adv) "suspended" "CO2 status")
-(assert-eq (coroutine-status co-3-adv) "suspended" "CO3 status")
+(assert-eq (coroutine-status co-1-adv) :suspended "CO1 status")
+(assert-eq (coroutine-status co-2-adv) :suspended "CO2 status")
+(assert-eq (coroutine-status co-3-adv) :suspended "CO3 status")
 
 (display "✓ Multiple independent coroutines work\n")
 
@@ -600,7 +565,7 @@
 (display (coroutine-resume counter-adv))
 (newline)
 
-(assert-eq (coroutine-status counter-adv) "suspended" "Counter status")
+(assert-eq (coroutine-status counter-adv) :suspended "Counter status")
 
 (display "✓ Counting generator works\n")
 
@@ -631,6 +596,6 @@
 (display (coroutine-resume alpha-co))
 (newline)
 
-(assert-eq (coroutine-status alpha-co) "suspended" "Alphabet generator status")
+(assert-eq (coroutine-status alpha-co) :suspended "Alphabet generator status")
 
 (display "✓ Alphabet generator works\n")

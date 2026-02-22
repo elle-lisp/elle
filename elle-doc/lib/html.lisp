@@ -1,5 +1,5 @@
 (define html-escape
-  (lambda (str)
+  (fn (str)
     (define s1 (string-replace str "&" "&amp;"))
     (define s2 (string-replace s1 "<" "&lt;"))
     (define s3 (string-replace s2 ">" "&gt;"))

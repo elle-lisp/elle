@@ -36,17 +36,17 @@ impl<'a> Analyzer<'a> {
             // Vector literal - call vector primitive
             SyntaxKind::Vector(items) => {
                 let mut args = Vec::new();
-                let mut effect = Effect::pure();
+                let mut effect = Effect::none();
                 for item in items {
                     let hir = self.analyze_expr(item)?;
-                    effect = effect.combine(hir.effect.clone());
+                    effect = effect.combine(hir.effect);
                     args.push(hir);
                 }
                 // Look up the 'vector' primitive and call it with the elements
                 let sym = self.symbols.intern("vector");
                 let id = self.ctx.fresh_binding();
                 self.ctx.register_binding(BindingInfo::global(id, sym));
-                let func = Hir::new(HirKind::Var(id), span.clone(), Effect::pure());
+                let func = Hir::new(HirKind::Var(id), span.clone(), Effect::none());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -85,7 +85,7 @@ impl<'a> Analyzer<'a> {
                         "let" => return self.analyze_let(items, span),
                         "let*" => return self.analyze_let_star(items, span),
                         "letrec" => return self.analyze_letrec(items, span),
-                        "fn" | "lambda" => return self.analyze_lambda(items, span),
+                        "fn" => return self.analyze_lambda(items, span),
                         "begin" => return self.analyze_begin(&items[1..], span),
                         "block" => return self.analyze_block(&items[1..], span),
                         "define" => return self.analyze_define(items, span),
@@ -102,11 +102,8 @@ impl<'a> Analyzer<'a> {
                             return Ok(Hir::pure(HirKind::Quote(value), span));
                         }
                         "yield" => return self.analyze_yield(items, span),
-                        "throw" => return self.analyze_throw(items, span),
                         "match" => return self.analyze_match(items, span),
                         "cond" => return self.analyze_cond(items, span),
-                        "handler-case" => return self.analyze_handler_case(items, span),
-                        "handler-bind" => return self.analyze_handler_bind(items, span),
                         "module" => return self.analyze_module(items, span),
                         "import" => return self.analyze_import(items, span),
                         _ => {}
@@ -134,9 +131,8 @@ impl<'a> Analyzer<'a> {
 
         let effect = cond
             .effect
-            .clone()
-            .combine(then_branch.effect.clone())
-            .combine(else_branch.effect.clone());
+            .combine(then_branch.effect)
+            .combine(else_branch.effect);
 
         Ok(Hir::new(
             HirKind::If {
@@ -170,11 +166,11 @@ impl<'a> Analyzer<'a> {
 
             // Pass 2: Analyze all expressions (all bindings now visible)
             let mut exprs = Vec::new();
-            let mut effect = Effect::pure();
+            let mut effect = Effect::none();
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
-                effect = effect.combine(hir.effect.clone());
+                effect = effect.combine(hir.effect);
                 exprs.push(hir);
             }
 
@@ -182,11 +178,11 @@ impl<'a> Analyzer<'a> {
         } else {
             // At top level, sequential semantics are fine
             let mut exprs = Vec::new();
-            let mut effect = Effect::pure();
+            let mut effect = Effect::none();
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
-                effect = effect.combine(hir.effect.clone());
+                effect = effect.combine(hir.effect);
                 exprs.push(hir);
             }
 
@@ -199,7 +195,7 @@ impl<'a> Analyzer<'a> {
         let result = self.analyze_begin(items, span.clone())?;
         self.pop_scope();
 
-        let effect = result.effect.clone();
+        let effect = result.effect;
         Ok(Hir::new(HirKind::Block(vec![result]), span, effect))
     }
 
@@ -218,7 +214,7 @@ impl<'a> Analyzer<'a> {
 
         let cond = self.analyze_expr(&items[1])?;
         let body = self.analyze_expr(&items[2])?;
-        let effect = cond.effect.clone().combine(body.effect.clone());
+        let effect = cond.effect.combine(body.effect);
 
         Ok(Hir::new(
             HirKind::While {
@@ -264,7 +260,7 @@ impl<'a> Analyzer<'a> {
         let body = self.analyze_expr(&items[body_idx])?;
         self.pop_scope();
 
-        let effect = iter.effect.clone().combine(body.effect.clone());
+        let effect = iter.effect.combine(body.effect);
 
         Ok(Hir::new(
             HirKind::For {
@@ -283,11 +279,11 @@ impl<'a> Analyzer<'a> {
         }
 
         let mut exprs = Vec::new();
-        let mut effect = Effect::pure();
+        let mut effect = Effect::none();
 
         for item in items {
             let hir = self.analyze_expr(item)?;
-            effect = effect.combine(hir.effect.clone());
+            effect = effect.combine(hir.effect);
             exprs.push(hir);
         }
 
@@ -300,11 +296,11 @@ impl<'a> Analyzer<'a> {
         }
 
         let mut exprs = Vec::new();
-        let mut effect = Effect::pure();
+        let mut effect = Effect::none();
 
         for item in items {
             let hir = self.analyze_expr(item)?;
-            effect = effect.combine(hir.effect.clone());
+            effect = effect.combine(hir.effect);
             exprs.push(hir);
         }
 
@@ -318,7 +314,7 @@ impl<'a> Analyzer<'a> {
 
         let mut clauses = Vec::new();
         let mut else_branch = None;
-        let mut effect = Effect::pure();
+        let mut effect = Effect::none();
 
         for clause in &items[1..] {
             let parts = clause
@@ -330,16 +326,14 @@ impl<'a> Analyzer<'a> {
 
             if parts[0].as_symbol() == Some("else") {
                 let body = self.analyze_body(&parts[1..], span.clone())?;
-                effect = effect.combine(body.effect.clone());
+                effect = effect.combine(body.effect);
                 else_branch = Some(Box::new(body));
                 break;
             }
 
             let test = self.analyze_expr(&parts[0])?;
             let body = self.analyze_body(&parts[1..], span.clone())?;
-            effect = effect
-                .combine(test.effect.clone())
-                .combine(body.effect.clone());
+            effect = effect.combine(test.effect).combine(body.effect);
             clauses.push((test, body));
         }
 
