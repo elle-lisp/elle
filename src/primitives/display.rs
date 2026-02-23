@@ -1,54 +1,24 @@
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::Value;
 
-/// Display values to standard output
+/// (display val ...) — human-readable output, no quotes on strings
 pub fn prim_display(args: &[Value]) -> (SignalBits, Value) {
     for arg in args {
-        print!("{}", format_value(arg));
+        print!("{}", arg);
     }
     (SIG_OK, Value::NIL)
 }
 
-/// Print values followed by a newline (Common Lisp-style print)
+/// (print val ...) — machine-readable output with newline, strings quoted
 pub fn prim_print(args: &[Value]) -> (SignalBits, Value) {
     for arg in args {
-        print!("{}", format_value(arg));
+        print!("{:?}", arg);
     }
     println!();
     (SIG_OK, Value::NIL)
 }
 
-/// Format a value for display, using the symbol table if available
-fn format_value(value: &Value) -> String {
-    if let Some(sym_id) = value.as_symbol() {
-        // Try to get the symbol name from the thread-local symbol table
-        unsafe {
-            if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                if let Some(name) = (*symbols_ptr).name(crate::value::SymbolId(sym_id)) {
-                    return name.to_string();
-                }
-            }
-        }
-        // Fallback if symbol table is not available
-        format!("Symbol({})", sym_id)
-    } else if let Some(id) = value.as_keyword() {
-        // Try to get the keyword name from the thread-local symbol table
-        unsafe {
-            if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                if let Some(name) = (*symbols_ptr).name(crate::value::SymbolId(id)) {
-                    return format!(":{}", name);
-                }
-            }
-        }
-        // Fallback if symbol table is not available
-        format!(":keyword-{}", id)
-    } else {
-        // Use the Debug implementation for Value
-        format!("{:?}", value)
-    }
-}
-
-/// Print a newline
+/// (newline) — print a newline
 pub fn prim_newline(_args: &[Value]) -> (SignalBits, Value) {
     println!();
     (SIG_OK, Value::NIL)

@@ -1021,8 +1021,7 @@ pub fn prim_keyword_to_string(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Convert symbol to string
-/// `(symbol->string sym)`
+/// `(symbol->string sym)` → `"name"`
 pub fn prim_symbol_to_string(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -1035,33 +1034,28 @@ pub fn prim_symbol_to_string(args: &[Value]) -> (SignalBits, Value) {
     }
 
     match args[0].as_symbol() {
-        Some(id) => {
-            // SAFETY: The symbol table is set in main.rs before any code execution
-            unsafe {
-                if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                    let symbols = &*symbols_ptr;
-                    let sym_id = crate::value::SymbolId(id);
-                    if let Some(name) = symbols.name(sym_id) {
-                        (SIG_OK, Value::string(name))
-                    } else {
-                        // Symbol ID not found is a VM bug - the symbol table should be consistent
-                        (
-                            SIG_ERROR,
-                            error_val(
-                                "error",
-                                format!("Symbol ID {} not found in symbol table", id),
-                            ),
-                        )
-                    }
+        Some(id) => unsafe {
+            if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
+                let symbols = &*symbols_ptr;
+                let sym_id = crate::value::SymbolId(id);
+                if let Some(name) = symbols.name(sym_id) {
+                    (SIG_OK, Value::string(name))
                 } else {
-                    // Symbol table not available is a VM bug - it should always be set
                     (
                         SIG_ERROR,
-                        error_val("error", "Symbol table not available".to_string()),
+                        error_val(
+                            "error",
+                            format!("Symbol ID {} not found in symbol table", id),
+                        ),
                     )
                 }
+            } else {
+                (
+                    SIG_ERROR,
+                    error_val("error", "Symbol table not available".to_string()),
+                )
             }
-        }
+        },
         None => (
             SIG_ERROR,
             error_val(

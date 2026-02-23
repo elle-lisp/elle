@@ -57,6 +57,7 @@ inner dispatch loop):
 - `SIG_RESUME` (8): VM-internal. Fiber primitive requests VM-side execution.
 - `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-raises caught signal.
 - `SIG_CANCEL` (64): VM-internal. `fiber/cancel` injects error into fiber.
+- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (e.g., call counts, global bindings).
 
 The public `execute_bytecode` method is the translation boundary — it converts
 `SignalBits` to `Result<Value, String>` for external callers. On `SIG_ERROR`,
@@ -79,6 +80,8 @@ creating `SuspendedFrame`s or `TailCallInfo`.
 - `TailCallInfo` is `(Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>)` — tail
   calls clone the Rc (cheap), not the Vec (expensive)
 - `closure_env` parameter is `&Rc<Vec<Value>>` (non-optional; empty Rc for no env)
+- `execute_closure_bytecode` takes `&Rc` params directly (no `.to_vec()` copy);
+  used by JIT trampolines where the closure already owns Rc'd data
 
 ## Primitive dispatch (NativeFn)
 
@@ -90,6 +93,7 @@ dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
 - `SIG_RESUME` → dispatch to fiber handler
 - `SIG_PROPAGATE` → re-raise child fiber's signal, preserve child chain
 - `SIG_CANCEL` → inject error into target fiber
+- `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack
 
 All SIG_RESUME primitives (including coroutine wrappers) return
 `(SIG_RESUME, fiber_value)`. The VM uses `FiberHandle::take()`/`put()` to swap
@@ -143,9 +147,12 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached NaN-boxed Value for current fiber (`None` for root) |
 | `globals` | `Vec<Value>` | Global bindings by SymbolId |
-| `jit_cache` | `HashMap<*const u8, Rc<JitCode>>` | JIT code cache |
+| `jit_cache` | `FxHashMap<*const u8, Rc<JitCode>>` | JIT code cache (FxHash for pointer keys) |
+| `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
 | `scope_stack` | `ScopeStack` | Runtime scope stack |
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |
+| `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
+| `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for `handle_tail_call` env building |
 
 ### Key Fiber fields (on `vm.fiber`)
 
@@ -191,7 +198,7 @@ Key methods:
 | `mod.rs` | ~100 | VM struct, VmResult, public interface |
 | `dispatch.rs` | ~334 | Main execution loop, instruction dispatch, returns `(SignalBits, usize)` |
 | `call.rs` | ~417 | Call, TailCall, JIT dispatch, environment building |
-| `signal.rs` | ~93 | Primitive signal dispatch (`handle_primitive_signal`) |
+| `signal.rs` | ~177 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch |
 | `fiber.rs` | ~388 | Fiber resume/propagate/cancel, shared swap protocol |
 | `execute.rs` | ~94 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack` |
 | `core.rs` | ~453 | VM struct, `resume_suspended`, stack trace helpers |

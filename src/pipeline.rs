@@ -71,8 +71,11 @@ pub fn compile_new(source: &str, symbols: &mut SymbolTable) -> Result<CompileRes
     // Phase 3.5: Mark tail calls
     mark_tail_calls(&mut analysis.hir);
 
-    // Phase 4: Lower to LIR with binding info
-    let mut lowerer = Lowerer::new().with_bindings(analysis.bindings);
+    // Phase 4: Lower to LIR with binding info and intrinsic specialization
+    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_bindings(analysis.bindings)
+        .with_intrinsics(intrinsics);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
@@ -152,9 +155,12 @@ pub fn compile_all_new(
     }
 
     // Lower and emit all forms
+    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let mut results = Vec::new();
     for analysis in analysis_results {
-        let mut lowerer = Lowerer::new().with_bindings(analysis.bindings);
+        let mut lowerer = Lowerer::new()
+            .with_bindings(analysis.bindings)
+            .with_intrinsics(intrinsics.clone());
         let lir_func = lowerer.lower(&analysis.hir)?;
 
         let symbol_snapshot = symbols.all_names();
@@ -827,6 +833,67 @@ mod tests {
             &mut vm,
         );
         assert_eq!(result.unwrap(), crate::value::Value::int(2));
+    }
+
+    #[test]
+    fn test_intrinsic_fib() {
+        // Fibonacci exercises intrinsic specialization with double recursion
+        let (mut symbols, mut vm) = setup();
+        let result = eval_new(
+            "(begin
+               (define fib (fn (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
+               (fib 10))",
+            &mut symbols,
+            &mut vm,
+        );
+        assert_eq!(result.unwrap(), crate::value::Value::int(55));
+    }
+
+    #[test]
+    fn test_intrinsic_unary_neg() {
+        let (mut symbols, mut vm) = setup();
+        assert_eq!(
+            eval_new("(- 5)", &mut symbols, &mut vm).unwrap(),
+            crate::value::Value::int(-5)
+        );
+        let (mut symbols, mut vm) = setup();
+        assert_eq!(
+            eval_new("(- -3)", &mut symbols, &mut vm).unwrap(),
+            crate::value::Value::int(3)
+        );
+    }
+
+    #[test]
+    fn test_intrinsic_variadic_fallthrough() {
+        // Variadic + falls through to generic call
+        let (mut symbols, mut vm) = setup();
+        assert_eq!(
+            eval_new("(+ 1 2 3)", &mut symbols, &mut vm).unwrap(),
+            crate::value::Value::int(6)
+        );
+    }
+
+    #[test]
+    fn test_intrinsic_not() {
+        let (mut symbols, mut vm) = setup();
+        assert_eq!(
+            eval_new("(not #t)", &mut symbols, &mut vm).unwrap(),
+            crate::value::Value::bool(false)
+        );
+        let (mut symbols, mut vm) = setup();
+        assert_eq!(
+            eval_new("(not #f)", &mut symbols, &mut vm).unwrap(),
+            crate::value::Value::bool(true)
+        );
+    }
+
+    #[test]
+    fn test_intrinsic_rem() {
+        let (mut symbols, mut vm) = setup();
+        assert_eq!(
+            eval_new("(rem 17 5)", &mut symbols, &mut vm).unwrap(),
+            crate::value::Value::int(2)
+        );
     }
 
     #[test]

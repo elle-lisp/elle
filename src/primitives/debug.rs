@@ -19,7 +19,11 @@ pub fn prim_debug_print(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Traces execution with a label
-/// (trace name value)
+/// `(trace label value)` — prints `[TRACE] label: value` to stderr, returns value
+///
+/// Label can be a string or symbol. Symbols are resolved to their
+/// name via the thread-local symbol table (same access pattern as
+/// symbol->string).
 pub fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -31,31 +35,18 @@ pub fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if let Some(_label) = args[0].as_heap_ptr() {
-        // Try to extract string from heap
-        use crate::value::heap::{deref, HeapObject};
-        match unsafe { deref(args[0]) } {
-            HeapObject::String(s) => {
-                eprintln!("[TRACE] {}: {:?}", s, args[1]);
-                (SIG_OK, args[1])
-            }
-            _ => {
-                if let Some(sym_id) = args[0].as_symbol() {
-                    eprintln!("[TRACE] {:?}: {:?}", sym_id, args[1]);
-                    (SIG_OK, args[1])
-                } else {
-                    (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            "trace: first argument must be a string or symbol".to_string(),
-                        ),
-                    )
-                }
-            }
-        }
+    if let Some(s) = args[0].as_string() {
+        eprintln!("[TRACE] {}: {:?}", s, args[1]);
+        (SIG_OK, args[1])
     } else if let Some(sym_id) = args[0].as_symbol() {
-        eprintln!("[TRACE] {:?}: {:?}", sym_id, args[1]);
+        // Resolve symbol name via thread-local symbol table
+        let name = unsafe {
+            crate::ffi::primitives::context::get_symbol_table()
+                .and_then(|ptr| (*ptr).name(crate::value::SymbolId(sym_id)))
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("#<sym:{}>", sym_id))
+        };
+        eprintln!("[TRACE] {}: {:?}", name, args[1]);
         (SIG_OK, args[1])
     } else {
         (
@@ -63,34 +54,6 @@ pub fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "type-error",
                 "trace: first argument must be a string or symbol".to_string(),
-            ),
-        )
-    }
-}
-
-/// Times the execution of a thunk
-/// (profile thunk)
-pub fn prim_profile(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("profile: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
-    // In production, would time execution of closure
-    // For now, just return a placeholder timing
-    if args[0].as_closure().is_some() || args[0].as_native_fn().is_some() {
-        (SIG_OK, Value::string("profiling-not-yet-implemented"))
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                "profile: argument must be a function".to_string(),
             ),
         )
     }

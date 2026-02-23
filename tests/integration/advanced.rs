@@ -98,12 +98,12 @@ fn test_spawn_and_thread_id() {
 fn test_sleep_integration() {
     // Sleep with integer
     let start = std::time::Instant::now();
-    assert_eq!(eval("(sleep 0)").unwrap(), Value::NIL);
+    assert_eq!(eval("(time/sleep 0)").unwrap(), Value::NIL);
     let elapsed = start.elapsed();
     assert!(elapsed.as_millis() < 100); // Should be quick for 0 seconds
 
     // Sleep with float
-    assert_eq!(eval("(sleep 0.001)").unwrap(), Value::NIL);
+    assert_eq!(eval("(time/sleep 0.001)").unwrap(), Value::NIL);
 }
 
 #[test]
@@ -127,13 +127,6 @@ fn test_trace_integration() {
         eval("(trace \"computation\" (+ 5 3))").unwrap(),
         Value::int(8)
     );
-}
-
-#[test]
-fn test_profile_integration() {
-    // profile with a closure-like value
-    assert!(eval("(profile +)").is_ok());
-    assert!(eval("(profile *)").is_ok());
 }
 
 #[test]
@@ -179,11 +172,11 @@ fn test_trace_with_arithmetic_chain() {
 fn test_sleep_zero_vs_positive() {
     // Sleep 0 should complete quickly
     let start = std::time::Instant::now();
-    eval("(sleep 0)").unwrap();
+    eval("(time/sleep 0)").unwrap();
     assert!(start.elapsed().as_millis() < 100);
 
     // Sleep with float should also complete
-    eval("(sleep 0.001)").unwrap();
+    eval("(time/sleep 0.001)").unwrap();
 }
 
 #[test]
@@ -251,11 +244,10 @@ fn test_phase5_feature_availability() {
     assert!(eval("(spawn (fn () 42))").is_ok());
     // join requires a thread handle, not a string
     assert!(eval("(join (spawn (fn () 42)))").is_ok());
-    assert!(eval("(sleep 0)").is_ok());
+    assert!(eval("(time/sleep 0)").is_ok());
     assert!(eval("(current-thread-id)").is_ok());
     assert!(eval("(debug-print 42)").is_ok());
     assert!(eval("(trace \"x\" 42)").is_ok());
-    assert!(eval("(profile +)").is_ok());
     assert!(eval("(memory-usage)").is_ok());
 }
 
@@ -326,23 +318,23 @@ fn test_join_wrong_argument_count() {
 
 #[test]
 fn test_sleep_wrong_argument_count() {
-    // sleep requires exactly 1 argument
-    assert!(eval("(sleep)").is_err());
-    assert!(eval("(sleep 1 2)").is_err());
+    // time/sleep requires exactly 1 argument
+    assert!(eval("(time/sleep)").is_err());
+    assert!(eval("(time/sleep 1 2)").is_err());
 }
 
 #[test]
 fn test_sleep_wrong_argument_type() {
-    // sleep requires a number
-    assert!(eval("(sleep \"not a number\")").is_err());
-    assert!(eval("(sleep nil)").is_err());
+    // time/sleep requires a number
+    assert!(eval("(time/sleep \"not a number\")").is_err());
+    assert!(eval("(time/sleep nil)").is_err());
 }
 
 #[test]
 fn test_sleep_negative_duration() {
-    // sleep with negative duration should fail
-    assert!(eval("(sleep -1)").is_err());
-    assert!(eval("(sleep -0.5)").is_err());
+    // time/sleep with negative duration should fail
+    assert!(eval("(time/sleep -1)").is_err());
+    assert!(eval("(time/sleep -0.5)").is_err());
 }
 
 #[test]
@@ -371,20 +363,6 @@ fn test_trace_invalid_label_type() {
     // trace label must be string or symbol
     assert!(eval("(trace 42 100)").is_err());
     assert!(eval("(trace nil 100)").is_err());
-}
-
-#[test]
-fn test_profile_wrong_argument_count() {
-    // profile requires exactly 1 argument
-    assert!(eval("(profile)").is_err());
-    assert!(eval("(profile + -)").is_err());
-}
-
-#[test]
-fn test_profile_wrong_argument_type() {
-    // profile requires a function
-    assert!(eval("(profile 42)").is_err());
-    assert!(eval("(profile \"not a function\")").is_err());
 }
 
 #[test]
@@ -600,7 +578,7 @@ fn test_debug_and_trace_chain() {
 #[test]
 fn test_sleep_in_arithmetic_context() {
     // Sleep returns nil which can't be used in arithmetic
-    assert!(eval("(+ 1 (sleep 0))").is_err());
+    assert!(eval("(+ 1 (time/sleep 0))").is_err());
 }
 
 #[test]

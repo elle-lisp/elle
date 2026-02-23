@@ -69,7 +69,7 @@ Unsupported (returns JitError::UnsupportedInstruction):
 | `compiler.rs` | ~500 | `JitCompiler`, `RuntimeHelpers`, compilation entry point |
 | `translate.rs` | ~630 | `FunctionTranslator`, LIR instruction translation |
 | `runtime.rs` | ~420 | Arithmetic, comparison, type-checking helpers |
-| `dispatch.rs` | ~320 | Data structure, cell, global, function call helpers |
+| `dispatch.rs` | ~530 | Data structure, cell, global, function call helpers (incl. JIT-to-JIT) |
 | `code.rs` | ~80 | `JitCode` wrapper type |
 
 ## Runtime Helpers
@@ -90,7 +90,7 @@ These handle type checking and NaN-boxing.
 - **Data structures**: `elle_jit_cons`, `elle_jit_car`, `elle_jit_cdr`, `elle_jit_make_vector`, `elle_jit_is_pair`
 - **Cells**: `elle_jit_make_cell`, `elle_jit_load_cell`, `elle_jit_store_cell`, `elle_jit_store_capture`
 - **Globals**: `elle_jit_load_global`, `elle_jit_store_global` (require VM pointer)
-- **Function calls**: `elle_jit_call` (dispatches to native functions or closures)
+- **Function calls**: `elle_jit_call` (dispatches to native functions, JIT-cached closures, or interpreter fallback)
 
 ## Self-Tail-Call Optimization
 
@@ -141,6 +141,24 @@ The effect system ensures fibers and JIT coexist safely:
   signal bits (not `SIG_OK` or `SIG_ERROR`). Reaching this means the effect
   system has a bug — a suspending primitive was called from JIT code.
 
+## JIT-to-JIT Calling
+
+When `elle_jit_call` dispatches to a closure, it checks `vm.jit_cache` for
+the callee's bytecode pointer. If found, it calls the JIT code directly
+without building an interpreter environment — zero heap allocations on the
+fast path. This is critical for recursive functions like `fib`.
+
+Key details:
+- **Zero-copy env**: `closure.env.as_ptr() as *const u64` — safe because
+  `Value` is `#[repr(transparent)]` over `u64`.
+- **Zero-copy args**: `args_ptr` passes through from the JIT caller directly.
+- **Zero-copy native args**: Native function calls use `args_ptr as *const Value`
+  to create a slice without Vec allocation.
+- **Call depth tracking**: Increments/decrements `call_depth`, checks > 1000.
+- **Tail call handling**: If the callee returns `TAIL_CALL_SENTINEL`, the
+  pending tail call is executed via `execute_closure_bytecode`.
+- **Exception propagation**: Checks `fiber.signal` for `SIG_ERROR` after call.
+
 ## Error Handling in Dispatch
 
 All dispatch helpers (`elle_jit_call`, `elle_jit_tail_call`,
@@ -174,10 +192,13 @@ No errors are silently swallowed.
 7. **No silent error swallowing.** Every error path in dispatch helpers sets
    `vm.fiber.signal` to `(SIG_ERROR, condition)` before returning `TAG_NIL`.
 
+8. **Value is repr(transparent) over u64.** JIT-to-JIT calling and native
+   function dispatch cast `*const u64` to `*const Value` (and vice versa)
+   without copying. If `Value`'s representation changes, these casts break.
+
 ## Future Phases
 
 - Phase 5:
-  - Intra-JIT calling (JIT functions calling other JIT functions directly)
   - Inline type checks for arithmetic fast paths
   - JIT-native exception handling (setjmp/longjmp or Cranelift exception tables)
   - Benchmarks and profiling

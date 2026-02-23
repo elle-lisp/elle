@@ -223,8 +223,26 @@ pub extern "C" fn elle_jit_store_global(sym_id: u64, value: u64, vm: *mut ()) ->
 // Function Calls
 // =============================================================================
 
-/// Call a function from JIT code
-/// Dispatches to native functions or closures
+/// Reinterpret a JIT args pointer as a `&[Value]` slice.
+///
+/// Safe because `Value` is `#[repr(transparent)]` over `u64`, so `*const u64`
+/// and `*const Value` have identical layout. Handles the null-pointer case
+/// when `nargs` is 0 (JIT may pass null for zero-arg calls).
+#[inline]
+fn args_ptr_to_value_slice(args_ptr: *const u64, nargs: u32) -> &'static [Value] {
+    if nargs == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(args_ptr as *const Value, nargs as usize) }
+    }
+}
+
+/// Call a function from JIT code.
+///
+/// Dispatches to native functions or closures. When the callee has
+/// JIT-compiled code in the cache, calls it directly (JIT-to-JIT)
+/// without building an interpreter environment — zero heap allocations
+/// on the fast path.
 #[no_mangle]
 pub extern "C" fn elle_jit_call(
     func_bits: u64,
@@ -235,29 +253,81 @@ pub extern "C" fn elle_jit_call(
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let func = unsafe { Value::from_bits(func_bits) };
 
-    // Reconstruct args
-    let args: Vec<Value> = (0..nargs as usize)
-        .map(|i| unsafe { Value::from_bits(*args_ptr.add(i)) })
-        .collect();
-
-    // Dispatch to native function (unified signal-based)
+    // Dispatch to native function — zero-copy args via repr(transparent)
     if let Some(f) = func.as_native_fn() {
-        let (bits, value) = f(&args);
+        let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
+        let (bits, value) = f(args_slice);
         return jit_handle_primitive_signal(vm, bits, value);
     }
 
     // Dispatch to closure
     if let Some(closure) = func.as_closure() {
-        // Check arity
-        if !vm.check_arity(&closure.arity, args.len()) {
+        // Check arity using nargs directly — no Vec needed
+        if !vm.check_arity(&closure.arity, nargs as usize) {
             return TAG_NIL;
         }
 
-        // Build environment
+        // JIT-to-JIT fast path: check if callee has JIT code
+        let bytecode_ptr = closure.bytecode.as_ptr();
+        if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
+            vm.fiber.call_depth += 1;
+            if vm.fiber.call_depth > 1000 {
+                vm.fiber.signal = Some((SIG_ERROR, error_val("error", "Stack overflow")));
+                vm.fiber.call_depth -= 1;
+                return TAG_NIL;
+            }
+
+            // Zero-copy env pointer: Value is #[repr(transparent)] over u64,
+            // so closure.env's &[Value] can be reinterpreted as *const u64.
+            let env_ptr = if closure.env.is_empty() {
+                std::ptr::null()
+            } else {
+                closure.env.as_ptr() as *const u64
+            };
+
+            // Args pass through directly — already *const u64 from JIT caller
+            let result_bits = unsafe {
+                jit_code.call(
+                    env_ptr,
+                    args_ptr,
+                    nargs,
+                    vm as *mut crate::vm::VM as *mut (),
+                    func_bits,
+                )
+            };
+
+            vm.fiber.call_depth -= 1;
+
+            // Check for exception
+            if matches!(vm.fiber.signal, Some((SIG_ERROR, _))) {
+                return TAG_NIL;
+            }
+
+            // Handle tail call sentinel
+            if result_bits == TAIL_CALL_SENTINEL {
+                if let Some((tail_bc, tail_consts, tail_env)) = vm.pending_tail_call.take() {
+                    match vm.execute_closure_bytecode(&tail_bc, &tail_consts, &tail_env) {
+                        Ok(val) => return val.to_bits(),
+                        Err(e) => {
+                            vm.fiber.signal = Some((SIG_ERROR, error_val("error", e)));
+                            return TAG_NIL;
+                        }
+                    }
+                }
+            }
+
+            return result_bits;
+        }
+
+        // Interpreter fallback — reconstruct args Vec for env building
+        let args: Vec<Value> = (0..nargs as usize)
+            .map(|i| unsafe { Value::from_bits(*args_ptr.add(i)) })
+            .collect();
+
         let new_env = build_closure_env_for_jit(closure, &args);
 
         vm.fiber.call_depth += 1;
-        let result = vm.execute_bytecode(&closure.bytecode, &closure.constants, Some(&new_env));
+        let result = vm.execute_closure_bytecode(&closure.bytecode, &closure.constants, &new_env);
         vm.fiber.call_depth -= 1;
 
         match result {
@@ -289,22 +359,23 @@ pub extern "C" fn elle_jit_tail_call(
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let func = unsafe { Value::from_bits(func_bits) };
 
-    // Reconstruct args
-    let args: Vec<Value> = (0..nargs as usize)
-        .map(|i| unsafe { Value::from_bits(*args_ptr.add(i)) })
-        .collect();
-
-    // Handle native functions — just call them directly (no tail call needed)
+    // Handle native functions — zero-copy args via repr(transparent)
     if let Some(f) = func.as_native_fn() {
-        let (bits, value) = f(&args);
+        let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
+        let (bits, value) = f(args_slice);
         return jit_handle_primitive_signal(vm, bits, value);
     }
 
     // Handle closures — set up pending_tail_call
     if let Some(closure) = func.as_closure() {
-        if !vm.check_arity(&closure.arity, args.len()) {
+        if !vm.check_arity(&closure.arity, nargs as usize) {
             return TAG_NIL;
         }
+
+        // Reconstruct args Vec for env building (needed by build_closure_env_for_jit)
+        let args: Vec<Value> = (0..nargs as usize)
+            .map(|i| unsafe { Value::from_bits(*args_ptr.add(i)) })
+            .collect();
 
         // Build environment (same as handle_tail_call)
         let new_env = build_closure_env_for_jit(closure, &args);

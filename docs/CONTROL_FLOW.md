@@ -172,7 +172,7 @@ While Elle emphasizes functional iteration, it also provides imperative loop con
 (forever
   (display "Tick")
   (newline)
-  (sleep 1)
+  (time/sleep 1)
   (if should-stop
     (break)))
 ```

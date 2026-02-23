@@ -5,6 +5,7 @@ use crate::value::{
     Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_OK, SIG_YIELD,
 };
 use crate::vm::scope::ScopeStack;
+use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -37,13 +38,14 @@ pub struct VM {
     pub loaded_modules: HashSet<String>,
     pub module_search_paths: Vec<PathBuf>,
     pub scope_stack: ScopeStack,
-    pub closure_call_counts: std::collections::HashMap<*const u8, usize>,
+    pub closure_call_counts: FxHashMap<*const u8, usize>,
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
+    pub env_cache: Vec<Value>,
     pub pending_tail_call: Option<TailCallInfo>,
     pub current_source_loc: Option<crate::reader::SourceLoc>,
     /// JIT code cache: bytecode pointer → compiled native code.
-    pub jit_cache: HashMap<*const u8, Rc<JitCode>>,
+    pub jit_cache: FxHashMap<*const u8, Rc<JitCode>>,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -86,12 +88,13 @@ impl VM {
             loaded_modules: HashSet::new(),
             module_search_paths: vec![PathBuf::from(".")],
             scope_stack: ScopeStack::new(),
-            closure_call_counts: std::collections::HashMap::new(),
+            closure_call_counts: FxHashMap::default(),
             location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),
+            env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
             current_source_loc: None,
-            jit_cache: HashMap::new(),
+            jit_cache: FxHashMap::default(),
         }
     }
 

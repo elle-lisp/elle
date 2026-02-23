@@ -1411,7 +1411,7 @@ fn test_join_primitive() {
 #[test]
 fn test_sleep_primitive() {
     let (vm, mut symbols) = setup();
-    let sleep = get_primitive(&vm, &mut symbols, "sleep");
+    let sleep = get_primitive(&vm, &mut symbols, "time/sleep");
 
     // Test with integer seconds
     let result = call_primitive(&sleep, &[Value::int(0)]);
@@ -1482,31 +1482,81 @@ fn test_trace_primitive() {
 }
 
 #[test]
-fn test_profile_primitive() {
+fn test_clock_monotonic_primitive() {
     let (vm, mut symbols) = setup();
-    let profile = get_primitive(&vm, &mut symbols, "profile");
+    let clock = get_primitive(&vm, &mut symbols, "clock/monotonic");
 
-    let closure = Value::closure(Closure {
-        bytecode: std::rc::Rc::new(vec![0u8]),
-        arity: elle::value::Arity::Exact(0),
-        env: std::rc::Rc::new(vec![]),
-        num_locals: 0,
-        num_captures: 0,
-        constants: std::rc::Rc::new(vec![]),
-
-        effect: elle::effects::Effect::none(),
-        cell_params_mask: 0,
-        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-        jit_code: None,
-        lir_function: None,
-    });
-
-    let result = call_primitive(&profile, &[closure]);
+    // Returns a non-negative float
+    let result = call_primitive(&clock, &[]);
     assert!(result.is_ok());
+    let val = result.unwrap();
+    assert!(
+        val.as_float().is_some(),
+        "clock/monotonic should return a float"
+    );
+    assert!(
+        val.as_float().unwrap() >= 0.0,
+        "clock/monotonic should be non-negative"
+    );
 
-    // Test with non-function
-    let result = call_primitive(&profile, &[Value::int(42)]);
+    // Monotonically non-decreasing
+    let t1 = call_primitive(&clock, &[]).unwrap().as_float().unwrap();
+    let t2 = call_primitive(&clock, &[]).unwrap().as_float().unwrap();
+    assert!(
+        t2 >= t1,
+        "clock/monotonic should be monotonically non-decreasing"
+    );
+
+    // Arity error when given arguments
+    let result = call_primitive(&clock, &[Value::int(1)]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_clock_realtime_primitive() {
+    let (vm, mut symbols) = setup();
+    let clock = get_primitive(&vm, &mut symbols, "clock/realtime");
+
+    // Returns a non-negative float
+    let result = call_primitive(&clock, &[]);
+    assert!(result.is_ok());
+    let val = result.unwrap();
+    assert!(
+        val.as_float().is_some(),
+        "clock/realtime should return a float"
+    );
+    assert!(
+        val.as_float().unwrap() > 1_700_000_000.0,
+        "clock/realtime should be a plausible epoch timestamp"
+    );
+
+    // Arity error when given arguments
+    let result = call_primitive(&clock, &[Value::int(1)]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_clock_cpu_primitive() {
+    let (vm, mut symbols) = setup();
+    let clock = get_primitive(&vm, &mut symbols, "clock/cpu");
+
+    // Returns a non-negative float
+    let result = call_primitive(&clock, &[]);
+    assert!(result.is_ok());
+    let val = result.unwrap();
+    assert!(val.as_float().is_some(), "clock/cpu should return a float");
+    assert!(
+        val.as_float().unwrap() >= 0.0,
+        "clock/cpu should be non-negative"
+    );
+
+    // Non-decreasing
+    let t1 = call_primitive(&clock, &[]).unwrap().as_float().unwrap();
+    let t2 = call_primitive(&clock, &[]).unwrap().as_float().unwrap();
+    assert!(t2 >= t1, "clock/cpu should be non-decreasing");
+
+    // Arity error when given arguments
+    let result = call_primitive(&clock, &[Value::int(1)]);
     assert!(result.is_err());
 }
 
@@ -1940,4 +1990,143 @@ fn test_disjit_arity_error() {
     let disjit = get_primitive(&vm, &mut symbols, "disjit");
     let result = call_primitive(&disjit, &[]);
     assert!(result.is_err(), "disjit with no args should error");
+}
+
+// ============================================================================
+// call-count and global? (SIG_QUERY primitives — need full eval pipeline)
+// ============================================================================
+
+#[allow(clippy::result_large_err)]
+fn eval_full(input: &str) -> Result<Value, elle::error::LError> {
+    let mut vm = VM::new();
+    let mut symbols = SymbolTable::new();
+    let _effects = register_primitives(&mut vm, &mut symbols);
+    elle::primitives::init_stdlib(&mut vm, &mut symbols);
+    elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+    eval_new(input, &mut symbols, &mut vm).map_err(elle::error::LError::from)
+}
+
+#[test]
+fn test_call_count_uncalled_closure() {
+    let result = eval_full("(let ((f (fn (x) x))) (call-count f))").unwrap();
+    assert_eq!(
+        result.as_int(),
+        Some(0),
+        "uncalled closure should have 0 calls"
+    );
+}
+
+#[test]
+fn test_call_count_after_calls() {
+    let result = eval_full("(let ((f (fn (x) x))) (f 1) (f 2) (f 3) (call-count f))").unwrap();
+    assert_eq!(
+        result.as_int(),
+        Some(3),
+        "closure called 3 times should report 3"
+    );
+}
+
+#[test]
+fn test_call_count_non_closure_returns_zero() {
+    let result = eval_full("(call-count 42)").unwrap();
+    assert_eq!(
+        result.as_int(),
+        Some(0),
+        "call-count on non-closure should return 0"
+    );
+}
+
+#[test]
+fn test_global_true_for_builtin() {
+    let result = eval_full("(global? '+)").unwrap();
+    assert_eq!(result, Value::TRUE, "+ should be a global");
+}
+
+#[test]
+fn test_global_false_for_local() {
+    // A symbol that's never been defined as a global
+    let result = eval_full("(global? 'zzz-nonexistent-symbol)").unwrap();
+    assert_eq!(
+        result,
+        Value::FALSE,
+        "undefined symbol should not be global"
+    );
+}
+
+#[test]
+fn test_string_to_keyword_returns_keyword() {
+    let result = eval_full(r#"(string->keyword "foo")"#).unwrap();
+    assert!(
+        result.as_keyword().is_some(),
+        "string->keyword should return a keyword"
+    );
+}
+
+#[test]
+fn test_string_to_keyword_same_name_same_id() {
+    let result = eval_full(r#"(= (string->keyword "bar") (string->keyword "bar"))"#).unwrap();
+    assert_eq!(
+        result,
+        Value::TRUE,
+        "same name should produce equal keywords"
+    );
+}
+
+#[test]
+fn test_string_to_keyword_different_names_differ() {
+    let result = eval_full(r#"(= (string->keyword "aaa") (string->keyword "bbb"))"#).unwrap();
+    assert_eq!(
+        result,
+        Value::FALSE,
+        "different names should produce different keywords"
+    );
+}
+
+#[test]
+fn test_string_to_keyword_type_error_on_non_string() {
+    let result = eval_full(r#"(string->keyword 42)"#);
+    assert!(
+        result.is_err(),
+        "string->keyword on non-string should error"
+    );
+}
+
+// ============================================================================
+// fiber/self (SIG_QUERY)
+// ============================================================================
+
+#[test]
+fn test_fiber_self_from_root_is_nil() {
+    let result = eval_full("(fiber/self)").unwrap();
+    assert_eq!(result, Value::NIL, "fiber/self from root should be nil");
+}
+
+#[test]
+fn test_fiber_self_from_fiber_is_fiber() {
+    let result = eval_full(
+        "(let ((f (fiber/new (fn () (fiber/self)) 0)))
+           (fiber/resume f nil)
+           (fiber/value f))",
+    )
+    .unwrap();
+    assert!(
+        result.as_fiber().is_some(),
+        "fiber/self from inside a fiber should return a fiber"
+    );
+}
+
+#[test]
+fn test_fiber_self_identity() {
+    // fiber/self should return the same fiber that the parent holds
+    let result = eval_full(
+        "(let ((f (fiber/new (fn () (fiber/self)) 0)))
+           (fiber/resume f nil)
+           (eq? f (fiber/value f)))",
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        Value::TRUE,
+        "fiber/self should be eq? to the fiber handle"
+    );
 }

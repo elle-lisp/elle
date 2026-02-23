@@ -7,6 +7,20 @@
 use crate::value::Value;
 use std::fmt;
 
+/// Resolve a symbol/keyword ID to its name via the thread-local symbol table.
+/// Returns None if the symbol table is unavailable or the ID is unknown.
+///
+/// # Safety
+/// Caller must ensure the thread-local symbol table pointer is valid.
+unsafe fn resolve_name(id: u32) -> Option<&'static str> {
+    let ptr = crate::ffi::primitives::context::get_symbol_table()?;
+    let name = (*ptr).name(crate::value::types::SymbolId(id))?;
+    // SAFETY: The symbol table's Rc<str> names live for the duration of the
+    // program. We transmute the lifetime to 'static because the symbol table
+    // is never deallocated while code is running.
+    Some(std::mem::transmute::<&str, &'static str>(name))
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Handle immediate values
@@ -35,11 +49,23 @@ impl fmt::Display for Value {
         }
 
         if let Some(id) = self.as_symbol() {
-            return write!(f, "{}", id);
+            return unsafe {
+                if let Some(name) = resolve_name(id) {
+                    write!(f, "{}", name)
+                } else {
+                    write!(f, "#<sym:{}>", id)
+                }
+            };
         }
 
         if let Some(id) = self.as_keyword() {
-            return write!(f, ":{}", id);
+            return unsafe {
+                if let Some(name) = resolve_name(id) {
+                    write!(f, ":{}", name)
+                } else {
+                    write!(f, ":{}", id)
+                }
+            };
         }
 
         // Handle heap values
@@ -135,7 +161,98 @@ impl fmt::Display for Value {
     }
 }
 
+impl fmt::Debug for Value {
+    /// Machine-readable representation. Strings are quoted, bools are #t/#f.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_nil() {
+            return write!(f, "nil");
+        }
+        if self.is_empty_list() {
+            return write!(f, "()");
+        }
+        if self.is_undefined() {
+            return write!(f, "#<undefined>");
+        }
+        if let Some(b) = self.as_bool() {
+            return write!(f, "{}", if b { "#t" } else { "#f" });
+        }
+        if let Some(n) = self.as_int() {
+            return write!(f, "{}", n);
+        }
+        if let Some(n) = self.as_float() {
+            return write!(f, "{}", n);
+        }
+        if let Some(id) = self.as_symbol() {
+            return unsafe {
+                if let Some(name) = resolve_name(id) {
+                    write!(f, "{}", name)
+                } else {
+                    write!(f, "#<sym:{}>", id)
+                }
+            };
+        }
+        if let Some(id) = self.as_keyword() {
+            return unsafe {
+                if let Some(name) = resolve_name(id) {
+                    write!(f, ":{}", name)
+                } else {
+                    write!(f, ":{}", id)
+                }
+            };
+        }
+        if !self.is_heap() {
+            return write!(f, "<unknown:{:#x}>", self.to_bits());
+        }
+        // String — quoted
+        if let Some(s) = self.as_string() {
+            return write!(f, "\"{}\"", s);
+        }
+        // Cons cell — use Debug recursively
+        if self.as_cons().is_some() {
+            return self.fmt_cons_debug(f);
+        }
+        // Vector
+        if let Some(vec_ref) = self.as_vector() {
+            let vec = vec_ref.borrow();
+            write!(f, "[")?;
+            for (i, v) in vec.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{:?}", v)?;
+            }
+            return write!(f, "]");
+        }
+        // Everything else — delegate to Display
+        write!(f, "{}", self)
+    }
+}
+
 impl Value {
+    /// Format a cons cell (list) with Debug (quoted strings)
+    fn fmt_cons_debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        let mut current = *self;
+        let mut first = true;
+        loop {
+            if current.is_nil() || current.is_empty_list() {
+                break;
+            }
+            if !first {
+                write!(f, " ")?;
+            }
+            first = false;
+            if let Some(c) = current.as_cons() {
+                write!(f, "{:?}", c.first)?;
+                current = c.rest;
+            } else {
+                write!(f, ". {:?}", current)?;
+                break;
+            }
+        }
+        write!(f, ")")
+    }
+
     /// Format a cons cell (list) with proper list notation
     fn fmt_cons(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "(")?;

@@ -126,16 +126,16 @@
       (assert-equal r1 100 "Example 7: captured value = 100")
       (assert-equal r2 150 "Example 7: computed value = 100+50 = 150"))))
 
-;;; Example 8: Using sleep with threads
-(display "Example 8: Using sleep with threads")
+;;; Example 8: Using time/sleep with threads
+(display "Example 8: Using time/sleep with threads")
 (newline)
 
 (let ((handle (spawn (fn () 
                        (begin
                          (display "Thread started")
                          (newline)
-                         (sleep 0.1)
-                         (display "Thread finished after sleep")
+                         (time/sleep 0.1)
+                         (display "Thread finished after time/sleep")
                          (newline)
                          42)))))
   (display "Main thread waiting for spawned thread...")
@@ -144,7 +144,7 @@
     (display "Spawned thread returned: ")
     (display result)
     (newline)
-    (assert-equal result 42 "Example 8: thread with sleep returns 42")))
+    (assert-equal result 42 "Example 8: thread with time/sleep returns 42")))
 
 ;;; Example 9: Current thread ID
 (display "Example 9: Current thread ID")

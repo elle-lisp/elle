@@ -146,6 +146,7 @@ pub const SIG_RESUME: SignalBits = 1 << 3; // fiber resumption (VM-internal)
 pub const SIG_FFI: SignalBits = 1 << 4; // calls foreign code
 pub const SIG_PROPAGATE: SignalBits = 1 << 5; // re-raise caught signal (VM-internal)
 pub const SIG_CANCEL: SignalBits = 1 << 6; // inject error into fiber (VM-internal)
+pub const SIG_QUERY: SignalBits = 1 << 7; // VM state query (VM-internal)
 
 // Signal bit partitioning:
 //
@@ -154,7 +155,8 @@ pub const SIG_CANCEL: SignalBits = 1 << 6; // inject error into fiber (VM-intern
 //   Bit  4:     FFI — calls foreign code
 //   Bit  5:     Propagate — re-raise caught signal (VM-internal)
 //   Bit  6:     Cancel — inject error into fiber (VM-internal)
-//   Bits 7-15:  Reserved for future use
+//   Bit  7:     Query — read VM state without fiber swap (VM-internal)
+//   Bits 8-15:  Reserved for future use
 //   Bits 16-31: User-defined signal types
 //
 // The VM dispatch loop checks all bits. User code only sees
