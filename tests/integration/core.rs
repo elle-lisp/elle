@@ -459,6 +459,31 @@ fn test_type() {
     }
 }
 
+#[test]
+fn test_type_of_list_consistency() {
+    // Issue #308: type-of should return :list for all list-like values
+    let empty = eval("(type-of ())").unwrap();
+    let proper = eval("(type-of (list 1 2))").unwrap();
+    let cons = eval("(type-of (cons 1 2))").unwrap();
+
+    assert!(empty.is_keyword(), "expected keyword for empty list");
+    assert!(proper.is_keyword(), "expected keyword for proper list");
+    assert!(cons.is_keyword(), "expected keyword for cons cell");
+
+    // All three must return the same keyword
+    assert_eq!(
+        empty, proper,
+        "empty list and proper list should have same type"
+    );
+    assert_eq!(
+        proper, cons,
+        "proper list and cons cell should have same type"
+    );
+
+    // And that keyword should be :list
+    assert_eq!(eval("(eq? (type-of ()) :list)").unwrap(), Value::TRUE);
+}
+
 // Math functions
 #[test]
 fn test_sqrt() {

@@ -836,7 +836,7 @@ This document provides comprehensive documentation for all built-in primitives i
 ⟹ :string
 
 (type-of (list 1 2))
-⟹ :pair
+⟹ :list
 
 (type-of nil)
 ⟹ :nil
