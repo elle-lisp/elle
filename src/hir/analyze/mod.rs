@@ -151,6 +151,10 @@ pub struct Analyzer<'a> {
     current_effect_sources: EffectSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
     current_lambda_params: Vec<BindingId>,
+    /// Immutable global bindings from previous forms (for cross-form const tracking)
+    immutable_globals: std::collections::HashSet<SymbolId>,
+    /// Immutable global bindings defined in this form (for cross-form tracking)
+    defined_immutable_globals: std::collections::HashSet<SymbolId>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -177,6 +181,8 @@ impl<'a> Analyzer<'a> {
             defined_global_effects: HashMap::new(),
             current_effect_sources: EffectSources::default(),
             current_lambda_params: Vec::new(),
+            immutable_globals: std::collections::HashSet::new(),
+            defined_immutable_globals: std::collections::HashSet::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
@@ -191,6 +197,19 @@ impl<'a> Analyzer<'a> {
     /// Take the defined global effects (consumes them, for use after analysis)
     pub fn take_defined_global_effects(&mut self) -> HashMap<SymbolId, Effect> {
         std::mem::take(&mut self.defined_global_effects)
+    }
+
+    /// Set immutable globals from previous forms (for cross-form const tracking)
+    pub fn set_immutable_globals(
+        &mut self,
+        immutable_globals: std::collections::HashSet<SymbolId>,
+    ) {
+        self.immutable_globals = immutable_globals;
+    }
+
+    /// Take the defined immutable globals (consumes them, for use after analysis)
+    pub fn take_defined_immutable_globals(&mut self) -> std::collections::HashSet<SymbolId> {
+        std::mem::take(&mut self.defined_immutable_globals)
     }
 
     /// Analyze a syntax tree into HIR

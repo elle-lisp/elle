@@ -92,6 +92,7 @@ impl<'a> Analyzer<'a> {
                         "begin" => return self.analyze_begin(&items[1..], span),
                         "block" => return self.analyze_block(&items[1..], span),
                         "define" => return self.analyze_define(items, span),
+                        "const" => return self.analyze_const(items, span),
                         "set!" => return self.analyze_set(items, span),
                         "while" => return self.analyze_while(items, span),
                         "each" => return self.analyze_for(items, span),

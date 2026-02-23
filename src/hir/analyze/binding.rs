@@ -208,12 +208,12 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    /// Check if an expression is a define form and return the name and scopes being defined
+    /// Check if an expression is a define or const form and return the name and scopes being defined
     pub(crate) fn is_define_form(syntax: &Syntax) -> Option<(&str, &[ScopeId])> {
         if let SyntaxKind::List(items) = &syntax.kind {
             if let Some(first) = items.first() {
                 if let Some(name) = first.as_symbol() {
-                    if name == "define" {
+                    if name == "define" || name == "const" {
                         if let Some(second) = items.get(1) {
                             return second
                                 .as_symbol()
@@ -326,6 +326,119 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    pub(crate) fn analyze_const(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        if items.len() != 3 {
+            return Err(format!("{}: const requires name and value", span));
+        }
+
+        let name = items[1]
+            .as_symbol()
+            .ok_or_else(|| format!("{}: const name must be a symbol", span))?;
+        let sym = self.symbols.intern(name);
+
+        // Check if we're inside a function scope
+        // If so, const creates a local binding, not a global one
+        let in_function = self.scopes.iter().any(|s| s.is_function);
+
+        // Check if the value is a lambda form (fn or lambda)
+        // If so, we'll seed effect_env with Pure before analyzing so self-recursive
+        // calls don't default to Yields
+        let is_lambda_form = if let Some(list) = items[2].as_list() {
+            list.first()
+                .and_then(|s| s.as_symbol())
+                .is_some_and(|s| s == "fn")
+        } else {
+            false
+        };
+
+        if in_function {
+            // Inside a function, const creates a local binding
+            // Check if binding was pre-created by analyze_begin (for mutual recursion)
+            let name_scopes = items[1].scopes.as_slice();
+            let binding_id = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes)
+            {
+                existing
+            } else {
+                // Not pre-created, create now (for single consts outside begin)
+                let local_index = self.current_local_count();
+                self.bind(name, name_scopes, BindingKind::Local { index: local_index })
+            };
+
+            // Mark as immutable
+            if let Some(info) = self.ctx.get_binding_mut(binding_id) {
+                info.is_immutable = true;
+            }
+
+            // Seed effect_env with Pure for lambda forms so self-recursive calls
+            // don't default to Yields during analysis
+            if is_lambda_form {
+                self.effect_env.insert(binding_id, Effect::none());
+            }
+
+            // Now analyze the value (which can reference the binding)
+            let value = self.analyze_expr(&items[2])?;
+
+            // Update effect_env with the actual inferred effect
+            if let HirKind::Lambda {
+                inferred_effect, ..
+            } = &value.kind
+            {
+                self.effect_env.insert(binding_id, *inferred_effect);
+            }
+
+            // Emit a LocalDefine that stores to a local slot
+            Ok(Hir::new(
+                HirKind::LocalDefine {
+                    binding: binding_id,
+                    value: Box::new(value),
+                },
+                span,
+                Effect::none(),
+            ))
+        } else {
+            // At top level, const creates a global binding
+            // Create binding first so recursive references work
+            let binding_id = self.bind(name, &[], BindingKind::Global);
+
+            // Mark as immutable
+            if let Some(info) = self.ctx.get_binding_mut(binding_id) {
+                info.is_immutable = true;
+            }
+
+            // Record in defined_immutable_globals for cross-form tracking
+            self.defined_immutable_globals.insert(sym);
+
+            // Seed effect_env with Pure for lambda forms so self-recursive calls
+            // don't default to Yields during analysis
+            if is_lambda_form {
+                self.effect_env.insert(binding_id, Effect::none());
+            }
+
+            // Now analyze the value
+            let value = self.analyze_expr(&items[2])?;
+
+            // Update effect_env with the actual inferred effect
+            // Also record in defined_global_effects for cross-form tracking
+            if let HirKind::Lambda {
+                inferred_effect, ..
+            } = &value.kind
+            {
+                self.effect_env.insert(binding_id, *inferred_effect);
+                // Record for cross-form effect tracking
+                self.defined_global_effects.insert(sym, *inferred_effect);
+            }
+
+            Ok(Hir::new(
+                HirKind::Define {
+                    name: sym,
+                    value: Box::new(value),
+                },
+                span,
+                Effect::none(),
+            ))
+        }
+    }
+
     pub(crate) fn analyze_set(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() != 3 {
             return Err(format!("{}: set! requires target and value", span));
@@ -340,11 +453,28 @@ impl<'a> Analyzer<'a> {
             None => {
                 // Treat as global reference (may have been defined in a previous form)
                 let sym = self.symbols.intern(name);
+                // Check if this was declared const in a previous form
+                if self.immutable_globals.contains(&sym) {
+                    return Err(format!(
+                        "{}: cannot set! immutable binding '{}'",
+                        span, name
+                    ));
+                }
                 let id = self.ctx.fresh_binding();
                 self.ctx.register_binding(BindingInfo::global(id, sym));
                 id
             }
         };
+
+        // Check for immutable binding
+        if let Some(info) = self.ctx.get_binding(target) {
+            if info.is_immutable {
+                return Err(format!(
+                    "{}: cannot set! immutable binding '{}'",
+                    span, name
+                ));
+            }
+        }
 
         // Mark as mutated
         if let Some(info) = self.ctx.get_binding_mut(target) {

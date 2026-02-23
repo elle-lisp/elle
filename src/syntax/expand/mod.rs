@@ -139,6 +139,37 @@ impl Expander {
                         }
                     }
 
+                    // Handle (const (f x y) body...) shorthand
+                    // Desugar to (const f (fn (x y) body...))
+                    if name == "const" && items.len() >= 3 {
+                        if let SyntaxKind::List(name_and_params) = &items[1].kind {
+                            if !name_and_params.is_empty() {
+                                // (const (f x y) body...) -> (const f (fn (x y) body...))
+                                let func_name = name_and_params[0].clone();
+                                let params = Syntax::new(
+                                    SyntaxKind::List(name_and_params[1..].to_vec()),
+                                    items[1].span.clone(),
+                                );
+                                let fn_sym = Syntax::new(
+                                    SyntaxKind::Symbol("fn".to_string()),
+                                    items[1].span.clone(),
+                                );
+                                let mut lambda_parts = vec![fn_sym, params];
+                                lambda_parts.extend(items[2..].iter().cloned());
+                                let lambda = Syntax::new(
+                                    SyntaxKind::List(lambda_parts),
+                                    syntax.span.clone(),
+                                );
+                                let const_sym = items[0].clone();
+                                let desugared = Syntax::new(
+                                    SyntaxKind::List(vec![const_sym, func_name, lambda]),
+                                    syntax.span.clone(),
+                                );
+                                return self.expand(desugared, symbols, vm);
+                            }
+                        }
+                    }
+
                     // Check if it's a macro call
                     if let Some(macro_def) = self.macros.get(name).cloned() {
                         return self.expand_macro_call(
