@@ -77,10 +77,10 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 3. **No primitive has VM access.** Operations that need the VM (fiber
    execution) return SIG_RESUME and let the VM dispatch loop handle it.
 
-4. **Symbol table pointers are set before use.** Some primitives (macros)
+4. **Symbol table pointers are set before use.** Some primitives (list length)
    need global access to symbol tables. Call `set_*_symbol_table` first.
 
-5. **Thread-local state exists for some primitives.** Macro symbol table.
+5. **Thread-local state exists for some primitives.** Length symbol table.
    Clean up with `clear_*` functions.
 
 ## Modules
@@ -104,7 +104,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value`, `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval_new`) |
-| `macros.rs` | `defmacro` (compile-time; `macro?` and `expand-macro` are now Expander operations) |
+| `meta.rs` | `gensym` (runtime unique symbol generation) |
 | `debugging.rs` | `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `global?`, `string->keyword`, `disbit`, `disjit` |
 | `debug.rs` | `debug-print`, `trace`, `memory-usage` |
 
