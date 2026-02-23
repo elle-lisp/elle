@@ -7,7 +7,7 @@
 ;; ============================================================================
 
 ;; Escape HTML special characters
-(define html-escape
+(var html-escape
   (fn (str)
     (if (nil? str)
       ""
@@ -24,27 +24,27 @@
           "'" "&#39;")))))
 
 ;; Find delimiter in text starting from character position
-(define find-closing-helper (fn (text pos tlen delimiter dlen)
+(def find-closing-helper (fn (text pos tlen delimiter dlen)
   (if (> (+ pos dlen) tlen)
     nil
     (if (= (substring text pos (+ pos dlen)) delimiter)
       pos
       (find-closing-helper text (+ pos 1) tlen delimiter dlen)))))
 
-(define find-closing (fn (text start delimiter)
+(def find-closing (fn (text start delimiter)
   (find-closing-helper text start (length text) delimiter (length delimiter))))
 
 ;; Convert markdown links [text](url) to HTML anchor tags
 ;; NOTE: Disabled for now due to compiler bug with define in nested contexts
-(define format-links-rec (fn (remaining result)
+(def format-links-rec (fn (remaining result)
   (string-append result remaining)))
 
-(define format-links (fn (text)
+(def format-links (fn (text)
   (format-links-rec text "")))
 
 ;; Helper function to apply formatting to split parts using fold
 ;; Applies a tag (like "strong", "em", "code") to alternating parts
-(define apply-formatting
+(var apply-formatting
   (fn (parts tag)
     (first
       (fold
@@ -61,7 +61,7 @@
 
 ;; Format inline markdown: **bold**, *italic*, `code`
 ;; Uses string-split to avoid UTF-8 boundary issues
-(define format-inline (fn (text)
+(def format-inline (fn (text)
   (format-links
     (apply-formatting
       (string-split
@@ -81,7 +81,7 @@
 ;; CSS stylesheet generation
 ;; ============================================================================
 
-(define generate-css
+(var generate-css
   (fn ()
     "/* Elle Documentation Site Stylesheet */
 
@@ -387,12 +387,12 @@ tbody tr:nth-child(even) {
 ;; ============================================================================
 
 ;; Render a paragraph block
-(define render-paragraph
+(var render-paragraph
   (fn (block)
     (string-append "<p>" (format-inline (get block "text")) "</p>")))
 
 ;; Render a code block
-(define render-code
+(var render-code
   (fn (block)
     (string-append 
       "<pre><code class=\"language-" (html-escape (get block "language")) "\">"
@@ -402,7 +402,7 @@ tbody tr:nth-child(even) {
 ;; Render a list block using fold
 ;; NOTE: We call format-inline directly without storing in a variable
 ;; to work around a compiler bug with variable definitions in fold closures
-(define render-list
+(var render-list
   (fn (block)
     (string-append 
       "<" (if (get block "ordered") "ol" "ul") ">"
@@ -414,12 +414,12 @@ tbody tr:nth-child(even) {
       "</" (if (get block "ordered") "ol" "ul") ">")))
 
 ;; Render a blockquote block
-(define render-blockquote
+(var render-blockquote
   (fn (block)
     (string-append "<blockquote>" (format-inline (get block "text")) "</blockquote>")))
 
 ;; Render a table block using fold
-(define render-table
+(var render-table
   (fn (block)
     (string-append 
       "<table><thead><tr>"
@@ -443,7 +443,7 @@ tbody tr:nth-child(even) {
       "</tbody></table>")))
 
 ;; Render a note/callout block
-(define render-note
+(var render-note
   (fn (block)
     (string-append 
       "<div class=\"note note-" (html-escape (get block "kind")) "\">"
@@ -451,7 +451,7 @@ tbody tr:nth-child(even) {
       "</div>")))
 
 ;; Main dispatcher
-(define render-block
+(var render-block
   (fn (block)
     (cond
       ((string-contains? (get block "type") "paragraph") (render-paragraph block))
@@ -464,7 +464,7 @@ tbody tr:nth-child(even) {
       (#t ""))))
 
 ;; Render blocks in a section
-(define render-blocks-in-section
+(var render-blocks-in-section
   (fn (blocks result)
     (fold
       (fn (acc block)
@@ -473,7 +473,7 @@ tbody tr:nth-child(even) {
       blocks)))
 
 ;; Render a heading block (nested heading within content)
-(define render-heading
+(var render-heading
   (fn (block)
     (string-append 
       "<h" (number->string (get block "level")) ">" 
@@ -481,7 +481,7 @@ tbody tr:nth-child(even) {
       "</h" (number->string (get block "level")) ">")))
 
 ;; Render a section with heading and content blocks
-(define render-section
+(var render-section
   (fn (section)
     (string-append 
       "<h" (number->string (get section "level")) ">" 
@@ -492,7 +492,7 @@ tbody tr:nth-child(even) {
 ;; Render all sections using fold
 ;; NOTE: We call render-section directly without storing in a variable
 ;; to work around a compiler bug with variable definitions in fold closures
-(define render-sections
+(var render-sections
   (fn (sections)
     (fold
       (fn (acc section)
@@ -505,7 +505,7 @@ tbody tr:nth-child(even) {
 ;; ============================================================================
 
 ;; Render navigation items
-(define render-nav-items
+(var render-nav-items
   (fn (items current-slug result)
     (fold
       (fn (acc item)
@@ -517,12 +517,12 @@ tbody tr:nth-child(even) {
       items)))
 
 ;; Generate navigation HTML
-(define generate-nav
+(var generate-nav
   (fn (nav-items current-slug)
     (render-nav-items nav-items current-slug "")))
 
 ;; Generate the full HTML page
-(define generate-page
+(var generate-page
   (fn (site page nav css body)
     (string-append
       "<!DOCTYPE html>\n"
@@ -553,8 +553,8 @@ tbody tr:nth-child(even) {
 ;; ============================================================================
 
 ;; Configuration
-(define docs-dir "elle-doc/docs")
-(define output-dir "site")
+(var docs-dir "elle-doc/docs")
+(var output-dir "site")
 
 ;; Create output directory if it doesn't exist
 (if (not (directory? output-dir))
@@ -563,53 +563,53 @@ tbody tr:nth-child(even) {
 ;; Read and parse site configuration
 (display "Reading site configuration...")
 (newline)
-(define site-json (slurp (join-path docs-dir "site.json")))
-(define site-config (json-parse site-json))
+(var site-json (slurp (join-path docs-dir "site.json")))
+(var site-config (json-parse site-json))
 
 ;; Generate and write CSS
 (display "Generating CSS...")
 (newline)
-(define css-content (generate-css))
+(var css-content (generate-css))
 (spit (join-path output-dir "style.css") css-content)
 
 ;; Get navigation items
-(define nav-items (get site-config "nav"))
+(var nav-items (get site-config "nav"))
 
 ;; Process each page
-(define process-pages
+(var process-pages
   (fn (all-nav-items current-nav-items)
     (if (empty? current-nav-items)
       (begin
         (display "Done!")
         (newline))
       (begin
-        (define nav-item (first current-nav-items))
-        (define rest-nav-items (rest current-nav-items))
-        (define slug (get nav-item "slug"))
-        (define title (get nav-item "title"))
-        (define page-file (join-path docs-dir (string-append "pages/" slug ".json")))
+        (var nav-item (first current-nav-items))
+        (var rest-nav-items (rest current-nav-items))
+        (var slug (get nav-item "slug"))
+        (var title (get nav-item "title"))
+        (var page-file (join-path docs-dir (string-append "pages/" slug ".json")))
         
         (display "Generating: ")
         (display slug)
         (display ".html...")
         (newline)
         
-        (define page-json (slurp page-file))
-        (define page-data (json-parse page-json))
+        (var page-json (slurp page-file))
+        (var page-data (json-parse page-json))
         
         ;; Add slug to page data for template
         (put page-data "slug" slug)
         
         ;; Render content sections
-        (define sections (get page-data "sections"))
-        (define body-html (render-sections sections))
+        (var sections (get page-data "sections"))
+        (var body-html (render-sections sections))
         
         ;; Generate full page (use all-nav-items for navigation)
         ;; NOTE: We pass slug as a separate parameter to avoid closure issues
-        (define full-html (generate-page site-config page-data all-nav-items css-content body-html))
+        (var full-html (generate-page site-config page-data all-nav-items css-content body-html))
         
         ;; Write HTML file
-        (define output-file (join-path output-dir (string-append slug ".html")))
+        (var output-file (join-path output-dir (string-append slug ".html")))
         (spit output-file full-html)
         
         ;; Process next page

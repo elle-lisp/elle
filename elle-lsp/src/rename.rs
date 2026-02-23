@@ -11,7 +11,8 @@ use std::collections::HashMap;
 
 /// Reserved words that cannot be used as symbol names
 const RESERVED_WORDS: &[&str] = &[
-    "define",
+    "def",
+    "var",
     "fn",
     "if",
     "cond",
@@ -292,7 +293,8 @@ mod tests {
 
     #[test]
     fn test_validate_new_name_reserved_word() {
-        assert!(validate_new_name("define").is_err());
+        assert!(validate_new_name("def").is_err());
+        assert!(validate_new_name("var").is_err());
         assert!(validate_new_name("if").is_err());
     }
 
@@ -314,7 +316,7 @@ mod tests {
     fn test_rename_symbol_no_symbol_at_position() {
         let index = SymbolIndex::new();
         let symbol_table = SymbolTable::new();
-        let source = "(define foo 1)";
+        let source = "(var foo 1)";
         let uri = "file:///test.elle";
 
         let result = rename_symbol(0, 0, "bar", &index, &symbol_table, source, uri);
@@ -326,7 +328,7 @@ mod tests {
     fn test_rename_symbol_returns_workspace_edit() {
         let index = SymbolIndex::new();
         let symbol_table = SymbolTable::new();
-        let source = "(define foo 1)";
+        let source = "(var foo 1)";
         let uri = "file:///test.elle";
 
         // With empty symbol index, should return error about no symbol found

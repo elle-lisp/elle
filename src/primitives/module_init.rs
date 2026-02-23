@@ -155,9 +155,9 @@ fn init_clock_module(vm: &mut VM, symbols: &mut SymbolTable) {
 /// Define Elle wrappers around vm/query operations
 fn define_vm_query_wrappers(vm: &mut VM, symbols: &mut SymbolTable) {
     let defs = [
-        r#"(define call-count (fn (f) (vm/query "call-count" f)))"#,
-        r#"(define global? (fn (sym) (vm/query "global?" sym)))"#,
-        r#"(define fiber/self (fn () (vm/query "fiber/self" nil)))"#,
+        r#"(def call-count (fn (f) (vm/query "call-count" f)))"#,
+        r#"(def global? (fn (sym) (vm/query "global?" sym)))"#,
+        r#"(def fiber/self (fn () (vm/query "fiber/self" nil)))"#,
     ];
     for code in &defs {
         if let Err(e) = eval(code, symbols, vm) {

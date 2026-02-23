@@ -26,7 +26,7 @@ pub struct BindingInfo {
     pub is_mutated: bool,
     /// Whether this binding is captured by a nested closure
     pub is_captured: bool,
-    /// Whether this binding is immutable (const)
+    /// Whether this binding is immutable (def)
     pub is_immutable: bool,
     /// The kind of binding
     pub kind: BindingKind,

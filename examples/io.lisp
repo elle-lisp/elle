@@ -9,8 +9,8 @@
 
 (begin
   ;; Cleanup from previous runs
-  (define cleanup-files (list "./elle_example_basic.txt" "./elle_example_copy.txt" "./elle_example_renamed.txt" "./elle_example_lines.txt" "./elle_example_config.txt"))
-  (define cleanup-dirs (list "./elle_example_dir" "./elle_example_data" "./elle_example_archive"))
+  (var cleanup-files (list "./elle_example_basic.txt" "./elle_example_copy.txt" "./elle_example_renamed.txt" "./elle_example_lines.txt" "./elle_example_config.txt"))
+  (var cleanup-dirs (list "./elle_example_dir" "./elle_example_data" "./elle_example_archive"))
   
   (display "=== I/O Operations in Elle ===")
   (newline)
@@ -22,13 +22,13 @@
   (display "---")
   (newline)
 
-  (define temp-file "./elle_example_basic.txt")
+  (var temp-file "./elle_example_basic.txt")
   (spit temp-file "Hello, Elle!")
   (display "Wrote to file: ")
   (display temp-file)
   (newline)
 
-  (define content (slurp temp-file))
+  (var content (slurp temp-file))
   (display "Read from file: ")
   (display content)
   (newline)
@@ -101,7 +101,7 @@
   (display "---")
   (newline)
 
-  (define copied-file "./elle_example_copy.txt")
+  (var copied-file "./elle_example_copy.txt")
   (copy-file temp-file copied-file)
   (display "Copied file to: ")
   (display copied-file)
@@ -119,7 +119,7 @@
   (display "---")
   (newline)
 
-  (define renamed-file "./elle_example_renamed.txt")
+  (var renamed-file "./elle_example_renamed.txt")
   (rename-file copied-file renamed-file)
   (display "Renamed to: ")
   (display renamed-file)
@@ -142,7 +142,7 @@
   (display "---")
   (newline)
 
-  (define full-path "/home/user/documents/project/report.pdf")
+  (var full-path "/home/user/documents/project/report.pdf")
 
   (display "Full path: ")
   (display full-path)
@@ -160,7 +160,7 @@
   (display (parent-directory full-path))
   (newline)
 
-  (define composed-path (join-path "." "test" "nested" "file.txt"))
+  (var composed-path (join-path "." "test" "nested" "file.txt"))
   (display "Composed path: ")
   (display composed-path)
   (newline)
@@ -172,8 +172,8 @@
   (display "---")
   (newline)
 
-  (define test-dir "./elle_example_dir")
-  (define sub-dir "./elle_example_dir/subdir")
+  (var test-dir "./elle_example_dir")
+  (var sub-dir "./elle_example_dir/subdir")
 
   (create-directory test-dir)
   (display "Created directory: ")
@@ -198,12 +198,12 @@
   (display "---")
   (newline)
 
-  (define lines-file "./elle_example_lines.txt")
+  (var lines-file "./elle_example_lines.txt")
   (spit lines-file "Line 1: First line of text\nLine 2: Second line of text\nLine 3: Third line of text\n")
 
   (display "Lines in file:")
   (newline)
-  (define lines (read-lines lines-file))
+  (var lines (read-lines lines-file))
   (display lines)
   (newline)
   (assert-equal (length lines) 3 "I/O: read-lines returns 3 lines")
@@ -247,7 +247,7 @@
   (display "---")
   (newline)
 
-  (define config-file "./elle_example_config.txt")
+  (var config-file "./elle_example_config.txt")
 
   ;; Write initial config
   (spit config-file "# Elle Configuration File\nversion=1.0\nauthor=Elle Users\n")
@@ -257,7 +257,7 @@
   ;; Read and display config
   (display "Current config:")
   (newline)
-   (define config-content (slurp config-file))
+   (var config-content (slurp config-file))
    (display config-content)
    (newline)
    (assert-true (> (length config-content) 0) "I/O: config file has content")
@@ -270,7 +270,7 @@
   ;; Read updated version
   (display "Updated config:")
   (newline)
-   (define updated-config (slurp config-file))
+   (var updated-config (slurp config-file))
    (display updated-config)
    (newline)
    (assert-true (> (length updated-config) (length config-content)) "I/O: updated config is longer")
@@ -282,8 +282,8 @@
   (display "---")
   (newline)
 
-  (define data-dir "./elle_example_data")
-  (define archive-dir "./elle_example_archive")
+  (var data-dir "./elle_example_data")
+  (var archive-dir "./elle_example_archive")
 
   (create-directory-all data-dir)
   (create-directory-all archive-dir)
@@ -298,8 +298,8 @@
   (newline)
 
   ;; Archive a file (copy to archive directory)
-  (define original (join-path data-dir "data1.txt"))
-  (define archived (join-path archive-dir "data1_archived.txt"))
+  (var original (join-path data-dir "data1.txt"))
+  (var archived (join-path archive-dir "data1_archived.txt"))
   (copy-file original archived)
 
   (display "Archived file to: ")

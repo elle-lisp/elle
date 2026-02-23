@@ -314,7 +314,7 @@ proptest! {
     #[test]
     fn countdown_from_n(n in 1000u32..50000) {
         let expr = format!(
-            "(begin (define f (fn (n) (if (<= n 0) 0 (f (- n 1))))) (f {}))",
+            "(begin (def f (fn (n) (if (<= n 0) 0 (f (- n 1))))) (f {}))",
             n
         );
         let result = eval(&expr);
@@ -329,7 +329,7 @@ proptest! {
         let expected = (n as i64) * ((n as i64) + 1) / 2;
         let expr = format!(
             "(begin
-               (define sum-iter (fn (n acc)
+               (def sum-iter (fn (n acc)
                  (if (<= n 0) acc (sum-iter (- n 1) (+ acc n)))))
                (sum-iter {} 0))",
             n
@@ -345,8 +345,8 @@ proptest! {
         let expected = n % 2 == 0;
         let expr = format!(
             "(begin
-               (define is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
-               (define is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
+               (def is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
+               (def is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
                (= (is-even {}) {}))",
             n, if expected { "#t" } else { "#f" }
         );
@@ -505,14 +505,14 @@ proptest! {
         // Two closures sharing a box see each other's mutations
         let expr = format!(
             "(begin
-               (define make-pair
+               (var make-pair
                  (fn ()
                    (let ((b (box 0)))
                      (list (fn () (begin (box-set! b (+ (unbox b) 1)) (unbox b)))
                            (fn () (unbox b))))))
-               (define p (make-pair))
-               (define inc (first p))
-               (define get (first (rest p)))
+               (var p (make-pair))
+               (var inc (first p))
+               (var get (first (rest p)))
                (let ((i 0) (result 0))
                  (begin {} (get))))",
             (1..=n).map(|_| "(inc)".to_string()).collect::<Vec<_>>().join(" ")

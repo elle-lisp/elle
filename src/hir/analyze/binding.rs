@@ -208,12 +208,12 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    /// Check if an expression is a define or const form and return the name and scopes being defined
+    /// Check if an expression is a var or def form and return the name and scopes being defined
     pub(crate) fn is_define_form(syntax: &Syntax) -> Option<(&str, &[ScopeId])> {
         if let SyntaxKind::List(items) = &syntax.kind {
             if let Some(first) = items.first() {
                 if let Some(name) = first.as_symbol() {
-                    if name == "define" || name == "const" {
+                    if name == "var" || name == "def" {
                         if let Some(second) = items.get(1) {
                             return second
                                 .as_symbol()
@@ -228,16 +228,16 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_define(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() != 3 {
-            return Err(format!("{}: define requires name and value", span));
+            return Err(format!("{}: var requires name and value", span));
         }
 
         let name = items[1]
             .as_symbol()
-            .ok_or_else(|| format!("{}: define name must be a symbol", span))?;
+            .ok_or_else(|| format!("{}: var name must be a symbol", span))?;
         let sym = self.symbols.intern(name);
 
         // Check if we're inside a function scope
-        // If so, define creates a local binding, not a global one
+        // If so, var creates a local binding, not a global one
         let in_function = self.scopes.iter().any(|s| s.is_function);
 
         // Check if the value is a lambda form (fn or lambda)
@@ -252,14 +252,14 @@ impl<'a> Analyzer<'a> {
         };
 
         if in_function {
-            // Inside a function, define creates a local binding
+            // Inside a function, var creates a local binding
             // Check if binding was pre-created by analyze_begin (for mutual recursion)
             let name_scopes = items[1].scopes.as_slice();
             let binding_id = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes)
             {
                 existing
             } else {
-                // Not pre-created, create now (for single defines outside begin)
+                // Not pre-created, create now (for single vars outside begin)
                 let local_index = self.current_local_count();
                 self.bind(name, name_scopes, BindingKind::Local { index: local_index })
             };
@@ -291,7 +291,7 @@ impl<'a> Analyzer<'a> {
                 Effect::none(),
             ))
         } else {
-            // At top level, define creates a global binding
+            // At top level, var creates a global binding
             // Create binding first so recursive references work
             let binding_id = self.bind(name, &[], BindingKind::Global);
 
@@ -328,16 +328,16 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_const(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() != 3 {
-            return Err(format!("{}: const requires name and value", span));
+            return Err(format!("{}: def requires name and value", span));
         }
 
         let name = items[1]
             .as_symbol()
-            .ok_or_else(|| format!("{}: const name must be a symbol", span))?;
+            .ok_or_else(|| format!("{}: def name must be a symbol", span))?;
         let sym = self.symbols.intern(name);
 
         // Check if we're inside a function scope
-        // If so, const creates a local binding, not a global one
+        // If so, def creates a local binding, not a global one
         let in_function = self.scopes.iter().any(|s| s.is_function);
 
         // Check if the value is a lambda form (fn or lambda)
@@ -352,14 +352,14 @@ impl<'a> Analyzer<'a> {
         };
 
         if in_function {
-            // Inside a function, const creates a local binding
+            // Inside a function, def creates a local binding
             // Check if binding was pre-created by analyze_begin (for mutual recursion)
             let name_scopes = items[1].scopes.as_slice();
             let binding_id = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes)
             {
                 existing
             } else {
-                // Not pre-created, create now (for single consts outside begin)
+                // Not pre-created, create now (for single defs outside begin)
                 let local_index = self.current_local_count();
                 self.bind(name, name_scopes, BindingKind::Local { index: local_index })
             };
@@ -396,7 +396,7 @@ impl<'a> Analyzer<'a> {
                 Effect::none(),
             ))
         } else {
-            // At top level, const creates a global binding
+            // At top level, def creates a global binding
             // Create binding first so recursive references work
             let binding_id = self.bind(name, &[], BindingKind::Global);
 

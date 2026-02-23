@@ -1,8 +1,8 @@
 ; Good naming conventions
 
-(define square 42)
-(define my-variable 10)
-(define add-two (fn (x y) (+ x y)))
-(define number? (fn (x) (int? x)))
-(define set-value! (fn (x v) v))
-(define foo-bar-baz 123)
+(var square 42)
+(var my-variable 10)
+(def add-two (fn (x y) (+ x y)))
+(def number? (fn (x) (int? x)))
+(def set-value! (fn (x v) v))
+(var foo-bar-baz 123)

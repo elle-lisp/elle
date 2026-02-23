@@ -358,7 +358,7 @@ mod tests {
     fn test_recursive_tail_call() {
         // Classic tail-recursive countdown
         let hir =
-            analyze_and_mark("(define count-down (fn (n) (if (<= n 0) 0 (count-down (- n 1)))))");
+            analyze_and_mark("(def count-down (fn (n) (if (<= n 0) 0 (count-down (- n 1)))))");
         let calls = find_calls(&hir);
         // Calls: <=, -, count-down
         // <= is in condition (not tail), - is arg (not tail), count-down is tail

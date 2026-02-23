@@ -3,13 +3,13 @@
 (import-file "elle-doc/lib/html.lisp")
 
 ;; Render a paragraph block
-(define render-paragraph
+(var render-paragraph
   (fn (block)
     (let ((text (get block "text")))
       (string-append "<p>" (format-inline text) "</p>"))))
 
 ;; Render a code block
-(define render-code
+(var render-code
   (fn (block)
     (let ((text (get block "text"))
           (language (get block "language")))
@@ -19,7 +19,7 @@
         "</code></pre>"))))
 
 ;; Render a list block
-(define render-list
+(var render-list
   (fn (block)
     (let ((items (get block "items"))
           (ordered (get block "ordered"))
@@ -37,13 +37,13 @@
           "</" tag ">"))))))
 
 ;; Render a blockquote block
-(define render-blockquote
+(var render-blockquote
   (fn (block)
     (let ((text (get block "text")))
       (string-append "<blockquote>" (format-inline text) "</blockquote>"))))
 
 ;; Render a table block
-(define render-table
+(var render-table
   (fn (block)
     (let ((headers (get block "headers"))
           (rows (get block "rows")))
@@ -57,7 +57,7 @@
                 headers)))
         
         ;; Render a single row of cells using fold
-        (define render-row-cells
+        (var render-row-cells
           (fn (cells)
             (fold
               (fn (acc cell)
@@ -81,7 +81,7 @@
             "</tbody></table>"))))))
 
 ;; Render a note/callout block
-(define render-note
+(var render-note
   (fn (block)
     (let ((text (get block "text"))
           (kind (get block "kind")))
@@ -91,7 +91,7 @@
         "</div>"))))
 
 ;; Main dispatcher
-(define render-block
+(var render-block
   (fn (block)
     (let ((type (get block "type")))
       (cond
@@ -104,12 +104,12 @@
         (#t "")))))
 
 ;; Render a section with heading and content blocks
-(define render-section
+(var render-section
   (fn (section)
     (let ((heading (get section "heading"))
           (level (get section "level"))
           (content (get section "content")))
-      (define level-str (number->string level))
+      (var level-str (number->string level))
       ;; Use fold to render all blocks
       (let ((rendered-content
               (fold
@@ -123,7 +123,7 @@
           rendered-content)))))
 
 ;; Render all sections using fold
-(define render-sections
+(var render-sections
   (fn (sections)
     (fold
       (fn (acc section)

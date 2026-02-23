@@ -126,7 +126,7 @@ mod tests {
     fn test_rename_symbol_no_symbol_at_position() {
         let index = SymbolIndex::new();
         let symbol_table = SymbolTable::new();
-        let source = "(define foo 1)";
+        let source = "(var foo 1)";
         let uri = "file:///test.elle";
 
         let result = rename::rename_symbol(0, 0, "bar", &index, &symbol_table, source, uri);
@@ -138,7 +138,7 @@ mod tests {
     fn test_rename_symbol_validate_empty_name() {
         let index = SymbolIndex::new();
         let symbol_table = SymbolTable::new();
-        let source = "(define foo 1)";
+        let source = "(var foo 1)";
         let uri = "file:///test.elle";
 
         // Empty name should fail validation
@@ -150,11 +150,11 @@ mod tests {
     fn test_rename_symbol_validate_reserved_word() {
         let index = SymbolIndex::new();
         let symbol_table = SymbolTable::new();
-        let source = "(define foo 1)";
+        let source = "(var foo 1)";
         let uri = "file:///test.elle";
 
         // Reserved word should fail validation
-        let result = rename::rename_symbol(0, 10, "define", &index, &symbol_table, source, uri);
+        let result = rename::rename_symbol(0, 10, "def", &index, &symbol_table, source, uri);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("reserved"));
     }
@@ -163,7 +163,7 @@ mod tests {
     fn test_rename_symbol_validate_invalid_characters() {
         let index = SymbolIndex::new();
         let symbol_table = SymbolTable::new();
-        let source = "(define foo 1)";
+        let source = "(var foo 1)";
         let uri = "file:///test.elle";
 
         // Invalid characters should fail validation
@@ -175,7 +175,7 @@ mod tests {
     fn test_rename_symbol_returns_workspace_edit() {
         let index = SymbolIndex::new();
         let symbol_table = SymbolTable::new();
-        let source = "(define foo 1)";
+        let source = "(var foo 1)";
         let uri = "file:///test.elle";
 
         // With empty symbol index, should return error about no symbol found
@@ -189,7 +189,7 @@ mod tests {
     fn test_compile_document_captures_syntax_errors() {
         let mut compiler_state = CompilerState::new();
         let uri = "file:///test.elle";
-        let invalid_code = "(define foo 1))"; // Extra closing paren
+        let invalid_code = "(var foo 1))"; // Extra closing paren
 
         compiler_state.on_document_open(uri.to_string(), invalid_code.to_string());
         compiler_state.compile_document(uri);
@@ -264,7 +264,7 @@ mod tests {
 
         compiler_state.on_document_open(
             uri.to_string(),
-            "(define my-func (lambda (x) (+ x 1)))".to_string(),
+            "(var my-func (lambda (x) (+ x 1)))".to_string(),
         );
         compiler_state.compile_document(uri);
 

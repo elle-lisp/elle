@@ -189,9 +189,9 @@ Elle provides predicate functions for type testing (all end with `?`):
 Define creates a global binding:
 
 ```lisp
-(define x 42)
-(define message "Hello, Elle!")
-(define my-list (list 1 2 3))
+(var x 42)
+(var message "Hello, Elle!")
+(var my-list (list 1 2 3))
 
 x ⟹ 42
 message ⟹ "Hello, Elle!"
@@ -218,7 +218,7 @@ x ⟹ 100
 Variables bound by `let` shadow outer bindings within the expression:
 
 ```lisp
-(define x 5)
+(var x 5)
 (let ((x 10))
   x)    ⟹ 10
 x      ⟹ 5
@@ -249,7 +249,7 @@ This is different from `let`, where all bindings are in parallel:
 `set!` updates an existing binding:
 
 ```lisp
-(define counter 0)
+(var counter 0)
 (set! counter (+ counter 1))
 counter ⟹ 1
 ```
@@ -286,7 +286,7 @@ The else branch is optional:
 `cond` is like a chain of if-else:
 
 ```lisp
-(define x 15)
+(var x 15)
 (cond
   ((> x 20) "x is large")
   ((> x 10) "x is medium")
@@ -383,7 +383,7 @@ Cleanup code runs here
 Use `exception` to create exception values and `throw` to raise them:
 
 ```lisp
-(define my-error (exception "Invalid input" (table "code" 42)))
+(var my-error (exception "Invalid input" (table "code" 42)))
 (throw my-error)
 
 ; Or throw directly:
@@ -393,7 +393,7 @@ Use `exception` to create exception values and `throw` to raise them:
 Get information from exceptions:
 
 ```lisp
-(define e (exception "Test error" (table "context" "validation")))
+(var e (exception "Test error" (table "context" "validation")))
 (exception-message e) ⟹ "Test error"
 (exception-data e)    ⟹ #<table String("context")="validation">
 ```
@@ -413,11 +413,11 @@ Elle provides a modern condition system for sophisticated error handling and sig
 The condition system allows defining custom signal types with handlers:
 
 ```lisp
-(define-condition :validation-error
+(var-condition :validation-error
   (message "Validation failed")
   (field "The field that failed"))
 
-(define-handler :validation-error
+(var-handler :validation-error
   (fn (condition)
     (display "Validation error in ")
     (display (condition-get condition 'field))
@@ -457,10 +457,10 @@ Use `catch-condition` to intercept specific conditions:
 Register multiple handlers for same signal - they're called in order:
 
 ```lisp
-(define-handler :validation-error
+(var-handler :validation-error
   (fn (c) (display "Handler 1") (newline)))
 
-(define-handler :validation-error
+(var-handler :validation-error
   (fn (c) (display "Handler 2") (newline)))
 
 (signal :validation-error
@@ -499,11 +499,11 @@ Functions are defined with `fn` or `define`:
 ; Function expression
 (fn (x y) (+ x y))
 
-; Named function (define creates a variable bound to fn)
-(define add (fn (x y) (+ x y)))
+; Named function (var creates a variable bound to fn)
+(def add (fn (x y) (+ x y)))
 
 ; Shorthand
-(define (add x y) (+ x y))
+(def (add x y) (+ x y))
 
 (add 3 4) ⟹ 7
 ```
@@ -515,10 +515,10 @@ Note: `lambda` is available as an alias for `fn`.
 Functions close over their definition environment:
 
 ```lisp
-(define (make-adder n)
+(def (make-adder n)
   (fn (x) (+ x n)))
 
-(define add-5 (make-adder 5))
+(var add-5 (make-adder 5))
 (add-5 10) ⟹ 15
 (add-5 20) ⟹ 25
 ```
@@ -569,7 +569,7 @@ Functions close over their definition environment:
 (apply + (list 1 2 3))
 ⟹ 6
 
-(define (add-three x y z) (+ x y z))
+(def (add-three x y z) (+ x y z))
 (apply add-three (list 10 20 30))
 ⟹ 60
 ```
@@ -611,8 +611,8 @@ Tables are mutable:
 
 ```lisp
 ; Creation
-(define t (table))
-(define t2 (table "x" 10 "y" 20))
+(var t (table))
+(var t2 (table "x" 10 "y" 20))
 
 ; Retrieval
 (get t2 "x")           ⟹ 10
@@ -635,19 +635,19 @@ Structs are immutable:
 
 ```lisp
 ; Creation
-(define s (struct "a" 1 "b" 2))
+(var s (struct "a" 1 "b" 2))
 
 ; Retrieval (get with optional default)
 (struct-get s "a")        ⟹ 1
 (struct-get s "z" "N/A")  ⟹ "N/A"
 
 ; "Modification" (returns new struct)
-(define s2 (struct-put s "c" 3))
+(var s2 (struct-put s "c" 3))
 (struct-get s "c")        ⟹ Error: key not found
 (struct-get s2 "c")       ⟹ 3
 
 ; Deletion (returns new struct)
-(define s3 (struct-del s2 "b"))
+(var s3 (struct-del s2 "b"))
 (struct-has? s3 "b")      ⟹ #f
 
 ; Querying
@@ -771,7 +771,7 @@ e                  ⟹ 2.71828...
 (spawn (fn () (display "Hello from thread") (newline)))
 ; Creates a new thread and runs the function
 
-(define t (spawn (fn () (+ 2 2))))
+(var t (spawn (fn () (+ 2 2))))
 (join t)          ; Wait for thread to complete, returns its result
 
 (time/sleep 1)         ; Sleep for 1 second
@@ -798,7 +798,7 @@ Quote prevents evaluation:
 Quasiquote allows selective evaluation with unquote:
 
 ```lisp
-(define x 5)
+(var x 5)
 `(the value is ,x)  ⟹ (the value is 5)
 `(a ,x b)           ⟹ (a 5 b)
 ```
@@ -824,7 +824,7 @@ Pattern matching destructures data:
 Macros transform code at compile time:
 
 ```lisp
-(define-macro when
+(var-macro when
   (fn (test body)
     `(if ,test ,body nil)))
 
@@ -849,13 +849,13 @@ Load external files as modules:
 Functions capture their definition environment:
 
 ```lisp
-(define (make-counter)
-  (define count 0)
+(def (make-counter)
+  (var count 0)
   (fn ()
     (set! count (+ count 1))
     count))
 
-(define c1 (make-counter))
+(var c1 (make-counter))
 (c1) ⟹ 1
 (c1) ⟹ 2
 (c1) ⟹ 3
@@ -864,7 +864,7 @@ Functions capture their definition environment:
 Each closure has its own captured variables:
 
 ```lisp
-(define c2 (make-counter))
+(var c2 (make-counter))
 (c2) ⟹ 1
 (c1) ⟹ 4
 (c2) ⟹ 2
@@ -884,8 +884,8 @@ Prefer `let` and `let*` over global definitions for local work:
   (+ x y))
 
 ; Avoid when possible
-(define x 10)
-(define y 20)
+(var x 10)
+(var y 20)
 (+ x y)
 ```
 
@@ -895,10 +895,10 @@ Use `struct` instead of `table` when you don't need mutation:
 
 ```lisp
 ; Better for functional style
-(define-constant user (struct "id" 1 "name" "Alice"))
+(var-constant user (struct "id" 1 "name" "Alice"))
 
 ; Use table only when mutation is needed
-(define cache (table))
+(var cache (table))
 (put cache "key" "value")
 ```
 

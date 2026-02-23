@@ -1,6 +1,6 @@
 ;; CSS stylesheet generation
 
-(define generate-css
+(var generate-css
   (fn ()
     "/* Elle Documentation Site Stylesheet */
 

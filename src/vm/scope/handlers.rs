@@ -49,7 +49,7 @@ pub fn handle_define_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constan
     vm.scope_stack.define_local(sym_id, value);
 
     // Push the value back on the stack to maintain expression semantics
-    // This way (define x 10) returns 10, allowing it to be used in expression contexts
+    // This way (var x 10) returns 10, allowing it to be used in expression contexts
     vm.fiber.stack.push(value);
 }
 

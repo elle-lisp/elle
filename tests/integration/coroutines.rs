@@ -85,11 +85,11 @@ fn collect_list_ints(value: &Value) -> Vec<i64> {
 
 #[test]
 fn test_simple_yield() {
-    // (define co (make-coroutine (fn () (yield 42))))
+    // (var co (make-coroutine (fn () (yield 42))))
     // (coro/resume co) => 42
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (yield 42))))
+        (var co (make-coroutine (fn () (yield 42))))
         (coro/resume co)
         "#,
     );
@@ -98,14 +98,14 @@ fn test_simple_yield() {
 
 #[test]
 fn test_multiple_yields() {
-    // (define co (make-coroutine (fn () (yield 1) (yield 2) (yield 3) 4)))
+    // (var co (make-coroutine (fn () (yield 1) (yield 2) (yield 3) 4)))
     // First resume => 1
     // Second resume => 2
     // Third resume => 3
     // Fourth resume => 4 (final value)
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (yield 1) (yield 2) (yield 3) 4)))
+        (var co (make-coroutine (fn () (yield 1) (yield 2) (yield 3) 4)))
         (list
           (coro/resume co)
           (coro/resume co)
@@ -124,12 +124,12 @@ fn test_multiple_yields() {
 
 #[test]
 fn test_yield_with_resume_value() {
-    // (define co (make-coroutine (fn () (+ 10 (yield 1)))))
+    // (var co (make-coroutine (fn () (+ 10 (yield 1)))))
     // (coro/resume co) => 1
     // (coro/resume co 5) => 15
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (+ 10 (yield 1)))))
+        (var co (make-coroutine (fn () (+ 10 (yield 1)))))
         (list
           (coro/resume co)
           (coro/resume co 5))
@@ -153,7 +153,7 @@ fn test_coroutine_status_created() {
     // Check status is :created keyword initially
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () 42)))
+        (var co (make-coroutine (fn () 42)))
         (keyword->string (coro/status co))
         "#,
     );
@@ -165,7 +165,7 @@ fn test_coroutine_status_done() {
     // After completion, status is :done keyword
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () 42)))
+        (var co (make-coroutine (fn () 42)))
         (coro/resume co)
         (keyword->string (coro/status co))
         "#,
@@ -178,7 +178,7 @@ fn test_coroutine_done_predicate() {
     // (coro/done? co) should return #f initially, #t after completion
     let result = eval(
         r#"
-         (define co (make-coroutine (fn () 42)))
+         (var co (make-coroutine (fn () 42)))
          (list
            (coro/done? co)
            (begin (coro/resume co) (coro/done? co)))
@@ -199,7 +199,7 @@ fn test_resume_done_coroutine_fails() {
     // Resuming a done coroutine should error
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () 42)))
+        (var co (make-coroutine (fn () 42)))
         (coro/resume co)
         (coro/resume co)
         "#,
@@ -215,7 +215,7 @@ fn test_coroutine_value_after_yield() {
     // (coro/value co) should return the last yielded value
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (yield 42))))
+        (var co (make-coroutine (fn () (yield 42))))
         (coro/resume co)
         (coro/value co)
         "#,
@@ -230,11 +230,11 @@ fn test_coroutine_value_after_yield() {
 #[test]
 fn test_pure_function_no_cps() {
     // A function without yield should be pure
-    // (define sum (fn (n) (if (<= n 0) 0 (+ n (sum (- n 1))))))
+    // (def sum (fn (n) (if (<= n 0) 0 (+ n (sum (- n 1))))))
     // Should work normally, no CPS overhead
     let result = eval(
         r#"
-         (define sum (fn (n)
+         (def sum (fn (n)
            (if (<= n 0)
              0
              (+ n (sum (- n 1))))))
@@ -250,10 +250,10 @@ fn test_yielding_function_detected() {
     // This is more of a compiler-level test, but we can verify it works
     let result = eval(
         r#"
-         (define gen (fn ()
+         (def gen (fn ()
            (yield 1)
            (yield 2)))
-         (define co (make-coroutine gen))
+         (var co (make-coroutine gen))
          (coro/resume co)
          "#,
     );
@@ -265,12 +265,12 @@ fn test_calling_yielding_function_propagates_effect() {
     // If f yields and g calls f, g should also yield
     let result = eval(
         r#"
-         (define f (fn ()
+         (def f (fn ()
            (yield 1)))
-         (define g (fn ()
+         (def g (fn ()
            (f)
            (yield 2)))
-         (define co (make-coroutine g))
+         (var co (make-coroutine g))
          (coro/resume co)
          "#,
     );
@@ -294,9 +294,9 @@ fn test_yield_from_basic() {
     // It should return an error.
     let result = eval(
         r#"
-        (define inner (fn () (yield 1) (yield 2)))
-        (define outer (fn () (yield-from (make-coroutine inner)) (yield 3)))
-        (define co (make-coroutine outer))
+        (def inner (fn () (yield 1) (yield 2)))
+        (def outer (fn () (yield-from (make-coroutine inner)) (yield 3)))
+        (var co (make-coroutine outer))
         (coro/resume co)
         "#,
     );
@@ -311,9 +311,9 @@ fn test_yield_from_completion() {
     // yield-from is dropped in the fiber migration (see issue #294 for yield*).
     let result = eval(
         r#"
-        (define inner (fn () (yield 1) 42))
-        (define outer (fn () (yield-from (make-coroutine inner))))
-        (define co (make-coroutine outer))
+        (def inner (fn () (yield 1) 42))
+        (def outer (fn () (yield-from (make-coroutine inner))))
+        (var co (make-coroutine outer))
         (coro/resume co)
         "#,
     );
@@ -334,7 +334,7 @@ fn test_coroutine_as_iterator() {
     // Should iterate over yielded values
     let result = eval(
         r#"
-        (define results (list))
+        (var results (list))
         (each x (make-coroutine (fn () (yield 1) (yield 2)))
           (set! results (cons x results)))
         results
@@ -349,8 +349,8 @@ fn test_coroutine_to_iterator() {
     // (coro/>iterator co) should convert a coroutine to an iterator
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (yield 1))))
-        (define iter (coro/>iterator co))
+        (var co (make-coroutine (fn () (yield 1))))
+        (var iter (coro/>iterator co))
         (coro? iter)
         "#,
     );
@@ -366,11 +366,11 @@ fn test_nested_coroutines() {
     // Coroutine that creates and resumes another coroutine
     let result = eval(
         r#"
-        (define inner-gen (fn () (yield 10)))
-        (define outer-gen (fn ()
-          (define inner-co (make-coroutine inner-gen))
+        (def inner-gen (fn () (yield 10)))
+        (def outer-gen (fn ()
+          (var inner-co (make-coroutine inner-gen))
           (yield (coro/resume inner-co))))
-        (define co (make-coroutine outer-gen))
+        (var co (make-coroutine outer-gen))
         (coro/resume co)
         "#,
     );
@@ -382,14 +382,14 @@ fn test_nested_coroutines_multiple_levels() {
     // Three levels of nesting
     let result = eval(
         r#"
-        (define level3 (fn () (yield 3)))
-        (define level2 (fn ()
-          (define co3 (make-coroutine level3))
+        (def level3 (fn () (yield 3)))
+        (def level2 (fn ()
+          (var co3 (make-coroutine level3))
           (yield (coro/resume co3))))
-        (define level1 (fn ()
-          (define co2 (make-coroutine level2))
+        (def level1 (fn ()
+          (var co2 (make-coroutine level2))
           (yield (coro/resume co2))))
-        (define co1 (make-coroutine level1))
+        (var co1 (make-coroutine level1))
         (coro/resume co1)
         "#,
     );
@@ -403,12 +403,12 @@ fn test_nested_coroutines_multiple_levels() {
 #[test]
 fn test_coroutine_with_captured_variables() {
     // (let ((x 10))
-    //   (define co (make-coroutine (fn () (yield x) (yield (+ x 1)))))
+    //   (var co (make-coroutine (fn () (yield x) (yield (+ x 1)))))
     //   ...)
     let result = eval(
         r#"
         (let ((x 10))
-          (define co (make-coroutine (fn () (yield x))))
+          (var co (make-coroutine (fn () (yield x))))
           (coro/resume co))
         "#,
     );
@@ -421,7 +421,7 @@ fn test_coroutine_with_multiple_captured_variables() {
     let result = eval(
         r#"
         (let ((x 10) (y 20))
-          (define co (make-coroutine (fn () (yield (+ x y)))))
+          (var co (make-coroutine (fn () (yield (+ x y)))))
           (coro/resume co))
         "#,
     );
@@ -434,7 +434,7 @@ fn test_coroutine_captures_mutable_state() {
     let result = eval(
         r#"
         (let ((counter (box 0)))
-          (define co (make-coroutine (fn ()
+          (var co (make-coroutine (fn ()
             (box-set! counter (+ (unbox counter) 1))
             (yield (unbox counter)))))
           (coro/resume co))
@@ -454,12 +454,12 @@ fn test_closure_captured_var_after_resume_issue_258() {
     // across multiple yield/resume cycles.
     let result = eval(
         r#"
-        (define make-counter (fn (start)
+        (def make-counter (fn (start)
           (fn ()
             (yield start)
             (yield (+ start 1))
             (yield (+ start 2)))))
-        (define co-100 (make-coroutine (make-counter 100)))
+        (var co-100 (make-coroutine (make-counter 100)))
         (list
           (coro/resume co-100)
           (coro/resume co-100)
@@ -480,13 +480,13 @@ fn test_interleaved_coroutines_issue_259() {
     // Each coroutine should maintain independent state.
     let result = eval(
         r#"
-        (define make-counter (fn (start)
+        (def make-counter (fn (start)
           (fn ()
             (yield start)
             (yield (+ start 1))
             (yield (+ start 2)))))
-        (define co-100 (make-coroutine (make-counter 100)))
-        (define co-200 (make-coroutine (make-counter 200)))
+        (var co-100 (make-coroutine (make-counter 100)))
+        (var co-200 (make-coroutine (make-counter 200)))
         (list
           (coro/resume co-100)
           (coro/resume co-200)
@@ -504,8 +504,8 @@ fn test_coroutine_status_suspended_after_yield() {
     // Verify coroutine is in Suspended state (not Running) after yield
     let result = eval(
         r#"
-        (define gen (fn () (yield 1) (yield 2)))
-        (define co (make-coroutine gen))
+        (def gen (fn () (yield 1) (yield 2)))
+        (var co (make-coroutine gen))
         (coro/resume co)
         (keyword->string (coro/status co))
         "#,
@@ -523,10 +523,10 @@ fn test_coroutine_state_after_error_during_resume() {
     // the state should transition to Error, not stay Running.
     let result = eval(
         r#"
-        (define bad-gen (fn ()
+        (def bad-gen (fn ()
           (yield 1)
           (/ 1 0)))
-        (define co (make-coroutine bad-gen))
+        (var co (make-coroutine bad-gen))
         (coro/resume co)
         (coro/resume co)
         "#,
@@ -540,10 +540,10 @@ fn test_coroutine_state_error_not_running_after_failure() {
     // After a coroutine fails, its state should be :error, not :running
     let result = eval(
         r#"
-        (define bad-gen (fn ()
+        (def bad-gen (fn ()
           (yield 1)
           (undefined-variable-that-does-not-exist)))
-        (define co (make-coroutine bad-gen))
+        (var co (make-coroutine bad-gen))
         (coro/resume co)
         (let ((f (fiber/new (fn () (coro/resume co)) 1)))
           (fiber/resume f))
@@ -558,10 +558,10 @@ fn test_multiple_coroutines_independent_state() {
     // Multiple coroutines should have completely independent state
     let result = eval(
         r#"
-        (define gen1 (fn () (yield 'a) (yield 'b)))
-        (define gen2 (fn () (yield 'x) (yield 'y)))
-        (define co1 (make-coroutine gen1))
-        (define co2 (make-coroutine gen2))
+        (def gen1 (fn () (yield 'a) (yield 'b)))
+        (def gen2 (fn () (yield 'x) (yield 'y)))
+        (var co1 (make-coroutine gen1))
+        (var co2 (make-coroutine gen2))
         (list
           (coro/status co1)
           (coro/status co2)
@@ -582,12 +582,12 @@ fn test_nested_coroutine_resume_from_coroutine() {
     // and not cause state confusion between the two
     let result = eval(
         r#"
-        (define inner-gen (fn () (yield 10) (yield 20)))
-        (define outer-gen (fn ()
-          (define inner-co (make-coroutine inner-gen))
+        (def inner-gen (fn () (yield 10) (yield 20)))
+        (def outer-gen (fn ()
+          (var inner-co (make-coroutine inner-gen))
           (yield (+ 1 (coro/resume inner-co)))
           (yield (+ 1 (coro/resume inner-co)))))
-        (define outer-co (make-coroutine outer-gen))
+        (var outer-co (make-coroutine outer-gen))
         (list
           (coro/resume outer-co)
           (coro/resume outer-co))
@@ -601,10 +601,10 @@ fn test_coroutine_state_not_stuck_running_on_cps_error() {
     // If error occurs before first yield, state should be :error, not stuck on :running
     let result = eval(
         r#"
-        (define bad-start-gen (fn ()
+        (def bad-start-gen (fn ()
           (+ undefined-at-start 1)
           (yield 1)))
-        (define co (make-coroutine bad-start-gen))
+        (var co (make-coroutine bad-start-gen))
         (let ((f (fiber/new (fn () (coro/resume co)) 1)))
           (fiber/resume f))
         (keyword->string (coro/status co))
@@ -622,7 +622,7 @@ fn test_error_in_coroutine() {
     // Coroutine that throws - should set state to Error
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (/ 1 0))))
+        (var co (make-coroutine (fn () (/ 1 0))))
         (coro/resume co)
         "#,
     );
@@ -634,7 +634,7 @@ fn test_error_in_coroutine_status() {
     // After error, status should be :error keyword
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (/ 1 0))))
+        (var co (make-coroutine (fn () (/ 1 0))))
         (let ((f (fiber/new (fn () (coro/resume co)) 1)))
           (fiber/resume f))
         (keyword->string (coro/status co))
@@ -648,7 +648,7 @@ fn test_cannot_resume_errored_coroutine() {
     // Cannot resume a coroutine that errored
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (/ 1 0))))
+        (var co (make-coroutine (fn () (/ 1 0))))
         (coro/resume co)
         "#,
     );
@@ -664,7 +664,7 @@ fn test_coroutine_predicate() {
     // (coro? val) should return #t for coroutines
     let result = eval(
         r#"
-         (define co (make-coroutine (fn () 42)))
+         (var co (make-coroutine (fn () 42)))
          (list
            (coro? co)
            (coro? 42)
@@ -683,13 +683,13 @@ fn test_coroutine_with_recursion() {
     // Coroutine that uses recursion
     let result = eval(
         r#"
-        (define countdown (fn (n)
+        (def countdown (fn (n)
           (if (<= n 0)
             (yield 0)
             (begin
               (yield n)
               (countdown (- n 1))))))
-        (define co (make-coroutine (fn () (countdown 3))))
+        (var co (make-coroutine (fn () (countdown 3))))
         (coro/resume co)
         "#,
     );
@@ -702,7 +702,7 @@ fn test_coroutine_with_higher_order_functions() {
     // Coroutine that uses map, filter, etc.
     let result = eval_with_stdlib(
         r#"
-        (define co (make-coroutine (fn ()
+        (var co (make-coroutine (fn ()
           (yield (map (fn (x) (* x 2)) (list 1 2 3))))))
          (coro/resume co)
         "#,
@@ -719,7 +719,7 @@ fn test_coroutine_with_no_yield() {
     // Coroutine that never yields
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () 42)))
+        (var co (make-coroutine (fn () 42)))
         (coro/resume co)
         "#,
     );
@@ -731,7 +731,7 @@ fn test_coroutine_with_nil_yield() {
     // Coroutine that yields nil
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (yield nil))))
+        (var co (make-coroutine (fn () (yield nil))))
         (coro/resume co)
         "#,
     );
@@ -743,7 +743,7 @@ fn test_coroutine_with_complex_yielded_value() {
     // Coroutine that yields a complex value
     let result = eval(
         r#"
-        (define co (make-coroutine (fn ()
+        (var co (make-coroutine (fn ()
           (yield (list 1 2 3)))))
         (coro/resume co)
         "#,
@@ -756,7 +756,7 @@ fn test_coroutine_with_empty_body() {
     // Coroutine with empty body (just returns nil)
     let result = eval(
         r#"
-         (define co (make-coroutine (fn () nil)))
+         (var co (make-coroutine (fn () nil)))
          (coro/resume co)
          "#,
     );
@@ -776,8 +776,8 @@ fn test_cps_simple_yield() {
     // This test exercises the CPS path since the closure yields
     let result = eval(
         r#"
-        (define gen (fn () (yield 42)))
-        (define co (make-coroutine gen))
+        (def gen (fn () (yield 42)))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -789,11 +789,11 @@ fn test_cps_yield_in_if() {
     // Yield inside an if expression
     let result = eval(
         r#"
-        (define gen (fn ()
+        (def gen (fn ()
             (if #t
                 (yield 1)
                 (yield 2))))
-        (define co (make-coroutine gen))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -805,11 +805,11 @@ fn test_cps_yield_in_else() {
     // Yield inside else branch
     let result = eval(
         r#"
-        (define gen (fn ()
+        (def gen (fn ()
             (if #f
                 (yield 1)
                 (yield 2))))
-        (define co (make-coroutine gen))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -821,11 +821,11 @@ fn test_cps_yield_in_begin() {
     // Yield inside a begin expression
     let result = eval(
         r#"
-        (define gen (fn ()
+        (def gen (fn ()
             (begin
                 (yield 1)
                 (yield 2))))
-        (define co (make-coroutine gen))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -837,9 +837,9 @@ fn test_cps_yield_with_computation() {
     // Yield a computed value
     let result = eval(
         r#"
-        (define gen (fn ()
+        (def gen (fn ()
             (yield (+ 10 20 12))))
-        (define co (make-coroutine gen))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -851,10 +851,10 @@ fn test_cps_yield_in_let() {
     // Yield inside a let expression
     let result = eval(
         r#"
-        (define gen (fn ()
+        (def gen (fn ()
             (let ((x 10))
                 (yield x))))
-        (define co (make-coroutine gen))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -867,8 +867,8 @@ fn test_cps_yield_with_captured_var() {
     let result = eval(
         r#"
         (let ((x 42))
-            (define gen (fn () (yield x)))
-            (define co (make-coroutine gen))
+            (def gen (fn () (yield x)))
+            (var co (make-coroutine gen))
             (coro/resume co))
         "#,
     );
@@ -880,9 +880,9 @@ fn test_cps_yield_in_and() {
     // Yield inside an and expression
     let result = eval(
         r#"
-        (define gen (fn ()
+        (def gen (fn ()
             (and #t (yield 42))))
-        (define co (make-coroutine gen))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -894,9 +894,9 @@ fn test_cps_yield_in_or() {
     // Yield inside an or expression (short-circuit)
     let result = eval(
         r#"
-        (define gen (fn ()
+        (def gen (fn ()
             (or #f (yield 42))))
-        (define co (make-coroutine gen))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -908,12 +908,12 @@ fn test_cps_yield_in_cond() {
     // Yield inside a cond expression
     let result = eval(
         r#"
-        (define gen (fn ()
+        (def gen (fn ()
             (cond
                 (#f (yield 1))
                 (#t (yield 2))
                 (else (yield 3)))))
-        (define co (make-coroutine gen))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -929,7 +929,7 @@ fn test_coroutine_with_large_yielded_value() {
     // Coroutine that yields a large value
     let result = eval(
         r#"
-        (define co (make-coroutine (fn ()
+        (var co (make-coroutine (fn ()
           (yield (list 1 2 3 4 5 6 7 8 9 10)))))
          (coro/resume co)
          "#,
@@ -942,8 +942,8 @@ fn test_multiple_coroutines_independent() {
     // Multiple independent coroutines
     let result = eval(
         r#"
-         (define co1 (make-coroutine (fn () (yield 1))))
-         (define co2 (make-coroutine (fn () (yield 2))))
+         (var co1 (make-coroutine (fn () (yield 1))))
+         (var co2 (make-coroutine (fn () (yield 2))))
          (list
            (coro/resume co1)
            (coro/resume co2))
@@ -963,8 +963,8 @@ fn test_yield_quoted_symbol_issue_260() {
     // as a value, not attempt to look it up as a variable.
     let result = eval(
         r#"
-        (define gen-sym (fn () (yield 'a) (yield 'b) (yield 'c)))
-        (define co (make-coroutine gen-sym))
+        (def gen-sym (fn () (yield 'a) (yield 'b) (yield 'c)))
+        (var co (make-coroutine gen-sym))
         (list
           (coro/resume co)
           (coro/resume co)
@@ -980,9 +980,9 @@ fn test_yield_quoted_symbol_is_value_not_variable() {
     // tested with symbol? predicate, not variable lookups
     let result = eval(
         r#"
-        (define gen (fn () (yield 'test-symbol)))
-        (define co (make-coroutine gen))
-        (define result (coro/resume co))
+        (def gen (fn () (yield 'test-symbol)))
+        (var co (make-coroutine gen))
+        (var result (coro/resume co))
         (symbol? result)
         "#,
     );
@@ -999,13 +999,13 @@ fn test_yield_various_literal_types() {
     // misinterpreted as variable references
     let result = eval(
         r#"
-        (define gen (fn ()
+        (def gen (fn ()
           (yield 'symbol-val)
           (yield 42)
           (yield "string")
           (yield #t)
           (yield nil)))
-        (define co (make-coroutine gen))
+        (var co (make-coroutine gen))
         (list
           (symbol? (coro/resume co))
           (number? (coro/resume co))
@@ -1022,8 +1022,8 @@ fn test_yield_quoted_list() {
     // Quoted lists should also be yielded as values, not evaluated
     let result = eval(
         r#"
-        (define gen (fn () (yield '(1 2 3))))
-        (define co (make-coroutine gen))
+        (def gen (fn () (yield '(1 2 3))))
+        (var co (make-coroutine gen))
         (coro/resume co)
         "#,
     );
@@ -1041,7 +1041,7 @@ fn test_yield_with_intermediate_values_on_stack() {
     // available after resume to complete the addition.
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (+ 1 (yield 2) 3))))
+        (var co (make-coroutine (fn () (+ 1 (yield 2) 3))))
         (list
           (coro/resume co)
           (coro/resume co 10))
@@ -1060,7 +1060,7 @@ fn test_yield_with_multiple_intermediate_values() {
     // Multiple intermediate values on the stack before yield
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (+ 1 2 (yield 3) 4 5))))
+        (var co (make-coroutine (fn () (+ 1 2 (yield 3) 4 5))))
         (list
           (coro/resume co)
           (coro/resume co 100))
@@ -1082,7 +1082,7 @@ fn test_yield_in_nested_call_with_intermediate_values() {
     // Yield inside a nested call with intermediate values at multiple levels
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (* 2 (+ 1 (yield 5) 3)))))
+        (var co (make-coroutine (fn () (* 2 (+ 1 (yield 5) 3)))))
         (list
           (coro/resume co)
           (coro/resume co 10))
@@ -1104,7 +1104,7 @@ fn test_multiple_yields_with_intermediate_values() {
     // Multiple yields in sequence, each with intermediate values
     let result = eval(
         r#"
-        (define co (make-coroutine (fn ()
+        (var co (make-coroutine (fn ()
           (+ (+ 1 (yield 2) 3)
              (+ 4 (yield 5) 6)))))
         (list
@@ -1165,7 +1165,7 @@ fn test_coroutine_resume_pure_closure_completes_immediately() {
     // A pure closure in a coroutine completes on first resume without yielding
     let result = eval(
         r#"
-        (define co (make-coroutine (fn () (+ 1 2 3))))
+        (var co (make-coroutine (fn () (+ 1 2 3))))
         (list
           (coro/resume co)
           (keyword->string (coro/status co)))
@@ -1195,10 +1195,10 @@ fn test_yield_across_three_call_levels() {
     // When resuming, we pass a value that becomes the yield expression's result
     let result = eval(
         r#"
-        (define a (fn (x) (yield (* x 2))))
-        (define b (fn (x) (+ (a x) 1)))
-        (define c (fn (x) (+ (b x) 1)))
-        (define co (make-coroutine (fn () (c 10))))
+        (def a (fn (x) (yield (* x 2))))
+        (def b (fn (x) (+ (a x) 1)))
+        (def c (fn (x) (+ (b x) 1)))
+        (var co (make-coroutine (fn () (c 10))))
         (list (coro/resume co) (coro/resume co 20))
         "#,
     );
@@ -1215,7 +1215,7 @@ fn test_yield_in_tail_position() {
     // Yield in tail position of coroutine body
     let result = eval(
         r#"
-        (define co (make-coroutine (fn ()
+        (var co (make-coroutine (fn ()
           (yield 1)
           (yield 2))))
         (list
@@ -1234,16 +1234,16 @@ fn test_deep_call_chain_with_multiple_yields() {
     // Multiple yields at different call depths
     let result = eval(
         r#"
-        (define level1 (fn ()
+        (def level1 (fn ()
           (yield 1)
           (level2)))
-        (define level2 (fn ()
+        (def level2 (fn ()
           (yield 2)
           (level3)))
-        (define level3 (fn ()
+        (def level3 (fn ()
           (yield 3)
           "done"))
-        (define co (make-coroutine level1))
+        (var co (make-coroutine level1))
         (list
           (coro/resume co)
           (coro/resume co)

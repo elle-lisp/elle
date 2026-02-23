@@ -80,7 +80,8 @@ pub fn get_completions(
         ("append", SymbolKind::Builtin, "Append lists"),
         // Control flow
         ("if", SymbolKind::Builtin, "Conditional expression"),
-        ("define", SymbolKind::Builtin, "Define variable"),
+        ("def", SymbolKind::Builtin, "Immutable binding"),
+        ("var", SymbolKind::Builtin, "Mutable binding"),
         ("fn", SymbolKind::Builtin, "Create function"),
         ("let", SymbolKind::Builtin, "Local binding"),
         ("begin", SymbolKind::Builtin, "Sequential execution"),

@@ -22,7 +22,7 @@
 ;; All assertions crash with exit code 1 on failure, making examples
 ;; act as contracts for the implementation.
 
-(define assert-eq (fn (actual expected msg)
+(def assert-eq (fn (actual expected msg)
   "Assert that actual equals expected (using = for numbers, eq? for symbols)"
   (let ((matches
     (if (symbol? expected)
@@ -40,15 +40,15 @@
           (display "\n")
           (exit 1))))))
 
-(define assert-true (fn (val msg)
+(def assert-true (fn (val msg)
   "Assert that val is #t"
   (assert-eq val #t msg)))
 
-(define assert-false (fn (val msg)
+(def assert-false (fn (val msg)
   "Assert that val is #f"
   (assert-eq val #f msg)))
 
-(define assert-list-eq (fn (actual expected msg)
+(def assert-list-eq (fn (actual expected msg)
   "Assert that two lists are equal (same length and elements)"
   (if (= (length actual) (length expected))
       ; Check each element - use a simple loop approach
@@ -84,10 +84,10 @@
         (exit 1)))))
 
 ;; Alias for assert-eq (some examples use assert-equal)
-(define assert-equal assert-eq)
+(var assert-equal assert-eq)
 
 ;; Assert that a value is not nil
-(define assert-not-nil (fn (val msg)
+(def assert-not-nil (fn (val msg)
   "Assert that val is not nil"
   (if (not (eq? val nil))
       #t
@@ -100,7 +100,7 @@
         (exit 1)))))
 
 ;; Assert that two strings are equal
-(define assert-string-eq (fn (actual expected msg)
+(def assert-string-eq (fn (actual expected msg)
   "Assert that two strings are equal"
   (if (= actual expected)
       #t

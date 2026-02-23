@@ -81,7 +81,7 @@ jumping to `handler.handler_offset`.
 Coroutines are suspendable computations:
 
 ```lisp
-(define gen (coroutine (fn () (yield 1) (yield 2) 3)))
+(var gen (coroutine (fn () (yield 1) (yield 2) 3)))
 (coro/resume gen)  ; → 1
 (coro/resume gen)  ; → 2
 (coro/resume gen)  ; → 3

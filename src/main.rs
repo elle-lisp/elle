@@ -50,7 +50,8 @@ fn print_help() {
     println!("Special forms:");
     println!("  (if cond then else)  - Conditional");
     println!("  (quote x)            - Quote literal");
-    println!("  (define x 10)        - Define variable");
+    println!("  (def x 10)           - Immutable binding");
+    println!("  (var x 10)           - Mutable binding");
     println!("  (begin ...)          - Sequence");
     println!();
 }

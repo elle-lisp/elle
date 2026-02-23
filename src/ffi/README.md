@@ -8,7 +8,7 @@ and other native code.
 
 ```lisp
 ; Load the C standard library
-(define libc (load-library "libc.so.6"))
+(var libc (load-library "libc.so.6"))
 
 ; Call strlen
 (ffi-call libc "strlen" :string "hello")  ; => 5
@@ -17,7 +17,7 @@ and other native code.
 ## Loading Libraries
 
 ```lisp
-(define lib (load-library "/path/to/library.so"))
+(var lib (load-library "/path/to/library.so"))
 ```
 
 The returned handle is used for all subsequent calls to that library.
@@ -45,12 +45,12 @@ Types are specified as keywords: `:int`, `:double`, `:string`, `:pointer`.
 Define struct layouts for C interop:
 
 ```lisp
-(define point-layout
+(var point-layout
   (ffi-struct "Point"
     (x :int 0)      ; field name, type, offset
     (y :int 4)))
 
-(define p (ffi-alloc point-layout))
+(var p (ffi-alloc point-layout))
 (ffi-set! p :x 10)
 (ffi-set! p :y 20)
 ```
@@ -60,7 +60,7 @@ Define struct layouts for C interop:
 Pass Elle functions to C:
 
 ```lisp
-(define my-callback
+(var my-callback
   (ffi-callback (:int :int -> :int)
     (fn (a b) (+ a b))))
 

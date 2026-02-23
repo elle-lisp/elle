@@ -18,7 +18,7 @@
 
 (display "Example 1a-1: Create a list with list function")
 (newline)
-(define my-list (list 1 2 3 4 5))
+(var my-list (list 1 2 3 4 5))
 (display "List: ")
 (display my-list)
 (newline)
@@ -26,7 +26,7 @@
 
 (display "Example 1a-2: Create a list with cons (head/tail construction)")
 (newline)
-(define cons-list (cons 0 (cons 1 (cons 2 (list)))))
+(var cons-list (cons 0 (cons 1 (cons 2 (list)))))
 (display "List: ")
 (display cons-list)
 (newline)
@@ -143,7 +143,7 @@
 
 (display "Example 1c-1: Build a list incrementally")
 (newline)
-(define built-list 
+(var built-list 
   (cons 1 (cons 2 (cons 3 (cons 4 (cons 5 (list)))))))
 (display "Built with cons: ")
 (display built-list)
@@ -152,8 +152,8 @@
 
 (display "Example 1c-2: Prepending to a list")
 (newline)
-(define original (list 2 3 4 5))
-(define prepended (cons 1 original))
+(var original (list 2 3 4 5))
+(var prepended (cons 1 original))
 (display "Original: ")
 (display original)
 (newline)
@@ -176,12 +176,12 @@
 (newline)
 (display "Manual iteration: (1 + 2 + 3 + 4 + 5)")
 (newline)
-(define num1 1)
-(define num2 2)
-(define num3 3)
-(define num4 4)
-(define num5 5)
-(define manual-sum (+ num1 (+ num2 (+ num3 (+ num4 num5)))))
+(var num1 1)
+(var num2 2)
+(var num3 3)
+(var num4 4)
+(var num5 5)
+(var manual-sum (+ num1 (+ num2 (+ num3 (+ num4 num5)))))
 (display "Sum: ")
 (display manual-sum)
 (newline)
@@ -189,8 +189,8 @@
 
 (display "Example 1d-2: Demonstration of length as iteration")
 (newline)
-(define numbers (list 10 20 30 40 50))
-(define count (length numbers))
+(var numbers (list 10 20 30 40 50))
+(var count (length numbers))
 (display "List: ")
 (display numbers)
 (newline)
@@ -211,7 +211,7 @@
 
 (display "Example 1e-1: Working with data")
 (newline)
-(define data (list 10 20 30 40 50))
+(var data (list 10 20 30 40 50))
 (display "Data: ")
 (display data)
 (newline)
@@ -231,7 +231,7 @@
 
 (display "Example 1e-2: Processing collections")
 (newline)
-(define words (list "hello" "world" "elle"))
+(var words (list "hello" "world" "elle"))
 (display "Words: ")
 (display words)
 (newline)
@@ -258,22 +258,22 @@
 
 (display "Example 1f-1: Multiple transformations")
 (newline)
-(define original-seq (list 1 2 3 4 5 6 7 8 9 10))
+(var original-seq (list 1 2 3 4 5 6 7 8 9 10))
 (display "Original: ")
 (display original-seq)
 (newline)
 
-(define first-5 (take 5 original-seq))
+(var first-5 (take 5 original-seq))
 (display "Take first 5: ")
 (display first-5)
 (newline)
 
-(define reversed-seq (reverse original-seq))
+(var reversed-seq (reverse original-seq))
 (display "Reverse all: ")
 (display reversed-seq)
 (newline)
 
-(define dropped-first-2 (drop 2 original-seq))
+(var dropped-first-2 (drop 2 original-seq))
 (display "Drop first 2: ")
 (display dropped-first-2)
 (newline)
@@ -287,12 +287,12 @@
 
 (display "Example 1f-2: List slicing")
 (newline)
-(define full-list (list 10 20 30 40 50 60 70 80 90 100))
+(var full-list (list 10 20 30 40 50 60 70 80 90 100))
 (display "Full list: ")
 (display full-list)
 (newline)
 
-(define middle (drop 2 (take 7 full-list)))
+(var middle (drop 2 (take 7 full-list)))
 (display "Elements 2-6: ")
 (display middle)
 (newline)
@@ -314,7 +314,7 @@
 
 (display "Example 1g-1: List of lists")
 (newline)
-(define nested (list (list 1 2 3) (list 4 5 6) (list 7 8 9)))
+(var nested (list (list 1 2 3) (list 4 5 6) (list 7 8 9)))
 (display "Nested lists: ")
 (display nested)
 (newline)
@@ -334,9 +334,9 @@
 
 (display "Example 1g-2: Appending nested lists")
 (newline)
-(define list1 (list (list 1 2) (list 3 4)))
-(define list2 (list (list 5 6) (list 7 8)))
-(define combined (append list1 list2))
+(var list1 (list (list 1 2) (list 3 4)))
+(var list2 (list (list 5 6) (list 7 8)))
+(var combined (append list1 list2))
 (display "Combined nested: ")
 (display combined)
 (newline)
@@ -359,9 +359,9 @@
 
 (display "Example 1h-1: Comparing lists")
 (newline)
-(define list-a (list 1 2 3))
-(define list-b (list 1 2 3))
-(define list-c (list 4 5 6))
+(var list-a (list 1 2 3))
+(var list-b (list 1 2 3))
+(var list-c (list 4 5 6))
 (display "List A: ")
 (display list-a)
 (newline)
@@ -385,7 +385,7 @@
 
 (display "Example 1h-2: Extracting subsequences")
 (newline)
-(define data-seq (list 'a 'b 'c 'd 'e 'f 'g))
+(var data-seq (list 'a 'b 'c 'd 'e 'f 'g))
 (display "Full sequence: ")
 (display data-seq)
 (newline)
@@ -418,7 +418,7 @@
 (newline)
 
 ; Create a vector with 5 elements
-(define my-vector (vector 10 20 30 40 50))
+(var my-vector (vector 10 20 30 40 50))
 (display "Created vector: ")
 (display my-vector)
 (newline)
@@ -435,7 +435,7 @@
 (assert-eq (length my-vector) 5 "length returns correct length for vector")
 
 ; Empty vector has length 0
-(define empty-vec (vector))
+(var empty-vec (vector))
 (assert-eq (length empty-vec) 0 "empty vector has length 0")
 (newline)
 
@@ -467,27 +467,27 @@
 (newline)
 
 ; Create a mutable vector
-(define mutable-vec (vector 1 2 3 4 5))
+(var mutable-vec (vector 1 2 3 4 5))
 (display "Original vector: ")
 (display mutable-vec)
 (newline)
 
 ; Modify first element - vector-set! returns a new vector
-(define mutable-vec (vector-set! mutable-vec 0 100))
+(var mutable-vec (vector-set! mutable-vec 0 100))
 (display "After setting index 0 to 100: ")
 (display mutable-vec)
 (newline)
 (assert-eq (vector-ref mutable-vec 0) 100 "vector-set! returns new vector with modified element")
 
 ; Modify middle element
-(define mutable-vec (vector-set! mutable-vec 2 300))
+(var mutable-vec (vector-set! mutable-vec 2 300))
 (display "After setting index 2 to 300: ")
 (display mutable-vec)
 (newline)
 (assert-eq (vector-ref mutable-vec 2) 300 "vector-set! modifies element at index 2")
 
 ; Modify last element
-(define mutable-vec (vector-set! mutable-vec 4 500))
+(var mutable-vec (vector-set! mutable-vec 4 500))
 (display "After setting index 4 to 500: ")
 (display mutable-vec)
 (newline)
@@ -499,8 +499,8 @@
 (newline)
 
 ; Create equivalent list and vector
-(define my-list-2 (list 1 2 3 4 5))
-(define my-vec-2 (vector 1 2 3 4 5))
+(var my-list-2 (list 1 2 3 4 5))
+(var my-vec-2 (vector 1 2 3 4 5))
 
 (display "List: ")
 (display my-list-2)
@@ -535,15 +535,15 @@
 (assert-eq (vector-ref my-vec-2 0) 1 "vector first element")
 
 ; Vectors are mutable, lists are immutable
-(define test-list (list 10 20 30))
-(define test-vec (vector 10 20 30))
+(var test-list (list 10 20 30))
+(var test-vec (vector 10 20 30))
 
 ; Modify vector - vector-set! returns a new vector
-(define test-vec (vector-set! test-vec 1 200))
+(var test-vec (vector-set! test-vec 1 200))
 (assert-eq (vector-ref test-vec 1) 200 "vector mutation works")
 
 ; Lists are immutable - cons creates new list
-(define modified-list (cons 5 test-list))
+(var modified-list (cons 5 test-list))
 (assert-eq (first test-list) 10 "original list unchanged after cons")
 (assert-eq (first modified-list) 5 "cons creates new list")
 (newline)
@@ -553,7 +553,7 @@
 (newline)
 
 ; Create vector with mixed types
-(define mixed-vec (vector 42 "hello" 'symbol))
+(var mixed-vec (vector 42 "hello" 'symbol))
 (display "Mixed type vector: ")
 (display mixed-vec)
 (newline)
@@ -571,8 +571,8 @@
 (newline)
 
 ; The `length` function works on both lists and vectors
-(define list-len (length (list 1 2 3)))
-(define vec-len (length (vector 1 2 3)))
+(var list-len (length (list 1 2 3)))
+(var vec-len (length (vector 1 2 3)))
 
 (display "List length: ")
 (display list-len)

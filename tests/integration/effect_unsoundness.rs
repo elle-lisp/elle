@@ -24,7 +24,7 @@ fn setup() -> (SymbolTable, VM) {
 ///
 /// The code:
 ///   (begin
-///     (define f (fn () 42))      ; f is Pure, stored in effect_env
+///     (var f (fn () 42))      ; f is Pure, stored in effect_env
 ///     (set! f (fn () (yield 1))) ; set! removes f from effect_env
 ///     (f))                       ; f is now unknown global → defaults to Yields
 ///
@@ -33,7 +33,7 @@ fn setup() -> (SymbolTable, VM) {
 fn test_unsound_effect_after_set() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (define f (fn () 42)) (set! f (fn () (yield 1))) (f))",
+        "(begin (var f (fn () 42)) (set! f (fn () (yield 1))) (f))",
         &mut symbols,
         &mut vm,
     )
@@ -61,7 +61,7 @@ fn test_unsound_effect_unknown_global() {
     // map is defined in stdlib, not as a primitive, so it's an unknown global.
     // Unknown globals default to Yields for soundness.
     let result = analyze(
-        "(begin (define gen (fn (x) (yield x))) (map gen (list 1 2 3)))",
+        "(begin (def gen (fn (x) (yield x))) (map gen (list 1 2 3)))",
         &mut symbols,
         &mut vm,
     )

@@ -5,7 +5,7 @@
 ; - If expressions  
 ; - Begin sequences
 
-(define if-loop
+(var if-loop
   (fn (n)
     "Lots of if expressions with literals"
     (if (> n 0)
@@ -15,7 +15,7 @@
         (if-loop (- n 1)))
       0)))
 
-(define nested-conditions
+(var nested-conditions
   (fn (n)
     "Multiple nested if conditions"
     (if (> n 0)
@@ -30,7 +30,7 @@
         (nested-conditions (- n 1)))
       0)))
 
-(define literal-test
+(var literal-test
   (fn (n acc)
     "Simple literal recursion"
     (if (= n 0)

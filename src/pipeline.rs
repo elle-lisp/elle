@@ -29,13 +29,13 @@ pub struct AnalyzeResult {
     pub bindings: HashMap<BindingId, BindingInfo>,
 }
 
-/// Scan an expanded syntax form for `(define name (fn ...))` patterns.
-/// Returns the SymbolId of the name if this is a define-lambda form.
+/// Scan an expanded syntax form for `(var/def name (fn ...))` patterns.
+/// Returns the SymbolId of the name if this is a binding-lambda form.
 fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<SymbolId> {
     if let SyntaxKind::List(items) = &syntax.kind {
         if items.len() >= 3 {
             if let Some(name) = items[0].as_symbol() {
-                if name == "define" || name == "const" {
+                if name == "var" || name == "def" {
                     if let Some(def_name) = items[1].as_symbol() {
                         // Check if value is a lambda form
                         if let SyntaxKind::List(val_items) = &items[2].kind {
@@ -55,13 +55,13 @@ fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<Symb
     None
 }
 
-/// Scan an expanded syntax form for `(const name ...)` patterns.
-/// Returns the SymbolId of the name if this is a const form.
+/// Scan an expanded syntax form for `(def name ...)` patterns.
+/// Returns the SymbolId of the name if this is a def (immutable) form.
 fn scan_const_binding(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<SymbolId> {
     if let SyntaxKind::List(items) = &syntax.kind {
         if items.len() >= 3 {
             if let Some(name) = items[0].as_symbol() {
-                if name == "const" {
+                if name == "def" {
                     if let Some(def_name) = items[1].as_symbol() {
                         return Some(symbols.intern(def_name));
                     }
@@ -148,7 +148,7 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
 ///
 /// Uses fixpoint iteration to correctly infer effects for mutually recursive
 /// top-level defines. The algorithm:
-/// 1. Pre-scan all forms for `(define name (fn ...))` patterns
+/// 1. Pre-scan all forms for `(def name (fn ...))` patterns
 /// 2. Seed `global_effects` with `Effect::none()` for all such defines (optimistic)
 /// 3. Analyze all forms, collecting actual inferred effects
 /// 4. If any effect changed, re-analyze with corrected effects
@@ -166,7 +166,7 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
         expanded_forms.push(expanded);
     }
 
-    // Pre-scan: find all (define name (fn ...)) patterns and seed as Pure
+    // Pre-scan: find all (def name (fn ...)) patterns and seed as Pure
     let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
     for form in &expanded_forms {
         if let Some(sym) = scan_define_lambda(form, symbols) {
@@ -174,7 +174,7 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
         }
     }
 
-    // Pre-scan: find all (const name ...) patterns for immutability tracking
+    // Pre-scan: find all (def name ...) patterns for immutability tracking
     let mut immutable_globals: std::collections::HashSet<SymbolId> =
         std::collections::HashSet::new();
     for form in &expanded_forms {
@@ -313,7 +313,7 @@ pub fn analyze_all(
         expanded_forms.push(expanded);
     }
 
-    // Pre-scan: find all (define name (fn ...)) patterns and seed as Pure
+    // Pre-scan: find all (def name (fn ...)) patterns and seed as Pure
     let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
     for form in &expanded_forms {
         if let Some(sym) = scan_define_lambda(form, symbols) {
@@ -321,7 +321,7 @@ pub fn analyze_all(
         }
     }
 
-    // Pre-scan: find all (const name ...) patterns for immutability tracking
+    // Pre-scan: find all (def name ...) patterns for immutability tracking
     let mut immutable_globals: std::collections::HashSet<SymbolId> =
         std::collections::HashSet::new();
     for form in &expanded_forms {
@@ -848,7 +848,7 @@ mod tests {
     fn test_eval_while_with_mutation() {
         let (mut symbols, mut vm) = setup();
         let result = eval(
-            "(begin (define x 0) (while (< x 5) (set! x (+ x 1))) x)",
+            "(begin (var x 0) (while (< x 5) (set! x (+ x 1))) x)",
             &mut symbols,
             &mut vm,
         );
@@ -918,14 +918,14 @@ mod tests {
     #[test]
     fn test_eval_define_then_use() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(begin (define x 42) x)", &mut symbols, &mut vm);
+        let result = eval("(begin (var x 42) x)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_eval_define_then_set() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(begin (define x 10) (set! x 42) x)", &mut symbols, &mut vm);
+        let result = eval("(begin (var x 10) (set! x 42) x)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
@@ -934,8 +934,8 @@ mod tests {
         let (mut symbols, mut vm) = setup();
         let result = eval(
             "(begin 
-               (define counter 0)
-               (define inc (fn () (set! counter (+ counter 1))))
+               (var counter 0)
+               (def inc (fn () (set! counter (+ counter 1))))
                (inc)
                (inc)
                counter)",
@@ -951,7 +951,7 @@ mod tests {
         let (mut symbols, mut vm) = setup();
         let result = eval(
             "(begin
-               (define fib (fn (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
+               (def fib (fn (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
                (fib 10))",
             &mut symbols,
             &mut vm,
@@ -1012,8 +1012,8 @@ mod tests {
 
         // Test with (list 1) - should work
         let code1 = r#"(begin
-            (define process (fn (acc x) (begin (define doubled (* x 2)) (+ acc doubled))))
-            (define my-fold (fn (f init lst)
+            (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
+            (def my-fold (fn (f init lst)
                 (if (nil? lst)
                     init
                     (my-fold f (f init (first lst)) (rest lst)))))
@@ -1025,8 +1025,8 @@ mod tests {
         // Test with (list 1 2) - might fail
         let (mut symbols2, mut vm2) = setup();
         let code2 = r#"(begin
-            (define process (fn (acc x) (begin (define doubled (* x 2)) (+ acc doubled))))
-            (define my-fold (fn (f init lst)
+            (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
+            (def my-fold (fn (f init lst)
                 (if (nil? lst)
                     init
                     (my-fold f (f init (first lst)) (rest lst)))))
@@ -1038,8 +1038,8 @@ mod tests {
         // Test with (list 1 2 3) - original failing case
         let (mut symbols3, mut vm3) = setup();
         let code3 = r#"(begin
-            (define process (fn (acc x) (begin (define doubled (* x 2)) (+ acc doubled))))
-            (define my-fold (fn (f init lst)
+            (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
+            (def my-fold (fn (f init lst)
                 (if (nil? lst)
                     init
                     (my-fold f (f init (first lst)) (rest lst)))))
@@ -1063,7 +1063,7 @@ mod tests {
     #[test]
     fn test_analyze_define() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(define x 10)", &mut symbols, &mut vm);
+        let result = analyze("(var x 10)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
         assert!(matches!(
@@ -1114,8 +1114,8 @@ mod tests {
         // when they only call each other and pure primitives
         let (mut symbols, _) = setup();
         let source = r#"
-(define f (fn (x) (if (= x 0) 1 (g (- x 1)))))
-(define g (fn (x) (if (= x 0) 2 (f (- x 1)))))
+(def f (fn (x) (if (= x 0) 1 (g (- x 1)))))
+(def g (fn (x) (if (= x 0) 2 (f (- x 1)))))
 "#;
         let results = compile_all(source, &mut symbols);
         assert!(results.is_ok(), "Compilation should succeed");
@@ -1130,8 +1130,8 @@ mod tests {
         // Test that mutually recursive functions execute correctly
         let (mut symbols, mut vm) = setup();
         let source = r#"
-(define f (fn (x) (if (= x 0) 1 (g (- x 1)))))
-(define g (fn (x) (if (= x 0) 2 (f (- x 1)))))
+(def f (fn (x) (if (= x 0) 1 (g (- x 1)))))
+(def g (fn (x) (if (= x 0) 2 (f (- x 1)))))
 (f 5)
 "#;
         let results = compile_all(source, &mut symbols);
@@ -1152,8 +1152,8 @@ mod tests {
         // Test that mutually recursive functions are inferred as Pure
         let (mut symbols, _) = setup();
         let source = r#"
-(define f (fn (x) (if (= x 0) 1 (g (- x 1)))))
-(define g (fn (x) (if (= x 0) 2 (f (- x 1)))))
+(def f (fn (x) (if (= x 0) 1 (g (- x 1)))))
+(def g (fn (x) (if (= x 0) 2 (f (- x 1)))))
 "#;
         let results = compile_all(source, &mut symbols);
         assert!(results.is_ok(), "Compilation should succeed");
@@ -1179,7 +1179,7 @@ mod tests {
         // Test that the nqueens functions are inferred as Pure
         let (mut symbols, _) = setup();
         let source = r#"
-(define check-safe-helper
+(var check-safe-helper
   (fn (col remaining row-offset)
     (if (empty? remaining)
       #t
@@ -1189,11 +1189,11 @@ mod tests {
           #f
           (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
 
-(define safe?
+(var safe?
   (fn (col queens)
     (check-safe-helper col queens 1)))
 
-(define try-cols-helper
+(var try-cols-helper
   (fn (n col queens row)
     (if (= col n)
       (list)
@@ -1203,7 +1203,7 @@ mod tests {
                   (try-cols-helper n (+ col 1) queens row)))
         (try-cols-helper n (+ col 1) queens row)))))
 
-(define solve-helper
+(var solve-helper
   (fn (n row queens)
     (if (= row n)
       (list (reverse queens))
@@ -1351,7 +1351,7 @@ mod tests {
         let (mut symbols, mut vm) = setup();
         let result = eval(
             r#"(begin
-                 (define (inner) (fiber/signal 2 99))
+                 (def (inner) (fiber/signal 2 99))
                  (let ((f (fiber/new (fn () (inner) 42) 2)))
                    (fiber/resume f)
                    (fiber/value f)))"#,
@@ -1381,14 +1381,14 @@ mod tests {
     #[test]
     fn test_const_basic() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(begin (const x 42) x)", &mut symbols, &mut vm);
+        let result = eval("(begin (def x 42) x)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_const_set_error() {
         let (mut symbols, _) = setup();
-        let result = compile("(begin (const x 42) (set! x 99))", &mut symbols);
+        let result = compile("(begin (def x 42) (set! x 99))", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
     }
@@ -1397,7 +1397,7 @@ mod tests {
     fn test_const_function() {
         let (mut symbols, mut vm) = setup();
         let result = eval(
-            "(begin (const (add1 x) (+ x 1)) (add1 10))",
+            "(begin (def (add1 x) (+ x 1)) (add1 10))",
             &mut symbols,
             &mut vm,
         );
@@ -1407,7 +1407,7 @@ mod tests {
     #[test]
     fn test_const_function_set_error() {
         let (mut symbols, _) = setup();
-        let result = compile("(begin (const (f x) x) (set! f 99))", &mut symbols);
+        let result = compile("(begin (def (f x) x) (set! f 99))", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
     }
@@ -1415,7 +1415,7 @@ mod tests {
     #[test]
     fn test_const_cross_form_set_error() {
         let (mut symbols, _) = setup();
-        let result = compile_all("(const x 42)\n(set! x 99)", &mut symbols);
+        let result = compile_all("(def x 42)\n(set! x 99)", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
     }
@@ -1423,7 +1423,7 @@ mod tests {
     #[test]
     fn test_const_cross_form_reference() {
         let (mut symbols, mut vm) = setup();
-        let results = compile_all("(const x 42)\n(+ x 1)", &mut symbols);
+        let results = compile_all("(def x 42)\n(+ x 1)", &mut symbols);
         assert!(results.is_ok());
         let results = results.unwrap();
         for result in &results {
@@ -1434,14 +1434,14 @@ mod tests {
     #[test]
     fn test_const_in_function_scope() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("((fn () (const x 42) x))", &mut symbols, &mut vm);
+        let result = eval("((fn () (def x 42) x))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_const_in_function_set_error() {
         let (mut symbols, _) = setup();
-        let result = compile("((fn () (const x 42) (set! x 99)))", &mut symbols);
+        let result = compile("((fn () (def x 42) (set! x 99)))", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
     }

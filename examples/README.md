@@ -84,7 +84,7 @@ When creating a new example:
 
 1. **Define assertion helpers** at the top:
 ```lisp
-(define assert-eq (fn (actual expected msg)
+(def assert-eq (fn (actual expected msg)
   (let ((matches
     (if (symbol? expected)
         (eq? actual expected)
@@ -100,7 +100,7 @@ When creating a new example:
 
 2. **Add assertions** after each example:
 ```lisp
-(define result (+ 1 2))
+(var result (+ 1 2))
 (assert-eq result 3 "1 + 2 = 3")
 ```
 

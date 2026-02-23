@@ -384,14 +384,14 @@ fn test_let_parallel_binding() {
 #[test]
 fn test_let_parallel_binding_shadowing() {
     // y should see the OUTER x (999), not the inner x (10)
-    let result = eval("(begin (define x 999) (let ((x 10) (y x)) y))").unwrap();
+    let result = eval("(begin (var x 999) (let ((x 10) (y x)) y))").unwrap();
     assert_eq!(result, Value::int(999));
 }
 
 #[test]
 fn test_let_star_sequential_binding() {
     // let*: y should see the inner x (10)
-    let result = eval("(begin (define x 999) (let* ((x 10) (y x)) y))").unwrap();
+    let result = eval("(begin (var x 999) (let* ((x 10) (y x)) y))").unwrap();
     assert_eq!(result, Value::int(10));
 }
 

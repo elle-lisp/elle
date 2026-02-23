@@ -5,7 +5,7 @@ use crate::vm::VM;
 /// Define time utility functions in Elle
 pub fn define_time_functions(vm: &mut VM, symbols: &mut SymbolTable) {
     let stopwatch_code = r#"
-        (define time/stopwatch (fn ()
+        (def time/stopwatch (fn ()
           (coro/new (fn ()
             (let ((start (clock/monotonic)))
               (while #t
@@ -13,7 +13,7 @@ pub fn define_time_functions(vm: &mut VM, symbols: &mut SymbolTable) {
     "#;
 
     let elapsed_code = r#"
-        (define time/elapsed (fn (thunk)
+        (def time/elapsed (fn (thunk)
           (let ((start (clock/monotonic)))
             (let ((result (thunk)))
               (list result (- (clock/monotonic) start))))))

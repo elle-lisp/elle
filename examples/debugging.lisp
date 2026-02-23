@@ -9,8 +9,8 @@
 
 (display "--- Introspection ---\n")
 
-(define (add x y) (+ x y))
-(define (identity x) x)
+(def (add x y) (+ x y))
+(def (identity x) x)
 
 ;; closure? predicate
 (assert-true (closure? add) "add is a closure")
@@ -31,9 +31,9 @@
 (display "  ✓ arity\n")
 
 ;; captures
-(define x 10)
-(define (make-adder n) (fn (x) (+ x n)))
-(define add5 (make-adder 5))
+(var x 10)
+(def (make-adder n) (fn (x) (+ x n)))
+(var add5 (make-adder 5))
 (assert-eq (captures add) 0 "add captures nothing")
 (assert-eq (captures add5) 1 "add5 captures one variable")
 (display "  ✓ captures\n")
@@ -44,13 +44,13 @@
 (display "  ✓ bytecode-size\n")
 
 ;; disbit - bytecode disassembly
-(define disasm-result (disbit add))
+(var disasm-result (disbit add))
 (assert-true (> (length disasm-result) 0) "disbit returns non-empty vector")
 (assert-true (string? (vector-ref disasm-result 0)) "disbit elements are strings")
 (display "  ✓ disbit\n")
 
 ;; disjit - Cranelift IR (may be nil if no LIR stored)
-(define jit-result (disjit add))
+(var jit-result (disjit add))
 ;; disjit returns nil or a vector of strings
 (assert-true (or (nil? jit-result)
                  (and (> (length jit-result) 0)

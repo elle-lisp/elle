@@ -27,32 +27,32 @@
 (newline)
 
 ;; Identity function - returns its argument unchanged
-(define identity (fn (x) x))
+(def identity (fn (x) x))
 (display "Identity function: (identity 42) = ")
 (display (identity 42))
 (newline)
 
 ;; Addition function - adds two numbers
-(define add (fn (x y) (+ x y)))
+(def add (fn (x y) (+ x y)))
 (display "Addition function: (add 5 3) = ")
 (display (add 5 3))
 (newline)
 
 ;; Doubling function - multiplies by 2
-(define double (fn (x) (* x 2)))
+(def double (fn (x) (* x 2)))
 (display "Doubling function: (double 21) = ")
 (display (double 21))
 (newline)
 
 ;; Absolute value function
-(define abs-val (fn (x)
+(def abs-val (fn (x)
   (if (< x 0) (- x) x)))
 (display "Absolute value: (abs-val -15) = ")
 (display (abs-val -15))
 (newline)
 
 ;; Maximum of two values
-(define max-of-two (fn (x y)
+(def max-of-two (fn (x y)
   (if (> x y) x y)))
 (display "Maximum of two: (max-of-two 10 25) = ")
 (display (max-of-two 10 25))
@@ -76,22 +76,22 @@
 (newline)
 
 ;; Create a closure that captures the outer variable 'base'
-(define base 100)
-(define add-to-base (fn (x) (+ base x)))
+(var base 100)
+(def add-to-base (fn (x) (+ base x)))
 (display "Closure capturing 'base' (100): (add-to-base 50) = ")
 (display (add-to-base 50))
 (newline)
 
 ;; Multiple variables captured from outer scope
-(define multiplier 2)
-(define compute (fn (x) (+ base (* multiplier x))))
+(var multiplier 2)
+(def compute (fn (x) (+ base (* multiplier x))))
 (display "Capturing 'base' and 'multiplier': (compute 25) = ")
 (display (compute 25))
 (newline)
 
 ;; Captured value changes persist in closure
-(define offset 10)
-(define apply-offset (fn (x) (+ offset x)))
+(var offset 10)
+(def apply-offset (fn (x) (+ offset x)))
 (display "With offset 10: (apply-offset 5) = ")
 (display (apply-offset 5))
 (newline)
@@ -107,21 +107,21 @@
 (newline)
 
 ;; Create specialized functions that work together
-(define add-one (fn (x) (+ x 1)))
-(define times-two (fn (x) (* x 2)))
+(def add-one (fn (x) (+ x 1)))
+(def times-two (fn (x) (* x 2)))
 
 ;; Apply functions in sequence
-(define x-value 5)
+(var x-value 5)
 (display "Starting value: ")
 (display x-value)
 (newline)
 
-(define after-add-one (add-one x-value))
+(var after-add-one (add-one x-value))
 (display "After add-one: ")
 (display after-add-one)
 (newline)
 
-(define after-times-two (times-two after-add-one))
+(var after-times-two (times-two after-add-one))
 (display "Then times-two: ")
 (display after-times-two)
 (newline)
@@ -143,10 +143,10 @@
 (newline)
 
 ;; Create predicates (functions returning boolean)
-(define is-positive (fn (x) (> x 0)))
-(define is-negative (fn (x) (< x 0)))
-(define is-zero (fn (x) (= x 0)))
-(define is-even (fn (x) (= (mod x 2) 0)))
+(def is-positive (fn (x) (> x 0)))
+(def is-negative (fn (x) (< x 0)))
+(def is-zero (fn (x) (= x 0)))
+(def is-even (fn (x) (= (mod x 2) 0)))
 
 (display "is-positive(5) = ")
 (display (is-positive 5))
@@ -186,18 +186,18 @@
 (newline)
 
 ;; List manipulation functions
-(define list-sum (fn (lst)
+(def list-sum (fn (lst)
   (if (= (length lst) 0)
     0
     (+ (first lst) (list-sum (rest lst))))))
 
-(define my-list (list 1 2 3 4 5))
+(var my-list (list 1 2 3 4 5))
 (display "Sum of list: ")
 (display (list-sum my-list))
 (newline)
 
 ;; List length counter
-(define list-count (fn (lst)
+(def list-count (fn (lst)
   (if (= (length lst) 0)
     0
     (+ 1 (list-count (rest lst))))))
@@ -207,7 +207,7 @@
 (newline)
 
 ;; List doubler
-(define double-all (fn (lst)
+(def double-all (fn (lst)
   (if (= (length lst) 0)
     (list)
     (cons (* 2 (first lst)) (double-all (rest lst))))))
@@ -217,7 +217,7 @@
 (newline)
 
 ;; Find maximum in list
-(define find-max (fn (lst)
+(def find-max (fn (lst)
   (if (= (length lst) 1)
     (first lst)
     (max-of-two (first lst) (find-max (rest lst))))))
@@ -242,9 +242,9 @@
 (newline)
 
 ;; Each closure has its own captured environment
-(define outer-base 42)
-(define closure-1 (fn (x) (+ outer-base x)))
-(define closure-2 (fn (x) (* outer-base x)))
+(var outer-base 42)
+(def closure-1 (fn (x) (+ outer-base x)))
+(def closure-2 (fn (x) (* outer-base x)))
 
 (display "Both closures capture outer-base (42)")
 (newline)
@@ -258,11 +258,11 @@
 (newline)
 
 ;; Multiple closures with different captured context
-(define threshold-1 50)
-(define above-50 (fn (x) (> x threshold-1)))
+(var threshold-1 50)
+(def above-50 (fn (x) (> x threshold-1)))
 
-(define threshold-2 100)
-(define above-100 (fn (x) (> x threshold-2)))
+(var threshold-2 100)
+(def above-100 (fn (x) (> x threshold-2)))
 
 (display "Is 75 above 50? ")
 (display (above-50 75))
@@ -289,10 +289,10 @@
 (newline)
 
 ;; Outer and inner scopes
-(define outer-x 10)
+(var outer-x 10)
 
 ;; This closure shadows the outer-x with its parameter
-(define shadow-test (fn (outer-x)
+(def shadow-test (fn (outer-x)
   (+ outer-x 5)))
 
 (display "Outer outer-x: 10")
@@ -303,7 +303,7 @@
 (newline)
 
 ;; The original outer-x is unchanged
-(define use-outer (fn (y)
+(def use-outer (fn (y)
   (+ outer-x y)))
 
 (display "use-outer still sees original: (use-outer 15) = ")
@@ -325,22 +325,22 @@
 (newline)
 
 ;; Environment variables are accessed from closure scope
-(define env-var 30)
-(define uses-env (fn (x) (+ env-var x)))
+(var env-var 30)
+(def uses-env (fn (x) (+ env-var x)))
 (display "Environment variable capture: (uses-env 20) = ")
 (display (uses-env 20))
 (newline)
 
 ;; Parameters are local to the function
-(define add-params (fn (a b c)
+(def add-params (fn (a b c)
   (+ a b c)))
 (display "Function parameters: (add-params 10 20 30) = ")
 (display (add-params 10 20 30))
 (newline)
 
 ;; Both parameters and environment variables work together
-(define mixed-context 50)
-(define mixed-func (fn (param)
+(var mixed-context 50)
+(def mixed-func (fn (param)
   (+ mixed-context param)))
 (display "Mixed (env + param): (mixed-func 10) = ")
 (display (mixed-func 10))
@@ -362,7 +362,7 @@
 (newline)
 
 ;; Complex conditional logic
-(define classify (fn (n)
+(def classify (fn (n)
   (if (< n 0)
     "negative"
     (if (= n 0)
@@ -411,8 +411,8 @@
 (newline)
 
 ;; Template pattern - parameterized function behavior
-(define threshold 10)
-(define filter-above (fn (lst)
+(var threshold 10)
+(def filter-above (fn (lst)
   (if (= (length lst) 0)
     (list)
     (if (> (first lst) threshold)
@@ -424,9 +424,9 @@
 (newline)
 
 ;; String builder with captured parts
-(define greeting-start "Hello")
-(define greeting-end "!")
-(define make-greeting (fn (name)
+(var greeting-start "Hello")
+(var greeting-end "!")
+(def make-greeting (fn (name)
   (string-append greeting-start ", " name greeting-end)))
 
 (display "Greeting: ")
@@ -453,15 +453,15 @@
 
 ;; Before Phase 4, define inside fn didn't work properly.
 ;; Now local variables are stored as cells in the closure environment.
-(define compute
+(var compute
   (fn ()
     (begin
-      (define x 10)
-      (define y 20)
+      (var x 10)
+      (var y 20)
       (+ x y))))
 
 (display "Local variables: (compute) = ")
-(define result1 (compute))
+(var result1 (compute))
 (display result1)
 (newline)
 (assert-eq result1 30 "Local variables should compute to 30")
@@ -477,15 +477,15 @@
 (newline)
 
 ;; set! now works on locally-defined variables inside fn bodies
-(define mutate-test
+(var mutate-test
   (fn ()
     (begin
-      (define x 0)
+      (var x 0)
       (set! x 42)
       x)))
 
 (display "set! mutation: (mutate-test) = ")
-(define result2 (mutate-test))
+(var result2 (mutate-test))
 (display result2)
 (newline)
 (assert-eq result2 42 "set! mutation should result in 42")
@@ -501,16 +501,16 @@
 (newline)
 
 ;; A locally-defined variable can be captured by a nested fn
-(define make-adder
+(var make-adder
   (fn (base)
     (begin
-      (define offset 10)
+      (var offset 10)
       (fn (x) (+ base offset x)))))
 
-(define add-with-offset (make-adder 100))
+(var add-with-offset (make-adder 100))
 
 (display "Nested capture: (add-with-offset 5) = ")
-(define result3 (add-with-offset 5))
+(var result3 (add-with-offset 5))
 (display result3)
 (newline)
 (assert-eq result3 115 "Nested capture should result in 115")
@@ -527,25 +527,25 @@
 
 ;; The classic closure counter pattern: a factory that returns
 ;; a closure sharing mutable state via a cell
-(define make-counter
+(var make-counter
   (fn ()
     (begin
-      (define count 0)
+      (var count 0)
       (fn ()
         (begin
           (set! count (+ count 1))
           count)))))
 
-(define counter (make-counter))
+(var counter (make-counter))
 
 (display "Counter sequence: ")
-(define c1-val1 (counter))
+(var c1-val1 (counter))
 (display c1-val1)
 (display " ")
-(define c1-val2 (counter))
+(var c1-val2 (counter))
 (display c1-val2)
 (display " ")
-(define c1-val3 (counter))
+(var c1-val3 (counter))
 (display c1-val3)
 (newline)
 (assert-eq c1-val1 1 "First counter call should be 1")
@@ -563,21 +563,21 @@
 (newline)
 
 ;; Each call to make-counter creates independent state
-(define c1 (make-counter))
-(define c2 (make-counter))
+(var c1 (make-counter))
+(var c2 (make-counter))
 
 (display "c1 sequence: ")
-(define c1-a (c1))
+(var c1-a (c1))
 (display c1-a)
 (display " ")
-(define c1-b (c1))
+(var c1-b (c1))
 (display c1-b)
 (newline)
 (assert-eq c1-a 1 "c1 first call should be 1")
 (assert-eq c1-b 2 "c1 second call should be 2")
 
 (display "c2 sequence: ")
-(define c2-a (c2))
+(var c2-a (c2))
 (display c2-a)
 (newline)
 (assert-eq c2-a 1 "c2 first call should be 1 (independent)")
@@ -593,25 +593,25 @@
 (newline)
 
 ;; An accumulator that adds values to a running total
-(define make-accumulator
+(var make-accumulator
   (fn (initial)
     (begin
-      (define total initial)
+      (var total initial)
       (fn (amount)
         (begin
           (set! total (+ total amount))
           total)))))
 
-(define acc (make-accumulator 100))
+(var acc (make-accumulator 100))
 
 (display "Accumulator sequence: ")
-(define acc1 (acc 10))
+(var acc1 (acc 10))
 (display acc1)
 (display " ")
-(define acc2 (acc 20))
+(var acc2 (acc 20))
 (display acc2)
 (display " ")
-(define acc3 (acc 5))
+(var acc3 (acc 5))
 (display acc3)
 (newline)
 (assert-eq acc1 110 "Accumulator first call should be 110")
@@ -630,11 +630,11 @@
 
 ;; This was the original bug from issue #106:
 ;; set! inside a fn body used to fail with "Undefined global variable"
-(define sum-to-n
+(var sum-to-n
   (fn (n)
     (begin
-      (define result 0)
-      (define i 1)
+      (var result 0)
+      (var i 1)
       (while (<= i n)
         (begin
           (set! result (+ result i))
@@ -642,7 +642,7 @@
       result)))
 
 (display "Sum 1..10: ")
-(define sum-result (sum-to-n 10))
+(var sum-result (sum-to-n 10))
 (display sum-result)
 (newline)
 (assert-eq sum-result 55 "Sum 1..10 should be 55")
@@ -660,20 +660,20 @@
 ;; A pair of closures that share the same mutable cell
 ;; (getter and setter pattern)
 ;; We return multiple closures from one factory using a list.
-(define make-box
+(var make-box
   (fn (initial)
     (begin
-      (define value initial)
+      (var value initial)
       (list
         (fn () value)                          ;; getter
         (fn (new-val) (set! value new-val))))))  ;; setter
 
-(define box (make-box 0))
-(define box-get (first box))
-(define box-set (first (rest box)))
+(var box (make-box 0))
+(var box-get (first box))
+(var box-set (first (rest box)))
 
 (display "Box initial: ")
-(define box-initial (box-get))
+(var box-initial (box-get))
 (display box-initial)
 (newline)
 (assert-eq box-initial 0 "Box initial value should be 0")
@@ -681,7 +681,7 @@
 (box-set 42)
 
 (display "Box after set: ")
-(define box-after (box-get))
+(var box-after (box-get))
 (display box-after)
 (newline)
 (assert-eq box-after 42 "Box after set should be 42")
@@ -752,7 +752,7 @@
 (newline)
 
 ;; Define a recursive Fibonacci function
-(define fib (fn (n)
+(def fib (fn (n)
   (if (= n 0)
     0
     (if (= n 1)
@@ -807,8 +807,8 @@
 (newline)
 (newline)
 
-(define fib-acc (fn (n)
-  (define helper (fn (n acc1 acc2)
+(def fib-acc (fn (n)
+  (def helper (fn (n acc1 acc2)
     (if (= n 0)
       acc1
       (helper (- n 1) acc2 (+ acc1 acc2)))))
@@ -840,7 +840,7 @@
 (newline)
 (newline)
 
-(define factorial (fn (n)
+(def factorial (fn (n)
   (if (= n 0)
     1
     (* n (factorial (- n 1))))))
@@ -863,13 +863,13 @@
 (newline)
 (newline)
 
-(define is-even
+(var is-even
   (fn (n)
     (if (= n 0)
       #t
       (is-odd (- n 1)))))
 
-(define is-odd
+(var is-odd
   (fn (n)
     (if (= n 0)
       #f
@@ -914,9 +914,9 @@
 (newline)
 (newline)
 
-(define run-factorial (fn (n)
+(def run-factorial (fn (n)
   (begin
-    (define fact (fn (x) (if (= x 0) 1 (* x (fact (- x 1))))))
+    (def fact (fn (x) (if (= x 0) 1 (* x (fact (- x 1))))))
     (fact n))))
 
 (display "Factorial of 6 (nested): ")
@@ -931,8 +931,8 @@
 (newline)
 
 ;; Mutual recursion with nested definitions requires letrec
-;; (define does not support forward references)
-(define run-even-odd (fn ()
+;; (var does not support forward references)
+(def run-even-odd (fn ()
   (letrec ((is-even-local (fn (n) (if (= n 0) #t (is-odd-local (- n 1)))))
            (is-odd-local (fn (n) (if (= n 0) #f (is-even-local (- n 1))))))
     (is-even-local 8))))
@@ -954,7 +954,7 @@
 (newline)
 (newline)
 
-(define count-down-a
+(var count-down-a
   (fn (n)
     (if (= n 0)
       (display "A: Done!")
@@ -964,7 +964,7 @@
         (newline)
         (count-down-b (- n 1))))))
 
-(define count-down-b
+(var count-down-b
   (fn (n)
     (if (= n 0)
       (display "B: Done!")
@@ -986,7 +986,7 @@
 (newline)
 (newline)
 
-(define process-words
+(var process-words
   (fn (words)
     (if (= (length words) 0)
       ""
@@ -995,7 +995,7 @@
         " "
         (process-separators (rest words))))))
 
-(define process-separators
+(var process-separators
   (fn (words)
     (if (= (length words) 0)
       ""
@@ -1016,11 +1016,11 @@
 (newline)
 (newline)
 
-(define factorial-mutual
+(var factorial-mutual
   (fn (n)
     (factorial-helper-mutual n 1)))
 
-(define factorial-helper-mutual
+(var factorial-helper-mutual
   (fn (n acc)
     (if (= n 0)
       acc
@@ -1048,19 +1048,19 @@
 (newline)
 (newline)
 
-(define func-a
+(var func-a
   (fn (n)
     (if (= n 0)
       "A-done"
       (func-b (- n 1)))))
 
-(define func-b
+(var func-b
   (fn (n)
     (if (= n 0)
       "B-done"
       (func-c (- n 1)))))
 
-(define func-c
+(var func-c
   (fn (n)
     (if (= n 0)
       "C-done"
@@ -1089,11 +1089,11 @@
 (newline)
 (newline)
 
-(define separate-numbers
+(var separate-numbers
   (fn (nums)
     (separate-helper-nums nums (list) (list))))
 
-(define separate-helper-nums
+(var separate-helper-nums
   (fn (nums evens odds)
     (if (= (length nums) 0)
       (list evens odds)
@@ -1103,7 +1103,7 @@
 
 (display "Input: (1 2 3 4 5 6)")
 (newline)
-(define separated (separate-numbers (list 1 2 3 4 5 6)))
+(var separated (separate-numbers (list 1 2 3 4 5 6)))
 (display "Evens: ")
 (display (first separated))
 (newline)
@@ -1125,13 +1125,13 @@
 (newline)
 (newline)
 
-(define step-x
+(var step-x
   (fn (n)
     (if (= n 0)
       "X"
       (step-y (- n 1)))))
 
-(define step-y
+(var step-y
   (fn (n)
     (if (= n 0)
       "Y"

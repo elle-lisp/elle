@@ -461,7 +461,7 @@ simple Copy pair.
 The programmer can declare effects on functions:
 
 ```lisp
-(define (query db sql)
+(def (query db sql)
   (declare (effects :io :raises))
   ...)
 ```
@@ -469,7 +469,7 @@ The programmer can declare effects on functions:
 And effect bounds on parameters:
 
 ```lisp
-(define (fast-map f xs)
+(def (fast-map f xs)
   (declare (param-effects f (not :yields :io)))
   ...)
 ```
@@ -603,15 +603,15 @@ The compiler's effect information guides JIT decisions:
 ### Effect Declarations
 
 ```lisp
-(define (pure-add x y)
+(def (pure-add x y)
   (declare (effects))           ;; no effects — pure
   (+ x y))
 
-(define (may-fail x)
+(def (may-fail x)
   (declare (effects :raises))   ;; may raise, nothing else
   (/ 1 x))
 
-(define (callback-must-be-pure f xs)
+(def (callback-must-be-pure f xs)
   (declare (param-effects f ())) ;; f must have no effects
   (map f xs))
 ```
@@ -694,7 +694,7 @@ don't resume. No special syntax or VM support is needed.
 
 ```lisp
 ;; The callee: signals with available recovery options
-(define (safe-divide a b)
+(def (safe-divide a b)
   (if (= b 0)
     (fiber/signal :error
       (table :error :division-by-zero
@@ -702,7 +702,7 @@ don't resume. No special syntax or VM support is needed.
     (/ a b)))
 
 ;; The handler: catches the signal, picks a recovery option
-(define (compute)
+(def (compute)
   (let ((f (fiber/new (fn () (safe-divide 10 0)) :error)))
     (let ((result (fiber/resume f nil)))
       (if (= (fiber/status f) :suspended)
