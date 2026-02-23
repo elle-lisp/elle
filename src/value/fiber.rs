@@ -162,7 +162,8 @@ pub const SIG_QUERY: SignalBits = 1 << 7; // VM state query (VM-internal)
 // The VM dispatch loop checks all bits. User code only sees
 // bits 0-2 and 16-31. Bits 3-15 are internal.
 
-/// Fiber status. Matches Janet's model.
+/// Fiber lifecycle status. Diverges from Janet: caught SIG_ERROR leaves
+/// fiber Suspended (resumable), not Error. See vm/fiber.rs for details.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FiberStatus {
     /// Not yet started (has closure but hasn't been resumed)
