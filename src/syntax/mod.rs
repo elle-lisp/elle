@@ -291,9 +291,12 @@ mod tests {
     #[test]
     fn test_expander_no_macros() {
         let mut expander = Expander::new();
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let mut vm = crate::vm::VM::new();
+        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 5, 1, 1);
         let syntax = Syntax::new(SyntaxKind::Int(42), span);
-        let result = expander.expand(syntax.clone());
+        let result = expander.expand(syntax.clone(), &mut symbols, &mut vm);
         assert!(result.is_ok());
         let expanded = result.unwrap();
         assert_eq!(expanded.to_string(), "42");
@@ -302,6 +305,9 @@ mod tests {
     #[test]
     fn test_expander_expand_list() {
         let mut expander = Expander::new();
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let mut vm = crate::vm::VM::new();
+        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 10, 1, 1);
         let items = vec![
             Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
@@ -309,7 +315,7 @@ mod tests {
             Syntax::new(SyntaxKind::Int(2), span.clone()),
         ];
         let syntax = Syntax::new(SyntaxKind::List(items), span);
-        let result = expander.expand(syntax);
+        let result = expander.expand(syntax, &mut symbols, &mut vm);
         assert!(result.is_ok());
         let expanded = result.unwrap();
         assert_eq!(expanded.to_string(), "(+ 1 2)");
@@ -318,13 +324,16 @@ mod tests {
     #[test]
     fn test_expander_expand_vector() {
         let mut expander = Expander::new();
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let mut vm = crate::vm::VM::new();
+        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 10, 1, 1);
         let items = vec![
             Syntax::new(SyntaxKind::Int(1), span.clone()),
             Syntax::new(SyntaxKind::Int(2), span.clone()),
         ];
         let syntax = Syntax::new(SyntaxKind::Vector(items), span);
-        let result = expander.expand(syntax);
+        let result = expander.expand(syntax, &mut symbols, &mut vm);
         assert!(result.is_ok());
         let expanded = result.unwrap();
         assert_eq!(expanded.to_string(), "[1 2]");
@@ -333,10 +342,13 @@ mod tests {
     #[test]
     fn test_expander_quote_not_expanded() {
         let mut expander = Expander::new();
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let mut vm = crate::vm::VM::new();
+        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 5, 1, 1);
         let inner = Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone());
         let syntax = Syntax::new(SyntaxKind::Quote(Box::new(inner)), span);
-        let result = expander.expand(syntax.clone());
+        let result = expander.expand(syntax.clone(), &mut symbols, &mut vm);
         assert!(result.is_ok());
         let expanded = result.unwrap();
         assert_eq!(expanded.to_string(), syntax.to_string());
@@ -345,27 +357,33 @@ mod tests {
     #[test]
     fn test_macro_definition_and_expansion() {
         let mut expander = Expander::new();
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let mut vm = crate::vm::VM::new();
+        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 5, 1, 1);
 
         // Define a simple macro: (defmacro double (x) `(+ ,x ,x))
         let template = Syntax::new(
-            SyntaxKind::List(vec![
-                Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
-                Syntax::new(
-                    SyntaxKind::Unquote(Box::new(Syntax::new(
-                        SyntaxKind::Symbol("x".to_string()),
+            SyntaxKind::Quasiquote(Box::new(Syntax::new(
+                SyntaxKind::List(vec![
+                    Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
+                    Syntax::new(
+                        SyntaxKind::Unquote(Box::new(Syntax::new(
+                            SyntaxKind::Symbol("x".to_string()),
+                            span.clone(),
+                        ))),
                         span.clone(),
-                    ))),
-                    span.clone(),
-                ),
-                Syntax::new(
-                    SyntaxKind::Unquote(Box::new(Syntax::new(
-                        SyntaxKind::Symbol("x".to_string()),
+                    ),
+                    Syntax::new(
+                        SyntaxKind::Unquote(Box::new(Syntax::new(
+                            SyntaxKind::Symbol("x".to_string()),
+                            span.clone(),
+                        ))),
                         span.clone(),
-                    ))),
-                    span.clone(),
-                ),
-            ]),
+                    ),
+                ]),
+                span.clone(),
+            ))),
             span.clone(),
         );
 
@@ -387,7 +405,7 @@ mod tests {
             span,
         );
 
-        let result = expander.expand(call);
+        let result = expander.expand(call, &mut symbols, &mut vm);
         assert!(result.is_ok());
         let expanded = result.unwrap();
         // The result should be (+ 5 5)
@@ -397,6 +415,9 @@ mod tests {
     #[test]
     fn test_macro_arity_check() {
         let mut expander = Expander::new();
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let mut vm = crate::vm::VM::new();
+        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 5, 1, 1);
 
         let template = Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone());
@@ -419,7 +440,7 @@ mod tests {
             span,
         );
 
-        let result = expander.expand(call);
+        let result = expander.expand(call, &mut symbols, &mut vm);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("expects 1 arguments, got 2"));
     }

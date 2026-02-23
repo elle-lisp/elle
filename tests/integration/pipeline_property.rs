@@ -5,7 +5,7 @@
 // This file replaces coverage currently only in old-pipeline tests.
 
 use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::eval_new;
+use elle::pipeline::eval as pipeline_eval;
 use elle::primitives::{init_stdlib, register_primitives};
 use elle::{SymbolTable, Value, VM};
 use proptest::prelude::*;
@@ -20,7 +20,7 @@ fn eval(input: &str) -> Result<Value, String> {
     // (e.g., type-of needs to intern type names as keywords)
     set_symbol_table(&mut symbols as *mut SymbolTable);
 
-    eval_new(input, &mut symbols, &mut vm)
+    pipeline_eval(input, &mut symbols, &mut vm)
 }
 
 // ============================================================================

@@ -4,7 +4,7 @@
 // and execution via native code.
 
 mod jit_tests {
-    use elle::pipeline::eval_new;
+    use elle::pipeline::eval as pipeline_eval;
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::value::Value;
@@ -15,7 +15,7 @@ mod jit_tests {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
         let _effects = register_primitives(&mut vm, &mut symbols);
-        eval_new(code, &mut symbols, &mut vm)
+        pipeline_eval(code, &mut symbols, &mut vm)
     }
 
     #[test]
@@ -386,7 +386,7 @@ mod jit_tests {
         let mut vm = VM::new();
         let _effects = register_primitives(&mut vm, &mut symbols);
         elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
-        let result = eval_new(
+        let result = pipeline_eval(
             r#"(begin
                 (define f (fiber/new (fn () 42) 1))
                 (define (check-status n)

@@ -76,6 +76,8 @@ impl Syntax {
             SyntaxKind::Keyword(name.to_string())
         } else if let Some(s) = value.as_string() {
             SyntaxKind::String(s.to_string())
+        } else if value.is_empty_list() {
+            SyntaxKind::List(vec![])
         } else if value.as_cons().is_some() {
             let items = value.list_to_vec().map_err(|e| e.to_string())?;
             let syntaxes: Result<Vec<Syntax>, String> = items
@@ -94,5 +96,146 @@ impl Syntax {
             return Err(format!("Cannot convert {:?} to Syntax", value));
         };
         Ok(Syntax::new(kind, span))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbol::SymbolTable;
+
+    fn test_span() -> Span {
+        Span::synthetic()
+    }
+
+    #[test]
+    fn test_roundtrip_nil() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(SyntaxKind::Nil, test_span());
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Nil));
+    }
+
+    #[test]
+    fn test_roundtrip_int() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(SyntaxKind::Int(42), test_span());
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Int(42)));
+    }
+
+    #[test]
+    fn test_roundtrip_float() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(SyntaxKind::Float(1.5), test_span());
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        match result.kind {
+            SyntaxKind::Float(f) => assert!((f - 1.5).abs() < f64::EPSILON),
+            other => panic!("expected Float, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_bool() {
+        let mut symbols = SymbolTable::new();
+        for b in [true, false] {
+            let syntax = Syntax::new(SyntaxKind::Bool(b), test_span());
+            let value = syntax.to_value(&mut symbols);
+            let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+            assert!(matches!(result.kind, SyntaxKind::Bool(v) if v == b));
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_string() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(SyntaxKind::String("hello".to_string()), test_span());
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        assert!(matches!(result.kind, SyntaxKind::String(ref s) if s == "hello"));
+    }
+
+    #[test]
+    fn test_roundtrip_symbol() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(SyntaxKind::Symbol("foo".to_string()), test_span());
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "foo"));
+    }
+
+    #[test]
+    fn test_roundtrip_keyword() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(SyntaxKind::Keyword("bar".to_string()), test_span());
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Keyword(ref s) if s == "bar"));
+    }
+
+    #[test]
+    fn test_roundtrip_empty_list() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(SyntaxKind::List(vec![]), test_span());
+        let value = syntax.to_value(&mut symbols);
+        assert!(value.is_empty_list());
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        match result.kind {
+            SyntaxKind::List(items) => assert!(items.is_empty()),
+            other => panic!("expected empty List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_list() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(
+            SyntaxKind::List(vec![
+                Syntax::new(SyntaxKind::Int(1), test_span()),
+                Syntax::new(SyntaxKind::Int(2), test_span()),
+            ]),
+            test_span(),
+        );
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        match result.kind {
+            SyntaxKind::List(items) => {
+                assert_eq!(items.len(), 2);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
+            }
+            other => panic!("expected List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_vector() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(
+            SyntaxKind::Vector(vec![Syntax::new(SyntaxKind::Int(1), test_span())]),
+            test_span(),
+        );
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        match result.kind {
+            SyntaxKind::Vector(items) => {
+                assert_eq!(items.len(), 1);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+            }
+            other => panic!("expected Vector, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_from_value_rejects_closure() {
+        let result = Syntax::from_value(
+            &Value::native_fn(|_| (0, Value::NIL)),
+            &SymbolTable::new(),
+            test_span(),
+        );
+        assert!(result.is_err());
     }
 }

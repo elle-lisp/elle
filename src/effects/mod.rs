@@ -152,7 +152,7 @@ impl Effect {
     }
 }
 
-// ── Backward compatibility ──────────────────────────────────────────
+// ── Deprecated aliases ──────────────────────────────────────────────
 
 impl Effect {
     /// Alias for `none()`. Deprecated — use `none()` or a specific
@@ -340,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn test_backward_compat() {
+    fn test_deprecated_aliases() {
         assert_eq!(Effect::pure(), Effect::none());
         assert_eq!(Effect::pure_raises(), Effect::raises());
         assert_eq!(Effect::PURE, Effect::none());

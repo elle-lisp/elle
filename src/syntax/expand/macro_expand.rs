@@ -1,14 +1,32 @@
-//! Macro call expansion and substitution
+//! Macro call expansion via VM evaluation
+//!
+//! The macro body is compiled and executed in the real VM. Arguments are
+//! quoted and bound via `let`. The result Value is converted back to Syntax
+//! via `from_value()`.
+//!
+//! Known limitations:
+//! - `from_value()` creates Syntax with empty scope sets, so scope marks
+//!   from the original arguments are lost through the Value round-trip.
+//!   PR 3 (sets-of-scopes hygiene) must address this.
+//! - Macros cannot return improper lists (e.g. `(cons 1 2)`). The
+//!   `from_value()` conversion requires proper lists.
+//! - `gensym` currently returns a string, not a symbol. Using gensym
+//!   results in quasiquote templates produces string literals, not
+//!   symbol bindings. See #306.
 
-use super::{Expander, MacroDef, SyntaxKind};
+use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
+use crate::symbol::SymbolTable;
 use crate::syntax::Syntax;
+use crate::vm::VM;
 
 impl Expander {
     pub(super) fn expand_macro_call(
         &mut self,
         macro_def: &MacroDef,
         args: &[Syntax],
-        _call_site: &Syntax,
+        call_site: &Syntax,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
     ) -> Result<Syntax, String> {
         // Check arity
         if args.len() != macro_def.params.len() {
@@ -20,207 +38,69 @@ impl Expander {
             ));
         }
 
-        // Generate fresh scope for this macro expansion
+        // Recursion guard
+        self.expansion_depth += 1;
+        if self.expansion_depth > MAX_MACRO_EXPANSION_DEPTH {
+            self.expansion_depth -= 1;
+            return Err(format!(
+                "macro expansion depth exceeded {} (possible infinite expansion)",
+                MAX_MACRO_EXPANSION_DEPTH
+            ));
+        }
+
+        let result = self.expand_macro_call_inner(macro_def, args, call_site, symbols, vm);
+        self.expansion_depth -= 1;
+        result
+    }
+
+    fn expand_macro_call_inner(
+        &mut self,
+        macro_def: &MacroDef,
+        args: &[Syntax],
+        call_site: &Syntax,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Syntax, String> {
+        let span = call_site.span.clone();
+
+        // Build let-expression: (let ((p1 'a1) (p2 'a2)) body)
+        let bindings: Vec<Syntax> = macro_def
+            .params
+            .iter()
+            .zip(args)
+            .map(|(param, arg)| {
+                let quoted_arg =
+                    Syntax::new(SyntaxKind::Quote(Box::new(arg.clone())), span.clone());
+                Syntax::new(
+                    SyntaxKind::List(vec![
+                        Syntax::new(SyntaxKind::Symbol(param.clone()), span.clone()),
+                        quoted_arg,
+                    ]),
+                    span.clone(),
+                )
+            })
+            .collect();
+
+        let let_expr = Syntax::new(
+            SyntaxKind::List(vec![
+                Syntax::new(SyntaxKind::Symbol("let".to_string()), span.clone()),
+                Syntax::new(SyntaxKind::List(bindings), span.clone()),
+                macro_def.template.clone(),
+            ]),
+            span.clone(),
+        );
+
+        // Compile and execute in the VM
+        let result_value = crate::pipeline::eval_syntax(let_expr, self, symbols, vm)?;
+
+        // Convert result back to Syntax
+        let result_syntax = Syntax::from_value(&result_value, symbols, span)?;
+
+        // Add intro scope for hygiene
         let intro_scope = self.fresh_scope();
+        let hygienized = self.add_scope_recursive(result_syntax, intro_scope);
 
-        // Substitute parameters with arguments in template
-        let substituted = self.substitute(&macro_def.template, &macro_def.params, args);
-
-        // If the template was a quasiquote, evaluate it to produce Syntax directly
-        // instead of converting to (list ...) calls
-        let resolved = match &substituted.kind {
-            SyntaxKind::Quasiquote(inner) => self.eval_quasiquote_to_syntax(inner)?,
-            _ => substituted,
-        };
-
-        // Add intro_scope to all identifiers introduced by the macro
-        let hygienized = self.add_scope_recursive(resolved, intro_scope);
-
-        // Recursively expand the result
-        self.expand(hygienized)
-    }
-
-    /// Evaluate a quasiquote at the Syntax level, producing a Syntax tree directly.
-    /// This is used for macro templates where we want compile-time Syntax construction,
-    /// not runtime list construction via (list ...) calls.
-    ///
-    /// At this point, parameters have already been substituted, so:
-    /// - Unquote nodes contain the substituted argument Syntax
-    /// - UnquoteSplicing nodes contain the substituted argument Syntax (should be a list)
-    /// - Everything else is literal and should be kept as-is
-    pub(super) fn eval_quasiquote_to_syntax(&self, syntax: &Syntax) -> Result<Syntax, String> {
-        match &syntax.kind {
-            SyntaxKind::Unquote(inner) => {
-                // The unquote content has already been substituted with the argument
-                // Just unwrap and return the substituted Syntax
-                Ok((**inner).clone())
-            }
-            SyntaxKind::List(items) => {
-                let mut result = Vec::new();
-                for item in items {
-                    match &item.kind {
-                        SyntaxKind::UnquoteSplicing(inner) => {
-                            // Splice: the inner should be a list, add its elements
-                            if let SyntaxKind::List(splice_items) = &inner.kind {
-                                // Recursively evaluate each spliced item
-                                for splice_item in splice_items {
-                                    result.push(self.eval_quasiquote_to_syntax(splice_item)?);
-                                }
-                            } else {
-                                // If it's not a list, just add the single item
-                                result.push((**inner).clone());
-                            }
-                        }
-                        _ => {
-                            result.push(self.eval_quasiquote_to_syntax(item)?);
-                        }
-                    }
-                }
-                Ok(Syntax::with_scopes(
-                    SyntaxKind::List(result),
-                    syntax.span.clone(),
-                    syntax.scopes.clone(),
-                ))
-            }
-            SyntaxKind::Vector(items) => {
-                let mut result = Vec::new();
-                for item in items {
-                    match &item.kind {
-                        SyntaxKind::UnquoteSplicing(inner) => {
-                            if let SyntaxKind::List(splice_items) = &inner.kind {
-                                for splice_item in splice_items {
-                                    result.push(self.eval_quasiquote_to_syntax(splice_item)?);
-                                }
-                            } else {
-                                result.push((**inner).clone());
-                            }
-                        }
-                        _ => {
-                            result.push(self.eval_quasiquote_to_syntax(item)?);
-                        }
-                    }
-                }
-                Ok(Syntax::with_scopes(
-                    SyntaxKind::Vector(result),
-                    syntax.span.clone(),
-                    syntax.scopes.clone(),
-                ))
-            }
-            // Nested quasiquote - keep as-is
-            // This handles cases like ``(a ,b) where we have nested quasiquotes
-            SyntaxKind::Quasiquote(_) => {
-                // For nested quasiquotes in macro templates, we keep the quasiquote
-                // structure - it will be evaluated later
-                Ok(syntax.clone())
-            }
-            // Anything else (symbols, ints, etc.) is literal - keep as-is
-            _ => Ok(syntax.clone()),
-        }
-    }
-
-    pub(super) fn substitute(
-        &self,
-        template: &Syntax,
-        params: &[String],
-        args: &[Syntax],
-    ) -> Syntax {
-        match &template.kind {
-            SyntaxKind::Symbol(name) => {
-                // If this symbol is a parameter, substitute with argument
-                if let Some(idx) = params.iter().position(|p| p == name) {
-                    args[idx].clone()
-                } else {
-                    template.clone()
-                }
-            }
-            SyntaxKind::List(items) => {
-                let new_items: Vec<Syntax> = items
-                    .iter()
-                    .map(|item| self.substitute(item, params, args))
-                    .collect();
-                Syntax::with_scopes(
-                    SyntaxKind::List(new_items),
-                    template.span.clone(),
-                    template.scopes.clone(),
-                )
-            }
-            SyntaxKind::Vector(items) => {
-                let new_items: Vec<Syntax> = items
-                    .iter()
-                    .map(|item| self.substitute(item, params, args))
-                    .collect();
-                Syntax::with_scopes(
-                    SyntaxKind::Vector(new_items),
-                    template.span.clone(),
-                    template.scopes.clone(),
-                )
-            }
-            SyntaxKind::Quote(_) => {
-                // Don't substitute inside quote
-                template.clone()
-            }
-            SyntaxKind::Quasiquote(inner) => {
-                let new_inner = self.substitute_quasiquote(inner, params, args);
-                Syntax::with_scopes(
-                    SyntaxKind::Quasiquote(Box::new(new_inner)),
-                    template.span.clone(),
-                    template.scopes.clone(),
-                )
-            }
-            // Handle Unquote directly in templates (templates are implicitly quasiquoted)
-            SyntaxKind::Unquote(inner) => {
-                // Substitute inside the unquote and unwrap
-                self.substitute(inner, params, args)
-            }
-            SyntaxKind::UnquoteSplicing(inner) => {
-                // Substitute inside - splicing handled elsewhere
-                let substituted = self.substitute(inner, params, args);
-                Syntax::with_scopes(
-                    SyntaxKind::UnquoteSplicing(Box::new(substituted)),
-                    template.span.clone(),
-                    template.scopes.clone(),
-                )
-            }
-            _ => template.clone(),
-        }
-    }
-
-    pub(super) fn substitute_quasiquote(
-        &self,
-        template: &Syntax,
-        params: &[String],
-        args: &[Syntax],
-    ) -> Syntax {
-        match &template.kind {
-            SyntaxKind::Unquote(inner) => {
-                // Inside unquote, do substitute
-                let substituted = self.substitute(inner, params, args);
-                Syntax::with_scopes(
-                    SyntaxKind::Unquote(Box::new(substituted)),
-                    template.span.clone(),
-                    template.scopes.clone(),
-                )
-            }
-            SyntaxKind::UnquoteSplicing(inner) => {
-                let substituted = self.substitute(inner, params, args);
-                Syntax::with_scopes(
-                    SyntaxKind::UnquoteSplicing(Box::new(substituted)),
-                    template.span.clone(),
-                    template.scopes.clone(),
-                )
-            }
-            SyntaxKind::List(items) => {
-                let new_items: Vec<Syntax> = items
-                    .iter()
-                    .map(|item| self.substitute_quasiquote(item, params, args))
-                    .collect();
-                Syntax::with_scopes(
-                    SyntaxKind::List(new_items),
-                    template.span.clone(),
-                    template.scopes.clone(),
-                )
-            }
-            _ => template.clone(),
-        }
+        // Continue expanding the result
+        self.expand(hygienized, symbols, vm)
     }
 }

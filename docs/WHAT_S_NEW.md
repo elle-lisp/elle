@@ -137,7 +137,7 @@ The `fn` keyword is now the preferred way to create anonymous functions:
 (define add (lambda (a b) (+ a b)))
 ```
 
-The `lambda` keyword remains available as an alias for backward compatibility.
+The `lambda` keyword remains available as an alias for `fn`.
 
 ### Exception Handling (try-catch-finally)
 

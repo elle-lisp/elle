@@ -4,7 +4,7 @@
 // They verify specific behaviors of the new Syntax → HIR → LIR → Bytecode pipeline.
 
 use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::eval_new;
+use elle::pipeline::eval as pipeline_eval;
 use elle::primitives::{init_stdlib, register_primitives};
 use elle::{SymbolTable, Value, VM};
 
@@ -15,7 +15,7 @@ fn eval(input: &str) -> Result<Value, String> {
     init_stdlib(&mut vm, &mut symbols);
     // Set symbol table context for primitives like type-of that need it
     set_symbol_table(&mut symbols as *mut SymbolTable);
-    eval_new(input, &mut symbols, &mut vm)
+    pipeline_eval(input, &mut symbols, &mut vm)
 }
 
 // ============================================================================
@@ -57,7 +57,7 @@ fn test_shebang_with_complex_expression() {
 // ============================================================================
 // The new pipeline uses Expander which supports defmacro (see src/syntax/expand.rs).
 // However, macros defined in one form are not visible in subsequent forms when
-// using eval_new because a fresh Expander is created for each compilation.
+// using eval because a fresh Expander is created for each compilation.
 // The threading macros (-> and ->>) are built into the Expander.
 
 #[test]

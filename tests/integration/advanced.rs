@@ -1,6 +1,6 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
 use elle::ffi_primitives;
-use elle::pipeline::{compile_all_new, compile_new};
+use elle::pipeline::{compile, compile_all};
 use elle::primitives::register_primitives;
 use elle::{SymbolTable, Value, VM};
 
@@ -16,16 +16,16 @@ fn eval(input: &str) -> Result<Value, String> {
     ffi_primitives::set_symbol_table(&mut symbols as *mut SymbolTable);
 
     // Try single expression first
-    let result = match compile_new(input, &mut symbols) {
+    let result = match compile(input, &mut symbols) {
         Ok(compiled) => vm.execute(&compiled.bytecode),
         Err(_) => {
             // Try wrapping in begin
             let wrapped = format!("(begin {})", input);
-            match compile_new(&wrapped, &mut symbols) {
+            match compile(&wrapped, &mut symbols) {
                 Ok(compiled) => vm.execute(&compiled.bytecode),
                 Err(_) => {
                     // Try multiple expressions
-                    match compile_all_new(input, &mut symbols) {
+                    match compile_all(input, &mut symbols) {
                         Ok(results) => {
                             let mut last_result = Ok(Value::NIL);
                             for r in results {

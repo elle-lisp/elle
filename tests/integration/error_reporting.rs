@@ -224,13 +224,13 @@ fn test_error_formatting_context() {
 
 #[test]
 fn test_location_map_populated_for_simple_expression() {
-    use elle::pipeline::compile_new;
+    use elle::pipeline::compile;
     use elle::SymbolTable;
 
     let mut symbols = SymbolTable::new();
     let source = "(+ 1 2)";
 
-    let result = compile_new(source, &mut symbols);
+    let result = compile(source, &mut symbols);
     assert!(result.is_ok());
 
     let compiled = result.unwrap();
@@ -243,14 +243,14 @@ fn test_location_map_populated_for_simple_expression() {
 
 #[test]
 fn test_location_map_has_correct_line_numbers() {
-    use elle::pipeline::compile_new;
+    use elle::pipeline::compile;
     use elle::SymbolTable;
 
     let mut symbols = SymbolTable::new();
     // Single expression with nested structure
     let source = "(if #t\n  (+ 1 2)\n  (- 3 4))";
 
-    let result = compile_new(source, &mut symbols);
+    let result = compile(source, &mut symbols);
     assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 
     let compiled = result.unwrap();
@@ -272,13 +272,13 @@ fn test_location_map_has_correct_line_numbers() {
 
 #[test]
 fn test_closure_has_location_map() {
-    use elle::pipeline::compile_new;
+    use elle::pipeline::compile;
     use elle::SymbolTable;
 
     let mut symbols = SymbolTable::new();
     let source = "(fn (x) (+ x 1))";
 
-    let result = compile_new(source, &mut symbols);
+    let result = compile(source, &mut symbols);
     assert!(result.is_ok());
 
     let compiled = result.unwrap();
@@ -301,7 +301,7 @@ fn test_closure_has_location_map() {
 
 #[test]
 fn test_vm_uses_location_map_for_stack_trace() {
-    use elle::pipeline::compile_new;
+    use elle::pipeline::compile;
     use elle::primitives::register_primitives;
     use elle::vm::VM;
     use elle::SymbolTable;
@@ -312,7 +312,7 @@ fn test_vm_uses_location_map_for_stack_trace() {
 
     // Compile a simple expression
     let source = "(+ 1 2)";
-    let result = compile_new(source, &mut symbols);
+    let result = compile(source, &mut symbols);
     assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 
     let compiled = result.unwrap();

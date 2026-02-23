@@ -1,4 +1,4 @@
-use elle::pipeline::{compile_new, eval_new};
+use elle::pipeline::{compile, eval};
 use elle::primitives::register_primitives;
 use elle::{read_str, SymbolTable, VM};
 use iai_callgrind::black_box;
@@ -70,21 +70,21 @@ pub fn bench_intern_cached() {
 #[inline(never)]
 pub fn bench_compile_simple() {
     let (_, mut symbols) = setup();
-    black_box(compile_new("(+ 1 2)", &mut symbols).unwrap());
+    black_box(compile("(+ 1 2)", &mut symbols).unwrap());
 }
 
 /// Compile a nested arithmetic expression
 #[inline(never)]
 pub fn bench_compile_nested() {
     let (_, mut symbols) = setup();
-    black_box(compile_new("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols).unwrap());
+    black_box(compile("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols).unwrap());
 }
 
 /// Execute arithmetic in the VM
 #[inline(never)]
 pub fn bench_vm_arithmetic() {
     let (mut vm, mut symbols) = setup();
-    let result = compile_new("(+ 1 2 3 4 5)", &mut symbols).unwrap();
+    let result = compile("(+ 1 2 3 4 5)", &mut symbols).unwrap();
     black_box(vm.execute(&result.bytecode).unwrap());
 }
 
@@ -92,7 +92,7 @@ pub fn bench_vm_arithmetic() {
 #[inline(never)]
 pub fn bench_vm_list() {
     let (mut vm, mut symbols) = setup();
-    let result = compile_new("(cons 1 (cons 2 (cons 3 nil)))", &mut symbols).unwrap();
+    let result = compile("(cons 1 (cons 2 (cons 3 nil)))", &mut symbols).unwrap();
     black_box(vm.execute(&result.bytecode).unwrap());
 }
 
@@ -100,7 +100,7 @@ pub fn bench_vm_list() {
 #[inline(never)]
 pub fn bench_end_to_end_simple() {
     let (mut vm, mut symbols) = setup();
-    black_box(eval_new("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols, &mut vm).unwrap());
+    black_box(eval("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols, &mut vm).unwrap());
 }
 
 fn main() {

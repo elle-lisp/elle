@@ -25,7 +25,7 @@ Does NOT:
 | `Expander` | Macro expansion engine |
 | `MacroDef` | Macro definition |
 | `resolve_qualified_symbol()` | Resolve `module:name` to flat primitive name |
-| `eval_quasiquote_to_syntax()` | Evaluate quasiquote template to Syntax tree |
+| `expand()` | Entry point: takes `&mut SymbolTable` and `&mut VM` |
 
 ## Data flow
 
@@ -33,14 +33,15 @@ Does NOT:
 Syntax (from reader)
     │
     ▼
-Expander
+Expander (with &mut SymbolTable, &mut VM)
     ├─► check for macro calls
-    ├─► substitute parameters
+    ├─► compile & eval macro body in VM via pipeline::eval_syntax()
+    ├─► convert result Value back to Syntax via from_value()
     ├─► add expansion scope
     ├─► handle macro? (check registry, return #t/#f literal)
     ├─► handle expand-macro (expand quoted form, wrap in quote)
     ├─► resolve module:name to flat primitives
-    └─► recurse on result
+    └─► recurse on result (with depth limit of 200)
     │
     ▼
 Syntax (expanded)
@@ -51,7 +52,7 @@ Analyzer (hir)
 
 ## Dependents
 
-- `pipeline.rs` - calls `Expander::expand()`
+- `pipeline.rs` - calls `Expander::expand()`, provides `eval_syntax()` for macro bodies
 - `hir/analyze.rs` - consumes expanded Syntax
 
 ## Invariants
@@ -73,9 +74,10 @@ Analyzer (hir)
    the macro registry and returns a literal `#t` or `#f`. `expand-macro`
    expands a quoted form and wraps the result in quote.
 
-6. **Quasiquote templates produce Syntax trees.** `eval_quasiquote_to_syntax`
-   evaluates quasiquote templates directly to Syntax, not to `(list ...)`
-   runtime calls. This ensures macro-generated code has proper spans.
+6. **Macro bodies are VM-evaluated.** Macro arguments are quoted and passed
+   to the macro body, which is compiled and executed in the real VM via
+   `pipeline::eval_syntax()`. The result Value is converted back to Syntax
+   via `from_value()`. Macros must use quasiquote to return code templates.
 
 7. **Module-qualified names are resolved at expansion time.** `module:name`
    is recognized by the lexer as a single token, then resolved by the
@@ -103,8 +105,8 @@ prevents accidental capture:
 | `mod.rs` | 454 | `Syntax`, `SyntaxKind`, `ScopeId` |
 | `span.rs` | ~50 | `Span` type |
 | `expand/mod.rs` | ~280 | `Expander` struct, context, entry point |
-| `expand/macro_expand.rs` | ~250 | Macro expansion logic |
-| `expand/quasiquote.rs` | ~200 | Quasiquote/unquote evaluation |
+| `expand/macro_expand.rs` | ~80 | VM-based macro expansion via `eval_syntax` |
+| `expand/quasiquote.rs` | ~200 | Quasiquote-to-code conversion |
 | `expand/threading.rs` | ~150 | Threading macros (`->`, `->>`) |
 | `expand/introspection.rs` | ~100 | `macro?`, `expand-macro` |
 | `expand/qualified.rs` | ~100 | Module-qualified name resolution |

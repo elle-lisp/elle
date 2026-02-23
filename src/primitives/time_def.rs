@@ -1,4 +1,4 @@
-use crate::pipeline::eval_new;
+use crate::pipeline::eval;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
 
@@ -20,7 +20,7 @@ pub fn define_time_functions(vm: &mut VM, symbols: &mut SymbolTable) {
     "#;
 
     for code in &[stopwatch_code, elapsed_code] {
-        if let Err(e) = eval_new(code, symbols, vm) {
+        if let Err(e) = eval(code, symbols, vm) {
             eprintln!("Warning: Failed to define time function: {}", e);
         }
     }

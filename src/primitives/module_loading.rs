@@ -72,7 +72,7 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
 
             // Compile all forms using the new pipeline
             let symbols = &mut *symbols_ptr;
-            let results = match crate::pipeline::compile_all_new(&contents, symbols) {
+            let results = match crate::pipeline::compile_all(&contents, symbols) {
                 Ok(r) => r,
                 Err(e) => {
                     return (

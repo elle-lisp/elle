@@ -3,7 +3,7 @@
 // These tests verify semantic correctness by checking mathematical properties
 // hold when code is compiled and executed through the new pipeline.
 
-use elle::pipeline::eval_new;
+use elle::pipeline::eval as pipeline_eval;
 use elle::primitives::{init_stdlib, register_primitives};
 use elle::{SymbolTable, Value, VM};
 use proptest::prelude::*;
@@ -14,7 +14,7 @@ fn eval(input: &str) -> Result<Value, String> {
     let mut symbols = SymbolTable::new();
     let _effects = register_primitives(&mut vm, &mut symbols);
     init_stdlib(&mut vm, &mut symbols);
-    eval_new(input, &mut symbols, &mut vm)
+    pipeline_eval(input, &mut symbols, &mut vm)
 }
 
 // ============================================================================

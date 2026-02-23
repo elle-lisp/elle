@@ -19,10 +19,10 @@ elle-lsp is a synchronous LSP server reading JSON-RPC from stdin and writing
 to stdout. It uses the new pipeline exclusively:
 
 ```
-Source → analyze_all_new → HIR + bindings
-                              ↓
-                    extract_symbols_from_hir → SymbolIndex
-                    HirLinter → Diagnostics
+Source → analyze_all → HIR + bindings
+                           ↓
+                 extract_symbols_from_hir → SymbolIndex
+                 HirLinter → Diagnostics
 ```
 
 `CompilerState` holds per-document state. On every open/change, it re-analyzes
@@ -45,7 +45,7 @@ the document and rebuilds the `SymbolIndex` and diagnostics. IDE features
 
 ## Dependencies
 
-- `elle` — core library (analyze_all_new, HirLinter, extract_symbols_from_hir, SymbolIndex)
+- `elle` — core library (analyze_all, HirLinter, extract_symbols_from_hir, SymbolIndex)
 - `elle-lint` — not used directly (linting is done via elle's HirLinter)
 - `lsp-types` — LSP type definitions
 - `serde` / `serde_json` — JSON-RPC serialization

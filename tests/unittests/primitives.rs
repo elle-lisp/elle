@@ -1,6 +1,6 @@
 // DEFENSE: Primitives are the building blocks - must be correct
 use elle::error::LError;
-use elle::pipeline::eval_new;
+use elle::pipeline::eval as pipeline_eval;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::value::{list, Closure, Value};
@@ -1861,7 +1861,7 @@ fn test_disbit_returns_vector_of_strings() {
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _effects = register_primitives(&mut vm2, &mut symbols2);
-    let result = eval_new("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
 
     let disasm = call_primitive(&disbit, &[result]).unwrap();
     let vec = disasm.as_vector().expect("disbit should return a vector");
@@ -1899,7 +1899,7 @@ fn test_disjit_returns_vector_for_pure_closure() {
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _effects = register_primitives(&mut vm2, &mut symbols2);
-    let result = eval_new("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
 
     let ir = call_primitive(&disjit, &[result]).unwrap();
     if !ir.is_nil() {
@@ -1942,7 +1942,7 @@ fn eval_full(input: &str) -> Result<Value, elle::error::LError> {
     let _effects = register_primitives(&mut vm, &mut symbols);
     elle::primitives::init_stdlib(&mut vm, &mut symbols);
     elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
-    eval_new(input, &mut symbols, &mut vm).map_err(elle::error::LError::from)
+    pipeline_eval(input, &mut symbols, &mut vm).map_err(elle::error::LError::from)
 }
 
 #[test]

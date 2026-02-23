@@ -1384,7 +1384,7 @@ fn test_jit_tail_call_compiles() {
 #[test]
 fn test_jit_self_tail_call_loop() {
     // This should compile to a native loop, not bounce to interpreter
-    use elle::pipeline::eval_new;
+    use elle::pipeline::eval;
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -1394,7 +1394,7 @@ fn test_jit_self_tail_call_loop() {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Use begin to wrap multiple expressions
-    let result = eval_new(
+    let result = eval(
         r#"(begin
         (define (count-down n)
             (if (= n 0) 0 (count-down (- n 1))))
@@ -1408,7 +1408,7 @@ fn test_jit_self_tail_call_loop() {
 
 #[test]
 fn test_jit_self_tail_call_accumulator() {
-    use elle::pipeline::eval_new;
+    use elle::pipeline::eval;
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -1417,7 +1417,7 @@ fn test_jit_self_tail_call_accumulator() {
     let mut vm = VM::new();
     let _effects = register_primitives(&mut vm, &mut symbols);
 
-    let result = eval_new(
+    let result = eval(
         r#"(begin
         (define (sum-to n acc)
             (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
@@ -1435,7 +1435,7 @@ fn test_jit_self_tail_call_accumulator() {
 fn test_jit_self_tail_call_with_swapped_args() {
     // Test that self-tail-calls correctly handle argument swapping
     // e.g., (f b a) where args are swapped
-    use elle::pipeline::eval_new;
+    use elle::pipeline::eval;
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -1446,7 +1446,7 @@ fn test_jit_self_tail_call_with_swapped_args() {
 
     // Simple test: swap args and decrement
     // Trace: (3,10) -> (10,2) -> (2,9) -> (9,1) -> (1,8) -> (8,0) -> (0,7) -> 7
-    let result = eval_new(
+    let result = eval(
         r#"(begin
         (define (swap-test a b)
             (if (= a 0) b (swap-test b (- a 1))))
@@ -1461,7 +1461,7 @@ fn test_jit_self_tail_call_with_swapped_args() {
 #[test]
 fn test_jit_self_tail_call_fibonacci_iterative() {
     // Iterative fibonacci using tail recursion
-    use elle::pipeline::eval_new;
+    use elle::pipeline::eval;
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -1470,7 +1470,7 @@ fn test_jit_self_tail_call_fibonacci_iterative() {
     let mut vm = VM::new();
     let _effects = register_primitives(&mut vm, &mut symbols);
 
-    let result = eval_new(
+    let result = eval(
         r#"(begin
         (define (fib-iter n a b)
             (if (= n 0) a (fib-iter (- n 1) b (+ a b))))

@@ -15,7 +15,7 @@ fn setup() -> (SymbolTable, VM) {
 
 #[test]
 fn test_print_lir_failing_case() {
-    let (mut symbols, _vm) = setup();
+    let (mut symbols, mut vm) = setup();
 
     let code = r#"(begin
         (define process (fn (acc x) (begin (define doubled (* x 2)) (+ acc doubled))))
@@ -30,7 +30,9 @@ fn test_print_lir_failing_case() {
 
     // Expand
     let mut expander = Expander::new();
-    let expanded = expander.expand(syntax).expect("expand failed");
+    let expanded = expander
+        .expand(syntax, &mut symbols, &mut vm)
+        .expect("expand failed");
 
     // Analyze
     let mut analyzer = Analyzer::new(&mut symbols);

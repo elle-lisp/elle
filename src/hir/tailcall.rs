@@ -203,7 +203,9 @@ mod tests {
 
         let syntax = read_syntax(source).expect("parse failed");
         let mut expander = Expander::new();
-        let expanded = expander.expand(syntax).expect("expand failed");
+        let expanded = expander
+            .expand(syntax, &mut symbols, &mut vm)
+            .expect("expand failed");
         let mut analyzer = Analyzer::new(&mut symbols);
         let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
         mark_tail_calls(&mut analysis.hir);

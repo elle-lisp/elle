@@ -3,7 +3,7 @@
 // Verifies that closures spawned in new threads correctly preserve their
 // LocationMap for error reporting.
 
-use elle::pipeline::{compile_all_new, compile_new};
+use elle::pipeline::{compile, compile_all};
 use elle::primitives::register_primitives;
 use elle::{SymbolTable, Value, VM};
 
@@ -13,16 +13,16 @@ fn eval(input: &str) -> Result<Value, String> {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Try to compile as a single expression first
-    match compile_new(input, &mut symbols) {
+    match compile(input, &mut symbols) {
         Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
         Err(_) => {
             // If that fails, try wrapping in a begin
             let wrapped = format!("(begin {})", input);
-            match compile_new(&wrapped, &mut symbols) {
+            match compile(&wrapped, &mut symbols) {
                 Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
                 Err(_) => {
                     // If that also fails, try compiling all expressions
-                    let results = compile_all_new(input, &mut symbols)?;
+                    let results = compile_all(input, &mut symbols)?;
                     let mut last_result = Value::NIL;
                     for result in results {
                         last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
@@ -179,7 +179,7 @@ fn test_compiled_closure_has_location_map() {
     let mut symbols = SymbolTable::new();
     let source = "(fn (x) (+ x 1))";
 
-    let result = compile_new(source, &mut symbols);
+    let result = compile(source, &mut symbols);
     assert!(result.is_ok(), "Compilation should succeed");
 
     let compiled = result.unwrap();
@@ -316,7 +316,7 @@ fn test_location_map_has_valid_line_numbers() {
     // Multi-line source to verify line tracking
     let source = "(fn (x)\n  (+ x\n     1))";
 
-    let result = compile_new(source, &mut symbols);
+    let result = compile(source, &mut symbols);
     assert!(result.is_ok(), "Compilation should succeed");
 
     let compiled = result.unwrap();
@@ -365,7 +365,7 @@ proptest! {
         let source = format!("(fn (x) (+ x {}))", a);
         let mut symbols = SymbolTable::new();
 
-        let result = compile_new(&source, &mut symbols);
+        let result = compile(&source, &mut symbols);
         prop_assert!(result.is_ok(), "Compilation should succeed for: {}", source);
 
         let compiled = result.unwrap();

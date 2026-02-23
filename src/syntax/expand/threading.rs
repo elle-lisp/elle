@@ -1,7 +1,9 @@
 //! Threading macro expansion (-> and ->>)
 
 use super::Expander;
+use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::vm::VM;
 
 impl Expander {
     /// Handle thread-first macro: (-> value form1 form2 ...)
@@ -10,6 +12,8 @@ impl Expander {
         &mut self,
         items: &[Syntax],
         span: &Span,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
     ) -> Result<Syntax, String> {
         if items.len() < 2 {
             return Err(format!("{}: -> requires at least a value", span));
@@ -38,7 +42,7 @@ impl Expander {
         }
 
         // Recursively expand the result
-        self.expand(result)
+        self.expand(result, symbols, vm)
     }
 
     /// Handle thread-last macro: (->> value form1 form2 ...)
@@ -47,6 +51,8 @@ impl Expander {
         &mut self,
         items: &[Syntax],
         span: &Span,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
     ) -> Result<Syntax, String> {
         if items.len() < 2 {
             return Err(format!("{}: ->> requires at least a value", span));
@@ -75,6 +81,6 @@ impl Expander {
         }
 
         // Recursively expand the result
-        self.expand(result)
+        self.expand(result, symbols, vm)
     }
 }

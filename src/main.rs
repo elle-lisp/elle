@@ -1,6 +1,6 @@
 use elle::ffi::primitives::context::set_symbol_table;
 use elle::ffi_primitives;
-use elle::pipeline::{compile_all_new, compile_new};
+use elle::pipeline::{compile, compile_all};
 use elle::primitives::set_length_symbol_table;
 use elle::repl::Repl;
 use elle::{init_stdlib, register_primitives, SymbolTable, VM};
@@ -106,7 +106,7 @@ fn run_source(
     let mut had_error = false;
 
     // Compile all forms with new pipeline
-    let results = match compile_all_new(contents, symbols) {
+    let results = match compile_all(contents, symbols) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("✗ Compilation error: {}", e);
@@ -189,7 +189,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                 }
 
                 // Try to compile accumulated input
-                match compile_new(accumulated_input.trim(), symbols) {
+                match compile(accumulated_input.trim(), symbols) {
                     Ok(result) => {
                         accumulated_input.clear();
 
@@ -309,7 +309,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
         }
 
         // Try to compile accumulated input
-        match compile_new(trimmed, symbols) {
+        match compile(trimmed, symbols) {
             Ok(result) => {
                 accumulated_input.clear();
 

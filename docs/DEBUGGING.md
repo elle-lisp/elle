@@ -319,7 +319,7 @@ code path avoids `throw` and calls only non-raising functions.
 ### 4.4 Propagation during fixpoint iteration
 
 Raises effects propagate exactly like yield effects during the cross-form
-fixpoint iteration in `compile_all_new`. Self-recursive functions start
+fixpoint iteration in `compile_all`. Self-recursive functions start
 with `may_raise = false` (optimistic) and iterate until stable.
 
 ### 4.5 Runtime query
