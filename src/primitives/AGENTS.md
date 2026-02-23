@@ -103,8 +103,8 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value`, `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
-| `meta.rs` | `gensym` (runtime unique symbol generation) |
-| `debugging.rs` | `closure?`, `jit?`, `pure?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `global?`, `string->keyword`, `disbit`, `disjit` |
+| `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` (metaprogramming) |
+| `debugging.rs` | `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `global?`, `string->keyword`, `disbit`, `disjit` |
 | `debug.rs` | `debug-print`, `trace`, `memory-usage` |
 | `process.rs` | `exit`, `halt` |
 

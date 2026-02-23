@@ -152,6 +152,13 @@ impl Value {
         self.heap_tag() == Some(HeapTag::Fiber)
     }
 
+    /// Check if this is a syntax object.
+    #[inline]
+    pub fn is_syntax(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::Syntax)
+    }
+
     /// Check if this is a proper list (nil or cons ending in nil).
     pub fn is_list(&self) -> bool {
         let mut current = *self;
@@ -342,6 +349,19 @@ impl Value {
         }
         match unsafe { deref(*self) } {
             HeapObject::Fiber(handle) => Some(handle),
+            _ => None,
+        }
+    }
+
+    /// Extract as syntax if this is a syntax object.
+    #[inline]
+    pub fn as_syntax(&self) -> Option<&std::rc::Rc<crate::syntax::Syntax>> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::Syntax(s) => Some(s),
             _ => None,
         }
     }

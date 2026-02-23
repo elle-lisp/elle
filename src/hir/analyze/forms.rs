@@ -21,7 +21,7 @@ impl<'a> Analyzer<'a> {
 
             // Variable reference
             SyntaxKind::Symbol(name) => {
-                match self.lookup(name) {
+                match self.lookup(name, syntax.scopes.as_slice()) {
                     Some(id) => Ok(Hir::pure(HirKind::Var(id), span)),
                     None => {
                         // Treat as global reference
@@ -63,6 +63,9 @@ impl<'a> Analyzer<'a> {
                 let value = (**inner).to_value(self.symbols);
                 Ok(Hir::pure(HirKind::Quote(value), span))
             }
+
+            // Syntax literal — pre-computed Value from macro argument passing
+            SyntaxKind::SyntaxLiteral(value) => Ok(Hir::pure(HirKind::Quote(*value), span)),
 
             // Quasiquote, Unquote, UnquoteSplicing should have been expanded
             SyntaxKind::Quasiquote(_) | SyntaxKind::Unquote(_) | SyntaxKind::UnquoteSplicing(_) => {
@@ -157,10 +160,10 @@ impl<'a> Analyzer<'a> {
             // Two-pass analysis for letrec-style semantics:
             // Pass 1: Create bindings for all defines (without analyzing values)
             for item in items {
-                if let Some(name) = Self::is_define_form(item) {
+                if let Some((name, scopes)) = Self::is_define_form(item) {
                     // Create local binding slot
                     let local_index = self.current_local_count();
-                    self.bind(name, BindingKind::Local { index: local_index });
+                    self.bind(name, scopes, BindingKind::Local { index: local_index });
                 }
             }
 
@@ -256,7 +259,11 @@ impl<'a> Analyzer<'a> {
         let iter = self.analyze_expr(&items[iter_idx])?;
 
         self.push_scope(false);
-        let var_id = self.bind(var_name, BindingKind::Local { index: 0 });
+        let var_id = self.bind(
+            var_name,
+            items[1].scopes.as_slice(),
+            BindingKind::Local { index: 0 },
+        );
         let body = self.analyze_expr(&items[body_idx])?;
         self.pop_scope();
 

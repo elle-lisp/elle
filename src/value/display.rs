@@ -144,6 +144,11 @@ impl fmt::Display for Value {
             };
         }
 
+        // Syntax object
+        if let Some(s) = self.as_syntax() {
+            return write!(f, "#<syntax:{}>", s.as_ref());
+        }
+
         // Tuple
         if let Some(elems) = self.as_tuple() {
             write!(f, "[")?;

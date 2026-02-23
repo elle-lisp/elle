@@ -140,6 +140,9 @@ impl SendValue {
 
             // Unsafe: fibers (contain execution state with closures)
             HeapObject::Fiber(_) => Err("Cannot send fiber".to_string()),
+
+            // Unsafe: syntax objects (contain Rc)
+            HeapObject::Syntax(_) => Err("Cannot send syntax object".to_string()),
         }
     }
 

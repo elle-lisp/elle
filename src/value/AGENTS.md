@@ -86,7 +86,19 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 NaN-boxing uses the NaN space of IEEE 754 doubles:
 
 - **Immediate**: nil, bool, int (i48), symbol, keyword, float
-- **Heap pointer**: cons, vector, table, closure, fiber, cell, etc.
+- **Heap pointer**: cons, vector, table, closure, fiber, cell, syntax, etc.
+
+### Syntax objects
+
+`HeapObject::Syntax(Rc<Syntax>)` preserves scope sets through the Value
+round-trip during macro expansion. Created by `Value::syntax()`, accessed
+by `Value::as_syntax()`. Not sendable across threads (contains `Rc`).
+`from_value()` unwraps syntax objects back to `Syntax`, preserving scopes.
+
+**Note:** `Value` depends on `Syntax` (for `HeapObject::Syntax`) and
+`Syntax` depends on `Value` (for `SyntaxKind::SyntaxLiteral`). This is
+a circular dependency within the same crate, which Rust allows. Both
+types are in `src/` — neither is in a separate crate.
 
 Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
 `Value::closure(c)`. Don't construct enum variants directly.

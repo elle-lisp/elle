@@ -47,7 +47,7 @@ use super::math::{
     prim_ceil, prim_cos, prim_e, prim_exp, prim_floor, prim_log, prim_pi, prim_pow, prim_round,
     prim_sin, prim_sqrt, prim_tan,
 };
-use super::meta::prim_gensym;
+use super::meta::{prim_datum_to_syntax, prim_gensym, prim_syntax_to_datum};
 use super::module_loading::{prim_add_module_path, prim_import_file};
 use super::package::{prim_package_info, prim_package_version};
 use super::process::{prim_exit, prim_halt};
@@ -733,14 +733,30 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<Sy
         Effect::raises(),
     );
 
-    // Quoting and meta-programming - pure
+    // Quoting and meta-programming — all can raise (symbol table access, type errors)
     register_fn(
         vm,
         symbols,
         &mut effects,
         "gensym",
         prim_gensym,
-        Effect::none(),
+        Effect::raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "datum->syntax",
+        prim_datum_to_syntax,
+        Effect::raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "syntax->datum",
+        prim_syntax_to_datum,
+        Effect::raises(),
     );
 
     // Package manager - can raise

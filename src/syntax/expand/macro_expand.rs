@@ -1,22 +1,22 @@
 //! Macro call expansion via VM evaluation
 //!
 //! The macro body is compiled and executed in the real VM. Arguments are
-//! quoted and bound via `let`. The result Value is converted back to Syntax
-//! via `from_value()`.
+//! wrapped as `Value::syntax(arg)` via `SyntaxLiteral` and bound via `let`.
+//! The result Value is converted back to Syntax via `from_value()`.
+//!
+//! Scope preservation: arguments are wrapped as syntax objects so their
+//! scope sets survive the Value round-trip. `from_value()` unwraps syntax
+//! objects back to Syntax, preserving scopes. `add_scope_recursive` then
+//! stamps the intro scope on the result, including unwrapped argument nodes.
 //!
 //! Known limitations:
-//! - `from_value()` creates Syntax with empty scope sets, so scope marks
-//!   from the original arguments are lost through the Value round-trip.
-//!   PR 3 (sets-of-scopes hygiene) must address this.
 //! - Macros cannot return improper lists (e.g. `(cons 1 2)`). The
 //!   `from_value()` conversion requires proper lists.
-//! - `gensym` currently returns a string, not a symbol. Using gensym
-//!   results in quasiquote templates produces string literals, not
-//!   symbol bindings. See #306.
 
 use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
 use crate::symbol::SymbolTable;
 use crate::syntax::Syntax;
+use crate::value::Value;
 use crate::vm::VM;
 
 impl Expander {
@@ -63,18 +63,36 @@ impl Expander {
     ) -> Result<Syntax, String> {
         let span = call_site.span.clone();
 
-        // Build let-expression: (let ((p1 'a1) (p2 'a2)) body)
+        // Build let-expression: (let ((p1 arg1) (p2 arg2)) body)
+        // Symbols and compound forms are wrapped as Value::syntax(arg) via
+        // SyntaxLiteral to preserve scope sets through the Value round-trip.
+        // Atoms (nil, bool, int, float, string, keyword) are quoted normally —
+        // they don't participate in binding resolution and wrapping them as
+        // syntax objects would change their runtime semantics (e.g., #f wrapped
+        // in a syntax object becomes truthy).
         let bindings: Vec<Syntax> = macro_def
             .params
             .iter()
             .zip(args)
             .map(|(param, arg)| {
-                let quoted_arg =
-                    Syntax::new(SyntaxKind::Quote(Box::new(arg.clone())), span.clone());
+                let arg_expr = match &arg.kind {
+                    SyntaxKind::Nil
+                    | SyntaxKind::Bool(_)
+                    | SyntaxKind::Int(_)
+                    | SyntaxKind::Float(_)
+                    | SyntaxKind::String(_)
+                    | SyntaxKind::Keyword(_) => {
+                        Syntax::new(SyntaxKind::Quote(Box::new(arg.clone())), span.clone())
+                    }
+                    _ => Syntax::new(
+                        SyntaxKind::SyntaxLiteral(Value::syntax(arg.clone())),
+                        span.clone(),
+                    ),
+                };
                 Syntax::new(
                     SyntaxKind::List(vec![
                         Syntax::new(SyntaxKind::Symbol(param.clone()), span.clone()),
-                        quoted_arg,
+                        arg_expr,
                     ]),
                     span.clone(),
                 )

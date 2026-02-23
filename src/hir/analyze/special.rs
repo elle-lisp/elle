@@ -78,6 +78,7 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Symbol(name) => {
                 let id = self.bind(
                     name,
+                    syntax.scopes.as_slice(),
                     BindingKind::Local {
                         index: self.current_local_index(),
                     },

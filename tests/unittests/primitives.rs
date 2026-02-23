@@ -395,42 +395,38 @@ fn test_arity_errors() {
 #[test]
 fn test_gensym_generation() {
     let (vm, mut symbols) = setup();
+    elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
     let gensym = get_primitive(&vm, &mut symbols, "gensym");
 
     // Generate unique symbols
     let sym1 = call_primitive(&gensym, &[]).unwrap();
     let sym2 = call_primitive(&gensym, &[]).unwrap();
 
-    // Should generate strings (symbol names)
-    match (&sym1, &sym2) {
-        (v1, v2) if v1.is_string() && v2.is_string() => {
-            let s1 = v1.as_string().unwrap();
-            let s2 = v2.as_string().unwrap();
-            // Symbols should be unique
-            assert_ne!(s1, s2);
-            // Should start with G (default prefix)
-            assert!(s1.starts_with('G'));
-            assert!(s2.starts_with('G'));
-        }
-        _ => panic!("gensym should return strings"),
-    }
+    // Should generate symbols (not strings)
+    assert!(sym1.as_symbol().is_some(), "gensym should return a symbol");
+    assert!(sym2.as_symbol().is_some(), "gensym should return a symbol");
+    // Symbols should be unique
+    assert_ne!(sym1.as_symbol(), sym2.as_symbol());
 }
 
 #[test]
 fn test_gensym_with_prefix() {
     let (vm, mut symbols) = setup();
+    elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
     let gensym = get_primitive(&vm, &mut symbols, "gensym");
 
     // Generate symbol with custom prefix
     let sym = call_primitive(&gensym, &[Value::string("VAR")]).unwrap();
 
-    match sym {
-        v if v.is_string() => {
-            let s = v.as_string().unwrap();
-            assert!(s.starts_with("VAR"));
-        }
-        _ => panic!("gensym should return string"),
-    }
+    assert!(sym.as_symbol().is_some(), "gensym should return a symbol");
+    // Verify the interned name starts with VAR
+    let sym_id = sym.as_symbol().unwrap();
+    let name = symbols.name(elle::value::SymbolId(sym_id)).unwrap();
+    assert!(
+        name.starts_with("VAR"),
+        "gensym with prefix should start with VAR, got: {}",
+        name
+    );
 }
 
 #[test]

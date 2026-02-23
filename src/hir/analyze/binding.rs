@@ -1,7 +1,7 @@
 //! Binding forms: let, let*, letrec, define, set!, lambda
 
 use super::*;
-use crate::syntax::{Syntax, SyntaxKind};
+use crate::syntax::{ScopeId, Syntax, SyntaxKind};
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_let(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
@@ -28,18 +28,20 @@ impl<'a> Analyzer<'a> {
             let name = pair[0]
                 .as_symbol()
                 .ok_or_else(|| format!("{}: let binding name must be a symbol", span))?;
+            let name_scopes = pair[0].scopes.clone();
             let value = self.analyze_expr(&pair[1])?;
             effect = effect.combine(value.effect);
-            names_and_values.push((name, value));
+            names_and_values.push((name, name_scopes, value));
         }
 
         // Phase 2: Push scope and create all bindings
         self.push_scope(false);
 
         let mut bindings = Vec::new();
-        for (name, value) in names_and_values {
+        for (name, name_scopes, value) in names_and_values {
             let id = self.bind(
                 name,
+                &name_scopes,
                 BindingKind::Local {
                     index: self.current_local_index(),
                 },
@@ -105,6 +107,7 @@ impl<'a> Analyzer<'a> {
 
             let id = self.bind(
                 name,
+                pair[0].scopes.as_slice(),
                 BindingKind::Local {
                     index: self.current_local_index(),
                 },
@@ -163,6 +166,7 @@ impl<'a> Analyzer<'a> {
                 .ok_or_else(|| format!("{}: letrec binding name must be a symbol", span))?;
             let id = self.bind(
                 name,
+                pair[0].scopes.as_slice(),
                 BindingKind::Local {
                     index: self.current_local_index(),
                 },
@@ -204,14 +208,16 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    /// Check if an expression is a define form and return the name being defined
-    pub(crate) fn is_define_form(syntax: &Syntax) -> Option<&str> {
+    /// Check if an expression is a define form and return the name and scopes being defined
+    pub(crate) fn is_define_form(syntax: &Syntax) -> Option<(&str, &[ScopeId])> {
         if let SyntaxKind::List(items) = &syntax.kind {
             if let Some(first) = items.first() {
                 if let Some(name) = first.as_symbol() {
                     if name == "define" {
                         if let Some(second) = items.get(1) {
-                            return second.as_symbol();
+                            return second
+                                .as_symbol()
+                                .map(|name| (name, second.scopes.as_slice()));
                         }
                     }
                 }
@@ -248,12 +254,14 @@ impl<'a> Analyzer<'a> {
         if in_function {
             // Inside a function, define creates a local binding
             // Check if binding was pre-created by analyze_begin (for mutual recursion)
-            let binding_id = if let Some(existing) = self.lookup_in_current_scope(name) {
+            let name_scopes = items[1].scopes.as_slice();
+            let binding_id = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes)
+            {
                 existing
             } else {
                 // Not pre-created, create now (for single defines outside begin)
                 let local_index = self.current_local_count();
-                self.bind(name, BindingKind::Local { index: local_index })
+                self.bind(name, name_scopes, BindingKind::Local { index: local_index })
             };
 
             // Seed effect_env with Pure for lambda forms so self-recursive calls
@@ -285,7 +293,7 @@ impl<'a> Analyzer<'a> {
         } else {
             // At top level, define creates a global binding
             // Create binding first so recursive references work
-            let binding_id = self.bind(name, BindingKind::Global);
+            let binding_id = self.bind(name, &[], BindingKind::Global);
 
             // Seed effect_env with Pure for lambda forms so self-recursive calls
             // don't default to Yields during analysis
@@ -327,7 +335,7 @@ impl<'a> Analyzer<'a> {
             .as_symbol()
             .ok_or_else(|| format!("{}: set! target must be a symbol", span))?;
 
-        let target = match self.lookup(name) {
+        let target = match self.lookup(name, items[1].scopes.as_slice()) {
             Some(id) => id,
             None => {
                 // Treat as global reference (may have been defined in a previous form)
@@ -388,7 +396,11 @@ impl<'a> Analyzer<'a> {
             let name = param
                 .as_symbol()
                 .ok_or_else(|| format!("{}: lambda parameter must be a symbol", span))?;
-            let id = self.bind(name, BindingKind::Parameter { index: i as u16 });
+            let id = self.bind(
+                name,
+                param.scopes.as_slice(),
+                BindingKind::Parameter { index: i as u16 },
+            );
             params.push(id);
         }
 

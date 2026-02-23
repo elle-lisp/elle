@@ -23,7 +23,7 @@ use super::binding::{BindingId, BindingInfo, BindingKind, CaptureInfo, CaptureKi
 use super::expr::{Hir, HirKind};
 use crate::effects::Effect;
 use crate::symbol::SymbolTable;
-use crate::syntax::Span;
+use crate::syntax::{ScopeId, Span};
 use crate::value::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -92,10 +92,23 @@ struct EffectSources {
     has_non_param_yield: bool,
 }
 
+/// A binding with its scope set for hygienic resolution.
+#[derive(Debug, Clone)]
+struct ScopedBinding {
+    scopes: Vec<ScopeId>,
+    id: BindingId,
+}
+
+/// Check if `subset` is a subset of `superset` (all elements of subset appear in superset).
+fn is_scope_subset(subset: &[ScopeId], superset: &[ScopeId]) -> bool {
+    subset.iter().all(|s| superset.contains(s))
+}
+
 /// A lexical scope
 struct Scope {
-    /// Bindings in this scope, by name
-    bindings: HashMap<String, BindingId>,
+    /// Bindings in this scope, by name. Multiple bindings per name are possible
+    /// when macro expansion introduces bindings with different scope sets.
+    bindings: HashMap<String, Vec<ScopedBinding>>,
     /// Is this a function scope (creates new capture boundary)
     is_function: bool,
     /// Next local index for this scope
@@ -204,7 +217,7 @@ impl<'a> Analyzer<'a> {
         self.scopes.pop()
     }
 
-    fn bind(&mut self, name: &str, kind: BindingKind) -> BindingId {
+    fn bind(&mut self, name: &str, scopes: &[ScopeId], kind: BindingKind) -> BindingId {
         let id = self.ctx.fresh_binding();
         let sym = self.symbols.intern(name);
 
@@ -216,7 +229,14 @@ impl<'a> Analyzer<'a> {
         self.ctx.register_binding(info);
 
         if let Some(scope) = self.scopes.last_mut() {
-            scope.bindings.insert(name.to_string(), id);
+            scope
+                .bindings
+                .entry(name.to_string())
+                .or_default()
+                .push(ScopedBinding {
+                    scopes: scopes.to_vec(),
+                    id,
+                });
             if matches!(kind, BindingKind::Local { .. }) {
                 scope.next_local += 1;
             }
@@ -225,15 +245,33 @@ impl<'a> Analyzer<'a> {
         id
     }
 
-    fn lookup(&mut self, name: &str) -> Option<BindingId> {
+    fn lookup(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<BindingId> {
         let mut found_in_scope = None;
         let mut crossed_function_boundary = false;
 
         // Walk scopes from innermost to outermost
         for (depth, scope) in self.scopes.iter().enumerate().rev() {
-            if let Some(&id) = scope.bindings.get(name) {
-                found_in_scope = Some((depth, id, crossed_function_boundary));
-                break;
+            if let Some(candidates) = scope.bindings.get(name) {
+                // Find the best candidate: binding's scopes must be a subset of
+                // the reference's scopes, and the largest scope set wins.
+                let best = candidates
+                    .iter()
+                    .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
+                    .max_by_key(|c| c.scopes.len());
+                if let Some(winner) = best {
+                    debug_assert!(
+                        candidates
+                            .iter()
+                            .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
+                            .filter(|c| c.scopes.len() == winner.scopes.len())
+                            .count()
+                            == 1,
+                        "Ambiguous binding: multiple candidates with same scope-set size for '{}'",
+                        name
+                    );
+                    found_in_scope = Some((depth, winner.id, crossed_function_boundary));
+                    break;
+                }
             }
             if scope.is_function {
                 crossed_function_boundary = true;
@@ -347,7 +385,12 @@ impl<'a> Analyzer<'a> {
     fn is_binding_in_current_scope(&self, binding_id: BindingId) -> bool {
         // Walk scopes from innermost to outermost, stopping at function boundaries
         for scope in self.scopes.iter().rev() {
-            if scope.bindings.values().any(|&id| id == binding_id) {
+            if scope
+                .bindings
+                .values()
+                .flat_map(|v| v.iter())
+                .any(|sb| sb.id == binding_id)
+            {
                 return true;
             }
             if scope.is_function {
@@ -359,10 +402,16 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Look up a binding in only the current (innermost) scope, not walking up the scope chain
-    fn lookup_in_current_scope(&self, name: &str) -> Option<BindingId> {
-        self.scopes
-            .last()
-            .and_then(|scope| scope.bindings.get(name).copied())
+    fn lookup_in_current_scope(&self, name: &str, ref_scopes: &[ScopeId]) -> Option<BindingId> {
+        self.scopes.last().and_then(|scope| {
+            scope.bindings.get(name).and_then(|candidates| {
+                candidates
+                    .iter()
+                    .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
+                    .max_by_key(|c| c.scopes.len())
+                    .map(|c| c.id)
+            })
+        })
     }
 }
 
@@ -485,5 +534,112 @@ mod tests {
         info.mark_captured();
         assert!(info.is_captured);
         assert!(info.needs_cell());
+    }
+
+    // === Scope-aware binding resolution tests ===
+
+    use crate::syntax::ScopeId;
+
+    #[test]
+    fn test_is_scope_subset_empty_is_subset_of_everything() {
+        assert!(is_scope_subset(&[], &[]));
+        assert!(is_scope_subset(&[], &[ScopeId(1)]));
+        assert!(is_scope_subset(&[], &[ScopeId(1), ScopeId(2)]));
+    }
+
+    #[test]
+    fn test_is_scope_subset_nonempty_not_subset_of_empty() {
+        assert!(!is_scope_subset(&[ScopeId(1)], &[]));
+    }
+
+    #[test]
+    fn test_is_scope_subset_identical_sets() {
+        assert!(is_scope_subset(
+            &[ScopeId(1), ScopeId(2)],
+            &[ScopeId(1), ScopeId(2)]
+        ));
+    }
+
+    #[test]
+    fn test_is_scope_subset_proper_subset() {
+        assert!(is_scope_subset(&[ScopeId(1)], &[ScopeId(1), ScopeId(2)]));
+    }
+
+    #[test]
+    fn test_is_scope_subset_not_subset() {
+        assert!(!is_scope_subset(
+            &[ScopeId(1), ScopeId(3)],
+            &[ScopeId(1), ScopeId(2)]
+        ));
+    }
+
+    #[test]
+    fn test_bind_and_lookup_with_empty_scopes() {
+        // Pre-expansion code: empty scopes work identically to before
+        let mut symbols = SymbolTable::new();
+        let mut analyzer = Analyzer::new(&mut symbols);
+        analyzer.push_scope(false);
+        let id = analyzer.bind("x", &[], BindingKind::Local { index: 0 });
+        assert_eq!(analyzer.lookup("x", &[]), Some(id));
+    }
+
+    #[test]
+    fn test_lookup_scope_filtering() {
+        // Binding with scope {S1} is invisible to reference with empty scopes
+        let mut symbols = SymbolTable::new();
+        let mut analyzer = Analyzer::new(&mut symbols);
+        analyzer.push_scope(false);
+        analyzer.bind("tmp", &[ScopeId(1)], BindingKind::Local { index: 0 });
+        // Reference with empty scopes cannot see binding with {S1}
+        assert_eq!(analyzer.lookup("tmp", &[]), None);
+    }
+
+    #[test]
+    fn test_lookup_scope_subset_match() {
+        // Binding with scope {S1} is visible to reference with {S1}
+        let mut symbols = SymbolTable::new();
+        let mut analyzer = Analyzer::new(&mut symbols);
+        analyzer.push_scope(false);
+        let id = analyzer.bind("tmp", &[ScopeId(1)], BindingKind::Local { index: 0 });
+        assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(id));
+    }
+
+    #[test]
+    fn test_lookup_largest_scope_wins() {
+        // Two bindings for "tmp": one with {} and one with {S1}
+        // Reference with {S1} should see the {S1} binding (more specific)
+        let mut symbols = SymbolTable::new();
+        let mut analyzer = Analyzer::new(&mut symbols);
+        analyzer.push_scope(false);
+        let _outer_id = analyzer.bind("tmp", &[], BindingKind::Local { index: 0 });
+        let inner_id = analyzer.bind("tmp", &[ScopeId(1)], BindingKind::Local { index: 1 });
+        assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(inner_id));
+    }
+
+    #[test]
+    fn test_lookup_empty_scopes_sees_empty_binding() {
+        // Two bindings for "tmp": one with {} and one with {S1}
+        // Reference with {} should see only the {} binding
+        let mut symbols = SymbolTable::new();
+        let mut analyzer = Analyzer::new(&mut symbols);
+        analyzer.push_scope(false);
+        let outer_id = analyzer.bind("tmp", &[], BindingKind::Local { index: 0 });
+        let _inner_id = analyzer.bind("tmp", &[ScopeId(1)], BindingKind::Local { index: 1 });
+        assert_eq!(analyzer.lookup("tmp", &[]), Some(outer_id));
+    }
+
+    #[test]
+    fn test_lookup_in_current_scope_with_scopes() {
+        let mut symbols = SymbolTable::new();
+        let mut analyzer = Analyzer::new(&mut symbols);
+        analyzer.push_scope(false);
+        let id = analyzer.bind("x", &[ScopeId(1)], BindingKind::Local { index: 0 });
+        // Visible with matching scopes
+        assert_eq!(
+            analyzer.lookup_in_current_scope("x", &[ScopeId(1)]),
+            Some(id)
+        );
+        // Invisible with empty scopes
+        assert_eq!(analyzer.lookup_in_current_scope("x", &[]), None);
     }
 }

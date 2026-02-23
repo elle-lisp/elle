@@ -33,6 +33,11 @@ pub struct Syntax {
     /// Scope set for hygiene. Two identifiers match only if their
     /// scope sets are compatible (implementation: subset check).
     pub scopes: Vec<ScopeId>,
+    /// When true, `add_scope_recursive` skips this node and its children.
+    /// Set by `datum->syntax` to prevent the intro scope from being added
+    /// to nodes that should resolve at the call site (hygiene escape hatch).
+    /// Only affects `add_scope_recursive`, not `add_scope`.
+    pub scope_exempt: bool,
 }
 
 impl Syntax {
@@ -42,18 +47,59 @@ impl Syntax {
             kind,
             span,
             scopes: Vec::new(),
+            scope_exempt: false,
         }
     }
 
     /// Create a new Syntax node with given scope set
     pub fn with_scopes(kind: SyntaxKind, span: Span, scopes: Vec<ScopeId>) -> Self {
-        Syntax { kind, span, scopes }
+        Syntax {
+            kind,
+            span,
+            scopes,
+            scope_exempt: false,
+        }
     }
 
     /// Add a scope to this node's scope set
     pub fn add_scope(&mut self, scope: ScopeId) {
         if !self.scopes.contains(&scope) {
             self.scopes.push(scope);
+        }
+    }
+
+    /// Replace the scope set on this node and all children with the given
+    /// scopes, and mark all nodes as scope-exempt. Used by `datum->syntax`
+    /// to give a datum the lexical context of another syntax object while
+    /// preventing `add_scope_recursive` from overriding those scopes.
+    pub fn set_scopes_recursive(&mut self, scopes: &[ScopeId]) {
+        self.scopes = scopes.to_vec();
+        self.scope_exempt = true;
+        match &mut self.kind {
+            SyntaxKind::List(items) | SyntaxKind::Vector(items) => {
+                for item in items {
+                    item.set_scopes_recursive(scopes);
+                }
+            }
+            SyntaxKind::Quote(inner) => {
+                inner.set_scopes_recursive(scopes);
+            }
+            SyntaxKind::Quasiquote(inner)
+            | SyntaxKind::Unquote(inner)
+            | SyntaxKind::UnquoteSplicing(inner) => {
+                inner.set_scopes_recursive(scopes);
+            }
+            // Atoms don't have children to recurse into
+            SyntaxKind::Nil
+            | SyntaxKind::Bool(_)
+            | SyntaxKind::Int(_)
+            | SyntaxKind::Float(_)
+            | SyntaxKind::Symbol(_)
+            | SyntaxKind::Keyword(_)
+            | SyntaxKind::String(_) => {}
+            // SyntaxLiteral is internal-only (created by expand_macro_call_inner);
+            // it should never appear in datum->syntax input from from_value()
+            SyntaxKind::SyntaxLiteral(_) => {}
         }
     }
 
@@ -99,6 +145,12 @@ pub enum SyntaxKind {
     Quasiquote(Box<Syntax>),
     Unquote(Box<Syntax>),
     UnquoteSplicing(Box<Syntax>),
+
+    /// Internal: pre-computed Value literal for macro argument passing.
+    /// Never produced by the reader. The analyzer handles this by producing
+    /// HirKind::Quote(value). Only created by `expand_macro_call_inner` to
+    /// inject `Value::syntax(arg)` into the compilation pipeline.
+    SyntaxLiteral(crate::value::Value),
 }
 
 #[cfg(test)]
