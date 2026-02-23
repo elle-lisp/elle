@@ -43,6 +43,16 @@ pub fn clear_symbol_table() {
     SYMBOL_TABLE.with(|ctx| *ctx.borrow_mut() = None);
 }
 
+/// Resolve a symbol ID to its name using the thread-local symbol table.
+/// Returns None if the symbol table is unavailable or the ID is unknown.
+pub fn resolve_symbol_name(sym_id: u32) -> Option<String> {
+    unsafe {
+        get_symbol_table()
+            .and_then(|ptr| (*ptr).name(crate::value::SymbolId(sym_id)))
+            .map(|s| s.to_string())
+    }
+}
+
 /// Register FFI primitives in the VM.
 pub fn register_ffi_primitives(_vm: &mut VM) {
     // Phase 2: FFI primitives for function calling

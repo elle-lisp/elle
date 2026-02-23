@@ -23,7 +23,9 @@ pub fn handle_load_global(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constant
             vm.fiber.stack.push(*val);
         } else {
             // Signal undefined-variable exception
-            let msg = format!("undefined variable: symbol #{}", sym_id);
+            let name = crate::ffi::primitives::context::resolve_symbol_name(sym_id)
+                .unwrap_or_else(|| format!("symbol #{}", sym_id));
+            let msg = format!("undefined variable: {}", name);
             vm.fiber.signal = Some((SIG_ERROR, error_val("undefined-variable", msg)));
             vm.fiber.stack.push(Value::NIL); // Push placeholder
         }

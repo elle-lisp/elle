@@ -225,6 +225,24 @@ fn test_undefined_variable() {
 }
 
 #[test]
+fn test_undefined_variable_error_shows_name() {
+    // Issue #300: error message should show the variable name, not a SymbolId
+    let result = eval("nonexistent-foo");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("nonexistent-foo"),
+        "Error should contain variable name, got: {}",
+        err
+    );
+    assert!(
+        !err.contains("symbol #"),
+        "Error should not contain raw SymbolId, got: {}",
+        err
+    );
+}
+
+#[test]
 fn test_arity_error() {
     assert!(eval("(+)").is_ok()); // + accepts 0 args
     assert!(eval("(first)").is_err()); // first requires 1 arg
