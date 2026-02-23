@@ -17,7 +17,7 @@
 
 use crate::value::error_val;
 use crate::value::fiber::FiberStatus;
-use crate::value::{FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK};
+use crate::value::{FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -69,7 +69,9 @@ impl VM {
         //    SIG_OK is terminal (Dead). Other signals are Suspended; the
         //    caller decides whether a caught SIG_ERROR stays Suspended
         //    (resumable) or gets promoted to Error (terminal) based on
-        //    the parent's mask.
+        //    the parent's mask. SIG_HALT is also provisionally Suspended
+        //    here — the resume handler promotes to Dead if the mask
+        //    doesn't catch it.
         self.fiber.status = if bits == SIG_OK {
             FiberStatus::Dead
         } else {
@@ -120,6 +122,12 @@ impl VM {
 
         // Check the child's signal against its mask
         let mask = handle.with(|fiber| fiber.mask);
+
+        // SIG_HALT is always terminal — the child fiber is Dead regardless
+        // of whether the mask catches it.
+        if result_bits == SIG_HALT {
+            handle.with_mut(|f| f.status = FiberStatus::Dead);
+        }
 
         if result_bits == SIG_OK {
             // Child completed normally — clear child chain
@@ -176,6 +184,11 @@ impl VM {
         let (result_bits, result_value) = self.do_fiber_resume(&handle, fiber_value);
 
         let mask = handle.with(|fiber| fiber.mask);
+
+        // SIG_HALT is always terminal — child fiber is Dead regardless of mask
+        if result_bits == SIG_HALT {
+            handle.with_mut(|f| f.status = FiberStatus::Dead);
+        }
 
         let caught = result_bits == SIG_OK || (mask & result_bits != 0);
         if caught {
@@ -244,7 +257,8 @@ impl VM {
 
         // If the fiber signaled (not normal completion), save context for resumption.
         // Only save if the yield instruction didn't already set up suspended frames.
-        if bits != SIG_OK && self.fiber.suspended.is_none() {
+        // SIG_HALT is non-resumable — no suspended frame needed.
+        if bits != SIG_OK && bits != SIG_HALT && self.fiber.suspended.is_none() {
             self.fiber.suspended = Some(vec![SuspendedFrame {
                 bytecode: closure.bytecode.clone(),
                 constants: closure.constants.clone(),

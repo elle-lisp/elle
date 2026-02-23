@@ -4,7 +4,7 @@
 //! instructions to their handlers.
 
 use crate::compiler::bytecode::Instruction;
-use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK, SIG_YIELD};
+use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -34,9 +34,9 @@ impl VM {
         let consts: &[Value] = constants;
 
         loop {
-            // If an error signal is pending, propagate immediately.
-            if matches!(self.fiber.signal, Some((SIG_ERROR, _))) {
-                return (SIG_ERROR, ip);
+            // If an error or halt signal is pending, propagate immediately.
+            if let Some((bits @ (SIG_ERROR | SIG_HALT), _)) = self.fiber.signal {
+                return (bits, ip);
             }
 
             if ip >= bc.len() {
@@ -272,9 +272,9 @@ impl VM {
                 }
             }
 
-            // If an error signal was set by the instruction, propagate.
-            if matches!(self.fiber.signal, Some((SIG_ERROR, _))) {
-                return (SIG_ERROR, ip);
+            // If an error or halt signal was set by the instruction, propagate.
+            if let Some((bits @ (SIG_ERROR | SIG_HALT), _)) = self.fiber.signal {
+                return (bits, ip);
             }
         }
     }

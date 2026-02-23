@@ -1,5 +1,5 @@
 //! Process-related primitives
-use crate::value::fiber::{SignalBits, SIG_ERROR};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT};
 use crate::value::{error_val, Value};
 
 /// Exit the process with an optional exit code
@@ -45,6 +45,29 @@ pub fn prim_exit(args: &[Value]) -> (SignalBits, Value) {
     std::process::exit(code);
 }
 
+/// Halt the VM gracefully, returning a value to the host.
+///
+/// (halt)         ; halts with nil
+/// (halt value)   ; halts with value
+///
+/// Unlike `exit`, `halt` does not terminate the process. It signals the
+/// VM to stop execution and return the value to the caller. The signal
+/// is maskable by fiber signal masks but non-resumable: once a fiber
+/// halts, it is Dead.
+pub fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() > 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("halt: expected 0-1 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let value = if args.is_empty() { Value::NIL } else { args[0] };
+    (SIG_HALT, value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,6 +93,26 @@ mod tests {
     #[test]
     fn test_exit_too_large() {
         let (signal, _) = prim_exit(&[Value::int(256)]);
+        assert_eq!(signal, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_halt_no_args() {
+        let (signal, value) = prim_halt(&[]);
+        assert_eq!(signal, SIG_HALT);
+        assert!(value.is_nil());
+    }
+
+    #[test]
+    fn test_halt_with_value() {
+        let (signal, value) = prim_halt(&[Value::int(42)]);
+        assert_eq!(signal, SIG_HALT);
+        assert_eq!(value, Value::int(42));
+    }
+
+    #[test]
+    fn test_halt_too_many_args() {
+        let (signal, _) = prim_halt(&[Value::int(0), Value::int(1)]);
         assert_eq!(signal, SIG_ERROR);
     }
 }

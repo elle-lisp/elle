@@ -8,7 +8,7 @@
 //! - JIT compilation and dispatch
 
 use crate::value::error_val;
-use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK, SIG_YIELD};
+use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
 // full cache line regardless of arg count, and the is-inline branch on
@@ -319,10 +319,10 @@ impl VM {
     ) -> Option<SignalBits> {
         let result = self.call_jit(jit_code, closure, args, func);
 
-        // Check if the JIT function (or a callee) set an error
-        if matches!(self.fiber.signal, Some((SIG_ERROR, _))) {
+        // Check if the JIT function (or a callee) set an error or halt
+        if matches!(self.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))) {
             self.fiber.stack.push(Value::NIL);
-            return None; // Let the dispatch loop's error check deal with it
+            return None; // Let the dispatch loop's signal check deal with it
         }
 
         // Check for pending tail call (JIT function did a TailCall)

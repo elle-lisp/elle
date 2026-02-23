@@ -106,6 +106,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `meta.rs` | `gensym` (runtime unique symbol generation) |
 | `debugging.rs` | `closure?`, `jit?`, `pure?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `global?`, `string->keyword`, `disbit`, `disjit` |
 | `debug.rs` | `debug-print`, `trace`, `memory-usage` |
+| `process.rs` | `exit`, `halt` |
 
 ## Files
 

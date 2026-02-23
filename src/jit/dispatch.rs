@@ -3,7 +3,7 @@
 //! These functions handle complex operations that interact with heap types
 //! or require VM access: data structures, cells, globals, and function calls.
 
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_OK};
 use crate::value::repr::TAG_NIL;
 use crate::value::{error_val, Value};
 
@@ -19,8 +19,8 @@ use crate::value::{error_val, Value};
 fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: Value) -> u64 {
     match bits {
         SIG_OK => value.to_bits(),
-        SIG_ERROR => {
-            vm.fiber.signal = Some((SIG_ERROR, value));
+        SIG_ERROR | SIG_HALT => {
+            vm.fiber.signal = Some((bits, value));
             TAG_NIL
         }
         _ => {
@@ -29,7 +29,7 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             // impossible since the JIT gate rejects may_suspend() closures.
             panic!(
                 "Effect system bug: signal {} reached JIT-compiled code. \
-                 Only SIG_OK and SIG_ERROR should appear in JIT context.",
+                 Only SIG_OK, SIG_ERROR, and SIG_HALT should appear in JIT context.",
                 bits
             );
         }
@@ -49,12 +49,12 @@ pub const TAIL_CALL_SENTINEL: u64 = 0xDEAD_BEEF_DEAD_BEEFu64;
 // Exception Checking
 // =============================================================================
 
-/// Check if an error signal is pending on the VM.
-/// Returns TRUE bits if error is set, FALSE bits otherwise.
+/// Check if a terminal signal is pending on the VM (error or halt).
+/// Returns TRUE bits if one is set, FALSE bits otherwise.
 #[no_mangle]
 pub extern "C" fn elle_jit_has_exception(vm: *mut ()) -> u64 {
     let vm = unsafe { &*(vm as *const crate::vm::VM) };
-    Value::bool(matches!(vm.fiber.signal, Some((SIG_ERROR, _)))).to_bits()
+    Value::bool(matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _)))).to_bits()
 }
 
 // =============================================================================
@@ -298,8 +298,8 @@ pub extern "C" fn elle_jit_call(
 
             vm.fiber.call_depth -= 1;
 
-            // Check for exception
-            if matches!(vm.fiber.signal, Some((SIG_ERROR, _))) {
+            // Check for exception (error or halt)
+            if matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))) {
                 return TAG_NIL;
             }
 

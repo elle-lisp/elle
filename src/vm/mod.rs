@@ -19,7 +19,7 @@ pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
 use crate::compiler::bytecode::Bytecode;
-use crate::value::{error_val, Value, SIG_ERROR, SIG_OK, SIG_YIELD};
+use crate::value::{error_val, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
 use std::rc::Rc;
 
 impl VM {
@@ -82,7 +82,7 @@ impl VM {
                 current_env = tail_env;
             } else {
                 return match bits {
-                    SIG_OK => {
+                    SIG_OK | SIG_HALT => {
                         let (_, value) = self.fiber.signal.take().unwrap();
                         Ok(value)
                     }

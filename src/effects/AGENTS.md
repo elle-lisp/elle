@@ -18,6 +18,7 @@ debug, ffi) and which parameter indices propagate their callee's effects.
 | `Effect::yields()` | May yield (SIG_YIELD) |
 | `Effect::yields_raises()` | May yield and raise |
 | `Effect::ffi()` | Calls foreign code (SIG_FFI) |
+| `Effect::halts()` | May halt (SIG_HALT) |
 | `Effect::polymorphic(n)` | Effect depends on parameter n |
 | `Effect::polymorphic_raises(n)` | Polymorphic + may raise |
 | `get_primitive_effects` | Returns effect map for already-interned primitives |
@@ -32,6 +33,7 @@ Each predicate asks a specific question. No vague "is_pure".
 | `may_yield()` | Can yield? (SIG_YIELD) |
 | `may_raise()` | Can raise an error? (SIG_ERROR) |
 | `may_ffi()` | Calls foreign code? (SIG_FFI) |
+| `may_halt()` | Can halt? (SIG_HALT) |
 | `is_polymorphic()` | Effect depends on arguments? (propagates != 0) |
 | `propagated_params()` | Iterator over propagated parameter indices |
 

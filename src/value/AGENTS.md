@@ -54,7 +54,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 | `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
 | `Frame` | `fiber.rs` | Single call frame (closure + ip + base) |
 | `FiberStatus` | `fiber.rs` | Fiber lifecycle: New, Alive, Suspended, Dead, Error |
-| `SignalBits` | `fiber.rs` | u32 bitmask: SIG_OK(0), SIG_ERROR(1), SIG_YIELD(2), SIG_DEBUG(4), SIG_RESUME(8), SIG_FFI(16), SIG_PROPAGATE(32), SIG_CANCEL(64) |
+| `SignalBits` | `fiber.rs` | u32 bitmask: SIG_OK(0), SIG_ERROR(1), SIG_YIELD(2), SIG_DEBUG(4), SIG_RESUME(8), SIG_FFI(16), SIG_PROPAGATE(32), SIG_CANCEL(64), SIG_HALT(256) |
 | `Arity` | `types.rs` | Function arity (Exact, AtLeast, Range) |
 | `SymbolId` | `types.rs` | Interned symbol identifier |
 | `SendValue` | `send.rs` | Thread-safe value wrapper |

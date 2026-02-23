@@ -21,7 +21,7 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `VM` | Global state + root Fiber. Per-execution state lives on `vm.fiber` |
-| `SignalBits` | Internal return type: `SIG_OK`, `SIG_ERROR`, `SIG_YIELD`, `SIG_DEBUG`, `SIG_RESUME`, `SIG_FFI`, `SIG_PROPAGATE`, `SIG_CANCEL` |
+| `SignalBits` | Internal return type: `SIG_OK`, `SIG_ERROR`, `SIG_YIELD`, `SIG_DEBUG`, `SIG_RESUME`, `SIG_FFI`, `SIG_PROPAGATE`, `SIG_CANCEL`, `SIG_HALT` |
 | `CallFrame` | Function name, IP, frame base |
 
 ## Data flow
@@ -58,6 +58,7 @@ inner dispatch loop):
 - `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-raises caught signal.
 - `SIG_CANCEL` (64): VM-internal. `fiber/cancel` injects error into fiber.
 - `SIG_QUERY` (128): VM-internal. Primitive reads VM state (e.g., call counts, global bindings).
+- `SIG_HALT` (256): Graceful VM termination. Value in `fiber.signal`. Non-resumable; fiber is Dead.
 
 The public `execute_bytecode` method is the translation boundary — it converts
 `SignalBits` to `Result<Value, String>` for external callers. On `SIG_ERROR`,

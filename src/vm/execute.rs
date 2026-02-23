@@ -1,6 +1,6 @@
 //! Bytecode execution entry points and helpers.
 
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_OK, SIG_YIELD};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -124,7 +124,7 @@ impl VM {
                 current_env = tail_env;
             } else {
                 return match bits {
-                    SIG_OK => {
+                    SIG_OK | SIG_HALT => {
                         let (_, value) = self.fiber.signal.take().unwrap();
                         Ok(value)
                     }

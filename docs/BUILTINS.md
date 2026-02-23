@@ -2233,6 +2233,29 @@ Parse JSON, modify, and serialize back:
 
 ---
 
+## Process Control
+
+### `halt` (Halt VM)
+
+**Semantics**: Signals the VM to stop execution and return a value to the host. Unlike `exit`, does not terminate the process. The signal is maskable by fiber signal masks but non-resumable: the halted fiber is Dead.
+
+**Usage**:
+```lisp
+(halt)         ; halt, return nil
+(halt value)   ; halt, return value
+```
+
+**Examples**:
+```lisp
+(halt 42)
+⟹ 42
+
+(begin (halt 1) 2)
+⟹ 1
+```
+
+---
+
 ## Module & Package Operations
 
 ### `import-file` (Import Module)
