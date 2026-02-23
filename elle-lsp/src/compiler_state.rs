@@ -7,7 +7,7 @@ use elle::hir::{extract_symbols_from_hir, HirLinter};
 use elle::lint::diagnostics::{Diagnostic, Severity};
 use elle::symbol::SymbolTable;
 use elle::symbols::SymbolIndex;
-use elle::{analyze_all_new, init_stdlib, register_primitives, VM};
+use elle::{analyze_all, init_stdlib, register_primitives, VM};
 use std::collections::HashMap;
 
 /// Document state: source + diagnostics + symbol index
@@ -39,7 +39,6 @@ impl DocumentState {
 pub struct CompilerState {
     documents: HashMap<String, DocumentState>,
     symbol_table: SymbolTable,
-    #[allow(dead_code)]
     vm: VM,
 }
 
@@ -88,7 +87,7 @@ impl CompilerState {
         doc.symbol_index = SymbolIndex::new();
 
         // Analyze using the new pipeline
-        let analyses = match analyze_all_new(&doc.source_text, &mut self.symbol_table) {
+        let analyses = match analyze_all(&doc.source_text, &mut self.symbol_table, &mut self.vm) {
             Ok(results) => results,
             Err(e) => {
                 // Analysis error - add as diagnostic

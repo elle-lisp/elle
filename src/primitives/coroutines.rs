@@ -1,7 +1,6 @@
 //! Coroutine primitives for Elle — implemented as fiber wrappers.
 //!
-//! Coroutines are fibers with SIG_YIELD mask. The user-facing API is
-//! preserved for backward compatibility, but all operations delegate
+//! Coroutines are fibers with SIG_YIELD mask. All operations delegate
 //! to the fiber system.
 //!
 //! Primitives:

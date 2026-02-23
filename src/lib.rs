@@ -7,14 +7,14 @@
 //! ## Quick Start
 //!
 //! ```
-//! use elle::{eval_new, register_primitives, SymbolTable, VM};
+//! use elle::{eval, register_primitives, SymbolTable, VM};
 //!
 //! let mut vm = VM::new();
 //! let mut symbols = SymbolTable::new();
 //! register_primitives(&mut vm, &mut symbols);
 //!
 //! let code = "(+ 1 2 3)";
-//! let result = eval_new(code, &mut symbols, &mut vm).unwrap();
+//! let result = eval(code, &mut symbols, &mut vm).unwrap();
 //! ```
 //!
 //! ## Architecture
@@ -60,8 +60,7 @@ pub use compiler::Bytecode;
 pub use error::{RuntimeError, SourceLoc};
 pub use lint::diagnostics::{Diagnostic, Severity};
 pub use pipeline::{
-    analyze_all_new, analyze_new, compile_all_new, compile_new, eval_new, AnalyzeResult,
-    CompileResult,
+    analyze, analyze_all, compile, compile_all, eval, AnalyzeResult, CompileResult,
 };
 pub use primitives::{init_stdlib, register_primitives};
 pub use reader::{read_str, Lexer, Reader};

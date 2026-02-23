@@ -3,7 +3,7 @@
 // These tests verify that code compiled through the new pipeline
 // produces correct results when executed.
 
-use elle::pipeline::{compile_new, eval_new};
+use elle::pipeline::{compile, eval as pipeline_eval};
 use elle::primitives::register_primitives;
 use elle::{SymbolTable, Value, VM};
 
@@ -12,13 +12,13 @@ fn eval(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     let _effects = register_primitives(&mut vm, &mut symbols);
-    eval_new(input, &mut symbols, &mut vm)
+    pipeline_eval(input, &mut symbols, &mut vm)
 }
 
 /// Helper that compiles but doesn't execute (for testing compilation only)
 fn compiles(input: &str) -> bool {
     let mut symbols = SymbolTable::new();
-    compile_new(input, &mut symbols).is_ok()
+    compile(input, &mut symbols).is_ok()
 }
 
 // ============ Literal Tests ============
@@ -169,7 +169,7 @@ fn test_call_simple() {
     // Note: Function calls to built-in symbols like + may fail during lowering
     // because the new pipeline doesn't yet have full integration with built-in symbols.
     let mut symbols = SymbolTable::new();
-    let result = compile_new("(+ 1 2)", &mut symbols);
+    let result = compile("(+ 1 2)", &mut symbols);
     // We accept either success or a specific error about unbound variables
     // since the new pipeline is still being integrated
     match result {
@@ -184,7 +184,7 @@ fn test_call_nested() {
     // Note: Function calls to built-in symbols like + may fail during lowering
     // because the new pipeline doesn't yet have full integration with built-in symbols.
     let mut symbols = SymbolTable::new();
-    let result = compile_new("(+ (+ 1 2) 3)", &mut symbols);
+    let result = compile("(+ (+ 1 2) 3)", &mut symbols);
     // We accept either success or a specific error about unbound variables
     // since the new pipeline is still being integrated
     match result {
@@ -306,21 +306,21 @@ fn test_import() {
 fn test_empty_input() {
     let mut symbols = SymbolTable::new();
     // Empty input should fail gracefully
-    let result = compile_new("", &mut symbols);
+    let result = compile("", &mut symbols);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_whitespace_only() {
     let mut symbols = SymbolTable::new();
-    let result = compile_new("   \n\t  ", &mut symbols);
+    let result = compile("   \n\t  ", &mut symbols);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_comment_only() {
     let mut symbols = SymbolTable::new();
-    let result = compile_new("; this is a comment", &mut symbols);
+    let result = compile("; this is a comment", &mut symbols);
     assert!(result.is_err());
 }
 
@@ -329,7 +329,7 @@ fn test_comment_only() {
 #[test]
 fn test_bytecode_not_empty() {
     let mut symbols = SymbolTable::new();
-    let result = compile_new("42", &mut symbols).unwrap();
+    let result = compile("42", &mut symbols).unwrap();
     assert!(
         !result.bytecode.instructions.is_empty(),
         "Bytecode should not be empty"
@@ -339,7 +339,7 @@ fn test_bytecode_not_empty() {
 #[test]
 fn test_bytecode_has_return() {
     let mut symbols = SymbolTable::new();
-    let result = compile_new("42", &mut symbols).unwrap();
+    let result = compile("42", &mut symbols).unwrap();
     // Bytecode should have instructions
     let last_instr = result.bytecode.instructions.last();
     assert!(last_instr.is_some(), "Bytecode should have instructions");
@@ -348,7 +348,7 @@ fn test_bytecode_has_return() {
 #[test]
 fn test_compile_all_multiple_forms() {
     let mut symbols = SymbolTable::new();
-    let result = elle::compile_all_new("1 2 3", &mut symbols);
+    let result = elle::compile_all("1 2 3", &mut symbols);
     assert!(result.is_ok());
     let compiled = result.unwrap();
     assert_eq!(compiled.len(), 3);
@@ -357,7 +357,7 @@ fn test_compile_all_multiple_forms() {
 #[test]
 fn test_compile_all_single_form() {
     let mut symbols = SymbolTable::new();
-    let result = elle::compile_all_new("42", &mut symbols);
+    let result = elle::compile_all("42", &mut symbols);
     assert!(result.is_ok());
     let compiled = result.unwrap();
     assert_eq!(compiled.len(), 1);
@@ -368,21 +368,21 @@ fn test_compile_all_single_form() {
 #[test]
 fn test_unmatched_paren() {
     let mut symbols = SymbolTable::new();
-    let result = compile_new("(+ 1 2", &mut symbols);
+    let result = compile("(+ 1 2", &mut symbols);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_extra_closing_paren() {
     let mut symbols = SymbolTable::new();
-    let result = compile_new("(+ 1 2))", &mut symbols);
+    let result = compile("(+ 1 2))", &mut symbols);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_invalid_syntax() {
     let mut symbols = SymbolTable::new();
-    let result = compile_new("(if)", &mut symbols);
+    let result = compile("(if)", &mut symbols);
     // Should fail during analysis or lowering
     assert!(result.is_err());
 }
@@ -394,8 +394,8 @@ fn test_same_code_same_bytecode() {
     let mut symbols1 = SymbolTable::new();
     let mut symbols2 = SymbolTable::new();
 
-    let result1 = compile_new("(let ((x 10)) x)", &mut symbols1).unwrap();
-    let result2 = compile_new("(let ((x 10)) x)", &mut symbols2).unwrap();
+    let result1 = compile("(let ((x 10)) x)", &mut symbols1).unwrap();
+    let result2 = compile("(let ((x 10)) x)", &mut symbols2).unwrap();
 
     // Both should compile successfully
     assert!(!result1.bytecode.instructions.is_empty());
@@ -413,7 +413,7 @@ fn test_complex_nested_structure() {
 fn test_deeply_nested_expressions() {
     // Note: Function calls to built-in symbols like + may fail during lowering
     let mut symbols = SymbolTable::new();
-    let result = compile_new(
+    let result = compile(
         "(+ (+ (+ (+ (+ (+ (+ (+ (+ (+ 1 2) 3) 4) 5) 6) 7) 8) 9) 10) 11)",
         &mut symbols,
     );
@@ -441,7 +441,7 @@ fn test_quasiquote() {
     // Quasiquote is an advanced meta-programming feature
     // The new pipeline may not support it yet
     let mut symbols = SymbolTable::new();
-    let result = compile_new("`(1 2 3)", &mut symbols);
+    let result = compile("`(1 2 3)", &mut symbols);
     // Accept either success or failure - this is an advanced feature
     let _ = result;
 }
@@ -451,7 +451,7 @@ fn test_unquote() {
     // Unquote is an advanced meta-programming feature
     // The new pipeline may not support it yet
     let mut symbols = SymbolTable::new();
-    let result = compile_new("`(1 ,x 3)", &mut symbols);
+    let result = compile("`(1 ,x 3)", &mut symbols);
     // Accept either success or failure - this is an advanced feature
     let _ = result;
 }
@@ -461,7 +461,7 @@ fn test_unquote_splicing() {
     // Unquote-splicing is an advanced meta-programming feature
     // The new pipeline may not support it yet
     let mut symbols = SymbolTable::new();
-    let result = compile_new("`(1 ,@x 3)", &mut symbols);
+    let result = compile("`(1 ,@x 3)", &mut symbols);
     // Accept either success or failure - this is an advanced feature
     let _ = result;
 }
@@ -477,7 +477,7 @@ fn test_let_shadowing() {
 fn test_let_with_complex_init() {
     // Note: Function calls to built-in symbols like + may fail during lowering
     let mut symbols = SymbolTable::new();
-    let result = compile_new("(let ((x (+ 1 2))) x)", &mut symbols);
+    let result = compile("(let ((x (+ 1 2))) x)", &mut symbols);
     match result {
         Ok(_) => {}                                    // Success is fine
         Err(e) if e.contains("Unbound variable") => {} // Expected during integration
@@ -563,7 +563,7 @@ fn test_trace_vm_execution() {
     // Define process
     let code2a =
         r#"(define process (fn (acc x) (begin (define doubled (* x 2)) (+ acc doubled))))"#;
-    let results = elle::compile_all_new(code2a, &mut symbols).expect("compile failed");
+    let results = elle::compile_all(code2a, &mut symbols).expect("compile failed");
     for r in &results {
         vm.execute(&r.bytecode).expect("exec failed");
     }
@@ -573,14 +573,14 @@ fn test_trace_vm_execution() {
             (if (nil? lst)
                 init
                 (my-fold f (f init (first lst)) (rest lst)))))"#;
-    let results = elle::compile_all_new(code2b, &mut symbols).expect("compile failed");
+    let results = elle::compile_all(code2b, &mut symbols).expect("compile failed");
     for r in &results {
         vm.execute(&r.bytecode).expect("exec failed");
     }
 
     // Call it
     let code2c = r#"(my-fold process 0 (list 1))"#;
-    let results = elle::compile_all_new(code2c, &mut symbols).expect("compile failed");
+    let results = elle::compile_all(code2c, &mut symbols).expect("compile failed");
     for r in &results {
         let res = vm.execute(&r.bytecode);
         println!("Multi-form result: {:?}", res);

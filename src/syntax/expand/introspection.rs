@@ -1,7 +1,9 @@
 //! Macro introspection: macro? and expand-macro
 
 use super::Expander;
+use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::vm::VM;
 
 impl Expander {
     /// Handle (macro? symbol) - returns #t if symbol is a defined macro, #f otherwise
@@ -42,6 +44,8 @@ impl Expander {
         &mut self,
         items: &[Syntax],
         span: &Span,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
     ) -> Result<Syntax, String> {
         // Syntax: (expand-macro '(form ...))
         if items.len() != 2 {
@@ -63,7 +67,7 @@ impl Expander {
         };
 
         // Expand the form (this will trigger macro expansion if it's a macro call)
-        let expanded = self.expand(form)?;
+        let expanded = self.expand(form, symbols, vm)?;
 
         // Wrap the result in a quote so it becomes data at runtime
         Ok(Syntax::new(

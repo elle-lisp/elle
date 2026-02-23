@@ -35,7 +35,7 @@ bytecode. Error messages include file:line:col information.
 | `symbols` | Symbol index types for IDE features (pipeline-agnostic) |
 | `primitives` | Built-in functions |
 | `ffi` | C interop via libloading/bindgen |
-| `pipeline` | Compilation entry points (`compile_new`, `analyze_new`, `eval_new`) |
+| `pipeline` | Compilation entry points (`compile`, `analyze`, `eval`) |
 | `error` | `LocationMap` for bytecode offset → source location mapping |
 
 ### The Value type

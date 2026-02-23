@@ -29,9 +29,9 @@ pub struct Bytecode {
 Compilation uses the HIR → LIR → Bytecode pipeline:
 
 ```rust
-use elle::pipeline::compile_new;
+use elle::pipeline::compile;
 
-let result = compile_new(source, &mut symbols)?;
+let result = compile(source, &mut symbols)?;
 vm.execute(&result.bytecode)?;
 ```
 

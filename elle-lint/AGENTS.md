@@ -14,11 +14,11 @@ new pipeline exclusively:
 
 ```
 Source → Reader → Syntax → Expander → Analyzer → HIR
-                                                   ↓
-                                            HirLinter → Diagnostics
+                                                    ↓
+                                             HirLinter → Diagnostics
 ```
 
-Entry point: `elle::analyze_all_new()` → `elle::hir::HirLinter`
+Entry point: `elle::analyze_all()` → `elle::hir::HirLinter`
 
 ## Files
 
@@ -37,7 +37,7 @@ Entry point: `elle::analyze_all_new()` → `elle::hir::HirLinter`
 
 ## Dependencies
 
-- `elle` — core library (analyze_all_new, HirLinter, Diagnostic, Severity)
+- `elle` — core library (analyze_all, HirLinter, Diagnostic, Severity)
 - `serde_json` — JSON output formatting
 
 ## Invariants

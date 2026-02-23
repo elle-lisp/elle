@@ -1,18 +1,18 @@
-//! New compilation pipeline: Syntax → HIR → LIR → Bytecode
+//! Compilation pipeline: Syntax -> HIR -> LIR -> Bytecode
 //!
-//! This module provides the end-to-end compilation function using the
-//! new intermediate representations. It runs in parallel with the
-//! existing Value-based pipeline until fully integrated.
+//! This module provides the end-to-end compilation functions.
 
 use crate::compiler::Bytecode;
 use crate::effects::{get_primitive_effects, Effect};
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{AnalysisResult, Analyzer, BindingId, BindingInfo, Hir};
 use crate::lir::{Emitter, Lowerer};
+use crate::primitives::register_primitives;
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Expander, Syntax, SyntaxKind};
 use crate::value::SymbolId;
+use crate::vm::VM;
 use std::collections::HashMap;
 
 /// Compilation result
@@ -54,14 +54,51 @@ fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<Symb
     None
 }
 
-/// Compile source code using the new pipeline
-pub fn compile_new(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String> {
+/// Compile and execute a Syntax tree, reusing the caller's Expander.
+///
+/// This is the entry point for macro body evaluation: the Expander builds
+/// a let-expression wrapping the macro body, then calls this to compile
+/// and run it in the VM. The same Expander is threaded through so nested
+/// macro calls work.
+pub fn eval_syntax(
+    syntax: Syntax,
+    expander: &mut Expander,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+) -> Result<crate::value::Value, String> {
+    let expanded = expander.expand(syntax, symbols, vm)?;
+
+    let primitive_effects = get_primitive_effects(symbols);
+    let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+    let mut analysis = analyzer.analyze(&expanded)?;
+    mark_tail_calls(&mut analysis.hir);
+
+    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_bindings(analysis.bindings)
+        .with_intrinsics(intrinsics);
+    let lir_func = lowerer.lower(&analysis.hir)?;
+
+    let symbol_snapshot = symbols.all_names();
+    let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
+    let bytecode = emitter.emit(&lir_func);
+
+    vm.execute(&bytecode).map_err(|e| e.to_string())
+}
+
+/// Compile source code to bytecode.
+///
+/// Creates an internal VM for macro expansion. Macro side effects
+/// don't persist beyond compilation.
+pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String> {
     // Phase 1: Parse to Syntax
     let syntax = read_syntax(source)?;
 
-    // Phase 2: Macro expansion
+    // Phase 2: Macro expansion (internal VM for macro bodies)
     let mut expander = Expander::new();
-    let expanded = expander.expand(syntax)?;
+    let mut macro_vm = VM::new();
+    let _effects = register_primitives(&mut macro_vm, symbols);
+    let expanded = expander.expand(syntax, symbols, &mut macro_vm)?;
 
     // Phase 3: Analyze to HIR with interprocedural effect tracking
     let primitive_effects = get_primitive_effects(symbols);
@@ -98,17 +135,16 @@ pub fn compile_new(source: &str, symbols: &mut SymbolTable) -> Result<CompileRes
 /// 3. Analyze all forms, collecting actual inferred effects
 /// 4. If any effect changed, re-analyze with corrected effects
 /// 5. Repeat until stable (max 10 iterations)
-pub fn compile_all_new(
-    source: &str,
-    symbols: &mut SymbolTable,
-) -> Result<Vec<CompileResult>, String> {
+pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<CompileResult>, String> {
     let syntaxes = read_syntax_all(source)?;
     let mut expander = Expander::new();
+    let mut macro_vm = VM::new();
+    let _effects = register_primitives(&mut macro_vm, symbols);
 
     // Expand all forms first (expansion is idempotent)
     let mut expanded_forms = Vec::new();
     for syntax in syntaxes {
-        let expanded = expander.expand(syntax)?;
+        let expanded = expander.expand(syntax, symbols, &mut macro_vm)?;
         expanded_forms.push(expanded);
     }
 
@@ -147,10 +183,10 @@ pub fn compile_all_new(
 
         // Check for convergence: did any effect change?
         if new_global_effects == global_effects {
-            break; // Stable — we're done
+            break; // Stable -- we're done
         }
 
-        // Effects changed — update and re-analyze
+        // Effects changed -- update and re-analyze
         global_effects = new_global_effects;
     }
 
@@ -176,22 +212,47 @@ pub fn compile_all_new(
     Ok(results)
 }
 
-/// Compile and execute using the new pipeline
-pub fn eval_new(
+/// Compile and execute using the pipeline.
+///
+/// Shares the caller's VM for both macro expansion and execution.
+pub fn eval(
     source: &str,
     symbols: &mut SymbolTable,
-    vm: &mut crate::vm::VM,
+    vm: &mut VM,
 ) -> Result<crate::value::Value, String> {
-    let result = compile_new(source, symbols)?;
-    vm.execute(&result.bytecode).map_err(|e| e.to_string())
+    let syntax = read_syntax(source)?;
+
+    let mut expander = Expander::new();
+    let expanded = expander.expand(syntax, symbols, vm)?;
+
+    let primitive_effects = get_primitive_effects(symbols);
+    let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+    let mut analysis = analyzer.analyze(&expanded)?;
+    mark_tail_calls(&mut analysis.hir);
+
+    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_bindings(analysis.bindings)
+        .with_intrinsics(intrinsics);
+    let lir_func = lowerer.lower(&analysis.hir)?;
+
+    let symbol_snapshot = symbols.all_names();
+    let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
+    let bytecode = emitter.emit(&lir_func);
+
+    vm.execute(&bytecode).map_err(|e| e.to_string())
 }
 
-/// Analyze source code without generating bytecode
-/// Used by linter and LSP which need HIR but not bytecode
-pub fn analyze_new(source: &str, symbols: &mut SymbolTable) -> Result<AnalyzeResult, String> {
+/// Analyze source code without generating bytecode.
+/// Used by linter and LSP which need HIR but not bytecode.
+pub fn analyze(
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+) -> Result<AnalyzeResult, String> {
     let syntax = read_syntax(source)?;
     let mut expander = Expander::new();
-    let expanded = expander.expand(syntax)?;
+    let expanded = expander.expand(syntax, symbols, vm)?;
     let primitive_effects = get_primitive_effects(symbols);
     let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
     let analysis = analyzer.analyze(&expanded)?;
@@ -202,10 +263,11 @@ pub fn analyze_new(source: &str, symbols: &mut SymbolTable) -> Result<AnalyzeRes
 }
 
 /// Analyze multiple top-level forms without generating bytecode.
-/// Uses fixpoint iteration for effect inference (same as compile_all_new).
-pub fn analyze_all_new(
+/// Uses fixpoint iteration for effect inference (same as compile_all).
+pub fn analyze_all(
     source: &str,
     symbols: &mut SymbolTable,
+    vm: &mut VM,
 ) -> Result<Vec<AnalyzeResult>, String> {
     let syntaxes = read_syntax_all(source)?;
     let mut expander = Expander::new();
@@ -213,7 +275,7 @@ pub fn analyze_all_new(
     // Expand all forms first
     let mut expanded_forms = Vec::new();
     for syntax in syntaxes {
-        let expanded = expander.expand(syntax)?;
+        let expanded = expander.expand(syntax, symbols, vm)?;
         expanded_forms.push(expanded);
     }
 
@@ -268,7 +330,6 @@ pub fn analyze_all_new(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitives::register_primitives;
     use crate::vm::VM;
 
     fn setup() -> (SymbolTable, VM) {
@@ -281,7 +342,7 @@ mod tests {
     #[test]
     fn test_compile_literal() {
         let (mut symbols, _) = setup();
-        let result = compile_new("42", &mut symbols);
+        let result = compile("42", &mut symbols);
         assert!(result.is_ok());
         let compiled = result.unwrap();
         assert!(!compiled.bytecode.instructions.is_empty());
@@ -290,21 +351,21 @@ mod tests {
     #[test]
     fn test_compile_if() {
         let (mut symbols, _) = setup();
-        let result = compile_new("(if #t 1 2)", &mut symbols);
+        let result = compile("(if #t 1 2)", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_let() {
         let (mut symbols, _) = setup();
-        let result = compile_new("(let ((x 10)) x)", &mut symbols);
+        let result = compile("(let ((x 10)) x)", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_lambda() {
         let (mut symbols, _) = setup();
-        let result = compile_new("(fn (x) x)", &mut symbols);
+        let result = compile("(fn (x) x)", &mut symbols);
         assert!(result.is_ok());
     }
 
@@ -314,7 +375,7 @@ mod tests {
         // Note: Function calls to built-in symbols like + may fail during lowering
         // because the new pipeline doesn't yet have full integration with built-in symbols.
         // This test just verifies that the pipeline can attempt to compile function calls.
-        let result = compile_new("(+ 1 2)", &mut symbols);
+        let result = compile("(+ 1 2)", &mut symbols);
         // We accept either success or a specific error about unbound variables
         // since the new pipeline is still being integrated
         match result {
@@ -329,7 +390,7 @@ mod tests {
         let (mut symbols, _) = setup();
         // Test that global variables (like +) are properly recognized and emit LoadGlobal
         // instead of "Unbound variable" error
-        let result = compile_new("(+ 1 2)", &mut symbols);
+        let result = compile("(+ 1 2)", &mut symbols);
         // After the fix, this should compile successfully (or at least not fail with "Unbound variable")
         match result {
             Ok(_) => {
@@ -348,42 +409,42 @@ mod tests {
     #[test]
     fn test_compile_begin() {
         let (mut symbols, _) = setup();
-        let result = compile_new("(begin 1 2 3)", &mut symbols);
+        let result = compile("(begin 1 2 3)", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_and() {
         let (mut symbols, _) = setup();
-        let result = compile_new("(and #t #t #f)", &mut symbols);
+        let result = compile("(and #t #t #f)", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_or() {
         let (mut symbols, _) = setup();
-        let result = compile_new("(or #f #f #t)", &mut symbols);
+        let result = compile("(or #f #f #t)", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_while() {
         let (mut symbols, _) = setup();
-        let result = compile_new("(while #f nil)", &mut symbols);
+        let result = compile("(while #f nil)", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_cond() {
         let (mut symbols, _) = setup();
-        let result = compile_new("(cond (#t 1) (else 2))", &mut symbols);
+        let result = compile("(cond (#t 1) (else 2))", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_all() {
         let (mut symbols, _) = setup();
-        let result = compile_all_new("1 2 3", &mut symbols);
+        let result = compile_all("1 2 3", &mut symbols);
         assert!(result.is_ok());
         let compiled = result.unwrap();
         assert_eq!(compiled.len(), 3);
@@ -392,7 +453,7 @@ mod tests {
     #[test]
     fn test_eval_literal() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("42", &mut symbols, &mut vm);
+        let result = eval("42", &mut symbols, &mut vm);
         // Note: execution may fail due to incomplete bytecode mapping
         // but compilation should succeed
         let _ = result;
@@ -401,7 +462,7 @@ mod tests {
     #[test]
     fn test_eval_addition() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(+ 1 2)", &mut symbols, &mut vm);
+        let result = eval("(+ 1 2)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(3)),
             Err(e) => panic!("Expected Ok(3), got Err: {}", e),
@@ -411,7 +472,7 @@ mod tests {
     #[test]
     fn test_eval_subtraction() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(- 10 3)", &mut symbols, &mut vm);
+        let result = eval("(- 10 3)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(7)),
             Err(e) => panic!("Expected Ok(7), got Err: {}", e),
@@ -421,7 +482,7 @@ mod tests {
     #[test]
     fn test_eval_nested_arithmetic() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(+ (* 2 3) (- 10 5))", &mut symbols, &mut vm);
+        let result = eval("(+ (* 2 3) (- 10 5))", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(11)),
             Err(e) => panic!("Expected Ok(11), got Err: {}", e),
@@ -431,7 +492,7 @@ mod tests {
     #[test]
     fn test_eval_if_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(if #t 42 0)", &mut symbols, &mut vm);
+        let result = eval("(if #t 42 0)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(42)),
             Err(e) => panic!("Expected Ok(42), got Err: {}", e),
@@ -441,7 +502,7 @@ mod tests {
     #[test]
     fn test_eval_if_false() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(if #f 42 0)", &mut symbols, &mut vm);
+        let result = eval("(if #f 42 0)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(0)),
             Err(e) => panic!("Expected Ok(0), got Err: {}", e),
@@ -451,7 +512,7 @@ mod tests {
     #[test]
     fn test_eval_let_simple() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(let ((x 10)) x)", &mut symbols, &mut vm);
+        let result = eval("(let ((x 10)) x)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(10)),
             Err(e) => panic!("Expected Ok(10), got Err: {}", e),
@@ -461,7 +522,7 @@ mod tests {
     #[test]
     fn test_eval_let_with_arithmetic() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(let ((x 10) (y 5)) (+ x y))", &mut symbols, &mut vm);
+        let result = eval("(let ((x 10) (y 5)) (+ x y))", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(15)),
             Err(e) => panic!("Expected Ok(15), got Err: {}", e),
@@ -471,7 +532,7 @@ mod tests {
     #[test]
     fn test_eval_lambda_identity() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("((fn (x) x) 42)", &mut symbols, &mut vm);
+        let result = eval("((fn (x) x) 42)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(42)),
             Err(e) => panic!("Expected Ok(42), got Err: {}", e),
@@ -481,7 +542,7 @@ mod tests {
     #[test]
     fn test_eval_lambda_add_one() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("((fn (x) (+ x 1)) 10)", &mut symbols, &mut vm);
+        let result = eval("((fn (x) (+ x 1)) 10)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(11)),
             Err(e) => panic!("Expected Ok(11), got Err: {}", e),
@@ -491,7 +552,7 @@ mod tests {
     #[test]
     fn test_compile_lambda_with_capture() {
         let (mut symbols, _) = setup();
-        let result = compile_new("(let ((x 10)) (fn () x))", &mut symbols);
+        let result = compile("(let ((x 10)) (fn () x))", &mut symbols);
         match result {
             Ok(_) => {}
             Err(e) => panic!("Failed to compile lambda with capture: {}", e),
@@ -501,7 +562,7 @@ mod tests {
     #[test]
     fn test_eval_begin() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(begin 1 2 3)", &mut symbols, &mut vm);
+        let result = eval("(begin 1 2 3)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(3)),
             Err(e) => panic!("Expected Ok(3), got Err: {}", e),
@@ -511,7 +572,7 @@ mod tests {
     #[test]
     fn test_eval_comparison_lt() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(< 1 2)", &mut symbols, &mut vm);
+        let result = eval("(< 1 2)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::bool(true)),
             Err(e) => panic!("Expected Ok(true), got Err: {}", e),
@@ -541,7 +602,7 @@ mod tests {
                 let content = fs::read_to_string(&path).expect("Failed to read example file");
 
                 let (mut symbols, _) = setup();
-                match compile_new(&content, &mut symbols) {
+                match compile(&content, &mut symbols) {
                     Ok(_) => {
                         passed.push(filename);
                     }
@@ -594,7 +655,7 @@ mod tests {
                 let content = fs::read_to_string(&path).expect("Failed to read example file");
                 let (mut symbols, mut vm) = setup();
 
-                match eval_new(&content, &mut symbols, &mut vm) {
+                match eval(&content, &mut symbols, &mut vm) {
                     Ok(_) => {
                         executed.push(filename.to_string());
                     }
@@ -624,28 +685,28 @@ mod tests {
     #[test]
     fn test_eval_cond_first_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(cond (#t 42))", &mut symbols, &mut vm);
+        let result = eval("(cond (#t 42))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_eval_cond_second_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(cond (#f 1) (#t 42))", &mut symbols, &mut vm);
+        let result = eval("(cond (#f 1) (#t 42))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_eval_cond_else() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(cond (#f 1) (#f 2) (else 42))", &mut symbols, &mut vm);
+        let result = eval("(cond (#f 1) (#f 2) (else 42))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_eval_cond_with_expressions() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(cond ((< 5 10) (+ 20 22)))", &mut symbols, &mut vm);
+        let result = eval("(cond ((< 5 10) (+ 20 22)))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
@@ -654,21 +715,21 @@ mod tests {
     #[test]
     fn test_eval_and_all_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(and #t #t #t)", &mut symbols, &mut vm);
+        let result = eval("(and #t #t #t)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(true));
     }
 
     #[test]
     fn test_eval_and_one_false() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(and #t #f #t)", &mut symbols, &mut vm);
+        let result = eval("(and #t #f #t)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(false));
     }
 
     #[test]
     fn test_eval_and_returns_last() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(and 1 2 3)", &mut symbols, &mut vm);
+        let result = eval("(and 1 2 3)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(3));
     }
 
@@ -676,14 +737,14 @@ mod tests {
     fn test_eval_and_short_circuit() {
         let (mut symbols, mut vm) = setup();
         // If and doesn't short-circuit, this would fail trying to call nil
-        let result = eval_new("(and #f (nil))", &mut symbols, &mut vm);
+        let result = eval("(and #f (nil))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(false));
     }
 
     #[test]
     fn test_eval_and_empty() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(and)", &mut symbols, &mut vm);
+        let result = eval("(and)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(true));
     }
 
@@ -692,21 +753,21 @@ mod tests {
     #[test]
     fn test_eval_or_all_false() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(or #f #f #f)", &mut symbols, &mut vm);
+        let result = eval("(or #f #f #f)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(false));
     }
 
     #[test]
     fn test_eval_or_one_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(or #f #t #f)", &mut symbols, &mut vm);
+        let result = eval("(or #f #t #f)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(true));
     }
 
     #[test]
     fn test_eval_or_returns_first_truthy() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(or #f 42 99)", &mut symbols, &mut vm);
+        let result = eval("(or #f 42 99)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
@@ -714,14 +775,14 @@ mod tests {
     fn test_eval_or_short_circuit() {
         let (mut symbols, mut vm) = setup();
         // If or doesn't short-circuit, this would fail trying to call nil
-        let result = eval_new("(or #t (nil))", &mut symbols, &mut vm);
+        let result = eval("(or #t (nil))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(true));
     }
 
     #[test]
     fn test_eval_or_empty() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(or)", &mut symbols, &mut vm);
+        let result = eval("(or)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(false));
     }
 
@@ -730,14 +791,14 @@ mod tests {
     #[test]
     fn test_eval_while_never_executes() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(while #f 42)", &mut symbols, &mut vm);
+        let result = eval("(while #f 42)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::NIL);
     }
 
     #[test]
     fn test_eval_while_with_mutation() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             "(begin (define x 0) (while (< x 5) (set! x (+ x 1))) x)",
             &mut symbols,
             &mut vm,
@@ -750,14 +811,14 @@ mod tests {
     #[test]
     fn test_eval_closure_captures_local() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(let ((x 10)) ((fn () x)))", &mut symbols, &mut vm);
+        let result = eval("(let ((x 10)) ((fn () x)))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(10));
     }
 
     #[test]
     fn test_eval_closure_captures_multiple() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             "(let ((x 10) (y 20)) ((fn () (+ x y))))",
             &mut symbols,
             &mut vm,
@@ -768,7 +829,7 @@ mod tests {
     #[test]
     fn test_eval_nested_closure() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             "(let ((x 10)) ((fn () ((fn () x)))))",
             &mut symbols,
             &mut vm,
@@ -779,7 +840,7 @@ mod tests {
     #[test]
     fn test_eval_closure_with_param_and_capture() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(let ((x 10)) ((fn (y) (+ x y)) 5))", &mut symbols, &mut vm);
+        let result = eval("(let ((x 10)) ((fn (y) (+ x y)) 5))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(15));
     }
 
@@ -788,7 +849,7 @@ mod tests {
     #[test]
     fn test_eval_function_as_argument() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             "((fn (f x) (f x)) (fn (n) (+ n 1)) 10)",
             &mut symbols,
             &mut vm,
@@ -799,7 +860,7 @@ mod tests {
     #[test]
     fn test_eval_function_returning_function() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(((fn (x) (fn (y) (+ x y))) 10) 5)", &mut symbols, &mut vm);
+        let result = eval("(((fn (x) (fn (y) (+ x y))) 10) 5)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(15));
     }
 
@@ -808,21 +869,21 @@ mod tests {
     #[test]
     fn test_eval_define_then_use() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(begin (define x 42) x)", &mut symbols, &mut vm);
+        let result = eval("(begin (define x 42) x)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_eval_define_then_set() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new("(begin (define x 10) (set! x 42) x)", &mut symbols, &mut vm);
+        let result = eval("(begin (define x 10) (set! x 42) x)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_eval_set_in_closure() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             "(begin 
                (define counter 0)
                (define inc (fn () (set! counter (+ counter 1))))
@@ -839,7 +900,7 @@ mod tests {
     fn test_intrinsic_fib() {
         // Fibonacci exercises intrinsic specialization with double recursion
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             "(begin
                (define fib (fn (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
                (fib 10))",
@@ -853,12 +914,12 @@ mod tests {
     fn test_intrinsic_unary_neg() {
         let (mut symbols, mut vm) = setup();
         assert_eq!(
-            eval_new("(- 5)", &mut symbols, &mut vm).unwrap(),
+            eval("(- 5)", &mut symbols, &mut vm).unwrap(),
             crate::value::Value::int(-5)
         );
         let (mut symbols, mut vm) = setup();
         assert_eq!(
-            eval_new("(- -3)", &mut symbols, &mut vm).unwrap(),
+            eval("(- -3)", &mut symbols, &mut vm).unwrap(),
             crate::value::Value::int(3)
         );
     }
@@ -868,7 +929,7 @@ mod tests {
         // Variadic + falls through to generic call
         let (mut symbols, mut vm) = setup();
         assert_eq!(
-            eval_new("(+ 1 2 3)", &mut symbols, &mut vm).unwrap(),
+            eval("(+ 1 2 3)", &mut symbols, &mut vm).unwrap(),
             crate::value::Value::int(6)
         );
     }
@@ -877,12 +938,12 @@ mod tests {
     fn test_intrinsic_not() {
         let (mut symbols, mut vm) = setup();
         assert_eq!(
-            eval_new("(not #t)", &mut symbols, &mut vm).unwrap(),
+            eval("(not #t)", &mut symbols, &mut vm).unwrap(),
             crate::value::Value::bool(false)
         );
         let (mut symbols, mut vm) = setup();
         assert_eq!(
-            eval_new("(not #f)", &mut symbols, &mut vm).unwrap(),
+            eval("(not #f)", &mut symbols, &mut vm).unwrap(),
             crate::value::Value::bool(true)
         );
     }
@@ -891,7 +952,7 @@ mod tests {
     fn test_intrinsic_rem() {
         let (mut symbols, mut vm) = setup();
         assert_eq!(
-            eval_new("(rem 17 5)", &mut symbols, &mut vm).unwrap(),
+            eval("(rem 17 5)", &mut symbols, &mut vm).unwrap(),
             crate::value::Value::int(2)
         );
     }
@@ -909,7 +970,7 @@ mod tests {
                     (my-fold f (f init (first lst)) (rest lst)))))
             (my-fold process 0 (list 1)))"#;
 
-        let result1 = eval_new(code1, &mut symbols, &mut vm);
+        let result1 = eval(code1, &mut symbols, &mut vm);
         println!("list 1: {:?}", result1);
 
         // Test with (list 1 2) - might fail
@@ -922,7 +983,7 @@ mod tests {
                     (my-fold f (f init (first lst)) (rest lst)))))
             (my-fold process 0 (list 1 2)))"#;
 
-        let result2 = eval_new(code2, &mut symbols2, &mut vm2);
+        let result2 = eval(code2, &mut symbols2, &mut vm2);
         println!("list 1 2: {:?}", result2);
 
         // Test with (list 1 2 3) - original failing case
@@ -935,25 +996,25 @@ mod tests {
                     (my-fold f (f init (first lst)) (rest lst)))))
             (my-fold process 0 (list 1 2 3)))"#;
 
-        let result3 = eval_new(code3, &mut symbols3, &mut vm3);
+        let result3 = eval(code3, &mut symbols3, &mut vm3);
         println!("list 1 2 3: {:?}", result3);
     }
 
-    // === analyze_new tests ===
+    // === analyze tests ===
 
     #[test]
-    fn test_analyze_new_literal() {
-        let (mut symbols, _) = setup();
-        let result = analyze_new("42", &mut symbols);
+    fn test_analyze_literal() {
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("42", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
         assert!(matches!(analysis.hir.kind, crate::hir::HirKind::Int(42)));
     }
 
     #[test]
-    fn test_analyze_new_define() {
-        let (mut symbols, _) = setup();
-        let result = analyze_new("(define x 10)", &mut symbols);
+    fn test_analyze_define() {
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(define x 10)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
         assert!(matches!(
@@ -963,9 +1024,9 @@ mod tests {
     }
 
     #[test]
-    fn test_analyze_new_lambda() {
-        let (mut symbols, _) = setup();
-        let result = analyze_new("(fn (x) x)", &mut symbols);
+    fn test_analyze_lambda() {
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(fn (x) x)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
         assert!(matches!(
@@ -977,9 +1038,9 @@ mod tests {
     }
 
     #[test]
-    fn test_analyze_all_new_multiple_forms() {
-        let (mut symbols, _) = setup();
-        let result = analyze_all_new("1 2 3", &mut symbols);
+    fn test_analyze_all_multiple_forms() {
+        let (mut symbols, mut vm) = setup();
+        let result = analyze_all("1 2 3", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analyses = result.unwrap();
         assert_eq!(analyses.len(), 3);
@@ -989,9 +1050,9 @@ mod tests {
     }
 
     #[test]
-    fn test_analyze_new_with_bindings() {
-        let (mut symbols, _) = setup();
-        let result = analyze_new("(let ((x 1) (y 2)) (+ x y))", &mut symbols);
+    fn test_analyze_with_bindings() {
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(let ((x 1) (y 2)) (+ x y))", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
         // Should have bindings for x and y
@@ -1007,7 +1068,7 @@ mod tests {
 (define f (fn (x) (if (= x 0) 1 (g (- x 1)))))
 (define g (fn (x) (if (= x 0) 2 (f (- x 1)))))
 "#;
-        let results = compile_all_new(source, &mut symbols);
+        let results = compile_all(source, &mut symbols);
         assert!(results.is_ok(), "Compilation should succeed");
         let results = results.unwrap();
         assert_eq!(results.len(), 2, "Should have 2 compiled forms");
@@ -1024,7 +1085,7 @@ mod tests {
 (define g (fn (x) (if (= x 0) 2 (f (- x 1)))))
 (f 5)
 "#;
-        let results = compile_all_new(source, &mut symbols);
+        let results = compile_all(source, &mut symbols);
         assert!(results.is_ok(), "Compilation should succeed");
         let results = results.unwrap();
 
@@ -1045,7 +1106,7 @@ mod tests {
 (define f (fn (x) (if (= x 0) 1 (g (- x 1)))))
 (define g (fn (x) (if (= x 0) 2 (f (- x 1)))))
 "#;
-        let results = compile_all_new(source, &mut symbols);
+        let results = compile_all(source, &mut symbols);
         assert!(results.is_ok(), "Compilation should succeed");
         let results = results.unwrap();
 
@@ -1099,7 +1160,7 @@ mod tests {
       (list (reverse queens))
       (try-cols-helper n 0 queens row))))
 "#;
-        let results = compile_all_new(source, &mut symbols);
+        let results = compile_all(source, &mut symbols);
         assert!(results.is_ok(), "Compilation should succeed");
         let results = results.unwrap();
 
@@ -1127,7 +1188,7 @@ mod tests {
     fn test_fiber_new_and_status() {
         let (mut symbols, mut vm) = setup();
         crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
-        let result = eval_new(
+        let result = eval(
             r#"(let ((f (fiber/new (fn () 42) 0)))
                  (= (fiber/status f) :new))"#,
             &mut symbols,
@@ -1144,7 +1205,7 @@ mod tests {
     fn test_fiber_resume_simple() {
         // A fiber that just returns a value
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             r#"(let ((f (fiber/new (fn () 42) 0)))
                  (fiber/resume f))"#,
             &mut symbols,
@@ -1161,7 +1222,7 @@ mod tests {
         // After a fiber completes, its status should be :dead
         let (mut symbols, mut vm) = setup();
         crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
-        let result = eval_new(
+        let result = eval(
             r#"(let ((f (fiber/new (fn () 42) 0)))
                  (fiber/resume f)
                  (= (fiber/status f) :dead))"#,
@@ -1180,7 +1241,7 @@ mod tests {
         // A fiber that signals, then is resumed to completion
         let (mut symbols, mut vm) = setup();
         // SIG_YIELD = 2, mask catches it
-        let result = eval_new(
+        let result = eval(
             r#"(let ((f (fiber/new (fn () (fiber/signal 2 99) 42) 2)))
                  (fiber/resume f)
                  (fiber/value f))"#,
@@ -1197,7 +1258,7 @@ mod tests {
     fn test_fiber_signal_resume_continues() {
         // Resume after signal should continue execution and return final value
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             r#"(let ((f (fiber/new (fn () (fiber/signal 2 99) 42) 2)))
                  (fiber/resume f)
                  (fiber/resume f))"#,
@@ -1213,7 +1274,7 @@ mod tests {
     #[test]
     fn test_fiber_is_fiber() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             r#"(fiber? (fiber/new (fn () 42) 0))"#,
             &mut symbols,
             &mut vm,
@@ -1227,7 +1288,7 @@ mod tests {
     #[test]
     fn test_fiber_not_fiber() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(r#"(fiber? 42)"#, &mut symbols, &mut vm);
+        let result = eval(r#"(fiber? 42)"#, &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::bool(false)),
             Err(e) => panic!("Expected Ok(#f), got Err: {}", e),
@@ -1239,7 +1300,7 @@ mod tests {
         // A fiber whose body calls a function that signals.
         // This tests yield propagation through nested calls.
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             r#"(begin
                  (define (inner) (fiber/signal 2 99))
                  (let ((f (fiber/new (fn () (inner) 42) 2)))
@@ -1257,7 +1318,7 @@ mod tests {
     #[test]
     fn test_fiber_mask() {
         let (mut symbols, mut vm) = setup();
-        let result = eval_new(
+        let result = eval(
             r#"(fiber/mask (fiber/new (fn () 42) 3))"#,
             &mut symbols,
             &mut vm,

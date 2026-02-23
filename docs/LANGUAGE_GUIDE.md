@@ -508,7 +508,7 @@ Functions are defined with `fn` or `define`:
 (add 3 4) ⟹ 7
 ```
 
-Note: `lambda` is available as an alias for `fn` for backward compatibility.
+Note: `lambda` is available as an alias for `fn`.
 
 ### Closures
 

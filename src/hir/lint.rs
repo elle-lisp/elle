@@ -203,15 +203,15 @@ impl Default for HirLinter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::analyze_new;
+    use crate::pipeline::analyze;
     use crate::primitives::register_primitives;
     use crate::vm::VM;
 
-    fn setup() -> SymbolTable {
+    fn setup() -> (SymbolTable, VM) {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
         let _effects = register_primitives(&mut vm, &mut symbols);
-        symbols
+        (symbols, vm)
     }
 
     #[test]
@@ -224,8 +224,8 @@ mod tests {
 
     #[test]
     fn test_hir_linter_naming_convention() {
-        let mut symbols = setup();
-        let result = analyze_new("(define camelCase 42)", &mut symbols);
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(define camelCase 42)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -241,8 +241,8 @@ mod tests {
 
     #[test]
     fn test_hir_linter_valid_naming() {
-        let mut symbols = setup();
-        let result = analyze_new("(define valid-name 42)", &mut symbols);
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(define valid-name 42)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -258,9 +258,9 @@ mod tests {
 
     #[test]
     fn test_hir_linter_arity_check() {
-        let mut symbols = setup();
+        let (mut symbols, mut vm) = setup();
         // cons expects 2 arguments
-        let result = analyze_new("(cons 1)", &mut symbols);
+        let result = analyze("(cons 1)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -276,8 +276,12 @@ mod tests {
 
     #[test]
     fn test_hir_linter_nested_expressions() {
-        let mut symbols = setup();
-        let result = analyze_new("(let ((camelCase 1)) (if #t camelCase 0))", &mut symbols);
+        let (mut symbols, mut vm) = setup();
+        let result = analyze(
+            "(let ((camelCase 1)) (if #t camelCase 0))",
+            &mut symbols,
+            &mut vm,
+        );
         assert!(result.is_ok());
         let analysis = result.unwrap();
 

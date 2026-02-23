@@ -129,7 +129,7 @@ pub struct Analyzer<'a> {
     /// Built from `register_primitive_effects` and passed in at construction
     primitive_effects: HashMap<SymbolId, Effect>,
     /// Maps SymbolId -> Effect for user-defined global functions from previous forms.
-    /// This enables cross-form effect tracking in compile_all_new.
+    /// This enables cross-form effect tracking in compile_all.
     global_effects: HashMap<SymbolId, Effect>,
     /// Effects of globally-defined functions in this form (for cross-form tracking)
     /// Populated during analysis, extracted after analysis completes.

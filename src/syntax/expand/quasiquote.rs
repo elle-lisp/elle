@@ -1,7 +1,9 @@
 //! Quasiquote expansion to runtime list construction
 
 use super::Expander;
+use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::vm::VM;
 
 impl Expander {
     /// Convert quasiquote to code that constructs the value at runtime
@@ -11,14 +13,16 @@ impl Expander {
         syntax: &Syntax,
         depth: usize,
         span: &Span,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
     ) -> Result<Syntax, String> {
         match &syntax.kind {
             // Unquote at depth 1 - evaluate the expression
-            SyntaxKind::Unquote(inner) if depth == 1 => self.expand((**inner).clone()),
+            SyntaxKind::Unquote(inner) if depth == 1 => self.expand((**inner).clone(), symbols, vm),
 
             // Nested unquote - decrease depth
             SyntaxKind::Unquote(inner) if depth > 1 => {
-                let expanded = self.quasiquote_to_code(inner, depth - 1, span)?;
+                let expanded = self.quasiquote_to_code(inner, depth - 1, span, symbols, vm)?;
                 // Wrap in (list (quote unquote) expanded)
                 Ok(self.make_list(
                     vec![
@@ -38,7 +42,7 @@ impl Expander {
 
             // Nested quasiquote - increase depth
             SyntaxKind::Quasiquote(inner) => {
-                let expanded = self.quasiquote_to_code(inner, depth + 1, span)?;
+                let expanded = self.quasiquote_to_code(inner, depth + 1, span, symbols, vm)?;
                 Ok(self.make_list(
                     vec![
                         self.make_symbol("list", span.clone()),
@@ -56,7 +60,9 @@ impl Expander {
             }
 
             // List - process elements, handling unquote-splicing
-            SyntaxKind::List(items) => self.quasiquote_list_to_code(items, depth, span),
+            SyntaxKind::List(items) => {
+                self.quasiquote_list_to_code(items, depth, span, symbols, vm)
+            }
 
             // Everything else gets quoted
             _ => Ok(self.make_list(
@@ -72,6 +78,8 @@ impl Expander {
         items: &[Syntax],
         depth: usize,
         span: &Span,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
     ) -> Result<Syntax, String> {
         if items.is_empty() {
             return Ok(self.make_list(
@@ -103,12 +111,18 @@ impl Expander {
                     }
                     // Add spliced expression
                     if depth == 1 {
-                        segments.push(self.expand((**inner).clone())?);
+                        segments.push(self.expand((**inner).clone(), symbols, vm)?);
                     } else {
-                        segments.push(self.quasiquote_to_code(inner, depth - 1, span)?);
+                        segments.push(self.quasiquote_to_code(
+                            inner,
+                            depth - 1,
+                            span,
+                            symbols,
+                            vm,
+                        )?);
                     }
                 } else {
-                    current_segment.push(self.quasiquote_to_code(item, depth, span)?);
+                    current_segment.push(self.quasiquote_to_code(item, depth, span, symbols, vm)?);
                 }
             }
 
@@ -127,7 +141,7 @@ impl Expander {
             // Simple case - just use list
             let mut list_call = vec![self.make_symbol("list", span.clone())];
             for item in items {
-                list_call.push(self.quasiquote_to_code(item, depth, span)?);
+                list_call.push(self.quasiquote_to_code(item, depth, span, symbols, vm)?);
             }
             Ok(self.make_list(list_call, span.clone()))
         }

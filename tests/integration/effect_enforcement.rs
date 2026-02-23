@@ -9,16 +9,16 @@
 
 use elle::effects::Effect;
 use elle::hir::HirKind;
-use elle::pipeline::{analyze_all_new, analyze_new};
+use elle::pipeline::{analyze, analyze_all};
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::vm::VM;
 
-fn setup() -> SymbolTable {
+fn setup() -> (SymbolTable, VM) {
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
     let _effects = register_primitives(&mut vm, &mut symbols);
-    symbols
+    (symbols, vm)
 }
 
 // ============================================================================
@@ -29,8 +29,8 @@ fn setup() -> SymbolTable {
 fn test_effect_direct_yield() {
     // (fn () (yield 1)) should have Pure effect on the lambda creation
     // but the body should have Yields effect
-    let mut symbols = setup();
-    let result = analyze_new("(fn () (yield 1))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(fn () (yield 1))", &mut symbols, &mut vm).unwrap();
 
     // Lambda creation is pure
     assert_eq!(result.hir.effect, Effect::none());
@@ -46,16 +46,16 @@ fn test_effect_direct_yield() {
 #[test]
 fn test_effect_yield_in_begin() {
     // (begin (yield 1) (yield 2)) should have Yields effect
-    let mut symbols = setup();
-    let result = analyze_new("(begin (yield 1) (yield 2))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(begin (yield 1) (yield 2))", &mut symbols, &mut vm).unwrap();
     assert_eq!(result.hir.effect, Effect::yields());
 }
 
 #[test]
 fn test_effect_yield_in_if() {
     // (if #t (yield 1) 2) should have Yields effect
-    let mut symbols = setup();
-    let result = analyze_new("(if #t (yield 1) 2)", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(if #t (yield 1) 2)", &mut symbols, &mut vm).unwrap();
     assert_eq!(result.hir.effect, Effect::yields());
 }
 
@@ -67,8 +67,8 @@ fn test_effect_yield_in_if() {
 fn test_effect_call_propagation() {
     // (define gen (fn () (yield 1)))
     // (gen) should have Yields effect
-    let mut symbols = setup();
-    let result = analyze_new("(begin (define gen (fn () (yield 1))) (gen))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(begin (define gen (fn () (yield 1))) (gen))", &mut symbols, &mut vm).unwrap();
     assert_eq!(
         result.hir.effect,
         Effect::yields(),
@@ -81,11 +81,8 @@ fn test_effect_nested_propagation() {
     // (define gen (fn () (yield 1)))
     // (define wrapper (fn () (gen)))
     // (wrapper) should be Yields
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(begin (define gen (fn () (yield 1))) (define wrapper (fn () (gen))) (wrapper))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(begin (define gen (fn () (yield 1))) (define wrapper (fn () (gen))) (wrapper))",        &mut symbols, &mut vm)
     .unwrap();
     assert_eq!(
         result.hir.effect,
@@ -98,8 +95,8 @@ fn test_effect_nested_propagation() {
 fn test_effect_pure_call() {
     // (define f (fn (x) (+ x 1)))
     // (f 42) should be Pure
-    let mut symbols = setup();
-    let result = analyze_new("(begin (define f (fn (x) (+ x 1))) (f 42))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(begin (define f (fn (x) (+ x 1))) (f 42))", &mut symbols, &mut vm).unwrap();
     assert_eq!(
         result.hir.effect,
         Effect::none(),
@@ -110,8 +107,8 @@ fn test_effect_pure_call() {
 #[test]
 fn test_effect_let_bound_lambda() {
     // (let ((gen (fn () (yield 1)))) (gen)) should have Yields effect
-    let mut symbols = setup();
-    let result = analyze_new("(let ((gen (fn () (yield 1)))) (gen))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(let ((gen (fn () (yield 1)))) (gen))", &mut symbols, &mut vm).unwrap();
     assert_eq!(
         result.hir.effect,
         Effect::yields(),
@@ -122,8 +119,8 @@ fn test_effect_let_bound_lambda() {
 #[test]
 fn test_effect_letrec_bound_lambda() {
     // (letrec ((gen (fn () (yield 1)))) (gen)) should have Yields effect
-    let mut symbols = setup();
-    let result = analyze_new("(letrec ((gen (fn () (yield 1)))) (gen) 42)", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(letrec ((gen (fn () (yield 1)))) (gen) 42)", &mut symbols, &mut vm).unwrap();
     assert_eq!(
         result.hir.effect,
         Effect::yields(),
@@ -144,17 +141,8 @@ fn test_effect_letrec_bound_lambda() {
 #[test]
 fn test_effect_polymorphic_local_higher_order() {
     // Define a local higher-order function and verify polymorphic resolution
-    let mut symbols = setup();
-    let result = analyze_new(
-        r#"(begin
-            (define my-map (fn (f lst)
-                (if (empty? lst)
-                    ()
-                    (cons (f (first lst)) (my-map f (rest lst))))))
-            (define gen (fn (x) (yield x)))
-            (my-map gen (list 1 2 3)))"#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        r#"(begin            (define my-map (fn (f lst)                (if (empty? lst)                    ()                    (cons (f (first lst)) (my-map f (rest lst))))))            (define gen (fn (x) (yield x)))            (my-map gen (list 1 2 3)))"#,        &mut symbols, &mut vm)
     .unwrap();
     // my-map calls gen which yields, so my-map's body has Yields effect
     // When we call (my-map gen ...), we look up my-map's effect
@@ -171,13 +159,8 @@ fn test_effect_polymorphic_local_higher_order() {
 #[test]
 fn test_effect_polymorphic_direct_call() {
     // Direct call with yielding lambda should propagate effect
-    let mut symbols = setup();
-    let result = analyze_new(
-        r#"(begin
-            (define apply-fn (fn (f x) (f x)))
-            (apply-fn (fn (x) (yield x)) 42))"#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        r#"(begin            (define apply-fn (fn (f x) (f x)))            (apply-fn (fn (x) (yield x)) 42))"#,        &mut symbols, &mut vm)
     .unwrap();
     // apply-fn's body calls f which is a parameter
     // We can't statically resolve the parameter's effect
@@ -194,8 +177,8 @@ fn test_effect_polymorphic_with_pure_arg() {
     // Calling a global function (map) with pure lambda
     // Since map isn't in primitive_effects (it's defined in stdlib),
     // the call is conservatively Yields (sound: unknown global may yield)
-    let mut symbols = setup();
-    let result = analyze_new("(map (fn (x) (+ x 1)) (list 1 2 3))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(map (fn (x) (+ x 1)) (list 1 2 3))", &mut symbols, &mut vm).unwrap();
     assert_eq!(
         result.hir.effect,
         Effect::yields(),
@@ -207,11 +190,8 @@ fn test_effect_polymorphic_with_pure_arg() {
 fn test_effect_polymorphic_with_yielding_arg_unknown_global() {
     // Calling a global function (map) that isn't in primitive_effects
     // Unknown globals default to Yields for soundness
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(begin (define gen (fn (x) (yield x))) (map gen (list 1 2 3)))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(begin (define gen (fn (x) (yield x))) (map gen (list 1 2 3)))",        &mut symbols, &mut vm)
     .unwrap();
     // map is not in primitive_effects (it's defined in stdlib, not as a primitive)
     // Unknown globals are Yields for soundness
@@ -232,11 +212,8 @@ fn test_effect_set_invalidation() {
     // (set! f (fn () (yield 1)))
     // After set!, effect tracking for f is invalidated
     // Calling f should be Yields (sound: we can't prove it's pure)
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(begin (define f (fn () 42)) (set! f (fn () (yield 1))) (f))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(begin (define f (fn () 42)) (set! f (fn () (yield 1))) (f))",        &mut symbols, &mut vm)
     .unwrap();
     // After set!, we conservatively treat the effect as Yields
     // This is sound: we can't prove the new value is pure
@@ -254,8 +231,8 @@ fn test_effect_set_invalidation() {
 #[test]
 fn test_effect_direct_lambda_call_yields() {
     // ((fn () (yield 1))) should have Yields effect
-    let mut symbols = setup();
-    let result = analyze_new("((fn () (yield 1)))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("((fn () (yield 1)))", &mut symbols, &mut vm).unwrap();
     assert_eq!(
         result.hir.effect,
         Effect::yields(),
@@ -266,8 +243,8 @@ fn test_effect_direct_lambda_call_yields() {
 #[test]
 fn test_effect_direct_lambda_call_pure() {
     // ((fn () 42)) should be Pure
-    let mut symbols = setup();
-    let result = analyze_new("((fn () 42))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("((fn () 42))", &mut symbols, &mut vm).unwrap();
     assert_eq!(
         result.hir.effect,
         Effect::none(),
@@ -286,11 +263,8 @@ fn test_effect_multiple_calls_mixed() {
     //        (pure-fn)
     //        (yield-fn))
     // Should have Yields effect because yield-fn is called
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(begin (define pure-fn (fn () 42)) (define yield-fn (fn () (yield 1))) (pure-fn) (yield-fn))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(begin (define pure-fn (fn () 42)) (define yield-fn (fn () (yield 1))) (pure-fn) (yield-fn))",        &mut symbols, &mut vm)
     .unwrap();
     assert_eq!(
         result.hir.effect,
@@ -303,11 +277,8 @@ fn test_effect_multiple_calls_mixed() {
 fn test_effect_conditional_yield() {
     // (define maybe-yield (fn (x) (if x (yield 1) 2)))
     // (maybe-yield #t) should have Yields effect
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(begin (define maybe-yield (fn (x) (if x (yield 1) 2))) (maybe-yield #t))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(begin (define maybe-yield (fn (x) (if x (yield 1) 2))) (maybe-yield #t))",        &mut symbols, &mut vm)
     .unwrap();
     assert_eq!(
         result.hir.effect,
@@ -322,11 +293,8 @@ fn test_effect_closure_captures_yielding() {
     //   (let ((wrapper (fn () (gen))))
     //     (wrapper)))
     // Should have Yields effect
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(let ((gen (fn () (yield 1)))) (let ((wrapper (fn () (gen)))) (wrapper)))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(let ((gen (fn () (yield 1)))) (let ((wrapper (fn () (gen)))) (wrapper)))",        &mut symbols, &mut vm)
     .unwrap();
     assert_eq!(
         result.hir.effect,
@@ -342,7 +310,7 @@ fn test_effect_closure_captures_yielding() {
 #[test]
 fn test_effect_pure_primitives() {
     // Pure primitives should have Pure effect
-    let mut symbols = setup();
+    let (mut symbols, mut vm) = setup();
 
     let pure_calls = [
         "(+ 1 2)",
@@ -363,7 +331,7 @@ fn test_effect_pure_primitives() {
     ];
 
     for call in pure_calls {
-        let result = analyze_new(call, &mut symbols).unwrap();
+        let result = analyze(call, &mut symbols, &mut vm).unwrap();
         assert_eq!(
             result.hir.effect,
             Effect::none(),
@@ -379,8 +347,8 @@ fn test_effect_pure_primitives() {
 
 #[test]
 fn test_lambda_body_effect_pure() {
-    let mut symbols = setup();
-    let result = analyze_new("(fn (x) (+ x 1))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(fn (x) (+ x 1))", &mut symbols, &mut vm).unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
         assert_eq!(body.effect, Effect::none());
@@ -391,8 +359,8 @@ fn test_lambda_body_effect_pure() {
 
 #[test]
 fn test_lambda_body_effect_yields() {
-    let mut symbols = setup();
-    let result = analyze_new("(fn (x) (yield x))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(fn (x) (yield x))", &mut symbols, &mut vm).unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
         assert_eq!(body.effect, Effect::yields());
@@ -403,8 +371,8 @@ fn test_lambda_body_effect_yields() {
 
 #[test]
 fn test_lambda_body_effect_nested_yield() {
-    let mut symbols = setup();
-    let result = analyze_new("(fn (x) (begin (+ x 1) (yield x) (+ x 2)))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(fn (x) (begin (+ x 1) (yield x) (+ x 2)))", &mut symbols, &mut vm).unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
         assert_eq!(body.effect, Effect::yields());
@@ -422,11 +390,8 @@ fn test_effect_unknown_global_is_yields() {
     // Unknown global functions default to Yields (sound)
     // This is the fix for effect soundness: if we can't prove a global is pure,
     // we must assume it may yield (since it could be redefined via set!)
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(begin (define f (fn () 42)) (set! f (fn () (yield 1))) (f))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(begin (define f (fn () 42)) (set! f (fn () (yield 1))) (f))",        &mut symbols, &mut vm)
     .unwrap();
     assert_eq!(
         result.hir.effect,
@@ -442,8 +407,8 @@ fn test_effect_unknown_global_is_yields() {
 #[test]
 fn test_effect_parameter_call_is_yields() {
     // Calling a function parameter should be Yields (we can't know its effect)
-    let mut symbols = setup();
-    let result = analyze_new("(fn (f) (f 42))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(fn (f) (f 42))", &mut symbols, &mut vm).unwrap();
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
         assert_eq!(
             body.effect,
@@ -458,8 +423,8 @@ fn test_effect_parameter_call_is_yields() {
 #[test]
 fn test_effect_let_bound_non_lambda_call_is_yields() {
     // Calling a let-bound non-lambda should be Yields
-    let mut symbols = setup();
-    let result = analyze_new("(let ((f (first fns))) (f 42))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(let ((f (first fns))) (f 42))", &mut symbols, &mut vm).unwrap();
     // f is not a lambda literal, effect unknown → Yields
     assert_eq!(
         result.hir.effect,
@@ -475,8 +440,8 @@ fn test_effect_let_bound_non_lambda_call_is_yields() {
 #[test]
 fn test_polymorphic_inference_single_param() {
     // Higher-order function should infer Polymorphic(0)
-    let mut symbols = setup();
-    let result = analyze_new("(define apply-fn (fn (f x) (f x)))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(define apply-fn (fn (f x) (f x)))", &mut symbols, &mut vm).unwrap();
 
     // Check the lambda's inferred effect
     if let HirKind::Define { value, .. } = &result.hir.kind {
@@ -500,11 +465,8 @@ fn test_polymorphic_inference_single_param() {
 #[test]
 fn test_polymorphic_inference_resolves_pure() {
     // Calling apply-fn with a pure function should be Pure
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(begin (define apply-fn (fn (f x) (f x))) (apply-fn + 42))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(begin (define apply-fn (fn (f x) (f x))) (apply-fn + 42))",        &mut symbols, &mut vm)
     .unwrap();
     assert_eq!(
         result.hir.effect,
@@ -516,11 +478,8 @@ fn test_polymorphic_inference_resolves_pure() {
 #[test]
 fn test_polymorphic_inference_resolves_yields() {
     // Calling apply-fn with a yielding lambda should be Yields
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(begin (define apply-fn (fn (f x) (f x))) (apply-fn (fn (x) (yield x)) 42))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(begin (define apply-fn (fn (f x) (f x))) (apply-fn (fn (x) (yield x)) 42))",        &mut symbols, &mut vm)
     .unwrap();
     assert_eq!(
         result.hir.effect,
@@ -534,15 +493,8 @@ fn test_polymorphic_inference_my_map() {
     // User-defined recursive map - the recursive call is seeded with Pure
     // during analysis (since define seeds lambda forms with Pure before
     // analyzing the body), so the function correctly infers as Polymorphic(0).
-    let mut symbols = setup();
-    let result = analyze_new(
-        r#"(begin 
-           (define my-map (fn (f xs) 
-             (if (empty? xs) (list) 
-                 (cons (f (first xs)) (my-map f (rest xs))))))
-           (my-map + (list 1 2 3)))"#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        r#"(begin            (define my-map (fn (f xs)              (if (empty? xs) (list)                  (cons (f (first xs)) (my-map f (rest xs))))))           (my-map + (list 1 2 3)))"#,        &mut symbols, &mut vm)
     .unwrap();
     // my-map is Polymorphic(0) because the only Yields source is calling f.
     // The recursive call to my-map is seeded as Pure during analysis.
@@ -557,15 +509,8 @@ fn test_polymorphic_inference_my_map() {
 #[test]
 fn test_polymorphic_inference_non_recursive_map() {
     // Non-recursive higher-order function should be Polymorphic(0)
-    let mut symbols = setup();
-    let result = analyze_new(
-        r#"(begin 
-           (define apply-to-list (fn (f xs) 
-             (if (empty? xs) (list) 
-                 (cons (f (first xs)) (list)))))
-           (apply-to-list + (list 1 2 3)))"#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        r#"(begin            (define apply-to-list (fn (f xs)              (if (empty? xs) (list)                  (cons (f (first xs)) (list)))))           (apply-to-list + (list 1 2 3)))"#,        &mut symbols, &mut vm)
     .unwrap();
     // apply-to-list is Polymorphic(0), + is Pure, so the call is Pure
     assert_eq!(
@@ -578,11 +523,8 @@ fn test_polymorphic_inference_non_recursive_map() {
 #[test]
 fn test_polymorphic_inference_direct_yield_prevents() {
     // A function that both calls a parameter AND yields directly is Yields, not Polymorphic
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(define bad (fn (f x) (begin (yield 99) (f x))))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(define bad (fn (f x) (begin (yield 99) (f x))))",        &mut symbols, &mut vm)
     .unwrap();
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
@@ -606,11 +548,8 @@ fn test_polymorphic_inference_direct_yield_prevents() {
 #[test]
 fn test_polymorphic_inference_two_params() {
     // A function that calls two different parameters — should infer Polymorphic({0, 1})
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(define apply-both (fn (f g x) (begin (f x) (g x))))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(define apply-both (fn (f g x) (begin (f x) (g x))))",        &mut symbols, &mut vm)
     .unwrap();
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
@@ -637,11 +576,8 @@ fn test_polymorphic_inference_two_params() {
 #[test]
 fn test_polymorphic_inference_two_params_resolves_pure() {
     // Calling apply-both with two pure functions should be Pure
-    let mut symbols = setup();
-    let result = analyze_new(
-        "(begin (define apply-both (fn (f g x) (begin (f x) (g x)))) (apply-both + * 5))",
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        "(begin (define apply-both (fn (f g x) (begin (f x) (g x)))) (apply-both + * 5))",        &mut symbols, &mut vm)
     .unwrap();
     assert_eq!(
         result.hir.effect,
@@ -653,14 +589,8 @@ fn test_polymorphic_inference_two_params_resolves_pure() {
 #[test]
 fn test_polymorphic_inference_two_params_resolves_yields() {
     // Calling apply-both with one yielding function should be Yields
-    let mut symbols = setup();
-    let result = analyze_new(
-        r#"(begin 
-           (define gen (fn () (yield 1)))
-           (define apply-both (fn (f g x) (begin (f x) (g x)))) 
-           (apply-both gen * 5))"#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        r#"(begin            (define gen (fn () (yield 1)))           (define apply-both (fn (f g x) (begin (f x) (g x))))            (apply-both gen * 5))"#,        &mut symbols, &mut vm)
     .unwrap();
     assert_eq!(
         result.hir.effect,
@@ -672,8 +602,8 @@ fn test_polymorphic_inference_two_params_resolves_yields() {
 #[test]
 fn test_polymorphic_inference_second_param() {
     // Higher-order function where the second parameter is called
-    let mut symbols = setup();
-    let result = analyze_new("(define apply-second (fn (x f) (f x)))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(define apply-second (fn (x f) (f x)))", &mut symbols, &mut vm).unwrap();
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
@@ -696,14 +626,8 @@ fn test_polymorphic_inference_second_param() {
 #[test]
 fn test_polymorphic_inference_nested_call() {
     // Nested higher-order function: outer calls inner which calls param
-    let mut symbols = setup();
-    let result = analyze_new(
-        r#"(begin 
-           (define apply-fn (fn (f x) (f x)))
-           (define wrapper (fn (g y) (apply-fn g y)))
-           (wrapper + 42))"#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        r#"(begin            (define apply-fn (fn (f x) (f x)))           (define wrapper (fn (g y) (apply-fn g y)))           (wrapper + 42))"#,        &mut symbols, &mut vm)
     .unwrap();
     // wrapper calls apply-fn with g, apply-fn is Polymorphic(0)
     // So wrapper's body effect depends on g's effect
@@ -718,13 +642,8 @@ fn test_polymorphic_inference_nested_call() {
 #[test]
 fn test_polymorphic_inference_with_known_yielding_call() {
     // A function that calls a parameter AND a known yielding function is Yields
-    let mut symbols = setup();
-    let result = analyze_new(
-        r#"(begin 
-           (define gen (fn () (yield 1)))
-           (define bad (fn (f x) (begin (gen) (f x)))))"#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(        r#"(begin            (define gen (fn () (yield 1)))           (define bad (fn (f x) (begin (gen) (f x)))))"#,        &mut symbols, &mut vm)
     .unwrap();
 
     // Find the 'bad' definition
@@ -753,8 +672,8 @@ fn test_polymorphic_inference_with_known_yielding_call() {
 #[test]
 fn test_polymorphic_inference_pure_function() {
     // A pure function should have Pure effect, not Polymorphic
-    let mut symbols = setup();
-    let result = analyze_new("(define add1 (fn (x) (+ x 1)))", &mut symbols).unwrap();
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(define add1 (fn (x) (+ x 1)))", &mut symbols, &mut vm).unwrap();
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
@@ -782,14 +701,8 @@ fn test_polymorphic_inference_pure_function() {
 fn test_cross_form_effect_tracking_pure_helper() {
     // When a pure helper function is defined in one form and called in another,
     // the caller should know the helper is pure.
-    let mut symbols = setup();
-    let results = analyze_all_new(
-        r#"
-        (define helper (fn (x) (+ x 1)))
-        (define caller (fn (y) (helper y)))
-        "#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let results = analyze_all(        r#"        (define helper (fn (x) (+ x 1)))        (define caller (fn (y) (helper y)))        "#,        &mut symbols,    &mut vm,    )
     .unwrap();
 
     // The second form (caller) should have Pure effect because helper is pure
@@ -818,14 +731,8 @@ fn test_cross_form_effect_tracking_pure_helper() {
 fn test_cross_form_effect_tracking_polymorphic_helper() {
     // When a polymorphic helper is defined in one form and called in another,
     // the caller should correctly resolve the polymorphic effect.
-    let mut symbols = setup();
-    let results = analyze_all_new(
-        r#"
-        (define apply-fn (fn (f x) (f x)))
-        (define use-apply (fn () (apply-fn + 5)))
-        "#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let results = analyze_all(        r#"        (define apply-fn (fn (f x) (f x)))        (define use-apply (fn () (apply-fn + 5)))        "#,        &mut symbols,    &mut vm,    )
     .unwrap();
 
     assert_eq!(results.len(), 2);
@@ -853,14 +760,8 @@ fn test_cross_form_effect_tracking_polymorphic_helper() {
 fn test_cross_form_effect_tracking_mutual_recursion() {
     // Test that mutually recursive functions across forms work correctly.
     // safe? calls check-safe-helper, which should be known as pure.
-    let mut symbols = setup();
-    let results = analyze_all_new(
-        r#"
-        (define check-safe-helper (fn (x) (= x 0)))
-        (define safe? (fn (n) (check-safe-helper n)))
-        "#,
-        &mut symbols,
-    )
+    let (mut symbols, mut vm) = setup();
+    let results = analyze_all(        r#"        (define check-safe-helper (fn (x) (= x 0)))        (define safe? (fn (n) (check-safe-helper n)))        "#,        &mut symbols,    &mut vm,    )
     .unwrap();
 
     assert_eq!(results.len(), 2);

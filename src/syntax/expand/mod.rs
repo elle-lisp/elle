@@ -10,7 +10,12 @@ mod threading;
 mod tests;
 
 use super::{ScopeId, Span, Syntax, SyntaxKind};
+use crate::symbol::SymbolTable;
+use crate::vm::VM;
 use std::collections::HashMap;
+
+/// Maximum macro expansion depth before erroring (prevents infinite expansion)
+const MAX_MACRO_EXPANSION_DEPTH: usize = 200;
 
 /// Macro definition stored as Syntax
 #[derive(Debug, Clone)]
@@ -25,6 +30,7 @@ pub struct MacroDef {
 pub struct Expander {
     macros: HashMap<String, MacroDef>,
     next_scope_id: u32,
+    expansion_depth: usize,
 }
 
 impl Expander {
@@ -32,6 +38,7 @@ impl Expander {
         Expander {
             macros: HashMap::new(),
             next_scope_id: 1, // 0 is reserved for top-level
+            expansion_depth: 0,
         }
     }
 
@@ -58,7 +65,12 @@ impl Expander {
     }
 
     /// Expand all macros in a syntax tree
-    pub fn expand(&mut self, syntax: Syntax) -> Result<Syntax, String> {
+    pub fn expand(
+        &mut self,
+        syntax: Syntax,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Syntax, String> {
         match &syntax.kind {
             SyntaxKind::Symbol(name) => {
                 // Resolve qualified symbols like string:upcase -> string-upcase
@@ -82,10 +94,10 @@ impl Expander {
 
                     // Handle threading macros
                     if name == "->" {
-                        return self.handle_thread_first(items, &syntax.span);
+                        return self.handle_thread_first(items, &syntax.span, symbols, vm);
                     }
                     if name == "->>" {
-                        return self.handle_thread_last(items, &syntax.span);
+                        return self.handle_thread_last(items, &syntax.span, symbols, vm);
                     }
 
                     // Handle macro introspection
@@ -93,7 +105,7 @@ impl Expander {
                         return self.handle_macro_predicate(items, &syntax.span);
                     }
                     if name == "expand-macro" {
-                        return self.handle_expand_macro(items, &syntax.span);
+                        return self.handle_expand_macro(items, &syntax.span, symbols, vm);
                     }
 
                     // Handle (define (f x y) body...) shorthand
@@ -122,27 +134,35 @@ impl Expander {
                                     SyntaxKind::List(vec![define_sym, func_name, lambda]),
                                     syntax.span.clone(),
                                 );
-                                return self.expand(desugared);
+                                return self.expand(desugared, symbols, vm);
                             }
                         }
                     }
 
                     // Check if it's a macro call
                     if let Some(macro_def) = self.macros.get(name).cloned() {
-                        return self.expand_macro_call(&macro_def, &items[1..], &syntax);
+                        return self.expand_macro_call(
+                            &macro_def,
+                            &items[1..],
+                            &syntax,
+                            symbols,
+                            vm,
+                        );
                     }
                 }
                 // Not a macro call - expand children recursively
-                self.expand_list(items, syntax.span, syntax.scopes)
+                self.expand_list(items, syntax.span, syntax.scopes, symbols, vm)
             }
-            SyntaxKind::Vector(items) => self.expand_vector(items, syntax.span, syntax.scopes),
+            SyntaxKind::Vector(items) => {
+                self.expand_vector(items, syntax.span, syntax.scopes, symbols, vm)
+            }
             SyntaxKind::Quote(_) => {
                 // Don't expand inside quote
                 Ok(syntax)
             }
             SyntaxKind::Quasiquote(inner) => {
                 // Convert quasiquote to code that builds the structure
-                self.quasiquote_to_code(inner, 1, &syntax.span)
+                self.quasiquote_to_code(inner, 1, &syntax.span, symbols, vm)
             }
             _ => Ok(syntax),
         }
@@ -237,9 +257,13 @@ impl Expander {
         items: &[Syntax],
         span: Span,
         scopes: Vec<ScopeId>,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
     ) -> Result<Syntax, String> {
-        let expanded: Result<Vec<Syntax>, String> =
-            items.iter().map(|item| self.expand(item.clone())).collect();
+        let expanded: Result<Vec<Syntax>, String> = items
+            .iter()
+            .map(|item| self.expand(item.clone(), symbols, vm))
+            .collect();
         Ok(Syntax::with_scopes(
             SyntaxKind::List(expanded?),
             span,
@@ -252,9 +276,13 @@ impl Expander {
         items: &[Syntax],
         span: Span,
         scopes: Vec<ScopeId>,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
     ) -> Result<Syntax, String> {
-        let expanded: Result<Vec<Syntax>, String> =
-            items.iter().map(|item| self.expand(item.clone())).collect();
+        let expanded: Result<Vec<Syntax>, String> = items
+            .iter()
+            .map(|item| self.expand(item.clone(), symbols, vm))
+            .collect();
         Ok(Syntax::with_scopes(
             SyntaxKind::Vector(expanded?),
             span,

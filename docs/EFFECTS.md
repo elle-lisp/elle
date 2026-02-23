@@ -580,7 +580,7 @@ The compiler's effect information guides JIT decisions:
 (fiber/env fiber) → table | nil
 ```
 
-### Sugar and Backward Compatibility
+### Sugar and Aliases
 
 ```lisp
 ;; try/catch/finally
@@ -594,7 +594,7 @@ The compiler's effect information guides JIT decisions:
 ;; throw
 (throw value) → (fiber/signal :error value)
 
-;; Backward compat (thin aliases)
+;; Thin aliases
 (coro/new fn) → (fiber/new fn :yield)
 (coro/resume co val) → (fiber/resume co val)
 (coro/status co) → (fiber/status co)
@@ -752,7 +752,7 @@ and faster. Current implementation: flat.
   `Condition` type, no exception hierarchy. Pattern matching on the payload
   replaces hierarchy checks.
 
-- **Backward compatibility**: `yield` works as a special form (emits
+- **Coroutine aliases**: `yield` works as a special form (emits
   `SIG_YIELD`). `make-coroutine` / `coro/resume` are thin wrappers
   around `fiber/new` / `fiber/resume`. `try`/`catch` macro is blocked on
   macro system work.

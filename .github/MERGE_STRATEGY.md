@@ -340,8 +340,8 @@ The revert commit shows what was removed and when, maintaining history.
 Elle uses Semantic Versioning: `MAJOR.MINOR.PATCH`
 
 - `MAJOR`: Breaking changes
-- `MINOR`: New features (backward compatible)
-- `PATCH`: Bug fixes (backward compatible)
+- `MINOR`: New features (non-breaking)
+- `PATCH`: Bug fixes (non-breaking)
 
 ### Release Process
 

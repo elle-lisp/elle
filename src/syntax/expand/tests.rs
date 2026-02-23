@@ -1,11 +1,22 @@
 //! Tests for macro expansion
 
 use super::*;
+use crate::primitives::register_primitives;
+use crate::symbol::SymbolTable;
 use crate::syntax::{ScopeId, Span, Syntax, SyntaxKind};
+use crate::vm::VM;
+
+fn setup() -> (SymbolTable, VM) {
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _effects = register_primitives(&mut vm, &mut symbols);
+    (symbols, vm)
+}
 
 #[test]
 fn test_quasiquote_simple_list() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 10, 1, 1);
 
     // `(a b c)
@@ -19,7 +30,7 @@ fn test_quasiquote_simple_list() {
         span.clone(),
     );
 
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     // Should expand to (list (quote a) (quote b) (quote c))
     let result_str = result.to_string();
     assert!(
@@ -37,6 +48,7 @@ fn test_quasiquote_simple_list() {
 #[test]
 fn test_quasiquote_with_unquote() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 10, 1, 1);
 
     // `(a ,x b)
@@ -56,7 +68,7 @@ fn test_quasiquote_with_unquote() {
         span.clone(),
     );
 
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     let result_str = result.to_string();
     assert!(
         result_str.contains("list"),
@@ -78,6 +90,7 @@ fn test_quasiquote_with_unquote() {
 #[test]
 fn test_quasiquote_with_splicing() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 10, 1, 1);
 
     // `(a ,@xs b)
@@ -97,7 +110,7 @@ fn test_quasiquote_with_splicing() {
         span.clone(),
     );
 
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     let result_str = result.to_string();
     assert!(
         result_str.contains("append"),
@@ -119,6 +132,7 @@ fn test_quasiquote_with_splicing() {
 #[test]
 fn test_quasiquote_non_list() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // `x
@@ -130,7 +144,7 @@ fn test_quasiquote_non_list() {
         span.clone(),
     );
 
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     let result_str = result.to_string();
     // Should expand to (quote x)
     assert!(
@@ -148,9 +162,10 @@ fn test_quasiquote_non_list() {
 #[test]
 fn test_defmacro_registration() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
-    // Define a macro using defmacro: (defmacro double (x) (* x 2))
+    // Define a macro using defmacro with quasiquote: (defmacro double (x) `(* ,x 2))
     let defmacro_form = Syntax::new(
         SyntaxKind::List(vec![
             Syntax::new(SyntaxKind::Symbol("defmacro".to_string()), span.clone()),
@@ -163,18 +178,27 @@ fn test_defmacro_registration() {
                 span.clone(),
             ),
             Syntax::new(
-                SyntaxKind::List(vec![
-                    Syntax::new(SyntaxKind::Symbol("*".to_string()), span.clone()),
-                    Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
-                    Syntax::new(SyntaxKind::Int(2), span.clone()),
-                ]),
+                SyntaxKind::Quasiquote(Box::new(Syntax::new(
+                    SyntaxKind::List(vec![
+                        Syntax::new(SyntaxKind::Symbol("*".to_string()), span.clone()),
+                        Syntax::new(
+                            SyntaxKind::Unquote(Box::new(Syntax::new(
+                                SyntaxKind::Symbol("x".to_string()),
+                                span.clone(),
+                            ))),
+                            span.clone(),
+                        ),
+                        Syntax::new(SyntaxKind::Int(2), span.clone()),
+                    ]),
+                    span.clone(),
+                ))),
                 span.clone(),
             ),
         ]),
         span.clone(),
     );
 
-    let result = expander.expand(defmacro_form);
+    let result = expander.expand(defmacro_form, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
     // defmacro should expand to nil
@@ -184,12 +208,12 @@ fn test_defmacro_registration() {
     let macro_call = Syntax::new(
         SyntaxKind::List(vec![
             Syntax::new(SyntaxKind::Symbol("double".to_string()), span.clone()),
-            Syntax::new(SyntaxKind::Int(21), span.clone()),
+            Syntax::new(SyntaxKind::Int(21), span),
         ]),
-        span,
+        Span::new(0, 5, 1, 1),
     );
 
-    let result = expander.expand(macro_call);
+    let result = expander.expand(macro_call, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
     // Should expand to (* 21 2)
@@ -199,6 +223,7 @@ fn test_defmacro_registration() {
 #[test]
 fn test_defmacro_invalid_syntax() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // defmacro with wrong number of arguments
@@ -210,7 +235,7 @@ fn test_defmacro_invalid_syntax() {
         span.clone(),
     );
 
-    let result = expander.expand(defmacro_form);
+    let result = expander.expand(defmacro_form, &mut symbols, &mut vm);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("requires exactly 3 arguments"));
 }
@@ -218,6 +243,7 @@ fn test_defmacro_invalid_syntax() {
 #[test]
 fn test_defmacro_non_symbol_name() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // defmacro with non-symbol name
@@ -231,7 +257,7 @@ fn test_defmacro_non_symbol_name() {
         span.clone(),
     );
 
-    let result = expander.expand(defmacro_form);
+    let result = expander.expand(defmacro_form, &mut symbols, &mut vm);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("macro name must be a symbol"));
 }
@@ -239,6 +265,7 @@ fn test_defmacro_non_symbol_name() {
 #[test]
 fn test_macro_predicate_true() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // Define a macro
@@ -259,7 +286,7 @@ fn test_macro_predicate_true() {
         span,
     );
 
-    let result = expander.expand(check);
+    let result = expander.expand(check, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
     assert_eq!(expanded.to_string(), "#t");
@@ -268,6 +295,7 @@ fn test_macro_predicate_true() {
 #[test]
 fn test_macro_predicate_false() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // (macro? not-a-macro) should return #f
@@ -279,7 +307,7 @@ fn test_macro_predicate_false() {
         span,
     );
 
-    let result = expander.expand(check);
+    let result = expander.expand(check, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
     assert_eq!(expanded.to_string(), "#f");
@@ -288,6 +316,7 @@ fn test_macro_predicate_false() {
 #[test]
 fn test_macro_predicate_non_symbol() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // (macro? 42) should return #f (not a symbol)
@@ -299,7 +328,7 @@ fn test_macro_predicate_non_symbol() {
         span,
     );
 
-    let result = expander.expand(check);
+    let result = expander.expand(check, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
     assert_eq!(expanded.to_string(), "#f");
@@ -308,6 +337,7 @@ fn test_macro_predicate_non_symbol() {
 #[test]
 fn test_macro_predicate_wrong_arity() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // (macro?) with no arguments should error
@@ -319,7 +349,7 @@ fn test_macro_predicate_wrong_arity() {
         span,
     );
 
-    let result = expander.expand(check);
+    let result = expander.expand(check, &mut symbols, &mut vm);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("requires exactly 1 argument"));
 }
@@ -327,15 +357,31 @@ fn test_macro_predicate_wrong_arity() {
 #[test]
 fn test_expand_macro_basic() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
-    // Define a macro: (defmacro double (x) (+ x x))
+    // Define a macro: (defmacro double (x) `(+ ,x ,x))
     let template = Syntax::new(
-        SyntaxKind::List(vec![
-            Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
-            Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
-            Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
-        ]),
+        SyntaxKind::Quasiquote(Box::new(Syntax::new(
+            SyntaxKind::List(vec![
+                Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
+                Syntax::new(
+                    SyntaxKind::Unquote(Box::new(Syntax::new(
+                        SyntaxKind::Symbol("x".to_string()),
+                        span.clone(),
+                    ))),
+                    span.clone(),
+                ),
+                Syntax::new(
+                    SyntaxKind::Unquote(Box::new(Syntax::new(
+                        SyntaxKind::Symbol("x".to_string()),
+                        span.clone(),
+                    ))),
+                    span.clone(),
+                ),
+            ]),
+            span.clone(),
+        ))),
         span.clone(),
     );
     let macro_def = MacroDef {
@@ -364,7 +410,7 @@ fn test_expand_macro_basic() {
         span,
     );
 
-    let result = expander.expand(expand_call);
+    let result = expander.expand(expand_call, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
     // Result should be a quoted form: '(+ 5 5)
@@ -374,6 +420,7 @@ fn test_expand_macro_basic() {
 #[test]
 fn test_expand_macro_non_macro() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // (expand-macro '(+ 1 2)) should return '(+ 1 2) unchanged
@@ -395,7 +442,7 @@ fn test_expand_macro_non_macro() {
         span,
     );
 
-    let result = expander.expand(expand_call);
+    let result = expander.expand(expand_call, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
     // Result should be unchanged: '(+ 1 2)
@@ -405,6 +452,7 @@ fn test_expand_macro_non_macro() {
 #[test]
 fn test_expand_macro_wrong_arity() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // (expand-macro) with no arguments should error
@@ -416,7 +464,7 @@ fn test_expand_macro_wrong_arity() {
         span,
     );
 
-    let result = expander.expand(expand_call);
+    let result = expander.expand(expand_call, &mut symbols, &mut vm);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("requires exactly 1 argument"));
 }
@@ -424,6 +472,7 @@ fn test_expand_macro_wrong_arity() {
 #[test]
 fn test_expand_macro_unquoted_arg() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // (expand-macro x) with unquoted arg returns the arg unchanged
@@ -435,7 +484,7 @@ fn test_expand_macro_unquoted_arg() {
         span,
     );
 
-    let result = expander.expand(expand_call);
+    let result = expander.expand(expand_call, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
     // Result should be the symbol x unchanged
@@ -445,6 +494,7 @@ fn test_expand_macro_unquoted_arg() {
 #[test]
 fn test_qualified_symbol_string_module() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // string:upcase should expand to string-upcase
@@ -452,50 +502,53 @@ fn test_qualified_symbol_string_module() {
         SyntaxKind::Symbol("string:upcase".to_string()),
         span.clone(),
     );
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "string-upcase");
 
     // string:length should expand to string-length
     let syntax = Syntax::new(SyntaxKind::Symbol("string:length".to_string()), span);
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "string-length");
 }
 
 #[test]
 fn test_qualified_symbol_math_module() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // math:abs should expand to abs
     let syntax = Syntax::new(SyntaxKind::Symbol("math:abs".to_string()), span.clone());
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "abs");
 
     // math:floor should expand to floor
     let syntax = Syntax::new(SyntaxKind::Symbol("math:floor".to_string()), span);
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "floor");
 }
 
 #[test]
 fn test_qualified_symbol_list_module() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // list:length should expand to length
     let syntax = Syntax::new(SyntaxKind::Symbol("list:length".to_string()), span.clone());
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "length");
 
     // list:append should expand to append
     let syntax = Syntax::new(SyntaxKind::Symbol("list:append".to_string()), span);
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "append");
 }
 
 #[test]
 fn test_qualified_symbol_in_call() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // (string:upcase "hello") should expand to (string-upcase "hello")
@@ -509,29 +562,109 @@ fn test_qualified_symbol_in_call() {
         ]),
         span,
     );
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "(string-upcase \"hello\")");
 }
 
 #[test]
 fn test_qualified_symbol_unknown_module() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // unknown:foo should remain unchanged (unknown module)
     let syntax = Syntax::new(SyntaxKind::Symbol("unknown:foo".to_string()), span);
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "unknown:foo");
 }
 
 #[test]
 fn test_keyword_not_qualified() {
     let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
     // :keyword should remain a keyword, not be treated as qualified
     let syntax = Syntax::new(SyntaxKind::Keyword("foo".to_string()), span);
-    let result = expander.expand(syntax).unwrap();
+    let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     // Keywords are stored without the leading colon in SyntaxKind::Keyword
     assert!(matches!(result.kind, SyntaxKind::Keyword(ref s) if s == "foo"));
+}
+
+/// Macro body uses `if` to conditionally generate different code.
+/// This requires VM evaluation — template substitution can't do this.
+#[test]
+fn test_macro_with_conditional_body() {
+    let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
+    let span = Span::new(0, 50, 1, 1);
+
+    // (defmacro maybe-negate (x negate?)
+    //   (if negate? `(- ,x) x))
+    let defmacro_syntax = Syntax::new(
+        SyntaxKind::List(vec![
+            Syntax::new(SyntaxKind::Symbol("defmacro".to_string()), span.clone()),
+            Syntax::new(SyntaxKind::Symbol("maybe-negate".to_string()), span.clone()),
+            Syntax::new(
+                SyntaxKind::List(vec![
+                    Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
+                    Syntax::new(SyntaxKind::Symbol("negate?".to_string()), span.clone()),
+                ]),
+                span.clone(),
+            ),
+            // Body: (if negate? `(- ,x) x)
+            Syntax::new(
+                SyntaxKind::List(vec![
+                    Syntax::new(SyntaxKind::Symbol("if".to_string()), span.clone()),
+                    Syntax::new(SyntaxKind::Symbol("negate?".to_string()), span.clone()),
+                    Syntax::new(
+                        SyntaxKind::Quasiquote(Box::new(Syntax::new(
+                            SyntaxKind::List(vec![
+                                Syntax::new(SyntaxKind::Symbol("-".to_string()), span.clone()),
+                                Syntax::new(
+                                    SyntaxKind::Unquote(Box::new(Syntax::new(
+                                        SyntaxKind::Symbol("x".to_string()),
+                                        span.clone(),
+                                    ))),
+                                    span.clone(),
+                                ),
+                            ]),
+                            span.clone(),
+                        ))),
+                        span.clone(),
+                    ),
+                    Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
+                ]),
+                span.clone(),
+            ),
+        ]),
+        span.clone(),
+    );
+    expander
+        .expand(defmacro_syntax, &mut symbols, &mut vm)
+        .unwrap();
+
+    // (maybe-negate 42 #t) should expand to (- 42) because negate? is #t
+    let call_true = Syntax::new(
+        SyntaxKind::List(vec![
+            Syntax::new(SyntaxKind::Symbol("maybe-negate".to_string()), span.clone()),
+            Syntax::new(SyntaxKind::Int(42), span.clone()),
+            Syntax::new(SyntaxKind::Bool(true), span.clone()),
+        ]),
+        span.clone(),
+    );
+    let result = expander.expand(call_true, &mut symbols, &mut vm).unwrap();
+    assert_eq!(result.to_string(), "(- 42)");
+
+    // (maybe-negate 42 #f) should expand to just 42 because negate? is #f
+    let call_false = Syntax::new(
+        SyntaxKind::List(vec![
+            Syntax::new(SyntaxKind::Symbol("maybe-negate".to_string()), span.clone()),
+            Syntax::new(SyntaxKind::Int(42), span.clone()),
+            Syntax::new(SyntaxKind::Bool(false), span.clone()),
+        ]),
+        span.clone(),
+    );
+    let result = expander.expand(call_false, &mut symbols, &mut vm).unwrap();
+    assert_eq!(result.to_string(), "42");
 }

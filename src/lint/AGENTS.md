@@ -26,7 +26,7 @@ provides the shared types and rule implementations.
 - `hir/lint.rs` — HIR linter calls rules and produces Diagnostics
 - `elle-lint` — re-exports Diagnostic/Severity for CLI output
 - `elle-lsp` — uses Diagnostic/Severity for LSP diagnostics
-- `compiler/linter/` — backward-compat re-export
+- `compiler/linter/` — re-export
 
 ## Files
 

@@ -245,21 +245,21 @@ impl<'a> HirSymbolExtractor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::analyze_new;
+    use crate::pipeline::analyze;
     use crate::primitives::register_primitives;
     use crate::vm::VM;
 
-    fn setup() -> SymbolTable {
+    fn setup() -> (SymbolTable, VM) {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
         let _effects = register_primitives(&mut vm, &mut symbols);
-        symbols
+        (symbols, vm)
     }
 
     #[test]
     fn test_extract_define_variable() {
-        let mut symbols = setup();
-        let result = analyze_new("(define x 42)", &mut symbols);
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(define x 42)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -278,8 +278,8 @@ mod tests {
 
     #[test]
     fn test_extract_define_function() {
-        let mut symbols = setup();
-        let result = analyze_new("(define add-one (fn (x) (+ x 1)))", &mut symbols);
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(define add-one (fn (x) (+ x 1)))", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -296,8 +296,8 @@ mod tests {
 
     #[test]
     fn test_extract_let_bindings() {
-        let mut symbols = setup();
-        let result = analyze_new("(let ((a 1) (b 2)) (+ a b))", &mut symbols);
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(let ((a 1) (b 2)) (+ a b))", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -312,8 +312,8 @@ mod tests {
 
     #[test]
     fn test_extract_lambda_params() {
-        let mut symbols = setup();
-        let result = analyze_new("(fn (x y) (+ x y))", &mut symbols);
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(fn (x y) (+ x y))", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -328,8 +328,8 @@ mod tests {
 
     #[test]
     fn test_extract_usages() {
-        let mut symbols = setup();
-        let result = analyze_new("(let ((x 1)) (+ x x))", &mut symbols);
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(let ((x 1)) (+ x x))", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -344,8 +344,8 @@ mod tests {
 
     #[test]
     fn test_available_symbols() {
-        let mut symbols = setup();
-        let result = analyze_new("(begin (define a 1) (define b 2))", &mut symbols);
+        let (mut symbols, mut vm) = setup();
+        let result = analyze("(begin (define a 1) (define b 2))", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 

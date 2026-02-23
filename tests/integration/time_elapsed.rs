@@ -6,7 +6,7 @@
 // - time/elapsed captures the thunk's return value
 
 use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::eval_new;
+use elle::pipeline::eval as pipeline_eval;
 use elle::primitives::{init_stdlib, register_primitives};
 use elle::{SymbolTable, Value, VM};
 use proptest::prelude::*;
@@ -18,7 +18,7 @@ fn eval(input: &str) -> Result<Value, String> {
     let _effects = register_primitives(&mut vm, &mut symbols);
     init_stdlib(&mut vm, &mut symbols);
     set_symbol_table(&mut symbols as *mut SymbolTable);
-    eval_new(input, &mut symbols, &mut vm)
+    pipeline_eval(input, &mut symbols, &mut vm)
 }
 
 /// Extract floats from a cons-list Value (returned in reverse order, so we reverse)

@@ -1,6 +1,6 @@
 use super::higher_order_def::define_higher_order_functions;
 use super::time_def::define_time_functions;
-use crate::pipeline::eval_new;
+use crate::pipeline::eval;
 use crate::symbol::{ModuleDef, SymbolTable};
 use crate::vm::VM;
 use std::collections::HashMap;
@@ -160,7 +160,7 @@ fn define_vm_query_wrappers(vm: &mut VM, symbols: &mut SymbolTable) {
         r#"(define fiber/self (fn () (vm/query "fiber/self" nil)))"#,
     ];
     for code in &defs {
-        if let Err(e) = eval_new(code, symbols, vm) {
+        if let Err(e) = eval(code, symbols, vm) {
             eprintln!("Warning: Failed to define vm/query wrapper: {}", e);
         }
     }

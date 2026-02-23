@@ -35,7 +35,7 @@ Each predicate asks a specific question. No vague "is_pure".
 | `is_polymorphic()` | Effect depends on arguments? (propagates != 0) |
 | `propagated_params()` | Iterator over propagated parameter indices |
 
-## Deprecated (backward compat)
+## Deprecated aliases
 
 | Deprecated | Use instead |
 |------------|-------------|

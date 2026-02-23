@@ -57,8 +57,8 @@ impl Linter {
         let _effects = register_primitives(&mut vm, &mut symbols);
         init_stdlib(&mut vm, &mut symbols);
 
-        // Use new pipeline: parse → expand → analyze → HIR
-        let analyses = elle::analyze_all_new(code, &mut symbols)
+        // Use pipeline: parse -> expand -> analyze -> HIR
+        let analyses = elle::analyze_all(code, &mut symbols, &mut vm)
             .map_err(|e| format!("Analysis error: {}", e))?;
 
         // Lint each analyzed form

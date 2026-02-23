@@ -1,4 +1,4 @@
-use crate::pipeline::eval_new;
+use crate::pipeline::eval;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
 
@@ -32,7 +32,7 @@ pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Execute each definition using the new pipeline
     for code in &[map_code, filter_code, fold_code] {
-        if let Err(e) = eval_new(code, symbols, vm) {
+        if let Err(e) = eval(code, symbols, vm) {
             eprintln!("Warning: Failed to define higher-order function: {}", e);
         }
     }

@@ -8,16 +8,16 @@
 //   .unwrap_or(Effect::yields())
 
 use elle::effects::Effect;
-use elle::pipeline::analyze_new;
+use elle::pipeline::analyze;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::vm::VM;
 
-fn setup() -> SymbolTable {
+fn setup() -> (SymbolTable, VM) {
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
     let _effects = register_primitives(&mut vm, &mut symbols);
-    symbols
+    (symbols, vm)
 }
 
 /// After set!, effect tracking is invalidated and the call is conservatively Yields.
@@ -31,10 +31,11 @@ fn setup() -> SymbolTable {
 /// Result: Effect::yields() (conservative, since we don't know f's effect after set!)
 #[test]
 fn test_unsound_effect_after_set() {
-    let mut symbols = setup();
-    let result = analyze_new(
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
         "(begin (define f (fn () 42)) (set! f (fn () (yield 1))) (f))",
         &mut symbols,
+        &mut vm,
     )
     .unwrap();
 
@@ -55,13 +56,14 @@ fn test_unsound_effect_after_set() {
 /// Result: Effect::yields() (conservative, since map is not a known primitive)
 #[test]
 fn test_unsound_effect_unknown_global() {
-    let mut symbols = setup();
+    let (mut symbols, mut vm) = setup();
 
     // map is defined in stdlib, not as a primitive, so it's an unknown global.
     // Unknown globals default to Yields for soundness.
-    let result = analyze_new(
+    let result = analyze(
         "(begin (define gen (fn (x) (yield x))) (map gen (list 1 2 3)))",
         &mut symbols,
+        &mut vm,
     )
     .unwrap();
 
