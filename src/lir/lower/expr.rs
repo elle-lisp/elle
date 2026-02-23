@@ -104,9 +104,15 @@ impl Lowerer {
                 }
             }
         } else if let Some(info) = self.bindings.get(binding_id) {
-            match info.kind {
+            let kind = info.kind;
+            let sym = info.name;
+            // Drop the borrow on self.bindings
+            match kind {
                 BindingKind::Global => {
-                    let sym = info.name;
+                    // Check if this is an immutable binding with a known literal value
+                    if let Some(&literal_value) = self.immutable_values.get(binding_id) {
+                        return self.emit_value_const(literal_value);
+                    }
                     let dst = self.fresh_reg();
                     self.emit(LirInstr::LoadGlobal { dst, sym });
                     Ok(dst)

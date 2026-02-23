@@ -151,6 +151,17 @@ impl Lowerer {
         name: crate::value::SymbolId,
         value: &Hir,
     ) -> Result<Reg, String> {
+        // For immutable bindings with literal values, record for LoadConst optimization
+        // We need to find the BindingId for this global by matching the SymbolId
+        if let Some(literal_value) = Self::hir_to_literal_value(value) {
+            for (bid, info) in &self.bindings {
+                if info.kind == BindingKind::Global && info.name == name && info.is_immutable {
+                    self.immutable_values.insert(*bid, literal_value);
+                    break;
+                }
+            }
+        }
+
         let value_reg = self.lower_expr(value)?;
         self.emit(LirInstr::StoreGlobal {
             sym: name,
@@ -274,5 +285,19 @@ impl Lowerer {
             return Err(format!("Unknown binding: {:?}", target));
         }
         Ok(value_reg)
+    }
+
+    /// Extract a compile-time literal Value from a HIR node, if it is a literal.
+    fn hir_to_literal_value(hir: &Hir) -> Option<Value> {
+        match &hir.kind {
+            HirKind::Int(n) => Some(Value::int(*n)),
+            HirKind::Float(f) => Some(Value::float(*f)),
+            HirKind::String(s) => Some(Value::string(s.as_str())),
+            HirKind::Bool(b) => Some(Value::bool(*b)),
+            HirKind::Nil => Some(Value::NIL),
+            HirKind::Keyword(sym) => Some(Value::keyword(sym.0)),
+            HirKind::EmptyList => Some(Value::EMPTY_LIST),
+            _ => None,
+        }
     }
 }

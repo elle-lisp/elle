@@ -40,6 +40,8 @@ pub struct Lowerer {
     /// Intrinsic operations for operator specialization.
     /// Maps global SymbolId to specialized LIR instruction.
     intrinsics: FxHashMap<SymbolId, IntrinsicOp>,
+    /// Compile-time constant values for immutable bindings (for LoadConst optimization)
+    immutable_values: HashMap<BindingId, Value>,
 }
 
 impl Lowerer {
@@ -56,6 +58,7 @@ impl Lowerer {
             upvalue_bindings: std::collections::HashSet::new(),
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),
+            immutable_values: HashMap::new(),
         }
     }
 

@@ -16,6 +16,7 @@ use crate::vm::VM;
 use std::collections::HashMap;
 
 /// Compilation result
+#[derive(Debug)]
 pub struct CompileResult {
     pub bytecode: Bytecode,
     pub warnings: Vec<String>,
@@ -34,7 +35,7 @@ fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<Symb
     if let SyntaxKind::List(items) = &syntax.kind {
         if items.len() >= 3 {
             if let Some(name) = items[0].as_symbol() {
-                if name == "define" {
+                if name == "define" || name == "const" {
                     if let Some(def_name) = items[1].as_symbol() {
                         // Check if value is a lambda form
                         if let SyntaxKind::List(val_items) = &items[2].kind {
@@ -46,6 +47,23 @@ fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<Symb
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Scan an expanded syntax form for `(const name ...)` patterns.
+/// Returns the SymbolId of the name if this is a const form.
+fn scan_const_binding(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<SymbolId> {
+    if let SyntaxKind::List(items) = &syntax.kind {
+        if items.len() >= 3 {
+            if let Some(name) = items[0].as_symbol() {
+                if name == "const" {
+                    if let Some(def_name) = items[1].as_symbol() {
+                        return Some(symbols.intern(def_name));
                     }
                 }
             }
@@ -156,6 +174,15 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
         }
     }
 
+    // Pre-scan: find all (const name ...) patterns for immutability tracking
+    let mut immutable_globals: std::collections::HashSet<SymbolId> =
+        std::collections::HashSet::new();
+    for form in &expanded_forms {
+        if let Some(sym) = scan_const_binding(form, symbols) {
+            immutable_globals.insert(sym);
+        }
+    }
+
     // Fixpoint loop: analyze until effects stabilize
     let mut analysis_results: Vec<AnalysisResult> = Vec::new();
     const MAX_ITERATIONS: usize = 10;
@@ -169,12 +196,19 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
             let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
             // Seed with current global effects (from pre-scan or previous iteration)
             analyzer.set_global_effects(global_effects.clone());
+            // Seed with immutable globals from pre-scan
+            analyzer.set_immutable_globals(immutable_globals.clone());
 
             let mut analysis = analyzer.analyze(form)?;
 
             // Collect effects from this form's defines
             for (sym, effect) in analyzer.take_defined_global_effects() {
                 new_global_effects.insert(sym, effect);
+            }
+
+            // Merge defined immutable globals from this form
+            for sym in analyzer.take_defined_immutable_globals() {
+                immutable_globals.insert(sym);
             }
 
             mark_tail_calls(&mut analysis.hir);
@@ -287,6 +321,15 @@ pub fn analyze_all(
         }
     }
 
+    // Pre-scan: find all (const name ...) patterns for immutability tracking
+    let mut immutable_globals: std::collections::HashSet<SymbolId> =
+        std::collections::HashSet::new();
+    for form in &expanded_forms {
+        if let Some(sym) = scan_const_binding(form, symbols) {
+            immutable_globals.insert(sym);
+        }
+    }
+
     // Fixpoint loop: analyze until effects stabilize
     let mut analysis_results: Vec<AnalysisResult> = Vec::new();
     const MAX_ITERATIONS: usize = 10;
@@ -299,11 +342,17 @@ pub fn analyze_all(
             let primitive_effects = get_primitive_effects(symbols);
             let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
             analyzer.set_global_effects(global_effects.clone());
+            analyzer.set_immutable_globals(immutable_globals.clone());
 
             let analysis = analyzer.analyze(form)?;
 
             for (sym, effect) in analyzer.take_defined_global_effects() {
                 new_global_effects.insert(sym, effect);
+            }
+
+            // Merge defined immutable globals from this form
+            for sym in analyzer.take_defined_immutable_globals() {
+                immutable_globals.insert(sym);
             }
 
             analysis_results.push(analysis);
@@ -1327,5 +1376,73 @@ mod tests {
             Ok(v) => assert_eq!(v, crate::value::Value::int(3)),
             Err(e) => panic!("Expected Ok(3), got Err: {}", e),
         }
+    }
+
+    #[test]
+    fn test_const_basic() {
+        let (mut symbols, mut vm) = setup();
+        let result = eval("(begin (const x 42) x)", &mut symbols, &mut vm);
+        assert_eq!(result.unwrap(), crate::value::Value::int(42));
+    }
+
+    #[test]
+    fn test_const_set_error() {
+        let (mut symbols, _) = setup();
+        let result = compile("(begin (const x 42) (set! x 99))", &mut symbols);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("immutable"));
+    }
+
+    #[test]
+    fn test_const_function() {
+        let (mut symbols, mut vm) = setup();
+        let result = eval(
+            "(begin (const (add1 x) (+ x 1)) (add1 10))",
+            &mut symbols,
+            &mut vm,
+        );
+        assert_eq!(result.unwrap(), crate::value::Value::int(11));
+    }
+
+    #[test]
+    fn test_const_function_set_error() {
+        let (mut symbols, _) = setup();
+        let result = compile("(begin (const (f x) x) (set! f 99))", &mut symbols);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("immutable"));
+    }
+
+    #[test]
+    fn test_const_cross_form_set_error() {
+        let (mut symbols, _) = setup();
+        let result = compile_all("(const x 42)\n(set! x 99)", &mut symbols);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("immutable"));
+    }
+
+    #[test]
+    fn test_const_cross_form_reference() {
+        let (mut symbols, mut vm) = setup();
+        let results = compile_all("(const x 42)\n(+ x 1)", &mut symbols);
+        assert!(results.is_ok());
+        let results = results.unwrap();
+        for result in &results {
+            let _ = vm.execute(&result.bytecode);
+        }
+    }
+
+    #[test]
+    fn test_const_in_function_scope() {
+        let (mut symbols, mut vm) = setup();
+        let result = eval("((fn () (const x 42) x))", &mut symbols, &mut vm);
+        assert_eq!(result.unwrap(), crate::value::Value::int(42));
+    }
+
+    #[test]
+    fn test_const_in_function_set_error() {
+        let (mut symbols, _) = setup();
+        let result = compile("((fn () (const x 42) (set! x 99)))", &mut symbols);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("immutable"));
     }
 }

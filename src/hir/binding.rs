@@ -26,6 +26,8 @@ pub struct BindingInfo {
     pub is_mutated: bool,
     /// Whether this binding is captured by a nested closure
     pub is_captured: bool,
+    /// Whether this binding is immutable (const)
+    pub is_immutable: bool,
     /// The kind of binding
     pub kind: BindingKind,
 }
@@ -71,6 +73,7 @@ impl BindingInfo {
             name,
             is_mutated: false,
             is_captured: false,
+            is_immutable: false,
             kind: BindingKind::Parameter { index },
         }
     }
@@ -82,6 +85,7 @@ impl BindingInfo {
             name,
             is_mutated: false,
             is_captured: false,
+            is_immutable: false,
             kind: BindingKind::Local { index },
         }
     }
@@ -93,6 +97,7 @@ impl BindingInfo {
             name,
             is_mutated: false,
             is_captured: false,
+            is_immutable: false,
             kind: BindingKind::Global,
         }
     }
