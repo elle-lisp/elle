@@ -86,32 +86,6 @@ pub fn prim_mul(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, result)
 }
 
-/// Variadic division: (/ 24 2 3) -> 4, (/ 5) -> 1/5
-pub fn prim_div(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "/: expected at least 1 argument, got 0"),
-        );
-    }
-
-    if args.len() == 1 {
-        return match arithmetic::reciprocal_value(&args[0]) {
-            Ok(val) => (SIG_OK, val),
-            Err(e) => (SIG_ERROR, error_val("error", e)),
-        };
-    }
-
-    let mut result = args[0];
-    for arg in &args[1..] {
-        match arithmetic::div_values(&result, arg) {
-            Ok(val) => result = val,
-            Err(e) => return (SIG_ERROR, error_val("error", e)),
-        }
-    }
-    (SIG_OK, result)
-}
-
 pub fn prim_mod(args: &[Value]) -> (SignalBits, Value) {
     // Euclidean modulo: result always has same sign as divisor (b)
     // Example: (mod -17 5) => 3 (because -17 = -4*5 + 3)

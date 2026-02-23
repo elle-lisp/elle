@@ -140,12 +140,25 @@ impl VM {
             if result_bits == SIG_ERROR {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
-            self.fiber.signal = Some((result_bits, result_value));
-            if result_bits == SIG_ERROR {
+
+            // Check if we're at root fiber
+            if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+                // At root fiber with non-error signal: no parent to catch it
+                set_error(
+                    &mut self.fiber,
+                    "error",
+                    "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
+                );
                 self.fiber.stack.push(Value::NIL);
-                None // dispatch loop will see the error signal
+                None
             } else {
-                Some(result_bits)
+                self.fiber.signal = Some((result_bits, result_value));
+                if result_bits == SIG_ERROR {
+                    self.fiber.stack.push(Value::NIL);
+                    None // dispatch loop will see the error signal
+                } else {
+                    Some(result_bits)
+                }
             }
         }
     }
@@ -175,8 +188,20 @@ impl VM {
             if result_bits == SIG_ERROR {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
-            self.fiber.signal = Some((result_bits, result_value));
-            result_bits
+
+            // Check if we're at root fiber
+            if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+                // At root fiber with non-error signal: no parent to catch it
+                set_error(
+                    &mut self.fiber,
+                    "error",
+                    "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
+                );
+                SIG_ERROR
+            } else {
+                self.fiber.signal = Some((result_bits, result_value));
+                result_bits
+            }
         }
     }
 
@@ -280,6 +305,15 @@ impl VM {
         if child_bits == SIG_ERROR {
             self.fiber.stack.push(Value::NIL);
             None
+        } else if self.current_fiber_handle.is_none() {
+            // At root fiber: no parent to catch the propagated signal
+            set_error(
+                &mut self.fiber,
+                "error",
+                "fiber/propagate: cannot propagate signal (no parent fiber to catch it)",
+            );
+            self.fiber.stack.push(Value::NIL);
+            None
         } else {
             Some(child_bits)
         }
@@ -306,7 +340,20 @@ impl VM {
         self.fiber.child = Some(handle);
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
-        child_bits
+
+        if child_bits == SIG_ERROR {
+            child_bits
+        } else if self.current_fiber_handle.is_none() {
+            // At root fiber: no parent to catch the propagated signal
+            set_error(
+                &mut self.fiber,
+                "error",
+                "fiber/propagate: cannot propagate signal (no parent fiber to catch it)",
+            );
+            SIG_ERROR
+        } else {
+            child_bits
+        }
     }
 
     // ── SIG_CANCEL: inject error into fiber ───────────────────────
@@ -343,12 +390,24 @@ impl VM {
             self.fiber.stack.push(result_value);
             None
         } else {
-            self.fiber.signal = Some((result_bits, result_value));
-            if result_bits == SIG_ERROR {
+            // Check if we're at root fiber
+            if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+                // At root fiber with non-error signal: no parent to catch it
+                set_error(
+                    &mut self.fiber,
+                    "error",
+                    "fiber/cancel: cannot propagate signal (no parent fiber to catch it)",
+                );
                 self.fiber.stack.push(Value::NIL);
                 None
             } else {
-                Some(result_bits)
+                self.fiber.signal = Some((result_bits, result_value));
+                if result_bits == SIG_ERROR {
+                    self.fiber.stack.push(Value::NIL);
+                    None
+                } else {
+                    Some(result_bits)
+                }
             }
         }
     }
@@ -376,8 +435,19 @@ impl VM {
             self.fiber.signal = Some((SIG_OK, result_value));
             SIG_OK
         } else {
-            self.fiber.signal = Some((result_bits, result_value));
-            result_bits
+            // Check if we're at root fiber
+            if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+                // At root fiber with non-error signal: no parent to catch it
+                set_error(
+                    &mut self.fiber,
+                    "error",
+                    "fiber/cancel: cannot propagate signal (no parent fiber to catch it)",
+                );
+                SIG_ERROR
+            } else {
+                self.fiber.signal = Some((result_bits, result_value));
+                result_bits
+            }
         }
     }
 

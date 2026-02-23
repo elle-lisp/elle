@@ -63,24 +63,6 @@ pub fn prim_is_pure(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (coro? value) — true if closure has Yields effect
-pub fn prim_is_coro(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("coro?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.effect.may_yield()))
-    } else {
-        (SIG_OK, Value::FALSE)
-    }
-}
-
 /// (mutates-params? value) — true if closure mutates any parameters
 pub fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
