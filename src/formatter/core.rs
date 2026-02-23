@@ -135,6 +135,7 @@ fn format_value(
             HeapObject::Cell(_, _) => return "#<cell>".to_string(),
             HeapObject::Float(_) => return "#<float>".to_string(),
             HeapObject::Fiber(_) => return "#<fiber>".to_string(),
+            HeapObject::Syntax(s) => return format!("#<syntax:{}>", s),
         }
     }
 

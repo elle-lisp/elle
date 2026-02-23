@@ -216,6 +216,11 @@ impl Expander {
     }
 
     fn add_scope_recursive(&self, mut syntax: Syntax, scope: ScopeId) -> Syntax {
+        // datum->syntax nodes keep their exact scopes — don't add intro scope
+        if syntax.scope_exempt {
+            return syntax;
+        }
+
         // Add scope to this node
         syntax.add_scope(scope);
 
@@ -246,6 +251,9 @@ impl Expander {
             SyntaxKind::UnquoteSplicing(inner) => {
                 SyntaxKind::UnquoteSplicing(Box::new(self.add_scope_recursive(*inner, scope)))
             }
+            // Don't recurse into syntax literals — the inner Value::syntax
+            // already carries its correct scopes from the original context.
+            SyntaxKind::SyntaxLiteral(_) => syntax.kind,
             other => other,
         };
 

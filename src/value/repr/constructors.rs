@@ -201,4 +201,13 @@ impl Value {
         use crate::value::heap::{alloc, HeapObject};
         alloc(HeapObject::Fiber(handle))
     }
+
+    /// Create a syntax object value.
+    /// Preserves scope sets through the Value round-trip during macro expansion.
+    #[inline]
+    pub fn syntax(s: crate::syntax::Syntax) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
+        use std::rc::Rc;
+        alloc(HeapObject::Syntax(Rc::new(s)))
+    }
 }

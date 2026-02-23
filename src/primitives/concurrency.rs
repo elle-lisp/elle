@@ -90,6 +90,9 @@ fn is_value_sendable(value: &Value) -> bool {
 
         // Fibers are not sendable (contain execution state with closures)
         HeapObject::Fiber(_) => false,
+
+        // Syntax objects are not sendable (contain Rc)
+        HeapObject::Syntax(_) => false,
     }
 }
 

@@ -106,5 +106,94 @@
 ; Quasiquote without unquote is like quote
 (assert-list-eq `(a b c) (list 'a 'b 'c) "quasiquote without unquote is like quote")
 
+; ========================================
+; 9. Macro hygiene: no accidental capture
+; ========================================
+; The swap macro introduces a `tmp` binding internally. If the caller
+; also has a variable named `tmp`, the macro's `tmp` must not shadow it.
+; This is automatic — no gensym needed.
+
+(defmacro my-swap (a b)
+  `(let ((tmp ,a)) (set! ,a ,b) (set! ,b tmp)))
+
+(let ((tmp 100) (x 1) (y 2))
+  (my-swap x y)
+  (assert-eq tmp 100 "swap: caller's tmp is not captured")
+  (assert-eq x 2 "swap: x is now 2")
+  (assert-eq y 1 "swap: y is now 1"))
+
+; ========================================
+; 10. Hygiene with nested macros
+; ========================================
+; Two macros both introduce `tmp`. They don't interfere with each
+; other or with the caller.
+
+(defmacro add-one (x)
+  `(let ((tmp ,x)) (+ tmp 1)))
+
+(defmacro add-two (x)
+  `(let ((tmp ,x)) (+ tmp 2)))
+
+(assert-eq (+ (add-one 10) (add-two 20)) 33
+  "nested macros with same-named tmp don't interfere")
+
+; ========================================
+; 11. gensym in macro templates
+; ========================================
+; gensym creates unique symbols at macro expansion time. Useful when
+; you need a temporary binding that won't collide with anything.
+
+(defmacro with-temp (val body)
+  (let ((g (gensym "tmp")))
+    `(let ((,g ,val)) ,body)))
+
+(with-temp 42 (assert-true #t "gensym macro expanded without error"))
+
+; Two expansions get different gensyms, so they don't collide.
+(with-temp 1
+  (with-temp 2
+    (assert-true #t "nested gensym macros don't collide")))
+
+; ========================================
+; 12. datum->syntax: anaphoric macros
+; ========================================
+; datum->syntax is the hygiene escape hatch. It creates a binding
+; that IS visible at the call site — the opposite of normal hygiene.
+; This enables "anaphoric" macros that intentionally introduce names.
+
+; aif: anaphoric if — binds the test result to `it`
+(defmacro aif (test then else)
+  `(let ((,(datum->syntax test 'it) ,test))
+     (if ,(datum->syntax test 'it) ,then ,else)))
+
+(assert-eq (aif 42 it 0) 42
+  "aif: `it` is bound to the test value")
+
+(assert-eq (aif #f 42 0) 0
+  "aif: false test takes else branch")
+
+(assert-eq (aif (+ 1 2) (+ it 10) 0) 13
+  "aif: `it` works with compound test expressions")
+
+; ========================================
+; 13. datum->syntax with existing bindings
+; ========================================
+; The macro-introduced `it` correctly shadows an outer `it` because
+; the let binding is closer in scope.
+
+(let ((it 999))
+  (assert-eq (aif 42 it 0) 42
+    "aif: macro's `it` shadows outer `it` inside then-branch"))
+
+; ========================================
+; 14. syntax->datum: stripping scopes
+; ========================================
+; syntax->datum converts a syntax object back to a plain value,
+; stripping all scope information. Useful for inspecting macro
+; arguments as data.
+
+(assert-eq (syntax->datum 42) 42
+  "syntax->datum: plain values pass through unchanged")
+
 (display "All meta-programming tests passed.")
 (newline)

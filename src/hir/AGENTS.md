@@ -76,12 +76,19 @@ HIR + bindings HashMap
    distinguishes between `nil` (absence) and `()` (empty list). Conflating them
    breaks truthiness semantics.
 
+7. **Binding resolution is scope-aware (hygienic).** `bind()` stores a
+   `Vec<ScopeId>` alongside each binding. `lookup()` uses subset matching:
+   a binding is visible to a reference if the binding's scope set is a subset
+   of the reference's scope set. When multiple bindings match, the one with
+   the largest scope set wins (most specific). Empty scopes `[]` is a subset
+   of everything, so pre-expansion code works identically.
+
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | 25 | Re-exports |
-| `analyze/mod.rs` | ~470 | `Analyzer` struct, `AnalysisContext`, scope management |
+| `analyze/mod.rs` | ~600 | `Analyzer` struct, `AnalysisContext`, `ScopedBinding`, scope-aware resolution |
 | `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
 | `analyze/binding.rs` | ~460 | Binding forms: `let`, `define`, `fn` |
 | `analyze/special.rs` | ~180 | Special forms: `match`, `yield`, `module` |

@@ -9,6 +9,7 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::syntax::Syntax;
 use crate::value::ffi::ThreadHandle;
 use crate::value::fiber::FiberHandle;
 use crate::value::Value;
@@ -41,6 +42,7 @@ pub enum HeapTag {
     Table = 3,
     Struct = 4,
     Closure = 5,
+    Syntax = 6,
     Tuple = 7,
     Cell = 8,
     Float = 9, // For NaN values that can't be inline
@@ -100,6 +102,12 @@ pub enum HeapObject {
 
     /// Fiber: independent execution context with its own stack and frames
     Fiber(FiberHandle),
+
+    /// Syntax object: preserves scope sets through the Value round-trip
+    /// during macro expansion. This is the only HeapObject variant that
+    /// references compile-time types — an intentional coupling required
+    /// for first-class syntax objects in hygienic macros.
+    Syntax(Rc<Syntax>),
 }
 
 /// Data for thread handles.
@@ -136,6 +144,7 @@ impl HeapObject {
             HeapObject::CHandle(_, _) => HeapTag::CHandle,
             HeapObject::ThreadHandle(_) => HeapTag::ThreadHandle,
             HeapObject::Fiber(_) => HeapTag::Fiber,
+            HeapObject::Syntax(_) => HeapTag::Syntax,
         }
     }
 
@@ -156,6 +165,7 @@ impl HeapObject {
             HeapObject::CHandle(_, _) => "c-handle",
             HeapObject::ThreadHandle(_) => "thread-handle",
             HeapObject::Fiber(_) => "fiber",
+            HeapObject::Syntax(_) => "syntax",
         }
     }
 }
@@ -195,6 +205,7 @@ impl std::fmt::Debug for HeapObject {
                 Some(status) => write!(f, "<fiber:{}>", status),
                 None => write!(f, "<fiber:taken>"),
             },
+            HeapObject::Syntax(s) => write!(f, "#<syntax:{}>", s),
         }
     }
 }

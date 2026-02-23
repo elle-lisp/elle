@@ -50,12 +50,22 @@ impl Syntax {
                 let sym = symbols.intern("unquote-splicing");
                 crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
             }
+            // Only reached during macro expansion. The value is a syntax object
+            // that will be processed by from_value() after VM evaluation.
+            SyntaxKind::SyntaxLiteral(v) => *v,
         }
     }
 
     /// Convert runtime Value to Syntax
-    /// Used for analyzing macro results
+    /// Used for analyzing macro results.
+    /// When encountering a syntax object, returns it directly — preserving
+    /// scopes from the original Syntax. The passed `span` is ignored in
+    /// this case; the syntax object carries its own (more accurate) span.
     pub fn from_value(value: &Value, symbols: &SymbolTable, span: Span) -> Result<Syntax, String> {
+        // Syntax objects pass through directly, preserving scopes
+        if let Some(syntax_rc) = value.as_syntax() {
+            return Ok(syntax_rc.as_ref().clone());
+        }
         let kind = if value.is_nil() {
             SyntaxKind::Nil
         } else if let Some(b) = value.as_bool() {
@@ -237,5 +247,64 @@ mod tests {
             test_span(),
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_roundtrip_syntax_with_scopes() {
+        use crate::syntax::ScopeId;
+        // A Syntax node with scopes, wrapped as Value::syntax, should
+        // survive from_value and preserve its scopes.
+        let scoped = Syntax::with_scopes(
+            SyntaxKind::Symbol("x".to_string()),
+            test_span(),
+            vec![ScopeId(1), ScopeId(2)],
+        );
+        let value = Value::syntax(scoped.clone());
+        let result = Syntax::from_value(&value, &SymbolTable::new(), test_span()).unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "x"));
+        assert_eq!(result.scopes.len(), 2);
+        assert_eq!(result.scopes[0], ScopeId(1));
+        assert_eq!(result.scopes[1], ScopeId(2));
+    }
+
+    #[test]
+    fn test_roundtrip_list_with_scoped_children() {
+        use crate::syntax::ScopeId;
+        let symbols = SymbolTable::new();
+        // A list containing a syntax-object element should preserve
+        // the element's scopes through from_value.
+        let scoped_child = Syntax::with_scopes(
+            SyntaxKind::Symbol("y".to_string()),
+            test_span(),
+            vec![ScopeId(3)],
+        );
+        let child_value = Value::syntax(scoped_child);
+        let plain_child = Value::int(42);
+        let list_value = crate::value::list(vec![child_value, plain_child]);
+        let result = Syntax::from_value(&list_value, &symbols, test_span()).unwrap();
+        match result.kind {
+            SyntaxKind::List(items) => {
+                assert_eq!(items.len(), 2);
+                // First element: syntax object with scopes preserved
+                assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "y"));
+                assert_eq!(items[0].scopes, vec![ScopeId(3)]);
+                // Second element: plain int, no scopes
+                assert!(matches!(items[1].kind, SyntaxKind::Int(42)));
+                assert!(items[1].scopes.is_empty());
+            }
+            other => panic!("expected List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_no_scopes_produces_plain_value() {
+        let mut symbols = SymbolTable::new();
+        // Syntax with empty scopes through to_value produces a plain value,
+        // not a syntax object.
+        let syntax = Syntax::new(SyntaxKind::Symbol("z".to_string()), test_span());
+        let value = syntax.to_value(&mut symbols);
+        // Should be a plain symbol, not a syntax object
+        assert!(value.as_symbol().is_some());
+        assert!(!value.is_syntax());
     }
 }

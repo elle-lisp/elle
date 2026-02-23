@@ -74,6 +74,9 @@ impl PartialEq for Value {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
+                // Syntax comparison (by reference — same Rc)
+                (HeapObject::Syntax(s1), HeapObject::Syntax(s2)) => std::rc::Rc::ptr_eq(s1, s2),
+
                 // Different types are not equal
                 _ => false,
             }
