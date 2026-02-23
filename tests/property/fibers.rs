@@ -282,12 +282,36 @@ proptest! {
     }
 
     #[test]
-    fn cancel_rejects_errored_fibers(payload in -100i64..100) {
-        // Create a fiber that errors, catch it via mask, then try to cancel
+    fn cancel_accepts_suspended_after_caught_error(payload in -100i64..100) {
+        // A fiber whose SIG_ERROR was caught by mask is Suspended (not Error),
+        // so cancel should succeed. The mask catches the error, leaving the
+        // fiber in a resumable state — cancelling a resumable fiber is valid.
         let code = format!(
             r#"(let ((f (fiber/new (fn () (fiber/signal 1 {})) 1)))
                  (fiber/resume f)
-                 (fiber/cancel f "already errored"))"#,
+                 (fiber/cancel f "cancelling suspended")
+                 (keyword->string (fiber/status f)))"#,
+            payload
+        );
+        let result = eval(&code);
+        prop_assert!(result.is_ok(),
+            "Cancel suspended fiber should succeed, got: {:?}", result);
+        let val = result.unwrap();
+        prop_assert_eq!(val, Value::string("error"),
+            "Cancelled fiber should be in error status");
+    }
+
+    #[test]
+    fn cancel_rejects_errored_fibers(payload in -100i64..100) {
+        // A fiber whose SIG_ERROR was NOT caught (mask=0) is in Error
+        // status. Cancelling an already-errored fiber should fail.
+        // We use a wrapper fiber to catch the propagated error so eval
+        // doesn't fail, then try to cancel the inner errored fiber.
+        let code = format!(
+            r#"(let ((f (fiber/new (fn () (fiber/signal 1 {})) 0)))
+                 (let ((wrapper (fiber/new (fn () (fiber/resume f)) 1)))
+                   (fiber/resume wrapper)
+                   (fiber/cancel f "already errored")))"#,
             payload
         );
         let result = eval(&code);

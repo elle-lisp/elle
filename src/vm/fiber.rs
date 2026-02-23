@@ -5,10 +5,15 @@
 //! 2. Wire parent/child chain (Janet semantics)
 //! 3. Swap parent out, child in
 //! 4. Execute the child
-//! 5. Update child status
+//! 5. Set provisional status (Dead or Suspended)
 //! 6. Extract result
 //! 7. Swap back
 //! 8. Put child back into its handle
+//!
+//! Status finalization happens in the caller, not in `with_child_fiber`:
+//! - Resume: SIG_ERROR + uncaught by mask → Error (terminal)
+//! - Resume: SIG_ERROR + caught by mask → Suspended (resumable)
+//! - Cancel: always Error (terminal), regardless of mask
 
 use crate::value::error_val;
 use crate::value::fiber::FiberStatus;
@@ -60,12 +65,16 @@ impl VM {
         // 4. Execute the closure
         let bits = execute(self);
 
-        // 5. Update child status based on result
-        match bits {
-            SIG_OK => self.fiber.status = FiberStatus::Dead,
-            SIG_ERROR => self.fiber.status = FiberStatus::Error,
-            _ => self.fiber.status = FiberStatus::Suspended,
-        }
+        // 5. Update child status based on result.
+        //    SIG_OK is terminal (Dead). Other signals are Suspended; the
+        //    caller decides whether a caught SIG_ERROR stays Suspended
+        //    (resumable) or gets promoted to Error (terminal) based on
+        //    the parent's mask.
+        self.fiber.status = if bits == SIG_OK {
+            FiberStatus::Dead
+        } else {
+            FiberStatus::Suspended
+        };
 
         // 6. Extract the result before swapping back
         let result_value = self
@@ -127,6 +136,10 @@ impl VM {
         } else {
             // Signal is NOT caught — propagate to parent.
             // Leave parent.child set (preserves trace chain for stack traces).
+            // Mark child as terminally errored (not resumable).
+            if result_bits == SIG_ERROR {
+                handle.with_mut(|f| f.status = FiberStatus::Error);
+            }
             self.fiber.signal = Some((result_bits, result_value));
             if result_bits == SIG_ERROR {
                 self.fiber.stack.push(Value::NIL);
@@ -158,6 +171,10 @@ impl VM {
             self.fiber.signal = Some((SIG_OK, result_value));
             SIG_OK
         } else {
+            // Uncaught SIG_ERROR → terminal error status on child
+            if result_bits == SIG_ERROR {
+                handle.with_mut(|f| f.status = FiberStatus::Error);
+            }
             self.fiber.signal = Some((result_bits, result_value));
             result_bits
         }
@@ -317,6 +334,9 @@ impl VM {
         let mask = handle.with(|fiber| fiber.mask);
         let caught = result_bits == SIG_OK || (mask & result_bits != 0);
 
+        // Cancelled fibers are always terminal regardless of mask
+        handle.with_mut(|f| f.status = FiberStatus::Error);
+
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;
@@ -348,6 +368,8 @@ impl VM {
         let mask = handle.with(|fiber| fiber.mask);
         let caught = result_bits == SIG_OK || (mask & result_bits != 0);
 
+        // Cancelled fibers are always terminal regardless of mask
+        handle.with_mut(|f| f.status = FiberStatus::Error);
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;

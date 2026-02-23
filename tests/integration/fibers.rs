@@ -465,3 +465,81 @@ fn test_fiber_child_identity() {
         "fiber/child should return identical values"
     );
 }
+
+// ── #299: caught SIG_ERROR status and resumability ───────────────
+
+#[test]
+fn test_caught_sig_error_leaves_fiber_suspended() {
+    // When a fiber signals SIG_ERROR and the mask catches it, the fiber
+    // should be left in :suspended status (not :error). This is the core
+    // bug fix for issue #299.
+    let result = eval(
+        r#"
+        (let ((f (fiber/new (fn () (fiber/signal 1 "oops") "recovered") 1)))
+          (fiber/resume f)
+          (keyword->string (fiber/status f)))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        Value::string("suspended"),
+        "Caught SIG_ERROR should leave fiber in suspended status"
+    );
+}
+
+#[test]
+fn test_caught_sig_error_fiber_is_resumable() {
+    // A fiber that caught SIG_ERROR should be resumable. After catching
+    // the error, the fiber should be able to continue execution and return
+    // its recovery value.
+    let result = eval(
+        r#"
+        (let ((f (fiber/new (fn () (fiber/signal 1 "oops") "recovered") 1)))
+          (fiber/resume f)
+          (fiber/resume f))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        Value::string("recovered"),
+        "Second resume should succeed and return recovery value"
+    );
+}
+
+#[test]
+fn test_uncaught_sig_error_produces_error_status() {
+    // When a fiber signals SIG_ERROR and the mask does NOT catch it,
+    // the error should propagate and the fiber should be in :error status.
+    // This confirms that uncaught errors still work as before.
+    let result = eval(
+        r#"
+        (let ((f (fiber/new (fn () (fiber/signal 1 "oops")) 0)))
+          (fiber/resume f))
+        "#,
+    );
+    // Error is NOT caught (mask=0), so it propagates to the root
+    assert!(result.is_err(), "Expected error to propagate");
+}
+
+#[test]
+fn test_cancel_always_produces_error_status() {
+    // fiber/cancel is terminal: it always puts the fiber in :error status,
+    // regardless of the mask. This is unchanged behavior, but we verify it
+    // to ensure cancel is distinct from caught SIG_ERROR.
+    let result = eval(
+        r#"
+        (let ((f (fiber/new (fn () (fiber/signal 2 "waiting") 99) 3)))
+          (fiber/resume f)
+          (fiber/cancel f "stop")
+          (keyword->string (fiber/status f)))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        Value::string("error"),
+        "Cancelled fiber should always be in error status"
+    );
+}
