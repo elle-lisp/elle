@@ -143,7 +143,7 @@
           "rows": [
             ["(spawn closure)", "Execute closure in a new thread, returns thread handle", "(spawn (lambda () 42))"],
             ["(join handle)", "Wait for thread to complete and return result", "(join handle)"],
-            ["(sleep seconds)", "Sleep for specified duration", "(sleep 1.5)"],
+            ["(time/sleep seconds)", "Sleep for specified duration", "(time/sleep 1.5)"],
             ["(current-thread-id)", "Get ID of current thread", "(current-thread-id)"]
           ]
         }

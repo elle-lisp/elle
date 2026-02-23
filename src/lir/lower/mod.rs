@@ -6,10 +6,12 @@ mod expr;
 mod lambda;
 mod pattern;
 
+use super::intrinsics::IntrinsicOp;
 use super::types::*;
 use crate::hir::{BindingId, BindingInfo, BindingKind, Hir, HirKind};
 use crate::syntax::Span;
-use crate::value::Value;
+use crate::value::{SymbolId, Value};
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 /// Lowers HIR to LIR
@@ -35,6 +37,9 @@ pub struct Lowerer {
     upvalue_bindings: std::collections::HashSet<BindingId>,
     /// Current span for emitted instructions
     current_span: Span,
+    /// Intrinsic operations for operator specialization.
+    /// Maps global SymbolId to specialized LIR instruction.
+    intrinsics: FxHashMap<SymbolId, IntrinsicOp>,
 }
 
 impl Lowerer {
@@ -50,12 +55,19 @@ impl Lowerer {
             num_captures: 0,
             upvalue_bindings: std::collections::HashSet::new(),
             current_span: Span::synthetic(),
+            intrinsics: FxHashMap::default(),
         }
     }
 
     /// Set binding info from analysis
     pub fn with_bindings(mut self, bindings: HashMap<BindingId, BindingInfo>) -> Self {
         self.bindings = bindings;
+        self
+    }
+
+    /// Set intrinsic operations for operator specialization
+    pub fn with_intrinsics(mut self, intrinsics: FxHashMap<SymbolId, IntrinsicOp>) -> Self {
+        self.intrinsics = intrinsics;
         self
     }
 

@@ -496,19 +496,20 @@ Call a function with arguments from a list:
 
 ```lisp
 ; Create and run a thread
-(thread/spawn (fn ()
+(spawn (fn ()
   (display "Running in thread")
   (newline)))
 
 ; Create and wait for result
-(define t (thread/spawn (fn () (+ 2 2))))
-(thread/join t)  ⟹ 4
+(define t (spawn (fn () (+ 2 2))))
+(join t)  ⟹ 4
 
 ; Sleep current thread
-(sleep 1000)  ; Sleep 1000ms
+(time/sleep 1)      ; Sleep 1 second
+(time/sleep 0.5)    ; Sleep 500ms
 
 ; Get current thread ID
-(current-thread-id) ⟹ some-id
+(current-thread-id) ⟹ "ThreadId(1)"
 ```
 
 ---
@@ -543,13 +544,12 @@ Get the type name as a keyword:
 
 ---
 
-## Debugging and Profiling
+## Debugging
 
 ```lisp
-(debug-print "Debug message")
-(trace function-name)
-(profile (expensive-operation))
-(memory-usage)
+(debug-print 42)              ; Prints: [DEBUG] 42
+(trace "label" (+ 1 2))       ; Prints: [TRACE] label: 3, returns 3
+(memory-usage)                 ; Returns (rss-bytes virtual-bytes)
 ```
 
 ---

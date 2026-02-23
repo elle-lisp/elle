@@ -81,9 +81,5 @@ impl PartialEq for Value {
     }
 }
 
-impl std::fmt::Debug for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Delegate to Display implementation
-        write!(f, "{}", self)
-    }
-}
+// Debug is implemented in display.rs alongside Display, since both
+// share the resolve_name helper for symbol/keyword resolution.

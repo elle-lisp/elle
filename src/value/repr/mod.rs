@@ -86,6 +86,10 @@ pub const INT_MIN: i64 = -0x8000_0000_0000;
 /// Core value type using NaN-boxing.
 ///
 /// This is exactly 8 bytes and implements Copy.
+///
+/// # repr(transparent) invariant
+/// JIT dispatch (`jit/dispatch.rs`, `vm/call.rs`) casts between `*const Value`
+/// and `*const u64` without copying. Changing this repr breaks those casts.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Value(pub(crate) u64);

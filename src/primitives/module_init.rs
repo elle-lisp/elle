@@ -1,4 +1,6 @@
 use super::higher_order_def::define_higher_order_functions;
+use super::time_def::define_time_functions;
+use crate::pipeline::eval_new;
 use crate::symbol::{ModuleDef, SymbolTable};
 use crate::vm::VM;
 use std::collections::HashMap;
@@ -7,11 +9,15 @@ use std::collections::HashMap;
 pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable) {
     // Define Lisp implementations of higher-order functions that support closures
     define_higher_order_functions(vm, symbols);
+    define_time_functions(vm, symbols);
+    define_vm_query_wrappers(vm, symbols);
 
     init_list_module(vm, symbols);
     init_string_module(vm, symbols);
     init_math_module(vm, symbols);
     init_json_module(vm, symbols);
+    init_clock_module(vm, symbols);
+    init_time_module(vm, symbols);
 }
 
 /// Initialize the list module
@@ -122,4 +128,62 @@ fn init_json_module(vm: &mut VM, symbols: &mut SymbolTable) {
     };
     symbols.define_module(json_module);
     vm.define_module("json".to_string(), json_exports);
+}
+
+/// Initialize the clock module
+fn init_clock_module(vm: &mut VM, symbols: &mut SymbolTable) {
+    let mut clock_exports = HashMap::new();
+
+    let functions = vec!["clock/monotonic", "clock/realtime", "clock/cpu"];
+
+    let mut exports = Vec::new();
+    for func_name in &functions {
+        if let Some(func) = vm.get_global(symbols.intern(func_name).0) {
+            clock_exports.insert(symbols.intern(func_name).0, *func);
+        }
+        exports.push(symbols.intern(func_name));
+    }
+
+    let clock_module = ModuleDef {
+        name: symbols.intern("clock"),
+        exports,
+    };
+    symbols.define_module(clock_module);
+    vm.define_module("clock".to_string(), clock_exports);
+}
+
+/// Define Elle wrappers around vm/query operations
+fn define_vm_query_wrappers(vm: &mut VM, symbols: &mut SymbolTable) {
+    let defs = [
+        r#"(define call-count (fn (f) (vm/query "call-count" f)))"#,
+        r#"(define global? (fn (sym) (vm/query "global?" sym)))"#,
+        r#"(define fiber/self (fn () (vm/query "fiber/self" nil)))"#,
+    ];
+    for code in &defs {
+        if let Err(e) = eval_new(code, symbols, vm) {
+            eprintln!("Warning: Failed to define vm/query wrapper: {}", e);
+        }
+    }
+}
+
+/// Initialize the time module
+fn init_time_module(vm: &mut VM, symbols: &mut SymbolTable) {
+    let mut time_exports = HashMap::new();
+
+    let functions = vec!["time/sleep", "time/stopwatch", "time/elapsed"];
+
+    let mut exports = Vec::new();
+    for func_name in &functions {
+        if let Some(func) = vm.get_global(symbols.intern(func_name).0) {
+            time_exports.insert(symbols.intern(func_name).0, *func);
+        }
+        exports.push(symbols.intern(func_name));
+    }
+
+    let time_module = ModuleDef {
+        name: symbols.intern("time"),
+        exports,
+    };
+    symbols.define_module(time_module);
+    vm.define_module("time".to_string(), time_exports);
 }

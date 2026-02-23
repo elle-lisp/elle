@@ -5,7 +5,7 @@
 //! - Time measurement (instant, duration, CPU time)
 //! - Bytecode and JIT disassembly
 
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -177,6 +177,85 @@ pub fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
         (SIG_OK, Value::int(closure.bytecode.len() as i64))
     } else {
         (SIG_OK, Value::NIL)
+    }
+}
+
+// ============================================================================
+// VM-access introspection (SIG_QUERY)
+// ============================================================================
+
+/// (vm/query op arg) — query VM state
+///
+/// The single gateway to SIG_QUERY. `op` is a string or keyword
+/// naming the operation; `arg` is the operation-specific argument.
+/// The VM's dispatch_query handles the rest.
+///
+/// Operations:
+/// - "call-count" closure → int
+/// - "global?" symbol → bool
+/// - "fiber/self" _ → fiber or nil
+pub fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("vm/query: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    if args[0].as_string().is_none() && args[0].as_keyword().is_none() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "vm/query: operation must be a string or keyword, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        );
+    }
+    (SIG_QUERY, Value::cons(args[0], args[1]))
+}
+
+/// (string->keyword str) — convert a string to a keyword
+///
+/// Interns the string via the thread-local symbol table (same access
+/// pattern as keyword->string, symbol->string, fiber/status).
+pub fn prim_string_to_keyword(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("string->keyword: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    if let Some(name) = args[0].as_string() {
+        unsafe {
+            if let Some(ptr) = crate::ffi::primitives::context::get_symbol_table() {
+                let id = (*ptr).intern(name);
+                (SIG_OK, Value::keyword(id.0))
+            } else {
+                (
+                    SIG_ERROR,
+                    error_val("error", "Symbol table not available".to_string()),
+                )
+            }
+        }
+    } else {
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "string->keyword: expected string, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        )
     }
 }
 

@@ -10,6 +10,11 @@ impl Lowerer {
         args: &[Hir],
         is_tail: bool,
     ) -> Result<Reg, String> {
+        // Check for intrinsic specialization before generic call
+        if let Some(result) = self.try_lower_intrinsic(func, args)? {
+            return Ok(result);
+        }
+
         // Lower arguments first, then function
         // This ensures the stack is in the right order for the Call instruction
         let mut arg_regs = Vec::new();
@@ -33,6 +38,83 @@ impl Lowerer {
                 args: arg_regs,
             });
             Ok(dst)
+        }
+    }
+
+    /// Try to lower a call as an intrinsic operation.
+    ///
+    /// Returns `Some(result_reg)` if the call was specialized, `None` to
+    /// fall through to generic call. Only specializes when:
+    /// - The function is a global variable reference
+    /// - The global is not mutated (so it still holds the original primitive)
+    /// - The SymbolId maps to a known intrinsic
+    /// - The argument count matches (2 for binary/compare, 1 for unary)
+    fn try_lower_intrinsic(&mut self, func: &Hir, args: &[Hir]) -> Result<Option<Reg>, String> {
+        // Must be a variable reference
+        let HirKind::Var(binding_id) = &func.kind else {
+            return Ok(None);
+        };
+
+        // Must have binding info
+        let Some(info) = self.bindings.get(binding_id) else {
+            return Ok(None);
+        };
+
+        // Must be a global that hasn't been mutated
+        if info.kind != BindingKind::Global || info.is_mutated {
+            return Ok(None);
+        }
+
+        let sym = info.name;
+
+        // Special case: `-` with 1 arg is negation
+        if args.len() == 1 {
+            if let Some(IntrinsicOp::Binary(BinOp::Sub)) = self.intrinsics.get(&sym) {
+                let src = self.lower_expr(&args[0])?;
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::UnaryOp {
+                    dst,
+                    op: UnaryOp::Neg,
+                    src,
+                });
+                return Ok(Some(dst));
+            }
+        }
+
+        let Some(&intrinsic) = self.intrinsics.get(&sym) else {
+            return Ok(None);
+        };
+
+        match intrinsic {
+            IntrinsicOp::Binary(op) => {
+                if args.len() != 2 {
+                    return Ok(None); // Variadic — fall through to generic call
+                }
+                let lhs = self.lower_expr(&args[0])?;
+                let rhs = self.lower_expr(&args[1])?;
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::BinOp { dst, op, lhs, rhs });
+                Ok(Some(dst))
+            }
+            IntrinsicOp::Compare(op) => {
+                if args.len() != 2 {
+                    return Ok(None);
+                }
+                let lhs = self.lower_expr(&args[0])?;
+                let rhs = self.lower_expr(&args[1])?;
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::Compare { dst, op, lhs, rhs });
+                Ok(Some(dst))
+            }
+            IntrinsicOp::Unary(op) => {
+                if args.len() != 1 {
+                    return Ok(None);
+                }
+                let src = self.lower_expr(&args[0])?;
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::UnaryOp { dst, op, src });
+                Ok(Some(dst))
+            }
         }
     }
 

@@ -377,8 +377,10 @@ impl Emitter {
             }
 
             LirInstr::BinOp { dst, op, lhs, rhs } => {
-                self.ensure_on_top(*lhs);
-                self.ensure_on_top(*rhs);
+                // Check if lhs and rhs are already the top two stack elements
+                // (lhs at top-1, rhs at top). This is the common case from the
+                // lowerer and avoids DupN which would leave orphaned values.
+                self.ensure_binary_on_top(*lhs, *rhs);
                 let instr = match op {
                     BinOp::Add => Instruction::Add,
                     BinOp::Sub => Instruction::Sub,
@@ -398,8 +400,8 @@ impl Emitter {
             }
 
             LirInstr::Compare { dst, op, lhs, rhs } => {
-                self.ensure_on_top(*lhs);
-                self.ensure_on_top(*rhs);
+                // Check if lhs and rhs are already the top two stack elements
+                self.ensure_binary_on_top(*lhs, *rhs);
                 let instr = match op {
                     CmpOp::Eq => Instruction::Eq,
                     CmpOp::Lt => Instruction::Lt,
@@ -422,13 +424,12 @@ impl Emitter {
                 match op {
                     UnaryOp::Not => self.bytecode.emit(Instruction::Not),
                     UnaryOp::Neg => {
-                        // Emit: push 0, swap, sub
-                        // Actually, we need to emit 0 - src
-                        // Stack has src on top, we need 0 on top then sub
-                        let zero_idx = self.bytecode.add_constant(Value::int(0));
+                        // Negate by multiplying by -1.
+                        // Stack has src on top; push -1, then Mul.
+                        let neg1_idx = self.bytecode.add_constant(Value::int(-1));
                         self.bytecode.emit(Instruction::LoadConst);
-                        self.bytecode.emit_u16(zero_idx);
-                        self.bytecode.emit(Instruction::Sub);
+                        self.bytecode.emit_u16(neg1_idx);
+                        self.bytecode.emit(Instruction::Mul);
                     }
                     UnaryOp::BitNot => {
                         self.bytecode.emit(Instruction::BitNot);
@@ -701,6 +702,32 @@ impl Emitter {
             // This is a fallback for compatibility; ideally the LIR would
             // use phi nodes or a single result register for control flow.
         }
+    }
+
+    /// Ensure two registers are the top two stack elements (lhs below rhs).
+    ///
+    /// Binary operations (BinOp, Compare) consume both operands. Unlike
+    /// `ensure_on_top` which duplicates via DupN (leaving originals as
+    /// orphans), this checks whether the operands are already in position
+    /// and only falls back to DupN when they aren't.
+    fn ensure_binary_on_top(&mut self, lhs: Reg, rhs: Reg) {
+        let stack_len = self.stack.len();
+        if stack_len >= 2 {
+            let lhs_pos = self.reg_to_stack.get(&lhs).copied();
+            let rhs_pos = self.reg_to_stack.get(&rhs).copied();
+            if lhs_pos == Some(stack_len - 2) && rhs_pos == Some(stack_len - 1) {
+                // Already in place — nothing to emit
+                return;
+            }
+        }
+        // Fall back to ensure_on_top for each operand.
+        // This handles the uncommon case (e.g., after control flow merges).
+        // NOTE: The DupN fallback leaves original values as orphans on the
+        // actual VM stack. This is a pre-existing limitation of ensure_on_top.
+        // From intrinsic lowering, operands are always freshly lowered and
+        // already in position, so this path is not reached in practice.
+        self.ensure_on_top(lhs);
+        self.ensure_on_top(rhs);
     }
 }
 

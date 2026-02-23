@@ -11,15 +11,16 @@ use super::arithmetic::{
 };
 use super::cell::{prim_box, prim_box_p, prim_box_set, prim_unbox};
 use super::comparison::{prim_eq, prim_ge, prim_gt, prim_le, prim_lt};
-use super::concurrency::{prim_current_thread_id, prim_join, prim_sleep, prim_spawn};
+use super::concurrency::{prim_current_thread_id, prim_join, prim_spawn};
 use super::coroutines::{
     prim_coroutine_done, prim_coroutine_resume, prim_coroutine_status, prim_coroutine_to_iterator,
     prim_coroutine_value, prim_is_coroutine, prim_make_coroutine, prim_yield_from,
 };
-use super::debug::{prim_debug_print, prim_memory_usage, prim_profile, prim_trace};
+use super::debug::{prim_debug_print, prim_memory_usage, prim_trace};
 use super::debugging::{
     prim_arity, prim_bytecode_size, prim_captures, prim_disbit, prim_disjit, prim_is_closure,
-    prim_is_jit, prim_is_pure, prim_mutates_params, prim_raises,
+    prim_is_jit, prim_is_pure, prim_mutates_params, prim_raises, prim_string_to_keyword,
+    prim_vm_query,
 };
 use super::display::{prim_display, prim_newline, prim_print};
 
@@ -64,6 +65,7 @@ use super::structs::{prim_struct, prim_struct_del};
 use super::table::{
     prim_del, prim_get, prim_has_key, prim_keys, prim_put, prim_table, prim_values,
 };
+use super::time::{prim_clock_cpu, prim_clock_monotonic, prim_clock_realtime, prim_sleep};
 use super::type_check::{
     prim_is_boolean, prim_is_keyword, prim_is_list, prim_is_nil, prim_is_number, prim_is_pair,
     prim_is_string, prim_is_symbol, prim_type_of,
@@ -817,7 +819,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<Sy
         vm,
         symbols,
         &mut effects,
-        "sleep",
+        "time/sleep",
         prim_sleep,
         Effect::raises(),
     );
@@ -861,16 +863,34 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<Sy
         vm,
         symbols,
         &mut effects,
-        "profile",
-        prim_profile,
+        "memory-usage",
+        prim_memory_usage,
+        Effect::none(),
+    );
+
+    // Clock and time primitives
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "clock/monotonic",
+        prim_clock_monotonic,
         Effect::none(),
     );
     register_fn(
         vm,
         symbols,
         &mut effects,
-        "memory-usage",
-        prim_memory_usage,
+        "clock/realtime",
+        prim_clock_realtime,
+        Effect::none(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "clock/cpu",
+        prim_clock_cpu,
         Effect::none(),
     );
 
@@ -964,6 +984,24 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<Sy
         "disjit",
         prim_disjit,
         Effect::raises(),
+    );
+
+    // VM-access introspection (SIG_QUERY)
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "vm/query",
+        prim_vm_query,
+        Effect::none(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "string->keyword",
+        prim_string_to_keyword,
+        Effect::none(),
     );
 
     // File I/O primitives - can raise
@@ -1236,14 +1274,6 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<Sy
         &mut effects,
         "coro/value",
         prim_coroutine_value,
-        Effect::raises(),
-    );
-    register_fn(
-        vm,
-        symbols,
-        &mut effects,
-        "coro/new",
-        prim_make_coroutine,
         Effect::raises(),
     );
 

@@ -768,13 +768,14 @@ e                  ⟹ 2.71828...
 ### Concurrency
 
 ```lisp
-(thread/spawn (fn () (display "Hello from thread") (newline)))
+(spawn (fn () (display "Hello from thread") (newline)))
 ; Creates a new thread and runs the function
 
-(define t (thread/spawn (fn () (+ 2 2))))
-(thread/join t)          ; Wait for thread to complete, returns its result
+(define t (spawn (fn () (+ 2 2))))
+(join t)          ; Wait for thread to complete, returns its result
 
-(sleep 1000)      ; Sleep for 1000 milliseconds
+(time/sleep 1)         ; Sleep for 1 second
+(time/sleep 0.5)       ; Sleep for 500 milliseconds
 
 (current-thread-id) ; Get ID of current thread
 ```

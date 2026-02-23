@@ -4,7 +4,7 @@
 //! instructions to their handlers.
 
 use crate::compiler::bytecode::Instruction;
-use crate::value::{error_val, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK, SIG_YIELD};
+use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK, SIG_YIELD};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -28,32 +28,12 @@ impl VM {
         start_ip: usize,
     ) -> (SignalBits, usize) {
         let mut ip = start_ip;
-        let mut instruction_count = 0;
-        const MAX_INSTRUCTIONS: usize = 100000;
 
         // Deref to slices for instruction handlers
         let bc: &[u8] = bytecode;
         let consts: &[Value] = constants;
 
         loop {
-            instruction_count += 1;
-            if instruction_count > MAX_INSTRUCTIONS {
-                let instr_byte = if ip < bc.len() { bc[ip] } else { 255 };
-                self.fiber.signal = Some((
-                    SIG_ERROR,
-                    error_val(
-                        "error",
-                        format!(
-                            "Instruction limit exceeded at ip={} (instr={}), stack depth={}",
-                            ip,
-                            instr_byte,
-                            self.fiber.stack.len(),
-                        ),
-                    ),
-                ));
-                return (SIG_ERROR, ip);
-            }
-
             // If an error signal is pending, propagate immediately.
             if matches!(self.fiber.signal, Some((SIG_ERROR, _))) {
                 return (SIG_ERROR, ip);

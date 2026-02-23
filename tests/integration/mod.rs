@@ -65,3 +65,9 @@ mod jit {
 mod fibers {
     include!("fibers.rs");
 }
+mod time_property {
+    include!("time_property.rs");
+}
+mod time_elapsed {
+    include!("time_elapsed.rs");
+}

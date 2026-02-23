@@ -36,7 +36,6 @@ blocks. The emitter carries stack simulation state across yield boundaries.
 ### What needs work
 
 - JIT intra-calling: JIT code bounces to interpreter for non-self calls
-- No timing/clock primitives
 - `handler-bind` stub — replaced by fiber/signal model (see docs/FIBERS.md)
 - `signal`/`error` are constructors — will become actual signal primitives in fiber model
 
@@ -49,8 +48,7 @@ inference into a single fiber/signal mechanism. Surface syntax: `try`/`catch`/
 
 ### Remaining from Debugging Toolkit
 
-- `Instant`/`Duration` heap types not yet implemented
-- `profile` primitive is still a placeholder
+- `Instant`/`Duration` heap types not yet implemented (clock/time primitives use floats for now)
 - Benchmarking macros (`lib/bench.lisp`) not yet written
 
 ## Future work

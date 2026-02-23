@@ -398,6 +398,7 @@ dependencies = [
  "cranelift-native",
  "criterion",
  "iai-callgrind",
+ "libc",
  "libloading",
  "proptest",
  "rustc-hash",

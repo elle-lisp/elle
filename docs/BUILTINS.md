@@ -1781,47 +1781,103 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 ## Concurrency
 
-### `thread/spawn` (Spawn Thread)
+### `spawn` (Spawn Thread)
 
-**Semantics**: Creates new thread that executes function.
+**Semantics**: Creates new thread that executes a closure. The closure must capture only immutable values.
 
 **Usage**:
 ```lisp
-(define t (thread/spawn (lambda () (display "Running in thread"))))
-(thread?)
-⟹ (thread object)
+(define t (spawn (fn () (display "Running in thread"))))
 ```
 
-### `thread/join` (Wait for Thread)
+### `join` (Wait for Thread)
 
-**Semantics**: Waits for thread to complete.
-
-**Usage**:
-```lisp
-(define t (thread/spawn (lambda () (sleep 1) (display "Done"))))
-(thread/join t)
-⟹ (waits for thread)
-```
-
-### `sleep` (Sleep)
-
-**Semantics**: Pauses execution for given milliseconds.
+**Semantics**: Waits for thread to complete and returns its result.
 
 **Usage**:
 ```lisp
-(display "Before")
-(sleep 1000)
-(display "After (1 second later)")
+(define t (spawn (fn () (+ 2 2))))
+(join t)
+⟹ 4
 ```
 
 ### `current-thread-id` (Get Thread ID)
 
-**Semantics**: Returns identifier of current thread.
+**Semantics**: Returns identifier of current thread as a string.
 
 **Usage**:
 ```lisp
 (current-thread-id)
-⟹ 1
+⟹ "ThreadId(1)"
+```
+
+---
+
+## Clock & Time
+
+### `clock/monotonic` (Monotonic Clock)
+
+**Semantics**: Returns seconds elapsed since process start as a float. Uses a monotonic clock that never goes backwards. Suitable for measuring durations.
+
+**Usage**:
+```lisp
+(clock/monotonic)
+⟹ 0.001234
+
+(let ((t1 (clock/monotonic)))
+  (time/sleep 0.1)
+  (- (clock/monotonic) t1))
+⟹ 0.100... ; approximately 0.1 seconds
+```
+
+### `clock/realtime` (Wall Clock)
+
+**Semantics**: Returns seconds since Unix epoch (January 1, 1970) as a float. Subject to NTP adjustments — not suitable for measuring durations.
+
+**Usage**:
+```lisp
+(clock/realtime)
+⟹ 1740268800.123456
+```
+
+### `time/sleep` (Sleep)
+
+**Semantics**: Pauses execution for the given number of seconds. Accepts integers or floats. Duration must be finite and non-negative.
+
+**Usage**:
+```lisp
+(time/sleep 1)       ; sleep 1 second
+(time/sleep 0.5)     ; sleep 500 milliseconds
+(time/sleep 0.001)   ; sleep 1 millisecond
+```
+
+### `time/elapsed` (Measure Elapsed Time)
+
+**Semantics**: Calls a zero-argument function and returns a list of `(result elapsed-seconds)`. Defined in Elle using `clock/monotonic`.
+
+**Usage**:
+```lisp
+(time/elapsed (fn () (+ 1 2)))
+⟹ (3 0.000012)
+
+(let ((result (time/elapsed (fn () (time/sleep 0.1) 42))))
+  (first result))
+⟹ 42
+```
+
+### `time/stopwatch` (Create Stopwatch)
+
+**Semantics**: Returns a coroutine that yields elapsed seconds since creation each time it is resumed. Defined in Elle using `clock/monotonic` and `coro/new`.
+
+**Usage**:
+```lisp
+(define sw (time/stopwatch))
+(coro/resume sw)
+⟹ 0.000001
+
+(time/sleep 0.1)
+(coro/resume sw)
+⟹ 0.100...
 ```
 
 ---
@@ -1865,26 +1921,19 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 ; Output: value: 42 (type: int)
 ```
 
-### `trace` (Enable Tracing)
+### `trace` (Trace Value)
 
-**Semantics**: Enables or disables execution tracing.
-
-**Usage**:
-```lisp
-(trace #t)
-; All expressions traced
-(trace #f)
-; Tracing disabled
-```
-
-### `profile` (Profile Code)
-
-**Semantics**: Profiles function execution times.
+**Semantics**: Prints a labeled value to stderr and returns the value. First argument is a label (string or symbol), second is the value to trace.
 
 **Usage**:
 ```lisp
-(profile (lambda () (+ 1 2)))
-; Prints timing information
+(trace "x" 42)
+; Prints: [TRACE] x: 42
+⟹ 42
+
+(trace "result" (+ 1 2))
+; Prints: [TRACE] result: 3
+⟹ 3
 ```
 
 ### `memory-usage` (Get Memory Usage)
@@ -1911,6 +1960,44 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 (gensym "var")
 ⟹ #:var3
+```
+
+### `string->keyword` (String to Keyword)
+
+**Semantics**: Converts a string to an interned keyword value.
+
+**Usage**:
+```lisp
+(string->keyword "foo")
+⟹ :foo
+
+(= (string->keyword "bar") (string->keyword "bar"))
+⟹ #t
+```
+
+### `call-count` (Closure Call Count)
+
+**Semantics**: Returns the number of times a closure has been called. Returns 0 for non-closures.
+
+**Usage**:
+```lisp
+(let ((f (fn (x) x)))
+  (f 1) (f 2) (f 3)
+  (call-count f))
+⟹ 3
+```
+
+### `global?` (Global Binding Check)
+
+**Semantics**: Returns `#t` if a symbol is bound as a global, `#f` otherwise.
+
+**Usage**:
+```lisp
+(global? '+)
+⟹ #t
+
+(global? 'nonexistent)
+⟹ #f
 ```
 
 ---

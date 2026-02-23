@@ -34,6 +34,7 @@ Return values:
 - `(SIG_OK, value)` — success, push value onto stack
 - `(SIG_ERROR, error_val(kind, msg))` — error, stored in `fiber.signal`
 - `(SIG_RESUME, fiber_value)` — fiber resume, VM handles fiber swap
+- `(SIG_QUERY, cons(keyword, arg))` — VM state query, dispatched by `dispatch_query()` in `signal.rs`
 
 All SIG_RESUME primitives (including coroutine wrappers) return
 `(SIG_RESUME, fiber_value)`. Fiber primitives (`fiber/resume`) return SIG_RESUME with the fiber value.
@@ -98,17 +99,20 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `display.rs` | `print`, `println`, `display` |
 | `type_check.rs` | `nil?`, `pair?`, `number?`, `string?`, etc. |
 | `higher_order.rs` | `map`, `filter`, `fold`, `apply` |
-| `concurrency.rs` | `spawn`, `join`, `channel`, `send`, `receive` |
-| `coro.rs` | `coro/new`, `coro/resume`, `coro/done?` (fiber wrappers) |
+| `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
+| `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro?>iterator`, `yield-from` |
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value`, `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
+| `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
+| `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval_new`) |
 | `macros.rs` | `defmacro` (compile-time; `macro?` and `expand-macro` are now Expander operations) |
-| `debug.rs` | `debug-print`, `trace` |
+| `debugging.rs` | `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `global?`, `string->keyword`, `disbit`, `disjit` |
+| `debug.rs` | `debug-print`, `trace`, `memory-usage` |
 
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 38 | Re-exports |
-| `registration.rs` | ~1370 | `register_primitives`, `register_fn` |
-| `module_init.rs` | ~50 | `init_stdlib` |
+| `mod.rs` | 35 | Re-exports |
+| `registration.rs` | ~1390 | `register_primitives`, `register_fn` |
+| `module_init.rs` | ~170 | `init_stdlib`, module initialization |
 | (others) | varies | Individual primitive implementations |

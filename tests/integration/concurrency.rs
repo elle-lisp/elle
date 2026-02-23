@@ -257,7 +257,7 @@ fn test_spawn_closure_with_conditional() {
 fn test_sleep() {
     // Test that sleep works and blocks for the right amount of time
     let start = std::time::Instant::now();
-    let result = eval("(sleep 0.1)");
+    let result = eval("(time/sleep 0.1)");
     let elapsed = start.elapsed();
 
     assert!(result.is_ok());
@@ -271,7 +271,7 @@ fn test_sleep() {
 fn test_sleep_with_int() {
     // Test sleep with integer seconds
     let start = std::time::Instant::now();
-    let result = eval("(sleep 0)");
+    let result = eval("(time/sleep 0)");
     let elapsed = start.elapsed();
 
     assert!(result.is_ok());
@@ -289,7 +289,7 @@ fn test_current_thread_id() {
 #[test]
 fn test_sleep_negative_duration() {
     // Test that negative sleep duration returns an error
-    let result = eval("(sleep -1)");
+    let result = eval("(time/sleep -1)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("non-negative"));
 }
@@ -297,7 +297,7 @@ fn test_sleep_negative_duration() {
 #[test]
 fn test_sleep_float_negative() {
     // Test negative float sleep duration
-    let result = eval("(sleep -0.5)");
+    let result = eval("(time/sleep -0.5)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("non-negative"));
 }
@@ -305,7 +305,7 @@ fn test_sleep_float_negative() {
 #[test]
 fn test_sleep_non_numeric() {
     // Test sleep with non-numeric argument
-    let result = eval("(sleep \"hello\")");
+    let result = eval("(time/sleep \"hello\")");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("number"));
 }

@@ -348,45 +348,6 @@ pub fn prim_join(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Sleeps for the specified number of seconds
-/// (sleep seconds)
-pub fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("sleep: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
-    if let Some(n) = args[0].as_int() {
-        if n < 0 {
-            return (
-                SIG_ERROR,
-                error_val("error", "sleep: duration must be non-negative".to_string()),
-            );
-        }
-        std::thread::sleep(std::time::Duration::from_secs(n as u64));
-        (SIG_OK, Value::NIL)
-    } else if let Some(f) = args[0].as_float() {
-        if f < 0.0 {
-            return (
-                SIG_ERROR,
-                error_val("error", "sleep: duration must be non-negative".to_string()),
-            );
-        }
-        std::thread::sleep(std::time::Duration::from_secs_f64(f));
-        (SIG_OK, Value::NIL)
-    } else {
-        (
-            SIG_ERROR,
-            error_val("type-error", "sleep: argument must be a number".to_string()),
-        )
-    }
-}
-
 /// Returns the ID of the current thread
 /// (current-thread-id)
 pub fn prim_current_thread_id(_args: &[Value]) -> (SignalBits, Value) {

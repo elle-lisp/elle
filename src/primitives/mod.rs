@@ -24,6 +24,8 @@ pub mod registration;
 pub mod string;
 pub mod structs;
 pub mod table;
+pub mod time;
+pub mod time_def;
 pub mod type_check;
 pub mod utility;
 pub mod vector;

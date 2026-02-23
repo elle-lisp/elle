@@ -9,6 +9,7 @@
 //! ```
 
 mod emit;
+pub mod intrinsics;
 mod lower;
 mod types;
 
