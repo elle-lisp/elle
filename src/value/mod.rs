@@ -33,7 +33,8 @@ pub use types::{Arity, NativeFn, SymbolId, TableKey};
 pub use closure::Closure;
 pub use fiber::{
     CallFrame, Fiber, FiberHandle, FiberStatus, Frame, SignalBits, SuspendedFrame, WeakFiberHandle,
-    SIG_CANCEL, SIG_DEBUG, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME, SIG_YIELD,
+    SIG_CANCEL, SIG_DEBUG, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
+    SIG_YIELD,
 };
 
 // Export FFI types

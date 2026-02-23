@@ -146,6 +146,10 @@ Things that look wrong but aren't:
   returns `EMPTY_LIST`. Use `empty?` (not `nil?`) to check for end-of-list.
   `nil?` only matches `Value::NIL`. This distinction matters in recursive
   list functions and affects `elle-doc/` and `examples/`.
+- Signal bits are partitioned: Bits 0-2 are user-facing (error, yield, debug),
+  Bits 3-7 are VM-internal (resume, FFI, propagate, cancel, query, halt),
+  Bits 9-15 are reserved, and Bits 16-31 are for user-defined signal types.
+  See `src/value/fiber.rs` for the full bit layout.
 
 ## Conventions
 

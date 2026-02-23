@@ -1495,3 +1495,39 @@ fn test_empty_list_display() {
     let val = result.unwrap();
     assert_eq!(format!("{}", val), "()");
 }
+
+// ============================================================================
+// halt primitive
+// ============================================================================
+
+#[test]
+fn test_halt_returns_value() {
+    let result = eval("(halt 42)");
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_halt_returns_nil() {
+    let result = eval("(halt)");
+    assert_eq!(result.unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_halt_stops_execution() {
+    // Code after halt should not execute
+    let result = eval("(begin (halt 1) 2)");
+    assert_eq!(result.unwrap(), Value::int(1));
+}
+
+#[test]
+fn test_halt_in_function() {
+    let result = eval("(begin (define f (fn () (halt 99))) (f))");
+    assert_eq!(result.unwrap(), Value::int(99));
+}
+
+#[test]
+fn test_halt_with_complex_value() {
+    let result = eval("(halt (list 1 2 3))");
+    let vec = result.unwrap().list_to_vec().unwrap();
+    assert_eq!(vec, vec![Value::int(1), Value::int(2), Value::int(3)]);
+}

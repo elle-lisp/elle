@@ -50,7 +50,7 @@ use super::math::{
 use super::meta::prim_gensym;
 use super::module_loading::{prim_add_module_path, prim_import_file};
 use super::package::{prim_package_info, prim_package_version};
-use super::process::prim_exit;
+use super::process::{prim_exit, prim_halt};
 
 use super::string::{
     prim_any_to_string, prim_char_at, prim_keyword_to_string, prim_number_to_string,
@@ -813,7 +813,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<Sy
         Effect::none(),
     );
 
-    // Process control - can raise
+    // Process control
     register_fn(
         vm,
         symbols,
@@ -821,6 +821,14 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<Sy
         "exit",
         prim_exit,
         Effect::raises(),
+    );
+    register_fn(
+        vm,
+        symbols,
+        &mut effects,
+        "halt",
+        prim_halt,
+        Effect::halts(),
     );
 
     // Debugging and profiling primitives - pure

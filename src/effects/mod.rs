@@ -10,7 +10,7 @@ mod primitives;
 pub use primitives::get_primitive_effects;
 
 use crate::value::fiber::SignalBits;
-use crate::value::fiber::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_YIELD};
+use crate::value::fiber::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_YIELD};
 use std::fmt;
 
 /// Effect classification for expressions and functions.
@@ -67,6 +67,14 @@ impl Effect {
     pub const fn yields_raises() -> Self {
         Effect {
             bits: SIG_YIELD | SIG_ERROR,
+            propagates: 0,
+        }
+    }
+
+    /// May halt the VM (non-resumable termination with return value).
+    pub const fn halts() -> Self {
+        Effect {
+            bits: SIG_HALT | SIG_ERROR,
             propagates: 0,
         }
     }
@@ -135,6 +143,11 @@ impl Effect {
         self.bits & SIG_ERROR != 0
     }
 
+    /// Can this function halt the VM?
+    pub const fn may_halt(&self) -> bool {
+        self.bits & SIG_HALT != 0
+    }
+
     /// Does this function call foreign code?
     pub const fn may_ffi(&self) -> bool {
         self.bits & SIG_FFI != 0
@@ -190,6 +203,9 @@ impl fmt::Display for Effect {
         let mut flags = Vec::new();
         if self.bits & SIG_ERROR != 0 {
             flags.push("raises");
+        }
+        if self.bits & SIG_HALT != 0 {
+            flags.push("halts");
         }
         if self.bits & SIG_FFI != 0 {
             flags.push("ffi");

@@ -2,7 +2,7 @@ use crate::error::{LocationMap, StackFrame};
 use crate::ffi::FFISubsystem;
 use crate::value::fiber::CallFrame;
 use crate::value::{
-    Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_OK, SIG_YIELD,
+    Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_OK, SIG_YIELD,
 };
 use crate::vm::scope::ScopeStack;
 use rustc_hash::FxHashMap;
@@ -358,7 +358,8 @@ impl VM {
                     // Non-OK signal (yield, error, user-defined).
                     // Save context for potential future resume if not already
                     // set (yield instruction sets it; fiber/signal does not).
-                    if self.fiber.suspended.is_none() {
+                    // SIG_HALT is non-resumable — no suspended frame needed.
+                    if bits != SIG_HALT && self.fiber.suspended.is_none() {
                         self.fiber.suspended = Some(vec![SuspendedFrame {
                             bytecode: frame.bytecode.clone(),
                             constants: frame.constants.clone(),
