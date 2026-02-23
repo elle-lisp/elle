@@ -98,14 +98,13 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `file_io.rs` | `read-file`, `write-file`, `file-exists?` |
 | `display.rs` | `print`, `println`, `display` |
 | `type_check.rs` | `nil?`, `pair?`, `number?`, `string?`, etc. |
-| `higher_order.rs` | `map`, `filter`, `fold`, `apply` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
 | `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro?>iterator`, `yield-from` |
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value`, `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
 | `meta.rs` | `gensym` (runtime unique symbol generation) |
-| `debugging.rs` | `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `global?`, `string->keyword`, `disbit`, `disjit` |
+| `debugging.rs` | `closure?`, `jit?`, `pure?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `global?`, `string->keyword`, `disbit`, `disjit` |
 | `debug.rs` | `debug-print`, `trace`, `memory-usage` |
 
 ## Files
