@@ -25,7 +25,7 @@ Runtime value representation using NaN-boxing.
 | `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle` |
 | `send.rs` | `SendValue` wrapper for thread-safe transfer |
 | `display.rs` | `Display` implementation for values |
-| `intern.rs` | Symbol interning |
+| `intern.rs` | String interning (used by both strings and keywords) |
 
 ## Key types
 

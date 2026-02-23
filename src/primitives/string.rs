@@ -418,61 +418,20 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
     }
 
     if let Some(sym_id) = val.as_symbol() {
-        // Get symbol name from symbol table
-        unsafe {
-            if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                let symbols = &*symbols_ptr;
-                let sym_id = crate::value::SymbolId(sym_id);
-                if let Some(name) = symbols.name(sym_id) {
-                    return (SIG_OK, Value::string(name));
-                } else {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            format!(
-                                "to-string: symbol ID {} not found in symbol table",
-                                sym_id.0
-                            ),
-                        ),
-                    );
-                }
-            } else {
-                return (
-                    SIG_ERROR,
-                    error_val("error", "to-string: symbol table not available".to_string()),
-                );
-            }
-        }
+        return match crate::ffi::primitives::context::resolve_symbol_name(sym_id) {
+            Some(name) => (SIG_OK, Value::string(name)),
+            None => (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("to-string: symbol ID {} not found in symbol table", sym_id),
+                ),
+            ),
+        };
     }
 
-    if let Some(kw_id) = val.as_keyword() {
-        // Get keyword name from symbol table with colon prefix
-        unsafe {
-            if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                let symbols = &*symbols_ptr;
-                let sym_id = crate::value::SymbolId(kw_id);
-                if let Some(name) = symbols.name(sym_id) {
-                    return (SIG_OK, Value::string(format!(":{}", name)));
-                } else {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            format!(
-                                "to-string: keyword ID {} not found in symbol table",
-                                sym_id.0
-                            ),
-                        ),
-                    );
-                }
-            } else {
-                return (
-                    SIG_ERROR,
-                    error_val("error", "to-string: symbol table not available".to_string()),
-                );
-            }
-        }
+    if let Some(name) = val.as_keyword_name() {
+        return (SIG_OK, Value::string(format!(":{}", name)));
     }
 
     // Handle heap types (Cons, Vector, etc.)
@@ -985,29 +944,8 @@ pub fn prim_keyword_to_string(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    match args[0].as_keyword() {
-        Some(id) => unsafe {
-            if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                let symbols = &*symbols_ptr;
-                let sym_id = crate::value::SymbolId(id);
-                if let Some(name) = symbols.name(sym_id) {
-                    (SIG_OK, Value::string(name))
-                } else {
-                    (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            format!("Keyword ID {} not found in symbol table", id),
-                        ),
-                    )
-                }
-            } else {
-                (
-                    SIG_ERROR,
-                    error_val("error", "Symbol table not available".to_string()),
-                )
-            }
-        },
+    match args[0].as_keyword_name() {
+        Some(name) => (SIG_OK, Value::string(name)),
         None => (
             SIG_ERROR,
             error_val(
@@ -1034,27 +972,15 @@ pub fn prim_symbol_to_string(args: &[Value]) -> (SignalBits, Value) {
     }
 
     match args[0].as_symbol() {
-        Some(id) => unsafe {
-            if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                let symbols = &*symbols_ptr;
-                let sym_id = crate::value::SymbolId(id);
-                if let Some(name) = symbols.name(sym_id) {
-                    (SIG_OK, Value::string(name))
-                } else {
-                    (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            format!("Symbol ID {} not found in symbol table", id),
-                        ),
-                    )
-                }
-            } else {
-                (
-                    SIG_ERROR,
-                    error_val("error", "Symbol table not available".to_string()),
-                )
-            }
+        Some(id) => match crate::ffi::primitives::context::resolve_symbol_name(id) {
+            Some(name) => (SIG_OK, Value::string(name)),
+            None => (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("Symbol ID {} not found in symbol table", id),
+                ),
+            ),
         },
         None => (
             SIG_ERROR,

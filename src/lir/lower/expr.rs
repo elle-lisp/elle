@@ -15,7 +15,7 @@ impl Lowerer {
             HirKind::Int(n) => self.emit_const(LirConst::Int(*n)),
             HirKind::Float(f) => self.emit_const(LirConst::Float(*f)),
             HirKind::String(s) => self.emit_const(LirConst::String(s.clone())),
-            HirKind::Keyword(sym) => self.emit_const(LirConst::Keyword(*sym)),
+            HirKind::Keyword(name) => self.emit_const(LirConst::Keyword(name.clone())),
 
             HirKind::Var(binding_id) => self.lower_var(binding_id),
             HirKind::Let { bindings, body } => self.lower_let(bindings, body),

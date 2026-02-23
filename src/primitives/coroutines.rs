@@ -87,15 +87,7 @@ pub fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
         FiberStatus::Error => "error",
     };
 
-    // Intern as keyword via thread-local symbol table
-    unsafe {
-        if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-            let id = (*symbols_ptr).intern(name);
-            (SIG_OK, Value::keyword(id.0))
-        } else {
-            (SIG_OK, Value::string(name))
-        }
-    }
+    (SIG_OK, Value::keyword(name))
 }
 
 /// (coro/done? co) → bool

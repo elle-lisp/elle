@@ -8,7 +8,7 @@ thread_local! {
     static SYMBOL_TABLE: RefCell<Option<*mut SymbolTable>> = const { RefCell::new(None) };
 }
 
-/// Set the symbol table context for length primitive
+/// Set the symbol table context for symbol name resolution in length primitive
 ///
 /// # Safety
 /// The pointer must remain valid for the duration of use.
@@ -25,15 +25,15 @@ pub fn clear_length_symbol_table() {
     });
 }
 
-/// Get the keyword name from a keyword ID
-fn get_keyword_name(kid: SymbolId) -> Option<String> {
+/// Get the symbol name from a symbol ID via the thread-local symbol table
+fn get_symbol_name(sid: SymbolId) -> Option<String> {
     SYMBOL_TABLE.with(|st| {
         let ptr = st.borrow();
         match *ptr {
             Some(p) => {
                 // SAFETY: Caller ensures pointer validity via set_length_symbol_table
                 let symbols = unsafe { &*p };
-                symbols.name(kid).map(|s| s.to_string())
+                symbols.name(sid).map(|s| s.to_string())
             }
             None => None,
         }
@@ -168,7 +168,7 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         (SIG_OK, Value::int(s.len() as i64))
     } else if let Some(sid) = args[0].as_symbol() {
         // Get the symbol name from the symbol table context
-        if let Some(name) = get_keyword_name(crate::value::SymbolId(sid)) {
+        if let Some(name) = get_symbol_name(crate::value::SymbolId(sid)) {
             (SIG_OK, Value::int(name.chars().count() as i64))
         } else {
             (
@@ -179,19 +179,8 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
                 ),
             )
         }
-    } else if let Some(kid) = args[0].as_keyword() {
-        // Get the keyword name from the symbol table context
-        if let Some(name) = get_keyword_name(crate::value::SymbolId(kid)) {
-            (SIG_OK, Value::int(name.chars().count() as i64))
-        } else {
-            (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("length: unable to resolve keyword name for id {:?}", kid),
-                ),
-            )
-        }
+    } else if let Some(name) = args[0].as_keyword_name() {
+        (SIG_OK, Value::int(name.chars().count() as i64))
     } else {
         (SIG_ERROR, error_val("type-error", format!(
             "length: expected collection type (list, string, vector, table, struct, symbol, or keyword), got {}",

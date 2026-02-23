@@ -7,18 +7,9 @@
 use crate::value::Value;
 use std::fmt;
 
-/// Resolve a symbol/keyword ID to its name via the thread-local symbol table.
-/// Returns None if the symbol table is unavailable or the ID is unknown.
-///
-/// # Safety
-/// Caller must ensure the thread-local symbol table pointer is valid.
-unsafe fn resolve_name(id: u32) -> Option<&'static str> {
-    let ptr = crate::ffi::primitives::context::get_symbol_table()?;
-    let name = (*ptr).name(crate::value::types::SymbolId(id))?;
-    // SAFETY: The symbol table's Rc<str> names live for the duration of the
-    // program. We transmute the lifetime to 'static because the symbol table
-    // is never deallocated while code is running.
-    Some(std::mem::transmute::<&str, &'static str>(name))
+/// Resolve a symbol ID to its name via the thread-local symbol table.
+fn resolve_symbol(id: u32) -> Option<String> {
+    crate::ffi::primitives::context::resolve_symbol_name(id)
 }
 
 impl fmt::Display for Value {
@@ -49,23 +40,15 @@ impl fmt::Display for Value {
         }
 
         if let Some(id) = self.as_symbol() {
-            return unsafe {
-                if let Some(name) = resolve_name(id) {
-                    write!(f, "{}", name)
-                } else {
-                    write!(f, "#<sym:{}>", id)
-                }
+            return if let Some(name) = resolve_symbol(id) {
+                write!(f, "{}", name)
+            } else {
+                write!(f, "#<sym:{}>", id)
             };
         }
 
-        if let Some(id) = self.as_keyword() {
-            return unsafe {
-                if let Some(name) = resolve_name(id) {
-                    write!(f, ":{}", name)
-                } else {
-                    write!(f, ":{}", id)
-                }
-            };
+        if let Some(name) = self.as_keyword_name() {
+            return write!(f, ":{}", name);
         }
 
         // Handle heap values
@@ -188,22 +171,14 @@ impl fmt::Debug for Value {
             return write!(f, "{}", n);
         }
         if let Some(id) = self.as_symbol() {
-            return unsafe {
-                if let Some(name) = resolve_name(id) {
-                    write!(f, "{}", name)
-                } else {
-                    write!(f, "#<sym:{}>", id)
-                }
+            return if let Some(name) = resolve_symbol(id) {
+                write!(f, "{}", name)
+            } else {
+                write!(f, "#<sym:{}>", id)
             };
         }
-        if let Some(id) = self.as_keyword() {
-            return unsafe {
-                if let Some(name) = resolve_name(id) {
-                    write!(f, ":{}", name)
-                } else {
-                    write!(f, ":{}", id)
-                }
-            };
+        if let Some(name) = self.as_keyword_name() {
+            return write!(f, ":{}", name);
         }
         if !self.is_heap() {
             return write!(f, "<unknown:{:#x}>", self.to_bits());

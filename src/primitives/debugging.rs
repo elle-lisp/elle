@@ -186,7 +186,7 @@ pub fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if args[0].as_string().is_none() && args[0].as_keyword().is_none() {
+    if args[0].as_string().is_none() && args[0].as_keyword_name().is_none() {
         return (
             SIG_ERROR,
             error_val(
@@ -203,8 +203,7 @@ pub fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
 
 /// (string->keyword str) — convert a string to a keyword
 ///
-/// Interns the string via the thread-local symbol table (same access
-/// pattern as keyword->string, symbol->string, fiber/status).
+/// Creates a content-addressed keyword from the string name.
 pub fn prim_string_to_keyword(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -216,17 +215,7 @@ pub fn prim_string_to_keyword(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(name) = args[0].as_string() {
-        unsafe {
-            if let Some(ptr) = crate::ffi::primitives::context::get_symbol_table() {
-                let id = (*ptr).intern(name);
-                (SIG_OK, Value::keyword(id.0))
-            } else {
-                (
-                    SIG_ERROR,
-                    error_val("error", "Symbol table not available".to_string()),
-                )
-            }
-        }
+        (SIG_OK, Value::keyword(name))
     } else {
         (
             SIG_ERROR,

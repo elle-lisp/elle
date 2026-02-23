@@ -90,10 +90,7 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Int(n) => Ok(HirPattern::Literal(PatternLiteral::Int(*n))),
             SyntaxKind::Float(f) => Ok(HirPattern::Literal(PatternLiteral::Float(*f))),
             SyntaxKind::String(s) => Ok(HirPattern::Literal(PatternLiteral::String(s.clone()))),
-            SyntaxKind::Keyword(k) => {
-                let sym = self.symbols.intern(k);
-                Ok(HirPattern::Literal(PatternLiteral::Keyword(sym)))
-            }
+            SyntaxKind::Keyword(k) => Ok(HirPattern::Literal(PatternLiteral::Keyword(k.clone()))),
             SyntaxKind::List(items) => {
                 if items.is_empty() {
                     return Ok(HirPattern::List(vec![]));

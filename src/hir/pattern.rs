@@ -1,7 +1,6 @@
 //! Pattern matching in HIR
 
 use super::binding::BindingId;
-use crate::value::SymbolId;
 
 /// HIR pattern for match expressions
 #[derive(Debug, Clone)]
@@ -38,7 +37,7 @@ pub enum PatternLiteral {
     Int(i64),
     Float(f64),
     String(String),
-    Keyword(SymbolId),
+    Keyword(String),
 }
 
 /// Bindings introduced by a pattern

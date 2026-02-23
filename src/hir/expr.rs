@@ -40,7 +40,7 @@ pub enum HirKind {
     Int(i64),
     Float(f64),
     String(String),
-    Keyword(SymbolId),
+    Keyword(String),
 
     // === Variables ===
     /// Reference to a binding (fully resolved)

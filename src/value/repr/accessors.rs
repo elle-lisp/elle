@@ -72,11 +72,15 @@ impl Value {
         }
     }
 
-    /// Extract keyword ID if this is a keyword.
+    /// Extract keyword name if this is a keyword.
     #[inline]
-    pub fn as_keyword(&self) -> Option<u32> {
+    pub fn as_keyword_name(&self) -> Option<&str> {
         if self.is_keyword() {
-            Some((self.0 & PAYLOAD_MASK) as u32)
+            let ptr = (self.0 & PAYLOAD_MASK) as *const crate::value::heap::HeapObject;
+            match unsafe { &*ptr } {
+                crate::value::heap::HeapObject::String(s) => Some(s),
+                _ => None,
+            }
         } else {
             None
         }

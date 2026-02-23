@@ -14,7 +14,7 @@
 //! EmptyList: 0x7FFC_0000_0000_0003 (no payload)
 //! Int:       0x7FF8_XXXX_XXXX_XXXX where X = 48-bit signed integer (sign-extended)
 //! Symbol:    0x7FF9_0000_XXXX_XXXX where X = 32-bit symbol ID
-//! Keyword:   0x7FFA_0000_XXXX_XXXX where X = 32-bit symbol ID  
+//! Keyword:   0x7FFA_XXXX_XXXX_XXXX where X = 48-bit interned string pointer
 //! Pointer:   0x7FFB_XXXX_XXXX_XXXX where X = 48-bit heap pointer
 //! NaN/Inf:   0x7FFD_XXXX_XXXX_XXXX where X = 64-bit float bits (NaN or Infinity)
 
@@ -58,7 +58,7 @@ pub(crate) const TAG_INT_MASK: u64 = 0xFFFF_0000_0000_0000;
 pub const TAG_SYMBOL: u64 = 0x7FF9_0000_0000_0000;
 pub(crate) const TAG_SYMBOL_MASK: u64 = 0xFFFF_0000_0000_0000;
 
-/// Keyword tag - upper 16 bits = 0x7FFA  
+/// Keyword tag - upper 16 bits = 0x7FFA, payload = 48-bit interned string pointer
 pub const TAG_KEYWORD: u64 = 0x7FFA_0000_0000_0000;
 pub(crate) const TAG_KEYWORD_MASK: u64 = 0xFFFF_0000_0000_0000;
 

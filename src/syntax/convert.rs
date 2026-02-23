@@ -21,10 +21,7 @@ impl Syntax {
                 let id = symbols.intern(s);
                 Value::symbol(id.0)
             }
-            SyntaxKind::Keyword(s) => {
-                let id = symbols.intern(s);
-                Value::keyword(id.0)
-            }
+            SyntaxKind::Keyword(s) => Value::keyword(s),
             SyntaxKind::String(s) => Value::string(s.clone()),
             SyntaxKind::List(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
@@ -79,10 +76,7 @@ impl Syntax {
                 .name(crate::value::SymbolId(id))
                 .ok_or("Unknown symbol")?;
             SyntaxKind::Symbol(name.to_string())
-        } else if let Some(id) = value.as_keyword() {
-            let name = symbols
-                .name(crate::value::SymbolId(id))
-                .ok_or("Unknown keyword")?;
+        } else if let Some(name) = value.as_keyword_name() {
             SyntaxKind::Keyword(name.to_string())
         } else if let Some(s) = value.as_string() {
             SyntaxKind::String(s.to_string())
