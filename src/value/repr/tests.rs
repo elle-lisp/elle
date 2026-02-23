@@ -194,7 +194,7 @@ fn test_type_name() {
     assert_eq!(Value::string("test").type_name(), "string");
     assert_eq!(
         Value::cons(Value::NIL, Value::EMPTY_LIST).type_name(),
-        "cons"
+        "list"
     );
     assert_eq!(Value::vector(vec![]).type_name(), "vector");
     assert_eq!(Value::table().type_name(), "table");

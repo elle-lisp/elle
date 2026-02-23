@@ -539,7 +539,7 @@ Get the type name as a keyword:
 (type-of "hello")⟹ :string
 (type-of #t)     ⟹ :boolean
 (type-of 'x)     ⟹ :symbol
-(type-of (list)) ⟹ :pair
+(type-of (list)) ⟹ :list
 ```
 
 ---

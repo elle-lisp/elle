@@ -143,7 +143,7 @@ impl HeapObject {
     pub fn type_name(&self) -> &'static str {
         match self {
             HeapObject::String(_) => "string",
-            HeapObject::Cons(_) => "cons",
+            HeapObject::Cons(_) => "list",
             HeapObject::Vector(_) => "vector",
             HeapObject::Table(_) => "table",
             HeapObject::Struct(_) => "struct",
