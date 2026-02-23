@@ -1134,7 +1134,7 @@ e
 
 **Usage**:
 ```lisp
-(define v (vector 1 2 3 4 5))
+(var v (vector 1 2 3 4 5))
 (length v)
 ⟹ 5
 ```
@@ -1147,7 +1147,7 @@ e
 
 **Usage**:
 ```lisp
-(define v (vector 'a 'b 'c))
+(var v (vector 'a 'b 'c))
 (vector-ref v 1)
 ⟹ b
 ```
@@ -1158,7 +1158,7 @@ e
 
 **Usage**:
 ```lisp
-(define v (vector 1 2 3))
+(var v (vector 1 2 3))
 (vector-set! v 1 99)
 (vector-ref v 1)
 ⟹ 99
@@ -1176,11 +1176,11 @@ Tables are mutable hash maps. Keys and values can be any type.
 
 **Usage**:
 ```lisp
-(define t (table))
+(var t (table))
 (table-length t)
 ⟹ 0
 
-(define t2 (table "a" 1 "b" 2))
+(var t2 (table "a" 1 "b" 2))
 (table-length t2)
 ⟹ 2
 ```
@@ -1191,7 +1191,7 @@ Tables are mutable hash maps. Keys and values can be any type.
 
 **Usage**:
 ```lisp
-(define t (table 1 "one" 2 "two"))
+(var t (table 1 "one" 2 "two"))
 (get t 1)
 ⟹ "one"
 
@@ -1205,7 +1205,7 @@ Tables are mutable hash maps. Keys and values can be any type.
 
 **Usage**:
 ```lisp
-(define t (table))
+(var t (table))
 (put t "name" "Alice")
 (get t "name")
 ⟹ "Alice"
@@ -1217,7 +1217,7 @@ Tables are mutable hash maps. Keys and values can be any type.
 
 **Usage**:
 ```lisp
-(define t (table 1 "a" 2 "b"))
+(var t (table 1 "a" 2 "b"))
 (del t 1)
 (has-key? t 1)
 ⟹ #f
@@ -1229,7 +1229,7 @@ Tables are mutable hash maps. Keys and values can be any type.
 
 **Usage**:
 ```lisp
-(define t (table "x" 10))
+(var t (table "x" 10))
 (has-key? t "x")
 ⟹ #t
 
@@ -1243,7 +1243,7 @@ Tables are mutable hash maps. Keys and values can be any type.
 
 **Usage**:
 ```lisp
-(define t (table "a" 1 "b" 2))
+(var t (table "a" 1 "b" 2))
 (keys t)
 ⟹ ("a" "b")
 ```
@@ -1254,7 +1254,7 @@ Tables are mutable hash maps. Keys and values can be any type.
 
 **Usage**:
 ```lisp
-(define t (table "a" 1 "b" 2))
+(var t (table "a" 1 "b" 2))
 (values t)
 ⟹ (1 2)
 ```
@@ -1271,7 +1271,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define s (struct "name" "Bob" "age" 30))
+(var s (struct "name" "Bob" "age" 30))
 (struct-length s)
 ⟹ 2
 ```
@@ -1282,7 +1282,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define s (struct "x" 10 "y" 20))
+(var s (struct "x" 10 "y" 20))
 (struct-get s "x")
 ⟹ 10
 
@@ -1296,8 +1296,8 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define s (struct "a" 1))
-(define s2 (struct-put s "b" 2))
+(var s (struct "a" 1))
+(var s2 (struct-put s "b" 2))
 (struct-length s)
 ⟹ 1
 
@@ -1311,8 +1311,8 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define s (struct "a" 1 "b" 2))
-(define s2 (struct-del s "a"))
+(var s (struct "a" 1 "b" 2))
+(var s2 (struct-del s "a"))
 (struct-has? s2 "a")
 ⟹ #f
 ```
@@ -1323,7 +1323,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define s (struct "name" "Alice"))
+(var s (struct "name" "Alice"))
 (struct-has? s "name")
 ⟹ #t
 
@@ -1337,7 +1337,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define s (struct "x" 1 "y" 2))
+(var s (struct "x" 1 "y" 2))
 (struct-keys s)
 ⟹ ("x" "y")
 ```
@@ -1348,7 +1348,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define s (struct "x" 1 "y" 2))
+(var s (struct "x" 1 "y" 2))
 (struct-values s)
 ⟹ (1 2)
 ```
@@ -1365,7 +1365,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define double (lambda (x) (* x 2)))
+(var double (lambda (x) (* x 2)))
 (map double (list 1 2 3))
 ⟹ (2 4 6)
 
@@ -1379,7 +1379,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define is-even (lambda (x) (= (mod x 2) 0)))
+(var is-even (lambda (x) (= (mod x 2) 0)))
 (filter is-even (list 1 2 3 4 5))
 ⟹ (2 4)
 
@@ -1393,7 +1393,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define add (lambda (a b) (+ a b)))
+(var add (lambda (a b) (+ a b)))
 (fold add 0 (list 1 2 3 4))
 ⟹ 10
 
@@ -1463,11 +1463,11 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define e (exception "Error message"))
+(var e (exception "Error message"))
 (exception-message e)
 ⟹ "Error message"
 
-(define e2 (exception "Invalid input" 42))
+(var e2 (exception "Invalid input" 42))
 (exception-data e2)
 ⟹ 42
 ```
@@ -1478,7 +1478,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define e (exception "Something went wrong"))
+(var e (exception "Something went wrong"))
 (exception-message e)
 ⟹ "Something went wrong"
 ```
@@ -1489,7 +1489,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define e (exception "Error" (list "details" "here")))
+(var e (exception "Error" (list "details" "here")))
 (exception-data e)
 ⟹ ("details" "here")
 ```
@@ -1787,7 +1787,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define t (spawn (fn () (display "Running in thread"))))
+(var t (spawn (fn () (display "Running in thread"))))
 ```
 
 ### `join` (Wait for Thread)
@@ -1796,7 +1796,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define t (spawn (fn () (+ 2 2))))
+(var t (spawn (fn () (+ 2 2))))
 (join t)
 ⟹ 4
 ```
@@ -1871,7 +1871,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(define sw (time/stopwatch))
+(var sw (time/stopwatch))
 (coro/resume sw)
 ⟹ 0.000001
 
@@ -2097,7 +2097,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 ⟹ #<table String("age")=30 String("name")="Alice">
 
 ; Access parsed object fields
-(define user (json-parse "{\"name\": \"Bob\", \"active\": true}"))
+(var user (json-parse "{\"name\": \"Bob\", \"active\": true}"))
 (get user "name")
 ⟹ "Bob"
 
@@ -2147,7 +2147,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 (json-serialize (list 1 2 3))
 ⟹ "[1,2,3]"
 
-(define config (table))
+(var config (table))
 (put config "name" "MyApp")
 (put config "version" "1.0.0")
 (json-serialize config)
@@ -2176,7 +2176,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 
 **Usage**:
 ```lisp
-(define user (table))
+(var user (table))
 (put user "name" "Alice")
 (put user "age" 30)
 (put user "active" #t)
@@ -2188,7 +2188,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
   \"name\": \"Alice\"
 }"
 
-(define users (list user))
+(var users (list user))
 (json-serialize-pretty users)
 ⟹ "[
   {
@@ -2211,8 +2211,8 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 Parse JSON, modify, and serialize back:
 
 ```lisp
-(define original "{\"product\": \"Widget\", \"price\": 19.99}")
-(define parsed (json-parse original))
+(var original "{\"product\": \"Widget\", \"price\": 19.99}")
+(var parsed (json-parse original))
 
 ; Modify the parsed data
 (put parsed "price" 24.99)
@@ -2335,12 +2335,12 @@ The condition system provides sophisticated error handling beyond simple excepti
 
 **Usage**:
 ```lisp
-(define-condition :validation-error
+(var-condition :validation-error
   (message "Validation failed")
   (field "unknown")
   (value nil))
 
-(define-condition :network-error
+(var-condition :network-error
   (message "Network error")
   (url "")
   (status-code 0)
@@ -2353,13 +2353,13 @@ The condition system provides sophisticated error handling beyond simple excepti
 
 **Usage**:
 ```lisp
-(define-handler :validation-error
+(var-handler :validation-error
   (lambda (c)
     (display "Validation Error: ")
     (display (condition-get c 'message))
     (newline)))
 
-(define-handler :validation-error
+(var-handler :validation-error
   (lambda (c)
     (display "  Field: ")
     (display (condition-get c 'field))
@@ -2390,7 +2390,7 @@ Validation Error: Invalid email format
 
 **Usage**:
 ```lisp
-(define-handler :validation-error
+(var-handler :validation-error
   (lambda (c)
     (display (condition-get c 'message))
     (display " in field: ")
@@ -2430,13 +2430,13 @@ Validation Error: Invalid email format
 
 ```lisp
 ; Define validation conditions
-(define-condition :field-error
+(var-condition :field-error
   (message "Field validation failed")
   (field "unknown")
   (constraint "unknown"))
 
 ; Register multiple handlers
-(define-handler :field-error
+(var-handler :field-error
   (lambda (c)
     (display "ERROR: ")
     (display (condition-get c 'field'))
@@ -2444,14 +2444,14 @@ Validation Error: Invalid email format
     (display (condition-get c 'message'))
     (newline)))
 
-(define-handler :field-error
+(var-handler :field-error
   (lambda (c)
     (display "  Required: ")
     (display (condition-get c 'constraint'))
     (newline)))
 
 ; Validation function
-(define (validate-email email)
+(def (validate-email email)
   (unless (string-contains? email "@")
     (signal :field-error
       :message "Must contain @"

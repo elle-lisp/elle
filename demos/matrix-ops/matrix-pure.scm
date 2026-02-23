@@ -14,30 +14,30 @@
 ;; ============================================================================
 
 ;; Create a zero matrix of given dimensions
-(define (make-matrix rows cols)
+(def (make-matrix rows cols)
   (make-vector rows
     (make-vector cols 0.0)))
 
 ;; Create an identity matrix
-(define (identity n)
+(def (identity n)
   (let ((m (make-matrix n n)))
     (do ((i 0 (+ i 1)))
       ((= i n) m)
       (vector-set! (vector-ref m i) i 1.0))))
 
 ;; Get element at (i, j)
-(define (matrix-ref m i j)
+(def (matrix-ref m i j)
   (vector-ref (vector-ref m i) j))
 
 ;; Set element at (i, j)
-(define (matrix-set! m i j val)
+(def (matrix-set! m i j val)
   (vector-set! (vector-ref m i) j val))
 
 ;; Get dimensions
-(define (matrix-rows m)
+(def (matrix-rows m)
   (vector-length m))
 
-(define (matrix-cols m)
+(def (matrix-cols m)
   (if (> (vector-length m) 0)
     (vector-length (vector-ref m 0))
     0))
@@ -47,7 +47,7 @@
 ;; ============================================================================
 
 ;; Matrix transpose
-(define (matrix-transpose m)
+(def (matrix-transpose m)
   (let* ((rows (matrix-rows m))
          (cols (matrix-cols m))
          (result (make-matrix cols rows)))
@@ -58,7 +58,7 @@
         (matrix-set! result j i (matrix-ref m i j))))))
 
 ;; Matrix multiplication: (m1: a x b) * (m2: b x c) = (result: a x c)
-(define (matrix-multiply m1 m2)
+(def (matrix-multiply m1 m2)
   (let* ((a (matrix-rows m1))
          (b (matrix-cols m1))
          (c (matrix-cols m2))
@@ -77,7 +77,7 @@
           (matrix-set! result i j sum))))))
 
 ;; Matrix addition
-(define (matrix-add m1 m2)
+(def (matrix-add m1 m2)
   (let* ((rows (matrix-rows m1))
          (cols (matrix-cols m1))
          (result (make-matrix rows cols)))
@@ -90,7 +90,7 @@
              (matrix-ref m2 i j)))))))
 
 ;; Scalar multiplication
-(define (matrix-scale m scalar)
+(def (matrix-scale m scalar)
   (let* ((rows (matrix-rows m))
          (cols (matrix-cols m))
          (result (make-matrix rows cols)))
@@ -102,7 +102,7 @@
           (* scalar (matrix-ref m i j)))))))
 
 ;; Frobenius norm (sum of squared elements)
-(define (matrix-norm m)
+(def (matrix-norm m)
   (let ((rows (matrix-rows m))
         (cols (matrix-cols m))
         (sum 0.0))
@@ -118,7 +118,7 @@
 ;; Decomposes M into L*U where L is lower triangular, U is upper triangular
 ;; ============================================================================
 
-(define (lu-decomposition m)
+(def (lu-decomposition m)
   (let* ((n (matrix-rows m))
          ;; Create working copies
          (a (make-matrix n n)))
@@ -171,7 +171,7 @@
 ;; Benchmarks
 ;; ============================================================================
 
-(define (benchmark-multiply size)
+(def (benchmark-multiply size)
   (display "Matrix multiply (")
   (display size)
   (display "x")
@@ -198,7 +198,7 @@
             (display (matrix-norm result))
             (newline)))))))
 
-(define (benchmark-transpose size)
+(def (benchmark-transpose size)
   (display "Matrix transpose (")
   (display size)
   (display "x")
@@ -222,7 +222,7 @@
             (display "ms")
             (newline)))))))
 
-(define (benchmark-lu size)
+(def (benchmark-lu size)
   (display "LU decomposition (")
   (display size)
   (display "x")

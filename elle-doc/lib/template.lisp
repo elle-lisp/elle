@@ -1,7 +1,7 @@
 ;; Page template generation
 
 ;; Generate navigation HTML using fold
-(define generate-nav
+(var generate-nav
   (fn (nav-items current-slug)
     (fold
       (fn (acc item)
@@ -15,7 +15,7 @@
       nav-items)))
 
 ;; Generate the full HTML page
-(define generate-page
+(var generate-page
   (fn (site page nav css body)
     (let ((site-title (get site "title"))
           (page-title (get page "title"))

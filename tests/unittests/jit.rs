@@ -22,8 +22,8 @@ mod jit_tests {
     fn test_jit_triggered_by_hot_loop() {
         // Call a pure function 20 times — should trigger JIT at call 10
         let code = r#"(begin
-            (define (add1 x) (+ x 1))
-            (define (loop n acc)
+            (def (add1 x) (+ x 1))
+            (def (loop n acc)
               (if (= n 0) acc (loop (- n 1) (add1 acc))))
             (loop 20 0))"#;
         let result = eval(code).unwrap();
@@ -34,8 +34,8 @@ mod jit_tests {
     fn test_jit_simple_arithmetic() {
         // Simple arithmetic function called many times
         let code = r#"(begin
-            (define (square x) (* x x))
-            (define (sum-squares n acc)
+            (def (square x) (* x x))
+            (def (sum-squares n acc)
               (if (= n 0) acc (sum-squares (- n 1) (+ acc (square n)))))
             (sum-squares 15 0))"#;
         let result = eval(code).unwrap();
@@ -47,10 +47,10 @@ mod jit_tests {
     fn test_jit_with_captures() {
         // Function with captured variables
         let code = r#"(begin
-            (define (make-adder n)
+            (def (make-adder n)
               (fn (x) (+ x n)))
-            (define add5 (make-adder 5))
-            (define (loop n acc)
+            (var add5 (make-adder 5))
+            (def (loop n acc)
               (if (= n 0) acc (loop (- n 1) (add5 acc))))
             (loop 15 0))"#;
         let result = eval(code).unwrap();
@@ -62,9 +62,9 @@ mod jit_tests {
     fn test_jit_comparison_operations() {
         // Test all comparison operations
         let code = r#"(begin
-            (define (test-comparisons x y)
+            (def (test-comparisons x y)
               (list (= x y) (< x y) (> x y) (<= x y) (>= x y)))
-            (define (loop n)
+            (def (loop n)
               (if (= n 0)
                   (test-comparisons 5 10)
                   (begin (test-comparisons n (+ n 1)) (loop (- n 1)))))
@@ -78,9 +78,9 @@ mod jit_tests {
     fn test_jit_modulo_and_division() {
         // Test modulo and division operations
         let code = r#"(begin
-            (define (mod-div-test x y)
+            (def (mod-div-test x y)
               (+ (/ x y) (% x y)))
-            (define (loop n acc)
+            (def (loop n acc)
               (if (= n 1) acc (loop (- n 1) (+ acc (mod-div-test n 2)))))
             (loop 15 0))"#;
         let result = eval(code).unwrap();
@@ -96,9 +96,9 @@ mod jit_tests {
     fn test_jit_conditional_branches() {
         // Test conditional branching in JIT
         let code = r#"(begin
-            (define (abs x)
+            (def (abs x)
               (if (< x 0) (- 0 x) x))
-            (define (sum-abs n acc)
+            (def (sum-abs n acc)
               (if (= n 0) acc (sum-abs (- n 1) (+ acc (abs (- n 8))))))
             (sum-abs 15 0))"#;
         let result = eval(code).unwrap();
@@ -112,10 +112,10 @@ mod jit_tests {
     fn test_jit_nested_calls() {
         // Test nested function calls
         let code = r#"(begin
-            (define (f x) (+ x 1))
-            (define (g x) (f (f x)))
-            (define (h x) (g (g x)))
-            (define (loop n acc)
+            (def (f x) (+ x 1))
+            (def (g x) (f (f x)))
+            (def (h x) (g (g x)))
+            (def (loop n acc)
               (if (= n 0) acc (loop (- n 1) (h acc))))
             (loop 12 0))"#;
         let result = eval(code).unwrap();
@@ -127,9 +127,9 @@ mod jit_tests {
     fn test_jit_float_arithmetic() {
         // Test float arithmetic
         let code = r#"(begin
-            (define (float-op x y)
+            (def (float-op x y)
               (+ (* x y) (- x y)))
-            (define (loop n acc)
+            (def (loop n acc)
               (if (= n 0) acc (loop (- n 1) (float-op acc 1.5))))
             (loop 12 1.0))"#;
         let result = eval(code).unwrap();
@@ -140,8 +140,8 @@ mod jit_tests {
     fn test_jit_identity_function() {
         // Simple identity function
         let code = r#"(begin
-            (define (id x) x)
-            (define (loop n)
+            (def (id x) x)
+            (def (loop n)
               (if (= n 0) (id 42) (begin (id n) (loop (- n 1)))))
             (loop 15))"#;
         let result = eval(code).unwrap();
@@ -152,8 +152,8 @@ mod jit_tests {
     fn test_jit_multiple_args() {
         // Function with multiple arguments
         let code = r#"(begin
-            (define (add3 a b c) (+ a (+ b c)))
-            (define (loop n acc)
+            (def (add3 a b c) (+ a (+ b c)))
+            (def (loop n acc)
               (if (= n 0) acc (loop (- n 1) (add3 acc n 1))))
             (loop 12 0))"#;
         let result = eval(code).unwrap();
@@ -167,11 +167,11 @@ mod jit_tests {
     fn test_jit_does_not_break_non_pure() {
         // Non-pure functions should still work (via interpreter)
         let code = r#"(begin
-            (define counter 0)
-            (define (inc!)
+            (var counter 0)
+            (def (inc!)
               (set! counter (+ counter 1))
               counter)
-            (define (loop n)
+            (def (loop n)
               (if (= n 0) counter (begin (inc!) (loop (- n 1)))))
             (loop 15))"#;
         let result = eval(code).unwrap();
@@ -182,10 +182,10 @@ mod jit_tests {
     fn test_jit_before_and_after_threshold() {
         // Verify results are consistent before and after JIT kicks in
         let code = r#"(begin
-            (define (fib n)
+            (def (fib n)
               (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))
-            (define results (list))
-            (define (collect n)
+            (var results (list))
+            (def (collect n)
               (if (= n 0)
                   results
                   (begin
@@ -208,7 +208,7 @@ mod jit_tests {
         // Tail-recursive sum — should work correctly with TCO
         let result = eval(
             r#"(begin
-            (define (sum-to n acc)
+            (def (sum-to n acc)
                 (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
             (sum-to 100 0))"#,
         );
@@ -221,7 +221,7 @@ mod jit_tests {
         // Deep tail recursion that would blow the stack without TCO
         let result = eval(
             r#"(begin
-            (define (count-down n)
+            (def (count-down n)
                 (if (= n 0) 0 (count-down (- n 1))))
             (count-down 50000))"#,
         );
@@ -234,9 +234,9 @@ mod jit_tests {
         // Mutual recursion via tail calls
         let result = eval(
             r#"(begin
-            (define (is-even n)
+            (def (is-even n)
                 (if (= n 0) #t (is-odd (- n 1))))
-            (define (is-odd n)
+            (def (is-odd n)
                 (if (= n 0) #f (is-even (- n 1))))
             (is-even 100))"#,
         );
@@ -250,7 +250,7 @@ mod jit_tests {
         // (they should fall through to interpreter, not JIT)
         let result = eval(
             r#"(begin
-            (define (fib-tail n a b)
+            (def (fib-tail n a b)
                 (if (= n 0) a
                     (if (= n 1) b
                         (fib-tail (- n 1) b (+ a b)))))
@@ -272,8 +272,8 @@ mod jit_tests {
         // the division-by-zero exception must propagate correctly.
         let result = eval(
             r#"(begin
-                (define (helper x) (/ 10 x))
-                (define (f x) (+ (helper x) 1))
+                (def (helper x) (/ 10 x))
+                (def (f x) (+ (helper x) 1))
                 ; Call f enough times to make it hot, then call with 0
                 (f 1) (f 2) (f 3) (f 4) (f 5)
                 (f 6) (f 7) (f 8) (f 9) (f 10)
@@ -294,8 +294,8 @@ mod jit_tests {
         // continue executing with NIL and produce wrong results.
         let result = eval(
             r#"(begin
-                (define (helper x) (/ 10 x))
-                (define (f x)
+                (def (helper x) (/ 10 x))
+                (def (f x)
                   ; Call helper, then add 1000 to result
                   ; If exception propagation is broken, this would execute
                   ; with result=NIL and return 1001 (or crash)
@@ -319,9 +319,9 @@ mod jit_tests {
         // Test exception propagation through multiple levels of JIT calls
         let result = eval(
             r#"(begin
-                (define (inner x) (/ 100 x))
-                (define (middle x) (+ (inner x) 10))
-                (define (outer x) (* (middle x) 2))
+                (def (inner x) (/ 100 x))
+                (def (middle x) (+ (inner x) 10))
+                (def (outer x) (* (middle x) 2))
                 ; Warm up all functions
                 (outer 1) (outer 2) (outer 4) (outer 5) (outer 10)
                 (outer 1) (outer 2) (outer 4) (outer 5) (outer 10)
@@ -351,7 +351,7 @@ mod jit_tests {
         // Call it in a hot loop to trigger JIT, verify correct results.
         let result = eval(
             r#"(begin
-                (define (count-fibers lst n)
+                (def (count-fibers lst n)
                   (if (= n 0) 0
                     (+ (if (fiber? lst) 1 0)
                        (count-fibers lst (- n 1)))))
@@ -367,7 +367,7 @@ mod jit_tests {
         // Create fibers in a hot loop, verify they're created correctly.
         let result = eval(
             r#"(begin
-                (define (make-fibers n)
+                (def (make-fibers n)
                   (if (= n 0) #t
                     (begin
                       (fiber/new (fn () n) 1)
@@ -388,8 +388,8 @@ mod jit_tests {
         elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
         let result = pipeline_eval(
             r#"(begin
-                (define f (fiber/new (fn () 42) 1))
-                (define (check-status n)
+                (var f (fiber/new (fn () 42) 1))
+                (def (check-status n)
                   (if (= n 0) (= (fiber/status f) :new)
                     (begin (fiber/status f) (check-status (- n 1)))))
                 (check-status 20))"#,
@@ -413,9 +413,9 @@ mod jit_tests {
         // should still work correctly via the interpreter.
         let result = eval(
             r#"(begin
-                (define (resume-fiber f)
+                (def (resume-fiber f)
                   (fiber/resume f))
-                (define f (fiber/new (fn () 42) 0))
+                (var f (fiber/new (fn () 42) 0))
                 (resume-fiber f))"#,
         );
         assert!(
@@ -433,17 +433,17 @@ mod jit_tests {
         // Both produce correct results.
         let result = eval(
             r#"(begin
-                (define (pure-add x y) (+ x y))
-                (define (use-fiber x)
-                  (define f (fiber/new (fn () x) 0))
+                (def (pure-add x y) (+ x y))
+                (def (use-fiber x)
+                  (var f (fiber/new (fn () x) 0))
                   (fiber/resume f)
                   (fiber/value f))
                 ; Warm up pure-add (should get JIT-compiled)
-                (define (loop n acc)
+                (def (loop n acc)
                   (if (= n 0) acc (loop (- n 1) (pure-add acc 1))))
-                (define sum (loop 20 0))
+                (var sum (loop 20 0))
                 ; Now use fibers (interpreter path)
-                (define fval (use-fiber sum))
+                (var fval (use-fiber sum))
                 fval)"#,
         );
         assert!(result.is_ok(), "mixed pure/fiber failed: {:?}", result);

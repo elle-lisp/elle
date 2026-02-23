@@ -14,8 +14,8 @@ fn test_print_raw_bytecode() {
     let (mut symbols, mut _vm) = setup();
 
     let code = r#"(begin
-        (define process (fn (acc x) (begin (define doubled (* x 2)) (+ acc doubled))))
-        (define my-fold (fn (f init lst)
+        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
+        (def my-fold (fn (f init lst)
             (if (nil? lst)
                 init
                 (my-fold f (f init (first lst)) (rest lst)))))

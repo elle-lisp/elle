@@ -1396,7 +1396,7 @@ fn test_jit_self_tail_call_loop() {
     // Use begin to wrap multiple expressions
     let result = eval(
         r#"(begin
-        (define (count-down n)
+        (def (count-down n)
             (if (= n 0) 0 (count-down (- n 1))))
         (count-down 100000))"#,
         &mut symbols,
@@ -1419,7 +1419,7 @@ fn test_jit_self_tail_call_accumulator() {
 
     let result = eval(
         r#"(begin
-        (define (sum-to n acc)
+        (def (sum-to n acc)
             (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
         (sum-to 10000 0))"#,
         &mut symbols,
@@ -1448,7 +1448,7 @@ fn test_jit_self_tail_call_with_swapped_args() {
     // Trace: (3,10) -> (10,2) -> (2,9) -> (9,1) -> (1,8) -> (8,0) -> (0,7) -> 7
     let result = eval(
         r#"(begin
-        (define (swap-test a b)
+        (def (swap-test a b)
             (if (= a 0) b (swap-test b (- a 1))))
         (swap-test 3 10))"#,
         &mut symbols,
@@ -1472,7 +1472,7 @@ fn test_jit_self_tail_call_fibonacci_iterative() {
 
     let result = eval(
         r#"(begin
-        (define (fib-iter n a b)
+        (def (fib-iter n a b)
             (if (= n 0) a (fib-iter (- n 1) b (+ a b))))
         (fib-iter 20 0 1))"#,
         &mut symbols,

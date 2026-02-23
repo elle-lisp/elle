@@ -6,7 +6,7 @@ use crate::vm::VM;
 pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
     // Define map: (fn (f lst) (if (empty? lst) () (cons (f (first lst)) (map f (rest lst)))))
     let map_code = r#"
-        (define map (fn (f lst)
+        (def map (fn (f lst)
           (if (empty? lst)
             ()
             (cons (f (first lst)) (map f (rest lst))))))
@@ -14,7 +14,7 @@ pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Define filter
     let filter_code = r#"
-        (define filter (fn (p lst)
+        (def filter (fn (p lst)
           (if (empty? lst)
             ()
             (if (p (first lst))
@@ -24,7 +24,7 @@ pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
 
     // Define fold
     let fold_code = r#"
-        (define fold (fn (f init lst)
+        (def fold (fn (f init lst)
           (if (empty? lst)
             init
             (fold f (f init (first lst)) (rest lst)))))

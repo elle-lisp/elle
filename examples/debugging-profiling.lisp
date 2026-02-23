@@ -27,22 +27,22 @@
 ; ========================================
 (display "\n=== 2. trace: Trace Function Execution ===\n")
 
-(define add (fn (a b)
+(def add (fn (a b)
   (+ a b)))
 
-(define multiply (fn (a b)
+(def multiply (fn (a b)
   (* a b)))
 
 (display "Tracing function calls:\n")
 
 (display "  Calling add(3, 4):\n")
-(define result1 (trace "add" (add 3 4)))
+(var result1 (trace "add" (add 3 4)))
 (display "  Result: ")
 (display result1)
 (newline)
 
 (display "  Calling multiply(5, 6):\n")
-(define result2 (trace "multiply" (multiply 5 6)))
+(var result2 (trace "multiply" (multiply 5 6)))
 (display "  Result: ")
 (display result2)
 (newline)
@@ -57,14 +57,14 @@
 ; ========================================
 (display "\n=== 3. Profiling Pattern: Simple Timing ===\n")
 
-(define fibonacci (fn (n)
+(def fibonacci (fn (n)
   (if (< n 2)
     n
     (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
 
 (display "Computing fibonacci(10):\n")
 
-(define fib-result (fibonacci 10))
+(var fib-result (fibonacci 10))
 (display "  Result: ")
 (display fib-result)
 (newline)
@@ -78,9 +78,9 @@
 ; ========================================
 (display "\n=== 4. Profiling Pattern: Call Counting ===\n")
 
-(define call-count 0)
+(var call-count 0)
 
-(define counted-add (fn (a b)
+(def counted-add (fn (a b)
   (set! call-count (+ call-count 1))
   (+ a b)))
 
@@ -104,9 +104,9 @@
 ; ========================================
 (display "\n=== 5. Profiling Pattern: Execution Tracking ===\n")
 
-(define execution-log (list))
+(var execution-log (list))
 
-(define logged-multiply (fn (a b)
+(def logged-multiply (fn (a b)
   (set! execution-log (append execution-log (list (list 'multiply a b))))
   (* a b)))
 
@@ -130,14 +130,14 @@
 ; ========================================
 (display "\n=== 6. Profiling Pattern: Performance Comparison ===\n")
 
-(define simple-sum (fn (n)
+(def simple-sum (fn (n)
   (if (= n 0)
     0
     (+ n (simple-sum (- n 1))))))
 
-(define iterative-sum (fn (n)
-  (define result 0)
-  (define i 0)
+(def iterative-sum (fn (n)
+  (var result 0)
+  (var i 0)
   (fn ()
     (if (< i n)
       (begin
@@ -159,7 +159,7 @@
 ; ========================================
 (display "\n=== 7. Debug Output with Values ===\n")
 
-(define debug-add (fn (a b)
+(def debug-add (fn (a b)
   (debug-print "Adding two numbers")
   (debug-print (string-append "a = " (number->string a)))
   (debug-print (string-append "b = " (number->string b)))
@@ -169,7 +169,7 @@
 
 (display "Debug output with values:\n")
 
-(define debug-result (debug-add 10 20))
+(var debug-result (debug-add 10 20))
 (display "  Final result: ")
 (display debug-result)
 (newline)
@@ -183,16 +183,16 @@
 ; ========================================
 (display "\n=== 8. Trace with Nested Calls ===\n")
 
-(define inner-fn (fn (x)
+(def inner-fn (fn (x)
   (+ x 1)))
 
-(define outer-fn (fn (x)
+(def outer-fn (fn (x)
   (inner-fn (+ x 10))))
 
 (display "Tracing nested function calls:\n")
 
 (display "  Calling outer-fn(5):\n")
-(define nested-result (trace "outer-fn" (outer-fn 5)))
+(var nested-result (trace "outer-fn" (outer-fn 5)))
 (display "  Result: ")
 (display nested-result)
 (newline)
@@ -206,9 +206,9 @@
 ; ========================================
 (display "\n=== 9. Profiling Pattern: Error Tracking ===\n")
 
-(define error-count 0)
+(var error-count 0)
 
-(define safe-divide (fn (a b)
+(def safe-divide (fn (a b)
   (if (= b 0)
     (begin
       (set! error-count (+ error-count 1))
@@ -238,7 +238,7 @@
 ; ========================================
 (display "\n=== 10. Profiling Pattern: Resource Usage ===\n")
 
-(define list-size-tracker (fn (lst)
+(def list-size-tracker (fn (lst)
   (let ((size (length lst)))
     (debug-print (string-append "List size: " (number->string size)))
     size)))

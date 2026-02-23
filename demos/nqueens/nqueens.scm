@@ -3,7 +3,7 @@
 ; This implementation solves the N-Queens problem using recursive backtracking.
 ; Tests recursion, list operations, and result accumulation.
 
-(define check-safe-helper
+(var check-safe-helper
   (lambda (col remaining row-offset)
     (if (null? remaining)
       #t
@@ -14,13 +14,13 @@
           #f
           (check-safe-helper col rest-queens (+ row-offset 1)))))))
 
-(define safe?
+(var safe?
   (lambda (col queens)
     "Check if column col is safe given previously placed queens.
      queens = list of columns from previous rows, most recent first."
     (check-safe-helper col queens 1)))
 
-(define try-cols-helper
+(var try-cols-helper
   (lambda (n col queens row)
     "Helper to try all columns for a given row."
     (if (= col n)
@@ -36,7 +36,7 @@
         ; Column not safe, try next column
         (try-cols-helper n (+ col 1) queens row)))))
 
-(define solve-helper
+(var solve-helper
   (lambda (n row queens)
     "Recursive backtracking solver.
      Base case (row == n): All queens placed -> one solution found
@@ -47,12 +47,12 @@
       ; RECURSIVE CASE: try each column in current row
       (try-cols-helper n 0 queens row))))
 
-(define solve-nqueens
+(var solve-nqueens
   (lambda (n)
     "Return list of solutions. Each solution is a list of column positions."
     (solve-helper n 0 '())))
 
-(define benchmark
+(var benchmark
   (lambda (n)
     (display "Solving N-Queens for N=")
     (display n)

@@ -20,14 +20,14 @@ Enforces kebab-case naming for all identifiers.
 **Examples:**
 
 ```lisp
-✗ (define myVariable 10)      ; Error: should be my-variable
-✓ (define my-variable 10)     ; Correct
+✗ (var myVariable 10)      ; Error: should be my-variable
+✓ (var my-variable 10)     ; Correct
 
-✗ (define isEmpty (fn [x] false))  ; Error: should be empty?
-✓ (define empty? (fn [x] false))   ; Correct
+✗ (def isEmpty (fn [x] false))  ; Error: should be empty?
+✓ (def empty? (fn [x] false))   ; Correct
 
-✗ (define setValue! (fn [x v] v))  ; Error: should be set-value!
-✓ (define set-value! (fn [x v] v)) ; Correct
+✗ (def setValue! (fn [x v] v))  ; Error: should be set-value!
+✓ (def set-value! (fn [x v] v)) ; Correct
 ```
 
 ### Planned Rules
@@ -106,7 +106,7 @@ elle-lint --help
 script.l:5:2 warning: naming-kebab-case
   --> script.l:5
     |
-  5 | (define myVariable 42)
+  5 | (var myVariable 42)
     |  ^^^^^^^^^^^^
 
 identifier 'myVariable' should use kebab-case
@@ -128,7 +128,7 @@ suggestions:
       "file": "script.l",
       "line": 5,
       "column": 2,
-      "context": "(define myVariable ...)",
+      "context": "(var myVariable ...)",
       "suggestions": ["rename to 'my-variable'"]
     }
   ]
@@ -181,8 +181,8 @@ Each diagnostic includes:
 
 ```lisp
 ; bad-code.l
-(define myFunction (fn [x] (* x x)))
-(define result (myFunction 5))
+(def myFunction (fn [x] (* x x)))
+(var result (myFunction 5))
 ```
 
 ```bash
@@ -190,7 +190,7 @@ $ elle-lint bad-code.l
 bad-code.l:1:2 warning: naming-kebab-case
   --> bad-code.l:1
     |
-  1 | (define myFunction ...)
+  1 | (var myFunction ...)
     |  ^^^^^^^^^^^^
 
 identifier 'myFunction' should use kebab-case

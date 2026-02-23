@@ -139,7 +139,7 @@ fn test_letrec_simple() {
 
 #[test]
 fn test_define() {
-    assert!(compiles("(define x 42)"));
+    assert!(compiles("(var x 42)"));
 }
 
 // ============ Function Tests ============
@@ -426,7 +426,7 @@ fn test_deeply_nested_expressions() {
 
 #[test]
 fn test_multiple_sequential_definitions() {
-    assert!(compiles("(begin (define x 1) (define y 2) (define z 3))"));
+    assert!(compiles("(begin (var x 1) (var y 2) (var z 3))"));
 }
 
 // ============ Special Form Tests ============
@@ -545,8 +545,8 @@ fn test_trace_vm_execution() {
     std::env::set_var("ELLE_DEBUG", "1");
 
     let code = r#"(begin
-        (define process (fn (acc x) (begin (define doubled (* x 2)) (+ acc doubled))))
-        (define my-fold (fn (f init lst)
+        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
+        (def my-fold (fn (f init lst)
             (if (nil? lst)
                 init
                 (my-fold f (f init (first lst)) (rest lst)))))
@@ -562,14 +562,14 @@ fn test_trace_vm_execution() {
 
     // Define process
     let code2a =
-        r#"(define process (fn (acc x) (begin (define doubled (* x 2)) (+ acc doubled))))"#;
+        r#"(def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))"#;
     let results = elle::compile_all(code2a, &mut symbols).expect("compile failed");
     for r in &results {
         vm.execute(&r.bytecode).expect("exec failed");
     }
 
     // Define my-fold
-    let code2b = r#"(define my-fold (fn (f init lst)
+    let code2b = r#"(def my-fold (fn (f init lst)
             (if (nil? lst)
                 init
                 (my-fold f (f init (first lst)) (rest lst)))))"#;

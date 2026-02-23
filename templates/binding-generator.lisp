@@ -15,7 +15,7 @@
 ;;; 3. Generate Elle Lisp wrapper functions
 ;;; 4. Output to a file for reuse
 
-(define (generate-bindings lib-name header-path lib-path output-path)
+(def (generate-bindings lib-name header-path lib-path output-path)
   "Generate Elle bindings from a C header file.
   
   Args:
@@ -94,16 +94,16 @@
     output-path))
 
 ;;; Helper: Generate struct definition
-(define (generate-struct-definition file struct-def)
-  "Generate (define-c-struct ...) for a C struct.
+(def (generate-struct-definition file struct-def)
+  "Generate (var-c-struct ...) for a C struct.
   
   Outputs:
-    (define-c-struct StructName
+    (var-c-struct StructName
       (field1 :int)
       (field2 :pointer)
       ...)"
   
-  (fprintf file "(define-c-struct ~a~n"
+  (fprintf file "(var-c-struct ~a~n"
     (struct-name struct-def))
   
   (for-each (fn [field]
@@ -115,16 +115,16 @@
   (fprintf file ")~n~n"))
 
 ;;; Helper: Generate enum definition
-(define (generate-enum-definition file enum-def)
-  "Generate (define-enum ...) for a C enum.
+(def (generate-enum-definition file enum-def)
+  "Generate (var-enum ...) for a C enum.
   
   Outputs:
-    (define-enum EnumName
+    (var-enum EnumName
       ((VARIANT1 0)
        (VARIANT2 1)
        ...))"
   
-  (fprintf file "(define-enum ~a~n"
+  (fprintf file "(var-enum ~a~n"
     (enum-name enum-def))
   
   (fprintf file "  (")
@@ -137,22 +137,22 @@
   (fprintf file "~n  ))~n~n"))
 
 ;;; Helper: Generate constant definition
-(define (generate-constant-definition file const-def)
-  "Generate (define name value) for a C constant.
+(def (generate-constant-definition file const-def)
+  "Generate (var name value) for a C constant.
   
   Outputs:
-    (define CONSTANT_NAME 42)"
+    (var CONSTANT_NAME 42)"
   
-  (fprintf file "(define ~a ~a)~n"
+  (fprintf file "(var ~a ~a)~n"
     (constant-name const-def)
     (constant-value const-def)))
 
 ;;; Helper: Generate function wrapper
-(define (generate-function-wrapper file func-def lib-path)
+(def (generate-function-wrapper file func-def lib-path)
   "Generate Elle function wrapper for a C function.
   
   Outputs:
-    (define (c-function-name arg1 arg2)
+    (def (c-function-name arg1 arg2)
       \"Call underlying C function\"
       (call-c-function lib-id \"c_function_name\" :return-type
         (list :arg1-type :arg2-type)
@@ -164,7 +164,7 @@
        return-type (function-return-type func-def))
     
     ;; Generate function definition
-    (fprintf file "(define (~a" func-name)
+    (fprintf file "(def (~a" func-name)
     
     ;; Add arguments
     (for-each (fn [arg]
@@ -196,7 +196,7 @@
     (fprintf file ")))~n~n")))
 
 ;;; Helper: Convert C type to Elle representation
-(define (ctype-to-elle ctype)
+(def (ctype-to-elle ctype)
   "Convert C type to Elle keyword notation.
   
   Examples:
@@ -215,7 +215,7 @@
     (else ":unknown")))
 
 ;;; Helper: Convert C function name to Elle convention
-(define (c-name-to-elle c-name)
+(def (c-name-to-elle c-name)
   "Convert C function name to Elle convention.
   
   Examples:
@@ -227,7 +227,7 @@
 
 ;;; Helper: Parse C header file
 ;;; In a full implementation, this would call the Rust header parser
-(define (parse-c-header path)
+(def (parse-c-header path)
   "Parse C header file and extract definitions.
   
   Returns:

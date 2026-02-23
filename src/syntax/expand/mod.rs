@@ -108,12 +108,11 @@ impl Expander {
                         return self.handle_expand_macro(items, &syntax.span, symbols, vm);
                     }
 
-                    // Handle (define (f x y) body...) shorthand
-                    // Desugar to (define f (fn (x y) body...))
-                    if name == "define" && items.len() >= 3 {
+                    // Handle (var (f x y) body...) and (def (f x y) body...) shorthand
+                    // Desugar to (var/def f (fn (x y) body...))
+                    if (name == "var" || name == "def") && items.len() >= 3 {
                         if let SyntaxKind::List(name_and_params) = &items[1].kind {
                             if !name_and_params.is_empty() {
-                                // (define (f x y) body...) -> (define f (fn (x y) body...))
                                 let func_name = name_and_params[0].clone();
                                 let params = Syntax::new(
                                     SyntaxKind::List(name_and_params[1..].to_vec()),
@@ -129,40 +128,9 @@ impl Expander {
                                     SyntaxKind::List(lambda_parts),
                                     syntax.span.clone(),
                                 );
-                                let define_sym = items[0].clone();
+                                let binding_sym = items[0].clone();
                                 let desugared = Syntax::new(
-                                    SyntaxKind::List(vec![define_sym, func_name, lambda]),
-                                    syntax.span.clone(),
-                                );
-                                return self.expand(desugared, symbols, vm);
-                            }
-                        }
-                    }
-
-                    // Handle (const (f x y) body...) shorthand
-                    // Desugar to (const f (fn (x y) body...))
-                    if name == "const" && items.len() >= 3 {
-                        if let SyntaxKind::List(name_and_params) = &items[1].kind {
-                            if !name_and_params.is_empty() {
-                                // (const (f x y) body...) -> (const f (fn (x y) body...))
-                                let func_name = name_and_params[0].clone();
-                                let params = Syntax::new(
-                                    SyntaxKind::List(name_and_params[1..].to_vec()),
-                                    items[1].span.clone(),
-                                );
-                                let fn_sym = Syntax::new(
-                                    SyntaxKind::Symbol("fn".to_string()),
-                                    items[1].span.clone(),
-                                );
-                                let mut lambda_parts = vec![fn_sym, params];
-                                lambda_parts.extend(items[2..].iter().cloned());
-                                let lambda = Syntax::new(
-                                    SyntaxKind::List(lambda_parts),
-                                    syntax.span.clone(),
-                                );
-                                let const_sym = items[0].clone();
-                                let desugared = Syntax::new(
-                                    SyntaxKind::List(vec![const_sym, func_name, lambda]),
+                                    SyntaxKind::List(vec![binding_sym, func_name, lambda]),
                                     syntax.span.clone(),
                                 );
                                 return self.expand(desugared, symbols, vm);
@@ -199,7 +167,7 @@ impl Expander {
         }
     }
 
-    /// Handle (defmacro name (params...) body) or (define-macro name (params...) body)
+    /// Handle (defmacro name (params...) body) or (var-macro name (params...) body)
     fn handle_defmacro(&mut self, items: &[Syntax], span: &Span) -> Result<Syntax, String> {
         // Syntax: (defmacro name (params...) body)
         if items.len() != 4 {

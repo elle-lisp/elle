@@ -56,7 +56,7 @@ fn generate_enum_definition(name: &str, variants: &[(String, i64)]) -> String {
 
     code.push_str(&format!(";;; Enum: {}\n", name));
     for (variant_name, value) in variants {
-        code.push_str(&format!("(define {} {})\n", variant_name, value));
+        code.push_str(&format!("(def {} {})\n", variant_name, value));
     }
     code.push('\n');
 
@@ -74,7 +74,7 @@ fn generate_constant_definition(name: &str, value: &super::header::ConstantValue
         ConstantValue::String(s) => format!("\"{}\"", s),
     };
 
-    format!("(define {} {})\n", name, value_str)
+    format!("(def {} {})\n", name, value_str)
 }
 
 /// Generate Elle code for a function wrapper.
@@ -100,12 +100,12 @@ fn generate_function_wrapper(
 
     if arg_names.is_empty() {
         format!(
-            "(define ({} )\n  (call-c-function \"{}\" \"{}\" {} ({}) ))\n\n",
+            "(def ({} )\n  (call-c-function \"{}\" \"{}\" {} ({}) ))\n\n",
             lisp_name, library_name, func_name, return_type_str, arg_types_str
         )
     } else {
         format!(
-            "(define ({} {})\n  (call-c-function \"{}\" \"{}\" ({}) ({}) ))\n\n",
+            "(def ({} {})\n  (call-c-function \"{}\" \"{}\" ({}) ({}) ))\n\n",
             lisp_name, arg_list, library_name, func_name, arg_types_str, arg_list
         )
     }
@@ -200,6 +200,6 @@ mod tests {
         let wrapper = generate_function_wrapper("strlen", &sig, "libc.so.6");
         assert!(wrapper.contains("strlen"));
         assert!(wrapper.contains("libc.so.6"));
-        assert!(wrapper.contains("define"));
+        assert!(wrapper.contains("def"));
     }
 }

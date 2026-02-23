@@ -16,16 +16,16 @@
 (newline)
 
 ;; Manual map implementation using recursion
-(define my-map (fn (f lst)
+(def my-map (fn (f lst)
   "Apply function f to each element of list lst"
   (if (= (length lst) 0)
       (list)
       (cons (f (first lst)) (my-map f (rest lst))))))
 
 ;; Example 1a: Double each number
-(define double (fn (x) (* x 2)))
-(define numbers (list 1 2 3 4 5))
-(define doubled (my-map double numbers))
+(def double (fn (x) (* x 2)))
+(var numbers (list 1 2 3 4 5))
+(var doubled (my-map double numbers))
 (display "Double each number: ")
 (display doubled)
 (newline)
@@ -33,15 +33,15 @@
 (newline)
 
 ;; Example 1b: Convert numbers to strings
-(define to-string (fn (x) (number->string x)))
-(define as-strings (my-map to-string numbers))
+(def to-string (fn (x) (number->string x)))
+(var as-strings (my-map to-string numbers))
 (display "Convert to strings: ")
 (display as-strings)
 (newline)
 (assert-list-eq as-strings (list "1" "2" "3" "4" "5") "map to-string")
 
 ;; Example 1c: Map with anonymous function
-(define squared (my-map (fn (x) (* x x)) numbers))
+(var squared (my-map (fn (x) (* x x)) numbers))
 (display "Square each number: ")
 (display squared)
 (newline)
@@ -49,9 +49,9 @@
 (newline)
 
 ;; Example 1d: Map with closure (captures outer variable)
-(define multiplier 3)
-(define multiply-by-multiplier (fn (x) (* x multiplier)))
-(define tripled (my-map multiply-by-multiplier numbers))
+(var multiplier 3)
+(def multiply-by-multiplier (fn (x) (* x multiplier)))
+(var tripled (my-map multiply-by-multiplier numbers))
 (display "Multiply by 3 (closure): ")
 (display tripled)
 (newline)
@@ -68,7 +68,7 @@
 (newline)
 
 ;; Manual filter implementation using recursion
-(define my-filter (fn (predicate lst)
+(def my-filter (fn (predicate lst)
   "Keep only elements where predicate returns true"
   (if (= (length lst) 0)
       (list)
@@ -77,8 +77,8 @@
           (my-filter predicate (rest lst))))))
 
 ;; Example 2a: Filter even numbers
-(define is-even (fn (x) (= (mod x 2) 0)))
-(define evens (my-filter is-even (list 1 2 3 4 5 6 7 8 9 10)))
+(def is-even (fn (x) (= (mod x 2) 0)))
+(var evens (my-filter is-even (list 1 2 3 4 5 6 7 8 9 10)))
 (display "Even numbers: ")
 (display evens)
 (newline)
@@ -86,8 +86,8 @@
 (newline)
 
 ;; Example 2b: Filter odd numbers
-(define is-odd (fn (x) (= (mod x 2) 1)))
-(define odds (my-filter is-odd (list 1 2 3 4 5 6 7 8 9 10)))
+(def is-odd (fn (x) (= (mod x 2) 1)))
+(var odds (my-filter is-odd (list 1 2 3 4 5 6 7 8 9 10)))
 (display "Odd numbers: ")
 (display odds)
 (newline)
@@ -95,7 +95,7 @@
 (newline)
 
 ;; Example 2c: Filter with anonymous function
-(define large-numbers (my-filter (fn (x) (> x 5)) (list 1 3 5 7 9 11)))
+(var large-numbers (my-filter (fn (x) (> x 5)) (list 1 3 5 7 9 11)))
 (display "Numbers > 5: ")
 (display large-numbers)
 (newline)
@@ -103,9 +103,9 @@
 (newline)
 
 ;; Example 2d: Filter with closure (captures threshold)
-(define threshold 50)
-(define above-threshold (fn (x) (> x threshold)))
-(define high-values (my-filter above-threshold (list 10 30 50 70 90)))
+(var threshold 50)
+(def above-threshold (fn (x) (> x threshold)))
+(var high-values (my-filter above-threshold (list 10 30 50 70 90)))
 (display "Values > 50: ")
 (display high-values)
 (newline)
@@ -121,15 +121,15 @@
 (newline)
 
 ;; Manual fold implementation using recursion
-(define my-fold (fn (f initial lst)
+(def my-fold (fn (f initial lst)
   "Reduce list to single value using function f and initial accumulator"
   (if (= (length lst) 0)
       initial
       (my-fold f (f initial (first lst)) (rest lst)))))
 
 ;; Example 3a: Sum all numbers
-(define add (fn (a b) (+ a b)))
-(define sum-result (my-fold add 0 (list 1 2 3 4 5)))
+(def add (fn (a b) (+ a b)))
+(var sum-result (my-fold add 0 (list 1 2 3 4 5)))
 (display "Sum of [1,2,3,4,5]: ")
 (display sum-result)
 (newline)
@@ -137,8 +137,8 @@
 (newline)
 
 ;; Example 3b: Product of all numbers
-(define multiply (fn (a b) (* a b)))
-(define product-result (my-fold multiply 1 (list 1 2 3 4 5)))
+(def multiply (fn (a b) (* a b)))
+(var product-result (my-fold multiply 1 (list 1 2 3 4 5)))
 (display "Product of [1,2,3,4,5]: ")
 (display product-result)
 (newline)
@@ -146,9 +146,9 @@
 (newline)
 
 ;; Example 3c: Concatenate strings
-(define concat (fn (a b) (string-append a b)))
-(define words (list "Hello" " " "World" "!"))
-(define concatenated (my-fold concat "" words))
+(def concat (fn (a b) (string-append a b)))
+(var words (list "Hello" " " "World" "!"))
+(var concatenated (my-fold concat "" words))
 (display "Concatenate strings: ")
 (display concatenated)
 (newline)
@@ -156,16 +156,16 @@
 (newline)
 
 ;; Example 3d: Build a list in reverse
-(define prepend (fn (lst item) (cons item lst)))
-(define reversed (my-fold prepend (list) (list 1 2 3 4 5)))
+(def prepend (fn (lst item) (cons item lst)))
+(var reversed (my-fold prepend (list) (list 1 2 3 4 5)))
 (display "Reverse via fold: ")
 (display reversed)
 (newline)
 (assert-list-eq reversed (list 5 4 3 2 1) "fold reverse: [1,2,3,4,5] -> [5,4,3,2,1]")
 
 ;; Example 3e: Count elements
-(define count-fn (fn (acc x) (+ acc 1)))
-(define count-result (my-fold count-fn 0 (list 'a 'b 'c 'd 'e)))
+(def count-fn (fn (acc x) (+ acc 1)))
+(var count-result (my-fold count-fn 0 (list 'a 'b 'c 'd 'e)))
 (display "Count elements: ")
 (display count-result)
 (newline)
@@ -182,14 +182,14 @@
 (newline)
 
 ;; Compose two functions: (compose f g)(x) = f(g(x))
-(define compose (fn (f g)
+(def compose (fn (f g)
   "Return a new function that applies g then f"
   (fn (x) (f (g x)))))
 
 ;; Example 4a: Compose double and add-one
-(define add-one (fn (x) (+ x 1)))
-(define double (fn (x) (* x 2)))
-(define add-one-then-double (compose double add-one))
+(def add-one (fn (x) (+ x 1)))
+(def double (fn (x) (* x 2)))
+(var add-one-then-double (compose double add-one))
 (display "Compose (double (add-one x)): ")
 (display (add-one-then-double 5))
 (newline)
@@ -197,8 +197,8 @@
 (newline)
 
 ;; Example 4b: Compose multiple operations
-(define square (fn (x) (* x x)))
-(define double-then-square (compose square double))
+(def square (fn (x) (* x x)))
+(var double-then-square (compose square double))
 (display "Compose (square (double x)): ")
 (display (double-then-square 3))
 (newline)
@@ -206,8 +206,8 @@
 (newline)
 
 ;; Example 4c: Use composed function with map
-(define numbers-2 (list 1 2 3 4))
-(define composed-map (my-map double-then-square numbers-2))
+(var numbers-2 (list 1 2 3 4))
+(var composed-map (my-map double-then-square numbers-2))
 (display "Map composed function: ")
 (display composed-map)
 (newline)
@@ -223,12 +223,12 @@
 (newline)
 
 ;; Pattern 1: Function that returns a function (currying)
-(define make-multiplier (fn (n)
+(def make-multiplier (fn (n)
   "Return a function that multiplies by n"
   (fn (x) (* x n))))
 
-(define times-5 (make-multiplier 5))
-(define times-10 (make-multiplier 10))
+(var times-5 (make-multiplier 5))
+(var times-10 (make-multiplier 10))
 (display "Curried multiplier (5): ")
 (display (times-5 3))
 (newline)
@@ -242,13 +242,13 @@
 (newline)
 
 ;; Pattern 2: Function that returns a predicate
-(define make-threshold-checker (fn (threshold)
+(def make-threshold-checker (fn (threshold)
    "Return a predicate that checks if value exceeds threshold"
    (fn (x) (> x threshold))))
 
-(define above-100 (make-threshold-checker 100))
-(define above-50 (make-threshold-checker 50))
-(define test-values (list 25 75 125))
+(var above-100 (make-threshold-checker 100))
+(var above-50 (make-threshold-checker 50))
+(var test-values (list 25 75 125))
 (display "Filter values > 100: ")
 (display (my-filter above-100 test-values))
 (newline)
@@ -261,7 +261,7 @@
 (assert-list-eq (my-filter above-50 test-values) (list 75 125) "filter > 50")
 
 ;; Pattern 3: Pipe - apply functions in sequence
-(define pipe (fn (x . functions)
+(def pipe (fn (x . functions)
    "Apply functions in sequence to x"
    (if (= (length functions) 0)
        x
@@ -278,7 +278,7 @@
 
 ;; Pattern 1: Data transformation pipeline
 ;; Transform: [1,2,3,4,5] -> double -> filter evens -> sum
-(define pipeline-result
+(var pipeline-result
    (my-fold add 0
      (my-filter is-even
        (my-map double (list 1 2 3 4 5)))))
@@ -289,13 +289,13 @@
 (newline)
 
 ;; Pattern 2: Conditional transformation
-(define transform-if (fn (predicate transformer lst)
+(def transform-if (fn (predicate transformer lst)
    "Apply transformer only to elements matching predicate"
    (my-map (fn (x)
      (if (predicate x) (transformer x) x))
      lst)))
 
-(define conditional-result
+(var conditional-result
    (transform-if is-even double (list 1 2 3 4 5)))
 (display "Transform only even numbers: ")
 (display conditional-result)
@@ -304,7 +304,7 @@
 (newline)
 
 ;; Pattern 3: Accumulate with side effects
-(define accumulate-with-display (fn (f initial lst)
+(def accumulate-with-display (fn (f initial lst)
    "Fold while displaying each step"
    (if (= (length lst) 0)
        initial
@@ -320,7 +320,7 @@
 
 (display "Accumulate with display:")
 (newline)
-(define traced-sum (accumulate-with-display add 0 (list 1 2 3)))
+(var traced-sum (accumulate-with-display add 0 (list 1 2 3)))
 (display "Final result: ")
 (display traced-sum)
 (newline)
@@ -337,18 +337,18 @@
 (newline)
 
 ;; Pattern 1: Partial application
-(define partial (fn (f . args)
+(def partial (fn (f . args)
   "Create a new function with some arguments pre-filled"
   (fn (. rest-args)
     (f . (append args rest-args)))))
 
 ;; Pattern 2: Memoization (simple version)
-(define make-memoized (fn (f)
+(def make-memoized (fn (f)
   "Create a memoized version of function f (simplified)"
   (fn (x) (f x))))
 
 ;; Pattern 3: Function that validates input
-(define validate-then-apply (fn (validator transformer value)
+(def validate-then-apply (fn (validator transformer value)
   "Apply transformer only if validator returns true"
   (if (validator value)
       (transformer value)
@@ -358,8 +358,8 @@
         (newline)
         value))))
 
-(define positive-validator (fn (x) (> x 0)))
-(define square-transformer (fn (x) (* x x)))
+(def positive-validator (fn (x) (> x 0)))
+(def square-transformer (fn (x) (* x x)))
 (display "Validate and transform 5: ")
 (display (validate-then-apply positive-validator square-transformer 5))
 (newline)

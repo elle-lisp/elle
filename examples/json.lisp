@@ -7,31 +7,31 @@
 (display "=== Example 1: Parsing JSON ===")
 (newline)
 
-(define json-null (json-parse "null"))
+(var json-null (json-parse "null"))
 (display "Parsed null: ")
 (display json-null)
 (newline)
 (assert-eq json-null nil "json-parse null returns nil")
 
-(define json-bool (json-parse "true"))
+(var json-bool (json-parse "true"))
 (display "Parsed true: ")
 (display json-bool)
 (newline)
 (assert-true (eq? json-bool (json-parse "true")) "json-parse true returns true")
 
-(define json-int (json-parse "42"))
+(var json-int (json-parse "42"))
 (display "Parsed 42: ")
 (display json-int)
 (newline)
 (assert-eq json-int 42 "json-parse 42 returns 42")
 
-(define json-float (json-parse "3.14"))
+(var json-float (json-parse "3.14"))
 (display "Parsed 3.14: ")
 (display json-float)
 (newline)
 (assert-eq json-float 3.14 "json-parse 3.14 returns 3.14")
 
-(define json-string (json-parse "\"hello world\""))
+(var json-string (json-parse "\"hello world\""))
 (display "Parsed string: ")
 (display json-string)
 (newline)
@@ -41,7 +41,7 @@
 (display "\n=== Example 2: Parsing Arrays ===")
 (newline)
 
-(define json-array (json-parse "[1, 2, 3, 4, 5]"))
+(var json-array (json-parse "[1, 2, 3, 4, 5]"))
 (display "Parsed array: ")
 (display json-array)
 (newline)
@@ -49,7 +49,7 @@
 (assert-eq (nth 0 json-array) 1 "First array element is 1")
 (assert-eq (nth 4 json-array) 5 "Last array element is 5")
 
-(define mixed-array (json-parse "[1, \"two\", true, null, 3.14]"))
+(var mixed-array (json-parse "[1, \"two\", true, null, 3.14]"))
 (display "Mixed array: ")
 (display mixed-array)
 (newline)
@@ -60,19 +60,19 @@
 (display "\n=== Example 3: Parsing Objects ===")
 (newline)
 
-(define json-obj (json-parse "{\"name\": \"Alice\", \"age\": 30, \"active\": true}"))
+(var json-obj (json-parse "{\"name\": \"Alice\", \"age\": 30, \"active\": true}"))
 (display "Parsed object: ")
 (display json-obj)
 (newline)
 
 ;; Access object fields using get
-(define name (get json-obj "name"))
+(var name (get json-obj "name"))
 (display "Name from object: ")
 (display name)
 (newline)
 (assert-eq name "Alice" "Object field 'name' is 'Alice'")
 
-(define age (get json-obj "age"))
+(var age (get json-obj "age"))
 (display "Age from object: ")
 (display age)
 (newline)
@@ -82,7 +82,7 @@
 (display "\n=== Example 4: Nested Structures ===")
 (newline)
 
-(define nested-json (json-parse "{\"user\": {\"name\": \"Bob\", \"scores\": [95, 87, 92]}, \"active\": true}"))
+(var nested-json (json-parse "{\"user\": {\"name\": \"Bob\", \"scores\": [95, 87, 92]}, \"active\": true}"))
 (display "Nested structure: ")
 (display nested-json)
 (newline)
@@ -91,30 +91,30 @@
 (display "\n=== Example 5: Serializing to JSON ===")
 (newline)
 
-(define serialized-nil (json-serialize nil))
+(var serialized-nil (json-serialize nil))
 (display "Serialized nil: ")
 (display serialized-nil)
 (newline)
 
-(define serialized-bool (json-serialize #t))
+(var serialized-bool (json-serialize #t))
 (display "Serialized true: ")
 (display serialized-bool)
 (newline)
 (assert-eq serialized-bool "true" "json-serialize true returns 'true'")
 
-(define serialized-int (json-serialize 42))
+(var serialized-int (json-serialize 42))
 (display "Serialized 42: ")
 (display serialized-int)
 (newline)
 (assert-eq serialized-int "42" "json-serialize 42 returns '42'")
 
-(define serialized-float (json-serialize 3.14))
+(var serialized-float (json-serialize 3.14))
 (display "Serialized 3.14: ")
 (display serialized-float)
 (newline)
 (assert-eq serialized-float "3.14" "json-serialize 3.14 returns '3.14'")
 
-(define serialized-string (json-serialize "hello"))
+(var serialized-string (json-serialize "hello"))
 (display "Serialized string: ")
 (display serialized-string)
 (newline)
@@ -128,16 +128,16 @@
 (display "Testing Elle native booleans (#t, #f):")
 (newline)
 
-(define elle-true #t)
-(define elle-false #f)
+(var elle-true #t)
+(var elle-false #f)
 
-(define serialized-elle-true (json-serialize elle-true))
+(var serialized-elle-true (json-serialize elle-true))
 (display "Serialized Elle #t: ")
 (display serialized-elle-true)
 (newline)
 (assert-eq serialized-elle-true "true" "Elle bool #t serializes to JSON 'true'")
 
-(define serialized-elle-false (json-serialize elle-false))
+(var serialized-elle-false (json-serialize elle-false))
 (display "Serialized Elle #f: ")
 (display serialized-elle-false)
 (newline)
@@ -147,8 +147,8 @@
 (display "\nTesting JSON-parsed booleans:")
 (newline)
 
-(define json-true (json-parse "true"))
-(define json-false (json-parse "false"))
+(var json-true (json-parse "true"))
+(var json-false (json-parse "false"))
 
 (display "Parsed JSON true: ")
 (display json-true)
@@ -164,13 +164,13 @@
 (display "\nTesting round-trip (parse -> serialize):")
 (newline)
 
-(define roundtrip-true (json-serialize (json-parse "true")))
+(var roundtrip-true (json-serialize (json-parse "true")))
 (display "Round-trip true: ")
 (display roundtrip-true)
 (newline)
 (assert-eq roundtrip-true "true" "JSON true round-trips correctly")
 
-(define roundtrip-false (json-serialize (json-parse "false")))
+(var roundtrip-false (json-serialize (json-parse "false")))
 (display "Round-trip false: ")
 (display roundtrip-false)
 (newline)
@@ -180,16 +180,16 @@
 (display "\nTesting interoperability (Elle bools vs JSON-parsed bools):")
 (newline)
 
-(define mixed-list-bools (list elle-true json-false elle-false json-true))
-(define serialized-mixed-bools (json-serialize mixed-list-bools))
+(var mixed-list-bools (list elle-true json-false elle-false json-true))
+(var serialized-mixed-bools (json-serialize mixed-list-bools))
 (display "Mixed list (Elle and JSON bools): ")
 (display serialized-mixed-bools)
 (newline)
 (assert-eq serialized-mixed-bools "[true,false,false,true]" "Mixed Elle and JSON bools serialize identically")
 
 ;; Test that Elle #t and JSON-parsed true serialize the same way
-(define elle-true-serialized (json-serialize #t))
-(define json-true-serialized (json-serialize (json-parse "true")))
+(var elle-true-serialized (json-serialize #t))
+(var json-true-serialized (json-serialize (json-parse "true")))
 (display "Elle #t serialized: ")
 (display elle-true-serialized)
 (newline)
@@ -199,8 +199,8 @@
 (assert-eq elle-true-serialized json-true-serialized "Elle #t and JSON true serialize identically")
 
 ;; Test that Elle #f and JSON-parsed false serialize the same way
-(define elle-false-serialized (json-serialize #f))
-(define json-false-serialized (json-serialize (json-parse "false")))
+(var elle-false-serialized (json-serialize #f))
+(var json-false-serialized (json-serialize (json-parse "false")))
 (display "Elle #f serialized: ")
 (display elle-false-serialized)
 (newline)
@@ -213,15 +213,15 @@
 (display "\n=== Example 6: Serializing Lists ===")
 (newline)
 
-(define my-list (list 1 2 3 4 5))
-(define serialized-list (json-serialize my-list))
+(var my-list (list 1 2 3 4 5))
+(var serialized-list (json-serialize my-list))
 (display "Serialized list: ")
 (display serialized-list)
 (newline)
 (assert-eq serialized-list "[1,2,3,4,5]" "json-serialize list returns JSON array")
 
-(define mixed-list (list 1 "two" #t nil 3.14))
-(define serialized-mixed (json-serialize mixed-list))
+(var mixed-list (list 1 "two" #t nil 3.14))
+(var serialized-mixed (json-serialize mixed-list))
 (display "Serialized mixed list: ")
 (display serialized-mixed)
 (newline)
@@ -231,12 +231,12 @@
 (display "\n=== Example 7: Serializing Tables ===")
 (newline)
 
-(define my-table (table))
+(var my-table (table))
 (put my-table "name" "Charlie")
 (put my-table "age" 25)
 (put my-table "active" #t)
 
-(define serialized-table (json-serialize my-table))
+(var serialized-table (json-serialize my-table))
 (display "Serialized table: ")
 (display serialized-table)
 (newline)
@@ -245,7 +245,7 @@
 (display "\n=== Example 8: Pretty-Printing JSON ===")
 (newline)
 
-(define pretty-json (json-serialize-pretty my-table))
+(var pretty-json (json-serialize-pretty my-table))
 (display "Pretty-printed table:")
 (newline)
 (display pretty-json)
@@ -255,12 +255,12 @@
 (display "\n=== Example 9: Round-trip Transformation ===")
 (newline)
 
-(define original-json "{\"product\": \"Widget\", \"price\": 19.99, \"in_stock\": true}")
+(var original-json "{\"product\": \"Widget\", \"price\": 19.99, \"in_stock\": true}")
 (display "Original JSON: ")
 (display original-json)
 (newline)
 
-(define parsed (json-parse original-json))
+(var parsed (json-parse original-json))
 (display "Parsed: ")
 (display parsed)
 (newline)
@@ -269,13 +269,13 @@
 (put parsed "price" 24.99)
 (put parsed "discount" 0.1)
 
-(define modified-json (json-serialize parsed))
+(var modified-json (json-serialize parsed))
 (display "Modified JSON: ")
 (display modified-json)
 (newline)
 
 ;; Pretty print the modified data
-(define pretty-modified (json-serialize-pretty parsed))
+(var pretty-modified (json-serialize-pretty parsed))
 (display "Pretty-printed modified:")
 (newline)
 (display pretty-modified)
@@ -285,19 +285,19 @@
 (display "\n=== Example 10: Building a Config Object ===")
 (newline)
 
-(define config (table))
+(var config (table))
 (put config "app_name" "MyApp")
 (put config "version" "1.0.0")
 (put config "debug" #f)
 
-(define settings (table))
+(var settings (table))
 (put settings "timeout" 30)
 (put settings "retries" 3)
 (put settings "verbose" #t)
 
 (put config "settings" settings)
 
-(define config-json (json-serialize-pretty config))
+(var config-json (json-serialize-pretty config))
 (display "Configuration:")
 (newline)
 (display config-json)
@@ -307,13 +307,13 @@
 (display "\n=== Example 11: Arrays of Objects ===")
 (newline)
 
-(define users-json "[{\"id\": 1, \"name\": \"Alice\"}, {\"id\": 2, \"name\": \"Bob\"}]")
-(define users (json-parse users-json))
+(var users-json "[{\"id\": 1, \"name\": \"Alice\"}, {\"id\": 2, \"name\": \"Bob\"}]")
+(var users (json-parse users-json))
 (display "Parsed users: ")
 (display users)
 (newline)
 
-(define pretty-users (json-serialize-pretty users))
+(var pretty-users (json-serialize-pretty users))
 (display "Pretty users:")
 (newline)
 (display pretty-users)

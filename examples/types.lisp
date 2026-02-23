@@ -31,19 +31,19 @@
 (assert-true (= :name :name) "keyword equality: :name = :name")
 
 ; Keywords in lists - useful for building data structures
-(define person '(:name :John :age :30 :city :NYC))
+(var person '(:name :John :age :30 :city :NYC))
 (assert-eq (first person) :name "first element of person list is :name")
 
 ; Keywords in vectors
-(define options [1 :option-a 2 :option-b 3])
+(var options [1 :option-a 2 :option-b 3])
 (assert-eq (vector-ref options 1) :option-a "second element of options vector is :option-a")
 
 ; Building configuration with keywords
-(define settings (list :debug #t :host "localhost" :port 8080))
+(var settings (list :debug #t :host "localhost" :port 8080))
 (assert-eq (first settings) :debug "first element of settings is :debug")
 
 ; Keywords as data structure labels
-(define colors (list :red 255 :green 128 :blue 64))
+(var colors (list :red 255 :green 128 :blue 64))
 (assert-eq (first colors) :red "first element of colors is :red")
 
 ; Keywords are distinct from symbols
@@ -77,11 +77,11 @@
 (assert-true (eq? 'name 'name) "symbol equality: 'name eq? 'name")
 
 ; Symbols in lists
-(define vars '(x y z))
+(var vars '(x y z))
 (assert-eq (first vars) 'x "first element of vars list is 'x")
 
 ; Symbols in vectors
-(define ops (vector 'add 'subtract 'multiply))
+(var ops (vector 'add 'subtract 'multiply))
 (assert-eq (vector-ref ops 0) 'add "first element of ops vector is 'add")
 
 ; Symbols are distinct from keywords
@@ -128,11 +128,11 @@
 (assert-true (= 3.14 3.14) "float equality: 3.14 = 3.14")
 
 ; Numbers in lists
-(define nums (list 1 2 3 4 5))
+(var nums (list 1 2 3 4 5))
 (assert-eq (first nums) 1 "first element of nums list is 1")
 
 ; Numbers in vectors
-(define values [10 20 30 40 50])
+(var values [10 20 30 40 50])
 (assert-eq (vector-ref values 0) 10 "first element of values vector is 10")
 
 ; Arithmetic with numbers
@@ -175,15 +175,15 @@
 (assert-eq (length "") 0 "length of empty string is 0")
 
 ; Strings in lists
-(define words (list "apple" "banana" "cherry"))
+(var words (list "apple" "banana" "cherry"))
 (assert-eq (first words) "apple" "first element of words list is \"apple\"")
 
 ; Strings in vectors
-(define messages ["hello" "world" "!"])
+(var messages ["hello" "world" "!"])
 (assert-eq (vector-ref messages 0) "hello" "first element of messages vector is \"hello\"")
 
 ; String concatenation
-(define greeting (string-append "Hello, " "World!"))
+(var greeting (string-append "Hello, " "World!"))
 (assert-eq greeting "Hello, World!" "string concatenation works")
 
 (display "✓ Strings verified\n")
@@ -216,11 +216,11 @@
 (assert-false (= #t #f) "boolean inequality: #t ≠ #f")
 
 ; Booleans in lists
-(define flags (list #t #f #t))
+(var flags (list #t #f #t))
 (assert-eq (first flags) #t "first element of flags list is #t")
 
 ; Booleans in vectors
-(define states [#t #f #t #f])
+(var states [#t #f #t #f])
 (assert-eq (vector-ref states 0) #t "first element of states vector is #t")
 
 ; Boolean predicates
@@ -250,11 +250,11 @@
 (assert-true (= nil nil) "nil equality: nil = nil")
 
 ; Nil in lists
-(define maybe-values (list 1 nil 3))
+(var maybe-values (list 1 nil 3))
 (assert-eq (first (rest maybe-values)) nil "second element of maybe-values list is nil")
 
 ; Nil in vectors
-(define optional [10 nil 30])
+(var optional [10 nil 30])
 (assert-eq (vector-ref optional 1) nil "second element of optional vector is nil")
 
 ; Nil predicates
@@ -274,13 +274,13 @@
 (display "\n=== Mixed Atoms in Collections ===\n")
 
 ; Mixed list
-(define mixed-list (list :key 'symbol 42 "string" #t nil))
+(var mixed-list (list :key 'symbol 42 "string" #t nil))
 (assert-eq (first mixed-list) :key "first element is keyword")
 (assert-eq (first (rest mixed-list)) 'symbol "second element is symbol")
 (assert-eq (first (rest (rest mixed-list))) 42 "third element is number")
 
 ; Mixed vector
-(define mixed-vec (vector :id 'user 123 "Alice" #t))
+(var mixed-vec (vector :id 'user 123 "Alice" #t))
 (assert-eq (vector-ref mixed-vec 0) :id "first element is keyword")
 (assert-eq (vector-ref mixed-vec 1) 'user "second element is symbol")
 (assert-eq (vector-ref mixed-vec 2) 123 "third element is number")
@@ -378,14 +378,14 @@
 (display "\n=== Type Predicate Summary ===\n")
 
 ; Create test values
-(define test-nil '())
-(define test-pair (cons 1 2))
-(define test-list (list 1 2 3))
-(define test-number 42)
-(define test-symbol 'symbol)
-(define test-string "hello")
-(define test-bool #t)
-(define test-vector (vector 1 2 3))
+(var test-nil '())
+(var test-pair (cons 1 2))
+(var test-list (list 1 2 3))
+(var test-number 42)
+(var test-symbol 'symbol)
+(var test-string "hello")
+(var test-bool #t)
+(var test-vector (vector 1 2 3))
 
 ; Display type information
 (display "nil: ")
@@ -473,7 +473,7 @@
 (display "\n=== Vectors ===\n")
 
 ; Vectors are a distinct type from lists
-(define test-vec (vector 1 2 3))
+(var test-vec (vector 1 2 3))
 (display "Vector: ")
 (display test-vec)
 (newline)
@@ -723,26 +723,26 @@
 
 ; Number -> String -> Number
 (display "  42 -> string -> int: ")
-(define num1 42)
-(define str1 (number->string num1))
-(define num1-back (string->int str1))
+(var num1 42)
+(var str1 (number->string num1))
+(var num1-back (string->int str1))
 (display num1-back)
 (newline)
 (assert-eq num1-back num1 "Round-trip: number -> string -> int")
 
 ; Float -> String -> Float
 (display "  3.14 -> string -> float: ")
-(define num2 3.14)
-(define str2 (number->string num2))
-(define num2-back (string->float str2))
+(var num2 3.14)
+(var str2 (number->string num2))
+(var num2-back (string->float str2))
 (display num2-back)
 (newline)
 (assert-eq num2-back num2 "Round-trip: float -> string -> float")
 
 ; Symbol -> String -> Symbol (via gensym)
 (display "  'hello -> string: ")
-(define sym 'hello)
-(define sym-str (symbol->string sym))
+(var sym 'hello)
+(var sym-str (symbol->string sym))
 (display sym-str)
 (newline)
 (assert-true (string? sym-str) "Round-trip: symbol -> string")
@@ -758,19 +758,19 @@
 
 ; int -> float -> string -> int
 (display "  int(42) -> float -> string -> int: ")
-(define chain1 (int 42))
-(define chain2 (float chain1))
-(define chain3 (number->string chain2))
-(define chain4 (string->int chain3))
+(var chain1 (int 42))
+(var chain2 (float chain1))
+(var chain3 (number->string chain2))
+(var chain4 (string->int chain3))
 (display chain4)
 (newline)
 (assert-eq chain4 42 "Conversion chain: int -> float -> string -> int")
 
 ; string -> int -> float -> string
 (display "  string->int(\"100\") -> float -> string: ")
-(define chain5 (string->int "100"))
-(define chain6 (float chain5))
-(define chain7 (number->string chain6))
+(var chain5 (string->int "100"))
+(var chain6 (float chain5))
+(var chain7 (number->string chain6))
 (display chain7)
 (newline)
 (assert-true (string? chain7) "Conversion chain: string -> int -> float -> string")
@@ -836,7 +836,7 @@
 (display "\n=== Box Creation ===\n")
 
 ; Create a box with initial value
-(define my-box (box 42))
+(var my-box (box 42))
 (display "Created box with value 42: ")
 (display my-box)
 (newline)
@@ -854,9 +854,9 @@
 (assert-eq (unbox my-box) 42 "unbox returns the stored value")
 
 ; Create boxes with different types
-(define string-box (box "hello"))
-(define symbol-box (box 'symbol))
-(define list-box (box (list 1 2 3)))
+(var string-box (box "hello"))
+(var symbol-box (box 'symbol))
+(var list-box (box (list 1 2 3)))
 
 (assert-eq (unbox string-box) "hello" "box stores strings")
 (assert-eq (unbox symbol-box) 'symbol "box stores symbols")
@@ -868,7 +868,7 @@
 (display "\n=== Box Mutation (box-set!) ===\n")
 
 ; Create a mutable box
-(define counter (box 0))
+(var counter (box 0))
 (display "Initial counter value: ")
 (display (unbox counter))
 (newline)
@@ -907,13 +907,13 @@
 (display "\n=== Boxes vs Immutable Structures ===\n")
 
 ; Lists are immutable
-(define my-list (list 1 2 3))
+(var my-list (list 1 2 3))
 (display "Original list: ")
 (display my-list)
 (newline)
 
 ; cons creates a new list, doesn't modify original
-(define new-list (cons 0 my-list))
+(var new-list (cons 0 my-list))
 (display "After cons 0: ")
 (display new-list)
 (newline)
@@ -923,7 +923,7 @@
 (assert-eq (first my-list) 1 "original list is unchanged")
 
 ; Boxes are mutable
-(define my-box-list (box (list 1 2 3)))
+(var my-box-list (box (list 1 2 3)))
 (display "\nOriginal box contents: ")
 (display (unbox my-box-list))
 (newline)
@@ -941,7 +941,7 @@
 (display "\n=== Use Case: Mutable State ===\n")
 
 ; Create a simple state holder with numbers
-(define state (box (list)))
+(var state (box (list)))
 
 (display "Initial state: ")
 (display (unbox state))
@@ -1094,8 +1094,8 @@
 (display "\n=== Truthiness in Conditionals ===\n")
 
 ; Using truthiness in cond
-(define test-value 0)
-(define result (cond
+(var test-value 0)
+(var result (cond
   ((nil? test-value) "is nil")
   ((= test-value #f) "is false")
   (test-value "is truthy")

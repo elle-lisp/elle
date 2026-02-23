@@ -29,9 +29,9 @@
 ; - Return the value of the last expression
 
 (display "Simple begin block:")
-(define result (begin
-  (define x 10)
-  (define y 20)
+(var result (begin
+  (var x 10)
+  (var y 20)
   (+ x y)))
 (display result)
 (newline)
@@ -171,7 +171,7 @@
 (display "---")
 (newline)
 
-(define add (fn (x y)
+(def add (fn (x y)
   (+ x y)))
 
 (display "add(3, 4) = ")
@@ -187,7 +187,7 @@
 (display "---")
 (newline)
 
-(define multiply-and-add (fn (x y z)
+(def multiply-and-add (fn (x y z)
   (+ (* x y) z)))
 
 (display "multiply-and-add(2, 3, 5) = ")
@@ -202,8 +202,8 @@
 ; ============================================================================
 
 ;; Global variables are defined at the top level
-(define global-x 100)
-(define global-y 200)
+(var global-x 100)
+(var global-y 200)
 
 ;; They can be accessed anywhere
 (display "PART 4: SCOPE - Global Scope")
@@ -222,7 +222,7 @@
 ; ============================================================================
 
 ;; Parameters are local to the function
-(define add-numbers (fn (x y)
+(def add-numbers (fn (x y)
   (+ x y)))
 
 (display "PART 5: Function Scope (Local Variables)")
@@ -230,18 +230,18 @@
 (newline)
 
 (display "Add 3 + 4: ")
-(define add-result (add-numbers 3 4))
+(var add-result (add-numbers 3 4))
 (display add-result)
 (newline)
 (assert-eq add-result 7 "3 + 4 should be 7")
 
 ;; Parameters shadow outer variables
-(define x 1000)
-(define shadowing-function (fn (x)
+(var x 1000)
+(def shadowing-function (fn (x)
   (+ x 1)))
 
 (display "Inner x (1) + 1: ")
-(define shadow-result (shadowing-function 1))
+(var shadow-result (shadowing-function 1))
 (display shadow-result)
 (newline)
 (assert-eq shadow-result 2 "Inner x (1) + 1 should be 2")
@@ -266,8 +266,8 @@
 (display "---")
 (newline)
 
-(display "Outer scope: (define outer-x 100)")
-(define outer-x 100)
+(display "Outer scope: (var outer-x 100)")
+(var outer-x 100)
 (display "outer-x = ")
 (display outer-x)
 (newline)
@@ -313,11 +313,11 @@
 (display "---")
 (newline)
 
-(define make-adder (fn (n)
+(def make-adder (fn (n)
   (fn (x) (+ x n))))
 
-(define add-5 (make-adder 5))
-(define add-10 (make-adder 10))
+(var add-5 (make-adder 5))
+(var add-10 (make-adder 10))
 
 (display "add-5(3) = ")
 (display (add-5 3))
@@ -373,7 +373,7 @@
 (display "---")
 (newline)
 
-(define shadow-test (fn (x)
+(def shadow-test (fn (x)
   (let ((x (+ x 10)))
     (display "Inside let: x = ")
     (display x)
@@ -392,7 +392,7 @@
 ; ============================================================================
 
 ;; Let-bindings can shadow outer variables
-(define x 100)
+(var x 100)
 
 (display "PART 8: Let-binding Shadowing")
 (newline)
@@ -425,7 +425,7 @@
 (display "While loop scoping example:")
 (newline)
 
-(define counter 0)
+(var counter 0)
 (while (< counter 3)
   (begin
     (display "Counter: ")
@@ -457,7 +457,7 @@
 ; ============================================================================
 
 ;; Closures can capture variables from their defining scope
-(define make-counter (fn (start)
+(def make-counter (fn (start)
   (fn ()
     (set! start (+ start 1))
     start)))
@@ -466,23 +466,23 @@
 (newline)
 (newline)
 
-(define counter1 (make-counter 10))
+(var counter1 (make-counter 10))
 
 (display "Counter1 call 1: ")
-(define c1-first (counter1))
+(var c1-first (counter1))
 (display c1-first)
 (newline)
 (assert-eq c1-first 11 "Counter1 first call should be 11")
 (display "Counter1 call 2: ")
-(define c1-second (counter1))
+(var c1-second (counter1))
 (display c1-second)
 (newline)
 (assert-eq c1-second 12 "Counter1 second call should be 12")
 
 ;; Different closure instance has its own captured value
-(define counter2 (make-counter 100))
+(var counter2 (make-counter 100))
 (display "Counter2 call 1: ")
-(define c2-first (counter2))
+(var c2-first (counter2))
 (display c2-first)
 (newline)
 (assert-eq c2-first 101 "Counter2 first call should be 101")
@@ -494,19 +494,19 @@
 ; ============================================================================
 
 ;; Inner functions can access outer function's variables
-(define outer-var 42)
+(var outer-var 42)
 
 (display "PART 11: Nested Functions and Scope Chain")
 (newline)
 (newline)
 
-(define outer-function (fn (x)
-  (define inner-function (fn (y)
+(def outer-function (fn (x)
+  (def inner-function (fn (y)
     (+ x y outer-var)))
   (inner-function 10)))
 
 (display "Nested function result: ")
-(define nested-result (outer-function 5))
+(var nested-result (outer-function 5))
 (display nested-result)
 (newline)
 (assert-eq nested-result 57 "Nested function should compute to 57")
@@ -523,7 +523,7 @@
   (newline)
   
   ;; Global variable
-  (define counter 0)
+  (var counter 0)
   (display "Before loop: counter = ")
   (display counter)
   (newline)
@@ -552,7 +552,7 @@
   (newline)
   
   ;; Outer loop
-  (define i 0)
+  (var i 0)
   (while (< i 2)
     (begin
       (display "Outer i = ")
@@ -560,7 +560,7 @@
       (newline)
       
       ;; Inner loop with separate variable
-      (define j 0)
+      (var j 0)
       (while (< j 2)
         (begin
           (display "  Inner j = ")
@@ -609,8 +609,8 @@
   (display "PART 15: Define in Loop Body (GCD Algorithm)")
   (newline)
   
-  (define a 48)
-  (define b 18)
+  (var a 48)
+  (var b 18)
   
   (display "Computing GCD of 48 and 18...")
   (newline)
@@ -618,7 +618,7 @@
   (while (> b 0)
     (begin
       ;; Define temporary variable in loop body
-      (define temp (% a b))
+      (var temp (% a b))
       (display "  a=")
       (display a)
       (display " b=")
@@ -644,7 +644,7 @@
   (display "PART 16: Variable Shadowing in Loops")
   (newline)
   
-  (define x 100)
+  (var x 100)
   (display "Global x = ")
   (display x)
   (newline)
@@ -674,7 +674,7 @@
   (newline)
   
   ;; Global variables
-  (define global_var 1000)
+  (var global_var 1000)
   
   ;; We can access global variables inside loops
   (each item (list "a" "b")
@@ -710,7 +710,7 @@
 (let ((temp-result (* 5 6))
       (temp-sum (+ 10 20)))
   (display "Good practice result: ")
-  (define good-result (+ temp-result temp-sum))
+  (var good-result (+ temp-result temp-sum))
   (display good-result)
   (newline)
   (assert-eq good-result 60 "Good practice result should be 60 (30+30)"))
@@ -730,7 +730,7 @@
 ;; (print i)  ; ERROR: i is not defined outside the loop
 
 ;; MISTAKE 2: Modifying global instead of local
-(define count 0)
+(var count 0)
 
 (fn ()
   (set! count (+ count 1))  ; Modifies global!

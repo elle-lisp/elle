@@ -90,7 +90,7 @@ HIR + bindings HashMap
 | `mod.rs` | 25 | Re-exports |
 | `analyze/mod.rs` | ~600 | `Analyzer` struct, `AnalysisContext`, `ScopedBinding`, scope-aware resolution |
 | `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
-| `analyze/binding.rs` | ~460 | Binding forms: `let`, `define`, `fn` |
+| `analyze/binding.rs` | ~460 | Binding forms: `let`, `def`, `var`, `fn` |
 | `analyze/special.rs` | ~180 | Special forms: `match`, `yield`, `module` |
 | `analyze/call.rs` | ~200 | Call analysis and effect tracking |
 | `expr.rs` | 180 | `Hir`, `HirKind` |

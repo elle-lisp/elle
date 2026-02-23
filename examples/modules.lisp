@@ -58,13 +58,13 @@
 (display "Organizing code into utility modules:\n")
 
 ; Define utility functions that would normally be in a module
-(define string-utils (fn ()
+(def string-utils (fn ()
   (display "String utilities module loaded\n")))
 
-(define list-utils (fn ()
+(def list-utils (fn ()
   (display "List utilities module loaded\n")))
 
-(define math-utils (fn ()
+(def math-utils (fn ()
   (display "Math utilities module loaded\n")))
 
 (display "  Defined string-utils\n")
@@ -81,13 +81,13 @@
 (display "Composing functionality from multiple modules:\n")
 
 ; Simulate importing and using functions from different modules
-(define length-util (fn (s)
+(def length-util (fn (s)
   (length s)))
 
-(define list-length-util (fn (lst)
+(def list-length-util (fn (lst)
   (length lst)))
 
-(define math-sum-util (fn (a b)
+(def math-sum-util (fn (a b)
   (+ a b)))
 
 (display "  length-util(\"hello\") = ")
@@ -116,7 +116,7 @@
 (display "Creating namespaced modules:\n")
 
 ; Simulate module namespaces
-(define string-module (fn ()
+(def string-module (fn ()
   (fn (op)
     (cond
       ((eq? op 'length) length)
@@ -124,7 +124,7 @@
       ((eq? op 'downcase) string-downcase)
       (else #f)))))
 
-(define string-ns (string-module))
+(var string-ns (string-module))
 
 (display "  string-ns('length) = ")
 (display (string-ns 'length))
@@ -146,20 +146,20 @@
 (display "Managing module dependencies:\n")
 
 ; Simulate module with dependencies
-(define module-a (fn ()
+(def module-a (fn ()
   (display "Module A loaded\n")
   (fn (x) (+ x 1))))
 
-(define module-b (fn ()
+(def module-b (fn ()
   (display "Module B loaded (depends on A)\n")
   (let ((a-fn (module-a)))
     (fn (x) (a-fn (a-fn x))))))
 
 (display "  Loading module-a:\n")
-(define a-fn (module-a))
+(var a-fn (module-a))
 
 (display "  Loading module-b (depends on module-a):\n")
-(define b-fn (module-b))
+(var b-fn (module-b))
 
 (display "  Using module-b: b-fn(5) = ")
 (display (b-fn 5))
@@ -177,7 +177,7 @@
 (display "Re-exporting functions from modules:\n")
 
 ; Simulate module re-export
-(define base-module (fn ()
+(def base-module (fn ()
   (fn (op)
     (cond
       ((eq? op 'add) +)
@@ -185,14 +185,14 @@
       ((eq? op 'mul) *)
       (else #f)))))
 
-(define extended-module (fn ()
+(def extended-module (fn ()
   (let ((base (base-module)))
     (fn (op)
       (cond
         ((eq? op 'div) /)
         (else (base op)))))))
 
-(define ext (extended-module))
+(var ext (extended-module))
 
 (display "  extended-module('add) = ")
 (display ((ext 'add) 10 5))
@@ -214,18 +214,18 @@
 
 (display "Module initialization patterns:\n")
 
-(define init-count 0)
+(var init-count 0)
 
-(define initialized-module (fn ()
+(def initialized-module (fn ()
   (set! init-count (+ init-count 1))
   (display (string-append "Module initialized (count: " (number->string init-count) ")\n"))
   (fn (x) (+ x 100))))
 
 (display "  Creating first instance:\n")
-(define mod1 (initialized-module))
+(var mod1 (initialized-module))
 
 (display "  Creating second instance:\n")
-(define mod2 (initialized-module))
+(var mod2 (initialized-module))
 
 (display "  mod1(5) = ")
 (display (mod1 5))
@@ -247,14 +247,14 @@
 
 (display "Testing module functionality:\n")
 
-(define test-module (fn ()
+(def test-module (fn ()
   (fn (op)
     (cond
       ((eq? op 'test-add) (fn (a b) (= (+ a b) 15)))
       ((eq? op 'test-mul) (fn (a b) (= (* a b) 50)))
       (else #f)))))
 
-(define test-mod (test-module))
+(var test-mod (test-module))
 
 (display "  test-add(10, 5) = ")
 (display ((test-mod 'test-add) 10 5))
@@ -323,11 +323,11 @@
 ; Test 4: Demonstrate basic arithmetic with imported modules loaded
 (display "Test 4: Arithmetic Operations\n")
 (display "  5 + 3 = ")
-(define sum-result (+ 5 3))
+(var sum-result (+ 5 3))
 (display sum-result)
 (newline)
 (display "  10 * 2 = ")
-(define mult-result (* 10 2))
+(var mult-result (* 10 2))
 (display mult-result)
 (newline)
 

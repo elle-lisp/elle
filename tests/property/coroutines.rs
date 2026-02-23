@@ -73,8 +73,8 @@ proptest! {
         let gen_body = format!("{} {}", yields.join(" "), final_value);
         let code = format!(
             r#"(begin
-                (define gen (fn () {}))
-                (define co (make-coroutine gen))
+                (def gen (fn () {}))
+                (var co (make-coroutine gen))
                 (list {}))"#,
             gen_body,
             (0..=n).map(|_| "(coro/resume co)".to_string()).collect::<Vec<_>>().join(" ")
@@ -128,10 +128,10 @@ proptest! {
 
         let code = format!(
             r#"(begin
-                (define gen (fn ()
+                (def gen (fn ()
                     (let ((acc 0))
                         (begin {} acc))))
-                (define co (make-coroutine gen))
+                (var co (make-coroutine gen))
                 {}
                 (coro/resume co {}))"#,
             yield_exprs,
@@ -161,8 +161,8 @@ proptest! {
         let cond_str = if cond { "#t" } else { "#f" };
         let code = format!(
             r#"(begin
-                (define gen (fn () (if {} (yield {}) (yield {}))))
-                (define co (make-coroutine gen))
+                (def gen (fn () (if {} (yield {}) (yield {}))))
+                (var co (make-coroutine gen))
                 (coro/resume co))"#,
             cond_str, a, b
         );
@@ -188,14 +188,14 @@ proptest! {
         // Build a coroutine that yields 0, 1, ..., n-1 using a while loop
         let code = format!(
             r#"(begin
-                (define gen (fn ()
+                (def gen (fn ()
                     (let ((i 0))
                         (while (< i {})
                             (begin
                                 (yield i)
                                 (set! i (+ i 1))))
                         i)))
-                (define co (make-coroutine gen))
+                (var co (make-coroutine gen))
                 (list {}))"#,
             n,
             (0..=n).map(|_| "(coro/resume co)".to_string()).collect::<Vec<_>>().join(" ")
@@ -228,9 +228,9 @@ proptest! {
         let yields: Vec<String> = (0..num_yields).map(|i| format!("(yield {})", i)).collect();
         let code = format!(
             r#"(begin
-                (define gen (fn () {} 999))
-                (define co (make-coroutine gen))
-                (define states (list))
+                (def gen (fn () {} 999))
+                (var co (make-coroutine gen))
+                (var states (list))
                 (set! states (cons (keyword->string (coro/status co)) states))
                 {}
                 (set! states (cons (keyword->string (coro/status co)) states))
@@ -289,10 +289,10 @@ proptest! {
         let yields: Vec<String> = (0..num_yields).map(|i| format!("(yield (+ start {}))", i)).collect();
         let code = format!(
             r#"(begin
-                (define make-gen (fn (start) (fn () {} (+ start {}))))
-                (define co1 (make-coroutine (make-gen {})))
-                (define co2 (make-coroutine (make-gen {})))
-                (define results (list))
+                (def make-gen (fn (start) (fn () {} (+ start {}))))
+                (var co1 (make-coroutine (make-gen {})))
+                (var co2 (make-coroutine (make-gen {})))
+                (var results (list))
                 {}
                 results)"#,
             yields.join(" "),
@@ -339,9 +339,9 @@ fn yield_across_call_boundaries() {
     // A helper function that yields a value, called from a coroutine
     let code = r#"
         (begin
-            (define helper (fn (x) (yield (* x 2))))
-            (define gen (fn () (helper 21)))
-            (define co (make-coroutine gen))
+            (def helper (fn (x) (yield (* x 2))))
+            (def gen (fn () (helper 21)))
+            (var co (make-coroutine gen))
             (coro/resume co))
     "#;
 
@@ -354,10 +354,10 @@ fn yield_across_two_call_levels() {
     // Yield propagates through two levels of function calls
     let code = r#"
         (begin
-            (define inner (fn (x) (yield (* x 3))))
-            (define outer (fn (x) (inner (+ x 1))))
-            (define gen (fn () (outer 10)))
-            (define co (make-coroutine gen))
+            (def inner (fn (x) (yield (* x 3))))
+            (def outer (fn (x) (inner (+ x 1))))
+            (def gen (fn () (outer 10)))
+            (var co (make-coroutine gen))
             (coro/resume co))
     "#;
 
@@ -371,11 +371,11 @@ fn yield_across_call_then_resume_then_yield() {
     // Yield, resume, then yield again across call boundaries
     let code = r#"
         (begin
-            (define helper (fn (x)
+            (def helper (fn (x)
                 (let ((first (yield x)))
                     (yield (+ first x)))))
-            (define gen (fn () (helper 10)))
-            (define co (make-coroutine gen))
+            (def gen (fn () (helper 10)))
+            (var co (make-coroutine gen))
             (list
                 (coro/resume co)
                 (coro/resume co 5)
@@ -397,13 +397,13 @@ fn yield_across_call_with_return_value() {
     // After yield, the helper returns a value that the caller uses
     let code = r#"
         (begin
-            (define helper (fn (x)
+            (def helper (fn (x)
                 (yield x)
                 (* x 2)))
-            (define gen (fn ()
+            (def gen (fn ()
                 (let ((result (helper 5)))
                     (+ result 100))))
-            (define co (make-coroutine gen))
+            (var co (make-coroutine gen))
             (list
                 (coro/resume co)
                 (coro/resume co)
@@ -449,7 +449,7 @@ fn yield_outside_coroutine_errors() {
 fn resume_completed_coroutine_errors() {
     let code = r#"
         (begin
-            (define co (make-coroutine (fn () 42)))
+            (var co (make-coroutine (fn () 42)))
             (coro/resume co)
             (coro/resume co))
     "#;
@@ -473,7 +473,7 @@ fn coroutine_that_never_yields() {
     // A pure function wrapped as a coroutine should work
     let code = r#"
         (begin
-            (define co (make-coroutine (fn () (+ 1 2 3))))
+            (var co (make-coroutine (fn () (+ 1 2 3))))
             (coro/resume co))
     "#;
     let result = eval(code);
@@ -486,14 +486,14 @@ fn mutable_local_preserved_across_resume() {
     // A mutable local should preserve its value across yield/resume
     let code = r#"
         (begin
-            (define gen (fn ()
+            (def gen (fn ()
                 (let ((x 0))
                     (set! x 10)
                     (yield x)
                     (set! x (+ x 5))
                     (yield x)
                     x)))
-            (define co (make-coroutine gen))
+            (var co (make-coroutine gen))
             (list
                 (coro/resume co)
                 (coro/resume co)
@@ -520,8 +520,8 @@ fn effect_threading_yields_effect_on_closure() {
     // We test this indirectly by checking that the coroutine works correctly
     let code = r#"
         (begin
-            (define gen (fn () (yield 42) (yield 43) 44))
-            (define co (make-coroutine gen))
+            (def gen (fn () (yield 42) (yield 43) 44))
+            (var co (make-coroutine gen))
             (keyword->string (coro/status co)))
     "#;
     let result = eval(code);
@@ -543,10 +543,10 @@ proptest! {
         // 2. The first resume actually yields (not just returns)
         let code = format!(
             r#"(begin
-                (define gen (fn () (yield {}) 999))
-                (define co (make-coroutine gen))
-                (define first-result (coro/resume co))
-                (define status-after (keyword->string (coro/status co)))
+                (def gen (fn () (yield {}) 999))
+                (var co (make-coroutine gen))
+                (var first-result (coro/resume co))
+                (var status-after (keyword->string (coro/status co)))
                 (list first-result status-after))"#,
             value
         );

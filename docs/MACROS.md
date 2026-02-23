@@ -47,8 +47,8 @@ list operations, recursion — everything.
 - **Recursion guard.** Expansion depth is limited to 200 (matching
   Janet), preventing infinite macro expansion.
 
-- **Define shorthand.** `(define (f x) body)` desugars to
-  `(define f (fn (x) body))` during expansion.
+- **Define shorthand.** `(def (f x) body)` desugars to
+  `(def f (fn (x) body))` during expansion.
 
 ### Known limitations
 

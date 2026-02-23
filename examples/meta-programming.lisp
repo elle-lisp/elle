@@ -44,8 +44,8 @@
 (defmacro make-adder (n)
   `(fn (x) (+ x ,n)))
 
-(define add-10 (make-adder 10))
-(define add-20 (make-adder 20))
+(var add-10 (make-adder 10))
+(var add-20 (make-adder 20))
 
 (assert-eq (add-10 5) 15 "make-adder(10) generates working function")
 (assert-eq (add-20 5) 25 "make-adder(20) generates working function")
@@ -74,7 +74,7 @@
 (assert-true (macro? double) "double is a macro")
 (assert-false (macro? +) "+ is not a macro")
 
-(define expanded (expand-macro '(double 5)))
+(var expanded (expand-macro '(double 5)))
 (assert-list-eq expanded (list '* 5 2) "expand-macro shows expansion")
 
 ; ========================================
@@ -83,13 +83,13 @@
 ; gensym creates symbols guaranteed to be unique, useful for
 ; avoiding name collisions in macro-generated code.
 
-(define sym1 (gensym))
-(define sym2 (gensym))
+(var sym1 (gensym))
+(var sym2 (gensym))
 (assert-false (eq? sym1 sym2) "gensym symbols are unique")
 
 ; With prefix for readability
-(define tmp1 (gensym "tmp"))
-(define tmp2 (gensym "tmp"))
+(var tmp1 (gensym "tmp"))
+(var tmp2 (gensym "tmp"))
 (assert-false (eq? tmp1 tmp2) "prefixed gensym symbols are unique")
 
 ; ========================================
@@ -98,8 +98,8 @@
 ; Quasiquote works outside macros too, for building data structures
 ; with computed parts.
 
-(define x 42)
-(define result `(the answer is ,x))
+(var x 42)
+(var result `(the answer is ,x))
 (assert-eq (length result) 4 "quasiquote builds a 4-element list")
 (assert-eq (last result) 42 "unquoted value is spliced in")
 

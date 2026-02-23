@@ -1,6 +1,6 @@
 ; Bad naming conventions - should be flagged by linter
 
-(define myVariable 10)
-(define camelCase 42)
-(define PascalCase 100)
-(define snake_case 5)
+(var myVariable 10)
+(var camelCase 42)
+(var PascalCase 100)
+(var snake_case 5)

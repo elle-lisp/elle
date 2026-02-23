@@ -1303,7 +1303,7 @@ proptest! {
         let expr = format!(
             "(fold (fn (acc x)
                      (begin
-                       (define doubled (* x 2))
+                       (var doubled (* x 2))
                        (+ acc doubled)))
                    0
                    (list {} {} {}))",
@@ -1321,8 +1321,8 @@ proptest! {
         let expr = format!(
             "(fold (fn (acc x)
                      (begin
-                       (define step1 (+ x 1))
-                       (define step2 (* step1 2))
+                       (var step1 (+ x 1))
+                       (var step2 (* step1 2))
                        (+ acc step2)))
                    0
                    (list {} {}))",
@@ -1339,10 +1339,10 @@ proptest! {
         // Bug: calling a function that has internal defines from within fold
         let expr = format!(
             "(begin
-               (define process (fn (x)
+               (def process (fn (x)
                                  (begin
-                                   (define doubled (* x 2))
-                                   (define incremented (+ doubled 1))
+                                   (var doubled (* x 2))
+                                   (var incremented (+ doubled 1))
                                    incremented)))
                (fold (fn (acc x) (+ acc (process x)))
                      0
@@ -1363,7 +1363,7 @@ proptest! {
                      (+ outer-acc
                         (fold (fn (inner-acc inner-x)
                                 (begin
-                                  (define product (* outer-x inner-x))
+                                  (var product (* outer-x inner-x))
                                   (+ inner-acc product)))
                               0
                               (list {} {}))))
@@ -1385,8 +1385,8 @@ proptest! {
         let expr = format!(
             "(fold (fn (acc x)
                      (begin
-                       (define num-str (number->string x))
-                       (define wrapped (string-append \"[\" num-str \"]\"))
+                       (var num-str (number->string x))
+                       (var wrapped (string-append \"[\" num-str \"]\"))
                        (string-append acc wrapped)))
                    \"\"
                    (list {} {}))",
@@ -1405,7 +1405,7 @@ proptest! {
         let expr = format!(
             "(fold + 0 (map (fn (x)
                               (begin
-                                (define squared (* x x))
+                                (var squared (* x x))
                                 squared))
                             (list {} {} {})))",
             a, b, c
@@ -1422,7 +1422,7 @@ proptest! {
         let expr = format!(
             "(length (filter (fn (x)
                                (begin
-                                 (define abs-x (if (< x 0) (- 0 x) x))
+                                 (var abs-x (if (< x 0) (- 0 x) x))
                                  (> abs-x 5)))
                              (list {} {} {})))",
             a, b, c
@@ -1448,13 +1448,13 @@ proptest! {
         // When fold-acc calls (f acc ...), incorrect binding occurs.
         let expr = format!(
             "(begin
-               (define process (fn (acc x)
+               (def process (fn (acc x)
                  (begin
-                   (define doubled (* x 2))
+                   (var doubled (* x 2))
                    (+ acc doubled))))
                
                 ;; This should work but fails due to name collision
-                (define fold-acc (fn (f acc lst)
+                (def fold-acc (fn (f acc lst)
                   (if (empty? lst)
                     acc
                     (fold-acc f (f acc (first lst)) (rest lst)))))
@@ -1473,12 +1473,12 @@ proptest! {
         // Same logic but with different parameter name (init vs acc) - should work
         let expr = format!(
             "(begin
-               (define process (fn (acc x)
+               (def process (fn (acc x)
                  (begin
-                   (define doubled (* x 2))
+                   (var doubled (* x 2))
                    (+ acc doubled))))
                 
-                (define fold-init (fn (f init lst)
+                (def fold-init (fn (f init lst)
                   (if (empty? lst)
                     init
                     (fold-init f (f init (first lst)) (rest lst)))))
@@ -1498,13 +1498,13 @@ proptest! {
         let expr = format!(
             "(let ((outer (fn (x)
                             (begin
-                              (define outer-local (* x 2))
+                              (var outer-local (* x 2))
                               (fn (y)
                                 (begin
-                                  (define middle-local (+ y outer-local))
+                                  (var middle-local (+ y outer-local))
                                   (fn (z)
                                     (begin
-                                      (define inner-local (* z middle-local))
+                                      (var inner-local (* z middle-local))
                                       inner-local))))))))
                (((outer {}) {}) 3))",
             a, b
@@ -1526,7 +1526,7 @@ proptest! {
             "(let ((x {}))
                (let ((f (fn ()
                           (begin
-                            (define x {})
+                            (var x {})
                             x))))
                  (+ (f) x)))",
             outer_val, inner_val
@@ -1547,12 +1547,12 @@ proptest! {
             "(let ((make-f1 (fn ()
                               (fn (x)
                                 (begin
-                                  (define local (* x 2))
+                                  (var local (* x 2))
                                   local))))
                    (make-f2 (fn ()
                               (fn (x)
                                 (begin
-                                  (define local (* x 3))
+                                  (var local (* x 3))
                                   local)))))
                (let ((f1 (make-f1))
                      (f2 (make-f2)))
@@ -1630,7 +1630,7 @@ proptest! {
         let expr = format!(
             "(let ((compute (fn (x)
                               (begin
-                                (define helper (fn (n acc)
+                                (def helper (fn (n acc)
                                   (if (= n 0) acc (helper (- n 1) (+ acc n)))))
                                 (helper x 0)))))
                (compute {}))",
@@ -1710,7 +1710,7 @@ proptest! {
         let expr = format!(
             "(let ((outer (fn (x)
                             (begin
-                              (define local (* x 2))
+                              (var local (* x 2))
                               (fn (y) (+ local y))))))
                ((outer {}) {}))",
             a, b
@@ -1727,9 +1727,9 @@ proptest! {
         let expr = format!(
             "(let ((compute (fn ()
                               (begin
-                                (define x {})
-                                (define y (+ x {}))
-                                (define z (* x y))
+                                (var x {})
+                                (var y (+ x {}))
+                                (var z (* x y))
                                 z))))
                (compute))",
             a, b

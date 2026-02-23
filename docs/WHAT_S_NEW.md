@@ -81,7 +81,7 @@ When walking a list, use `(empty? lst)` to check for termination, **not** `(nil?
 **WRONG** — will infinite-loop or error when lst reaches `()`:
 
 ```lisp
-(define (my-map f lst)
+(def (my-map f lst)
   (if (nil? lst) ()
     (cons (f (first lst)) (my-map f (rest lst)))))
 ```
@@ -89,7 +89,7 @@ When walking a list, use `(empty? lst)` to check for termination, **not** `(nil?
 **RIGHT** — correctly terminates on empty list:
 
 ```lisp
-(define (my-map f lst)
+(def (my-map f lst)
   (if (empty? lst) ()
     (cons (f (first lst)) (my-map f (rest lst)))))
 ```
@@ -130,11 +130,11 @@ The `fn` keyword is now the preferred way to create anonymous functions:
 
 ```lisp
 ; New style (preferred)
-(define add (fn (a b) (+ a b)))
+(def add (fn (a b) (+ a b)))
 (map (fn (x) (* x 2)) '(1 2 3))
 
 ; Old style (still works as alias)
-(define add (lambda (a b) (+ a b)))
+(var add (lambda (a b) (+ a b)))
 ```
 
 The `lambda` keyword remains available as an alias for `fn`.
@@ -189,11 +189,11 @@ Elle now provides comprehensive exception handling with the `try-catch-finally` 
 Beyond simple exceptions, Elle provides a sophisticated condition system for handling expected error scenarios:
 
 ```lisp
-(define-condition :validation-error
+(var-condition :validation-error
   (message "Validation failed")
   (field "unknown"))
 
-(define-handler :validation-error
+(var-handler :validation-error
   (fn (c)
     (display "Error in ")
     (display (condition-get c 'field))
@@ -222,7 +222,7 @@ This is useful for:
 Create and throw exception objects:
 
 ```lisp
-(define e (exception "Error message" data))
+(var e (exception "Error message" data))
 (exception-message e)  ⟹ "Error message"
 (exception-data e)     ⟹ data
 
@@ -261,14 +261,14 @@ If you have existing Elle code:
 (write-file "output.txt" data)
 (has? table "key")
 (remainder 10 3)
-(define (my-bool? x) (boolean? x))
+(def (my-bool? x) (boolean? x))
 
 ; Updated code
 (slurp "data.txt")
 (spit "output.txt" data)
 (has-key? table "key")
 (rem 10 3)
-(define (my-boolean? x) (boolean? x))
+(def (my-boolean? x) (boolean? x))
 ```
 
 ---
@@ -281,7 +281,7 @@ File I/O was renamed for idiom consistency with Clojure/Janet:
 
 ```lisp
 ; Read entire file (old: read-file)
-(define content (slurp "path/to/file.txt"))
+(var content (slurp "path/to/file.txt"))
 
 ; Write to file - overwrites (old: write-file)
 (spit "output.txt" content)
@@ -426,7 +426,7 @@ Call a function with arguments from a list:
 ### Tables (Mutable Hash Maps)
 
 ```lisp
-(define t (table "x" 10 "y" 20))
+(var t (table "x" 10 "y" 20))
 (get t "x")          ⟹ 10
 (put t "z" 30)       ; Modifies t
 (del t "x")          ; Removes "x" from t
@@ -439,9 +439,9 @@ Call a function with arguments from a list:
 ### Structs (Immutable Hash Maps)
 
 ```lisp
-(define s (struct "a" 1 "b" 2))
+(var s (struct "a" 1 "b" 2))
 (struct-get s "a")          ⟹ 1
-(define s2 (struct-put s "c" 3))  ; Returns new struct
+(var s2 (struct-put s "c" 3))  ; Returns new struct
 (struct-del s2 "b")         ; Returns new struct without "b"
 (struct-has? s2 "c")        ⟹ #t
 (struct-keys s)             ⟹ ("a" "b")
@@ -452,7 +452,7 @@ Call a function with arguments from a list:
 ### Vectors
 
 ```lisp
-(define v [1 2 3])
+(var v [1 2 3])
 (length v)           ⟹ 3
 (vector-ref v 1)     ⟹ 2
 (vector-set! v 0 99) ⟹ [99 2 3]
@@ -478,7 +478,7 @@ Call a function with arguments from a list:
 
 ```lisp
 ; Parse JSON string to table
-(define data (json-parse "{\"x\": 42, \"y\": \"hello\"}"))
+(var data (json-parse "{\"x\": 42, \"y\": \"hello\"}"))
 (get data "x") ⟹ 42
 
 ; Serialize table to JSON
@@ -501,7 +501,7 @@ Call a function with arguments from a list:
   (newline)))
 
 ; Create and wait for result
-(define t (spawn (fn () (+ 2 2))))
+(var t (spawn (fn () (+ 2 2))))
 (join t)  ⟹ 4
 
 ; Sleep current thread
@@ -578,14 +578,14 @@ If upgrading from pre-exception-handling versions:
 
 **Old Pattern (using define with result):**
 ```lisp
-(define result (if (can-do?)
+(var result (if (can-do?)
   (do-it)
   default-value))
 ```
 
 **New Pattern (using try-catch):**
 ```lisp
-(define result (try
+(var result (try
   (do-it)
   (catch (e)
     default-value)))

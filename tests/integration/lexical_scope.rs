@@ -170,8 +170,8 @@ fn test_set_on_locally_defined_capture() {
     let code = r#"
         ((fn ()
            (begin
-             (define counter 0)
-             (define inc (fn () (begin (set! counter (+ counter 1)) counter)))
+             (var counter 0)
+             (def inc (fn () (begin (set! counter (+ counter 1)) counter)))
              (begin (inc) (inc) (inc)))))
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(3));
@@ -437,7 +437,7 @@ fn test_nested_lambda_param_shadowing() {
 fn test_capture_with_define_in_lambda() {
     let code = r#"
         (let ((x 10))
-          (let ((f (fn () (begin (define y (+ x 5)) y))))
+          (let ((f (fn () (begin (var y (+ x 5)) y))))
             (f)))
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(15));
@@ -448,8 +448,8 @@ fn test_mutual_recursion_with_captures() {
     let code = r#"
         (let ((limit 4))
           (begin
-            (define is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
-            (define is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
+            (def is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
+            (def is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
             (is-even limit)))
     "#;
     assert_eq!(eval(code).unwrap(), Value::bool(true));
@@ -460,7 +460,7 @@ fn test_capture_across_define_boundary() {
     let code = r#"
         (let ((x 10))
           (begin
-            (define f (fn () x))
+            (def f (fn () x))
             (f)))
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(10));
@@ -476,7 +476,7 @@ fn test_self_recursive_function_via_define_inside_fn() {
     let code = r#"
         ((fn (n)
            (begin
-             (define fact (fn (x) (if (= x 0) 1 (* x (fact (- x 1))))))
+             (def fact (fn (x) (if (= x 0) 1 (* x (fact (- x 1))))))
              (fact n))) 6)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(720));
@@ -488,8 +488,8 @@ fn test_nested_lambda_capturing_locally_defined_variable() {
     let code = r#"
         ((fn ()
            (begin
-             (define x 42)
-             (define f (fn () x))
+             (var x 42)
+             (def f (fn () x))
              (f))))
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(42));
@@ -501,9 +501,9 @@ fn test_multiple_closures_sharing_mutable_state_via_define() {
     let code = r#"
         ((fn (initial)
            (begin
-             (define value initial)
-             (define getter (fn () value))
-             (define setter (fn (new-val) (set! value new-val)))
+             (var value initial)
+             (def getter (fn () value))
+             (def setter (fn (new-val) (set! value new-val)))
              (setter 42)
              (getter))) 0)
     "#;
@@ -516,8 +516,8 @@ fn test_mutual_recursion_via_define_inside_fn() {
     let code = r#"
         ((fn ()
            (begin
-             (define is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
-             (define is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
+             (def is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
+             (def is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
              (is-even 8))))
     "#;
     assert_eq!(eval(code).unwrap(), Value::bool(true));
@@ -542,7 +542,7 @@ fn test_let_inside_closure_does_not_corrupt_caller_stack() {
     // After the call, `x` must still be intact.
     let code = r#"
         (begin
-          (define check (fn (val)
+          (def check (fn (val)
             (let ((temp (+ val 1)))
               temp)))
           (let ((x 100))
@@ -558,7 +558,7 @@ fn test_let_inside_closure_returns_correct_value() {
     // not on the shared stack.
     let code = r#"
         (begin
-          (define f (fn (a b)
+          (def f (fn (a b)
             (let ((sum (+ a b))
                   (diff (- a b)))
               (+ sum diff))))
@@ -572,7 +572,7 @@ fn test_letrec_inside_closure_does_not_corrupt_caller_stack() {
     // Same bug as above but for letrec.
     let code = r#"
         (begin
-          (define process (fn (n)
+          (def process (fn (n)
             (letrec ((helper (fn (x) (if (= x 0) 0 (+ x (helper (- x 1)))))))
               (helper n))))
           (let ((result 999))
@@ -588,8 +588,8 @@ fn test_multiple_closures_with_let_dont_interfere() {
     // Each must use its own environment, not stomp the stack.
     let code = r#"
         (begin
-          (define f (fn (x) (let ((a (+ x 1))) a)))
-          (define g (fn (x) (let ((b (* x 2))) b)))
+          (def f (fn (x) (let ((a (+ x 1))) a)))
+          (def g (fn (x) (let ((b (* x 2))) b)))
           (let ((r1 (f 10))
                 (r2 (g 20)))
             (+ r1 r2)))
@@ -604,7 +604,7 @@ fn test_closure_let_with_string_operations() {
     // receiving a boolean instead of a string after spawn/join.
     let code = r#"
         (begin
-          (define checker (fn (s)
+          (def checker (fn (s)
             (let ((result (string-contains? s "hello")))
               result)))
           (let ((msg "say hello world"))

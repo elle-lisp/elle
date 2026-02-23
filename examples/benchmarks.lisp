@@ -7,9 +7,9 @@
 
 ; ── helpers ──────────────────────────────────────────────────────────
 
-(define bench-iterations 1000)
+(var bench-iterations 1000)
 
-(define (run-bench label n thunk)
+(def (run-bench label n thunk)
   (let ((t0 (clock/monotonic))
         (i 0))
     (while (< i n)

@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_format_source_context() {
-        let source = "(define x 1)\n(+ x 2)";
+        let source = "(var x 1)\n(+ x 2)";
         let loc = SourceLoc::new("test.lisp", 2, 4);
 
         let result = format_source_context(source, &loc);
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_format_source_context_unknown_location() {
-        let source = "(define x 1)";
+        let source = "(var x 1)";
         let loc = SourceLoc::start(); // <unknown> file
 
         let result = format_source_context(source, &loc);

@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn test_hir_linter_naming_convention() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(define camelCase 42)", &mut symbols, &mut vm);
+        let result = analyze("(var camelCase 42)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn test_hir_linter_valid_naming() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(define valid-name 42)", &mut symbols, &mut vm);
+        let result = analyze("(var valid-name 42)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 

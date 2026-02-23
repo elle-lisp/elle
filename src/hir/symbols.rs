@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn test_extract_define_variable() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(define x 42)", &mut symbols, &mut vm);
+        let result = analyze("(var x 42)", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn test_extract_define_function() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(define add-one (fn (x) (+ x 1)))", &mut symbols, &mut vm);
+        let result = analyze("(def add-one (fn (x) (+ x 1)))", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn test_available_symbols() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(begin (define a 1) (define b 2))", &mut symbols, &mut vm);
+        let result = analyze("(begin (var a 1) (var b 2))", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
 

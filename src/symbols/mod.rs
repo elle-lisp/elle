@@ -212,7 +212,8 @@ pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
         "println" => "Print with newline: (println x)",
 
         // Special forms
-        "define" => "Define a variable: (define name value)",
+        "var" => "Mutable binding: (var name value)",
+        "def" => "Immutable binding: (def name value)",
         "quote" => "Quote expression: (quote expr)",
         "begin" => "Sequential execution: (begin expr1 expr2 ...)",
         "let" => "Local bindings: (let ((var val) ...) body)",

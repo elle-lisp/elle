@@ -62,7 +62,7 @@ The else branch is optional:
 **Examples:**
 
 ```lisp
-(define x 15)
+(var x 15)
 (cond
   ((> x 20) "x is large")
   ((> x 10) "x is medium")
@@ -105,7 +105,7 @@ The final `(#t ...)` clause acts as a catch-all (equivalent to `else`):
   (+ 2 2))
 ⟹ 4 (returns value of last expression)
 
-(define result (do
+(var result (do
   (set! x 10)
   (set! y 20)
   (+ x y)))
@@ -129,7 +129,7 @@ While Elle emphasizes functional iteration, it also provides imperative loop con
 **Examples:**
 
 ```lisp
-(define counter 0)
+(var counter 0)
 (while (< counter 5)
   (begin
     (display counter)
@@ -137,7 +137,7 @@ While Elle emphasizes functional iteration, it also provides imperative loop con
     (set! counter (+ counter 1))))
 ⟹ nil (prints 0 1 2 3 4)
 
-(define x 100)
+(var x 100)
 (while (> x 0)
   (set! x (/ x 2)))
 ⟹ nil (x becomes 0 after repeated halving)
@@ -162,7 +162,7 @@ While Elle emphasizes functional iteration, it also provides imperative loop con
   (newline))
 
 ; Event loop pattern
-(define running #t)
+(var running #t)
 (forever
   (process-event)
   (if (not running)
@@ -287,7 +287,7 @@ Use `try` to wrap potentially failing code and `catch` to handle exceptions:
 The catch block receives the exception value:
 
 ```lisp
-(define result (try
+(var result (try
   (throw (exception "Bad input" (table "type" "validation")))
   (catch (e)
     (exception-message e))))
@@ -317,7 +317,7 @@ Execution order:
 **Examples:**
 
 ```lisp
-(define result (try
+(var result (try
   (display "Body")
   (newline)
   42
@@ -361,13 +361,13 @@ Caught: Error! - Cleanup
 Use `exception` to create exception values:
 
 ```lisp
-(define e (exception "Error message" data))
+(var e (exception "Error message" data))
 ```
 
 The data parameter can be any value (typically a table with context):
 
 ```lisp
-(define e (exception "Database error"
+(var e (exception "Database error"
   (table
     "code" 500
     "query" "SELECT * FROM users"
@@ -385,7 +385,7 @@ Use `throw` to raise an exception:
 Extract information from exceptions:
 
 ```lisp
-(define e (exception "Test" (table "x" 42)))
+(var e (exception "Test" (table "x" 42)))
 (exception-message e)  ⟹ "Test"
 (exception-data e)     ⟹ #<table String("x")=42>
 ```
@@ -407,7 +407,7 @@ The condition system is a more sophisticated approach to error handling than sim
 Define a condition type with `define-condition`:
 
 ```lisp
-(define-condition :condition-name
+(var-condition :condition-name
   (field1 "default-value-1")
   (field2 "default-value-2")
   ...)
@@ -416,12 +416,12 @@ Define a condition type with `define-condition`:
 **Examples:**
 
 ```lisp
-(define-condition :validation-error
+(var-condition :validation-error
   (message "Validation failed")
   (field "unknown")
   (value nil))
 
-(define-condition :network-error
+(var-condition :network-error
   (message "Network failed")
   (url "")
   (status-code 0)
@@ -433,7 +433,7 @@ Define a condition type with `define-condition`:
 Register a handler for a condition with `define-handler`:
 
 ```lisp
-(define-handler :condition-name
+(var-handler :condition-name
   (fn (condition)
     handler-body))
 ```
@@ -441,13 +441,13 @@ Register a handler for a condition with `define-handler`:
 Multiple handlers can be registered for the same condition - they're called in order:
 
 ```lisp
-(define-handler :validation-error
+(var-handler :validation-error
   (fn (c)
     (display "Handler 1: ")
     (display (condition-get c 'message))
     (newline)))
 
-(define-handler :validation-error
+(var-handler :validation-error
   (fn (c)
     (display "Handler 2: ")
     (display (condition-get c 'field))
@@ -535,7 +535,7 @@ Use `condition-catch` to handle any condition:
 Access condition fields with `condition-get`:
 
 ```lisp
-(define c (signal :validation-error
+(var c (signal :validation-error
   :message "Invalid"
   :field "email"))
 
@@ -547,13 +547,13 @@ Access condition fields with `condition-get`:
 
 ```lisp
 ; Define validation error condition
-(define-condition :validation-error
+(var-condition :validation-error
   (message "Validation failed")
   (field "unknown")
   (constraint "unknown"))
 
 ; Register handlers
-(define-handler :validation-error
+(var-handler :validation-error
   (fn (c)
     (display "VALIDATION ERROR: ")
     (display (condition-get c 'field))
@@ -561,7 +561,7 @@ Access condition fields with `condition-get`:
     (display (condition-get c 'message))
     (newline)))
 
-(define-handler :validation-error
+(var-handler :validation-error
   (fn (c)
     (display "  (constraint: ")
     (display (condition-get c 'constraint))
@@ -569,7 +569,7 @@ Access condition fields with `condition-get`:
     (newline)))
 
 ; Validation function
-(define (validate-email email)
+(def (validate-email email)
   (unless (string-contains? email "@")
     (signal :validation-error
       :message "Missing @ symbol"
@@ -618,12 +618,12 @@ Prefer `map`, `filter`, and `fold` for processing collections:
 
 ```lisp
 ; Good: Clear intent, composable
-(define doubled (map (fn (x) (* x 2)) (list 1 2 3)))
-(define evens (filter even? (list 1 2 3 4 5 6)))
-(define sum (fold (fn (acc x) (+ acc x)) 0 (list 1 2 3)))
+(var doubled (map (fn (x) (* x 2)) (list 1 2 3)))
+(var evens (filter even? (list 1 2 3 4 5 6)))
+(var sum (fold (fn (acc x) (+ acc x)) 0 (list 1 2 3)))
 
 ; Less idiomatic: Manual recursion (still valid)
-(define (sum-list lst)
+(def (sum-list lst)
   (if (nil? lst)
     0
     (+ (first lst) (sum-list (rest lst)))))
@@ -635,7 +635,7 @@ Use exceptions for truly exceptional cases, conditions for expected error scenar
 
 ```lisp
 ; Good: Expected validation error
-(define-condition :invalid-input
+(var-condition :invalid-input
   (message "Input validation failed")
   (field "unknown"))
 

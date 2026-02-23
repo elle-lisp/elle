@@ -26,8 +26,8 @@
 (display "---")
 (newline)
 
-(define score 85)
-(define grade (cond
+(var score 85)
+(var grade (cond
   ((>= score 90) "A")
   ((>= score 80) "B")
   ((>= score 70) "C")
@@ -44,8 +44,8 @@
 (display "---")
 (newline)
 
-(define x 5)
-(define result (cond
+(var x 5)
+(var result (cond
   ((< x 0) "negative")
   ((= x 0) "zero")
   ((> x 0) "positive")))
@@ -61,8 +61,8 @@
 (display "---")
 (newline)
 
-(define age 25)
-(define status (cond
+(var age 25)
+(var status (cond
   ((< age 13) "child")
   ((< age 18) "teen")
   ((< age 65) "adult")
@@ -96,7 +96,7 @@
 (newline)
 (display "Forever loop - infinite until break")
 (newline)
-(define counter 0)
+(var counter 0)
 (display "Counter starts at: ")
 (display counter)
 (newline)
@@ -127,7 +127,7 @@
 (newline)
 (display "---")
 (newline)
-(define result1 (match 42
+(var result1 (match 42
   (1 "one")
   (2 "two")
   (42 "the answer")))
@@ -141,7 +141,7 @@
 (newline)
 (display "---")
 (newline)
-(define result2 (match "hello"
+(var result2 (match "hello"
   ("hello" "greeting")
   ("goodbye" "farewell")))
 (display result2)
@@ -154,7 +154,7 @@
 (newline)
 (display "---")
 (newline)
-(define result3 (match 100
+(var result3 (match 100
   (50 "fifty")
   (_ "something else")))
 (display result3)
@@ -167,7 +167,7 @@
 (newline)
 (display "---")
 (newline)
-(define result4 (match nil
+(var result4 (match nil
   (nil "it's nil")
   (_ "not nil")))
 (display result4)
@@ -180,7 +180,7 @@
 (newline)
 (display "---")
 (newline)
-(define result5 (match (list 1 2 3)
+(var result5 (match (list 1 2 3)
   ((1 2 3) "exact match")
   (_ "no match")))
 (display result5)
@@ -193,7 +193,7 @@
 (newline)
 (display "---")
 (newline)
-(define result6 (match (list)
+(var result6 (match (list)
   (() "empty list")
   (_ "not empty")))
 (display result6)
@@ -206,7 +206,7 @@
 (newline)
 (display "---")
 (newline)
-(define result7 (match (list (list 1 2) (list 3 4))
+(var result7 (match (list (list 1 2) (list 3 4))
   (((1 2) (3 4)) "matched nested")
   (_ "no match")))
 (display result7)
@@ -219,7 +219,7 @@
 (newline)
 (display "---")
 (newline)
-(define result8 (match 100
+(var result8 (match 100
   (50 (+ 50 50))
   (100 (+ 100 100))
   (_ 0)))
@@ -233,7 +233,7 @@
 (newline)
 (display "---")
 (newline)
-(define result9 (match "foo"
+(var result9 (match "foo"
   ("bar" "bar")
   ("baz" "baz")
   ("foo" "foo")))
@@ -247,7 +247,7 @@
 (newline)
 (display "---")
 (newline)
-(define result10 (match (list "name" "Alice" 30)
+(var result10 (match (list "name" "Alice" 30)
   (("name" "Alice" 30) "name Alice age 30")
   (_ "no match")))
 (display result10)

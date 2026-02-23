@@ -53,8 +53,8 @@
 (display "\nModule examples:")
 (newline)
 
-(define a 10)
-(define b 3)
+(var a 10)
+(var b 3)
 
 (display "  10 + 3 = ")
 (let ((sum (+ a b)))
@@ -286,15 +286,15 @@
 (display "\n=== Practical Examples ===\n")
 
 ; Filter even numbers from a list
-(define filter-even (fn (lst)
+(def filter-even (fn (lst)
   (if (empty? lst)
       '()
       (if (even? (first lst))
           (cons (first lst) (filter-even (rest lst)))
           (filter-even (rest lst))))))
 
-(define numbers (list 1 2 3 4 5 6 7 8 9 10))
-(define evens (filter-even numbers))
+(var numbers (list 1 2 3 4 5 6 7 8 9 10))
+(var evens (filter-even numbers))
 (display "Even numbers from 1-10: ")
 (display evens)
 (newline)
@@ -303,14 +303,14 @@
 (display "✓ filter-even works\n")
 
 ; Filter odd numbers from a list
-(define filter-odd (fn (lst)
+(def filter-odd (fn (lst)
   (if (empty? lst)
       '()
       (if (odd? (first lst))
           (cons (first lst) (filter-odd (rest lst)))
           (filter-odd (rest lst))))))
 
-(define odds (filter-odd numbers))
+(var odds (filter-odd numbers))
 (display "Odd numbers from 1-10: ")
 (display odds)
 (newline)
@@ -322,14 +322,14 @@
 (display "\n=== Counting Predicates ===\n")
 
 ; Count even numbers
-(define count-even (fn (lst)
+(def count-even (fn (lst)
   (if (empty? lst)
       0
       (if (even? (first lst))
           (+ 1 (count-even (rest lst)))
           (count-even (rest lst))))))
 
-(define even-count (count-even numbers))
+(var even-count (count-even numbers))
 (display "Count of even numbers in 1-10: ")
 (display even-count)
 (newline)
@@ -337,14 +337,14 @@
 (display "✓ count-even works\n")
 
 ; Count odd numbers
-(define count-odd (fn (lst)
+(def count-odd (fn (lst)
   (if (empty? lst)
       0
       (if (odd? (first lst))
           (+ 1 (count-odd (rest lst)))
           (count-odd (rest lst))))))
 
-(define odd-count (count-odd numbers))
+(var odd-count (count-odd numbers))
 (display "Count of odd numbers in 1-10: ")
 (display odd-count)
 (newline)
@@ -355,7 +355,7 @@
 (display "\n=== Alternating Pattern ===\n")
 
 ; Check if list alternates between even and odd
-(define alternates? (fn (lst)
+(def alternates? (fn (lst)
   (if (empty? lst)
       #t
       (if (empty? (rest lst))
@@ -368,8 +368,8 @@
                   (alternates? (rest lst))
                   #f))))))
 
-(define alternating (list 1 2 3 4 5 6))
-(define not-alternating (list 1 3 5 7))
+(var alternating (list 1 2 3 4 5 6))
+(var not-alternating (list 1 3 5 7))
 
 (assert-true (alternates? alternating) "1 2 3 4 5 6 alternates")
 (assert-false (alternates? not-alternating) "1 3 5 7 does not alternate")
@@ -379,14 +379,14 @@
 (display "\n=== Sum of Even/Odd ===\n")
 
 ; Sum of even numbers
-(define sum-even (fn (lst)
+(def sum-even (fn (lst)
   (if (empty? lst)
       0
       (if (even? (first lst))
           (+ (first lst) (sum-even (rest lst)))
           (sum-even (rest lst))))))
 
-(define even-sum (sum-even numbers))
+(var even-sum (sum-even numbers))
 (display "Sum of even numbers in 1-10: ")
 (display even-sum)
 (newline)
@@ -394,14 +394,14 @@
 (display "✓ sum-even works\n")
 
 ; Sum of odd numbers
-(define sum-odd (fn (lst)
+(def sum-odd (fn (lst)
   (if (empty? lst)
       0
       (if (odd? (first lst))
           (+ (first lst) (sum-odd (rest lst)))
           (sum-odd (rest lst))))))
 
-(define odd-sum (sum-odd numbers))
+(var odd-sum (sum-odd numbers))
 (display "Sum of odd numbers in 1-10: ")
 (display odd-sum)
 (newline)
@@ -558,7 +558,7 @@
 (display "\n=== Practical Examples ===\n")
 
 ; Check if number is in range
-(define in-range? (fn (x min max)
+(def in-range? (fn (x min max)
   (if (and (>= x min) (<= x max)) #t #f)))
 
 (assert-true (in-range? 5 0 10) "5 is in range [0, 10]")
@@ -566,7 +566,7 @@
 (display "✓ in-range? works\n")
 
 ; Check if value is valid (not nil and not false)
-(define valid? (fn (x)
+(def valid? (fn (x)
   (if (and (not (nil? x)) (not (eq? x #f))) #t #f)))
 
 (assert-true (valid? 42) "42 is valid")
@@ -576,7 +576,7 @@
 (display "✓ valid? works\n")
 
 ; Check if value is positive or zero
-(define non-negative? (fn (x)
+(def non-negative? (fn (x)
   (if (or (> x 0) (= x 0)) #t #f)))
 
 (assert-true (non-negative? 5) "5 is non-negative")
@@ -588,7 +588,7 @@
 (display "\n=== Combining Logical Operations ===\n")
 
 ; Complex condition: (a AND b) OR (NOT c)
-(define complex-check (fn (a b c)
+(def complex-check (fn (a b c)
   (if (or (and a b) (not c)) #t #f)))
 
 (assert-true (complex-check #t #t #f) "(#t AND #t) OR (NOT #f) = #t")
@@ -600,7 +600,7 @@
 (display "\n=== Predicate Combinations ===\n")
 
 ; Check if number is even and positive
-(define even-positive? (fn (x)
+(def even-positive? (fn (x)
   (and (even? x) (> x 0))))
 
 (assert-true (even-positive? 2) "2 is even and positive")
@@ -609,7 +609,7 @@
 (display "✓ even-positive? works\n")
 
 ; Check if number is odd and negative
-(define odd-negative? (fn (x)
+(def odd-negative? (fn (x)
   (and (odd? x) (< x 0))))
 
 (assert-true (odd-negative? -1) "-1 is odd and negative")

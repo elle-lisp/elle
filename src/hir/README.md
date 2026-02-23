@@ -62,8 +62,8 @@ struct CaptureInfo {
 
 - `let` creates block scope (doesn't cross function boundaries)
 - `fn`/`lambda` creates function scope (capture boundary)
-- `define` at top level creates global binding
-- `define` inside function creates local binding (letrec semantics in `begin`)
+- `def`/`var` at top level creates global binding (`def` is immutable, `var` is mutable)
+- `def`/`var` inside function creates local binding (letrec semantics in `begin`)
 
 ## See Also
 

@@ -5,7 +5,7 @@
 ; - If expressions
 ; - Tail recursion (using trampolining with counters)
 
-(define countdown-ifs
+(var countdown-ifs
   (fn (n result)
     "Tail-recursive countdown using only if expressions and literals"
     (if (= n 0)

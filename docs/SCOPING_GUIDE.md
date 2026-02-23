@@ -11,9 +11,9 @@ Elle Lisp implements proper lexical scoping with support for global, function, b
 Variables defined at the top level are global and accessible everywhere.
 
 ```lisp
-(define global-x 100)
+(var global-x 100)
 
-(define my-function (lambda ()
+(var my-function (lambda ()
   (display global-x)))  ; Can access global-x
 
 (my-function)  ; Prints: 100
@@ -24,9 +24,9 @@ Variables defined at the top level are global and accessible everywhere.
 Function parameters are local to the function and shadow outer variables.
 
 ```lisp
-(define x 100)
+(var x 100)
 
-(define add-one (lambda (x)
+(var add-one (lambda (x)
   (+ x 1)))  ; x is parameter, shadows global x
 
 (add-one 5)   ; Returns 6
@@ -38,10 +38,10 @@ x             ; Still 100
 Block scopes are created by `begin` expressions.
 
 ```lisp
-(define x 100)
+(var x 100)
 
 (begin
-  (define x 50)  ; Block-scoped, shadows outer x
+  (var x 50)  ; Block-scoped, shadows outer x
   (display x))   ; Prints: 50
 
 (display x)      ; Prints: 100
@@ -52,7 +52,7 @@ Block scopes are created by `begin` expressions.
 While and for loops create their own scope for loop variables.
 
 ```lisp
-(define counter 0)
+(var counter 0)
 
 (while (< counter 3)
   (begin
@@ -94,9 +94,9 @@ When a variable is referenced, Elle searches for it in this order:
 4. **Error** - If not found anywhere
 
 ```lisp
-(define global-x 1)
+(var global-x 1)
 
-(define outer-function (lambda (param-x)
+(var outer-function (lambda (param-x)
   (let ((let-x 5))
     (display (+ global-x param-x let-x)))))
     ; Lookup order: let-x (found) → param-x (found) → global-x (found)
@@ -109,7 +109,7 @@ When a variable is referenced, Elle searches for it in this order:
 Inner scopes can shadow (hide) outer scope variables:
 
 ```lisp
-(define x 100)
+(var x 100)
 
 (lambda (x)  ; Parameter x shadows global x
   (+ x 1))   ; References parameter x, not global
@@ -120,7 +120,7 @@ Inner scopes can shadow (hide) outer scope variables:
 This is usually clear when variables have descriptive names:
 
 ```lisp
-(define total 1000)
+(var total 1000)
 
 (lambda (total)  ; OK: parameter total shadows global total
   (+ total 100))
@@ -129,7 +129,7 @@ This is usually clear when variables have descriptive names:
 But can be confusing with poor naming:
 
 ```lisp
-(define x 100)
+(var x 100)
 
 (lambda (x)  ; Confusing: hides outer x
   (let ((x 5))  ; Even more confusing!
@@ -141,7 +141,7 @@ But can be confusing with poor naming:
 The `set!` operator modifies existing variables:
 
 ```lisp
-(define counter 0)
+(var counter 0)
 
 (lambda ()
   (set! counter (+ counter 1))  ; Modifies global counter
@@ -151,7 +151,7 @@ The `set!` operator modifies existing variables:
 `set!` searches the scope chain to find where a variable is defined:
 
 ```lisp
-(define outer-var 100)
+(var outer-var 100)
 
 (lambda ()
   (set! outer-var 200)  ; Modifies outer-var in global scope
@@ -206,12 +206,12 @@ Use let-bindings for temporary calculations:
 Create functions with captured variables:
 
 ```lisp
-(define make-multiplier (lambda (factor)
+(var make-multiplier (lambda (factor)
   (lambda (x)
     (* x factor))))
 
-(define double (make-multiplier 2))
-(define triple (make-multiplier 3))
+(var double (make-multiplier 2))
+(var triple (make-multiplier 3))
 
 (double 5)   ; Returns 10
 (triple 5)   ; Returns 15
@@ -233,11 +233,11 @@ Use a global or let-bound accumulator with loops:
 Inner functions access outer scope:
 
 ```lisp
-(define make-adder (lambda (base)
+(var make-adder (lambda (base)
   (lambda (x)
     (+ base x))))  ; Can access base from outer scope
 
-(define add-10 (make-adder 10))
+(var add-10 (make-adder 10))
 (add-10 5)  ; Returns 15
 ```
 
@@ -251,7 +251,7 @@ Inner functions access outer scope:
 
 **Fix**: Define the variable first:
 ```lisp
-(define undefined-var 42)
+(var undefined-var 42)
 (display undefined-var)  ; OK
 ```
 

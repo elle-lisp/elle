@@ -122,7 +122,7 @@
 (newline)
 
 ; Test 15: Basic struct with integer keys
-(define data1 {1 "one" 2 "two" 3 "three"})
+(var data1 {1 "one" 2 "two" 3 "three"})
 (display "Created struct with sugar: ")
 (display data1)
 (newline)
@@ -157,7 +157,7 @@
 (assert-eq (length data1) 3 "Struct sugar length is 3")
 
 ; Test 19: Empty struct
-(define empty-struct {})
+(var empty-struct {})
 (display (newline))
 (display "Empty struct: ")
 (display empty-struct)
@@ -175,7 +175,7 @@
 (assert-eq (length empty-struct) 0 "Empty struct length is 0")
 
 ; Test 20: Struct with mixed value types
-(define mixed {1 42 2 3.14 3 "text" 4 #t})
+(var mixed {1 42 2 3.14 3 "text" 4 #t})
 (display (newline))
 (display "Struct with mixed types: ")
 (display mixed)
@@ -198,7 +198,7 @@
 (newline)
 
 ; Test 21: Basic table with integer keys
-(define table1 @{1 "first" 2 "second" 3 "third"})
+(var table1 @{1 "first" 2 "second" 3 "third"})
 (display "Created table with sugar: ")
 (display table1)
 (newline)
@@ -232,7 +232,7 @@
 (assert-eq (length table1) 3 "Table sugar length is 3")
 
 ; Test 24: Empty table
-(define empty-table @{})
+(var empty-table @{})
 (display (newline))
 (display "Empty table: ")
 (display empty-table)
@@ -265,8 +265,8 @@
 (display "=== Struct vs Table ===")
 (newline)
 
-(define s {100 "struct"})
-(define t @{100 "table"})
+(var s {100 "struct"})
+(var t @{100 "table"})
 
 (display "Struct type: ")
 (display (type-of s))
@@ -294,8 +294,8 @@
 (newline)
 
 ; Test 26: These should be equivalent
-(define s1 {1 "a" 2 "b"})
-(define s2 (struct 1 "a" 2 "b"))
+(var s1 {1 "a" 2 "b"})
+(var s2 (struct 1 "a" 2 "b"))
 
 (display "Struct from sugar: ")
 (display s1)
@@ -311,8 +311,8 @@
 (assert-true (= s1 s2) "Struct sugar equals explicit struct call")
 
 ; Test 27: Same for tables
-(define t1 @{1 "a" 2 "b"})
-(define t2 (table 1 "a" 2 "b"))
+(var t1 @{1 "a" 2 "b"})
+(var t2 (table 1 "a" 2 "b"))
 
 (display (newline))
 (display "Table from sugar: ")
@@ -334,7 +334,7 @@
 (newline)
 
 ; Test 28: Nested struct with list values
-(define nested {1 (list 10 20 30) 2 (list "a" "b" "c")})
+(var nested {1 (list 10 20 30) 2 (list "a" "b" "c")})
 (display "Struct with list values: ")
 (display nested)
 (newline)
@@ -343,12 +343,12 @@
 (display "First list value: ")
 (display (get nested 1))
 (newline)
-(define first-list (get nested 1))
+(var first-list (get nested 1))
 (assert-eq (length first-list) 3 "First list has 3 elements")
 (assert-eq (nth 0 first-list) 10 "First list first element is 10")
 
 ; Test 29: Table with nested table
-(define outer @{1 @{10 "inner"}})
+(var outer @{1 @{10 "inner"}})
 (display (newline))
 (display "Table with nested table: ")
 (display outer)
@@ -358,7 +358,7 @@
 (display "Get outer table key 1: ")
 (display (get outer 1))
 (newline)
-(define inner-table (get outer 1))
+(var inner-table (get outer 1))
 (assert-true (= (type-of inner-table) (type-of (table))) "Nested value is a table")
 (assert-eq (get inner-table 10) "inner" "Inner table value is 'inner'")
 

@@ -376,9 +376,9 @@ proptest! {
         // helper returns resume_val, caller returns resume_val + 1.
         let code = format!(
             r#"(begin
-                 (define helper (fn (x) (yield (* x 2))))
-                 (define caller (fn (x) (+ (helper x) 1)))
-                 (define co (make-coroutine (fn () (caller {}))))
+                 (def helper (fn (x) (yield (* x 2))))
+                 (def caller (fn (x) (+ (helper x) 1)))
+                 (var co (make-coroutine (fn () (caller {}))))
                  (list (coro/resume co) (coro/resume co {})))"#,
             base, resume_val
         );
@@ -422,12 +422,12 @@ proptest! {
         // Final resume returns val2's resume value (which is NIL by default).
         let code = format!(
             r#"(begin
-                 (define helper (fn (x) (yield x)))
-                 (define gen (fn ()
+                 (def helper (fn (x) (yield x)))
+                 (def gen (fn ()
                    (helper {})
                    (yield {})
                    42))
-                 (define co (make-coroutine gen))
+                 (var co (make-coroutine gen))
                  (list
                    (coro/resume co)
                    (coro/resume co {})
@@ -478,11 +478,11 @@ proptest! {
         // The error should propagate to the root.
         let code = format!(
             r#"(begin
-                 (define helper (fn (x)
+                 (def helper (fn (x)
                    (yield x)
                    (/ 1 0)))
-                 (define gen (fn () (+ (helper {}) 1)))
-                 (define co (make-coroutine gen))
+                 (def gen (fn () (+ (helper {}) 1)))
+                 (var co (make-coroutine gen))
                  (coro/resume co)
                  (coro/resume co))"#,
             val

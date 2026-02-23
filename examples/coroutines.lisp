@@ -21,8 +21,8 @@
 ; ========================================
 (display "=== 1. Basic Coroutine Creation ===\n")
 
-(define simple-gen (fn () (yield 42)))
-(define co (coro/new simple-gen))
+(def simple-gen (fn () (yield 42)))
+(var co (coro/new simple-gen))
 (assert-true (coro? co) "coro/new returns a coroutine")
 (assert-eq (coro/status co) :created "Initial status is created")
 (assert-eq (coro/resume co) 42 "First resume returns yielded value")
@@ -38,11 +38,11 @@
 ; ========================================
 (display "\n=== 2. Multiple Yields ===\n")
 
-(define multi-gen (fn ()
+(def multi-gen (fn ()
   (yield 1)
   (yield 2)
   (yield 3)))
-(define co-multi (coro/new multi-gen))
+(var co-multi (coro/new multi-gen))
 (assert-eq (coro/resume co-multi) 1 "First yield")
 (assert-eq (coro/status co-multi) :suspended "Suspended after yield")
 (assert-eq (coro/resume co-multi) 2 "Second yield")
@@ -55,14 +55,14 @@
 ; ========================================
 (display "\n=== 3. Closure Captures ===\n")
 
-(define make-counter (fn (start)
+(def make-counter (fn (start)
   (fn ()
     (yield start)
     (yield (+ start 1))
     (yield (+ start 2)))))
 
-(define co-100 (coro/new (make-counter 100)))
-(define co-200 (coro/new (make-counter 200)))
+(var co-100 (coro/new (make-counter 100)))
+(var co-200 (coro/new (make-counter 200)))
 
 (assert-eq (coro/resume co-100) 100 "Counter 100 first")
 (assert-eq (coro/resume co-200) 200 "Counter 200 first")
@@ -77,10 +77,10 @@
 ; ========================================
 (display "\n=== 4. Interleaved Coroutines ===\n")
 
-(define gen-a (fn () (yield 1) (yield 2) (yield 3)))
-(define gen-b (fn () (yield 10) (yield 20) (yield 30)))
-(define co-a (coro/new gen-a))
-(define co-b (coro/new gen-b))
+(def gen-a (fn () (yield 1) (yield 2) (yield 3)))
+(def gen-b (fn () (yield 10) (yield 20) (yield 30)))
+(var co-a (coro/new gen-a))
+(var co-b (coro/new gen-b))
 
 ; Interleave resumes
 (assert-eq (coro/resume co-a) 1 "A first")
@@ -98,20 +98,20 @@
 ; ========================================
 (display "\n=== 5. Quoted Symbols ===\n")
 
-(define symbol-gen (fn ()
+(def symbol-gen (fn ()
   (yield 'hello)
   (yield 'world)
   (yield '(a b c))))
 
-(define co-sym (coro/new symbol-gen))
-(define sym1 (coro/resume co-sym))
+(var co-sym (coro/new symbol-gen))
+(var sym1 (coro/resume co-sym))
 (assert-true (symbol? sym1) "Yielded symbol is a symbol")
 (assert-eq sym1 'hello "Symbol value is correct")
 
-(define sym2 (coro/resume co-sym))
+(var sym2 (coro/resume co-sym))
 (assert-eq sym2 'world "Second symbol correct")
 
-(define lst (coro/resume co-sym))
+(var lst (coro/resume co-sym))
 (assert-true (list? lst) "Yielded list is a list")
 (display "✓ Quoted symbols and lists yield correctly\n")
 
@@ -120,8 +120,8 @@
 ; ========================================
 (display "\n=== 6. Coroutine Value ===\n")
 
-(define val-gen (fn () (yield 10) (yield 20)))
-(define co-val (coro/new val-gen))
+(def val-gen (fn () (yield 10) (yield 20)))
+(var co-val (coro/new val-gen))
 
 (coro/resume co-val)
 (assert-eq (coro/value co-val) 10 "Value after first yield")
@@ -134,12 +134,12 @@
 ; ========================================
 (display "\n=== 7. Yield with Expressions ===\n")
 
-(define expr-gen (fn ()
+(def expr-gen (fn ()
   (yield (+ 1 2 3))
   (yield (* 4 5))
   (yield (if #t 100 200))))
 
-(define co-expr (coro/new expr-gen))
+(var co-expr (coro/new expr-gen))
 (assert-eq (coro/resume co-expr) 6 "Sum expression")
 (assert-eq (coro/resume co-expr) 20 "Product expression")
 (assert-eq (coro/resume co-expr) 100 "Conditional expression")
@@ -150,13 +150,13 @@
 ; ========================================
 (display "\n=== 8. Nested Coroutines ===\n")
 
-(define inner-gen (fn () (yield 100) (yield 200)))
-(define outer-gen (fn ()
-  (define inner-co (coro/new inner-gen))
+(def inner-gen (fn () (yield 100) (yield 200)))
+(def outer-gen (fn ()
+  (var inner-co (coro/new inner-gen))
   (yield (coro/resume inner-co))
   (yield (coro/resume inner-co))))
 
-(define co-outer (coro/new outer-gen))
+(var co-outer (coro/new outer-gen))
 (assert-eq (coro/resume co-outer) 100 "Nested inner first")
 (assert-eq (coro/resume co-outer) 200 "Nested inner second")
 (display "✓ Nested coroutines work correctly\n")
@@ -169,12 +169,12 @@
 ; Note: Local state preservation across yields is a complex feature
 ; that requires careful handling of the execution environment.
 ; This test documents the current behavior.
-(define stateful-gen (fn ()
+(def stateful-gen (fn ()
   (yield 10)
   (yield 20)
   (yield 30)))
 
-(define co-state (coro/new stateful-gen))
+(var co-state (coro/new stateful-gen))
 (assert-eq (coro/resume co-state) 10 "First yield")
 (assert-eq (coro/resume co-state) 20 "Second yield")
 (assert-eq (coro/resume co-state) 30 "Third yield")
@@ -185,14 +185,14 @@
 ; ========================================
 (display "\n=== 10. Generator Pattern ===\n")
 
-(define count-gen (fn ()
+(def count-gen (fn ()
   (yield 0)
   (yield 1)
   (yield 2)
   (yield 3)
   (yield 4)))
 
-(define counter (coro/new count-gen))
+(var counter (coro/new count-gen))
 (assert-eq (coro/resume counter) 0 "Count 0")
 (assert-eq (coro/resume counter) 1 "Count 1")
 (assert-eq (coro/resume counter) 2 "Count 2")
@@ -205,7 +205,7 @@
 ; ========================================
 (display "\n=== 11. Fibonacci Sequence ===\n")
 
-(define fib-gen (fn ()
+(def fib-gen (fn ()
   (yield 0)
   (yield 1)
   (yield 1)
@@ -214,7 +214,7 @@
   (yield 5)
   (yield 8)))
 
-(define fibs (coro/new fib-gen))
+(var fibs (coro/new fib-gen))
 (assert-eq (coro/resume fibs) 0 "Fib 0")
 (assert-eq (coro/resume fibs) 1 "Fib 1")
 (assert-eq (coro/resume fibs) 1 "Fib 2")
@@ -229,7 +229,7 @@
 ; ========================================
 (display "\n=== 12. Type Predicate ===\n")
 
-(define test-co (coro/new (fn () (yield 1))))
+(var test-co (coro/new (fn () (yield 1))))
 (assert-true (coro? test-co) "Coroutine is a coroutine")
 (assert-false (coro? 42) "Number is not a coroutine")
 (assert-false (coro? (fn () 1)) "Function is not a coroutine")
@@ -289,14 +289,14 @@
 ; ========================================
 (display "\n=== 14. Generator Pattern: Range ===\n")
 
-(define simple-range-gen (fn ()
+(def simple-range-gen (fn ()
   (yield 0)
   (yield 1)
   (yield 2)
   (yield 3)
   (yield 4)))
 
-(define range-co (coro/new simple-range-gen))
+(var range-co (coro/new simple-range-gen))
 
 (display "Range generator (0-4):\n")
 (display "  ")
@@ -320,7 +320,7 @@
 ; ========================================
 (display "\n=== 15. Generator Pattern: Extended Fibonacci ===\n")
 
-(define fib-gen-extended (fn ()
+(def fib-gen-extended (fn ()
   (yield 0)
   (yield 1)
   (yield 1)
@@ -330,7 +330,7 @@
   (yield 8)
   (yield 13)))
 
-(define fib-co-extended (coro/new fib-gen-extended))
+(var fib-co-extended (coro/new fib-gen-extended))
 
 (display "Fibonacci sequence:\n")
 (display "  ")
@@ -360,17 +360,17 @@
 ; ========================================
 (display "\n=== 16. Nested Coroutines (Advanced) ===\n")
 
-(define inner-nested-gen (fn ()
+(def inner-nested-gen (fn ()
   (yield 100)
   (yield 200)))
 
-(define outer-nested-gen (fn ()
-  (define inner-co-nested (coro/new inner-nested-gen))
+(def outer-nested-gen (fn ()
+  (var inner-co-nested (coro/new inner-nested-gen))
   (yield (coro/resume inner-co-nested))
   (yield (coro/resume inner-co-nested))
   (yield 300)))
 
-(define nested-co-adv (coro/new outer-nested-gen))
+(var nested-co-adv (coro/new outer-nested-gen))
 
 (display "Nested coroutines:\n")
 (display "  Inner first: ")
@@ -394,18 +394,18 @@
 ; ========================================
 (display "\n=== 17. Interleaving Coroutines (Advanced) ===\n")
 
-(define gen-a-adv (fn ()
+(def gen-a-adv (fn ()
   (yield 'a1)
   (yield 'a2)
   (yield 'a3)))
 
-(define gen-b-adv (fn ()
+(def gen-b-adv (fn ()
   (yield 'b1)
   (yield 'b2)
   (yield 'b3)))
 
-(define co-a-adv (coro/new gen-a-adv))
-(define co-b-adv (coro/new gen-b-adv))
+(var co-a-adv (coro/new gen-a-adv))
+(var co-b-adv (coro/new gen-b-adv))
 
 (display "Interleaving two coroutines:\n")
 (display "  A: ")
@@ -436,13 +436,13 @@
 ; ========================================
 (display "\n=== 18. Coroutine with State (Advanced) ===\n")
 
-(define stateful-gen-adv (fn ()
+(def stateful-gen-adv (fn ()
   (yield 10)
   (yield 20)
   (yield 30)
   (yield 40)))
 
-(define state-co-adv (coro/new stateful-gen-adv))
+(var state-co-adv (coro/new stateful-gen-adv))
 
 (display "Coroutine state tracking:\n")
 
@@ -470,14 +470,14 @@
 ; ========================================
 (display "\n=== 19. Multiple Coroutines from Same Generator ===\n")
 
-(define shared-gen-adv (fn ()
+(def shared-gen-adv (fn ()
   (yield 1)
   (yield 2)
   (yield 3)))
 
-(define co-1-adv (coro/new shared-gen-adv))
-(define co-2-adv (coro/new shared-gen-adv))
-(define co-3-adv (coro/new shared-gen-adv))
+(var co-1-adv (coro/new shared-gen-adv))
+(var co-2-adv (coro/new shared-gen-adv))
+(var co-3-adv (coro/new shared-gen-adv))
 
 (display "Three independent coroutines:\n")
 
@@ -508,11 +508,11 @@
 ; ========================================
 (display "\n=== 20. Coroutine Completion Detection (Advanced) ===\n")
 
-(define short-gen-adv (fn ()
+(def short-gen-adv (fn ()
   (yield 1)
   (yield 2)))
 
-(define short-co-adv (coro/new short-gen-adv))
+(var short-co-adv (coro/new short-gen-adv))
 
 (display "Detecting coroutine completion:\n")
 
@@ -543,14 +543,14 @@
 ; ========================================
 (display "\n=== 21. Generator Pattern: Counting (Advanced) ===\n")
 
-(define count-gen-adv (fn ()
+(def count-gen-adv (fn ()
   (yield 0)
   (yield 1)
   (yield 2)
   (yield 3)
   (yield 4)))
 
-(define counter-adv (coro/new count-gen-adv))
+(var counter-adv (coro/new count-gen-adv))
 
 (display "Counting generator:\n")
 (display "  ")
@@ -574,14 +574,14 @@
 ; ========================================
 (display "\n=== 22. Generator Pattern: Alphabet ===\n")
 
-(define alpha-gen (fn ()
+(def alpha-gen (fn ()
   (yield 'a)
   (yield 'b)
   (yield 'c)
   (yield 'd)
   (yield 'e)))
 
-(define alpha-co (coro/new alpha-gen))
+(var alpha-co (coro/new alpha-gen))
 
 (display "Alphabet generator:\n")
 (display "  ")

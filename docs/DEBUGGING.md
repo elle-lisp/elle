@@ -150,7 +150,7 @@ Use it when you need to distinguish computation time from I/O wait.
 seconds elapsed since the stopwatch was created:
 
 ```lisp
-(define sw (time/stopwatch))
+(var sw (time/stopwatch))
 (coro/resume sw)   ; => 0.000234
 ;; ... do work ...
 (coro/resume sw)   ; => 1.532100  (cumulative, not delta)
@@ -159,7 +159,7 @@ seconds elapsed since the stopwatch was created:
 Implementation (in `src/primitives/time_def.rs`):
 
 ```lisp
-(define time/stopwatch (fn ()
+(def time/stopwatch (fn ()
   (coro/new (fn ()
     (let ((start (clock/monotonic)))
       (while #t
@@ -169,7 +169,7 @@ Implementation (in `src/primitives/time_def.rs`):
 `time/elapsed` takes a thunk and returns a pair of (result, elapsed-seconds):
 
 ```lisp
-(define result (time/elapsed (fn () (heavy-computation))))
+(var result (time/elapsed (fn () (heavy-computation))))
 (first result)          ; => computation result
 (first (rest result))   ; => elapsed seconds
 ```
@@ -240,7 +240,7 @@ Usage: `(bench "fibonacci(30)" (fibonacci 30))` prints timing, returns result.
     `(let* ((,count ,n)
             (,start (clock/monotonic))
             (,result nil))
-       (define ,i 0)
+       (var ,i 0)
        (while (< ,i ,count)
          (set! ,result ,expr)
          (set! ,i (+ ,i 1)))
