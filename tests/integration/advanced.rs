@@ -71,18 +71,6 @@ fn test_add_module_path_integration() {
 }
 
 #[test]
-fn test_macro_primitives_integration() {
-    // Test expand-macro with a quoted list (macro call form)
-    // In the new pipeline, expand-macro is a placeholder that returns the form unchanged
-    let result = eval("(expand-macro '(test 1 2))").unwrap();
-    assert!(result.is_cons()); // Should return the list unchanged
-
-    // Test macro? - always returns false in the new pipeline
-    assert_eq!(eval("(macro? 'some-name)").unwrap(), Value::bool(false));
-    assert_eq!(eval("(macro? 42)").unwrap(), Value::bool(false));
-}
-
-#[test]
 fn test_spawn_and_thread_id() {
     // Get current thread ID
     let result = eval("(current-thread-id)").unwrap();
@@ -197,25 +185,6 @@ fn test_module_and_arithmetic_combination() {
 }
 
 #[test]
-fn test_expand_macro_with_symbols() {
-    // expand-macro with quoted list (macro call form)
-    // In the new pipeline, expand-macro is a placeholder that returns the form unchanged
-    let result = eval("(expand-macro '(+ 1 2))").unwrap();
-    assert!(result.is_cons());
-    let result = eval("(expand-macro '(list 1 2))").unwrap();
-    assert!(result.is_cons());
-}
-
-#[test]
-fn test_macro_predicate_various_types() {
-    // macro? with different value types
-    assert_eq!(eval("(macro? 42)").unwrap(), Value::bool(false));
-    assert_eq!(eval("(macro? \"string\")").unwrap(), Value::bool(false));
-    assert_eq!(eval("(macro? (list 1 2))").unwrap(), Value::bool(false));
-    assert_eq!(eval("(macro? +)").unwrap(), Value::bool(false));
-}
-
-#[test]
 fn test_thread_id_consistency() {
     // Multiple calls should return same thread ID
     let id1 = eval("(current-thread-id)").unwrap();
@@ -237,9 +206,6 @@ fn test_phase5_feature_availability() {
     // Verify all Phase 5 primitives are registered
     assert!(eval("(import-file \"test-modules/test.lisp\")").is_ok());
     assert!(eval("(add-module-path \".\")").is_ok());
-    // expand-macro returns the form unchanged in the new pipeline
-    assert!(eval("(expand-macro '(x 1 2))").is_ok());
-    assert!(eval("(macro? 'x)").is_ok());
     // spawn now requires a closure, not a native function
     assert!(eval("(spawn (fn () 42))").is_ok());
     // join requires a thread handle, not a string
@@ -279,20 +245,6 @@ fn test_add_module_path_wrong_argument_type() {
     // add-module-path requires a string argument
     assert!(eval("(add-module-path 42)").is_err());
     assert!(eval("(add-module-path (list 1 2))").is_err());
-}
-
-#[test]
-fn test_expand_macro_wrong_argument_count() {
-    // expand-macro requires exactly 1 argument
-    assert!(eval("(expand-macro)").is_err());
-    assert!(eval("(expand-macro 'a 'b)").is_err());
-}
-
-#[test]
-fn test_macro_predicate_wrong_argument_count() {
-    // macro? requires exactly 1 argument
-    assert!(eval("(macro?)").is_err());
-    assert!(eval("(macro? 'a 'b)").is_err());
 }
 
 #[test]

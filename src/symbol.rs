@@ -1,24 +1,6 @@
 use crate::value::SymbolId;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-/// Global counter for gensym to ensure uniqueness
-static GENSYM_COUNTER: AtomicU64 = AtomicU64::new(1_000_000);
-
-/// Generate a unique symbol ID for use in macros and hygiene
-pub fn gensym_id() -> SymbolId {
-    let id = GENSYM_COUNTER.fetch_add(1, Ordering::Relaxed);
-    SymbolId(id as u32)
-}
-
-/// Macro definition
-#[derive(Debug, Clone)]
-pub struct MacroDef {
-    pub name: SymbolId,
-    pub params: Vec<SymbolId>,
-    pub body: String, // Lisp source for macro body
-}
 
 /// Module definition
 #[derive(Debug, Clone)]
@@ -37,7 +19,6 @@ pub struct ModuleDef {
 pub struct SymbolTable {
     map: FxHashMap<Rc<str>, SymbolId>,
     names: Vec<Rc<str>>,
-    macros: FxHashMap<SymbolId, Rc<MacroDef>>,
     modules: FxHashMap<SymbolId, Rc<ModuleDef>>,
     current_module: Option<SymbolId>,
 }
@@ -47,7 +28,6 @@ impl SymbolTable {
         SymbolTable {
             map: FxHashMap::default(),
             names: Vec::new(),
-            macros: FxHashMap::default(),
             modules: FxHashMap::default(),
             current_module: None,
         }
@@ -77,22 +57,6 @@ impl SymbolTable {
     /// Check if a symbol exists
     pub fn get(&self, name: &str) -> Option<SymbolId> {
         self.map.get(name).copied()
-    }
-
-    /// Register a macro definition
-    pub fn define_macro(&mut self, macro_def: MacroDef) {
-        let id = macro_def.name;
-        self.macros.insert(id, Rc::new(macro_def));
-    }
-
-    /// Get a macro definition by symbol ID
-    pub fn get_macro(&self, id: SymbolId) -> Option<Rc<MacroDef>> {
-        self.macros.get(&id).cloned()
-    }
-
-    /// Check if a symbol is a macro
-    pub fn is_macro(&self, id: SymbolId) -> bool {
-        self.macros.contains_key(&id)
     }
 
     /// Define a module

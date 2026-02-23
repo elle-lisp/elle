@@ -433,30 +433,6 @@ fn test_gensym_with_prefix() {
     }
 }
 
-// Module system tests
-#[test]
-fn test_symbol_table_macro_support() {
-    use elle::symbol::{MacroDef, SymbolTable};
-
-    let mut table = SymbolTable::new();
-    let name = table.intern("when");
-    let cond = table.intern("cond");
-    let body = table.intern("body");
-
-    // Define a macro
-    let macro_def = MacroDef {
-        name,
-        params: vec![cond, body],
-        body: "(if cond body nil)".to_string(),
-    };
-
-    table.define_macro(macro_def);
-
-    // Check macro exists
-    assert!(table.is_macro(name));
-    assert!(table.get_macro(name).is_some());
-}
-
 #[test]
 fn test_symbol_table_module_support() {
     use elle::symbol::{ModuleDef, SymbolTable};
@@ -1322,43 +1298,6 @@ fn test_add_module_path_with_vm_context() {
 
     // Clean up
     ffi_primitives::clear_vm_context();
-}
-
-#[test]
-fn test_expand_macro_primitive() {
-    let (vm, mut symbols) = setup();
-    let expand = get_primitive(&vm, &mut symbols, "expand-macro");
-
-    // Test with a quoted list (macro call form)
-    // In the new pipeline, expand-macro is a placeholder that returns the form unchanged
-    let macro_name = symbols.intern("test-macro");
-    let arg = Value::int(42);
-    let form = Value::cons(
-        Value::symbol(macro_name.0),
-        Value::cons(arg, Value::EMPTY_LIST),
-    );
-
-    let result = call_primitive(&expand, std::slice::from_ref(&form));
-    // Should return the form unchanged (placeholder behavior)
-    assert!(result.is_ok());
-    // The result should be the same form we passed in
-    assert!(result.unwrap().is_cons());
-}
-
-#[test]
-fn test_is_macro_primitive() {
-    let (vm, mut symbols) = setup();
-    let is_macro = get_primitive(&vm, &mut symbols, "macro?");
-
-    // In the new pipeline, macro? always returns false (macros are expanded at compile time)
-    let sym_id = symbols.intern("some-symbol");
-    let result = call_primitive(&is_macro, &[Value::symbol(sym_id.0)]);
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::bool(false));
-
-    let result = call_primitive(&is_macro, &[Value::int(42)]);
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), Value::bool(false));
 }
 
 #[test]

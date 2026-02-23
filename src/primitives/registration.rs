@@ -43,7 +43,6 @@ use super::list::{
     prim_nth, prim_rest, prim_reverse, prim_take,
 };
 use super::logic::{prim_and, prim_not, prim_or, prim_xor};
-use super::macros::{prim_expand_macro, prim_is_macro};
 use super::math::{
     prim_ceil, prim_cos, prim_e, prim_exp, prim_floor, prim_log, prim_pi, prim_pow, prim_round,
     prim_sin, prim_sqrt, prim_tan,
@@ -778,24 +777,6 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<Sy
         "add-module-path",
         prim_add_module_path,
         Effect::raises(),
-    );
-
-    // Macro expansion - can raise
-    register_fn(
-        vm,
-        symbols,
-        &mut effects,
-        "expand-macro",
-        prim_expand_macro,
-        Effect::raises(),
-    );
-    register_fn(
-        vm,
-        symbols,
-        &mut effects,
-        "macro?",
-        prim_is_macro,
-        Effect::none(),
     );
 
     // Concurrency primitives - can raise

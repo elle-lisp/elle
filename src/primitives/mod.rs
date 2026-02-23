@@ -13,7 +13,6 @@ pub mod higher_order_def;
 pub mod json;
 pub mod list;
 pub mod logic;
-pub mod macros;
 pub mod math;
 pub mod meta;
 pub mod module_init;
