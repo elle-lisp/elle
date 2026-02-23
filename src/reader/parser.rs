@@ -181,10 +181,9 @@ impl Reader {
                 }
             }
             OwnedToken::Keyword(s) => {
-                // Keywords are self-evaluating values
-                let id = symbols.intern(s).0;
+                // Keywords are self-evaluating values (interned strings)
                 self.advance();
-                Ok(Value::keyword(id))
+                Ok(Value::keyword(s))
             }
             OwnedToken::RightParen => {
                 let loc = self.current_location();

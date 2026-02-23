@@ -295,7 +295,7 @@ impl Lowerer {
             HirKind::String(s) => Some(Value::string(s.as_str())),
             HirKind::Bool(b) => Some(Value::bool(*b)),
             HirKind::Nil => Some(Value::NIL),
-            HirKind::Keyword(sym) => Some(Value::keyword(sym.0)),
+            HirKind::Keyword(name) => Some(Value::keyword(name)),
             HirKind::EmptyList => Some(Value::EMPTY_LIST),
             _ => None,
         }

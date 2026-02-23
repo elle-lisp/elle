@@ -82,9 +82,9 @@ fn test_symbol() {
 
 #[test]
 fn test_keyword() {
-    let v = Value::keyword(123);
+    let v = Value::keyword("test");
     assert!(v.is_keyword());
-    assert_eq!(v.as_keyword(), Some(123));
+    assert_eq!(v.as_keyword_name(), Some("test"));
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn test_type_name() {
     assert_eq!(Value::int(42).type_name(), "integer");
     assert_eq!(Value::float(std::f64::consts::PI).type_name(), "float");
     assert_eq!(Value::symbol(1).type_name(), "symbol");
-    assert_eq!(Value::keyword(1).type_name(), "keyword");
+    assert_eq!(Value::keyword("test").type_name(), "keyword");
     assert_eq!(Value::string("test").type_name(), "string");
     assert_eq!(
         Value::cons(Value::NIL, Value::EMPTY_LIST).type_name(),
@@ -235,7 +235,7 @@ fn test_truthiness_semantics() {
         "non-empty string is truthy"
     );
     assert!(Value::symbol(1).is_truthy(), "symbol is truthy");
-    assert!(Value::keyword(1).is_truthy(), "keyword is truthy");
+    assert!(Value::keyword("test").is_truthy(), "keyword is truthy");
 
     // Non-empty list is truthy
     let non_empty_list = Value::cons(Value::int(1), Value::NIL);

@@ -52,10 +52,18 @@ impl Value {
         Value(TAG_SYMBOL | (id as u64))
     }
 
-    /// Create a keyword value from a SymbolId.
+    /// Create a keyword value from a name string.
+    /// The name is interned for O(1) equality and display.
     #[inline]
-    pub fn keyword(id: u32) -> Self {
-        Value(TAG_KEYWORD | (id as u64))
+    pub fn keyword(name: &str) -> Self {
+        use crate::value::intern::intern_string;
+        let ptr = intern_string(name) as *const ();
+        let addr = ptr as u64;
+        debug_assert!(
+            addr & !PAYLOAD_MASK == 0,
+            "Keyword pointer exceeds 48-bit address space"
+        );
+        Value(TAG_KEYWORD | addr)
     }
 
     /// Create a boolean value.

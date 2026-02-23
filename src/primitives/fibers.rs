@@ -23,19 +23,9 @@ use crate::value::fiber::{
 };
 use crate::value::{error_val, Value};
 
-/// Return a keyword Value for a FiberStatus by interning via the
-/// thread-local symbol table. Falls back to a string if no symbol
-/// table is available (shouldn't happen in normal execution).
+/// Return a keyword Value for a FiberStatus.
 fn status_keyword(status: FiberStatus) -> Value {
-    let name = status.as_str();
-    unsafe {
-        if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
-            let id = (*symbols_ptr).intern(name);
-            Value::keyword(id.0)
-        } else {
-            Value::string(name)
-        }
-    }
+    Value::keyword(status.as_str())
 }
 
 /// (fiber/new fn mask) → fiber
@@ -628,55 +618,41 @@ mod tests {
         assert_eq!(sig, SIG_ERROR);
     }
 
-    /// Set up thread-local symbol table for tests that need keyword interning.
-    fn with_symbol_table<F: FnOnce()>(f: F) {
-        let mut symbols = crate::symbol::SymbolTable::new();
-        crate::ffi::primitives::context::set_symbol_table(
-            &mut symbols as *mut crate::symbol::SymbolTable,
-        );
-        f();
-        crate::ffi::primitives::context::clear_symbol_table();
-    }
-
     #[test]
     fn test_fiber_status() {
-        with_symbol_table(|| {
-            let closure = make_test_closure();
-            let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-            let (sig, status) = prim_fiber_status(&[fiber_val]);
-            assert_eq!(sig, SIG_OK);
-            assert!(status.is_keyword(), "Expected keyword, got {:?}", status);
-        });
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        let (sig, status) = prim_fiber_status(&[fiber_val]);
+        assert_eq!(sig, SIG_OK);
+        assert!(status.is_keyword(), "Expected keyword, got {:?}", status);
     }
 
     #[test]
     fn test_fiber_status_transitions() {
-        with_symbol_table(|| {
-            let closure = make_test_closure();
-            let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
 
-            // All statuses should return keywords
-            for status in [
-                FiberStatus::New,
-                FiberStatus::Alive,
-                FiberStatus::Suspended,
-                FiberStatus::Dead,
-                FiberStatus::Error,
-            ] {
-                fiber_val
-                    .as_fiber()
-                    .unwrap()
-                    .with_mut(|f| f.status = status);
-                let (sig, val) = prim_fiber_status(&[fiber_val]);
-                assert_eq!(sig, SIG_OK);
-                assert!(
-                    val.is_keyword(),
-                    "Expected keyword for {:?}, got {:?}",
-                    status,
-                    val
-                );
-            }
-        });
+        // All statuses should return keywords
+        for status in [
+            FiberStatus::New,
+            FiberStatus::Alive,
+            FiberStatus::Suspended,
+            FiberStatus::Dead,
+            FiberStatus::Error,
+        ] {
+            fiber_val
+                .as_fiber()
+                .unwrap()
+                .with_mut(|f| f.status = status);
+            let (sig, val) = prim_fiber_status(&[fiber_val]);
+            assert_eq!(sig, SIG_OK);
+            assert!(
+                val.is_keyword(),
+                "Expected keyword for {:?}, got {:?}",
+                status,
+                val
+            );
+        }
     }
 
     #[test]

@@ -1,5 +1,4 @@
 //! Type checking primitives
-use crate::ffi::primitives::context::get_symbol_table;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{error_val, Value};
 
@@ -132,17 +131,5 @@ pub fn prim_type_of(args: &[Value]) -> (SignalBits, Value) {
     }
 
     let type_name = args[0].type_name();
-
-    // Try to get the symbol table from thread-local context
-    // Safety: The symbol table pointer is set in main() and cleared only at exit,
-    // so it's valid during program execution.
-    unsafe {
-        if let Some(symbols_ptr) = get_symbol_table() {
-            let keyword_id = (*symbols_ptr).intern(type_name);
-            (SIG_OK, Value::keyword(keyword_id.0))
-        } else {
-            // Fallback to string if no symbol table in context
-            (SIG_OK, Value::string(type_name.to_string()))
-        }
-    }
+    (SIG_OK, Value::keyword(type_name))
 }

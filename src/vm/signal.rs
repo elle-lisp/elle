@@ -105,27 +105,11 @@ impl VM {
     }
 }
 
-/// Access the thread-local symbol table immutably (for keyword resolution).
-/// Returns SIG_ERROR if unavailable.
-fn with_symbol_table_ref(
-    f: impl FnOnce(&crate::symbol::SymbolTable) -> (SignalBits, Value),
-) -> (SignalBits, Value) {
-    unsafe {
-        match crate::ffi::primitives::context::get_symbol_table() {
-            Some(ptr) => f(&*ptr),
-            None => (
-                SIG_ERROR,
-                error_val("error", "SIG_QUERY: symbol table not available".to_string()),
-            ),
-        }
-    }
-}
-
 impl VM {
     /// Dispatch a VM state query. Value is (operation . argument).
     ///
     /// The operation can be a keyword or a string. Keywords are resolved
-    /// to their name via the thread-local symbol table; strings are used
+    /// via the content-addressed keyword registry; strings are used
     /// directly. SIG_QUERY is for questions that can only be answered
     /// from the VM's context (call counts, global bindings, current fiber).
     ///
@@ -145,17 +129,8 @@ impl VM {
         };
 
         // Accept keyword or string as operation identifier.
-        let op_name: String = if let Some(id) = cons.first.as_keyword() {
-            match with_symbol_table_ref(|st| match st.name(crate::value::SymbolId(id)) {
-                Some(s) => (SIG_OK, Value::string(s)),
-                None => (
-                    SIG_ERROR,
-                    error_val("error", format!("SIG_QUERY: unknown keyword id {}", id)),
-                ),
-            }) {
-                (SIG_OK, v) => v.as_string().unwrap().to_string(),
-                err => return err,
-            }
+        let op_name: String = if let Some(name) = cons.first.as_keyword_name() {
+            name.to_string()
         } else if let Some(s) = cons.first.as_string() {
             s.to_string()
         } else {

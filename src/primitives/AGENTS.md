@@ -77,11 +77,10 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 3. **No primitive has VM access.** Operations that need the VM (fiber
    execution) return SIG_RESUME and let the VM dispatch loop handle it.
 
-4. **Symbol table pointers are set before use.** Some primitives (list length)
-   need global access to symbol tables. Call `set_*_symbol_table` first.
-
-5. **Thread-local state exists for some primitives.** Length symbol table.
-   Clean up with `clear_*` functions.
+4. **Symbol table pointers are set before use.** The `length` primitive needs
+   symbol table access to resolve symbol names. Call `set_length_symbol_table`
+   before use, `clear_length_symbol_table` after. Keywords no longer need this
+   — they carry their name directly via interned strings.
 
 ## Modules
 

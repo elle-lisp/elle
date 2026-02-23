@@ -1992,7 +1992,7 @@ fn test_global_false_for_local() {
 fn test_string_to_keyword_returns_keyword() {
     let result = eval_full(r#"(string->keyword "foo")"#).unwrap();
     assert!(
-        result.as_keyword().is_some(),
+        result.as_keyword_name().is_some(),
         "string->keyword should return a keyword"
     );
 }

@@ -579,7 +579,7 @@ impl<'a> FunctionTranslator<'a> {
                 crate::value::Value::string(s.clone()).to_bits()
             }
             LirConst::Symbol(id) => crate::value::Value::symbol(id.0).to_bits(),
-            LirConst::Keyword(id) => crate::value::Value::keyword(id.0).to_bits(),
+            LirConst::Keyword(name) => crate::value::Value::keyword(name).to_bits(),
         };
         builder.ins().iconst(I64, bits as i64)
     }

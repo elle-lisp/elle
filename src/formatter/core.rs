@@ -80,12 +80,8 @@ fn format_value(
             .unwrap_or_else(|| format!("#{}", id));
     }
 
-    if let Some(id) = value.as_keyword() {
-        let sym_id = SymbolId(id);
-        return symbol_table
-            .name(sym_id)
-            .map(|s| format!(":{}", s))
-            .unwrap_or_else(|| format!(":{}", id));
+    if let Some(name) = value.as_keyword_name() {
+        return format!(":{}", name);
     }
 
     // Handle heap values

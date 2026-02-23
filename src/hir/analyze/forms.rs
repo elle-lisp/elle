@@ -14,10 +14,7 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Int(n) => Ok(Hir::pure(HirKind::Int(*n), span)),
             SyntaxKind::Float(f) => Ok(Hir::pure(HirKind::Float(*f), span)),
             SyntaxKind::String(s) => Ok(Hir::pure(HirKind::String(s.clone()), span)),
-            SyntaxKind::Keyword(k) => {
-                let sym = self.symbols.intern(k);
-                Ok(Hir::pure(HirKind::Keyword(sym), span))
-            }
+            SyntaxKind::Keyword(k) => Ok(Hir::pure(HirKind::Keyword(k.clone()), span)),
 
             // Variable reference
             SyntaxKind::Symbol(name) => {

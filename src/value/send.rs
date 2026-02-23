@@ -15,13 +15,17 @@ use std::collections::BTreeMap;
 
 /// A thread-safe wrapper around Value that deep-copies heap data.
 ///
-/// For immediate values (nil, bool, int, float, symbol, keyword), SendValue
-/// stores them directly. For heap values, SendValue stores owned copies of the
-/// heap data, ensuring the data remains valid even if the original Rc is dropped.
+/// For immediate values (nil, bool, int, float, symbol), SendValue stores
+/// them directly. Keywords carry their name for cross-thread re-interning.
+/// For heap values, SendValue stores owned copies of the heap data, ensuring
+/// the data remains valid even if the original Rc is dropped.
 #[derive(Clone)]
 pub enum SendValue {
     /// Immediate values that don't need copying
     Immediate(Value),
+
+    /// Keyword with name for cross-thread re-interning
+    Keyword(String),
 
     /// Owned string copy
     String(String),
@@ -52,13 +56,17 @@ impl SendValue {
     /// Returns Err if the value contains non-sendable data (mutable tables,
     /// native functions, FFI handles, etc.).
     pub fn from_value(value: Value) -> Result<Self, String> {
+        // Keywords carry their name for cross-thread re-interning
+        if let Some(name) = value.as_keyword_name() {
+            return Ok(SendValue::Keyword(name.to_string()));
+        }
+
         // Immediate values are always safe
         if value.is_nil()
             || value.is_bool()
             || value.is_int()
             || value.is_float()
             || value.is_symbol()
-            || value.is_keyword()
         {
             return Ok(SendValue::Immediate(value));
         }
@@ -150,6 +158,7 @@ impl SendValue {
     pub fn into_value(self) -> Value {
         match self {
             SendValue::Immediate(v) => v,
+            SendValue::Keyword(name) => Value::keyword(&name),
             SendValue::String(s) => {
                 // Use alloc directly to avoid thread-local interner issues
                 let boxed: Box<str> = s.into();
