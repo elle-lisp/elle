@@ -358,9 +358,20 @@ pub extern "C" fn elle_jit_call(
     }
 }
 
-/// Set up a pending tail call on the VM.
-/// This mirrors VM::handle_tail_call for closures.
-/// Returns TAIL_CALL_SENTINEL to signal the JIT to return immediately.
+/// Handle a non-self tail call from JIT code.
+///
+/// If the target closure has JIT code in the cache, calls it directly —
+/// avoiding the round-trip through the interpreter. This is critical for
+/// mutual recursion (e.g., `solve-helper` tail-calling `try-cols-helper`):
+/// without this, every cross-function tail call drops from JIT to the
+/// interpreter dispatch loop.
+///
+/// If the callee returns TAIL_CALL_SENTINEL (its own non-self tail call),
+/// we propagate it to our caller for resolution — the pending_tail_call
+/// env is in interpreter format and can't be used for another JIT call.
+///
+/// Falls back to TAIL_CALL_SENTINEL (interpreter trampoline) only when
+/// the target has no JIT code.
 #[no_mangle]
 pub extern "C" fn elle_jit_tail_call(
     func_bits: u64,
@@ -378,21 +389,46 @@ pub extern "C" fn elle_jit_tail_call(
         return jit_handle_primitive_signal(vm, bits, value);
     }
 
-    // Handle closures — set up pending_tail_call
+    // Handle closures
     if let Some(closure) = func.as_closure() {
         if !vm.check_arity(&closure.arity, nargs as usize) {
             return TAG_NIL;
         }
 
-        // Reconstruct args Vec for env building (needed by build_closure_env_for_jit)
+        // JIT fast path: if the target has JIT code, call it directly
+        let bytecode_ptr = closure.bytecode.as_ptr();
+        if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
+            let env_ptr = if closure.env.is_empty() {
+                std::ptr::null()
+            } else {
+                closure.env.as_ptr() as *const u64
+            };
+
+            let result_bits = unsafe {
+                jit_code.call(
+                    env_ptr,
+                    args_ptr,
+                    nargs,
+                    vm as *mut crate::vm::VM as *mut (),
+                    func_bits,
+                )
+            };
+
+            // Check for exception
+            if matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))) {
+                return TAG_NIL;
+            }
+
+            // Propagate result (including TAIL_CALL_SENTINEL) to caller
+            return result_bits;
+        }
+
+        // Interpreter fallback — build env, return TAIL_CALL_SENTINEL
         let args: Vec<Value> = (0..nargs as usize)
             .map(|i| unsafe { Value::from_bits(*args_ptr.add(i)) })
             .collect();
 
-        // Build environment (same as handle_tail_call)
         let new_env = build_closure_env_for_jit(closure, &args);
-
-        // Set pending tail call (Rc clones, not data copies)
         vm.pending_tail_call = Some((closure.bytecode.clone(), closure.constants.clone(), new_env));
 
         return TAIL_CALL_SENTINEL;
