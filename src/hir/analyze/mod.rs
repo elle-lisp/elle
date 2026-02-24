@@ -1,7 +1,7 @@
 //! Syntax to HIR analysis
 //!
 //! This module converts expanded Syntax trees into HIR by:
-//! 1. Resolving all variable references to BindingIds
+//! 1. Resolving all variable references to Bindings
 //! 2. Computing captures for closures
 //! 3. Inferring effects (including interprocedural effect tracking)
 //! 4. Validating scope rules
@@ -19,11 +19,12 @@ mod call;
 mod forms;
 mod special;
 
-use super::binding::{BindingId, BindingInfo, BindingKind, CaptureInfo, CaptureKind};
+use super::binding::{Binding, CaptureInfo, CaptureKind};
 use super::expr::{Hir, HirKind};
 use crate::effects::Effect;
 use crate::symbol::SymbolTable;
 use crate::syntax::{ScopeId, Span};
+use crate::value::heap::BindingScope;
 use crate::value::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -31,61 +32,14 @@ use std::collections::{HashMap, HashSet};
 pub struct AnalysisResult {
     /// The analyzed HIR expression
     pub hir: Hir,
-    /// Binding metadata from analysis
-    pub bindings: HashMap<BindingId, BindingInfo>,
-}
-
-/// Analysis context tracking scopes and bindings
-pub struct AnalysisContext {
-    /// All bindings in the program
-    bindings: HashMap<BindingId, BindingInfo>,
-    /// Next binding ID to assign
-    next_binding_id: u32,
-}
-
-impl AnalysisContext {
-    pub fn new() -> Self {
-        AnalysisContext {
-            bindings: HashMap::new(),
-            next_binding_id: 0,
-        }
-    }
-
-    /// Create a fresh binding ID
-    pub fn fresh_binding(&mut self) -> BindingId {
-        let id = BindingId::new(self.next_binding_id);
-        self.next_binding_id += 1;
-        id
-    }
-
-    /// Register a binding
-    pub fn register_binding(&mut self, info: BindingInfo) {
-        self.bindings.insert(info.id, info);
-    }
-
-    /// Get binding info
-    pub fn get_binding(&self, id: BindingId) -> Option<&BindingInfo> {
-        self.bindings.get(&id)
-    }
-
-    /// Get mutable binding info
-    pub fn get_binding_mut(&mut self, id: BindingId) -> Option<&mut BindingInfo> {
-        self.bindings.get_mut(&id)
-    }
-}
-
-impl Default for AnalysisContext {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Tracks the sources of Yields effects within a lambda body.
 /// Used to infer Polymorphic effects for higher-order functions.
 #[derive(Debug, Clone, Default)]
 struct EffectSources {
-    /// Parameters whose calls contribute Yields effects (by their BindingId)
-    param_calls: HashSet<BindingId>,
+    /// Parameters whose calls contribute Yields effects
+    param_calls: HashSet<Binding>,
     /// Whether there's a direct yield (not from calling a parameter)
     has_direct_yield: bool,
     /// Whether there's a Yields from a non-parameter source (known yielding function, etc.)
@@ -96,7 +50,7 @@ struct EffectSources {
 #[derive(Debug, Clone)]
 struct ScopedBinding {
     scopes: Vec<ScopeId>,
-    id: BindingId,
+    binding: Binding,
 }
 
 /// Check if `subset` is a subset of `superset` (all elements of subset appear in superset).
@@ -111,7 +65,7 @@ struct Scope {
     bindings: HashMap<String, Vec<ScopedBinding>>,
     /// Is this a function scope (creates new capture boundary)
     is_function: bool,
-    /// Next local index for this scope
+    /// Next local index for this scope (used only for tracking local count)
     next_local: u16,
 }
 
@@ -127,17 +81,16 @@ impl Scope {
 
 /// Analyzer that converts Syntax to HIR
 pub struct Analyzer<'a> {
-    ctx: AnalysisContext,
     symbols: &'a mut SymbolTable,
     scopes: Vec<Scope>,
     /// Captures for the current function being analyzed
     current_captures: Vec<CaptureInfo>,
     /// Captures from the parent function (for nested closures)
     parent_captures: Vec<CaptureInfo>,
-    /// Maps BindingId -> known effect of the bound value (if it's a callable)
+    /// Maps Binding -> known effect of the bound value (if it's a callable)
     /// This enables interprocedural effect tracking: when we call a function,
     /// we can look up its effect and propagate it to the call site.
-    effect_env: HashMap<BindingId, Effect>,
+    effect_env: HashMap<Binding, Effect>,
     /// Maps SymbolId -> Effect for primitive functions
     /// Built from `register_primitive_effects` and passed in at construction
     primitive_effects: HashMap<SymbolId, Effect>,
@@ -150,7 +103,7 @@ pub struct Analyzer<'a> {
     /// Tracks effect sources within the current lambda body for polymorphic inference
     current_effect_sources: EffectSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
-    current_lambda_params: Vec<BindingId>,
+    current_lambda_params: Vec<Binding>,
     /// Immutable global bindings from previous forms (for cross-form const tracking)
     immutable_globals: std::collections::HashSet<SymbolId>,
     /// Immutable global bindings defined in this form (for cross-form tracking)
@@ -170,7 +123,6 @@ impl<'a> Analyzer<'a> {
         primitive_effects: HashMap<SymbolId, Effect>,
     ) -> Self {
         let mut analyzer = Analyzer {
-            ctx: AnalysisContext::new(),
             symbols,
             scopes: Vec::new(),
             current_captures: Vec::new(),
@@ -215,9 +167,7 @@ impl<'a> Analyzer<'a> {
     /// Analyze a syntax tree into HIR
     pub fn analyze(&mut self, syntax: &crate::syntax::Syntax) -> Result<AnalysisResult, String> {
         let hir = self.analyze_expr(syntax)?;
-        // Clone bindings instead of taking them, so they persist across multiple analyze() calls
-        let bindings = self.ctx.bindings.clone();
-        Ok(AnalysisResult { hir, bindings })
+        Ok(AnalysisResult { hir })
     }
 
     // === Scope Management ===
@@ -236,35 +186,28 @@ impl<'a> Analyzer<'a> {
         self.scopes.pop()
     }
 
-    fn bind(&mut self, name: &str, scopes: &[ScopeId], kind: BindingKind) -> BindingId {
-        let id = self.ctx.fresh_binding();
+    fn bind(&mut self, name: &str, scopes: &[ScopeId], scope: BindingScope) -> Binding {
         let sym = self.symbols.intern(name);
+        let binding = Binding::new(sym, scope);
 
-        let info = match kind {
-            BindingKind::Parameter { index } => BindingInfo::parameter(id, sym, index),
-            BindingKind::Local { index } => BindingInfo::local(id, sym, index),
-            BindingKind::Global => BindingInfo::global(id, sym),
-        };
-        self.ctx.register_binding(info);
-
-        if let Some(scope) = self.scopes.last_mut() {
-            scope
+        if let Some(scope_frame) = self.scopes.last_mut() {
+            scope_frame
                 .bindings
                 .entry(name.to_string())
                 .or_default()
                 .push(ScopedBinding {
                     scopes: scopes.to_vec(),
-                    id,
+                    binding,
                 });
-            if matches!(kind, BindingKind::Local { .. }) {
-                scope.next_local += 1;
+            if matches!(scope, BindingScope::Local) {
+                scope_frame.next_local += 1;
             }
         }
 
-        id
+        binding
     }
 
-    fn lookup(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<BindingId> {
+    fn lookup(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding> {
         let mut found_in_scope = None;
         let mut crossed_function_boundary = false;
 
@@ -288,7 +231,7 @@ impl<'a> Analyzer<'a> {
                         "Ambiguous binding: multiple candidates with same scope-set size for '{}'",
                         name
                     );
-                    found_in_scope = Some((depth, winner.id, crossed_function_boundary));
+                    found_in_scope = Some((depth, winner.binding, crossed_function_boundary));
                     break;
                 }
             }
@@ -297,94 +240,67 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        if let Some((_found_depth, id, needs_capture)) = found_in_scope {
+        if let Some((_found_depth, binding, needs_capture)) = found_in_scope {
             if needs_capture {
                 // Check if this is a global - globals are not captured, accessed directly
-                if let Some(info) = self.ctx.get_binding(id) {
-                    if matches!(info.kind, BindingKind::Global) {
-                        // Globals are accessed directly, not captured
-                        return Some(id);
-                    }
+                if binding.is_global() {
+                    return Some(binding);
                 }
 
                 // Mark as captured
-                if let Some(info) = self.ctx.get_binding_mut(id) {
-                    info.mark_captured();
-                }
+                binding.mark_captured();
 
                 // Determine capture kind based on where it was found
-                let capture_kind = if let Some(info) = self.ctx.get_binding(id) {
-                    match info.kind {
-                        BindingKind::Parameter { index } | BindingKind::Local { index } => {
-                            // Direct capture from parent's locals (parameters or local variables)
-                            CaptureKind::Local { index }
-                        }
-                        BindingKind::Global => {
-                            // This should not happen due to the check above
-                            CaptureKind::Global { sym: info.name }
+                let capture_kind = match binding.scope() {
+                    BindingScope::Parameter | BindingScope::Local => {
+                        // Direct capture from parent's locals
+                        // Use binding_to_slot in the lowerer to find the actual index
+                        // For now, use 0 as placeholder — the lowerer resolves this
+                        CaptureKind::Local
+                    }
+                    BindingScope::Global => {
+                        // This should not happen due to the check above
+                        CaptureKind::Global {
+                            sym: binding.name(),
                         }
                     }
-                } else {
-                    return Some(id);
                 };
 
                 // Add to current captures if not already present
-                if !self.current_captures.iter().any(|c| c.binding == id) {
-                    let is_mutated = self
-                        .ctx
-                        .get_binding(id)
-                        .map(|i| i.is_mutated)
-                        .unwrap_or(false);
-
+                if !self.current_captures.iter().any(|c| c.binding == binding) {
                     self.current_captures.push(CaptureInfo {
-                        binding: id,
+                        binding,
                         kind: capture_kind,
-                        is_mutated,
                     });
                 }
             }
-            return Some(id);
+            return Some(binding);
         }
 
         // If not found in scopes, check if it's in parent captures (for nested lambdas)
         if !self.parent_captures.is_empty() {
             for (capture_index, parent_cap) in self.parent_captures.iter().enumerate() {
-                if let Some(info) = self.ctx.get_binding(parent_cap.binding) {
-                    if info.name.0 == self.symbols.intern(name).0 {
-                        // Found in parent captures - create a transitive capture
-                        let binding_id = parent_cap.binding;
+                if parent_cap.binding.name().0 == self.symbols.intern(name).0 {
+                    // Found in parent captures - create a transitive capture
+                    let binding = parent_cap.binding;
 
-                        // Mark as captured
-                        if let Some(info) = self.ctx.get_binding_mut(binding_id) {
-                            info.mark_captured();
-                        }
+                    // Mark as captured
+                    binding.mark_captured();
 
-                        // Create a Capture kind that references the parent's capture index
-                        let capture_kind = CaptureKind::Capture {
-                            index: capture_index as u16,
-                        };
+                    // Create a Capture kind that references the parent's capture index
+                    let capture_kind = CaptureKind::Capture {
+                        index: capture_index as u16,
+                    };
 
-                        // Add to current captures if not already present
-                        if !self
-                            .current_captures
-                            .iter()
-                            .any(|c| c.binding == binding_id)
-                        {
-                            let is_mutated = self
-                                .ctx
-                                .get_binding(binding_id)
-                                .map(|i| i.is_mutated)
-                                .unwrap_or(false);
-
-                            self.current_captures.push(CaptureInfo {
-                                binding: binding_id,
-                                kind: capture_kind,
-                                is_mutated,
-                            });
-                        }
-
-                        return Some(binding_id);
+                    // Add to current captures if not already present
+                    if !self.current_captures.iter().any(|c| c.binding == binding) {
+                        self.current_captures.push(CaptureInfo {
+                            binding,
+                            kind: capture_kind,
+                        });
                     }
+
+                    return Some(binding);
                 }
             }
         }
@@ -392,23 +308,19 @@ impl<'a> Analyzer<'a> {
         None
     }
 
-    fn current_local_index(&self) -> u16 {
-        self.scopes.last().map(|s| s.next_local).unwrap_or(0)
-    }
-
     fn current_local_count(&self) -> u16 {
         self.scopes.last().map(|s| s.next_local).unwrap_or(0)
     }
 
     /// Check if a binding is accessible in the current scope stack without crossing a function boundary
-    fn is_binding_in_current_scope(&self, binding_id: BindingId) -> bool {
+    fn is_binding_in_current_scope(&self, binding: Binding) -> bool {
         // Walk scopes from innermost to outermost, stopping at function boundaries
         for scope in self.scopes.iter().rev() {
             if scope
                 .bindings
                 .values()
                 .flat_map(|v| v.iter())
-                .any(|sb| sb.id == binding_id)
+                .any(|sb| sb.binding == binding)
             {
                 return true;
             }
@@ -421,14 +333,14 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Look up a binding in only the current (innermost) scope, not walking up the scope chain
-    fn lookup_in_current_scope(&self, name: &str, ref_scopes: &[ScopeId]) -> Option<BindingId> {
+    fn lookup_in_current_scope(&self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding> {
         self.scopes.last().and_then(|scope| {
             scope.bindings.get(name).and_then(|candidates| {
                 candidates
                     .iter()
                     .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
                     .max_by_key(|c| c.scopes.len())
-                    .map(|c| c.id)
+                    .map(|c| c.binding)
             })
         })
     }
@@ -527,32 +439,20 @@ mod tests {
     }
 
     #[test]
-    fn test_fresh_binding_id() {
-        let mut ctx = AnalysisContext::new();
-        let id1 = ctx.fresh_binding();
-        let id2 = ctx.fresh_binding();
-        assert_ne!(id1, id2);
-        assert_eq!(id1, BindingId::new(0));
-        assert_eq!(id2, BindingId::new(1));
-    }
-
-    #[test]
     fn test_binding_info() {
-        let id = BindingId::new(0);
         let sym = SymbolId(1);
+        let binding = Binding::new(sym, BindingScope::Local);
+        assert!(!binding.is_mutated());
+        assert!(!binding.is_captured());
+        assert!(!binding.needs_cell());
 
-        let mut info = BindingInfo::local(id, sym, 0);
-        assert!(!info.is_mutated);
-        assert!(!info.is_captured);
-        assert!(!info.needs_cell());
+        binding.mark_mutated();
+        assert!(binding.is_mutated());
+        assert!(!binding.needs_cell());
 
-        info.mark_mutated();
-        assert!(info.is_mutated);
-        assert!(!info.needs_cell());
-
-        info.mark_captured();
-        assert!(info.is_captured);
-        assert!(info.needs_cell());
+        binding.mark_captured();
+        assert!(binding.is_captured());
+        assert!(binding.needs_cell());
     }
 
     // === Scope-aware binding resolution tests ===
@@ -598,8 +498,8 @@ mod tests {
         let mut symbols = SymbolTable::new();
         let mut analyzer = Analyzer::new(&mut symbols);
         analyzer.push_scope(false);
-        let id = analyzer.bind("x", &[], BindingKind::Local { index: 0 });
-        assert_eq!(analyzer.lookup("x", &[]), Some(id));
+        let binding = analyzer.bind("x", &[], BindingScope::Local);
+        assert_eq!(analyzer.lookup("x", &[]), Some(binding));
     }
 
     #[test]
@@ -608,7 +508,7 @@ mod tests {
         let mut symbols = SymbolTable::new();
         let mut analyzer = Analyzer::new(&mut symbols);
         analyzer.push_scope(false);
-        analyzer.bind("tmp", &[ScopeId(1)], BindingKind::Local { index: 0 });
+        analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
         // Reference with empty scopes cannot see binding with {S1}
         assert_eq!(analyzer.lookup("tmp", &[]), None);
     }
@@ -619,8 +519,8 @@ mod tests {
         let mut symbols = SymbolTable::new();
         let mut analyzer = Analyzer::new(&mut symbols);
         analyzer.push_scope(false);
-        let id = analyzer.bind("tmp", &[ScopeId(1)], BindingKind::Local { index: 0 });
-        assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(id));
+        let binding = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
+        assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(binding));
     }
 
     #[test]
@@ -630,9 +530,9 @@ mod tests {
         let mut symbols = SymbolTable::new();
         let mut analyzer = Analyzer::new(&mut symbols);
         analyzer.push_scope(false);
-        let _outer_id = analyzer.bind("tmp", &[], BindingKind::Local { index: 0 });
-        let inner_id = analyzer.bind("tmp", &[ScopeId(1)], BindingKind::Local { index: 1 });
-        assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(inner_id));
+        let _outer = analyzer.bind("tmp", &[], BindingScope::Local);
+        let inner = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
+        assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(inner));
     }
 
     #[test]
@@ -642,9 +542,9 @@ mod tests {
         let mut symbols = SymbolTable::new();
         let mut analyzer = Analyzer::new(&mut symbols);
         analyzer.push_scope(false);
-        let outer_id = analyzer.bind("tmp", &[], BindingKind::Local { index: 0 });
-        let _inner_id = analyzer.bind("tmp", &[ScopeId(1)], BindingKind::Local { index: 1 });
-        assert_eq!(analyzer.lookup("tmp", &[]), Some(outer_id));
+        let outer = analyzer.bind("tmp", &[], BindingScope::Local);
+        let _inner = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
+        assert_eq!(analyzer.lookup("tmp", &[]), Some(outer));
     }
 
     #[test]
@@ -652,11 +552,11 @@ mod tests {
         let mut symbols = SymbolTable::new();
         let mut analyzer = Analyzer::new(&mut symbols);
         analyzer.push_scope(false);
-        let id = analyzer.bind("x", &[ScopeId(1)], BindingKind::Local { index: 0 });
+        let binding = analyzer.bind("x", &[ScopeId(1)], BindingScope::Local);
         // Visible with matching scopes
         assert_eq!(
             analyzer.lookup_in_current_scope("x", &[ScopeId(1)]),
-            Some(id)
+            Some(binding)
         );
         // Invisible with empty scopes
         assert_eq!(analyzer.lookup_in_current_scope("x", &[]), None);

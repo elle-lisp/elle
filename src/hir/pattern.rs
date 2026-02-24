@@ -1,6 +1,6 @@
 //! Pattern matching in HIR
 
-use super::binding::BindingId;
+use super::binding::Binding;
 
 /// HIR pattern for match expressions
 #[derive(Debug, Clone)]
@@ -15,7 +15,7 @@ pub enum HirPattern {
     Literal(PatternLiteral),
 
     /// Bind to a variable
-    Var(BindingId),
+    Var(Binding),
 
     /// Match cons cell and destructure
     Cons {
@@ -43,7 +43,7 @@ pub enum PatternLiteral {
 /// Bindings introduced by a pattern
 #[derive(Debug, Clone, Default)]
 pub struct PatternBindings {
-    pub bindings: Vec<BindingId>,
+    pub bindings: Vec<Binding>,
 }
 
 impl PatternBindings {
@@ -53,12 +53,12 @@ impl PatternBindings {
         }
     }
 
-    pub fn add(&mut self, id: BindingId) {
-        self.bindings.push(id);
+    pub fn add(&mut self, binding: Binding) {
+        self.bindings.push(binding);
     }
 
     pub fn extend(&mut self, other: &PatternBindings) {
-        self.bindings.extend(other.bindings.iter().cloned());
+        self.bindings.extend(other.bindings.iter().copied());
     }
 }
 
@@ -72,7 +72,7 @@ impl HirPattern {
 
     fn collect_bindings(&self, out: &mut PatternBindings) {
         match self {
-            HirPattern::Var(id) => out.add(*id),
+            HirPattern::Var(binding) => out.add(*binding),
             HirPattern::Cons { head, tail } => {
                 head.collect_bindings(out);
                 tail.collect_bindings(out);

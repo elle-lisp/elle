@@ -77,6 +77,11 @@ impl PartialEq for Value {
                 // Syntax comparison (by reference — same Rc)
                 (HeapObject::Syntax(s1), HeapObject::Syntax(s2)) => std::rc::Rc::ptr_eq(s1, s2),
 
+                // Binding comparison (by reference — same heap allocation)
+                (HeapObject::Binding(_), HeapObject::Binding(_)) => {
+                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
+                }
+
                 // Different types are not equal
                 _ => false,
             }

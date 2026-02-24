@@ -394,6 +394,26 @@ impl Value {
         }
     }
 
+    /// Check if this is a binding.
+    #[inline]
+    pub fn is_binding(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::Binding)
+    }
+
+    /// Extract as binding inner if this is a binding.
+    #[inline]
+    pub fn as_binding(&self) -> Option<&std::cell::RefCell<crate::value::heap::BindingInner>> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::Binding(inner) => Some(inner),
+            _ => None,
+        }
+    }
+
     /// Convert a proper list to a Vec.
     pub fn list_to_vec(&self) -> Result<Vec<Value>, &'static str> {
         let mut result = Vec::new();

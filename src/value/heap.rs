@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::syntax::Syntax;
 use crate::value::ffi::ThreadHandle;
 use crate::value::fiber::FiberHandle;
+use crate::value::types::SymbolId;
 use crate::value::Value;
 
 // Re-export types for convenience
@@ -51,6 +52,7 @@ pub enum HeapTag {
     CHandle = 13,
     ThreadHandle = 14,
     Fiber = 16,
+    Binding = 17,
 }
 
 /// All heap-allocated value types.
@@ -108,6 +110,37 @@ pub enum HeapObject {
     /// references compile-time types — an intentional coupling required
     /// for first-class syntax objects in hygienic macros.
     Syntax(Rc<Syntax>),
+
+    /// Compile-time binding metadata. Mutable during analysis (the analyzer
+    /// discovers captures and mutations after creating the binding), read-only
+    /// during lowering. Never appears at runtime — the VM never sees this type.
+    Binding(RefCell<BindingInner>),
+}
+
+/// Internal binding metadata, heap-allocated behind the Value pointer.
+#[derive(Debug)]
+pub struct BindingInner {
+    /// Original symbol name (for error messages and global lookup)
+    pub name: SymbolId,
+    /// Where this binding lives
+    pub scope: BindingScope,
+    /// Whether this binding has been mutated via set!
+    pub is_mutated: bool,
+    /// Whether this binding is captured by a nested closure
+    pub is_captured: bool,
+    /// Whether this binding is immutable (def)
+    pub is_immutable: bool,
+}
+
+/// Where a binding lives at runtime
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingScope {
+    /// Lambda parameter
+    Parameter,
+    /// Local variable (let-bound, define inside function)
+    Local,
+    /// Global/top-level definition
+    Global,
 }
 
 /// Data for thread handles.
@@ -145,6 +178,7 @@ impl HeapObject {
             HeapObject::ThreadHandle(_) => HeapTag::ThreadHandle,
             HeapObject::Fiber(_) => HeapTag::Fiber,
             HeapObject::Syntax(_) => HeapTag::Syntax,
+            HeapObject::Binding(_) => HeapTag::Binding,
         }
     }
 
@@ -166,6 +200,7 @@ impl HeapObject {
             HeapObject::ThreadHandle(_) => "thread-handle",
             HeapObject::Fiber(_) => "fiber",
             HeapObject::Syntax(_) => "syntax",
+            HeapObject::Binding(_) => "binding",
         }
     }
 }
@@ -206,6 +241,7 @@ impl std::fmt::Debug for HeapObject {
                 None => write!(f, "<fiber:taken>"),
             },
             HeapObject::Syntax(s) => write!(f, "#<syntax:{}>", s),
+            HeapObject::Binding(_) => write!(f, "#<binding>"),
         }
     }
 }

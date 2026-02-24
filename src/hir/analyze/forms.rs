@@ -19,13 +19,12 @@ impl<'a> Analyzer<'a> {
             // Variable reference
             SyntaxKind::Symbol(name) => {
                 match self.lookup(name, syntax.scopes.as_slice()) {
-                    Some(id) => Ok(Hir::pure(HirKind::Var(id), span)),
+                    Some(binding) => Ok(Hir::pure(HirKind::Var(binding), span)),
                     None => {
                         // Treat as global reference
                         let sym = self.symbols.intern(name);
-                        let id = self.ctx.fresh_binding();
-                        self.ctx.register_binding(BindingInfo::global(id, sym));
-                        Ok(Hir::pure(HirKind::Var(id), span))
+                        let binding = Binding::new(sym, BindingScope::Global);
+                        Ok(Hir::pure(HirKind::Var(binding), span))
                     }
                 }
             }
@@ -41,9 +40,8 @@ impl<'a> Analyzer<'a> {
                 }
                 // Look up the 'array' primitive and call it with the elements
                 let sym = self.symbols.intern("array");
-                let id = self.ctx.fresh_binding();
-                self.ctx.register_binding(BindingInfo::global(id, sym));
-                let func = Hir::new(HirKind::Var(id), span.clone(), Effect::none());
+                let binding = Binding::new(sym, BindingScope::Global);
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -160,8 +158,7 @@ impl<'a> Analyzer<'a> {
             for item in items {
                 if let Some((name, scopes)) = Self::is_define_form(item) {
                     // Create local binding slot
-                    let local_index = self.current_local_count();
-                    self.bind(name, scopes, BindingKind::Local { index: local_index });
+                    self.bind(name, scopes, BindingScope::Local);
                 }
             }
 
@@ -257,11 +254,7 @@ impl<'a> Analyzer<'a> {
         let iter = self.analyze_expr(&items[iter_idx])?;
 
         self.push_scope(false);
-        let var_id = self.bind(
-            var_name,
-            items[1].scopes.as_slice(),
-            BindingKind::Local { index: 0 },
-        );
+        let var_id = self.bind(var_name, items[1].scopes.as_slice(), BindingScope::Local);
         let body = self.analyze_expr(&items[body_idx])?;
         self.pop_scope();
 

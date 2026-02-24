@@ -10,15 +10,15 @@
 //! ```
 
 mod analyze;
-mod binding;
+pub mod binding;
 mod expr;
 pub mod lint;
 mod pattern;
 pub mod symbols;
 pub mod tailcall;
 
-pub use analyze::{AnalysisContext, AnalysisResult, Analyzer};
-pub use binding::{BindingId, BindingInfo, BindingKind, CaptureInfo, CaptureKind};
+pub use analyze::{AnalysisResult, Analyzer};
+pub use binding::{Binding, CaptureInfo, CaptureKind};
 pub use expr::{Hir, HirKind};
 pub use lint::HirLinter;
 pub use pattern::{HirPattern, PatternBindings, PatternLiteral};

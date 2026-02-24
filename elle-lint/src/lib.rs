@@ -63,7 +63,7 @@ impl Linter {
 
         // Lint each analyzed form
         for analysis in &analyses {
-            let mut hir_linter = elle::hir::HirLinter::new(analysis.bindings.clone());
+            let mut hir_linter = elle::hir::HirLinter::new();
             hir_linter.lint(&analysis.hir, &symbols);
             self.diagnostics
                 .extend(hir_linter.diagnostics().iter().cloned());

@@ -85,24 +85,23 @@ New types:
 ```rust
 struct ScopedBinding {
     scopes: Vec<ScopeId>,
-    id: BindingId,
+    binding: Binding,  // NaN-boxed Value wrapping HeapObject::Binding
 }
 
 struct Scope {
     bindings: HashMap<String, Vec<ScopedBinding>>,
     is_function: bool,
-    next_local: u16,
 }
 ```
 
 Change `bind()` signature:
 ```rust
-fn bind(&mut self, name: &str, scopes: &[ScopeId], kind: BindingKind) -> BindingId
+fn bind(&mut self, name: &str, scopes: &[ScopeId], binding: Binding)
 ```
 
 Change `lookup()` signature and algorithm:
 ```rust
-fn lookup(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<BindingId>
+fn lookup(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding>
 ```
 
 The algorithm:

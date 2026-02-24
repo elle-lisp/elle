@@ -132,6 +132,7 @@ fn format_value(
             HeapObject::Float(_) => return "#<float>".to_string(),
             HeapObject::Fiber(_) => return "#<fiber>".to_string(),
             HeapObject::Syntax(s) => return format!("#<syntax:{}>", s),
+            HeapObject::Binding(_) => return "#<binding>".to_string(),
         }
     }
 

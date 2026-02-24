@@ -119,6 +119,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             HeapTag::ThreadHandle => Err("Cannot serialize thread handles to JSON".to_string()),
             HeapTag::Fiber => Err("Cannot serialize fibers to JSON".to_string()),
             HeapTag::Syntax => Err("Cannot serialize syntax objects to JSON".to_string()),
+            HeapTag::Binding => Err("Cannot serialize bindings to JSON".to_string()),
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())
@@ -265,6 +266,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             HeapTag::ThreadHandle => Err("Cannot serialize thread handles to JSON".to_string()),
             HeapTag::Fiber => Err("Cannot serialize fibers to JSON".to_string()),
             HeapTag::Syntax => Err("Cannot serialize syntax objects to JSON".to_string()),
+            HeapTag::Binding => Err("Cannot serialize bindings to JSON".to_string()),
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())

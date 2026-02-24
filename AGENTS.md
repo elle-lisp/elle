@@ -109,8 +109,9 @@ benchmarks, rustdoc, elle-doc site generation. All must pass.
 
 These must remain true. Violating them breaks the system:
 
-1. **Bindings are resolved at analysis time.** HIR contains `BindingId`, not
-   symbols. If you see symbol lookup at runtime, something is wrong.
+1. **Bindings are resolved at analysis time.** HIR contains `Binding` (NaN-boxed
+   Value pointing to heap `BindingInner`), not symbols. If you see symbol
+   lookup at runtime, something is wrong.
 
 2. **Closures capture by value into their environment.** Mutable captures use
    `LocalCell`. The `cell_params_mask` on `Closure` tracks which parameters need

@@ -8,7 +8,7 @@ mod pattern;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
-use crate::hir::{BindingId, BindingInfo, BindingKind, Hir, HirKind};
+use crate::hir::{Binding, Hir, HirKind};
 use crate::syntax::Span;
 use crate::value::{SymbolId, Value};
 use rustc_hash::FxHashMap;
@@ -24,24 +24,22 @@ pub struct Lowerer {
     next_reg: u32,
     /// Next label ID
     next_label: u32,
-    /// Mapping from BindingId to local slot
-    binding_to_slot: HashMap<BindingId, u16>,
-    /// Binding metadata from analysis
-    bindings: HashMap<BindingId, BindingInfo>,
+    /// Mapping from Binding to local slot
+    binding_to_slot: HashMap<Binding, u16>,
     /// Whether we're currently lowering a lambda (closure)
     in_lambda: bool,
     /// Number of captured variables (for lambda context)
     num_captures: u16,
     /// Set of bindings that are upvalues (captures/parameters in lambda)
     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal
-    upvalue_bindings: std::collections::HashSet<BindingId>,
+    upvalue_bindings: std::collections::HashSet<Binding>,
     /// Current span for emitted instructions
     current_span: Span,
     /// Intrinsic operations for operator specialization.
     /// Maps global SymbolId to specialized LIR instruction.
     intrinsics: FxHashMap<SymbolId, IntrinsicOp>,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
-    immutable_values: HashMap<BindingId, Value>,
+    immutable_values: HashMap<Binding, Value>,
 }
 
 impl Lowerer {
@@ -52,7 +50,6 @@ impl Lowerer {
             next_reg: 0,
             next_label: 1, // 0 is entry
             binding_to_slot: HashMap::new(),
-            bindings: HashMap::new(),
             in_lambda: false,
             num_captures: 0,
             upvalue_bindings: std::collections::HashSet::new(),
@@ -60,12 +57,6 @@ impl Lowerer {
             intrinsics: FxHashMap::default(),
             immutable_values: HashMap::new(),
         }
-    }
-
-    /// Set binding info from analysis
-    pub fn with_bindings(mut self, bindings: HashMap<BindingId, BindingInfo>) -> Self {
-        self.bindings = bindings;
-        self
     }
 
     /// Set intrinsic operations for operator specialization
@@ -105,7 +96,7 @@ impl Lowerer {
         r
     }
 
-    fn allocate_slot(&mut self, binding: BindingId) -> u16 {
+    fn allocate_slot(&mut self, binding: Binding) -> u16 {
         // Inside a lambda, slots need to account for the captures offset
         // Environment layout: [captures..., params..., locally_defined...]
         // num_locals tracks params + locally_defined (NOT captures)

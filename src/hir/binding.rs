@@ -1,127 +1,115 @@
-//! Binding resolution types for HIR
+//! Binding types for HIR
+//!
+//! A `Binding` is a NaN-boxed Value pointing to a HeapObject::Binding on the
+//! heap. Identity is bit-pattern equality (same heap pointer = same binding).
+//! Binding is Copy (8 bytes). The underlying BindingInner is mutable via
+//! RefCell during analysis; the lowerer only reads.
+//!
+//! Binding must only be constructed via `Binding::new()`.
+//!
+//! Each `Binding::new()` leaks an `Rc<HeapObject>` (via `Rc::into_raw` in
+//! `alloc()`). This is the same pattern used for all NaN-boxed heap values.
+//! The leak is bounded by the number of binding sites per compilation unit.
 
-use crate::value::SymbolId;
+use crate::value::heap::{BindingInner, BindingScope};
+use crate::value::{SymbolId, Value};
+use std::fmt;
+use std::hash::{Hash, Hasher};
 
-/// Unique identifier for a binding, assigned during analysis.
-/// Unlike SymbolId, this is unique per binding site - two `let x` in
-/// different scopes get different BindingIds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BindingId(pub u32);
+/// A binding handle wrapping a NaN-boxed Value.
+#[derive(Clone, Copy)]
+pub struct Binding(Value);
 
-impl BindingId {
-    /// Create a new binding ID
-    pub fn new(id: u32) -> Self {
-        BindingId(id)
+impl Binding {
+    /// Create a new binding
+    pub fn new(name: SymbolId, scope: BindingScope) -> Self {
+        Binding(Value::binding(name, scope))
+    }
+
+    /// Get the inner RefCell for direct access
+    fn inner(&self) -> &std::cell::RefCell<BindingInner> {
+        self.0.as_binding().expect("Binding holds a binding Value")
+    }
+
+    // Read accessors
+    pub fn name(&self) -> SymbolId {
+        self.inner().borrow().name
+    }
+    pub fn scope(&self) -> BindingScope {
+        self.inner().borrow().scope
+    }
+    pub fn is_mutated(&self) -> bool {
+        self.inner().borrow().is_mutated
+    }
+    pub fn is_captured(&self) -> bool {
+        self.inner().borrow().is_captured
+    }
+    pub fn is_immutable(&self) -> bool {
+        self.inner().borrow().is_immutable
+    }
+    pub fn is_global(&self) -> bool {
+        self.scope() == BindingScope::Global
+    }
+
+    /// A binding needs a cell if captured (for locals) or mutated (for params)
+    pub fn needs_cell(&self) -> bool {
+        let inner = self.inner().borrow();
+        match inner.scope {
+            BindingScope::Local => inner.is_captured,
+            BindingScope::Parameter => inner.is_mutated,
+            BindingScope::Global => false,
+        }
+    }
+
+    // Mutation (used by analyzer during analysis only)
+    pub fn mark_mutated(&self) {
+        self.inner().borrow_mut().is_mutated = true;
+    }
+    pub fn mark_captured(&self) {
+        self.inner().borrow_mut().is_captured = true;
+    }
+    pub fn mark_immutable(&self) {
+        self.inner().borrow_mut().is_immutable = true;
     }
 }
 
-/// Information about a binding
-#[derive(Debug, Clone)]
-pub struct BindingInfo {
-    /// The unique binding ID
-    pub id: BindingId,
-    /// Original symbol name (for debugging/error messages)
-    pub name: SymbolId,
-    /// Whether this binding is mutated (via set!)
-    pub is_mutated: bool,
-    /// Whether this binding is captured by a nested closure
-    pub is_captured: bool,
-    /// Whether this binding is immutable (def)
-    pub is_immutable: bool,
-    /// The kind of binding
-    pub kind: BindingKind,
+impl PartialEq for Binding {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
 }
 
-/// What kind of binding this is
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BindingKind {
-    /// Lambda parameter
-    Parameter { index: u16 },
-    /// Let-bound variable
-    Local { index: u16 },
-    /// Global/top-level definition
-    Global,
+impl Eq for Binding {}
+
+impl Hash for Binding {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+    }
+}
+
+impl fmt::Debug for Binding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let inner = self.inner().borrow();
+        write!(f, "Binding({:?}, {:?})", inner.name, inner.scope)
+    }
 }
 
 /// Information about a captured variable in a closure
 #[derive(Debug, Clone)]
 pub struct CaptureInfo {
     /// The binding being captured
-    pub binding: BindingId,
+    pub binding: Binding,
     /// How to access this capture from the parent scope
     pub kind: CaptureKind,
-    /// Whether the captured variable is mutated (requires cell boxing)
-    pub is_mutated: bool,
 }
 
 /// How a capture is accessed from the enclosing scope
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureKind {
-    /// Capture from parent's local slot
-    Local { index: u16 },
+    /// Capture from parent's local slot (resolved by lowerer via binding_to_slot)
+    Local,
     /// Capture from parent's capture (transitive capture)
     Capture { index: u16 },
     /// Capture from global scope
     Global { sym: SymbolId },
-}
-
-impl BindingInfo {
-    /// Create a new parameter binding
-    pub fn parameter(id: BindingId, name: SymbolId, index: u16) -> Self {
-        BindingInfo {
-            id,
-            name,
-            is_mutated: false,
-            is_captured: false,
-            is_immutable: false,
-            kind: BindingKind::Parameter { index },
-        }
-    }
-
-    /// Create a new local binding
-    pub fn local(id: BindingId, name: SymbolId, index: u16) -> Self {
-        BindingInfo {
-            id,
-            name,
-            is_mutated: false,
-            is_captured: false,
-            is_immutable: false,
-            kind: BindingKind::Local { index },
-        }
-    }
-
-    /// Create a new global binding
-    pub fn global(id: BindingId, name: SymbolId) -> Self {
-        BindingInfo {
-            id,
-            name,
-            is_mutated: false,
-            is_captured: false,
-            is_immutable: false,
-            kind: BindingKind::Global,
-        }
-    }
-
-    /// Mark this binding as mutated
-    pub fn mark_mutated(&mut self) {
-        self.is_mutated = true;
-    }
-
-    /// Mark this binding as captured
-    pub fn mark_captured(&mut self) {
-        self.is_captured = true;
-    }
-
-    /// Check if this binding needs to be boxed in a cell
-    /// A binding needs a cell if:
-    /// - It's mutated AND captured (standard case for mutable captures)
-    /// - OR it's captured AND it's a Local (for letrec-style recursive bindings)
-    /// - OR it's a Parameter that's mutated (even if not captured, for StoreCapture to work)
-    pub fn needs_cell(&self) -> bool {
-        match self.kind {
-            BindingKind::Local { .. } => self.is_captured, // Locals need cell if captured (for letrec semantics)
-            BindingKind::Parameter { .. } => self.is_mutated, // Params need cell if mutated (for set! to work)
-            BindingKind::Global => false,                     // Globals don't use cells
-        }
-    }
 }

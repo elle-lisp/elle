@@ -93,6 +93,9 @@ fn is_value_sendable(value: &Value) -> bool {
 
         // Syntax objects are not sendable (contain Rc)
         HeapObject::Syntax(_) => false,
+
+        // Bindings are compile-time only, not sendable
+        HeapObject::Binding(_) => false,
     }
 }
 

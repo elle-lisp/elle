@@ -1,6 +1,6 @@
 //! HIR expression types
 
-use super::binding::{BindingId, CaptureInfo};
+use super::binding::{Binding, CaptureInfo};
 use super::pattern::HirPattern;
 use crate::effects::Effect;
 use crate::syntax::Span;
@@ -44,24 +44,24 @@ pub enum HirKind {
 
     // === Variables ===
     /// Reference to a binding (fully resolved)
-    Var(BindingId),
+    Var(Binding),
 
     // === Binding Forms ===
     /// Let binding
     Let {
-        bindings: Vec<(BindingId, Hir)>,
+        bindings: Vec<(Binding, Hir)>,
         body: Box<Hir>,
     },
 
     /// Letrec (mutually recursive bindings)
     Letrec {
-        bindings: Vec<(BindingId, Hir)>,
+        bindings: Vec<(Binding, Hir)>,
         body: Box<Hir>,
     },
 
     /// Lambda expression
     Lambda {
-        params: Vec<BindingId>,
+        params: Vec<Binding>,
         captures: Vec<CaptureInfo>,
         body: Box<Hir>,
         /// Number of local slots needed (params + locals)
@@ -105,19 +105,14 @@ pub enum HirKind {
     // === Mutation ===
     /// Set! - mutate a binding
     Set {
-        target: BindingId,
+        target: Binding,
         value: Box<Hir>,
     },
 
-    /// Define - create/update global binding
+    /// Define - create/update a binding (global or local).
+    /// The lowerer checks binding.is_global() to decide StoreGlobal vs StoreLocal.
     Define {
-        name: SymbolId,
-        value: Box<Hir>,
-    },
-
-    /// LocalDefine - create a local binding inside a function
-    LocalDefine {
-        binding: BindingId,
+        binding: Binding,
         value: Box<Hir>,
     },
 
@@ -130,7 +125,7 @@ pub enum HirKind {
 
     /// For/each loop
     For {
-        var: BindingId,
+        var: Binding,
         iter: Box<Hir>,
         body: Box<Hir>,
     },

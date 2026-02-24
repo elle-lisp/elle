@@ -7,7 +7,7 @@ impl Lowerer {
     /// Lower a lambda expression (creates closure with captures)
     pub(super) fn lower_lambda_expr(
         &mut self,
-        params: &[BindingId],
+        params: &[Binding],
         captures: &[CaptureInfo],
         body: &Hir,
         num_locals: u16,
@@ -22,14 +22,10 @@ impl Lowerer {
 
             // Check if this binding needs a cell (captured locals, mutated params)
             // We need to preserve the cell when capturing so mutations are shared
-            let binding_needs_cell = self
-                .bindings
-                .get(&cap.binding)
-                .map(|info| info.needs_cell())
-                .unwrap_or(false);
+            let binding_needs_cell = cap.binding.needs_cell();
 
             match cap.kind {
-                CaptureKind::Local { index: _ } => {
+                CaptureKind::Local => {
                     // Load from parent's local/parameter slot
                     // Use binding_to_slot to find where this binding is in the current context
                     if let Some(&slot) = self.binding_to_slot.get(&cap.binding) {
@@ -108,7 +104,7 @@ impl Lowerer {
     /// Lower a lambda body to a separate LirFunction
     fn lower_lambda_body(
         &mut self,
-        params: &[BindingId],
+        params: &[Binding],
         captures: &[CaptureInfo],
         body: &Hir,
         _num_locals: u16,
@@ -156,11 +152,7 @@ impl Lowerer {
         for (i, param) in params.iter().enumerate() {
             let upvalue_idx = self.num_captures + i as u16;
 
-            let needs_cell = self
-                .bindings
-                .get(param)
-                .map(|info| info.needs_cell())
-                .unwrap_or(false);
+            let needs_cell = param.needs_cell();
 
             if needs_cell && i < 64 {
                 // Set the bit for this parameter

@@ -6,7 +6,7 @@ and basic blocks. Architecture-independent but close to target.
 ## Responsibility
 
 - Lower HIR to explicit control flow (basic blocks, jumps)
-- Translate `BindingId` references to concrete slot indices
+- Translate `Binding` references to concrete slot indices
 - Emit cell operations for mutable captures
 - Produce bytecode via `Emitter`
 
@@ -33,12 +33,12 @@ Does NOT:
 ## Data flow
 
 ```
-HIR + bindings + spans
+HIR + spans
     │
     ▼
 Lowerer
-    ├─► allocate slots for bindings
-    ├─► emit MakeCell for captured locals
+    ├─► allocate slots for bindings (HashMap<Binding, u16>)
+    ├─► emit MakeCell for captured locals (binding.needs_cell())
     ├─► lower control flow to jumps
     ├─► emit LoadCapture/StoreCapture for upvalues
     └─► propagate HIR spans to SpannedInstr
@@ -56,6 +56,10 @@ Emitter
     ▼
 Bytecode + LocationMap
 ```
+
+The lowerer reads binding metadata directly from `Binding` objects (via
+`binding.needs_cell()`, `binding.is_global()`, `binding.name()`, etc.)
+rather than looking up a separate bindings HashMap.
 
 ## Source location tracking
 
@@ -86,7 +90,8 @@ stored in `Closure.location_map` and used by the VM for error reporting.
    or `Unreachable`. No fall-through.
 
 3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with
-   "unknown binding," the HIR→LIR mapping is incomplete.
+   "unknown binding," the HIR→LIR mapping is incomplete. The key is `Binding`
+   (hashed by `Value::to_bits()`), the value is `u16` slot index.
 
 4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies,
    captures and parameters are upvalues; they use LoadCapture, not LoadLocal.

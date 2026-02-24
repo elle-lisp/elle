@@ -6,7 +6,7 @@ bindings, inferred effects, and computed captures.
 ## Responsibility
 
 Transform expanded Syntax into a representation suitable for lowering.
-- Resolve all variable references to `BindingId`
+- Resolve all variable references to `Binding` (NaN-boxed heap objects)
 - Compute closure captures
 - Infer effects
 - Validate scope rules
@@ -22,15 +22,14 @@ Does NOT:
 |------|---------|
 | `Hir` | Expression node with kind, span, effect |
 | `HirKind` | Expression variants (literals, control flow, etc.) |
-| `BindingId` | Unique identifier per binding site |
-| `BindingInfo` | Metadata: name, mutated?, captured?, kind |
-| `BindingKind` | `Parameter`, `Local`, or `Global` |
+| `Binding` | NaN-boxed Value wrapping `HeapObject::Binding(RefCell<BindingInner>)` — Copy, identity by bit-pattern |
+| `BindingScope` | `Parameter`, `Local`, or `Global` (in `value::heap`) |
 | `CaptureInfo` | What a closure captures and how |
 | `CaptureKind` | `Local`, `Capture` (transitive), or `Global` |
 | `Analyzer` | Transforms Syntax → HIR |
-| `AnalysisResult` | HIR + binding metadata |
-| `HirLinter` | HIR-based linter producing Diagnostics |
-| `extract_symbols_from_hir` | Builds SymbolIndex from HIR |
+| `AnalysisResult` | HIR (no separate bindings map — metadata is inline in Binding) |
+| `HirLinter` | HIR-based linter producing Diagnostics (no constructor args) |
+| `extract_symbols_from_hir` | Builds SymbolIndex from HIR (2 args: hir, symbols) |
 
 ## Data flow
 
@@ -39,32 +38,33 @@ Syntax (expanded)
     │
     ▼
 Analyzer
-    ├─► resolve variables → BindingId
-    ├─► track mutations → is_mutated
-    ├─► track captures → CaptureInfo
+    ├─► resolve variables → Binding (heap-allocated, shared by reference)
+    ├─► track mutations → binding.mark_mutated()
+    ├─► track captures → binding.mark_captured() + CaptureInfo
     └─► infer effects → Effect
     │
     ▼
-HIR + bindings HashMap
+HIR (bindings are inline — no separate HashMap)
 ```
 
 ## Dependents
 
-- `lir/lower.rs` - consumes HIR, uses binding info for cell decisions
+- `lir/lower/` - consumes HIR, reads `binding.needs_cell()` / `binding.is_global()` directly
 - `pipeline.rs` - orchestrates Syntax → HIR → LIR → Bytecode
 - `elle-lint` - uses `HirLinter` for static analysis
 - `elle-lsp` - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
 
 ## Invariants
 
-1. **Every variable reference is a `BindingId`.** No symbols in HIR. If you
+1. **Every variable reference is a `Binding`.** No symbols in HIR. If you
    see a symbol at this stage, analysis failed.
 
-2. **`BindingId` is unique per binding site.** Two `let x` in different
-   scopes get different IDs, unlike `SymbolId` which is per-name.
+2. **`Binding` identity is bit-pattern equality.** Two references to the same
+   binding site share the same NaN-boxed pointer. `Binding` implements
+   `Hash`/`Eq` via `Value::to_bits()`.
 
-3. **`needs_cell()` determines cell boxing.** A binding needs a cell if
-   it's captured AND mutated, or if it's a local that's captured.
+3. **`needs_cell()` determines cell boxing.** A local binding needs a cell if
+   captured. A parameter needs a cell if mutated. Globals never need cells.
 
 4. **Effects combine upward.** A `begin` has the combined effect of its
    children. A `fn` body's effect is stored but the fn itself is Pure.
@@ -83,18 +83,26 @@ HIR + bindings HashMap
    the largest scope set wins (most specific). Empty scopes `[]` is a subset
    of everything, so pre-expansion code works identically.
 
+8. **`Define` and `LocalDefine` are unified.** There is a single
+   `HirKind::Define { binding, value }`. The lowerer checks
+   `binding.is_global()` to decide between global and local define semantics.
+
+9. **Binding metadata is mutable during analysis, read-only after.** The
+   analyzer calls `mark_mutated()`, `mark_captured()`, `mark_immutable()`.
+   The lowerer only reads via `needs_cell()`, `is_global()`, `name()`, etc.
+
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | 25 | Re-exports |
-| `analyze/mod.rs` | ~600 | `Analyzer` struct, `AnalysisContext`, `ScopedBinding`, scope-aware resolution |
+| `analyze/mod.rs` | ~560 | `Analyzer` struct, `ScopedBinding`, scope-aware resolution |
 | `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
 | `analyze/binding.rs` | ~460 | Binding forms: `let`, `def`, `var`, `fn` |
 | `analyze/special.rs` | ~180 | Special forms: `match`, `yield`, `module` |
 | `analyze/call.rs` | ~200 | Call analysis and effect tracking |
-| `expr.rs` | 180 | `Hir`, `HirKind` |
-| `binding.rs` | 120 | `BindingId`, `BindingInfo`, `CaptureInfo` |
+| `expr.rs` | ~180 | `Hir`, `HirKind` |
+| `binding.rs` | ~110 | `Binding(Value)` newtype, `CaptureInfo`, `CaptureKind` |
 | `pattern.rs` | ~100 | Pattern matching types |
 | `tailcall.rs` | ~462 | Post-analysis pass marking tail calls |
 | `lint.rs` | ~150 | HIR-based linter (walks HirKind, produces Diagnostics) |

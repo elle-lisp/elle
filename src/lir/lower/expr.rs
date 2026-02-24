@@ -17,7 +17,7 @@ impl Lowerer {
             HirKind::String(s) => self.emit_const(LirConst::String(s.clone())),
             HirKind::Keyword(name) => self.emit_const(LirConst::Keyword(name.clone())),
 
-            HirKind::Var(binding_id) => self.lower_var(binding_id),
+            HirKind::Var(binding) => self.lower_var(binding),
             HirKind::Let { bindings, body } => self.lower_let(bindings, body),
             HirKind::Letrec { bindings, body } => self.lower_letrec(bindings, body),
             HirKind::Lambda {
@@ -44,8 +44,7 @@ impl Lowerer {
             } => self.lower_call(func, args, *is_tail),
 
             HirKind::Set { target, value } => self.lower_set(target, value),
-            HirKind::Define { name, value } => self.lower_define(*name, value),
-            HirKind::LocalDefine { binding, value } => self.lower_local_define(*binding, value),
+            HirKind::Define { binding, value } => self.lower_define(*binding, value),
 
             HirKind::While { cond, body } => self.lower_while(cond, body),
             HirKind::For { var, iter, body } => self.lower_for(*var, iter, body),
@@ -67,17 +66,13 @@ impl Lowerer {
         }
     }
 
-    fn lower_var(&mut self, binding_id: &BindingId) -> Result<Reg, String> {
-        if let Some(&slot) = self.binding_to_slot.get(binding_id) {
+    fn lower_var(&mut self, binding: &Binding) -> Result<Reg, String> {
+        if let Some(&slot) = self.binding_to_slot.get(binding) {
             // Check if this binding needs cell unwrapping
-            let needs_cell = self
-                .bindings
-                .get(binding_id)
-                .map(|info| info.needs_cell())
-                .unwrap_or(false);
+            let needs_cell = binding.needs_cell();
 
             // Check if this is an upvalue (capture or parameter) or a local
-            let is_upvalue = self.upvalue_bindings.contains(binding_id);
+            let is_upvalue = self.upvalue_bindings.contains(binding);
 
             let dst = self.fresh_reg();
             if self.in_lambda && is_upvalue {
@@ -103,24 +98,19 @@ impl Lowerer {
                     Ok(dst)
                 }
             }
-        } else if let Some(info) = self.bindings.get(binding_id) {
-            let kind = info.kind;
-            let sym = info.name;
-            // Drop the borrow on self.bindings
-            match kind {
-                BindingKind::Global => {
-                    // Check if this is an immutable binding with a known literal value
-                    if let Some(&literal_value) = self.immutable_values.get(binding_id) {
-                        return self.emit_value_const(literal_value);
-                    }
-                    let dst = self.fresh_reg();
-                    self.emit(LirInstr::LoadGlobal { dst, sym });
-                    Ok(dst)
-                }
-                _ => Err(format!("Unbound variable: {:?}", binding_id)),
+        } else if binding.is_global() {
+            // Check if this is an immutable binding with a known literal value
+            if let Some(&literal_value) = self.immutable_values.get(binding) {
+                return self.emit_value_const(literal_value);
             }
+            let dst = self.fresh_reg();
+            self.emit(LirInstr::LoadGlobal {
+                dst,
+                sym: binding.name(),
+            });
+            Ok(dst)
         } else {
-            Err(format!("Unknown binding: {:?}", binding_id))
+            Err(format!("Unknown binding: {:?}", binding))
         }
     }
 
@@ -172,11 +162,14 @@ impl Lowerer {
     }
 
     fn lower_begin(&mut self, exprs: &[Hir]) -> Result<Reg, String> {
-        // Pre-allocate slots for all LocalDefine bindings
+        // Pre-allocate slots for all local Define bindings
         // This enables mutual recursion where lambda A captures variable B
-        // before B's LocalDefine has been lowered
+        // before B's Define has been lowered
         for expr in exprs {
-            if let HirKind::LocalDefine { binding, .. } = &expr.kind {
+            if let HirKind::Define { binding, .. } = &expr.kind {
+                if binding.is_global() {
+                    continue;
+                }
                 // Allocate slot now so captures can find it
                 if !self.binding_to_slot.contains_key(binding) {
                     let slot = self.allocate_slot(*binding);
@@ -187,11 +180,7 @@ impl Lowerer {
                     }
 
                     // Check if this binding needs a cell
-                    let needs_cell = self
-                        .bindings
-                        .get(binding)
-                        .map(|info| info.needs_cell())
-                        .unwrap_or(false);
+                    let needs_cell = binding.needs_cell();
 
                     // Only create cells for top-level locals (outside lambdas)
                     // Inside lambdas, the VM creates cells for locally-defined variables
@@ -199,7 +188,7 @@ impl Lowerer {
                     if needs_cell && !self.in_lambda {
                         // Create a cell containing nil
                         // This cell will be captured by nested lambdas
-                        // and updated when the LocalDefine is lowered
+                        // and updated when the Define is lowered
                         let nil_reg = self.emit_const(LirConst::Nil)?;
                         let cell_reg = self.fresh_reg();
                         self.emit(LirInstr::MakeCell {
@@ -280,7 +269,7 @@ impl Lowerer {
         Ok(result_reg)
     }
 
-    fn lower_for(&mut self, var: BindingId, iter: &Hir, body: &Hir) -> Result<Reg, String> {
+    fn lower_for(&mut self, var: Binding, iter: &Hir, body: &Hir) -> Result<Reg, String> {
         // Allocate separate slots for iterator and loop variable
         // Inside a lambda, slots need to account for the captures offset.
         let iter_slot = if self.in_lambda {

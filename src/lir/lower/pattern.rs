@@ -71,12 +71,12 @@ impl Lowerer {
 
                 Ok(())
             }
-            HirPattern::Var(binding_id) => {
+            HirPattern::Var(binding) => {
                 // Bind the value to the variable
-                let slot = self.allocate_slot(*binding_id);
+                let slot = self.allocate_slot(*binding);
                 // Inside lambdas, pattern-bound variables are part of the closure environment
                 if self.in_lambda {
-                    self.upvalue_bindings.insert(*binding_id);
+                    self.upvalue_bindings.insert(*binding);
                     self.emit(LirInstr::StoreCapture {
                         index: slot,
                         src: value_reg,

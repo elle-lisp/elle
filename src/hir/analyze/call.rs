@@ -45,20 +45,16 @@ impl<'a> Analyzer<'a> {
             HirKind::Lambda {
                 inferred_effect, ..
             } => *inferred_effect,
-            HirKind::Var(binding_id) => {
-                if let Some(effect) = self.effect_env.get(binding_id) {
+            HirKind::Var(binding) => {
+                if let Some(effect) = self.effect_env.get(binding) {
                     *effect
-                } else if let Some(info) = self.ctx.get_binding(*binding_id) {
-                    if matches!(info.kind, BindingKind::Global) {
-                        // Check primitive effects first, then global effects from previous forms
-                        self.primitive_effects
-                            .get(&info.name)
-                            .or_else(|| self.global_effects.get(&info.name))
-                            .cloned()
-                            .unwrap_or(Effect::yields())
-                    } else {
-                        Effect::yields()
-                    }
+                } else if binding.is_global() {
+                    // Check primitive effects first, then global effects from previous forms
+                    self.primitive_effects
+                        .get(&binding.name())
+                        .or_else(|| self.global_effects.get(&binding.name()))
+                        .cloned()
+                        .unwrap_or(Effect::yields())
                 } else {
                     Effect::yields()
                 }
@@ -77,14 +73,12 @@ impl<'a> Analyzer<'a> {
         args: &[Hir],
     ) {
         // Case 1: Direct call to a parameter
-        if let HirKind::Var(binding_id) = &func.kind {
-            if let Some(info) = self.ctx.get_binding(*binding_id) {
-                if matches!(info.kind, BindingKind::Parameter { .. })
-                    && self.current_lambda_params.contains(binding_id)
-                {
-                    self.current_effect_sources.param_calls.insert(*binding_id);
-                    return;
-                }
+        if let HirKind::Var(binding) = &func.kind {
+            if matches!(binding.scope(), BindingScope::Parameter)
+                && self.current_lambda_params.contains(binding)
+            {
+                self.current_effect_sources.param_calls.insert(*binding);
+                return;
             }
         }
 
@@ -93,17 +87,13 @@ impl<'a> Analyzer<'a> {
             let mut found_param = false;
             for param_idx in raw_effect.propagated_params() {
                 if param_idx < args.len() {
-                    if let HirKind::Var(arg_binding_id) = &args[param_idx].kind {
-                        if let Some(info) = self.ctx.get_binding(*arg_binding_id) {
-                            if matches!(info.kind, BindingKind::Parameter { .. })
-                                && self.current_lambda_params.contains(arg_binding_id)
-                            {
-                                // The polymorphic effect depends on a parameter
-                                self.current_effect_sources
-                                    .param_calls
-                                    .insert(*arg_binding_id);
-                                found_param = true;
-                            }
+                    if let HirKind::Var(arg_binding) = &args[param_idx].kind {
+                        if matches!(arg_binding.scope(), BindingScope::Parameter)
+                            && self.current_lambda_params.contains(arg_binding)
+                        {
+                            // The polymorphic effect depends on a parameter
+                            self.current_effect_sources.param_calls.insert(*arg_binding);
+                            found_param = true;
                         }
                     }
                 }
@@ -147,21 +137,20 @@ impl<'a> Analyzer<'a> {
             HirKind::Lambda {
                 inferred_effect, ..
             } => *inferred_effect,
-            HirKind::Var(id) => self
+            HirKind::Var(binding) => self
                 .effect_env
-                .get(id)
+                .get(binding)
                 .cloned()
                 .or_else(|| {
-                    self.ctx
-                        .get_binding(*id)
-                        .filter(|info| matches!(info.kind, BindingKind::Global))
-                        .and_then(|info| {
-                            // Check primitive effects first, then global effects from previous forms
-                            self.primitive_effects
-                                .get(&info.name)
-                                .or_else(|| self.global_effects.get(&info.name))
-                                .cloned()
-                        })
+                    if binding.is_global() {
+                        // Check primitive effects first, then global effects from previous forms
+                        self.primitive_effects
+                            .get(&binding.name())
+                            .or_else(|| self.global_effects.get(&binding.name()))
+                            .cloned()
+                    } else {
+                        None
+                    }
                 })
                 .unwrap_or(Effect::yields()),
             // Unknown argument effect - conservatively Yields for soundness
@@ -172,7 +161,7 @@ impl<'a> Analyzer<'a> {
     /// Compute the inferred effect for a lambda based on effect sources.
     /// This enables polymorphic effect inference: if the only sources of
     /// suspension are calling parameters, we infer Polymorphic over them.
-    pub(crate) fn compute_inferred_effect(&self, body: &Hir, params: &[BindingId]) -> Effect {
+    pub(crate) fn compute_inferred_effect(&self, body: &Hir, params: &[Binding]) -> Effect {
         // If body doesn't suspend, lambda doesn't suspend
         if !body.effect.may_suspend() {
             return Effect::none();
