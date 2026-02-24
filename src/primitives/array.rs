@@ -64,7 +64,7 @@ pub fn prim_array_ref(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Set a value in an array at an index (returns new array)
+/// Set a value in an array at an index (mutates in place, returns the same array)
 pub fn prim_array_set(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 3 {
         return (
@@ -119,7 +119,117 @@ pub fn prim_array_set(args: &[Value]) -> (SignalBits, Value) {
 
     vec[index] = value;
     drop(vec);
-    (SIG_OK, Value::array(vec_ref.borrow().clone()))
+    (SIG_OK, args[0])
+}
+
+/// Push a value onto the end of an array (mutates in place, returns the same array)
+pub fn prim_array_push(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("array/push!: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    let vec_ref = match args[0].as_array() {
+        Some(v) => v,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("array/push!: expected array, got {}", args[0].type_name()),
+                ),
+            )
+        }
+    };
+
+    let mut vec = vec_ref.borrow_mut();
+    vec.push(args[1]);
+    drop(vec);
+    (SIG_OK, args[0])
+}
+
+/// Pop a value from the end of an array (mutates in place, returns the removed element)
+pub fn prim_array_pop(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("array/pop!: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+
+    let vec_ref = match args[0].as_array() {
+        Some(v) => v,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("array/pop!: expected array, got {}", args[0].type_name()),
+                ),
+            )
+        }
+    };
+
+    let mut vec = vec_ref.borrow_mut();
+    match vec.pop() {
+        Some(v) => {
+            drop(vec);
+            (SIG_OK, v)
+        }
+        None => {
+            drop(vec);
+            (
+                SIG_ERROR,
+                error_val("error", "array/pop!: empty array".to_string()),
+            )
+        }
+    }
+}
+
+/// Create an array of n elements, all set to fill
+pub fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("array/new: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    let n = match args[0].as_int() {
+        Some(i) => {
+            if i < 0 {
+                return (
+                    SIG_ERROR,
+                    error_val("error", "array/new: size must be non-negative".to_string()),
+                );
+            }
+            i as usize
+        }
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("array/new: expected integer, got {}", args[0].type_name()),
+                ),
+            )
+        }
+    };
+
+    let fill = args[1];
+    let vec = vec![fill; n];
+    (SIG_OK, Value::array(vec))
 }
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[
@@ -155,5 +265,38 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "array",
         example: "(array/set! (array 1 2 3) 0 99) ;=> [99 2 3]",
         aliases: &["array-set!"],
+    },
+    PrimitiveDef {
+        name: "array/push!",
+        func: prim_array_push,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Append element to end of array. Returns the same array.",
+        params: &["arr", "val"],
+        category: "array",
+        example: "(array/push! (array 1 2) 3) ;=> [1 2 3]",
+        aliases: &["array-push!"],
+    },
+    PrimitiveDef {
+        name: "array/pop!",
+        func: prim_array_pop,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Remove and return last element from array.",
+        params: &["arr"],
+        category: "array",
+        example: "(array/pop! (array 1 2 3)) ;=> 3",
+        aliases: &["array-pop!"],
+    },
+    PrimitiveDef {
+        name: "array/new",
+        func: prim_array_new,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Create array of n elements, all set to fill value.",
+        params: &["n", "fill"],
+        category: "array",
+        example: "(array/new 3 0) ;=> [0 0 0]",
+        aliases: &[],
     },
 ];
