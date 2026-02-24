@@ -35,16 +35,28 @@ x             ; Still 100
 
 ### 3. Block Scope
 
-Block scopes are created by `begin` expressions.
+Block scopes are created by `block` expressions. The `block` form creates a new lexical scope where bindings don't leak out.
 
 ```lisp
 (var x 100)
 
-(begin
+(block
   (var x 50)  ; Block-scoped, shadows outer x
   (display x))   ; Prints: 50
 
 (display x)      ; Prints: 100
+```
+
+You can optionally name a block and use `break` to exit early with a value:
+
+```lisp
+(var result (block :my-block
+  (var x 10)
+  (if (> x 5)
+    (break :my-block "early exit"))
+  "normal exit"))
+
+result  ; ⟹ "early exit"
 ```
 
 ### 4. Loop Scope

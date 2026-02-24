@@ -15,7 +15,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(0),
         doc: "Create a mutable table from key-value pairs",
         params: &[],
-        category: "",
+        category: "table",
         example: "(table :a 1 :b 2)",
         aliases: &[],
     },
@@ -26,7 +26,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Range(2, 3),
         doc: "Get a value from a table or struct by key, with optional default",
         params: &["collection", "key", "default"],
-        category: "",
+        category: "table",
         example: "(get (table :a 1) :a)",
         aliases: &[],
     },
@@ -37,7 +37,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(3),
         doc: "Put a key-value pair into a table or struct",
         params: &["collection", "key", "value"],
-        category: "",
+        category: "table",
         example: "(put (table) :a 1)",
         aliases: &["put!"],
     },
@@ -48,7 +48,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(2),
         doc: "Delete a key from a table or struct",
         params: &["collection", "key"],
-        category: "",
+        category: "table",
         example: "(del (table :a 1) :a)",
         aliases: &["del!"],
     },
@@ -59,7 +59,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Get all keys from a table or struct as a list",
         params: &["collection"],
-        category: "",
+        category: "table",
         example: "(keys (table :a 1 :b 2))",
         aliases: &[],
     },
@@ -70,7 +70,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Get all values from a table or struct as a list",
         params: &["collection"],
-        category: "",
+        category: "table",
         example: "(values (table :a 1 :b 2))",
         aliases: &[],
     },
@@ -81,7 +81,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(2),
         doc: "Check if a table or struct has a key",
         params: &["collection", "key"],
-        category: "",
+        category: "table",
         example: "(has-key? (table :a 1) :a)",
         aliases: &[],
     },
@@ -123,13 +123,15 @@ fn value_to_table_key(val: &Value) -> Result<TableKey, Value> {
         Ok(TableKey::Int(i))
     } else if let Some(id) = val.as_symbol() {
         Ok(TableKey::Symbol(crate::value::SymbolId(id)))
+    } else if let Some(name) = val.as_keyword_name() {
+        Ok(TableKey::Keyword(name.to_string()))
     } else if let Some(s) = val.as_string() {
         Ok(TableKey::String(s.to_string()))
     } else {
         Err(error_val(
             "type-error",
             format!(
-                "expected table key (nil, bool, int, symbol, or string), got {}",
+                "expected table key (nil, bool, int, symbol, keyword, or string), got {}",
                 val.type_name()
             ),
         ))
@@ -337,6 +339,7 @@ pub fn prim_table_keys(args: &[Value]) -> (SignalBits, Value) {
             TableKey::Int(i) => Value::int(*i),
             TableKey::Symbol(sid) => Value::symbol(sid.0),
             TableKey::String(s) => Value::string(s.as_str()),
+            TableKey::Keyword(s) => Value::keyword(s.as_str()),
         })
         .collect();
 
@@ -535,6 +538,7 @@ pub fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
                 TableKey::Int(i) => Value::int(*i),
                 TableKey::Symbol(sid) => Value::symbol(sid.0),
                 TableKey::String(s) => Value::string(s.as_str()),
+                TableKey::Keyword(s) => Value::keyword(s.as_str()),
             })
             .collect();
         (SIG_OK, crate::value::list(keys))
@@ -559,6 +563,7 @@ pub fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
                 TableKey::Int(i) => Value::int(*i),
                 TableKey::Symbol(sid) => Value::symbol(sid.0),
                 TableKey::String(st) => Value::string(st.as_str()),
+                TableKey::Keyword(st) => Value::keyword(st.as_str()),
             })
             .collect();
         (SIG_OK, crate::value::list(keys))

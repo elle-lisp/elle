@@ -240,7 +240,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(0),
         doc: "Create a mutable array from arguments.",
         params: &[],
-        category: "",
+        category: "array",
         example: "(array 1 2 3) ;=> [1 2 3]",
         aliases: &[],
     },

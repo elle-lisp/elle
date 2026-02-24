@@ -15,7 +15,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(0),
         doc: "Create an immutable struct from key-value pairs",
         params: &[],
-        category: "",
+        category: "struct",
         example: "(struct :a 1 :b 2)",
         aliases: &[],
     },
@@ -42,6 +42,8 @@ fn value_to_table_key(val: &Value) -> Result<TableKey, Value> {
         Ok(TableKey::Int(i))
     } else if let Some(sym_id) = val.as_symbol() {
         Ok(TableKey::Symbol(crate::value::SymbolId(sym_id)))
+    } else if let Some(name) = val.as_keyword_name() {
+        Ok(TableKey::Keyword(name.to_string()))
     } else if let Some(s) = val.as_string() {
         Ok(TableKey::String(s.to_string()))
     } else {
@@ -223,6 +225,7 @@ pub fn prim_struct_keys(args: &[Value]) -> (SignalBits, Value) {
             TableKey::Int(i) => Value::int(*i),
             TableKey::Symbol(sid) => Value::symbol(sid.0),
             TableKey::String(st) => Value::string(st.as_str()),
+            TableKey::Keyword(st) => Value::keyword(st.as_str()),
         })
         .collect();
 

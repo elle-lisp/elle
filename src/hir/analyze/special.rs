@@ -127,6 +127,30 @@ impl<'a> Analyzer<'a> {
                     rest,
                 })
             }
+            SyntaxKind::Table(items) => {
+                // Table pattern: {:key1 pat1 :key2 pat2}
+                if items.len() % 2 != 0 {
+                    return Err(format!(
+                        "{}: table pattern requires keyword-pattern pairs",
+                        syntax.span
+                    ));
+                }
+                let mut entries = Vec::new();
+                for pair in items.chunks(2) {
+                    let key_name = match &pair[0].kind {
+                        SyntaxKind::Keyword(k) => k.clone(),
+                        _ => {
+                            return Err(format!(
+                                "{}: table pattern key must be a keyword, got {}",
+                                syntax.span, pair[0]
+                            ))
+                        }
+                    };
+                    let pattern = self.analyze_pattern(&pair[1])?;
+                    entries.push((key_name, pattern));
+                }
+                Ok(HirPattern::Table { entries })
+            }
             _ => Err(format!("{}: invalid pattern", syntax.span)),
         }
     }

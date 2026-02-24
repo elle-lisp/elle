@@ -2108,3 +2108,36 @@ fn test_doc_wrong_arity() {
     let result = eval_full(r#"(doc "a" "b")"#);
     assert!(result.is_err(), "doc with 2 args should error");
 }
+
+#[test]
+fn test_doc_bare_symbol_special_form() {
+    let result = eval_full("(doc if)").unwrap();
+    let s = result.as_string().expect("doc should return a string");
+    assert!(
+        s.contains("Conditional"),
+        "doc for if should describe conditional, got: {}",
+        s
+    );
+}
+
+#[test]
+fn test_doc_bare_symbol_primitive() {
+    let result = eval_full("(doc +)").unwrap();
+    let s = result.as_string().expect("doc should return a string");
+    assert!(
+        s.contains("+"),
+        "doc for + via bare symbol should contain '+', got: {}",
+        s
+    );
+}
+
+#[test]
+fn test_doc_bare_symbol_macro() {
+    let result = eval_full("(doc defn)").unwrap();
+    let s = result.as_string().expect("doc should return a string");
+    assert!(
+        s.contains("defn"),
+        "doc for defn should contain 'defn', got: {}",
+        s
+    );
+}

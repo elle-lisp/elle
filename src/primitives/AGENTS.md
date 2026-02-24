@@ -98,12 +98,12 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `display.rs` | `print`, `println`, `display` |
 | `type_check.rs` | `nil?`, `pair?`, `number?`, `string?`, etc. |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
-| `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro?>iterator`, `yield-from` |
+| `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro/>iterator` |
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value`, `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
 | `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` (metaprogramming) |
-| `debugging.rs` | `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `doc`, `global?`, `string->keyword`, `disbit`, `disjit` |
+| `debugging.rs` | `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `doc`, `global?`, `string->keyword`, `disbit`, `disjit`, `vm/list-primitives`, `vm/primitive-meta` |
 | `debug.rs` | `debug-print`, `trace`, `memory-usage` |
 | `process.rs` | `exit`, `halt` |
 

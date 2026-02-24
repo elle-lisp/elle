@@ -124,6 +124,7 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
     let mut expander = Expander::new();
     let mut macro_vm = VM::new();
     let meta = register_primitives(&mut macro_vm, symbols);
+    expander.load_prelude(symbols, &mut macro_vm)?;
     let expanded = expander.expand(syntax, symbols, &mut macro_vm)?;
 
     // Phase 3: Analyze to HIR with interprocedural effect and arity tracking
@@ -163,6 +164,7 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
     let mut expander = Expander::new();
     let mut macro_vm = VM::new();
     let meta = register_primitives(&mut macro_vm, symbols);
+    expander.load_prelude(symbols, &mut macro_vm)?;
 
     // Expand all forms first (expansion is idempotent)
     let mut expanded_forms = Vec::new();
@@ -269,6 +271,7 @@ pub fn eval(
     let syntax = read_syntax(source)?;
 
     let mut expander = Expander::new();
+    expander.load_prelude(symbols, vm)?;
     let expanded = expander.expand(syntax, symbols, vm)?;
 
     let meta = build_primitive_meta(symbols);
@@ -296,6 +299,7 @@ pub fn analyze(
 ) -> Result<AnalyzeResult, String> {
     let syntax = read_syntax(source)?;
     let mut expander = Expander::new();
+    expander.load_prelude(symbols, vm)?;
     let expanded = expander.expand(syntax, symbols, vm)?;
     let meta = build_primitive_meta(symbols);
     let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
@@ -312,6 +316,7 @@ pub fn analyze_all(
 ) -> Result<Vec<AnalyzeResult>, String> {
     let syntaxes = read_syntax_all(source)?;
     let mut expander = Expander::new();
+    expander.load_prelude(symbols, vm)?;
 
     // Expand all forms first
     let mut expanded_forms = Vec::new();

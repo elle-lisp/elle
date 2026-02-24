@@ -31,4 +31,4 @@ pub mod type_check;
 pub use def::{PrimitiveDef, PrimitiveMeta};
 pub use list::{clear_length_symbol_table, set_length_symbol_table};
 pub use module_init::init_stdlib;
-pub use registration::{build_primitive_meta, register_primitives};
+pub use registration::{build_primitive_meta, help_text, register_primitives};

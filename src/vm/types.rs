@@ -46,6 +46,36 @@ pub fn handle_not(vm: &mut VM) {
     vm.fiber.stack.push(Value::bool(!val.is_truthy()));
 }
 
+pub fn handle_is_array(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on IsArray");
+    vm.fiber.stack.push(Value::bool(val.is_array()));
+}
+
+pub fn handle_array_len(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on ArrayLen");
+    let len = val.as_array().map(|a| a.borrow().len() as i64).unwrap_or(0);
+    vm.fiber.stack.push(Value::int(len));
+}
+
+pub fn handle_is_table(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on IsTable");
+    vm.fiber
+        .stack
+        .push(Value::bool(val.is_table() || val.is_struct()));
+}
+
 pub fn handle_is_empty_list(vm: &mut VM) {
     let val = vm
         .fiber

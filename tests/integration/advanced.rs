@@ -598,3 +598,193 @@ fn test_import_file_with_relative_paths() {
     // Only test with simple files to avoid recursion issues
     assert!(eval("(import-file \"test-modules/test.lisp\")").is_ok());
 }
+
+// Array pattern matching tests
+
+#[test]
+fn test_match_array_literal() {
+    assert_eq!(
+        eval("(match [1 2 3] ([1 2 3] \"exact\") (_ \"no\"))").unwrap(),
+        Value::string("exact")
+    );
+}
+
+#[test]
+fn test_match_array_binding() {
+    assert_eq!(
+        eval("(match [10 20] ([a b] (+ a b)))").unwrap(),
+        Value::int(30)
+    );
+}
+
+#[test]
+fn test_match_array_wrong_length() {
+    assert_eq!(
+        eval("(match [1 2] ([a b c] \"three\") ([a b] \"two\"))").unwrap(),
+        Value::string("two")
+    );
+}
+
+#[test]
+fn test_match_array_not_array() {
+    assert_eq!(
+        eval("(match 42 ([a b] \"array\") (_ \"other\"))").unwrap(),
+        Value::string("other")
+    );
+}
+
+#[test]
+fn test_match_array_empty() {
+    assert_eq!(
+        eval("(match [] ([] \"empty\") (_ \"other\"))").unwrap(),
+        Value::string("empty")
+    );
+}
+
+#[test]
+fn test_match_array_rest() {
+    // & rest captures remaining elements
+    assert_eq!(
+        eval("(match [1 2 3 4] ([a & rest] (length rest)))").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_match_array_nested() {
+    assert_eq!(
+        eval("(match [1 [2 3]] ([a [b c]] (+ a (+ b c))))").unwrap(),
+        Value::int(6)
+    );
+}
+
+// Guard (when) tests
+
+#[test]
+fn test_match_guard_basic() {
+    assert_eq!(
+        eval("(match 5 (x when (> x 3) \"big\") (x \"small\"))").unwrap(),
+        Value::string("big")
+    );
+    assert_eq!(
+        eval("(match 2 (x when (> x 3) \"big\") (x \"small\"))").unwrap(),
+        Value::string("small")
+    );
+}
+
+#[test]
+fn test_match_guard_with_literal() {
+    assert_eq!(
+        eval("(match 10 (10 when #f \"nope\") (10 \"yes\"))").unwrap(),
+        Value::string("yes")
+    );
+}
+
+// Cons pattern tests
+
+#[test]
+fn test_match_cons_pattern() {
+    assert_eq!(
+        eval("(match (cons 1 2) ((h . t) (+ h t)))").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_match_cons_not_pair() {
+    assert_eq!(
+        eval("(match 42 ((h . t) \"pair\") (_ \"nope\"))").unwrap(),
+        Value::string("nope")
+    );
+}
+
+// List rest pattern tests
+
+#[test]
+fn test_match_list_rest() {
+    assert_eq!(
+        eval("(match (list 1 2 3) ((a & rest) a))").unwrap(),
+        Value::int(1)
+    );
+}
+
+#[test]
+fn test_match_list_exact_length() {
+    // List pattern without rest must match exact length
+    assert_eq!(
+        eval("(match (list 1 2 3) ((1 2) \"two\") ((1 2 3) \"three\"))").unwrap(),
+        Value::string("three")
+    );
+}
+
+// Keyword pattern test
+
+#[test]
+fn test_match_keyword_literal() {
+    assert_eq!(
+        eval("(match :foo (:foo \"matched\") (_ \"no\"))").unwrap(),
+        Value::string("matched")
+    );
+    assert_eq!(
+        eval("(match :bar (:foo \"matched\") (_ \"no\"))").unwrap(),
+        Value::string("no")
+    );
+}
+
+// Variable binding test
+
+#[test]
+fn test_match_variable_binding() {
+    assert_eq!(eval("(match 42 (x (+ x 1)))").unwrap(), Value::int(43));
+}
+
+// No-match returns nil
+
+#[test]
+fn test_match_no_match_returns_nil() {
+    assert_eq!(
+        eval("(match 42 (1 \"one\") (2 \"two\"))").unwrap(),
+        Value::NIL
+    );
+}
+
+// Variadic macro tests
+
+#[test]
+fn test_variadic_macro_basic() {
+    assert_eq!(
+        eval("(begin (defmacro my-list (& items) `(list ,@items)) (my-list 1 2 3))").unwrap(),
+        eval("(list 1 2 3)").unwrap()
+    );
+}
+
+#[test]
+fn test_variadic_macro_fixed_and_rest() {
+    assert_eq!(
+        eval("(begin (defmacro my-add (first & rest) `(+ ,first ,@rest)) (my-add 1 2 3))").unwrap(),
+        Value::int(6)
+    );
+}
+
+#[test]
+fn test_variadic_macro_empty_rest() {
+    assert_eq!(
+        eval("(begin (defmacro my-list (& items) `(list ,@items)) (my-list))").unwrap(),
+        Value::EMPTY_LIST
+    );
+}
+
+#[test]
+fn test_variadic_macro_arity_error() {
+    assert!(eval("(begin (defmacro foo (a b & rest) `(list ,a ,b ,@rest)) (foo 1))").is_err());
+}
+
+#[test]
+fn test_variadic_macro_when_multi_body() {
+    // when with multiple body expressions via & rest
+    assert_eq!(
+        eval("(begin (defmacro my-when (test & body) `(if ,test (begin ,@body) nil)) (my-when #t 1 2 3))")
+            .unwrap(),
+        Value::int(3)
+    );
+}

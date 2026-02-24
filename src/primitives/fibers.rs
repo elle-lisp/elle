@@ -584,7 +584,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if a value is a fiber",
         params: &["value"],
-        category: "",
+        category: "fiber",
         example: "(fiber? f)",
         aliases: &[],
     },

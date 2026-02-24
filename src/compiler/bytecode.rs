@@ -162,6 +162,16 @@ pub enum Instruction {
     /// Array slice from index (for & rest destructuring): returns sub-array from index to end
     /// Operand: u16 index (immediate)
     ArraySliceFrom,
+
+    /// Type check: is value an array?
+    IsArray,
+    /// Type check: is value a table or struct?
+    IsTable,
+    /// Get array length as integer
+    ArrayLen,
+    /// Table/struct get with silent nil (for destructuring): returns nil if key missing or wrong type.
+    /// Operand: u16 constant pool index (keyword key)
+    TableGetOrNil,
 }
 
 /// Inline cache entry for function lookups

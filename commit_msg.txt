@@ -1,7 +1,0 @@
-Rename `coroutine?` to `coro?` throughout the codebase.
-
-- Updated primitive registration and error messages.
-- Adjusted documentation, docs, examples, and tests to use `coro?`.
-- Added/moved `src/primitives/coro.rs` content as necessary.
-- Updated comments and references in AGENTS.md, README.md, docs.
-- Ensured all tests and examples reference the new predicate.

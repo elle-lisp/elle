@@ -249,15 +249,8 @@ impl SyntaxReader {
                     let end_loc = self.current_location();
                     self.advance();
 
-                    // Prepend 'struct' symbol
-                    let struct_sym = Syntax::new(
-                        SyntaxKind::Symbol("struct".to_string()),
-                        self.source_loc_to_span(start_loc, start_loc.col + 1),
-                    );
-                    elements.insert(0, struct_sym);
-
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
-                    return Ok(Syntax::new(SyntaxKind::List(elements), span));
+                    return Ok(Syntax::new(SyntaxKind::Table(elements), span));
                 }
                 _ => elements.push(self.read()?),
             }
@@ -608,11 +601,11 @@ mod tests {
     fn test_parse_struct() {
         let result = lex_and_parse("{:a 1 :b 2}").unwrap();
         match result.kind {
-            SyntaxKind::List(ref items) => {
-                assert_eq!(items.len(), 5); // struct symbol + 4 elements
-                assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "struct"));
+            SyntaxKind::Table(ref items) => {
+                assert_eq!(items.len(), 4); // :a 1 :b 2
+                assert!(matches!(items[0].kind, SyntaxKind::Keyword(ref s) if s == "a"));
             }
-            _ => panic!("Expected list"),
+            _ => panic!("Expected Table, got {:?}", result.kind),
         }
     }
 

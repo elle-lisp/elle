@@ -187,6 +187,12 @@ pub enum LirInstr {
     IsNil { dst: Reg, src: Reg },
     /// Check if value is a pair
     IsPair { dst: Reg, src: Reg },
+    /// Check if value is an array (for pattern matching)
+    IsArray { dst: Reg, src: Reg },
+    /// Check if value is a table or struct (for pattern matching)
+    IsTable { dst: Reg, src: Reg },
+    /// Get array length (for pattern matching)
+    ArrayLen { dst: Reg, src: Reg },
 
     // === Cell Operations (for mutable captures) ===
     /// Create a cell containing a value
@@ -217,6 +223,9 @@ pub enum LirInstr {
     ArrayRefOrNil { dst: Reg, src: Reg, index: u16 },
     /// Array slice from index: returns a new array from index to end, or empty array
     ArraySliceFrom { dst: Reg, src: Reg, index: u16 },
+    /// Table/struct get with silent nil: returns nil if key not found or wrong type.
+    /// `key` is a constant pool index holding a keyword Value.
+    TableGetOrNil { dst: Reg, src: Reg, key: LirConst },
 
     // === Coroutines ===
     /// Load the resume value after a yield.

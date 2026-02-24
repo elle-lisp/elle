@@ -3,7 +3,7 @@
 // - Basic yield/resume
 // - Coroutine state transitions
 // - Effect inference
-// - Yield-from delegation
+// - yield* delegation
 // - Iterator protocol
 // - Nested coroutines
 // - Closures with captured variables
@@ -285,42 +285,55 @@ fn test_calling_yielding_function_propagates_effect() {
 }
 
 // ============================================================================
-// 4. YIELD-FROM TESTS
+// 4. YIELD* DELEGATION TESTS
 // ============================================================================
 
 #[test]
-fn test_yield_from_basic() {
-    // yield-from is dropped in the fiber migration (see issue #294 for yield*).
-    // It should return an error.
+fn test_yield_star() {
+    // yield* delegates to sub-coroutine, forwarding all yielded values
     let result = eval(
         r#"
-        (def inner (fn () (yield 1) (yield 2)))
-        (def outer (fn () (yield-from (make-coroutine inner)) (yield 3)))
-        (var co (make-coroutine outer))
-        (coro/resume co)
+        (def sub (coro/new (fn ()
+          (yield 1)
+          (yield 2)
+          (yield 3)
+          :done)))
+        (def main (coro/new (fn ()
+          (yield 0)
+          (yield* sub)
+          (yield 99))))
+        (var results (list))
+        (while (not (coro/done? main))
+          (begin
+            (coro/resume main nil)
+            (when (not (coro/done? main))
+              (set! results (append results (list (coro/value main)))))))
+        results
         "#,
     );
-    assert!(
-        result.is_err(),
-        "yield-from should error (dropped, see issue #294)"
-    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    // Should yield: 0, 1, 2, 3, 99
+    assert_eq!(format!("{:?}", result.unwrap()), "(0 1 2 3 99)");
 }
 
 #[test]
-fn test_yield_from_completion() {
-    // yield-from is dropped in the fiber migration (see issue #294 for yield*).
+fn test_yield_star_simple() {
+    // Basic yield* delegation — outer yields inner's values then completes
     let result = eval(
         r#"
-        (def inner (fn () (yield 1) 42))
-        (def outer (fn () (yield-from (make-coroutine inner))))
-        (var co (make-coroutine outer))
-        (coro/resume co)
+        (def inner (coro/new (fn () (yield 10) (yield 20) :final)))
+        (def outer (coro/new (fn () (yield* inner))))
+        (coro/resume outer nil)
+        (def v1 (coro/value outer))
+        (coro/resume outer nil)
+        (def v2 (coro/value outer))
+        (coro/resume outer nil)
+        (list v1 v2 (coro/done? outer) (coro/value outer))
         "#,
     );
-    assert!(
-        result.is_err(),
-        "yield-from should error (dropped, see issue #294)"
-    );
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    // outer yields 10, then 20, then completes with :final
+    assert_eq!(format!("{:?}", result.unwrap()), "(10 20 #t :final)");
 }
 
 // ============================================================================

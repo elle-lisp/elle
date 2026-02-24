@@ -249,7 +249,7 @@ fn test_quote_list() {
 
 #[test]
 fn test_try_simple() {
-    assert!(compiles("(try 42)"));
+    assert!(compiles("(try 42 (catch e e))"));
 }
 
 #[test]
@@ -561,8 +561,7 @@ fn test_trace_vm_execution() {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Define process
-    let code2a =
-        r#"(def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))"#;
+    let code2a = r#"(def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))"#;
     let results = elle::compile_all(code2a, &mut symbols).expect("compile failed");
     for r in &results {
         vm.execute(&r.bytecode).expect("exec failed");

@@ -30,6 +30,11 @@ impl Hir {
     }
 }
 
+/// Unique identifier for a named/anonymous block, used by `break` to target
+/// the correct block at compile time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BlockId(pub u32);
+
 /// HIR expression kinds - fully analyzed forms
 #[derive(Debug, Clone)]
 pub enum HirKind {
@@ -94,8 +99,18 @@ pub enum HirKind {
     /// Sequence of expressions
     Begin(Vec<Hir>),
 
-    /// Block with its own scope
-    Block(Vec<Hir>),
+    /// Block with its own scope. May be named for targeted `break`.
+    Block {
+        name: Option<String>,
+        block_id: BlockId,
+        body: Vec<Hir>,
+    },
+
+    /// Early exit from a block, returning a value.
+    Break {
+        block_id: BlockId,
+        value: Box<Hir>,
+    },
 
     // === Function Application ===
     /// Function call

@@ -34,6 +34,7 @@ Syntax (from reader)
     │
     ▼
 Expander (with &mut SymbolTable, &mut VM)
+    ├─► load prelude macros (when, unless, try, protect, defer, with)
     ├─► desugar defn to (def name (fn params body...))
     ├─► desugar let* to nested let (one binding at a time)
     ├─► check for macro calls

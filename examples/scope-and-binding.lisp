@@ -16,32 +16,72 @@
 (newline)
 
 ; ============================================================================
-; PART 0: The begin Form - Explicit Scope
+; PART 0: The begin Form - Sequencing (No Scope)
 ; ============================================================================
 
-(display "PART 0: The begin Form - Explicit Scope")
+(display "PART 0: The begin Form - Sequencing (No Scope)")
 (newline)
 (newline)
 
-; begin creates an explicit scope where you can:
-; - Define local variables with define
-; - Execute multiple expressions
-; - Return the value of the last expression
+; begin sequences multiple expressions and returns the last value.
+; It does NOT create a new scope—bindings defined inside begin
+; go into the enclosing scope.
 
-(display "Simple begin block:")
+(display "Simple begin sequencing:")
 (var result (begin
   (var x 10)
   (var y 20)
   (+ x y)))
 (display result)
 (newline)
-(assert-eq result 30 "begin block sums local variables")
+(assert-eq result 30 "begin sequences and returns last value")
 
-; Variables defined in begin don't leak out
-(display "Variables don't leak from begin:")
-; (display x) ; Would error - x is not defined here
-(display "✓ x is scoped to begin block")
+; Variables defined in begin DO leak into enclosing scope
+(display "Variables leak from begin into enclosing scope:")
+(display "x = ")
+(display x)  ; x is accessible here because begin doesn't create scope
 (newline)
+(assert-eq x 10 "x is accessible after begin")
+
+(newline)
+
+; ============================================================================
+; PART 0.5: The block Form - Scoped Sequencing
+; ============================================================================
+
+(display "PART 0.5: The block Form - Scoped Sequencing")
+(newline)
+(newline)
+
+; block sequences expressions within a NEW lexical scope.
+; Bindings defined inside block do NOT leak out.
+; You can optionally name a block and use break to exit early.
+
+(display "Simple block with scope isolation:")
+(var outer-x 100)
+(block
+  (var inner-x 50)  ; Local to block
+  (display "inner-x = ")
+  (display inner-x)
+  (newline)
+  (assert-eq inner-x 50 "inner-x is 50 inside block"))
+
+; inner-x is NOT accessible here
+(display "outer-x = ")
+(display outer-x)
+(newline)
+(assert-eq outer-x 100 "outer-x is still 100 outside block")
+
+; Named block with break
+(display "Named block with break:")
+(var break-result (block :search
+  (var x 10)
+  (if (> x 5)
+    (break :search "x is greater than 5"))
+  "x is not greater than 5"))
+(display break-result)
+(newline)
+(assert-eq break-result "x is greater than 5" "break exits block with value")
 
 (newline)
 

@@ -272,6 +272,7 @@ fn test_macro_predicate_true() {
     let macro_def = MacroDef {
         name: "my-macro".to_string(),
         params: vec!["x".to_string()],
+        rest_param: None,
         template: Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
         definition_scope: ScopeId(0),
     };
@@ -387,6 +388,7 @@ fn test_expand_macro_basic() {
     let macro_def = MacroDef {
         name: "double".to_string(),
         params: vec!["x".to_string()],
+        rest_param: None,
         template,
         definition_scope: ScopeId(0),
     };

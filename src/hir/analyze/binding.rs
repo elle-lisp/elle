@@ -239,13 +239,23 @@ impl<'a> Analyzer<'a> {
                     Self::extract_pattern_names(item, out);
                 }
             }
-            _ => {} // Ignore non-symbol, non-compound elements
+            SyntaxKind::Table(items) => {
+                // Table patterns are alternating keyword/pattern pairs;
+                // only extract names from the value patterns (odd indices)
+                for item in items.iter().skip(1).step_by(2) {
+                    Self::extract_pattern_names(item, out);
+                }
+            }
+            _ => {} // Ignore non-symbol, non-compound elements (including keywords)
         }
     }
 
-    /// Check if a syntax node is a destructuring pattern (list or array of symbols/patterns).
+    /// Check if a syntax node is a destructuring pattern (list, array, or table).
     fn is_destructure_pattern(syntax: &Syntax) -> bool {
-        matches!(&syntax.kind, SyntaxKind::List(_) | SyntaxKind::Array(_))
+        matches!(
+            &syntax.kind,
+            SyntaxKind::List(_) | SyntaxKind::Array(_) | SyntaxKind::Table(_)
+        )
     }
 
     /// Estimate arity from syntax-level parameter list (before analysis).
@@ -364,8 +374,33 @@ impl<'a> Analyzer<'a> {
                 };
                 Ok(HirPattern::Array { elements, rest })
             }
+            SyntaxKind::Table(items) => {
+                // Table destructuring: {:key1 pat1 :key2 pat2 ...}
+                if items.len() % 2 != 0 {
+                    return Err(format!(
+                        "{}: table destructuring requires keyword-pattern pairs",
+                        span
+                    ));
+                }
+                let mut entries = Vec::new();
+                for pair in items.chunks(2) {
+                    let key_name = match &pair[0].kind {
+                        SyntaxKind::Keyword(k) => k.clone(),
+                        _ => {
+                            return Err(format!(
+                                "{}: table destructuring key must be a keyword, got {}",
+                                span, pair[0]
+                            ))
+                        }
+                    };
+                    let pattern =
+                        self.analyze_destructure_pattern(&pair[1], scope, immutable, span)?;
+                    entries.push((key_name, pattern));
+                }
+                Ok(HirPattern::Table { entries })
+            }
             _ => Err(format!(
-                "{}: destructuring pattern element must be a symbol, list, or array",
+                "{}: destructuring pattern element must be a symbol, list, array, or table",
                 span
             )),
         }
@@ -750,6 +785,9 @@ impl<'a> Analyzer<'a> {
         // For nested lambdas, the parent captures are the captures from the enclosing lambda
         self.parent_captures = saved_captures.clone();
 
+        // Increment fn_depth so break cannot target blocks outside this lambda
+        self.fn_depth += 1;
+
         self.push_scope(true);
 
         // Split params at & for variadic rest parameter
@@ -834,6 +872,7 @@ impl<'a> Analyzer<'a> {
         let inferred_effect = self.compute_inferred_effect(&body, &params);
 
         self.pop_scope();
+        self.fn_depth -= 1;
         let captures = std::mem::replace(&mut self.current_captures, saved_captures);
         self.parent_captures = saved_parent_captures;
 

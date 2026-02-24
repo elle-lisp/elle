@@ -120,6 +120,10 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 | `CarOrNil` | value → car | Car of cons, or nil if not a cons |
 | `CdrOrNil` | value → cdr | Cdr of cons, or nil if not a cons |
 | `ArrayRefOrNil` | array → elem | Array element by immediate u16 index, or nil if out of bounds |
+| `IsArray` | value → bool | Type check: is value an array? (for pattern matching) |
+| `IsTable` | value → bool | Type check: is value a table or struct? (for pattern matching) |
+| `ArrayLen` | array → int | Get array length (for pattern matching) |
+| `TableGetOrNil` | table → value | Get key from table/struct, or nil if missing/wrong type (u16 const_idx operand) |
 
 ## Yield as terminator
 
@@ -133,6 +137,21 @@ suspends execution and resumes in a new block. The lowerer:
 The emitter preserves stack state across the yield boundary via
 `yield_stack_state`. This ensures intermediate values computed before yield
 (e.g., the `1` in `(+ 1 (yield 2) 3)`) survive into the resume block.
+
+## Block/Break lowering
+
+`HirKind::Block` lowers to a result register + exit label pattern:
+1. Allocate `result_reg` and `exit_label`
+2. Push `BlockLowerContext { block_id, result_reg, exit_label }`
+3. Lower body, move result to `result_reg`
+4. Pop context, jump to `exit_label`, start new block at `exit_label`
+
+`HirKind::Break` lowers to Move + Jump:
+1. Find target block's `result_reg` and `exit_label` via `block_lower_contexts`
+2. Lower value, move to `result_reg`, jump to `exit_label`
+3. Start unreachable dead-code block
+
+No new bytecode instructions — break compiles to existing Move + Jump.
 
 ## Files
 

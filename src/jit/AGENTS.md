@@ -137,9 +137,15 @@ The effect system ensures fibers and JIT coexist safely:
   `Effect::yields_raises()` — `may_suspend()` is true. Any closure calling
   them transitively inherits this effect, so the JIT gate rejects them.
 
+- **SIG_QUERY handling**: `jit_handle_primitive_signal` dispatches `SIG_QUERY`
+  to `vm.dispatch_query()` and returns the result. This supports primitives
+  like `list-primitives` and `primitive-meta` that read VM state but don't
+  suspend execution.
+
 - **Catch-all panic**: `jit_handle_primitive_signal` panics on unexpected
-  signal bits (not `SIG_OK` or `SIG_ERROR`). Reaching this means the effect
-  system has a bug — a suspending primitive was called from JIT code.
+  signal bits (not `SIG_OK`, `SIG_ERROR`, `SIG_HALT`, or `SIG_QUERY`).
+  Reaching this means the effect system has a bug — a suspending primitive
+  was called from JIT code.
 
 ## JIT-to-JIT Calling
 

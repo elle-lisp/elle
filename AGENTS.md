@@ -153,10 +153,25 @@ Things that look wrong but aren't:
   See `src/value/fiber.rs` for the full bit layout.
 - Destructuring uses **silent nil semantics**: missing values become `nil`,
   wrong types produce `nil`, no runtime errors. This is separate from `match`
-  pattern matching which is conditional. `CarOrNil`/`CdrOrNil`/`ArrayRefOrNil`
-  are dedicated bytecode instructions for this — they never signal errors.
-- `defn` and `let*` are desugared in the Rust expander, not as `defmacro`
-  macros. Elle does not yet have a prelude loading mechanism.
+  pattern matching which is conditional. `CarOrNil`/`CdrOrNil`/`ArrayRefOrNil`/
+  `TableGetOrNil` are dedicated bytecode instructions for this — they never
+  signal errors. In `match`, compound patterns (`Cons`, `List`, `Array`,
+  `Table`) emit type guards (`IsPair`, `IsArray`, `IsTable`) that branch to
+  the fail label before extracting elements.
+- `defn`, `let*`, `->`, `->>`, `when`, `unless`, `try`/`catch`, `protect`,
+  `defer`, `with`, and `yield*` are prelude macros defined in `prelude.lisp`,
+  loaded by the Expander before user code expansion. The prelude is embedded
+  via `include_str!` and parsed/expanded on each Expander creation.
+- `{:key val ...}` is `SyntaxKind::Table(elements)` in the reader. In
+  expression position, the analyzer desugars it to a `(struct ...)` call.
+  In destructuring position, it produces `HirPattern::Table`. `@{:key val}`
+  (mutable table) remains `SyntaxKind::List` with `table` prepended.
+- `begin` and `block` are distinct forms. `begin` sequences expressions
+  without creating a scope (bindings leak into the enclosing scope). `block`
+  sequences expressions within a new lexical scope (bindings are contained).
+  `block` supports an optional keyword name and `break` for early exit:
+  `(block :name body...)` / `(break :name value)`. `break` is validated at
+  compile time — it must be inside a block and cannot cross function boundaries.
 
 ## Conventions
 

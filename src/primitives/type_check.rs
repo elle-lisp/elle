@@ -30,7 +30,11 @@ pub fn prim_is_pair(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].as_cons().is_some()))
+    let is_pair = args[0].as_cons().is_some()
+        || args[0].as_syntax().is_some_and(
+            |s| matches!(s.kind, crate::syntax::SyntaxKind::List(ref items) if !items.is_empty()),
+        );
+    (SIG_OK, Value::bool(is_pair))
 }
 
 /// Check if value is a list (empty list or cons cell)
@@ -44,10 +48,12 @@ pub fn prim_is_list(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (
-        SIG_OK,
-        Value::bool(args[0].is_empty_list() || args[0].as_cons().is_some()),
-    )
+    let is_list = args[0].is_empty_list()
+        || args[0].as_cons().is_some()
+        || args[0]
+            .as_syntax()
+            .is_some_and(|s| matches!(s.kind, crate::syntax::SyntaxKind::List(_)));
+    (SIG_OK, Value::bool(is_list))
 }
 
 /// Check if value is a number
@@ -75,7 +81,11 @@ pub fn prim_is_symbol(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].is_symbol()))
+    let is_symbol = args[0].is_symbol()
+        || args[0]
+            .as_syntax()
+            .is_some_and(|s| matches!(s.kind, crate::syntax::SyntaxKind::Symbol(_)));
+    (SIG_OK, Value::bool(is_symbol))
 }
 
 /// Check if value is a string
@@ -145,7 +155,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if value is nil.",
         params: &["value"],
-        category: "",
+        category: "predicate",
         example: "(nil? nil) ;=> #t\n(nil? 42) ;=> #f",
         aliases: &[],
     },
@@ -156,7 +166,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if value is a pair (cons cell).",
         params: &["value"],
-        category: "",
+        category: "predicate",
         example: "(pair? (cons 1 2)) ;=> #t\n(pair? 42) ;=> #f",
         aliases: &[],
     },
@@ -167,7 +177,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if value is a list (empty list or cons cell).",
         params: &["value"],
-        category: "",
+        category: "predicate",
         example: "(list? (list 1 2)) ;=> #t\n(list? 42) ;=> #f",
         aliases: &[],
     },
@@ -178,7 +188,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if value is a number.",
         params: &["value"],
-        category: "",
+        category: "predicate",
         example: "(number? 42) ;=> #t\n(number? \"hello\") ;=> #f",
         aliases: &[],
     },
@@ -189,7 +199,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if value is a symbol.",
         params: &["value"],
-        category: "",
+        category: "predicate",
         example: "(symbol? 'foo) ;=> #t\n(symbol? 42) ;=> #f",
         aliases: &[],
     },
@@ -200,7 +210,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if value is a string.",
         params: &["value"],
-        category: "",
+        category: "predicate",
         example: "(string? \"hello\") ;=> #t\n(string? 42) ;=> #f",
         aliases: &[],
     },
@@ -211,7 +221,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if value is a boolean.",
         params: &["value"],
-        category: "",
+        category: "predicate",
         example: "(boolean? #t) ;=> #t\n(boolean? 42) ;=> #f",
         aliases: &[],
     },
@@ -222,7 +232,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if value is a keyword.",
         params: &["value"],
-        category: "",
+        category: "predicate",
         example: "(keyword? :foo) ;=> #t\n(keyword? 42) ;=> #f",
         aliases: &[],
     },
@@ -233,7 +243,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Get the type of a value as a keyword.",
         params: &["value"],
-        category: "",
+        category: "predicate",
         example: "(type 42) ;=> :integer\n(type \"hello\") ;=> :string",
         aliases: &["type-of"],
     },

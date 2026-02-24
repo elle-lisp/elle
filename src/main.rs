@@ -10,7 +10,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 
 fn print_welcome() {
-    println!("Elle v0.1.0 - Lisp Interpreter (type (help) for commands)");
+    println!("Elle v1.0.0 (type (help) for commands)");
 }
 
 fn print_error_context(input: &str, _msg: &str, line: usize, col: usize) {
@@ -29,30 +29,7 @@ fn print_error_context(input: &str, _msg: &str, line: usize, col: usize) {
 
 fn print_help() {
     println!();
-    println!("Elle - Fast Lisp Interpreter");
-    println!();
-    println!("Primitives:");
-    println!("  Arithmetic:  +, -, *, /");
-    println!("  Comparison:  =, <, >, <=, >=");
-    println!("  Lists:       cons, first, rest, list, length, append, reverse");
-    println!("  List utils:  nth, last, take, drop");
-    println!("  Math:        min, max, abs, sqrt, sin, cos, tan, log, exp, pow");
-    println!("  Constants:   pi, e");
-    println!("  Rounding:    floor, ceil, round");
-    println!("  Integer ops: mod, remainder, even?, odd?");
-    println!("  Strings:     string-append, string-upcase, string-downcase,");
-    println!("               substring, string-index, char-at");
-    println!("  Arrays:      array, array-ref, array-set!");
-    println!("  Types:       type-of, int, float, string");
-    println!("  Logic:       not, if");
-    println!("  I/O:         display, newline");
-    println!();
-    println!("Special forms:");
-    println!("  (if cond then else)  - Conditional");
-    println!("  (quote x)            - Quote literal");
-    println!("  (def x 10)           - Immutable binding");
-    println!("  (var x 10)           - Mutable binding");
-    println!("  (begin ...)          - Sequence");
+    print!("{}", elle::primitives::help_text());
     println!();
 }
 
@@ -390,6 +367,18 @@ fn main() {
 
     // Check for command-line arguments
     let args: Vec<String> = env::args().collect();
+
+    // Check for --help/-h first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("Elle v1.0.0\n");
+        println!("Usage: elle [options] [file...]\n");
+        println!("Options:");
+        println!("  -h, --help    Show this help");
+        println!("  -              Read from stdin\n");
+        print!("{}", elle::primitives::help_text());
+        return;
+    }
+
     let mut had_errors = false;
     let mut files = Vec::new();
     let mut read_stdin = false;

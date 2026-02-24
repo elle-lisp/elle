@@ -63,9 +63,10 @@ const fn _default_prim(
     panic!("PrimitiveDef::DEFAULT func called — this is a bug")
 }
 
-/// Documentation info for a primitive, stored at runtime for `doc` lookup.
+/// Documentation info for a named form (primitive, special form, or macro).
+/// Stored at runtime for `doc` lookup.
 #[derive(Debug, Clone)]
-pub struct PrimitiveDoc {
+pub struct Doc {
     pub name: &'static str,
     pub doc: &'static str,
     pub params: &'static [&'static str],
@@ -73,9 +74,10 @@ pub struct PrimitiveDoc {
     pub effect: Effect,
     pub category: &'static str,
     pub example: &'static str,
+    pub aliases: &'static [&'static str],
 }
 
-impl PrimitiveDoc {
+impl Doc {
     /// Format as a human-readable doc string for REPL display.
     pub fn format(&self) -> String {
         let mut out = String::new();
@@ -107,6 +109,12 @@ impl PrimitiveDoc {
                 out.push('\n');
             }
         }
+        // Aliases
+        if !self.aliases.is_empty() {
+            out.push_str("  aliases: ");
+            out.push_str(&self.aliases.join(", "));
+            out.push('\n');
+        }
         out
     }
 }
@@ -119,7 +127,7 @@ impl PrimitiveDoc {
 pub struct PrimitiveMeta {
     pub effects: HashMap<SymbolId, Effect>,
     pub arities: HashMap<SymbolId, Arity>,
-    pub docs: HashMap<SymbolId, PrimitiveDoc>,
+    pub docs: HashMap<SymbolId, Doc>,
 }
 
 impl PrimitiveMeta {

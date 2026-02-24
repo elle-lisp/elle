@@ -167,13 +167,20 @@ impl HirSymbolExtractor {
                 }
             }
 
-            HirKind::Begin(exprs)
-            | HirKind::Block(exprs)
-            | HirKind::And(exprs)
-            | HirKind::Or(exprs) => {
+            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => {
                 for e in exprs {
                     self.walk(e, index, symbols);
                 }
+            }
+
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    self.walk(e, index, symbols);
+                }
+            }
+
+            HirKind::Break { value, .. } => {
+                self.walk(value, index, symbols);
             }
 
             HirKind::Call { func, args, .. } => {

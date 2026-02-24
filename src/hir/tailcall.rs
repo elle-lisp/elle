@@ -124,14 +124,17 @@ fn mark(hir: &mut Hir, in_tail: bool) {
             }
         }
 
-        // Block: only the last expression inherits tail position
-        HirKind::Block(exprs) => {
-            if let Some((last, rest)) = exprs.split_last_mut() {
-                for expr in rest {
-                    mark(expr, false);
-                }
-                mark(last, in_tail);
+        // Block: body is never in tail position because a `break` could
+        // override the result. Conservative but correct.
+        HirKind::Block { body, .. } => {
+            for expr in body {
+                mark(expr, false);
             }
+        }
+
+        // Break: value is not in tail position (stored to result register, then jump)
+        HirKind::Break { value, .. } => {
+            mark(value, false);
         }
 
         // While: loop bodies are never in tail position
@@ -287,10 +290,13 @@ mod tests {
             | HirKind::Yield(value) => {
                 collect_calls(value, calls);
             }
-            HirKind::Block(exprs) => {
-                for expr in exprs {
+            HirKind::Block { body, .. } => {
+                for expr in body {
                     collect_calls(expr, calls);
                 }
+            }
+            HirKind::Break { value, .. } => {
+                collect_calls(value, calls);
             }
             HirKind::Module { body, .. } => collect_calls(body, calls),
             _ => {}

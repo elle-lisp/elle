@@ -1,5 +1,5 @@
 use super::core::VM;
-use crate::value::{cons, error_val, Value, SIG_ERROR};
+use crate::value::{cons, error_val, TableKey, Value, SIG_ERROR};
 
 pub fn handle_cons(vm: &mut VM) {
     let rest = vm
@@ -276,4 +276,52 @@ pub fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
         Value::array(vec![])
     };
     vm.fiber.stack.push(result);
+}
+
+/// Table/struct get with silent nil: returns nil if key missing or wrong type.
+/// Operand: u16 constant pool index (keyword key).
+/// Used by destructuring — missing keys become nil, no errors.
+pub fn handle_table_get_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
+    let const_idx = vm.read_u16(bytecode, ip) as usize;
+    let key_value = constants[const_idx];
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on TableGetOrNil");
+
+    // Convert the constant to a TableKey for lookup
+    let key = if let Some(name) = key_value.as_keyword_name() {
+        TableKey::Keyword(name.to_string())
+    } else if let Some(s) = key_value.as_string() {
+        TableKey::String(s.to_string())
+    } else if let Some(i) = key_value.as_int() {
+        TableKey::Int(i)
+    } else if let Some(id) = key_value.as_symbol() {
+        TableKey::Symbol(crate::value::SymbolId(id))
+    } else if let Some(b) = key_value.as_bool() {
+        TableKey::Bool(b)
+    } else if key_value.is_nil() {
+        TableKey::Nil
+    } else {
+        vm.fiber.stack.push(Value::NIL);
+        return;
+    };
+
+    // Try struct first (immutable, no RefCell borrow)
+    if let Some(struct_map) = val.as_struct() {
+        if let Some(value) = struct_map.get(&key) {
+            vm.fiber.stack.push(*value);
+            return;
+        }
+    }
+    // Try table (mutable)
+    if let Some(table_ref) = val.as_table() {
+        if let Some(value) = table_ref.borrow().get(&key) {
+            vm.fiber.stack.push(*value);
+            return;
+        }
+    }
+    // Not found or wrong type → nil
+    vm.fiber.stack.push(Value::NIL);
 }

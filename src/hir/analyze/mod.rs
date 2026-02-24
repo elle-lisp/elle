@@ -20,7 +20,7 @@ mod forms;
 mod special;
 
 use super::binding::{Binding, CaptureInfo, CaptureKind};
-use super::expr::{Hir, HirKind};
+use super::expr::{BlockId, Hir, HirKind};
 use crate::effects::Effect;
 use crate::symbol::SymbolTable;
 use crate::syntax::{ScopeId, Span};
@@ -28,6 +28,15 @@ use crate::value::heap::BindingScope;
 use crate::value::types::Arity;
 use crate::value::SymbolId;
 use std::collections::{HashMap, HashSet};
+
+/// Tracks an active block for `break` targeting.
+struct BlockContext {
+    block_id: BlockId,
+    name: Option<String>,
+    /// fn_depth at the point the block was entered.
+    /// A break can only target blocks at the same fn_depth.
+    fn_depth: u32,
+}
 
 /// Result of HIR analysis
 pub struct AnalysisResult {
@@ -120,6 +129,13 @@ pub struct Analyzer<'a> {
     immutable_globals: std::collections::HashSet<SymbolId>,
     /// Immutable global bindings defined in this form (for cross-form tracking)
     defined_immutable_globals: std::collections::HashSet<SymbolId>,
+    /// Stack of active blocks for `break` targeting
+    block_contexts: Vec<BlockContext>,
+    /// Next block ID to allocate
+    next_block_id: u32,
+    /// Current function nesting depth (incremented in analyze_lambda).
+    /// Used to prevent `break` from crossing function boundaries.
+    fn_depth: u32,
 }
 
 impl<'a> Analyzer<'a> {
@@ -161,6 +177,9 @@ impl<'a> Analyzer<'a> {
             current_lambda_params: Vec::new(),
             immutable_globals: std::collections::HashSet::new(),
             defined_immutable_globals: std::collections::HashSet::new(),
+            block_contexts: Vec::new(),
+            next_block_id: 0,
+            fn_depth: 0,
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);

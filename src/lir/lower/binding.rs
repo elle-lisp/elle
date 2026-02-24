@@ -265,7 +265,11 @@ impl Lowerer {
     }
 
     /// Recursively destructure a value into pattern bindings.
-    fn lower_destructure(&mut self, pattern: &HirPattern, value_reg: Reg) -> Result<(), String> {
+    fn lower_destructure(
+        &mut self,
+        pattern: &HirPattern,
+        mut value_reg: Reg,
+    ) -> Result<(), String> {
         match pattern {
             HirPattern::Wildcard => {
                 // Discard the value — don't bind it
@@ -352,6 +356,33 @@ impl Lowerer {
                         index: elements.len() as u16,
                     });
                     self.lower_destructure(rest_pat, slice)?;
+                }
+                Ok(())
+            }
+            HirPattern::Table { entries } => {
+                for (i, (key_name, sub_pattern)) in entries.iter().enumerate() {
+                    let is_last = i == entries.len() - 1;
+                    let src = if is_last {
+                        // Last entry: consume the table directly
+                        value_reg
+                    } else {
+                        // Not last: dup the table
+                        let dup = self.fresh_reg();
+                        self.emit(LirInstr::Dup {
+                            dst: dup,
+                            src: value_reg,
+                        });
+                        let src = value_reg;
+                        value_reg = dup;
+                        src
+                    };
+                    let elem = self.fresh_reg();
+                    self.emit(LirInstr::TableGetOrNil {
+                        dst: elem,
+                        src,
+                        key: LirConst::Keyword(key_name.clone()),
+                    });
+                    self.lower_destructure(sub_pattern, elem)?;
                 }
                 Ok(())
             }

@@ -11,7 +11,7 @@
 //! - coro/value: Get fiber signal value
 //! - coro?: Check if value is a fiber
 //! - coro/>iterator: Identity (fibers are iterable)
-//! - yield-from: Stub (not yet supported)
+//! - yield*: Prelude macro for sub-coroutine delegation
 
 use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
@@ -239,20 +239,6 @@ pub fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
     (SIG_RESUME, args[0])
 }
 
-/// (yield-from co) → error
-///
-/// Dropped in the fiber migration. See issue #294 for yield* design.
-pub fn prim_yield_from(args: &[Value]) -> (SignalBits, Value) {
-    let _ = args;
-    (
-        SIG_ERROR,
-        error_val(
-            "error",
-            "yield-from: not yet supported with fibers (see issue #294 for yield*)",
-        ),
-    )
-}
-
 /// (coro/>iterator co) → co
 ///
 /// Identity — fibers are iterable.
@@ -339,17 +325,6 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "coro",
         example: "(coro/resume co)",
         aliases: &[],
-    },
-    PrimitiveDef {
-        name: "coro/yield-from",
-        func: prim_yield_from,
-        effect: Effect::yields_raises(),
-        arity: Arity::AtLeast(0),
-        doc: "Yield from a coroutine (not yet supported with fibers)",
-        params: &[],
-        category: "coro",
-        example: "(coro/yield-from)",
-        aliases: &["yield-from"],
     },
     PrimitiveDef {
         name: "coro/>iterator",
@@ -484,12 +459,6 @@ mod tests {
     #[test]
     fn test_coroutine_resume_wrong_type() {
         let (sig, _) = prim_coroutine_resume(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_yield_from_returns_error() {
-        let (sig, _) = prim_yield_from(&[Value::int(42)]);
         assert_eq!(sig, SIG_ERROR);
     }
 

@@ -3,7 +3,7 @@
 //! These functions handle complex operations that interact with heap types
 //! or require VM access: data structures, cells, globals, and function calls.
 
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_OK, SIG_QUERY};
 use crate::value::repr::TAG_NIL;
 use crate::value::{error_val, Value};
 
@@ -15,7 +15,9 @@ use crate::value::{error_val, Value};
 ///
 /// JIT-compiled code only runs non-suspending functions, so SIG_YIELD and
 /// SIG_RESUME should never appear here. SIG_ERROR sets the exception on
-/// the fiber for the JIT caller to check.
+/// the fiber for the JIT caller to check. SIG_QUERY is dispatched to the
+/// VM's query handler (for primitives like `list-primitives` and
+/// `primitive-meta` that read VM state).
 fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: Value) -> u64 {
     match bits {
         SIG_OK => value.to_bits(),
@@ -23,13 +25,23 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             vm.fiber.signal = Some((bits, value));
             TAG_NIL
         }
+        SIG_QUERY => {
+            // Dispatch VM state query and return the result.
+            let (sig, result) = vm.dispatch_query(value);
+            if sig == SIG_ERROR {
+                vm.fiber.signal = Some((SIG_ERROR, result));
+                TAG_NIL
+            } else {
+                result.to_bits()
+            }
+        }
         _ => {
             // Reaching here means the effect system has a bug: a suspending
             // primitive was called from JIT-compiled code, which should be
             // impossible since the JIT gate rejects may_suspend() closures.
             panic!(
                 "Effect system bug: signal {} reached JIT-compiled code. \
-                 Only SIG_OK, SIG_ERROR, and SIG_HALT should appear in JIT context.",
+                 Only SIG_OK, SIG_ERROR, SIG_HALT, and SIG_QUERY should appear in JIT context.",
                 bits
             );
         }

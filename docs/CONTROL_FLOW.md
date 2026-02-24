@@ -82,12 +82,12 @@ The final `(#t ...)` clause acts as a catch-all (equivalent to `else`):
 
 
 
-### do/begin - Compound Expressions
+### begin - Sequencing Expressions
 
-`do` (or `begin`) groups multiple expressions together, returning the value of the last:
+`begin` sequences multiple expressions together, returning the value of the last. It does NOT create a new scope—bindings defined inside `begin` go into the enclosing scope.
 
 ```lisp
-(do
+(begin
   expression1
   expression2
   ...
@@ -97,7 +97,7 @@ The final `(#t ...)` clause acts as a catch-all (equivalent to `else`):
 **Examples:**
 
 ```lisp
-(do
+(begin
   (display "First")
   (newline)
   (display "Second")
@@ -105,11 +105,43 @@ The final `(#t ...)` clause acts as a catch-all (equivalent to `else`):
   (+ 2 2))
 ⟹ 4 (returns value of last expression)
 
-(var result (do
+(var result (begin
   (set! x 10)
   (set! y 20)
   (+ x y)))
 result ⟹ 30
+```
+
+### block - Scoped Sequencing with break
+
+`block` sequences expressions within a new lexical scope. Bindings don't leak out. You can optionally name a block and use `break` to exit early with a value.
+
+```lisp
+(block :optional-name
+  expression1
+  expression2
+  ...
+  final-expression)
+```
+
+**Examples:**
+
+```lisp
+; Simple block with scope isolation
+(var x 100)
+(block
+  (var x 50)  ; Local to block, shadows outer x
+  (display x))  ; Prints: 50
+(display x)     ; Prints: 100
+
+; Named block with break for early exit
+(var result (block :search
+  (for item (list 1 2 3 4 5)
+    (if (= item 3)
+      (break :search "found it")))
+  "not found"))
+
+result  ; ⟹ "found it"
 ```
 
 ---
@@ -671,7 +703,7 @@ If you open resources, ensure cleanup code runs:
 
 ; Less good: Generic exception handling
 (try
-  (do
+  (begin
     (fetch-data)
     (validate-input))
   (catch (e)
@@ -700,7 +732,9 @@ Chain functional operations for clarity:
 |-----------|----------|---------|
 | `if` | Simple true/false choice | Any value |
 | `cond` | Multiple conditions | First true branch value |
-| `do/begin` | Multiple expressions | Last expression value |
+| `begin` | Sequence expressions (no scope) | Last expression value |
+| `block` | Sequence expressions (with scope) | Last expression value |
+| `break` | Exit block early with value | Block's return value |
 | `while` | Conditional loop | nil |
 | `forever` | Infinite loop (syntactic sugar for `while #t`) | nil |
 | `map` | Transform each element | New list with transformed elements |

@@ -31,6 +31,13 @@ impl Syntax {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 Value::array(values)
             }
+            SyntaxKind::Table(items) => {
+                // Convert to (struct k1 v1 k2 v2 ...) list
+                let struct_sym = symbols.intern("struct");
+                let mut values = vec![Value::symbol(struct_sym.0)];
+                values.extend(items.iter().map(|item| item.to_value(symbols)));
+                crate::value::list(values)
+            }
             SyntaxKind::Quote(inner) => {
                 let quote_sym = symbols.intern("quote");
                 crate::value::list(vec![Value::symbol(quote_sym.0), inner.to_value(symbols)])
@@ -59,9 +66,13 @@ impl Syntax {
     /// scopes from the original Syntax. The passed `span` is ignored in
     /// this case; the syntax object carries its own (more accurate) span.
     pub fn from_value(value: &Value, symbols: &SymbolTable, span: Span) -> Result<Syntax, String> {
-        // Syntax objects pass through directly, preserving scopes
+        // Syntax objects pass through directly, preserving scopes.
+        // Mark as scope_exempt so the intro scope isn't stamped on
+        // call-site identifiers that survived the Value round-trip.
         if let Some(syntax_rc) = value.as_syntax() {
-            return Ok(syntax_rc.as_ref().clone());
+            let mut s = syntax_rc.as_ref().clone();
+            s.scope_exempt = true;
+            return Ok(s);
         }
         let kind = if value.is_nil() {
             SyntaxKind::Nil
