@@ -76,14 +76,8 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Symbol(name) if name == "_" => Ok(HirPattern::Wildcard),
             SyntaxKind::Symbol(name) if name == "nil" => Ok(HirPattern::Nil),
             SyntaxKind::Symbol(name) => {
-                let id = self.bind(
-                    name,
-                    syntax.scopes.as_slice(),
-                    BindingKind::Local {
-                        index: self.current_local_index(),
-                    },
-                );
-                Ok(HirPattern::Var(id))
+                let binding = self.bind(name, syntax.scopes.as_slice(), BindingScope::Local);
+                Ok(HirPattern::Var(binding))
             }
             SyntaxKind::Nil => Ok(HirPattern::Nil),
             SyntaxKind::Bool(b) => Ok(HirPattern::Literal(PatternLiteral::Bool(*b))),

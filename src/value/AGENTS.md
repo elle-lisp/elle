@@ -22,7 +22,7 @@ Runtime value representation using NaN-boxing.
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`, `SignalBits` |
 | `error.rs` | `error_val()` and `format_error()` helpers for error tuples |
 | `ffi.rs` | `LibHandle`, `CHandle` for C interop |
-| `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle` |
+| `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle`, `BindingInner`, `BindingScope` |
 | `send.rs` | `SendValue` wrapper for thread-safe transfer |
 | `display.rs` | `Display` implementation for values |
 | `intern.rs` | String interning (used by both strings and keywords) |
@@ -86,7 +86,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 NaN-boxing uses the NaN space of IEEE 754 doubles:
 
 - **Immediate**: nil, bool, int (i48), symbol, keyword, float
-- **Heap pointer**: cons, array, table, closure, fiber, cell, syntax, etc.
+- **Heap pointer**: cons, array, table, closure, fiber, cell, syntax, binding, etc.
 
 ### Syntax objects
 
@@ -100,8 +100,19 @@ by `Value::as_syntax()`. Not sendable across threads (contains `Rc`).
 a circular dependency within the same crate, which Rust allows. Both
 types are in `src/` — neither is in a separate crate.
 
+### Binding objects
+
+`HeapObject::Binding(RefCell<BindingInner>)` stores compile-time binding
+metadata. Created by `Value::binding(name, scope)`, accessed by
+`Value::as_binding()`. Never appears at runtime — the VM never sees this type.
+The `BindingInner` is mutable during analysis (the analyzer discovers captures
+and mutations after creating the binding) and read-only during lowering.
+
+`BindingScope` enum: `Parameter`, `Local`, `Global`. Defined in `heap.rs`.
+
 Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
-`Value::closure(c)`. Don't construct enum variants directly.
+`Value::closure(c)`, `Value::binding(name, scope)`. Don't construct enum
+variants directly.
 
 ## Files
 
@@ -118,7 +129,7 @@ Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
 | `fiber.rs` | ~515 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
 | `error.rs` | ~50 | error_val() and format_error() helpers |
 | `ffi.rs` | ~50 | LibHandle, CHandle |
-| `heap.rs` | ~300 | HeapObject, Cons, ThreadHandle |
+| `heap.rs` | ~320 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope |
 | `send.rs` | ~150 | SendValue for thread transfer |
 | `display.rs` | ~100 | Display formatting |
 | `intern.rs` | ~100 | Symbol interning |

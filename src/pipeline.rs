@@ -5,7 +5,7 @@
 use crate::compiler::Bytecode;
 use crate::effects::{get_primitive_effects, Effect};
 use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::{AnalysisResult, Analyzer, BindingId, BindingInfo, Hir};
+use crate::hir::{AnalysisResult, Analyzer, Hir};
 use crate::lir::{Emitter, Lowerer};
 use crate::primitives::register_primitives;
 use crate::reader::{read_syntax, read_syntax_all};
@@ -26,7 +26,6 @@ pub struct CompileResult {
 /// Used by linter and LSP which need HIR but not bytecode
 pub struct AnalyzeResult {
     pub hir: Hir,
-    pub bindings: HashMap<BindingId, BindingInfo>,
 }
 
 /// Scan an expanded syntax form for `(var/def name (fn ...))` patterns.
@@ -92,9 +91,7 @@ pub fn eval_syntax(
     mark_tail_calls(&mut analysis.hir);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new()
-        .with_bindings(analysis.bindings)
-        .with_intrinsics(intrinsics);
+    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
     let symbol_snapshot = symbols.all_names();
@@ -126,11 +123,9 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
     // Phase 3.5: Mark tail calls
     mark_tail_calls(&mut analysis.hir);
 
-    // Phase 4: Lower to LIR with binding info and intrinsic specialization
+    // Phase 4: Lower to LIR with intrinsic specialization
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new()
-        .with_bindings(analysis.bindings)
-        .with_intrinsics(intrinsics);
+    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
@@ -228,9 +223,7 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let mut results = Vec::new();
     for analysis in analysis_results {
-        let mut lowerer = Lowerer::new()
-            .with_bindings(analysis.bindings)
-            .with_intrinsics(intrinsics.clone());
+        let mut lowerer = Lowerer::new().with_intrinsics(intrinsics.clone());
         let lir_func = lowerer.lower(&analysis.hir)?;
 
         let symbol_snapshot = symbols.all_names();
@@ -265,9 +258,7 @@ pub fn eval(
     mark_tail_calls(&mut analysis.hir);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new()
-        .with_bindings(analysis.bindings)
-        .with_intrinsics(intrinsics);
+    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
     let symbol_snapshot = symbols.all_names();
@@ -290,10 +281,7 @@ pub fn analyze(
     let primitive_effects = get_primitive_effects(symbols);
     let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
     let analysis = analyzer.analyze(&expanded)?;
-    Ok(AnalyzeResult {
-        hir: analysis.hir,
-        bindings: analysis.bindings,
-    })
+    Ok(AnalyzeResult { hir: analysis.hir })
 }
 
 /// Analyze multiple top-level forms without generating bytecode.
@@ -369,10 +357,7 @@ pub fn analyze_all(
     // Convert to AnalyzeResult
     Ok(analysis_results
         .into_iter()
-        .map(|a| AnalyzeResult {
-            hir: a.hir,
-            bindings: a.bindings,
-        })
+        .map(|a| AnalyzeResult { hir: a.hir })
         .collect())
 }
 
@@ -1082,8 +1067,6 @@ mod tests {
             analysis.hir.kind,
             crate::hir::HirKind::Lambda { .. }
         ));
-        // Should have bindings for the parameter
-        assert!(!analysis.bindings.is_empty());
     }
 
     #[test]
@@ -1099,13 +1082,13 @@ mod tests {
     }
 
     #[test]
-    fn test_analyze_with_bindings() {
+    fn test_analyze_with_let() {
         let (mut symbols, mut vm) = setup();
         let result = analyze("(let ((x 1) (y 2)) (+ x y))", &mut symbols, &mut vm);
         assert!(result.is_ok());
         let analysis = result.unwrap();
-        // Should have bindings for x and y
-        assert!(analysis.bindings.len() >= 2);
+        // Should produce a Let HIR node
+        assert!(matches!(analysis.hir.kind, crate::hir::HirKind::Let { .. }));
     }
 
     #[test]

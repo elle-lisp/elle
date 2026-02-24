@@ -39,21 +39,15 @@ impl<'a> Analyzer<'a> {
 
         let mut bindings = Vec::new();
         for (name, name_scopes, value) in names_and_values {
-            let id = self.bind(
-                name,
-                &name_scopes,
-                BindingKind::Local {
-                    index: self.current_local_index(),
-                },
-            );
+            let binding = self.bind(name, &name_scopes, BindingScope::Local);
             // Track effect for interprocedural analysis
             if let HirKind::Lambda {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(id, *inferred_effect);
+                self.effect_env.insert(binding, *inferred_effect);
             }
-            bindings.push((id, value));
+            bindings.push((binding, value));
         }
 
         // Analyze body expressions (empty body returns nil)
@@ -105,21 +99,15 @@ impl<'a> Analyzer<'a> {
             let value = self.analyze_expr(&pair[1])?;
             effect = effect.combine(value.effect);
 
-            let id = self.bind(
-                name,
-                pair[0].scopes.as_slice(),
-                BindingKind::Local {
-                    index: self.current_local_index(),
-                },
-            );
+            let b = self.bind(name, pair[0].scopes.as_slice(), BindingScope::Local);
             // Track effect for interprocedural analysis
             if let HirKind::Lambda {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(id, *inferred_effect);
+                self.effect_env.insert(b, *inferred_effect);
             }
-            bindings.push((id, value));
+            bindings.push((b, value));
         }
 
         let body = if items.len() > 2 {
@@ -153,7 +141,7 @@ impl<'a> Analyzer<'a> {
         self.push_scope(false);
 
         // First pass: bind all names (for mutual recursion)
-        let mut binding_ids = Vec::new();
+        let mut binding_handles = Vec::new();
         for binding in bindings_syntax {
             let pair = binding
                 .as_list()
@@ -164,14 +152,8 @@ impl<'a> Analyzer<'a> {
             let name = pair[0]
                 .as_symbol()
                 .ok_or_else(|| format!("{}: letrec binding name must be a symbol", span))?;
-            let id = self.bind(
-                name,
-                pair[0].scopes.as_slice(),
-                BindingKind::Local {
-                    index: self.current_local_index(),
-                },
-            );
-            binding_ids.push(id);
+            let b = self.bind(name, pair[0].scopes.as_slice(), BindingScope::Local);
+            binding_handles.push(b);
         }
 
         // Second pass: analyze values
@@ -182,15 +164,13 @@ impl<'a> Analyzer<'a> {
             let value = self.analyze_expr(&pair[1])?;
             effect = effect.combine(value.effect);
             // Track effect for interprocedural analysis
-            // Note: For mutual recursion, effects may be incomplete at this point
-            // since later bindings haven't been analyzed yet. This is conservative.
             if let HirKind::Lambda {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(binding_ids[i], *inferred_effect);
+                self.effect_env.insert(binding_handles[i], *inferred_effect);
             }
-            bindings.push((binding_ids[i], value));
+            bindings.push((binding_handles[i], value));
         }
 
         let body = self.analyze_body(&items[2..], span.clone())?;
@@ -234,15 +214,12 @@ impl<'a> Analyzer<'a> {
         let name = items[1]
             .as_symbol()
             .ok_or_else(|| format!("{}: var name must be a symbol", span))?;
-        let sym = self.symbols.intern(name);
 
         // Check if we're inside a function scope
         // If so, var creates a local binding, not a global one
         let in_function = self.scopes.iter().any(|s| s.is_function);
 
         // Check if the value is a lambda form (fn or lambda)
-        // If so, we'll seed effect_env with Pure before analyzing so self-recursive
-        // calls don't default to Yields
         let is_lambda_form = if let Some(list) = items[2].as_list() {
             list.first()
                 .and_then(|s| s.as_symbol())
@@ -255,19 +232,16 @@ impl<'a> Analyzer<'a> {
             // Inside a function, var creates a local binding
             // Check if binding was pre-created by analyze_begin (for mutual recursion)
             let name_scopes = items[1].scopes.as_slice();
-            let binding_id = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes)
-            {
+            let binding = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes) {
                 existing
             } else {
                 // Not pre-created, create now (for single vars outside begin)
-                let local_index = self.current_local_count();
-                self.bind(name, name_scopes, BindingKind::Local { index: local_index })
+                self.bind(name, name_scopes, BindingScope::Local)
             };
 
-            // Seed effect_env with Pure for lambda forms so self-recursive calls
-            // don't default to Yields during analysis
+            // Seed effect_env with Pure for lambda forms
             if is_lambda_form {
-                self.effect_env.insert(binding_id, Effect::none());
+                self.effect_env.insert(binding, Effect::none());
             }
 
             // Now analyze the value (which can reference the binding)
@@ -278,13 +252,13 @@ impl<'a> Analyzer<'a> {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(binding_id, *inferred_effect);
+                self.effect_env.insert(binding, *inferred_effect);
             }
 
-            // Emit a LocalDefine that stores to a local slot
+            // Emit a Define (the lowerer checks binding.is_global())
             Ok(Hir::new(
-                HirKind::LocalDefine {
-                    binding: binding_id,
+                HirKind::Define {
+                    binding,
                     value: Box::new(value),
                 },
                 span,
@@ -292,32 +266,30 @@ impl<'a> Analyzer<'a> {
             ))
         } else {
             // At top level, var creates a global binding
-            // Create binding first so recursive references work
-            let binding_id = self.bind(name, &[], BindingKind::Global);
+            let sym = self.symbols.intern(name);
+            let binding = self.bind(name, &[], BindingScope::Global);
 
-            // Seed effect_env with Pure for lambda forms so self-recursive calls
-            // don't default to Yields during analysis
+            // Seed effect_env with Pure for lambda forms
             if is_lambda_form {
-                self.effect_env.insert(binding_id, Effect::none());
+                self.effect_env.insert(binding, Effect::none());
             }
 
             // Now analyze the value
             let value = self.analyze_expr(&items[2])?;
 
             // Update effect_env with the actual inferred effect
-            // Also record in defined_global_effects for cross-form tracking
             if let HirKind::Lambda {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(binding_id, *inferred_effect);
+                self.effect_env.insert(binding, *inferred_effect);
                 // Record for cross-form effect tracking
                 self.defined_global_effects.insert(sym, *inferred_effect);
             }
 
             Ok(Hir::new(
                 HirKind::Define {
-                    name: sym,
+                    binding,
                     value: Box::new(value),
                 },
                 span,
@@ -337,12 +309,9 @@ impl<'a> Analyzer<'a> {
         let sym = self.symbols.intern(name);
 
         // Check if we're inside a function scope
-        // If so, def creates a local binding, not a global one
         let in_function = self.scopes.iter().any(|s| s.is_function);
 
-        // Check if the value is a lambda form (fn or lambda)
-        // If so, we'll seed effect_env with Pure before analyzing so self-recursive
-        // calls don't default to Yields
+        // Check if the value is a lambda form
         let is_lambda_form = if let Some(list) = items[2].as_list() {
             list.first()
                 .and_then(|s| s.as_symbol())
@@ -353,29 +322,22 @@ impl<'a> Analyzer<'a> {
 
         if in_function {
             // Inside a function, def creates a local binding
-            // Check if binding was pre-created by analyze_begin (for mutual recursion)
             let name_scopes = items[1].scopes.as_slice();
-            let binding_id = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes)
-            {
+            let binding = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes) {
                 existing
             } else {
-                // Not pre-created, create now (for single defs outside begin)
-                let local_index = self.current_local_count();
-                self.bind(name, name_scopes, BindingKind::Local { index: local_index })
+                self.bind(name, name_scopes, BindingScope::Local)
             };
 
             // Mark as immutable
-            if let Some(info) = self.ctx.get_binding_mut(binding_id) {
-                info.is_immutable = true;
-            }
+            binding.mark_immutable();
 
-            // Seed effect_env with Pure for lambda forms so self-recursive calls
-            // don't default to Yields during analysis
+            // Seed effect_env with Pure for lambda forms
             if is_lambda_form {
-                self.effect_env.insert(binding_id, Effect::none());
+                self.effect_env.insert(binding, Effect::none());
             }
 
-            // Now analyze the value (which can reference the binding)
+            // Now analyze the value
             let value = self.analyze_expr(&items[2])?;
 
             // Update effect_env with the actual inferred effect
@@ -383,13 +345,12 @@ impl<'a> Analyzer<'a> {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(binding_id, *inferred_effect);
+                self.effect_env.insert(binding, *inferred_effect);
             }
 
-            // Emit a LocalDefine that stores to a local slot
             Ok(Hir::new(
-                HirKind::LocalDefine {
-                    binding: binding_id,
+                HirKind::Define {
+                    binding,
                     value: Box::new(value),
                 },
                 span,
@@ -397,40 +358,34 @@ impl<'a> Analyzer<'a> {
             ))
         } else {
             // At top level, def creates a global binding
-            // Create binding first so recursive references work
-            let binding_id = self.bind(name, &[], BindingKind::Global);
+            let binding = self.bind(name, &[], BindingScope::Global);
 
             // Mark as immutable
-            if let Some(info) = self.ctx.get_binding_mut(binding_id) {
-                info.is_immutable = true;
-            }
+            binding.mark_immutable();
 
             // Record in defined_immutable_globals for cross-form tracking
             self.defined_immutable_globals.insert(sym);
 
-            // Seed effect_env with Pure for lambda forms so self-recursive calls
-            // don't default to Yields during analysis
+            // Seed effect_env with Pure for lambda forms
             if is_lambda_form {
-                self.effect_env.insert(binding_id, Effect::none());
+                self.effect_env.insert(binding, Effect::none());
             }
 
             // Now analyze the value
             let value = self.analyze_expr(&items[2])?;
 
             // Update effect_env with the actual inferred effect
-            // Also record in defined_global_effects for cross-form tracking
             if let HirKind::Lambda {
                 inferred_effect, ..
             } = &value.kind
             {
-                self.effect_env.insert(binding_id, *inferred_effect);
-                // Record for cross-form effect tracking
+                self.effect_env.insert(binding, *inferred_effect);
                 self.defined_global_effects.insert(sym, *inferred_effect);
             }
 
             Ok(Hir::new(
                 HirKind::Define {
-                    name: sym,
+                    binding,
                     value: Box::new(value),
                 },
                 span,
@@ -449,7 +404,7 @@ impl<'a> Analyzer<'a> {
             .ok_or_else(|| format!("{}: set! target must be a symbol", span))?;
 
         let target = match self.lookup(name, items[1].scopes.as_slice()) {
-            Some(id) => id,
+            Some(binding) => binding,
             None => {
                 // Treat as global reference (may have been defined in a previous form)
                 let sym = self.symbols.intern(name);
@@ -460,29 +415,22 @@ impl<'a> Analyzer<'a> {
                         span, name
                     ));
                 }
-                let id = self.ctx.fresh_binding();
-                self.ctx.register_binding(BindingInfo::global(id, sym));
-                id
+                Binding::new(sym, BindingScope::Global)
             }
         };
 
         // Check for immutable binding
-        if let Some(info) = self.ctx.get_binding(target) {
-            if info.is_immutable {
-                return Err(format!(
-                    "{}: cannot set! immutable binding '{}'",
-                    span, name
-                ));
-            }
+        if target.is_immutable() {
+            return Err(format!(
+                "{}: cannot set! immutable binding '{}'",
+                span, name
+            ));
         }
 
         // Mark as mutated
-        if let Some(info) = self.ctx.get_binding_mut(target) {
-            info.mark_mutated();
-        }
+        target.mark_mutated();
 
         // Invalidate effect tracking for this binding since it's being mutated
-        // The binding's effect is now uncertain
         self.effect_env.remove(&target);
 
         let value = self.analyze_expr(&items[2])?;
@@ -522,16 +470,12 @@ impl<'a> Analyzer<'a> {
 
         // Bind parameters
         let mut params = Vec::new();
-        for (i, param) in params_syntax.iter().enumerate() {
+        for param in params_syntax.iter() {
             let name = param
                 .as_symbol()
                 .ok_or_else(|| format!("{}: lambda parameter must be a symbol", span))?;
-            let id = self.bind(
-                name,
-                param.scopes.as_slice(),
-                BindingKind::Parameter { index: i as u16 },
-            );
-            params.push(id);
+            let binding = self.bind(name, param.scopes.as_slice(), BindingScope::Parameter);
+            params.push(binding);
         }
 
         // Set current lambda params for effect source tracking
@@ -541,9 +485,8 @@ impl<'a> Analyzer<'a> {
         // Skip docstring if present (string literal as first body expression)
         let body_items = &items[2..];
         let body_start = if body_items.len() > 1 {
-            // Check if first item is a string literal (docstring)
             if matches!(&body_items[0].kind, SyntaxKind::String(_)) {
-                &body_items[1..] // Skip docstring
+                &body_items[1..]
             } else {
                 body_items
             }
@@ -557,36 +500,22 @@ impl<'a> Analyzer<'a> {
         let inferred_effect = self.compute_inferred_effect(&body, &params);
 
         self.pop_scope();
-        let mut captures = std::mem::replace(&mut self.current_captures, saved_captures);
+        let captures = std::mem::replace(&mut self.current_captures, saved_captures);
         self.parent_captures = saved_parent_captures;
 
         // Restore effect sources
         self.current_effect_sources = saved_effect_sources;
         self.current_lambda_params = saved_lambda_params;
 
-        // Update is_mutated flag in captures based on current binding info
-        // This is needed because the capture info might have been created before
-        // the set! was analyzed, so is_mutated might be stale
-        for cap in &mut captures {
-            if let Some(info) = self.ctx.get_binding(cap.binding) {
-                cap.is_mutated = info.is_mutated;
-            }
-        }
+        // No need to sync is_mutated — CaptureInfo reads from the shared Binding directly
 
         // Propagate captures from this lambda to the parent lambda
-        // If we're in a nested lambda, add our captures to the parent's captures
-        // But only if:
-        // 1. They're not parameters of the current lambda
-        // 2. They're not already accessible in the parent scope (as params or locals)
-        // 3. They're not already in the parent's captures
         for cap in &captures {
-            // Check if this capture is a parameter of the current lambda
             let is_param = params.contains(&cap.binding);
             if is_param {
                 continue;
             }
 
-            // Check if already in parent's captures
             if self
                 .current_captures
                 .iter()
@@ -595,15 +524,11 @@ impl<'a> Analyzer<'a> {
                 continue;
             }
 
-            // Check if the binding is accessible in the parent scope (without capturing)
-            // This handles the case where the inner lambda captures a parameter of the outer lambda
             let is_in_parent_scope = self.is_binding_in_current_scope(cap.binding);
             if is_in_parent_scope {
-                // The binding is accessible in the parent scope, no need to propagate
                 continue;
             }
 
-            // This capture is from an outer scope, propagate it to the parent lambda
             let propagated_cap = cap.clone();
             self.current_captures.push(propagated_cap);
         }
@@ -618,7 +543,7 @@ impl<'a> Analyzer<'a> {
                 inferred_effect,
             },
             span,
-            Effect::none(), // Creating a closure is pure
+            Effect::none(),
         ))
     }
 }

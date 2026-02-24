@@ -49,7 +49,7 @@ Each predicate asks a specific question. No vague "is_pure".
 
 The analyzer performs interprocedural effect tracking:
 
-1. **effect_env**: Maps `BindingId` → `Effect` for locally-defined functions
+1. **effect_env**: Maps `Binding` → `Effect` for locally-defined functions
 2. **primitive_effects**: Maps `SymbolId` → `Effect` for primitive functions
 
 When analyzing a call:

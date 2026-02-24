@@ -3,25 +3,21 @@
 //! Walks HIR trees and produces diagnostics. Uses the same rules as the
 //! legacy Expr-based linter but operates on the new pipeline's HIR.
 
-use crate::hir::binding::{BindingId, BindingInfo, BindingKind};
 use crate::hir::expr::{Hir, HirKind};
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::lint::rules;
 use crate::reader::SourceLoc;
 use crate::symbol::SymbolTable;
-use std::collections::HashMap;
 
 /// HIR-based linter
 pub struct HirLinter {
     diagnostics: Vec<Diagnostic>,
-    bindings: HashMap<BindingId, BindingInfo>,
 }
 
 impl HirLinter {
-    pub fn new(bindings: HashMap<BindingId, BindingInfo>) -> Self {
+    pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
-            bindings,
         }
     }
 
@@ -122,17 +118,15 @@ impl HirLinter {
                     self.check(arg, symbols);
                 }
                 // Check arity if calling a known global
-                if let HirKind::Var(binding_id) = &func.kind {
-                    if let Some(info) = self.bindings.get(binding_id) {
-                        if let BindingKind::Global = info.kind {
-                            rules::check_call_arity(
-                                info.name,
-                                args.len(),
-                                &loc,
-                                symbols,
-                                &mut self.diagnostics,
-                            );
-                        }
+                if let HirKind::Var(binding) = &func.kind {
+                    if binding.is_global() {
+                        rules::check_call_arity(
+                            binding.name(),
+                            args.len(),
+                            &loc,
+                            symbols,
+                            &mut self.diagnostics,
+                        );
                     }
                 }
             }
@@ -141,15 +135,11 @@ impl HirLinter {
                 self.check(value, symbols);
             }
 
-            HirKind::Define { name, value } => {
+            HirKind::Define { binding, value } => {
                 // Check naming convention
-                if let Some(sym_name) = symbols.name(*name) {
+                if let Some(sym_name) = symbols.name(binding.name()) {
                     rules::check_naming_convention(sym_name, &loc, &mut self.diagnostics);
                 }
-                self.check(value, symbols);
-            }
-
-            HirKind::LocalDefine { value, .. } => {
                 self.check(value, symbols);
             }
 
@@ -196,7 +186,7 @@ impl HirLinter {
 
 impl Default for HirLinter {
     fn default() -> Self {
-        Self::new(HashMap::new())
+        Self::new()
     }
 }
 
@@ -216,7 +206,7 @@ mod tests {
 
     #[test]
     fn test_hir_linter_creation() {
-        let linter = HirLinter::new(HashMap::new());
+        let linter = HirLinter::new();
         assert_eq!(linter.diagnostics().len(), 0);
         assert!(!linter.has_errors());
         assert!(!linter.has_warnings());
@@ -229,7 +219,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let mut linter = HirLinter::new(analysis.bindings);
+        let mut linter = HirLinter::new();
         linter.lint(&analysis.hir, &symbols);
 
         assert!(linter.has_warnings());
@@ -246,7 +236,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let mut linter = HirLinter::new(analysis.bindings);
+        let mut linter = HirLinter::new();
         linter.lint(&analysis.hir, &symbols);
 
         // Should have no naming warnings
@@ -264,7 +254,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let mut linter = HirLinter::new(analysis.bindings);
+        let mut linter = HirLinter::new();
         linter.lint(&analysis.hir, &symbols);
 
         assert!(linter.has_warnings());
@@ -285,7 +275,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let mut linter = HirLinter::new(analysis.bindings);
+        let mut linter = HirLinter::new();
         linter.lint(&analysis.hir, &symbols);
 
         // Let bindings don't trigger naming convention checks (only define does)

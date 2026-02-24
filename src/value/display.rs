@@ -132,6 +132,11 @@ impl fmt::Display for Value {
             return write!(f, "#<syntax:{}>", s.as_ref());
         }
 
+        // Binding
+        if self.is_binding() {
+            return write!(f, "#<binding>");
+        }
+
         // Tuple
         if let Some(elems) = self.as_tuple() {
             write!(f, "[")?;

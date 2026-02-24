@@ -218,4 +218,21 @@ impl Value {
         use std::rc::Rc;
         alloc(HeapObject::Syntax(Rc::new(s)))
     }
+
+    /// Create a binding value (compile-time only).
+    #[inline]
+    pub fn binding(
+        name: crate::value::types::SymbolId,
+        scope: crate::value::heap::BindingScope,
+    ) -> Self {
+        use crate::value::heap::{alloc, BindingInner, HeapObject};
+        use std::cell::RefCell;
+        alloc(HeapObject::Binding(RefCell::new(BindingInner {
+            name,
+            scope,
+            is_mutated: false,
+            is_captured: false,
+            is_immutable: false,
+        })))
+    }
 }

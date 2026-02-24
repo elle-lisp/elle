@@ -4,35 +4,29 @@
 //! SymbolIndex for Language Server Protocol features (hover, completion,
 //! go-to-definition, find-references, rename).
 
-use crate::hir::binding::{BindingId, BindingInfo};
+use crate::hir::binding::Binding;
 use crate::hir::expr::{Hir, HirKind};
 use crate::reader::SourceLoc;
 use crate::symbol::SymbolTable;
 use crate::symbols::{SymbolDef, SymbolIndex, SymbolKind};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Extract symbol index from analyzed HIR
-pub fn extract_symbols_from_hir(
-    hir: &Hir,
-    bindings: &HashMap<BindingId, BindingInfo>,
-    symbols: &SymbolTable,
-) -> SymbolIndex {
+pub fn extract_symbols_from_hir(hir: &Hir, symbols: &SymbolTable) -> SymbolIndex {
     let mut index = SymbolIndex::new();
-    let mut extractor = HirSymbolExtractor::new(bindings);
+    let mut extractor = HirSymbolExtractor::new();
     extractor.walk(hir, &mut index, symbols);
     extractor.collect_available(symbols, &mut index);
     index
 }
 
-struct HirSymbolExtractor<'a> {
-    bindings: &'a HashMap<BindingId, BindingInfo>,
-    seen: HashSet<BindingId>,
+struct HirSymbolExtractor {
+    seen: HashSet<Binding>,
 }
 
-impl<'a> HirSymbolExtractor<'a> {
-    fn new(bindings: &'a HashMap<BindingId, BindingInfo>) -> Self {
+impl HirSymbolExtractor {
+    fn new() -> Self {
         Self {
-            bindings,
             seen: HashSet::new(),
         }
     }
@@ -43,38 +37,38 @@ impl<'a> HirSymbolExtractor<'a> {
 
     fn record_definition(
         &mut self,
-        binding_id: BindingId,
+        binding: Binding,
         kind: SymbolKind,
         span: &crate::syntax::Span,
         index: &mut SymbolIndex,
         symbols: &SymbolTable,
     ) {
-        if self.seen.contains(&binding_id) {
+        if self.seen.contains(&binding) {
             return;
         }
-        self.seen.insert(binding_id);
+        self.seen.insert(binding);
 
-        if let Some(info) = self.bindings.get(&binding_id) {
-            if let Some(name_str) = symbols.name(info.name) {
-                let loc = Self::span_to_loc(span);
-                let def = SymbolDef::new(info.name, name_str.to_string(), kind)
-                    .with_location(loc.clone());
-                index.definitions.insert(info.name, def);
-                index.symbol_locations.insert(info.name, loc);
-            }
+        let sym = binding.name();
+        if let Some(name_str) = symbols.name(sym) {
+            let loc = Self::span_to_loc(span);
+            let def = SymbolDef::new(sym, name_str.to_string(), kind).with_location(loc.clone());
+            index.definitions.insert(sym, def);
+            index.symbol_locations.insert(sym, loc);
         }
     }
 
     fn record_usage(
         &mut self,
-        binding_id: BindingId,
+        binding: Binding,
         span: &crate::syntax::Span,
         index: &mut SymbolIndex,
     ) {
-        if let Some(info) = self.bindings.get(&binding_id) {
-            let loc = Self::span_to_loc(span);
-            index.symbol_usages.entry(info.name).or_default().push(loc);
-        }
+        let loc = Self::span_to_loc(span);
+        index
+            .symbol_usages
+            .entry(binding.name())
+            .or_default()
+            .push(loc);
     }
 
     fn walk(&mut self, hir: &Hir, index: &mut SymbolIndex, symbols: &SymbolTable) {
@@ -88,29 +82,11 @@ impl<'a> HirSymbolExtractor<'a> {
             | HirKind::Keyword(_)
             | HirKind::Quote(_) => {}
 
-            HirKind::Var(binding_id) => {
-                self.record_usage(*binding_id, &hir.span, index);
+            HirKind::Var(binding) => {
+                self.record_usage(*binding, &hir.span, index);
             }
 
-            HirKind::Define { name, value } => {
-                // For global defines, record using SymbolId directly
-                if let Some(name_str) = symbols.name(*name) {
-                    let loc = Self::span_to_loc(&hir.span);
-                    // Determine kind based on value
-                    let kind = if matches!(value.kind, HirKind::Lambda { .. }) {
-                        SymbolKind::Function
-                    } else {
-                        SymbolKind::Variable
-                    };
-                    let def = SymbolDef::new(*name, name_str.to_string(), kind)
-                        .with_location(loc.clone());
-                    index.definitions.insert(*name, def);
-                    index.symbol_locations.insert(*name, loc);
-                }
-                self.walk(value, index, symbols);
-            }
-
-            HirKind::LocalDefine { binding, value } => {
+            HirKind::Define { binding, value } => {
                 let kind = if matches!(value.kind, HirKind::Lambda { .. }) {
                     SymbolKind::Function
                 } else {
@@ -193,7 +169,7 @@ impl<'a> HirSymbolExtractor<'a> {
                 }
             }
 
-            HirKind::Set { value, target } => {
+            HirKind::Set { target, value } => {
                 self.record_usage(*target, &hir.span, index);
                 self.walk(value, index, symbols);
             }
@@ -263,7 +239,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &analysis.bindings, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
 
         // Should have one definition
         assert!(!index.definitions.is_empty());
@@ -283,7 +259,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &analysis.bindings, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
 
         // Find the 'add-one' definition
         let add_one_def = index
@@ -301,7 +277,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &analysis.bindings, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
 
         // Should have definitions for a and b
         let has_a = index.definitions.values().any(|d| d.name == "a");
@@ -317,7 +293,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &analysis.bindings, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
 
         // Should have definitions for x and y parameters
         let has_x = index.definitions.values().any(|d| d.name == "x");
@@ -333,7 +309,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &analysis.bindings, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
 
         // Should have usages for x (used twice in the body)
         let x_sym = symbols.intern("x");
@@ -349,7 +325,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &analysis.bindings, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
 
         // available_symbols should be sorted
         let names: Vec<_> = index.available_symbols.iter().map(|(n, _, _)| n).collect();

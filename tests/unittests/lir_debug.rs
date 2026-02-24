@@ -39,7 +39,7 @@ fn test_print_lir_failing_case() {
     let analysis = analyzer.analyze(&expanded).expect("analyze failed");
 
     // Lower
-    let mut lowerer = Lowerer::new().with_bindings(analysis.bindings);
+    let mut lowerer = Lowerer::new();
     let lir = lowerer.lower(&analysis.hir).expect("lower failed");
 
     println!("=== LIR MAIN FUNCTION ===");

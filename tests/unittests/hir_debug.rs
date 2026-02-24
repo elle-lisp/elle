@@ -40,11 +40,6 @@ fn test_print_hir_failing_case() {
     println!("=== HIR ===");
     println!("{:#?}", analysis.hir);
 
-    println!("\n=== BINDINGS ===");
-    for (id, info) in &analysis.bindings {
-        println!(
-            "  {:?}: name={:?} kind={:?} is_captured={} is_mutated={}",
-            id, info.name, info.kind, info.is_captured, info.is_mutated
-        );
-    }
+    // Binding metadata is now inline in the HIR (Binding newtype wrapping Value)
+    // No separate bindings HashMap to print
 }

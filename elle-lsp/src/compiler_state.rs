@@ -105,12 +105,11 @@ impl CompilerState {
         // Process each analysis result
         for analysis in &analyses {
             // Extract symbols and merge into document's symbol index
-            let partial_index =
-                extract_symbols_from_hir(&analysis.hir, &analysis.bindings, &self.symbol_table);
+            let partial_index = extract_symbols_from_hir(&analysis.hir, &self.symbol_table);
             doc.symbol_index.merge(partial_index);
 
             // Run HIR linter
-            let mut linter = HirLinter::new(analysis.bindings.clone());
+            let mut linter = HirLinter::new();
             linter.lint(&analysis.hir, &self.symbol_table);
             doc.diagnostics.extend(linter.diagnostics().iter().cloned());
         }

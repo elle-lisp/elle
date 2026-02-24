@@ -51,21 +51,16 @@ impl Lowerer {
     /// - The argument count matches (2 for binary/compare, 1 for unary)
     fn try_lower_intrinsic(&mut self, func: &Hir, args: &[Hir]) -> Result<Option<Reg>, String> {
         // Must be a variable reference
-        let HirKind::Var(binding_id) = &func.kind else {
-            return Ok(None);
-        };
-
-        // Must have binding info
-        let Some(info) = self.bindings.get(binding_id) else {
+        let HirKind::Var(binding) = &func.kind else {
             return Ok(None);
         };
 
         // Must be a global that hasn't been mutated
-        if info.kind != BindingKind::Global || info.is_mutated {
+        if !binding.is_global() || binding.is_mutated() {
             return Ok(None);
         }
 
-        let sym = info.name;
+        let sym = binding.name();
 
         // Special case: `-` with 1 arg is negation
         if args.len() == 1 {

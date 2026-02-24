@@ -151,6 +151,9 @@ impl SendValue {
 
             // Unsafe: syntax objects (contain Rc)
             HeapObject::Syntax(_) => Err("Cannot send syntax object".to_string()),
+
+            // Unsafe: bindings (compile-time only)
+            HeapObject::Binding(_) => Err("Cannot send binding".to_string()),
         }
     }
 
