@@ -201,22 +201,42 @@ impl VM {
             self.tail_call_env_cache
                 .extend((*closure.env).iter().cloned());
 
-            // Add parameters, wrapping in local cells if needed
-            for (i, arg) in args.iter().enumerate() {
-                if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-                    self.tail_call_env_cache.push(Value::local_cell(*arg));
-                } else {
-                    self.tail_call_env_cache.push(*arg);
+            // Add parameters, handling variadic rest collection
+            match closure.arity {
+                crate::value::Arity::AtLeast(n) => {
+                    for (i, arg) in args[..n].iter().enumerate() {
+                        if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                            self.tail_call_env_cache.push(Value::local_cell(*arg));
+                        } else {
+                            self.tail_call_env_cache.push(*arg);
+                        }
+                    }
+                    let rest = Self::args_to_list(&args[n..]);
+                    let rest_idx = n;
+                    if rest_idx < 64 && (closure.cell_params_mask & (1 << rest_idx)) != 0 {
+                        self.tail_call_env_cache.push(Value::local_cell(rest));
+                    } else {
+                        self.tail_call_env_cache.push(rest);
+                    }
+                }
+                _ => {
+                    for (i, arg) in args.iter().enumerate() {
+                        if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                            self.tail_call_env_cache.push(Value::local_cell(*arg));
+                        } else {
+                            self.tail_call_env_cache.push(*arg);
+                        }
+                    }
                 }
             }
 
             // Calculate and add locally-defined variables
-            let num_params = match closure.arity {
+            let num_param_slots = match closure.arity {
                 crate::value::Arity::Exact(n) => n,
-                crate::value::Arity::AtLeast(n) => n,
+                crate::value::Arity::AtLeast(n) => n + 1,
                 crate::value::Arity::Range(min, _) => min,
             };
-            let num_locally_defined = closure.num_locals.saturating_sub(num_params);
+            let num_locally_defined = closure.num_locals.saturating_sub(num_param_slots);
 
             for _ in 0..num_locally_defined {
                 self.tail_call_env_cache.push(Value::local_cell(Value::NIL));
@@ -402,22 +422,44 @@ impl VM {
         }
         self.env_cache.extend((*closure.env).iter().cloned());
 
-        // Add parameters, wrapping in local cells if cell_params_mask indicates
-        for (i, arg) in args.iter().enumerate() {
-            if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-                self.env_cache.push(Value::local_cell(*arg));
-            } else {
-                self.env_cache.push(*arg);
+        match closure.arity {
+            crate::value::Arity::AtLeast(n) => {
+                // Variadic: first n args are fixed params, rest collected into a list
+                for (i, arg) in args[..n].iter().enumerate() {
+                    if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                        self.env_cache.push(Value::local_cell(*arg));
+                    } else {
+                        self.env_cache.push(*arg);
+                    }
+                }
+                // Collect remaining args into a list for the rest slot
+                let rest = Self::args_to_list(&args[n..]);
+                let rest_idx = n; // rest param is at index n in the param list
+                if rest_idx < 64 && (closure.cell_params_mask & (1 << rest_idx)) != 0 {
+                    self.env_cache.push(Value::local_cell(rest));
+                } else {
+                    self.env_cache.push(rest);
+                }
+            }
+            _ => {
+                // Fixed arity: all args are direct params
+                for (i, arg) in args.iter().enumerate() {
+                    if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                        self.env_cache.push(Value::local_cell(*arg));
+                    } else {
+                        self.env_cache.push(*arg);
+                    }
+                }
             }
         }
 
         // Calculate number of locally-defined variables
-        let num_params = match closure.arity {
+        let num_param_slots = match closure.arity {
             crate::value::Arity::Exact(n) => n,
-            crate::value::Arity::AtLeast(n) => n,
+            crate::value::Arity::AtLeast(n) => n + 1, // fixed + rest slot
             crate::value::Arity::Range(min, _) => min,
         };
-        let num_locally_defined = closure.num_locals.saturating_sub(num_params);
+        let num_locally_defined = closure.num_locals.saturating_sub(num_param_slots);
 
         // Add empty LocalCells for locally-defined variables
         for _ in 0..num_locally_defined {
@@ -425,5 +467,14 @@ impl VM {
         }
 
         Rc::new(self.env_cache.clone())
+    }
+
+    /// Collect values into an Elle list (cons chain terminated by EMPTY_LIST).
+    fn args_to_list(args: &[Value]) -> Value {
+        let mut list = Value::EMPTY_LIST;
+        for arg in args.iter().rev() {
+            list = Value::cons(*arg, list);
+        }
+        list
     }
 }

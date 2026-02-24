@@ -13,7 +13,7 @@
 ;; ============================================================================
 
 ;; Find character in string
-(def (char-in-string? char str)
+(defn char-in-string? (char str)
   (let loop ((i 0))
     (cond
       ((= i (string-length str)) #f)
@@ -21,17 +21,17 @@
       (else (loop (+ i 1))))))
 
 ;; Convert integer to hex string with padding
-(def (to-hex-string num width)
+(defn to-hex-string (num width)
   (let ((hex-digits "0123456789abcdef"))
     (let loop ((n num) (result '()) (w width))
       (if (= w 0)
         (apply string-append (map string result))
-        (loop (quotient n 16)
-              (cons (string-ref hex-digits (modulo n 16)) result)
-              (- w 1))))))
+         (loop (quotient n 16)
+               (cons (string-ref hex-digits (modulo n 16)) result)
+               (- w 1))))))
 
 ;; Convert bytevector to hex string
-(def (bytevector->hex-string bv)
+(defn bytevector->hex-string (bv)
   (apply string-append
     (map (lambda (b) (to-hex-string b 2))
          (bytevector->u8-list bv))))
@@ -42,32 +42,32 @@
 
 ;; Simple timestamp parser for ISO 8601
 ;; Format: 2023-02-08T15:30:45Z
-(def (parse-timestamp-simple timestamp-str)
+(defn parse-timestamp-simple (timestamp-str)
   "Parse simplified ISO 8601 timestamp
-   Returns: (year month day hour minute second)"
-  ;; Extract parts manually
-  (let ((year (string->number (substring timestamp-str 0 4)))
-        (month (string->number (substring timestamp-str 5 7)))
-        (day (string->number (substring timestamp-str 8 10)))
-        (hour (string->number (substring timestamp-str 11 13)))
-        (minute (string->number (substring timestamp-str 14 16)))
-        (second (string->number (substring timestamp-str 17 19))))
-    (list year month day hour minute second)))
+    Returns: (year month day hour minute second)"
+   ;; Extract parts manually
+   (let ((year (string->number (substring timestamp-str 0 4)))
+         (month (string->number (substring timestamp-str 5 7)))
+         (day (string->number (substring timestamp-str 8 10)))
+         (hour (string->number (substring timestamp-str 11 13)))
+         (minute (string->number (substring timestamp-str 14 16)))
+         (second (string->number (substring timestamp-str 17 19))))
+     (list year month day hour minute second)))
 
 ;; Pad integer to width with zeros
-(def (pad-int n width)
+(defn pad-int (n width)
   (let ((s (number->string n)))
     (string-append (make-string (max 0 (- width (string-length s))) #\0) s)))
 
 ;; Format timestamp as AWS date (YYYYMMDD)
-(def (format-aws-date year month day)
+(defn format-aws-date (year month day)
   (string-append
     (pad-int year 4)
     (pad-int month 2)
     (pad-int day 2)))
 
 ;; Format timestamp as AWS datetime (YYYYMMDDTHHMMSSZ)
-(def (format-aws-datetime year month day hour minute second)
+(defn format-aws-datetime (year month day hour minute second)
   (string-append
     (pad-int year 4)
     (pad-int month 2)
@@ -83,19 +83,19 @@
 ;; ============================================================================
 
 ;; Percent-encode character
-(def (percent-encode-char c)
+(defn percent-encode-char (c)
   (let ((code (char->integer c)))
     (string-append "%" (to-hex-string code 2))))
 
 ;; Check if character is unreserved (safe in URI)
-(def (uri-unreserved? c)
+(defn uri-unreserved? (c)
   (or (and (char>=? c #\a) (char<=? c #\z))
       (and (char>=? c #\A) (char<=? c #\Z))
       (and (char>=? c #\0) (char<=? c #\9))
       (char-in-string? c "-._~")))
 
 ;; Percent-encode string for URI component
-(def (uri-encode str)
+(defn uri-encode (str)
   (apply string-append
     (map (lambda (c)
            (if (uri-unreserved? c)
@@ -108,56 +108,56 @@
 ;; ============================================================================
 
 ;; Create canonical headers string
-(def (canonical-headers-string headers)
+(defn canonical-headers-string (headers)
   "Format headers in canonical form for SigV4
-   Headers are: name:value\\n (lowercase, sorted)"
-  (apply string-append
-    (map (lambda (header)
-           (let ((name (car header))
-                 (value (cdr header)))
-             (string-append
-               (string-downcase name) ":"
-               (string-trim value) "\n")))
-         headers)))
+    Headers are: name:value\\n (lowercase, sorted)"
+   (apply string-append
+     (map (lambda (header)
+            (let ((name (car header))
+                  (value (cdr header)))
+              (string-append
+                (string-downcase name) ":"
+                (string-trim value) "\n")))
+          headers)))
 
 ;; Get list of signed header names
-(def (signed-headers-list headers)
+(defn signed-headers-list (headers)
   (apply string-append
     (let ((names (map (lambda (h) (string-downcase (car h))) headers)))
       (apply string-append
-        (map string->list names)
-        (cdr (apply append
-          (map (lambda (h) (list ";" h))
-               names)))))))
+         (map string->list names)
+         (cdr (apply append
+           (map (lambda (h) (list ";" h))
+                names)))))))
 
 ;; Create canonical query string
-(def (canonical-query-string params)
+(defn canonical-query-string (params)
   "Format query parameters in canonical form
-   Parameters should be sorted by key"
-  (if (null? params)
-    ""
-    (apply string-append
-      (map (lambda (p)
-             (string-append (car p) "=" (cdr p) "&"))
-           (reverse (cdr (reverse params)))))))
+    Parameters should be sorted by key"
+   (if (null? params)
+     ""
+     (apply string-append
+       (map (lambda (p)
+              (string-append (car p) "=" (cdr p) "&"))
+            (reverse (cdr (reverse params)))))))
 
 ;; ============================================================================
 ;; Hash Functions (Placeholders)
 ;; ============================================================================
 
 ;; SHA256 (placeholder - would use FFI in real implementation)
-(def (sha256 data)
+(defn sha256 (data)
   (make-bytevector 32 0))
 
 ;; HMAC-SHA256 (placeholder - would use FFI in real implementation)
-(def (hmac-sha256 key data)
+(defn hmac-sha256 (key data)
   (make-bytevector 32 0))
 
 ;; ============================================================================
 ;; Test Cases
 ;; ============================================================================
 
-(def (test-timestamp-parsing)
+(defn test-timestamp-parsing ()
   (display "=== Timestamp Parsing Test ===")
   (newline)
   (let ((ts "2023-02-08T15:30:45Z"))
@@ -169,7 +169,7 @@
       (display parsed)
       (newline))))
 
-(def (test-uri-encoding)
+(defn test-uri-encoding ()
   (display "=== URI Encoding Test ===")
   (newline)
   (let ((test-cases (list
@@ -178,16 +178,16 @@
     "special chars")))
     (for-each
       (lambda (s)
-        (display "Input:  ")
-        (display s)
-        (newline)
-        (display "Encoded: ")
-        (display (uri-encode s))
-        (newline)
-        (newline))
-      test-cases)))
+         (display "Input:  ")
+         (display s)
+         (newline)
+         (display "Encoded: ")
+         (display (uri-encode s))
+         (newline)
+         (newline))
+       test-cases)))
 
-(def (test-datetime-formatting)
+(defn test-datetime-formatting ()
   (display "=== DateTime Formatting Test ===")
   (newline)
   (let ((date (format-aws-date 2023 2 8)))
@@ -199,7 +199,7 @@
     (display datetime)
     (newline)))
 
-(def (test-hex-conversion)
+(defn test-hex-conversion ()
   (display "=== Hex Conversion Test ===")
   (newline)
   (let ((bv (make-bytevector 4)))

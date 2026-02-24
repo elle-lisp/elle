@@ -87,7 +87,10 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Keyword(k) => Ok(HirPattern::Literal(PatternLiteral::Keyword(k.clone()))),
             SyntaxKind::List(items) => {
                 if items.is_empty() {
-                    return Ok(HirPattern::List(vec![]));
+                    return Ok(HirPattern::List {
+                        elements: vec![],
+                        rest: None,
+                    });
                 }
                 // Check for cons pattern (head . tail)
                 if items.len() == 3 && items[1].as_symbol() == Some(".") {
@@ -98,15 +101,31 @@ impl<'a> Analyzer<'a> {
                         tail: Box::new(tail),
                     });
                 }
-                // List pattern
-                let patterns: Result<Vec<_>, _> =
-                    items.iter().map(|p| self.analyze_pattern(p)).collect();
-                Ok(HirPattern::List(patterns?))
+                // List pattern with optional & rest
+                let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
+                let elements: Result<Vec<_>, _> =
+                    fixed.iter().map(|p| self.analyze_pattern(p)).collect();
+                let rest = match rest_syntax {
+                    Some(r) => Some(Box::new(self.analyze_pattern(r)?)),
+                    None => None,
+                };
+                Ok(HirPattern::List {
+                    elements: elements?,
+                    rest,
+                })
             }
             SyntaxKind::Array(items) => {
-                let patterns: Result<Vec<_>, _> =
-                    items.iter().map(|p| self.analyze_pattern(p)).collect();
-                Ok(HirPattern::Array(patterns?))
+                let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
+                let elements: Result<Vec<_>, _> =
+                    fixed.iter().map(|p| self.analyze_pattern(p)).collect();
+                let rest = match rest_syntax {
+                    Some(r) => Some(Box::new(self.analyze_pattern(r)?)),
+                    None => None,
+                };
+                Ok(HirPattern::Array {
+                    elements: elements?,
+                    rest,
+                })
             }
             _ => Err(format!("{}: invalid pattern", syntax.span)),
         }

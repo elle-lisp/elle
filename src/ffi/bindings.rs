@@ -100,12 +100,12 @@ fn generate_function_wrapper(
 
     if arg_names.is_empty() {
         format!(
-            "(def ({} )\n  (call-c-function \"{}\" \"{}\" {} ({}) ))\n\n",
+            "(defn {} ()\n  (call-c-function \"{}\" \"{}\" {} ({}) ))\n\n",
             lisp_name, library_name, func_name, return_type_str, arg_types_str
         )
     } else {
         format!(
-            "(def ({} {})\n  (call-c-function \"{}\" \"{}\" ({}) ({}) ))\n\n",
+            "(defn {} ({})\n  (call-c-function \"{}\" \"{}\" ({}) ({}) ))\n\n",
             lisp_name, arg_list, library_name, func_name, arg_types_str, arg_list
         )
     }

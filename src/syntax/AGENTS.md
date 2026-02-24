@@ -34,6 +34,8 @@ Syntax (from reader)
     │
     ▼
 Expander (with &mut SymbolTable, &mut VM)
+    ├─► desugar defn to (def name (fn params body...))
+    ├─► desugar let* to nested let (one binding at a time)
     ├─► check for macro calls
     ├─► compile & eval macro body in VM via pipeline::eval_syntax()
     ├─► convert result Value back to Syntax via from_value()

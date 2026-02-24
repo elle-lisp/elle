@@ -23,11 +23,17 @@ pub enum HirPattern {
         tail: Box<HirPattern>,
     },
 
-    /// Match a list of specific length
-    List(Vec<HirPattern>),
+    /// Match a list pattern with optional rest
+    List {
+        elements: Vec<HirPattern>,
+        rest: Option<Box<HirPattern>>,
+    },
 
-    /// Match an array of specific length
-    Array(Vec<HirPattern>),
+    /// Match an array pattern with optional rest
+    Array {
+        elements: Vec<HirPattern>,
+        rest: Option<Box<HirPattern>>,
+    },
 }
 
 /// Literal values that can appear in patterns
@@ -77,9 +83,12 @@ impl HirPattern {
                 head.collect_bindings(out);
                 tail.collect_bindings(out);
             }
-            HirPattern::List(patterns) | HirPattern::Array(patterns) => {
-                for p in patterns {
+            HirPattern::List { elements, rest } | HirPattern::Array { elements, rest } => {
+                for p in elements {
                     p.collect_bindings(out);
+                }
+                if let Some(r) = rest {
+                    r.collect_bindings(out);
                 }
             }
             HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}

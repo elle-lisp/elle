@@ -140,6 +140,20 @@ impl VM {
                     data::handle_array_set(self);
                 }
 
+                // Destructuring (silent nil on type mismatch)
+                Instruction::CarOrNil => {
+                    data::handle_car_or_nil(self);
+                }
+                Instruction::CdrOrNil => {
+                    data::handle_cdr_or_nil(self);
+                }
+                Instruction::ArrayRefOrNil => {
+                    data::handle_array_ref_or_nil(self, bc, &mut ip);
+                }
+                Instruction::ArraySliceFrom => {
+                    data::handle_array_slice_from(self, bc, &mut ip);
+                }
+
                 // Arithmetic (integer)
                 Instruction::AddInt => {
                     arithmetic::handle_add_int(self);

@@ -6,7 +6,7 @@ A comprehensive guide to Elle's core language features, data types, control flow
 
 1. [Introduction](#introduction)
 2. [Basic Data Types](#basic-data-types)
-3. [Variables and Bindings](#variables-and-bindings)
+3. [Variables and Bindings](#variables-and-bindings) (includes destructuring)
 4. [Control Flow](#control-flow)
 5. [Exception Handling](#exception-handling)
 6. [The Condition System](#the-condition-system)
@@ -242,6 +242,149 @@ This is different from `let`, where all bindings are in parallel:
       (y (* x 2)))  ; x is still unbound here
   (+ x y))
 ⟹ Error: x is unbound
+```
+
+### Destructuring
+
+Destructuring extracts values from lists and arrays into multiple bindings
+in a single form. It works in `def`, `var`, `let`, `let*`, and function
+parameters.
+
+#### List Destructuring
+
+Use a list pattern `(a b c)` on the left-hand side:
+
+```lisp
+(def (a b c) (list 1 2 3))
+a ⟹ 1
+b ⟹ 2
+c ⟹ 3
+```
+
+Missing elements become `nil` (no error):
+
+```lisp
+(def (x y z) (list 1))
+x ⟹ 1
+y ⟹ nil
+z ⟹ nil
+```
+
+Extra elements are silently ignored:
+
+```lisp
+(def (a b) (list 1 2 3 4))
+a ⟹ 1
+b ⟹ 2
+```
+
+#### Array Destructuring
+
+Use brackets `[a b]` for arrays:
+
+```lisp
+(def [x y] [10 20])
+x ⟹ 10
+y ⟹ 20
+```
+
+#### Nested Destructuring
+
+Patterns nest arbitrarily:
+
+```lisp
+(def ((a b) c) (list (list 1 2) 3))
+a ⟹ 1
+b ⟹ 2
+c ⟹ 3
+
+(def ([x y] z) (list [10 20] 30))
+x ⟹ 10
+y ⟹ 20
+z ⟹ 30
+```
+
+#### Wildcard `_`
+
+Use `_` to skip elements you don't need:
+
+```lisp
+(def (_ b _) (list 1 2 3))
+b ⟹ 2
+
+(def [_ y] [10 20])
+y ⟹ 20
+```
+
+#### Rest Patterns `& name`
+
+Use `& name` to collect remaining elements:
+
+```lisp
+; List rest — collects as a list
+(def (head & tail) (list 1 2 3 4))
+head ⟹ 1
+tail ⟹ (2 3 4)
+
+; Array rest — collects as an array
+(def [first & others] [10 20 30])
+first ⟹ 10
+others ⟹ [20 30]
+
+; Empty rest when all elements consumed
+(def (a b & r) (list 1 2))
+r ⟹ ()
+```
+
+#### Destructuring in `let` and `let*`
+
+```lisp
+(let (((a b) (list 10 20)))
+  (+ a b))
+⟹ 30
+
+(let* (((a b) (list 1 2))
+       (c (+ a b)))
+  c)
+⟹ 3
+```
+
+#### Destructuring in Function Parameters
+
+Destructuring patterns in parameter lists extract values from arguments:
+
+```lisp
+(defn add-pair ((a b)) (+ a b))
+(add-pair (list 3 4)) ⟹ 7
+
+; Mix normal and destructured parameters
+(defn weighted-sum (weight (a b))
+  (+ (* weight a) (* weight b)))
+(weighted-sum 2 (list 3 4)) ⟹ 14
+```
+
+#### Mutable Destructuring with `var`
+
+`var` creates mutable bindings; `def` creates immutable ones:
+
+```lisp
+(var (a b) (list 1 2))
+(set! a 100)
+a ⟹ 100
+
+(def (x y) (list 1 2))
+(set! x 10) ⟹ Error: immutable binding
+```
+
+### defn - Named Function Shorthand
+
+`defn` combines `def` and `fn`:
+
+```lisp
+(defn add (x y) (+ x y))
+; equivalent to: (def add (fn (x y) (+ x y)))
+
+(add 3 4) ⟹ 7
 ```
 
 ### set! - Mutation
@@ -493,19 +636,26 @@ Catch all conditions with a generic handler:
 
 ### Defining Functions
 
-Functions are defined with `fn` or `define`:
+Functions are defined with `fn` and named with `defn`:
 
 ```lisp
-; Function expression
+; Anonymous function
 (fn (x y) (+ x y))
 
-; Named function (var creates a variable bound to fn)
+; Named function with defn (preferred)
+(defn add (x y) (+ x y))
+
+; Equivalent long form
 (def add (fn (x y) (+ x y)))
 
-; Shorthand
-(def (add x y) (+ x y))
-
 (add 3 4) ⟹ 7
+```
+
+`defn` supports destructured parameters:
+
+```lisp
+(defn sum-pair ((a b)) (+ a b))
+(sum-pair (list 3 4)) ⟹ 7
 ```
 
 Note: `lambda` is available as an alias for `fn`.
@@ -515,7 +665,7 @@ Note: `lambda` is available as an alias for `fn`.
 Functions close over their definition environment:
 
 ```lisp
-(def (make-adder n)
+(defn make-adder (n)
   (fn (x) (+ x n)))
 
 (var add-5 (make-adder 5))
@@ -569,7 +719,7 @@ Functions close over their definition environment:
 (apply + (list 1 2 3))
 ⟹ 6
 
-(def (add-three x y z) (+ x y z))
+(defn add-three (x y z) (+ x y z))
 (apply add-three (list 10 20 30))
 ⟹ 60
 ```
@@ -849,7 +999,7 @@ Load external files as modules:
 Functions capture their definition environment:
 
 ```lisp
-(def (make-counter)
+(defn make-counter ()
   (var count 0)
   (fn ()
     (set! count (+ count 1))

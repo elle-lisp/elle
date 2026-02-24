@@ -101,6 +101,42 @@ They have different NaN-boxed representations:
 - `nil` = `0x7FFC_0000_0000_0000`
 - `()` = `0x7FFC_0000_0000_0003`
 
+## Destructuring
+
+Destructuring in binding forms (`def`, `var`, `let`, `let*`, `fn` parameters)
+uses **silent nil semantics**: it always succeeds at runtime.
+
+### Rules
+
+| Situation | Result |
+|-----------|--------|
+| Missing list element | `nil` |
+| Missing array element | `nil` |
+| Wrong type (e.g., destructure a number) | `nil` for all bindings |
+| Extra elements | Silently ignored |
+| `_` wildcard | Matches anything, no binding created |
+| `& name` with no remaining elements | `()` for lists, `[]` for arrays |
+
+### List rest vs Array rest
+
+The `& name` rest pattern preserves the source type:
+- List destructuring `(a & r)` produces a **list** for `r`
+- Array destructuring `[a & r]` produces an **array** for `r`
+
+When all fixed elements are consumed, the rest binding is:
+- `()` (empty list) for list patterns — **truthy**
+- `[]` (empty array) for array patterns — **truthy**
+- Never `nil`
+
+### Destructuring vs Pattern Matching
+
+Destructuring (`def`, `let`, etc.) is **unconditional extraction** — it always
+succeeds, binding `nil` for missing values. Pattern matching (`match`) is
+**conditional** — it tests whether the value fits the pattern and branches.
+
+These are separate systems. Destructuring patterns do not support literal
+matching, guard clauses, or failure branches.
+
 ---
 
 ## Maintaining This Document

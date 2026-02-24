@@ -108,33 +108,84 @@ impl Expander {
                         return self.handle_expand_macro(items, &syntax.span, symbols, vm);
                     }
 
-                    // Handle (var (f x y) body...) and (def (f x y) body...) shorthand
-                    // Desugar to (var/def f (fn (x y) body...))
-                    if (name == "var" || name == "def") && items.len() >= 3 {
-                        if let SyntaxKind::List(name_and_params) = &items[1].kind {
-                            if !name_and_params.is_empty() {
-                                let func_name = name_and_params[0].clone();
-                                let params = Syntax::new(
-                                    SyntaxKind::List(name_and_params[1..].to_vec()),
-                                    items[1].span.clone(),
+                    // Handle (defn f (x y) body...) shorthand
+                    // Desugar to (def f (fn (x y) body...))
+                    if name == "defn" && items.len() >= 4 {
+                        let func_name = items[1].clone();
+                        let params = items[2].clone();
+                        let fn_sym = Syntax::new(
+                            SyntaxKind::Symbol("fn".to_string()),
+                            items[2].span.clone(),
+                        );
+                        let mut lambda_parts = vec![fn_sym, params];
+                        lambda_parts.extend(items[3..].iter().cloned());
+                        let lambda =
+                            Syntax::new(SyntaxKind::List(lambda_parts), syntax.span.clone());
+                        let def_sym = Syntax::new(
+                            SyntaxKind::Symbol("def".to_string()),
+                            items[0].span.clone(),
+                        );
+                        let desugared = Syntax::new(
+                            SyntaxKind::List(vec![def_sym, func_name, lambda]),
+                            syntax.span.clone(),
+                        );
+                        return self.expand(desugared, symbols, vm);
+                    }
+
+                    // Handle (let* ((a 1) (b a)) body...) by desugaring
+                    // to nested let: (let ((a 1)) (let* ((b a)) body...))
+                    // The recursive expansion handles the rest.
+                    if name == "let*" && items.len() >= 2 {
+                        let bindings = &items[1];
+                        if let SyntaxKind::List(pairs) = &bindings.kind {
+                            let desugared = if pairs.is_empty() {
+                                // (let* () body...) => (begin body...)
+                                let begin_sym = Syntax::new(
+                                    SyntaxKind::Symbol("begin".to_string()),
+                                    items[0].span.clone(),
                                 );
-                                let fn_sym = Syntax::new(
-                                    SyntaxKind::Symbol("fn".to_string()),
-                                    items[1].span.clone(),
+                                let mut parts = vec![begin_sym];
+                                parts.extend(items[2..].iter().cloned());
+                                Syntax::new(SyntaxKind::List(parts), syntax.span.clone())
+                            } else {
+                                // Peel off first binding, wrap rest in let*
+                                let first = pairs[0].clone();
+                                let let_sym = Syntax::new(
+                                    SyntaxKind::Symbol("let".to_string()),
+                                    items[0].span.clone(),
                                 );
-                                let mut lambda_parts = vec![fn_sym, params];
-                                lambda_parts.extend(items[2..].iter().cloned());
-                                let lambda = Syntax::new(
-                                    SyntaxKind::List(lambda_parts),
-                                    syntax.span.clone(),
+                                let one_binding = Syntax::new(
+                                    SyntaxKind::List(vec![first]),
+                                    bindings.span.clone(),
                                 );
-                                let binding_sym = items[0].clone();
-                                let desugared = Syntax::new(
-                                    SyntaxKind::List(vec![binding_sym, func_name, lambda]),
-                                    syntax.span.clone(),
-                                );
-                                return self.expand(desugared, symbols, vm);
-                            }
+                                if pairs.len() == 1 {
+                                    // Last binding: (let ((a 1)) body...)
+                                    let mut parts = vec![let_sym, one_binding];
+                                    parts.extend(items[2..].iter().cloned());
+                                    Syntax::new(SyntaxKind::List(parts), syntax.span.clone())
+                                } else {
+                                    // More bindings: (let ((a 1)) (let* ((b 2) ...) body...))
+                                    let let_star_sym = Syntax::new(
+                                        SyntaxKind::Symbol("let*".to_string()),
+                                        items[0].span.clone(),
+                                    );
+                                    let rest_bindings = Syntax::new(
+                                        SyntaxKind::List(pairs[1..].to_vec()),
+                                        bindings.span.clone(),
+                                    );
+                                    let mut inner_parts = vec![let_star_sym, rest_bindings];
+                                    inner_parts.extend(items[2..].iter().cloned());
+                                    let inner = Syntax::new(
+                                        SyntaxKind::List(inner_parts),
+                                        syntax.span.clone(),
+                                    );
+                                    Syntax::new(
+                                        SyntaxKind::List(vec![let_sym, one_binding, inner]),
+                                        syntax.span.clone(),
+                                    )
+                                }
+                            };
+                            return self.expand(desugared, symbols, vm);
                         }
                     }
 

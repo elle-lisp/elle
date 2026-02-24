@@ -51,14 +51,15 @@ impl Closure {
 
     /// Calculate the total environment capacity needed for a call.
     /// This is: existing captures + parameters + locally-defined variables.
+    /// For variadic functions (AtLeast), the rest slot is an extra parameter.
     pub fn env_capacity(&self) -> usize {
-        let num_params = match self.arity {
+        let num_param_slots = match self.arity {
             Arity::Exact(n) => n,
-            Arity::AtLeast(n) => n,
+            Arity::AtLeast(n) => n + 1, // fixed params + rest slot
             Arity::Range(min, _) => min,
         };
-        let num_locally_defined = self.num_locals.saturating_sub(num_params);
-        self.env.len() + num_params + num_locally_defined
+        let num_locally_defined = self.num_locals.saturating_sub(num_param_slots);
+        self.env.len() + num_param_slots + num_locally_defined
     }
 }
 
@@ -127,7 +128,7 @@ mod tests {
             bytecode: Rc::new(vec![]),
             arity: Arity::AtLeast(2),
             env: Rc::new(vec![Value::NIL]), // 1 capture
-            num_locals: 4,                  // 2 required params + 2 locally-defined
+            num_locals: 4,                  // 3 param slots (2 fixed + 1 rest) + 1 locally-defined
             num_captures: 1,
             constants: Rc::new(vec![]),
             effect: Effect::none(),
@@ -137,7 +138,7 @@ mod tests {
             jit_code: None,
             lir_function: None,
         };
-        // env_capacity = 1 (captures) + 2 (params) + 2 (locally-defined) = 5
+        // env_capacity = 1 (captures) + 3 (param slots) + 1 (locally-defined) = 5
         assert_eq!(closure_variadic.env_capacity(), 5);
 
         // Closure with Range arity

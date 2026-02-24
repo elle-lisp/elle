@@ -52,6 +52,14 @@ impl Arity {
             Arity::Range(min, max) => n >= *min && n <= *max,
         }
     }
+
+    /// Number of fixed parameter slots this arity requires.
+    /// For `Exact(n)` → n, for `AtLeast(n)` → n, for `Range(min, _)` → min.
+    pub fn fixed_params(&self) -> usize {
+        match self {
+            Arity::Exact(n) | Arity::AtLeast(n) | Arity::Range(n, _) => *n,
+        }
+    }
 }
 
 impl fmt::Display for Arity {

@@ -15,7 +15,7 @@
 ;;; 3. Generate Elle Lisp wrapper functions
 ;;; 4. Output to a file for reuse
 
-(def (generate-bindings lib-name header-path lib-path output-path)
+(defn generate-bindings (lib-name header-path lib-path output-path)
   "Generate Elle bindings from a C header file.
   
   Args:
@@ -94,7 +94,7 @@
     output-path))
 
 ;;; Helper: Generate struct definition
-(def (generate-struct-definition file struct-def)
+(defn generate-struct-definition (file struct-def)
   "Generate (var-c-struct ...) for a C struct.
   
   Outputs:
@@ -115,7 +115,7 @@
   (fprintf file ")~n~n"))
 
 ;;; Helper: Generate enum definition
-(def (generate-enum-definition file enum-def)
+(defn generate-enum-definition (file enum-def)
   "Generate (var-enum ...) for a C enum.
   
   Outputs:
@@ -137,7 +137,7 @@
   (fprintf file "~n  ))~n~n"))
 
 ;;; Helper: Generate constant definition
-(def (generate-constant-definition file const-def)
+(defn generate-constant-definition (file const-def)
   "Generate (var name value) for a C constant.
   
   Outputs:
@@ -148,7 +148,7 @@
     (constant-value const-def)))
 
 ;;; Helper: Generate function wrapper
-(def (generate-function-wrapper file func-def lib-path)
+(defn generate-function-wrapper (file func-def lib-path)
   "Generate Elle function wrapper for a C function.
   
   Outputs:
@@ -196,7 +196,7 @@
     (fprintf file ")))~n~n")))
 
 ;;; Helper: Convert C type to Elle representation
-(def (ctype-to-elle ctype)
+(defn ctype-to-elle (ctype)
   "Convert C type to Elle keyword notation.
   
   Examples:
@@ -215,7 +215,7 @@
     (else ":unknown")))
 
 ;;; Helper: Convert C function name to Elle convention
-(def (c-name-to-elle c-name)
+(defn c-name-to-elle (c-name)
   "Convert C function name to Elle convention.
   
   Examples:
@@ -227,7 +227,7 @@
 
 ;;; Helper: Parse C header file
 ;;; In a full implementation, this would call the Rust header parser
-(def (parse-c-header path)
+(defn parse-c-header (path)
   "Parse C header file and extract definitions.
   
   Returns:

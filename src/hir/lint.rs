@@ -143,6 +143,10 @@ impl HirLinter {
                 self.check(value, symbols);
             }
 
+            HirKind::Destructure { value, .. } => {
+                self.check(value, symbols);
+            }
+
             HirKind::While { cond, body } => {
                 self.check(cond, symbols);
                 self.check(body, symbols);

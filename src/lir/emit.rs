@@ -5,7 +5,7 @@
 
 use super::types::*;
 use crate::compiler::bytecode::{Bytecode, Instruction};
-use crate::value::{Arity, Closure, Value};
+use crate::value::{Closure, Value};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -207,11 +207,10 @@ impl Emitter {
                 // Add symbol to constants with name for cross-thread portability
                 let name = self.symbol_names.get(&sym.0).cloned().unwrap_or_default();
                 let const_idx = self.bytecode.add_symbol(sym.0, &name);
-                // StoreGlobal reads the symbol index directly from bytecode
-                // Stack should have the value on top
+                // StoreGlobal pops the value, stores it, and pushes it back.
+                // The stack simulation stays the same (value is still on top).
                 self.bytecode.emit(Instruction::StoreGlobal);
                 self.bytecode.emit_u16(const_idx);
-                self.pop();
             }
 
             LirInstr::MakeClosure {
@@ -245,7 +244,7 @@ impl Emitter {
                 // Create closure template
                 let closure = Closure {
                     bytecode: Rc::new(nested_bytecode.instructions),
-                    arity: Arity::Exact(func.arity as usize),
+                    arity: func.arity,
                     env: Rc::new(vec![]), // Empty - captures added at runtime
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
@@ -376,6 +375,36 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
+            LirInstr::CarOrNil { dst, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::CarOrNil);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::CdrOrNil { dst, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::CdrOrNil);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::ArrayRefOrNil { dst, src, index } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::ArrayRefOrNil);
+                self.bytecode.emit_u16(*index);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::ArraySliceFrom { dst, src, index } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::ArraySliceFrom);
+                self.bytecode.emit_u16(*index);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
             LirInstr::BinOp { dst, op, lhs, rhs } => {
                 // Check if lhs and rhs are already the top two stack elements
                 // (lhs at top-1, rhs at top). This is the common case from the
@@ -471,8 +500,11 @@ impl Emitter {
                 self.ensure_on_top(*cell);
                 self.ensure_on_top(*value);
                 self.bytecode.emit(Instruction::UpdateCell);
-                self.pop();
-                self.pop();
+                // UpdateCell pops value, pops cell, pushes value back.
+                // Net stack effect: -1 (cell is consumed, value survives).
+                self.pop(); // value (will be re-pushed)
+                self.pop(); // cell (consumed)
+                self.push_reg(*value); // value pushed back by VM
             }
 
             LirInstr::Move { dst, src } => {
@@ -741,6 +773,7 @@ impl Default for Emitter {
 mod tests {
     use super::*;
     use crate::syntax::Span;
+    use crate::value::Arity;
 
     fn synthetic_span() -> Span {
         Span::synthetic()
@@ -750,7 +783,7 @@ mod tests {
     fn test_emit_simple() {
         let mut emitter = Emitter::new();
 
-        let mut func = LirFunction::new(0);
+        let mut func = LirFunction::new(Arity::Exact(0));
         let mut block = BasicBlock::new(Label(0));
         block.instructions.push(SpannedInstr::new(
             LirInstr::Const {
@@ -771,7 +804,7 @@ mod tests {
     fn test_emit_branch() {
         let mut emitter = Emitter::new();
 
-        let mut func = LirFunction::new(0);
+        let mut func = LirFunction::new(Arity::Exact(0));
 
         // Entry block
         let mut entry = BasicBlock::new(Label(0));

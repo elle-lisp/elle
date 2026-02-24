@@ -9,7 +9,7 @@
 
 (var bench-iterations 1000)
 
-(def (run-bench label n thunk)
+(defn run-bench (label n thunk)
   (let ((t0 (clock/monotonic))
         (i 0))
     (while (< i n)

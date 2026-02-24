@@ -81,7 +81,6 @@ impl<'a> Analyzer<'a> {
                     match name.as_str() {
                         "if" => return self.analyze_if(items, span),
                         "let" => return self.analyze_let(items, span),
-                        "let*" => return self.analyze_let_star(items, span),
                         "letrec" => return self.analyze_letrec(items, span),
                         "fn" => return self.analyze_lambda(items, span),
                         "begin" => return self.analyze_begin(&items[1..], span),
@@ -156,7 +155,7 @@ impl<'a> Analyzer<'a> {
             // Two-pass analysis for letrec-style semantics:
             // Pass 1: Create bindings for all defines (without analyzing values)
             for item in items {
-                if let Some((name, scopes)) = Self::is_define_form(item) {
+                for (name, scopes) in Self::is_define_form(item) {
                     // Create local binding slot
                     self.bind(name, scopes, BindingScope::Local);
                 }

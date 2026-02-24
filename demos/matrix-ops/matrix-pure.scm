@@ -14,30 +14,30 @@
 ;; ============================================================================
 
 ;; Create a zero matrix of given dimensions
-(def (make-matrix rows cols)
+(defn make-matrix (rows cols)
   (make-vector rows
     (make-vector cols 0.0)))
 
 ;; Create an identity matrix
-(def (identity n)
+(defn identity (n)
   (let ((m (make-matrix n n)))
     (do ((i 0 (+ i 1)))
       ((= i n) m)
       (vector-set! (vector-ref m i) i 1.0))))
 
 ;; Get element at (i, j)
-(def (matrix-ref m i j)
+(defn matrix-ref (m i j)
   (vector-ref (vector-ref m i) j))
 
 ;; Set element at (i, j)
-(def (matrix-set! m i j val)
+(defn matrix-set! (m i j val)
   (vector-set! (vector-ref m i) j val))
 
 ;; Get dimensions
-(def (matrix-rows m)
+(defn matrix-rows (m)
   (vector-length m))
 
-(def (matrix-cols m)
+(defn matrix-cols (m)
   (if (> (vector-length m) 0)
     (vector-length (vector-ref m 0))
     0))
@@ -47,7 +47,7 @@
 ;; ============================================================================
 
 ;; Matrix transpose
-(def (matrix-transpose m)
+(defn matrix-transpose (m)
   (let* ((rows (matrix-rows m))
          (cols (matrix-cols m))
          (result (make-matrix cols rows)))
@@ -58,7 +58,7 @@
         (matrix-set! result j i (matrix-ref m i j))))))
 
 ;; Matrix multiplication: (m1: a x b) * (m2: b x c) = (result: a x c)
-(def (matrix-multiply m1 m2)
+(defn matrix-multiply (m1 m2)
   (let* ((a (matrix-rows m1))
          (b (matrix-cols m1))
          (c (matrix-cols m2))
@@ -67,17 +67,17 @@
       ((= i a) result)
       (do ((j 0 (+ j 1)))
         ((= j c))
-        ;; Compute dot product of row i and column j
-        (let ((sum 0.0))
-          (do ((k 0 (+ k 1)))
-            ((= k b))
-            (set! sum (+ sum
-              (* (matrix-ref m1 i k)
-                 (matrix-ref m2 k j)))))
-          (matrix-set! result i j sum))))))
+         ;; Compute dot product of row i and column j
+         (let ((sum 0.0))
+           (do ((k 0 (+ k 1)))
+             ((= k b))
+             (set! sum (+ sum
+               (* (matrix-ref m1 i k)
+                  (matrix-ref m2 k j)))))
+           (matrix-set! result i j sum))))))
 
 ;; Matrix addition
-(def (matrix-add m1 m2)
+(defn matrix-add (m1 m2)
   (let* ((rows (matrix-rows m1))
          (cols (matrix-cols m1))
          (result (make-matrix rows cols)))
@@ -85,12 +85,12 @@
       ((= i rows) result)
       (do ((j 0 (+ j 1)))
         ((= j cols))
-        (matrix-set! result i j
-          (+ (matrix-ref m1 i j)
-             (matrix-ref m2 i j)))))))
+         (matrix-set! result i j
+           (+ (matrix-ref m1 i j)
+              (matrix-ref m2 i j)))))))
 
 ;; Scalar multiplication
-(def (matrix-scale m scalar)
+(defn matrix-scale (m scalar)
   (let* ((rows (matrix-rows m))
          (cols (matrix-cols m))
          (result (make-matrix rows cols)))
@@ -98,11 +98,11 @@
       ((= i rows) result)
       (do ((j 0 (+ j 1)))
         ((= j cols))
-        (matrix-set! result i j
-          (* scalar (matrix-ref m i j)))))))
+         (matrix-set! result i j
+           (* scalar (matrix-ref m i j)))))))
 
 ;; Frobenius norm (sum of squared elements)
-(def (matrix-norm m)
+(defn matrix-norm (m)
   (let ((rows (matrix-rows m))
         (cols (matrix-cols m))
         (sum 0.0))
@@ -110,15 +110,15 @@
       ((= i rows) (sqrt sum))
       (do ((j 0 (+ j 1)))
         ((= j cols))
-        (let ((val (matrix-ref m i j)))
-          (set! sum (+ sum (* val val))))))))
+         (let ((val (matrix-ref m i j)))
+           (set! sum (+ sum (* val val))))))))
 
 ;; ============================================================================
 ;; LU Decomposition with Partial Pivoting
 ;; Decomposes M into L*U where L is lower triangular, U is upper triangular
 ;; ============================================================================
 
-(def (lu-decomposition m)
+(defn lu-decomposition (m)
   (let* ((n (matrix-rows m))
          ;; Create working copies
          (a (make-matrix n n)))
@@ -127,51 +127,51 @@
       ((= i n))
       (do ((j 0 (+ j 1)))
         ((= j n))
-        (matrix-set! a i j (matrix-ref m i j))))
+         (matrix-set! a i j (matrix-ref m i j))))
     
-    ;; Perform LU decomposition with partial pivoting
-    (do ((k 0 (+ k 1)))
-      ((= k n) a)
-      
-      ;; Find pivot row
-      (let ((max-val 0.0)
-            (pivot-row k))
-        (do ((i k (+ i 1)))
-          ((= i n))
-          (if (> (abs (matrix-ref a i k)) max-val)
-            (begin
-              (set! max-val (abs (matrix-ref a i k)))
-              (set! pivot-row i))))
-        
-        ;; Swap rows if needed
-        (if (not (= pivot-row k))
-          (let ((temp (vector-ref a k)))
-            (vector-set! a k (vector-ref a pivot-row))
-            (vector-set! a pivot-row temp)))
-        
-        ;; Skip if pivot is too small
-        (if (> (abs (matrix-ref a k k)) 1e-10)
-          (begin
-            ;; Eliminate below pivot
-            (do ((i (+ k 1) (+ i 1)))
-              ((= i n))
-              ;; Compute multiplier and store in lower triangle
-              (let ((factor (/ (matrix-ref a i k) (matrix-ref a k k))))
-                (matrix-set! a i k factor)
-                ;; Eliminate elements in upper triangle
-                (do ((j (+ k 1) (+ j 1)))
-                  ((= j n))
-                  (matrix-set! a i j
-                    (- (matrix-ref a i j)
-                       (* factor (matrix-ref a k j)))))))))))
+     ;; Perform LU decomposition with partial pivoting
+     (do ((k 0 (+ k 1)))
+       ((= k n) a)
+       
+       ;; Find pivot row
+       (let ((max-val 0.0)
+             (pivot-row k))
+         (do ((i k (+ i 1)))
+           ((= i n))
+           (if (> (abs (matrix-ref a i k)) max-val)
+             (begin
+               (set! max-val (abs (matrix-ref a i k)))
+               (set! pivot-row i))))
+         
+         ;; Swap rows if needed
+         (if (not (= pivot-row k))
+           (let ((temp (vector-ref a k)))
+             (vector-set! a k (vector-ref a pivot-row))
+             (vector-set! a pivot-row temp)))
+         
+         ;; Skip if pivot is too small
+         (if (> (abs (matrix-ref a k k)) 1e-10)
+           (begin
+             ;; Eliminate below pivot
+             (do ((i (+ k 1) (+ i 1)))
+               ((= i n))
+               ;; Compute multiplier and store in lower triangle
+               (let ((factor (/ (matrix-ref a i k) (matrix-ref a k k))))
+                 (matrix-set! a i k factor)
+                 ;; Eliminate elements in upper triangle
+                 (do ((j (+ k 1) (+ j 1)))
+                   ((= j n))
+                   (matrix-set! a i j
+                     (- (matrix-ref a i j)
+                        (* factor (matrix-ref a k j)))))))))))
     
-    a))
+     a))
 
 ;; ============================================================================
 ;; Benchmarks
 ;; ============================================================================
 
-(def (benchmark-multiply size)
+(defn benchmark-multiply (size)
   (display "Matrix multiply (")
   (display size)
   (display "x")
@@ -184,21 +184,21 @@
       ((= i size))
       (do ((j 0 (+ j 1)))
         ((= j size))
-        (matrix-set! m1 i j (+ 0.1 (/ (+ i j) size)))
-        (matrix-set! m2 i j (+ 0.1 (/ (+ i j) size)))))
+         (matrix-set! m1 i j (+ 0.1 (/ (+ i j) size)))
+         (matrix-set! m2 i j (+ 0.1 (/ (+ i j) size)))))
     
-    (let ((start (current-time 'time-utc)))
-      (let ((result (matrix-multiply m1 m2)))
-        (let ((end (current-time 'time-utc)))
-          (let ((elapsed (- (time-second end) (time-second start))))
-            (display "done in ~")
-            (display (+ (* elapsed 1000)
-              (/ (- (time-nanosecond end) (time-nanosecond start)) 1e6)))
-            (display "ms, norm=")
-            (display (matrix-norm result))
-            (newline)))))))
+     (let ((start (current-time 'time-utc)))
+       (let ((result (matrix-multiply m1 m2)))
+         (let ((end (current-time 'time-utc)))
+           (let ((elapsed (- (time-second end) (time-second start))))
+             (display "done in ~")
+             (display (+ (* elapsed 1000)
+               (/ (- (time-nanosecond end) (time-nanosecond start)) 1e6)))
+             (display "ms, norm=")
+             (display (matrix-norm result))
+             (newline)))))))
 
-(def (benchmark-transpose size)
+(defn benchmark-transpose (size)
   (display "Matrix transpose (")
   (display size)
   (display "x")
@@ -210,19 +210,19 @@
       ((= i size))
       (do ((j 0 (+ j 1)))
         ((= j size))
-        (matrix-set! m i j (+ 0.1 (/ (+ i j) size)))))
+         (matrix-set! m i j (+ 0.1 (/ (+ i j) size)))))
     
-    (let ((start (current-time 'time-utc)))
-      (let ((result (matrix-transpose m)))
-        (let ((end (current-time 'time-utc)))
-          (let ((elapsed (- (time-second end) (time-second start))))
-            (display "done in ~")
-            (display (+ (* elapsed 1000)
-              (/ (- (time-nanosecond end) (time-nanosecond start)) 1e6)))
-            (display "ms")
-            (newline)))))))
+     (let ((start (current-time 'time-utc)))
+       (let ((result (matrix-transpose m)))
+         (let ((end (current-time 'time-utc)))
+           (let ((elapsed (- (time-second end) (time-second start))))
+             (display "done in ~")
+             (display (+ (* elapsed 1000)
+               (/ (- (time-nanosecond end) (time-nanosecond start)) 1e6)))
+             (display "ms")
+             (newline)))))))
 
-(def (benchmark-lu size)
+(defn benchmark-lu (size)
   (display "LU decomposition (")
   (display size)
   (display "x")
@@ -234,19 +234,19 @@
       ((= i size))
       (do ((j 0 (+ j 1)))
         ((= j size))
-        (if (= i j)
-          (matrix-set! m i j (+ 10.0 (/ (+ i j) size)))
-          (matrix-set! m i j (/ (+ i j) size)))))
+         (if (= i j)
+           (matrix-set! m i j (+ 10.0 (/ (+ i j) size)))
+           (matrix-set! m i j (/ (+ i j) size)))))
     
-    (let ((start (current-time 'time-utc)))
-      (let ((result (lu-decomposition m)))
-        (let ((end (current-time 'time-utc)))
-          (let ((elapsed (- (time-second end) (time-second start))))
-            (display "done in ~")
-            (display (+ (* elapsed 1000)
-              (/ (- (time-nanosecond end) (time-nanosecond start)) 1e6)))
-            (display "ms")
-            (newline)))))))
+     (let ((start (current-time 'time-utc)))
+       (let ((result (lu-decomposition m)))
+         (let ((end (current-time 'time-utc)))
+           (let ((elapsed (- (time-second end) (time-second start))))
+             (display "done in ~")
+             (display (+ (* elapsed 1000)
+               (/ (- (time-nanosecond end) (time-nanosecond start)) 1e6)))
+             (display "ms")
+             (newline)))))))
 
 ;; ============================================================================
 ;; Main

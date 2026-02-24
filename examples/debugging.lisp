@@ -9,8 +9,8 @@
 
 (display "--- Introspection ---\n")
 
-(def (add x y) (+ x y))
-(def (identity x) x)
+(defn add (x y) (+ x y))
+(defn identity (x) x)
 
 ;; closure? predicate
 (assert-true (closure? add) "add is a closure")
@@ -32,7 +32,7 @@
 
 ;; captures
 (var x 10)
-(def (make-adder n) (fn (x) (+ x n)))
+(defn make-adder (n) (fn (x) (+ x n)))
 (var add5 (make-adder 5))
 (assert-eq (captures add) 0 "add captures nothing")
 (assert-eq (captures add5) 1 "add5 captures one variable")

@@ -91,6 +91,17 @@ HIR (bindings are inline — no separate HashMap)
    analyzer calls `mark_mutated()`, `mark_captured()`, `mark_immutable()`.
    The lowerer only reads via `needs_cell()`, `is_global()`, `name()`, etc.
 
+10. **`Destructure` decomposes values into pattern bindings.** 
+    `HirKind::Destructure { pattern: HirPattern, value: Box<Hir> }` is
+    produced by the analyzer for `def`, `var`, `let`, and `fn` parameter
+    destructuring. The pattern's leaf `Var` bindings are created in the
+    current scope. `let*` is desugared to nested `let` in the expander,
+    so the analyzer never sees `let*`.
+
+11. **Destructured bindings use silent nil semantics.** Missing list/array
+    elements produce `nil`, not errors. Wrong-type values produce `nil`
+    for all bindings. No runtime type checks.
+
 ## Files
 
 | File | Lines | Content |

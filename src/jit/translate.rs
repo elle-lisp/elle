@@ -131,7 +131,7 @@ impl<'a> FunctionTranslator<'a> {
                 // - [num_captures, num_captures + arity) are parameters (from args)
                 // - [num_captures + arity, ...) are locally-defined variables
                 let num_captures = self.lir.num_captures;
-                let arity = self.lir.arity;
+                let arity = self.lir.arity.fixed_params() as u16;
                 if *index < num_captures {
                     // Load from closure environment (captures)
                     // Must auto-unwrap LocalCell if present (matches interpreter's LoadUpvalue)
@@ -164,7 +164,7 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::LoadCaptureRaw { dst, index } => {
                 // Same as LoadCapture but doesn't unwrap cells (for forwarding)
                 let num_captures = self.lir.num_captures;
-                let arity = self.lir.arity;
+                let arity = self.lir.arity.fixed_params() as u16;
                 if *index < num_captures {
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("LoadCaptureRaw without env pointer".to_string())
@@ -301,7 +301,7 @@ impl<'a> FunctionTranslator<'a> {
 
             LirInstr::StoreCapture { index, src } => {
                 let num_captures = self.lir.num_captures;
-                let arity = self.lir.arity;
+                let arity = self.lir.arity.fixed_params() as u16;
                 let val = builder.use_var(var(src.0));
 
                 if *index < num_captures + arity {
@@ -397,7 +397,7 @@ impl<'a> FunctionTranslator<'a> {
                 // Only do this optimization if we have self_bits and loop_header
                 if let (Some(self_bits), Some(loop_header)) = (self.self_bits, self.loop_header) {
                     // Check arity matches (self-call must have same number of args)
-                    if args.len() == self.lir.arity as usize {
+                    if args.len() == self.lir.arity.fixed_params() {
                         let is_self = builder.ins().icmp(IntCC::Equal, func_val, self_bits);
 
                         let self_call_block = builder.create_block();
@@ -487,6 +487,22 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::LoadResumeValue { .. } => {
                 return Err(JitError::UnsupportedInstruction(
                     "LoadResumeValue".to_string(),
+                ));
+            }
+            LirInstr::CarOrNil { .. } => {
+                return Err(JitError::UnsupportedInstruction("CarOrNil".to_string()));
+            }
+            LirInstr::CdrOrNil { .. } => {
+                return Err(JitError::UnsupportedInstruction("CdrOrNil".to_string()));
+            }
+            LirInstr::ArrayRefOrNil { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "ArrayRefOrNil".to_string(),
+                ));
+            }
+            LirInstr::ArraySliceFrom { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "ArraySliceFrom".to_string(),
                 ));
             }
         }
