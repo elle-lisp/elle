@@ -80,6 +80,7 @@ pub enum TableKey {
     Int(i64),
     Symbol(SymbolId),
     String(String),
+    Keyword(String),
 }
 
 impl TableKey {
@@ -93,6 +94,8 @@ impl TableKey {
             Ok(TableKey::Int(i))
         } else if let Some(id) = val.as_symbol() {
             Ok(TableKey::Symbol(SymbolId(id)))
+        } else if let Some(name) = val.as_keyword_name() {
+            Ok(TableKey::Keyword(name.to_string()))
         } else if let Some(s) = val.as_string() {
             Ok(TableKey::String(s.to_string()))
         } else {
@@ -110,6 +113,20 @@ impl std::hash::Hash for TableKey {
             TableKey::Int(i) => i.hash(state),
             TableKey::Symbol(id) => id.hash(state),
             TableKey::String(s) => s.hash(state),
+            TableKey::Keyword(s) => s.hash(state),
+        }
+    }
+}
+
+impl fmt::Display for TableKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TableKey::Nil => write!(f, "nil"),
+            TableKey::Bool(b) => write!(f, "{}", b),
+            TableKey::Int(i) => write!(f, "{}", i),
+            TableKey::Symbol(id) => write!(f, "{:?}", id),
+            TableKey::String(s) => write!(f, "\"{}\"", s),
+            TableKey::Keyword(s) => write!(f, ":{}", s),
         }
     }
 }

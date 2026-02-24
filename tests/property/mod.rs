@@ -8,3 +8,9 @@ mod bugfixes {
 mod fibers {
     include!("fibers.rs");
 }
+mod macros {
+    include!("macros.rs");
+}
+mod destructuring {
+    include!("destructuring.rs");
+}

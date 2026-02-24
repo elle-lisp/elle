@@ -505,6 +505,20 @@ impl<'a> FunctionTranslator<'a> {
                     "ArraySliceFrom".to_string(),
                 ));
             }
+            LirInstr::IsArray { .. } => {
+                return Err(JitError::UnsupportedInstruction("IsArray".to_string()));
+            }
+            LirInstr::IsTable { .. } => {
+                return Err(JitError::UnsupportedInstruction("IsTable".to_string()));
+            }
+            LirInstr::ArrayLen { .. } => {
+                return Err(JitError::UnsupportedInstruction("ArrayLen".to_string()));
+            }
+            LirInstr::TableGetOrNil { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "TableGetOrNil".to_string(),
+                ));
+            }
         }
         Ok(false)
     }

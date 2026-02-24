@@ -64,6 +64,12 @@ impl Expander {
                 self.quasiquote_list_to_code(items, depth, span, symbols, vm)
             }
 
+            // Table — quasiquote treats it as data (quoted)
+            SyntaxKind::Table(_) => Ok(self.make_list(
+                vec![self.make_symbol("quote", span.clone()), syntax.clone()],
+                span.clone(),
+            )),
+
             // Everything else gets quoted
             _ => Ok(self.make_list(
                 vec![self.make_symbol("quote", span.clone()), syntax.clone()],

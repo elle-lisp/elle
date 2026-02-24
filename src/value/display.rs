@@ -89,7 +89,7 @@ impl fmt::Display for Value {
                     write!(f, " ")?;
                 }
                 first = false;
-                write!(f, "{:?} {}", k, v)?;
+                write!(f, "{} {}", k, v)?;
             }
             return write!(f, "}}");
         }
@@ -103,7 +103,7 @@ impl fmt::Display for Value {
                     write!(f, " ")?;
                 }
                 first = false;
-                write!(f, "{:?} {}", k, v)?;
+                write!(f, "{} {}", k, v)?;
             }
             return write!(f, "}}");
         }

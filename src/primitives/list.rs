@@ -2,6 +2,7 @@
 use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
 use crate::symbol::SymbolTable;
+use crate::syntax::SyntaxKind;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, list, SymbolId, Value};
@@ -57,7 +58,7 @@ pub fn prim_cons(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, crate::value::cons(args[0], args[1]))
 }
 
-/// Get the first element of a cons cell
+/// Get the first element of a cons cell or syntax list
 pub fn prim_first(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -68,22 +69,27 @@ pub fn prim_first(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let cons = match args[0].as_cons() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("first: expected cons cell, got {}", args[0].type_name()),
-                ),
-            )
+    if let Some(cons) = args[0].as_cons() {
+        return (SIG_OK, cons.first);
+    }
+    if let Some(syntax) = args[0].as_syntax() {
+        if let SyntaxKind::List(items) = &syntax.kind {
+            if items.is_empty() {
+                return (SIG_ERROR, error_val("error", "first: empty syntax list"));
+            }
+            return (SIG_OK, Value::syntax(items[0].clone()));
         }
-    };
-    (SIG_OK, cons.first)
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("first: expected cons cell, got {}", args[0].type_name()),
+        ),
+    )
 }
 
-/// Get the rest of a cons cell
+/// Get the rest of a cons cell or syntax list
 pub fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -94,19 +100,28 @@ pub fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let cons = match args[0].as_cons() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("rest: expected cons cell, got {}", args[0].type_name()),
-                ),
-            )
+    if let Some(cons) = args[0].as_cons() {
+        return (SIG_OK, cons.rest);
+    }
+    if let Some(syntax) = args[0].as_syntax() {
+        if let SyntaxKind::List(items) = &syntax.kind {
+            if items.is_empty() {
+                return (SIG_ERROR, error_val("error", "rest: empty syntax list"));
+            }
+            let rest = crate::syntax::Syntax::new(
+                SyntaxKind::List(items[1..].to_vec()),
+                syntax.span.clone(),
+            );
+            return (SIG_OK, Value::syntax(rest));
         }
-    };
-    (SIG_OK, cons.rest)
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("rest: expected cons cell, got {}", args[0].type_name()),
+        ),
+    )
 }
 
 /// Create a list from arguments
@@ -134,6 +149,18 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             Err(e) => return (SIG_ERROR, error_val("type-error", format!("length: {}", e))),
         };
         (SIG_OK, Value::int(vec.len() as i64))
+    } else if let Some(syntax) = args[0].as_syntax() {
+        if let SyntaxKind::List(items) = &syntax.kind {
+            (SIG_OK, Value::int(items.len() as i64))
+        } else {
+            (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    "length: expected collection type, got syntax object (non-list)",
+                ),
+            )
+        }
     } else if let Some(s) = args[0].as_string() {
         (SIG_OK, Value::int(s.chars().count() as i64))
     } else if args[0].is_array() {
@@ -216,7 +243,22 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let result = if args[0].is_empty_list() {
+    let result = if let Some(syntax) = args[0].as_syntax() {
+        if let SyntaxKind::List(items) = &syntax.kind {
+            items.is_empty()
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "empty?: expected collection type (list, string, array, table, or struct), got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            );
+        }
+    } else if args[0].is_empty_list() {
         true
     } else if args[0].is_cons() {
         false
@@ -453,6 +495,40 @@ pub fn prim_last(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// Get all elements of a list except the last
+pub fn prim_butlast(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("butlast: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+
+    let vec = match args[0].list_to_vec() {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                SIG_ERROR,
+                error_val("type-error", format!("butlast: {}", e)),
+            )
+        }
+    };
+    if vec.is_empty() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "error",
+                "butlast: cannot get butlast of empty list".to_string(),
+            ),
+        );
+    }
+    let init: Vec<Value> = vec[..vec.len() - 1].to_vec();
+    (SIG_OK, list(init))
+}
+
 /// Take the first n elements of a list
 pub fn prim_take(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
@@ -528,7 +604,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(2),
         doc: "Construct a cons cell with car and cdr",
         params: &["car", "cdr"],
-        category: "",
+        category: "list",
         example: "(cons 1 (cons 2 ()))",
         aliases: &[],
     },
@@ -539,7 +615,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Get the first element (car) of a cons cell",
         params: &["cell"],
-        category: "",
+        category: "list",
         example: "(first (cons 1 2))",
         aliases: &[],
     },
@@ -550,7 +626,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Get the rest (cdr) of a cons cell",
         params: &["cell"],
-        category: "",
+        category: "list",
         example: "(rest (cons 1 (cons 2 ())))",
         aliases: &[],
     },
@@ -561,7 +637,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(0),
         doc: "Create a list from arguments",
         params: &["elements"],
-        category: "",
+        category: "list",
         example: "(list 1 2 3)",
         aliases: &[],
     },
@@ -572,7 +648,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Get the length of a collection (list, string, vector, table, struct, symbol, or keyword)",
         params: &["collection"],
-        category: "",
+        category: "list",
         example: "(length (list 1 2 3))",
         aliases: &[],
     },
@@ -583,7 +659,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if a collection is empty",
         params: &["collection"],
-        category: "",
+        category: "list",
         example: "(empty? (list))",
         aliases: &[],
     },
@@ -594,7 +670,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(0),
         doc: "Append multiple lists into a single list",
         params: &["lists"],
-        category: "",
+        category: "list",
         example: "(append (list 1 2) (list 3 4))",
         aliases: &[],
     },
@@ -605,7 +681,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Reverse a list",
         params: &["list"],
-        category: "",
+        category: "list",
         example: "(reverse (list 1 2 3))",
         aliases: &[],
     },
@@ -616,7 +692,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(2),
         doc: "Get the nth element of a collection (list, array, or string) (0-indexed)",
         params: &["index", "collection"],
-        category: "",
+        category: "list",
         example: "(nth 1 (list 10 20 30))",
         aliases: &[],
     },
@@ -627,8 +703,19 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Get the last element of a list",
         params: &["list"],
-        category: "",
+        category: "list",
         example: "(last (list 1 2 3))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "butlast",
+        func: prim_butlast,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get all elements of a list except the last",
+        params: &["list"],
+        category: "list",
+        example: "(butlast (list 1 2 3))",
         aliases: &[],
     },
     PrimitiveDef {
@@ -638,7 +725,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(2),
         doc: "Take the first n elements of a list",
         params: &["count", "list"],
-        category: "",
+        category: "list",
         example: "(take 2 (list 1 2 3 4))",
         aliases: &[],
     },
@@ -649,7 +736,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(2),
         doc: "Drop the first n elements of a list",
         params: &["count", "list"],
-        category: "",
+        category: "list",
         example: "(drop 2 (list 1 2 3 4))",
         aliases: &[],
     },

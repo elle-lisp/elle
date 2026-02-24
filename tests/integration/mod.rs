@@ -77,3 +77,9 @@ mod hygiene {
 mod destructuring {
     include!("destructuring.rs");
 }
+mod prelude {
+    include!("prelude.rs");
+}
+mod blocks {
+    include!("blocks.rs");
+}

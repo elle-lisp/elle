@@ -8,11 +8,19 @@ mod pattern;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
-use crate::hir::{Binding, Hir, HirKind, HirPattern};
+use crate::hir::{Binding, BlockId, Hir, HirKind, HirPattern};
 use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
+
+/// Tracks an active block during lowering so `break` can find its
+/// result register and exit label.
+struct BlockLowerContext {
+    block_id: BlockId,
+    result_reg: Reg,
+    exit_label: Label,
+}
 
 /// Lowers HIR to LIR
 pub struct Lowerer {
@@ -40,6 +48,8 @@ pub struct Lowerer {
     intrinsics: FxHashMap<SymbolId, IntrinsicOp>,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
     immutable_values: HashMap<Binding, Value>,
+    /// Stack of active block contexts for `break` lowering
+    block_lower_contexts: Vec<BlockLowerContext>,
 }
 
 impl Lowerer {
@@ -56,6 +66,7 @@ impl Lowerer {
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),
             immutable_values: HashMap::new(),
+            block_lower_contexts: Vec::new(),
         }
     }
 

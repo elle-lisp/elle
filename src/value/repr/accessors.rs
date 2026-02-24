@@ -416,6 +416,16 @@ impl Value {
 
     /// Convert a proper list to a Vec.
     pub fn list_to_vec(&self) -> Result<Vec<Value>, &'static str> {
+        // Syntax lists: unwrap SyntaxKind::List items as Value::syntax each
+        if let Some(syntax) = self.as_syntax() {
+            if let crate::syntax::SyntaxKind::List(items) = &syntax.kind {
+                return Ok(items
+                    .iter()
+                    .map(|item| Value::syntax(item.clone()))
+                    .collect());
+            }
+            return Err("Not a proper list");
+        }
         let mut result = Vec::new();
         let mut current = *self;
         loop {

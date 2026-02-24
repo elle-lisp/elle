@@ -549,6 +549,120 @@ tbody tr:nth-child(even) {
       "</html>\n")))
 
 ;; ============================================================================
+;; Standard library reference generator (from runtime primitive metadata)
+;; ============================================================================
+
+;; Map category identifiers to display names
+(var category-display-name
+  (fn (cat)
+    (cond
+      ((= cat "") "Core")
+      ((= cat "math") "Math")
+      ((= cat "string") "String Operations")
+      ((= cat "file") "File I/O")
+      ((= cat "ffi") "FFI (Foreign Function Interface)")
+      ((= cat "fiber") "Fibers")
+      ((= cat "coro") "Coroutines")
+      ((= cat "array") "Arrays")
+      ((= cat "struct") "Structs")
+      ((= cat "json") "JSON")
+      ((= cat "clock") "Clock")
+      ((= cat "time") "Time")
+      ((= cat "meta") "Metaprogramming")
+      ((= cat "debug") "Debugging")
+      ((= cat "fn") "Function Introspection")
+      ((= cat "os") "OS / Process")
+      ((= cat "pkg") "Packages")
+      ((= cat "module") "Modules")
+      ((= cat "bit") "Bitwise Operations")
+      (#t cat))))
+
+;; Build a function signature string like "(cons car cdr)" from metadata
+(var build-signature
+  (fn (meta)
+    (let* ((name (get meta :name))
+           (params (get meta :params)))
+      (if (empty? params)
+        (string-append "(" name ")")
+        (string-append "(" name " " (string-join params " ") ")")))))
+
+;; Build the description string, including aliases if any
+(var build-description
+  (fn (meta)
+    (let* ((doc (get meta :doc))
+           (aliases (get meta :aliases)))
+      (if (empty? aliases)
+        doc
+        (string-append doc " (alias: " (string-join aliases ", ") ")")))))
+
+;; Group primitives by category, skipping aliases.
+;; Returns a table mapping category-name → list of metadata structs.
+(var group-by-category
+  (fn (names)
+    (fold (fn (groups name)
+            (let* ((meta (vm/primitive-meta name))
+                   (canonical (get meta :name)))
+              ;; Skip aliases: name passed in doesn't match canonical name
+              (if (not (= name canonical))
+                groups
+                (let* ((cat (get meta :category))
+                       (existing (get groups cat))
+                       (items (if (nil? existing) (list) existing)))
+                  (put groups cat (append items (list meta)))
+                  groups))))
+          (table)
+          names)))
+
+;; Build a section (table with heading) for one category
+(var build-category-section
+  (fn (cat-name metas)
+    (let* ((rows (map (fn (meta)
+                        (list (build-signature meta)
+                              (build-description meta)
+                              (get meta :example)))
+                      metas))
+           (tbl (table "type" "table"
+                       "headers" (list "Function" "Description" "Example")
+                       "rows" rows)))
+      (table "heading" (category-display-name cat-name)
+             "level" 2
+             "content" (list tbl)))))
+
+;; Preferred category ordering for the stdlib reference page
+(var category-order
+  (list "" "math" "string" "array" "struct" "json"
+        "file" "fn" "fiber" "coro" "clock" "time"
+        "meta" "debug" "bit" "os" "pkg" "module" "ffi"))
+
+;; Generate all stdlib sections from runtime primitive metadata
+(var generate-stdlib-sections
+  (fn ()
+    (let* ((names (vm/list-primitives))
+           (groups (group-by-category names))
+           (all-cats (keys groups)))
+      ;; Build sections in preferred order, then append any unknown categories
+      (let* ((ordered
+               (fold (fn (acc cat)
+                       (let* ((metas (get groups cat)))
+                         (if (nil? metas)
+                           acc
+                           (append acc (list (build-category-section cat metas))))))
+                     (list)
+                     category-order))
+             ;; Find categories not in category-order
+             (extra
+               (fold (fn (acc cat)
+                       (if (fold (fn (found c) (or found (= c cat)))
+                                 #f
+                                 category-order)
+                         acc
+                         (append acc (list (build-category-section
+                                            cat (get groups cat))))))
+                     (list)
+                     all-cats)))
+        (append ordered extra)))))
+
+;; ============================================================================
 ;; Main generator
 ;; ============================================================================
 
@@ -594,8 +708,17 @@ tbody tr:nth-child(even) {
         (display ".html...")
         (newline)
         
-        (var page-json (slurp page-file))
-        (var page-data (json-parse page-json))
+        ;; For stdlib-reference, generate from runtime metadata
+        ;; For all other pages, read from JSON
+        (var page-data
+          (if (= slug "stdlib-reference")
+            (begin
+              (var pd (table))
+              (put pd "title" title)
+              (put pd "description" "Built-in functions and operations in Elle")
+              (put pd "sections" (generate-stdlib-sections))
+              pd)
+            (json-parse (slurp page-file))))
         
         ;; Add slug to page data for template
         (put page-data "slug" slug)

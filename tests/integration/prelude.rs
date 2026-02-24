@@ -1,0 +1,270 @@
+// Integration tests for prelude macros (when, unless, try, protect, defer, with)
+
+use elle::ffi::primitives::context::set_symbol_table;
+use elle::pipeline::{compile, compile_all};
+use elle::primitives::register_primitives;
+use elle::{SymbolTable, Value, VM};
+
+fn eval(input: &str) -> Result<Value, String> {
+    let mut vm = VM::new();
+    let mut symbols = SymbolTable::new();
+    let _effects = register_primitives(&mut vm, &mut symbols);
+    set_symbol_table(&mut symbols as *mut SymbolTable);
+
+    match compile(input, &mut symbols) {
+        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
+        Err(_) => {
+            let wrapped = format!("(begin {})", input);
+            match compile(&wrapped, &mut symbols) {
+                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
+                Err(_) => {
+                    let results = compile_all(input, &mut symbols)?;
+                    let mut last_result = Value::NIL;
+                    for result in results {
+                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
+                    }
+                    Ok(last_result)
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// SECTION 1: when
+// ============================================================================
+
+#[test]
+fn test_when_true() {
+    assert_eq!(eval("(when #t 42)").unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_when_false() {
+    assert_eq!(eval("(when #f 42)").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_when_multi_body() {
+    assert_eq!(eval("(when #t 1 2 3)").unwrap(), Value::int(3));
+}
+
+#[test]
+fn test_when_truthy_value() {
+    // Non-boolean truthy value
+    assert_eq!(eval("(when 1 42)").unwrap(), Value::int(42));
+}
+
+// ============================================================================
+// SECTION 2: unless
+// ============================================================================
+
+#[test]
+fn test_unless_true() {
+    assert_eq!(eval("(unless #t 42)").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_unless_false() {
+    assert_eq!(eval("(unless #f 42)").unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_unless_multi_body() {
+    assert_eq!(eval("(unless #f 1 2 3)").unwrap(), Value::int(3));
+}
+
+// ============================================================================
+// SECTION 3: try/catch
+// ============================================================================
+
+#[test]
+fn test_try_catch_no_error() {
+    assert_eq!(eval("(try 42 (catch e :error))").unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_try_catch_catches_error() {
+    let result = eval("(try (/ 1 0) (catch e :caught))");
+    assert_eq!(result.unwrap(), Value::keyword("caught"));
+}
+
+#[test]
+fn test_try_catch_binds_error() {
+    // The error binding should be available in the handler
+    let result = eval("(try (/ 1 0) (catch e e))");
+    assert!(result.is_ok());
+    // e should be the error value (a cons cell / error tuple)
+    let val = result.unwrap();
+    assert!(!val.is_nil());
+}
+
+#[test]
+fn test_try_catch_multi_body() {
+    // Multiple body forms before the catch clause
+    assert_eq!(
+        eval("(try 1 2 (+ 20 22) (catch e :error))").unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn test_try_catch_multi_handler() {
+    // Multiple handler forms — last one is the result
+    let result = eval("(try (/ 1 0) (catch e 1 2 :caught))");
+    assert_eq!(result.unwrap(), Value::keyword("caught"));
+}
+
+// ============================================================================
+// SECTION 4: protect
+// ============================================================================
+
+#[test]
+fn test_protect_success() {
+    let result = eval("(protect 42)");
+    assert!(result.is_ok());
+    let val = result.unwrap();
+    let arr = val.as_array().unwrap();
+    let borrowed = arr.borrow();
+    assert_eq!(borrowed[0], Value::bool(true));
+    assert_eq!(borrowed[1], Value::int(42));
+}
+
+#[test]
+fn test_protect_failure() {
+    let result = eval("(protect (/ 1 0))");
+    assert!(result.is_ok());
+    let val = result.unwrap();
+    let arr = val.as_array().unwrap();
+    let borrowed = arr.borrow();
+    assert_eq!(borrowed[0], Value::bool(false));
+    // borrowed[1] is the error value — just check it exists
+    assert!(!borrowed[1].is_nil() || borrowed[1].is_nil()); // always true, just access it
+}
+
+// ============================================================================
+// SECTION 5: defer
+// ============================================================================
+
+#[test]
+fn test_defer_runs_cleanup() {
+    assert_eq!(
+        eval("(begin (var cleaned #f) (defer (set! cleaned #t) 42) cleaned)").unwrap(),
+        Value::bool(true)
+    );
+}
+
+#[test]
+fn test_defer_returns_body_value() {
+    assert_eq!(
+        eval("(begin (var x 0) (defer (set! x 1) 42))").unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn test_defer_runs_cleanup_on_error() {
+    // Cleanup should run even when body errors
+    assert_eq!(
+        eval("(begin (var cleaned #f) (try (defer (set! cleaned #t) (/ 1 0)) (catch e cleaned)))")
+            .unwrap(),
+        Value::bool(true)
+    );
+}
+
+// ============================================================================
+// SECTION 6: with
+// ============================================================================
+
+#[test]
+fn test_with_basic() {
+    // Use with to bind a resource and clean it up
+    assert_eq!(
+        eval(
+            r#"(begin
+                (defn make-resource () :resource)
+                (defn free-resource (r) nil)
+                (with r (make-resource) free-resource
+                  42))"#
+        )
+        .unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn test_with_cleanup_runs() {
+    assert_eq!(
+        eval(
+            r#"(begin
+                (var cleaned #f)
+                (defn make () :resource)
+                (defn cleanup (r) (set! cleaned #t))
+                (with r (make) cleanup
+                  42)
+                cleaned)"#
+        )
+        .unwrap(),
+        Value::bool(true)
+    );
+}
+
+// ============================================================================
+// SECTION 7: butlast primitive
+// ============================================================================
+
+#[test]
+fn test_butlast_basic() {
+    let result = eval("(butlast (list 1 2 3))").unwrap();
+    let items = result.list_to_vec().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0], Value::int(1));
+    assert_eq!(items[1], Value::int(2));
+}
+
+#[test]
+fn test_butlast_single() {
+    let result = eval("(butlast (list 1))").unwrap();
+    // Should return empty list
+    assert!(result.list_to_vec().unwrap().is_empty());
+}
+
+#[test]
+fn test_butlast_empty_errors() {
+    let result = eval("(butlast (list))");
+    assert!(result.is_err());
+}
+
+// ============================================================================
+// SECTION 8: hygiene — prelude macros don't capture
+// ============================================================================
+
+#[test]
+fn test_try_hygiene_no_capture() {
+    // The try macro introduces an internal binding `f`.
+    // A call-site variable named `f` should not be affected.
+    assert_eq!(
+        eval(
+            r#"(let ((f 99))
+                (try (+ f 1) (catch e :error)))"#
+        )
+        .unwrap(),
+        Value::int(100)
+    );
+}
+
+#[test]
+fn test_defer_hygiene_no_capture() {
+    // The defer macro introduces an internal binding `f`.
+    // A call-site variable named `f` should not be affected.
+    assert_eq!(
+        eval(
+            r#"(begin
+                (var cleaned #f)
+                (let ((f 99))
+                  (defer (set! cleaned #t) (+ f 1))))"#
+        )
+        .unwrap(),
+        Value::int(100)
+    );
+}

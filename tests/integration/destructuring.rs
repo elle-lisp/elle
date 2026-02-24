@@ -705,3 +705,186 @@ fn test_variadic_compile_time_arity_check() {
     // This should fail at compile time (0 args, needs at least 1)
     assert!(eval("(begin (defn f (x & rest) x) (f))").is_err());
 }
+
+// === Table/struct destructuring (edge cases) ===
+
+#[test]
+fn test_table_missing_key_is_nil() {
+    assert_eq!(
+        eval("(begin (def {:missing m} {:other 42}) m)").unwrap(),
+        Value::NIL
+    );
+}
+
+#[test]
+fn test_table_wrong_type_is_nil() {
+    assert_eq!(eval("(begin (def {:x x} 42) x)").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_table_empty_pattern() {
+    assert_eq!(
+        eval("(begin (def {} {:x 1}) :ok)").unwrap(),
+        Value::keyword("ok")
+    );
+}
+
+#[test]
+fn test_table_match_fallback() {
+    assert_eq!(
+        eval("(match 42 ({:x x} x) (_ :no-match))").unwrap(),
+        Value::keyword("no-match")
+    );
+}
+
+// === Table/struct destructuring ===
+
+#[test]
+fn test_def_table_basic() {
+    assert_eq!(
+        eval("(begin (def {:name n :age a} {:name \"Alice\" :age 30}) n)").unwrap(),
+        Value::string("Alice")
+    );
+    assert_eq!(
+        eval("(begin (def {:name n :age a} {:name \"Alice\" :age 30}) a)").unwrap(),
+        Value::int(30)
+    );
+}
+
+#[test]
+fn test_def_table_missing_key() {
+    // Missing key → nil (silent nil semantics)
+    assert_eq!(
+        eval("(begin (def {:missing m} {:other 42}) m)").unwrap(),
+        Value::NIL
+    );
+}
+
+#[test]
+fn test_def_table_wrong_type() {
+    // Non-table/struct value → nil for all bindings
+    assert_eq!(eval("(begin (def {:x x} 42) x)").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_var_table() {
+    assert_eq!(
+        eval("(begin (var {:x x} {:x 99}) x)").unwrap(),
+        Value::int(99)
+    );
+}
+
+#[test]
+fn test_let_table() {
+    assert_eq!(
+        eval("(let (({:x x :y y} {:x 10 :y 20})) (+ x y))").unwrap(),
+        Value::int(30)
+    );
+}
+
+#[test]
+fn test_let_star_table() {
+    assert_eq!(
+        eval("(let* (({:x x} {:x 5}) ({:y y} {:y x})) (+ x y))").unwrap(),
+        Value::int(10)
+    );
+}
+
+#[test]
+fn test_fn_param_table() {
+    assert_eq!(
+        eval("(begin (defn f ({:x x :y y}) (+ x y)) (f {:x 3 :y 4}))").unwrap(),
+        Value::int(7)
+    );
+}
+
+#[test]
+fn test_table_nested() {
+    assert_eq!(
+        eval("(begin (def {:point {:x px :y py}} {:point {:x 3 :y 4}}) (+ px py))").unwrap(),
+        Value::int(7)
+    );
+}
+
+#[test]
+fn test_table_with_mutable_table() {
+    // Destructuring works on mutable tables too
+    assert_eq!(
+        eval("(begin (def {:a a} @{:a 99}) a)").unwrap(),
+        Value::int(99)
+    );
+}
+
+#[test]
+fn test_table_in_match() {
+    assert_eq!(
+        eval(
+            "(match {:type :circle :radius 5}
+               ({:type :circle :radius r} r)
+               ({:type :square :side s} s)
+               (_ 0))"
+        )
+        .unwrap(),
+        Value::int(5)
+    );
+}
+
+#[test]
+fn test_table_match_fallthrough() {
+    assert_eq!(
+        eval(
+            "(match {:type :square :side 7}
+               ({:type :circle :radius r} r)
+               ({:type :square :side s} s)
+               (_ 0))"
+        )
+        .unwrap(),
+        Value::int(7)
+    );
+}
+
+#[test]
+fn test_table_match_wildcard_fallback() {
+    assert_eq!(
+        eval(
+            "(match 42
+               ({:x x} x)
+               (_ :no-match))"
+        )
+        .unwrap(),
+        Value::keyword("no-match")
+    );
+}
+
+#[test]
+fn test_table_expression_position() {
+    // {:a 1 :b 2} in expression position is a struct literal
+    assert_eq!(eval("(get {:a 1 :b 2} :a)").unwrap(), Value::int(1));
+}
+
+#[test]
+fn test_table_empty() {
+    // Empty table destructuring
+    assert_eq!(
+        eval("(begin (def {} {:x 1}) :ok)").unwrap(),
+        Value::keyword("ok")
+    );
+}
+
+#[test]
+fn test_table_mixed_with_list() {
+    // Table inside list destructuring
+    assert_eq!(
+        eval("(begin (def (a {:x x}) (list 1 {:x 2})) (+ a x))").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_table_wildcard_value() {
+    // Use _ for value to ignore it
+    assert_eq!(
+        eval("(begin (def {:x _ :y y} {:x 10 :y 20}) y)").unwrap(),
+        Value::int(20)
+    );
+}

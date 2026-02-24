@@ -58,7 +58,7 @@ See `assertions.lisp` for the standard assertion library documentation.
 
 ### Computation (Tier 2)
 - **closures.lisp** - Lambda functions, closures, mutable captures, and comprehensive recursion patterns (self-recursion, mutual recursion, tail recursion, nested definitions, multi-way recursion)
-- **scope-and-binding.lisp** - Binding forms (let, let*, function parameters), lexical scoping, shadowing, scope management, closures, nested functions, begin form for explicit scope
+- **scope-and-binding.lisp** - Binding forms (let, let*, function parameters), lexical scoping, shadowing, scope management, closures, nested functions, begin form for sequencing, block form for scoped sequencing with break
 - **control-flow.lisp** - Conditionals (cond), loops (for/each, while, forever), and pattern matching (match with binding)
 - **string-operations.lisp** - String manipulation and String Module
 
@@ -131,11 +131,13 @@ echo $?
   - Part 3: Pattern matching (literal matching, string matching, wildcards, nil patterns, list patterns, nested lists, computed results)
   - 42 assertions covering all control flow patterns
 
-- `scope-and-binding.lisp` enhanced with **begin form section**
-  - Added Part 0: The begin Form - Explicit Scope
-  - Demonstrates begin as explicit scope for local variables
-  - Shows variable scoping and non-leakage from begin blocks
-  - 2 new assertions for begin form behavior
+- `scope-and-binding.lisp` enhanced with **begin and block form sections**
+   - Part 0: The begin Form - Sequencing (No Scope)
+   - Part 0.5: The block Form - Scoped Sequencing
+   - Demonstrates begin as sequencing without scope (variables leak)
+   - Demonstrates block as scoped sequencing (variables contained)
+   - Shows named blocks and break for early exit
+   - Multiple assertions for begin and block form behavior
 
 ### Previous Consolidations (Session 9)
 

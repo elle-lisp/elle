@@ -15,9 +15,29 @@
 
 use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
 use crate::symbol::SymbolTable;
-use crate::syntax::Syntax;
+use crate::syntax::{Span, Syntax};
 use crate::value::Value;
 use crate::vm::VM;
+
+/// Wrap a macro argument for binding in the let-expression.
+/// Atoms are quoted to preserve semantics. Symbols and compounds
+/// are wrapped as syntax objects to preserve scope sets.
+fn wrap_macro_arg(arg: &Syntax, span: &Span) -> Syntax {
+    match &arg.kind {
+        SyntaxKind::Nil
+        | SyntaxKind::Bool(_)
+        | SyntaxKind::Int(_)
+        | SyntaxKind::Float(_)
+        | SyntaxKind::String(_)
+        | SyntaxKind::Keyword(_) => {
+            Syntax::new(SyntaxKind::Quote(Box::new(arg.clone())), span.clone())
+        }
+        _ => Syntax::new(
+            SyntaxKind::SyntaxLiteral(Value::syntax(arg.clone())),
+            span.clone(),
+        ),
+    }
+}
 
 impl Expander {
     pub(super) fn expand_macro_call(
@@ -29,7 +49,16 @@ impl Expander {
         vm: &mut VM,
     ) -> Result<Syntax, String> {
         // Check arity
-        if args.len() != macro_def.params.len() {
+        if macro_def.rest_param.is_some() {
+            if args.len() < macro_def.params.len() {
+                return Err(format!(
+                    "Macro '{}' expects at least {} arguments, got {}",
+                    macro_def.name,
+                    macro_def.params.len(),
+                    args.len()
+                ));
+            }
+        } else if args.len() != macro_def.params.len() {
             return Err(format!(
                 "Macro '{}' expects {} arguments, got {}",
                 macro_def.name,
@@ -70,25 +99,13 @@ impl Expander {
         // they don't participate in binding resolution and wrapping them as
         // syntax objects would change their runtime semantics (e.g., #f wrapped
         // in a syntax object becomes truthy).
-        let bindings: Vec<Syntax> = macro_def
+        // Bind fixed params
+        let mut bindings: Vec<Syntax> = macro_def
             .params
             .iter()
-            .zip(args)
+            .zip(&args[..macro_def.params.len()])
             .map(|(param, arg)| {
-                let arg_expr = match &arg.kind {
-                    SyntaxKind::Nil
-                    | SyntaxKind::Bool(_)
-                    | SyntaxKind::Int(_)
-                    | SyntaxKind::Float(_)
-                    | SyntaxKind::String(_)
-                    | SyntaxKind::Keyword(_) => {
-                        Syntax::new(SyntaxKind::Quote(Box::new(arg.clone())), span.clone())
-                    }
-                    _ => Syntax::new(
-                        SyntaxKind::SyntaxLiteral(Value::syntax(arg.clone())),
-                        span.clone(),
-                    ),
-                };
+                let arg_expr = wrap_macro_arg(arg, &span);
                 Syntax::new(
                     SyntaxKind::List(vec![
                         Syntax::new(SyntaxKind::Symbol(param.clone()), span.clone()),
@@ -98,6 +115,27 @@ impl Expander {
                 )
             })
             .collect();
+
+        // Bind rest param if present
+        if let Some(ref rest_name) = macro_def.rest_param {
+            let rest_args = &args[macro_def.params.len()..];
+            // Build (list arg1 arg2 ...) expression
+            let mut list_elems = vec![Syntax::new(
+                SyntaxKind::Symbol("list".to_string()),
+                span.clone(),
+            )];
+            for arg in rest_args {
+                list_elems.push(wrap_macro_arg(arg, &span));
+            }
+            let list_expr = Syntax::new(SyntaxKind::List(list_elems), span.clone());
+            bindings.push(Syntax::new(
+                SyntaxKind::List(vec![
+                    Syntax::new(SyntaxKind::Symbol(rest_name.clone()), span.clone()),
+                    list_expr,
+                ]),
+                span.clone(),
+            ));
+        }
 
         let let_expr = Syntax::new(
             SyntaxKind::List(vec![

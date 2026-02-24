@@ -53,6 +53,29 @@ impl<'a> Analyzer<'a> {
                 ))
             }
 
+            // Table literal {k1 v1 k2 v2} - desugar to (struct k1 v1 k2 v2)
+            SyntaxKind::Table(items) => {
+                let mut args = Vec::new();
+                let mut effect = Effect::none();
+                for item in items {
+                    let hir = self.analyze_expr(item)?;
+                    effect = effect.combine(hir.effect);
+                    args.push(hir);
+                }
+                let sym = self.symbols.intern("struct");
+                let binding = Binding::new(sym, BindingScope::Global);
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                Ok(Hir::new(
+                    HirKind::Call {
+                        func: Box::new(func),
+                        args,
+                        is_tail: false,
+                    },
+                    span,
+                    effect,
+                ))
+            }
+
             // Quote - convert to Value at analysis time
             SyntaxKind::Quote(inner) => {
                 let value = (**inner).to_value(self.symbols);
@@ -85,6 +108,7 @@ impl<'a> Analyzer<'a> {
                         "fn" => return self.analyze_lambda(items, span),
                         "begin" => return self.analyze_begin(&items[1..], span),
                         "block" => return self.analyze_block(&items[1..], span),
+                        "break" => return self.analyze_break(&items[1..], span),
                         "var" => return self.analyze_define(items, span),
                         "def" => return self.analyze_const(items, span),
                         "set!" => return self.analyze_set(items, span),
@@ -104,6 +128,21 @@ impl<'a> Analyzer<'a> {
                         "cond" => return self.analyze_cond(items, span),
                         "module" => return self.analyze_module(items, span),
                         "import" => return self.analyze_import(items, span),
+                        // (doc <symbol>) → (doc "<symbol-name>")
+                        // Rewrites the symbol arg to a string so bare symbols
+                        // like (doc if) work without quoting.
+                        "doc" if items.len() == 2 => {
+                            if let SyntaxKind::Symbol(sym_name) = &items[1].kind {
+                                let mut rewritten = items.to_vec();
+                                rewritten[1] = Syntax {
+                                    kind: SyntaxKind::String(sym_name.clone()),
+                                    span: items[1].span.clone(),
+                                    scopes: items[1].scopes.clone(),
+                                    scope_exempt: items[1].scope_exempt,
+                                };
+                                return self.analyze_call(&rewritten, span);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -188,12 +227,113 @@ impl<'a> Analyzer<'a> {
     }
 
     pub(crate) fn analyze_block(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        // Check if the first item is a keyword (block name)
+        let (name, body_items) = if let Some(first) = items.first() {
+            if let SyntaxKind::Keyword(kw) = &first.kind {
+                (Some(kw.clone()), &items[1..])
+            } else {
+                (None, items)
+            }
+        } else {
+            (None, items)
+        };
+
+        let block_id = BlockId(self.next_block_id);
+        self.next_block_id += 1;
+
+        self.block_contexts.push(BlockContext {
+            block_id,
+            name: name.clone(),
+            fn_depth: self.fn_depth,
+        });
+
         self.push_scope(false);
-        let result = self.analyze_begin(items, span.clone())?;
+        let result = self.analyze_begin(body_items, span.clone())?;
         self.pop_scope();
 
+        self.block_contexts.pop();
+
         let effect = result.effect;
-        Ok(Hir::new(HirKind::Block(vec![result]), span, effect))
+        Ok(Hir::new(
+            HirKind::Block {
+                name,
+                block_id,
+                body: vec![result],
+            },
+            span,
+            effect,
+        ))
+    }
+
+    pub(crate) fn analyze_break(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        // Parse arguments:
+        //   (break)           → no name, nil value
+        //   (break val)       → no name, has value
+        //   (break :name)     → named, nil value
+        //   (break :name val) → named, has value
+        let (name, value_syntax) = match items.len() {
+            0 => (None, None),
+            1 => {
+                if let SyntaxKind::Keyword(kw) = &items[0].kind {
+                    (Some(kw.clone()), None)
+                } else {
+                    (None, Some(&items[0]))
+                }
+            }
+            2 => {
+                if let SyntaxKind::Keyword(kw) = &items[0].kind {
+                    (Some(kw.clone()), Some(&items[1]))
+                } else {
+                    return Err(format!(
+                        "{}: break takes at most 2 arguments: optional :name and optional value",
+                        span
+                    ));
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "{}: break takes at most 2 arguments: optional :name and optional value",
+                    span
+                ));
+            }
+        };
+
+        // Find the target block
+        let target = if let Some(ref target_name) = name {
+            self.block_contexts
+                .iter()
+                .rev()
+                .find(|ctx| ctx.name.as_deref() == Some(target_name))
+                .ok_or_else(|| format!("{}: no block named :{} in scope", span, target_name))?
+        } else {
+            self.block_contexts
+                .last()
+                .ok_or_else(|| format!("{}: break outside of any block", span))?
+        };
+
+        // Check function boundary
+        if target.fn_depth != self.fn_depth {
+            return Err(format!("{}: break cannot cross function boundary", span));
+        }
+
+        let block_id = target.block_id;
+
+        // Analyze value expression (or nil if absent)
+        let value = if let Some(val_syn) = value_syntax {
+            self.analyze_expr(val_syn)?
+        } else {
+            Hir::pure(HirKind::Nil, span.clone())
+        };
+
+        let effect = value.effect;
+        Ok(Hir::new(
+            HirKind::Break {
+                block_id,
+                value: Box::new(value),
+            },
+            span,
+            effect,
+        ))
     }
 
     pub(crate) fn analyze_body(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {

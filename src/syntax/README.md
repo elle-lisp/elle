@@ -42,6 +42,7 @@ let mut expander = Expander::new();
 expander.define_macro(MacroDef {
     name: "when".to_string(),
     params: vec!["cond".to_string(), "body".to_string()],
+    rest_param: None,
     template: /* `(if ,cond ,body nil) */,
     definition_scope: ScopeId(0),
 });

@@ -25,8 +25,8 @@ fn init_list_module(vm: &mut VM, symbols: &mut SymbolTable) {
     let mut list_exports = HashMap::new();
 
     let functions = vec![
-        "length", "empty?", "append", "reverse", "map", "filter", "fold", "nth", "last", "take",
-        "drop", "list", "cons", "first", "rest",
+        "length", "empty?", "append", "reverse", "map", "filter", "fold", "nth", "last", "butlast",
+        "take", "drop", "list", "cons", "first", "rest",
     ];
 
     let mut exports = Vec::new();

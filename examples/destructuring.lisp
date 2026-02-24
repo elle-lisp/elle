@@ -9,6 +9,7 @@
 ; - Silent nil semantics for missing values
 ; - defn with destructured parameters
 ; - Variadic & rest in function parameters
+; - Table/struct destructuring with {:key var} syntax
 
 (import-file "./examples/assertions.lisp")
 
@@ -371,6 +372,111 @@
 (assert-eq remainder 2 "divmod remainder")
 (display "  17 / 5 => quotient=")
 (display quotient) (display " remainder=") (display remainder)
+(newline)
+
+; ============================================================================
+; PART 12: Table/Struct Destructuring
+; ============================================================================
+
+(display "PART 12: Table/Struct Destructuring")
+(newline)
+(newline)
+
+; Basic struct destructuring with def
+(def {:name name :age age} {:name "Alice" :age 30})
+(assert-eq name "Alice" "table destr: name")
+(assert-eq age 30 "table destr: age")
+(display "  (def {:name name :age age} {:name \"Alice\" :age 30}) => name=")
+(display name) (display " age=") (display age)
+(newline)
+
+; Missing key gives nil
+(def {:missing val} {:other 42})
+(assert-eq val nil "table destr: missing key => nil")
+(display "  (def {:missing val} {:other 42}) => val=")
+(display val)
+(newline)
+
+; Non-table gives nil for all bindings
+(def {:x nx} 42)
+(assert-eq nx nil "table destr: non-table => nil")
+(display "  (def {:x nx} 42) => nx=")
+(display nx)
+(newline)
+
+; Mutable table destructuring
+(def {:a ta} @{:a 99})
+(assert-eq ta 99 "table destr: mutable table")
+(display "  (def {:a ta} @{:a 99}) => ta=")
+(display ta)
+(newline)
+
+; Nested table destructuring
+(def {:point {:x px :y py}} {:point {:x 3 :y 4}})
+(assert-eq px 3 "nested table: x")
+(assert-eq py 4 "nested table: y")
+(display "  (def {:point {:x px :y py}} {:point {:x 3 :y 4}}) => px=")
+(display px) (display " py=") (display py)
+(newline)
+
+; Table destructuring in let
+(var let-tbl-result (let (({:a la :b lb} {:a 10 :b 20})) (+ la lb)))
+(assert-eq let-tbl-result 30 "let table destr sum")
+(display "  (let (({:a la :b lb} {:a 10 :b 20})) (+ la lb)) => ")
+(display let-tbl-result)
+(newline)
+
+; Table destructuring in function parameters
+(defn point-sum ({:x x :y y}) (+ x y))
+(assert-eq (point-sum {:x 5 :y 7}) 12 "fn table param")
+(display "  (defn point-sum ({:x x :y y}) (+ x y)) => (point-sum {:x 5 :y 7}) = ")
+(display (point-sum {:x 5 :y 7}))
+(newline)
+
+; Table pattern matching in match
+(var shape {:type :circle :radius 5})
+(var area (match shape
+  ({:type :circle :radius r} (* r r))
+  ({:type :square :side s} (* s s))
+  (_ 0)))
+(assert-eq area 25 "match table: circle area")
+(display "  (match {:type :circle :radius 5} ...) => ")
+(display area)
+(newline)
+
+; Match falls through on wrong literal key value
+(var shape2 {:type :square :side 7})
+(var area2 (match shape2
+  ({:type :circle :radius r} (* r r))
+  ({:type :square :side s} (* s s))
+  (_ 0)))
+(assert-eq area2 49 "match table: square area")
+(display "  (match {:type :square :side 7} ...) => ")
+(display area2)
+(newline)
+
+; Match rejects non-table values
+(var non-tbl (match 42
+  ({:x x} x)
+  (_ :no-match)))
+(assert-eq non-tbl :no-match "match table: non-table fallback")
+(display "  (match 42 ({:x x} x) (_ :no-match)) => ")
+(display non-tbl)
+(newline)
+
+; Wildcard value in table destructuring
+(def {:x _ :y ty} {:x 10 :y 20})
+(assert-eq ty 20 "table destr: wildcard value")
+(display "  (def {:x _ :y ty} {:x 10 :y 20}) => ty=")
+(display ty)
+(newline)
+
+; Table inside list destructuring
+(def (tl-a {:x tl-x}) (list 1 {:x 2}))
+(assert-eq tl-a 1 "table-in-list: list elem")
+(assert-eq tl-x 2 "table-in-list: table elem")
+(display "  (def (tl-a {:x tl-x}) (list 1 {:x 2})) => tl-a=")
+(display tl-a) (display " tl-x=") (display tl-x)
 (newline)
 
 (newline)

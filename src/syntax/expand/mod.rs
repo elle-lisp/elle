@@ -4,8 +4,6 @@ mod introspection;
 mod macro_expand;
 mod qualified;
 mod quasiquote;
-mod threading;
-
 #[cfg(test)]
 mod tests;
 
@@ -22,6 +20,7 @@ const MAX_MACRO_EXPANSION_DEPTH: usize = 200;
 pub struct MacroDef {
     pub name: String,
     pub params: Vec<String>,
+    pub rest_param: Option<String>,
     pub template: Syntax,
     pub definition_scope: ScopeId,
 }
@@ -45,6 +44,20 @@ impl Expander {
     /// Register a macro definition
     pub fn define_macro(&mut self, def: MacroDef) {
         self.macros.insert(def.name.clone(), def);
+    }
+
+    /// Load the standard prelude macros.
+    ///
+    /// Parses and expands `prelude.lisp`, which registers macro
+    /// definitions in this Expander. Must be called after the VM
+    /// has primitives registered but before user code expansion.
+    pub fn load_prelude(&mut self, symbols: &mut SymbolTable, vm: &mut VM) -> Result<(), String> {
+        const PRELUDE: &str = include_str!("../../../prelude.lisp");
+        let syntaxes = crate::reader::read_syntax_all(PRELUDE)?;
+        for syntax in syntaxes {
+            self.expand(syntax, symbols, vm)?;
+        }
+        Ok(())
     }
 
     /// Generate a fresh scope ID
@@ -92,101 +105,12 @@ impl Expander {
                         return self.handle_defmacro(items, &syntax.span);
                     }
 
-                    // Handle threading macros
-                    if name == "->" {
-                        return self.handle_thread_first(items, &syntax.span, symbols, vm);
-                    }
-                    if name == "->>" {
-                        return self.handle_thread_last(items, &syntax.span, symbols, vm);
-                    }
-
                     // Handle macro introspection
                     if name == "macro?" {
                         return self.handle_macro_predicate(items, &syntax.span);
                     }
                     if name == "expand-macro" {
                         return self.handle_expand_macro(items, &syntax.span, symbols, vm);
-                    }
-
-                    // Handle (defn f (x y) body...) shorthand
-                    // Desugar to (def f (fn (x y) body...))
-                    if name == "defn" && items.len() >= 4 {
-                        let func_name = items[1].clone();
-                        let params = items[2].clone();
-                        let fn_sym = Syntax::new(
-                            SyntaxKind::Symbol("fn".to_string()),
-                            items[2].span.clone(),
-                        );
-                        let mut lambda_parts = vec![fn_sym, params];
-                        lambda_parts.extend(items[3..].iter().cloned());
-                        let lambda =
-                            Syntax::new(SyntaxKind::List(lambda_parts), syntax.span.clone());
-                        let def_sym = Syntax::new(
-                            SyntaxKind::Symbol("def".to_string()),
-                            items[0].span.clone(),
-                        );
-                        let desugared = Syntax::new(
-                            SyntaxKind::List(vec![def_sym, func_name, lambda]),
-                            syntax.span.clone(),
-                        );
-                        return self.expand(desugared, symbols, vm);
-                    }
-
-                    // Handle (let* ((a 1) (b a)) body...) by desugaring
-                    // to nested let: (let ((a 1)) (let* ((b a)) body...))
-                    // The recursive expansion handles the rest.
-                    if name == "let*" && items.len() >= 2 {
-                        let bindings = &items[1];
-                        if let SyntaxKind::List(pairs) = &bindings.kind {
-                            let desugared = if pairs.is_empty() {
-                                // (let* () body...) => (begin body...)
-                                let begin_sym = Syntax::new(
-                                    SyntaxKind::Symbol("begin".to_string()),
-                                    items[0].span.clone(),
-                                );
-                                let mut parts = vec![begin_sym];
-                                parts.extend(items[2..].iter().cloned());
-                                Syntax::new(SyntaxKind::List(parts), syntax.span.clone())
-                            } else {
-                                // Peel off first binding, wrap rest in let*
-                                let first = pairs[0].clone();
-                                let let_sym = Syntax::new(
-                                    SyntaxKind::Symbol("let".to_string()),
-                                    items[0].span.clone(),
-                                );
-                                let one_binding = Syntax::new(
-                                    SyntaxKind::List(vec![first]),
-                                    bindings.span.clone(),
-                                );
-                                if pairs.len() == 1 {
-                                    // Last binding: (let ((a 1)) body...)
-                                    let mut parts = vec![let_sym, one_binding];
-                                    parts.extend(items[2..].iter().cloned());
-                                    Syntax::new(SyntaxKind::List(parts), syntax.span.clone())
-                                } else {
-                                    // More bindings: (let ((a 1)) (let* ((b 2) ...) body...))
-                                    let let_star_sym = Syntax::new(
-                                        SyntaxKind::Symbol("let*".to_string()),
-                                        items[0].span.clone(),
-                                    );
-                                    let rest_bindings = Syntax::new(
-                                        SyntaxKind::List(pairs[1..].to_vec()),
-                                        bindings.span.clone(),
-                                    );
-                                    let mut inner_parts = vec![let_star_sym, rest_bindings];
-                                    inner_parts.extend(items[2..].iter().cloned());
-                                    let inner = Syntax::new(
-                                        SyntaxKind::List(inner_parts),
-                                        syntax.span.clone(),
-                                    );
-                                    Syntax::new(
-                                        SyntaxKind::List(vec![let_sym, one_binding, inner]),
-                                        syntax.span.clone(),
-                                    )
-                                }
-                            };
-                            return self.expand(desugared, symbols, vm);
-                        }
                     }
 
                     // Check if it's a macro call
@@ -205,6 +129,9 @@ impl Expander {
             }
             SyntaxKind::Array(items) => {
                 self.expand_array(items, syntax.span, syntax.scopes, symbols, vm)
+            }
+            SyntaxKind::Table(items) => {
+                self.expand_table(items, syntax.span, syntax.scopes, symbols, vm)
             }
             SyntaxKind::Quote(_) => {
                 // Don't expand inside quote
@@ -239,14 +166,31 @@ impl Expander {
             .as_list()
             .ok_or_else(|| format!("{}: macro parameters must be a list", span))?;
 
-        let params: Vec<String> = params_syntax
-            .iter()
-            .map(|p| {
-                p.as_symbol()
-                    .ok_or_else(|| format!("{}: macro parameter must be a symbol", span))
-                    .map(|s| s.to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        // Parse params, recognizing & as rest separator
+        let mut fixed_params = Vec::new();
+        let mut rest_param = None;
+        let mut i = 0;
+        while i < params_syntax.len() {
+            let p = params_syntax[i]
+                .as_symbol()
+                .ok_or_else(|| format!("{}: macro parameter must be a symbol", span))?;
+            if p == "&" {
+                // Next symbol is the rest param
+                if i + 1 >= params_syntax.len() {
+                    return Err(format!("{}: expected parameter name after &", span));
+                }
+                if i + 2 < params_syntax.len() {
+                    return Err(format!("{}: only one parameter allowed after &", span));
+                }
+                let rest_name = params_syntax[i + 1]
+                    .as_symbol()
+                    .ok_or_else(|| format!("{}: macro parameter must be a symbol", span))?;
+                rest_param = Some(rest_name.to_string());
+                break;
+            }
+            fixed_params.push(p.to_string());
+            i += 1;
+        }
 
         // Get the body template
         let template = items[3].clone();
@@ -254,7 +198,8 @@ impl Expander {
         // Create and register the macro
         let macro_def = MacroDef {
             name: name.clone(),
-            params,
+            params: fixed_params,
+            rest_param,
             template,
             definition_scope: ScopeId(0), // Top-level scope
         };
@@ -283,6 +228,12 @@ impl Expander {
                     .collect(),
             ),
             SyntaxKind::Array(items) => SyntaxKind::Array(
+                items
+                    .into_iter()
+                    .map(|item| self.add_scope_recursive(item, scope))
+                    .collect(),
+            ),
+            SyntaxKind::Table(items) => SyntaxKind::Table(
                 items
                     .into_iter()
                     .map(|item| self.add_scope_recursive(item, scope))
@@ -343,6 +294,25 @@ impl Expander {
             .collect();
         Ok(Syntax::with_scopes(
             SyntaxKind::Array(expanded?),
+            span,
+            scopes,
+        ))
+    }
+
+    fn expand_table(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+        scopes: Vec<ScopeId>,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Syntax, String> {
+        let expanded: Result<Vec<Syntax>, String> = items
+            .iter()
+            .map(|item| self.expand(item.clone(), symbols, vm))
+            .collect();
+        Ok(Syntax::with_scopes(
+            SyntaxKind::Table(expanded?),
             span,
             scopes,
         ))

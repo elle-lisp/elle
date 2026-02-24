@@ -442,12 +442,12 @@ The final clause `(#t ...)` acts as a catch-all.
 
 
 
-### do - Compound Statements
+### begin - Sequencing Expressions
 
-`do` groups multiple expressions, returning the value of the last:
+`begin` sequences multiple expressions, returning the value of the last. It does NOT create a new scope—bindings defined inside `begin` go into the enclosing scope.
 
 ```lisp
-(do
+(begin
   (display "First expression")
   (newline)
   (display "Second expression")
@@ -456,7 +456,30 @@ The final clause `(#t ...)` acts as a catch-all.
 ⟹ 4
 ```
 
-Also called `begin` in some Lisp dialects.
+Inside a function body, `begin` performs a two-pass analysis for mutual recursion, pre-creating `def`/`var` bindings.
+
+### block - Scoped Sequencing
+
+`block` sequences expressions within a new lexical scope. Bindings defined inside `block` don't leak out. You can optionally name a block and use `break` to exit early with a value.
+
+```lisp
+; Simple block
+(block
+  (var x 10)
+  (display x))
+; x is not accessible here
+
+; Named block with break
+(var result (block :my-block
+  (var x 10)
+  (if (> x 5)
+    (break :my-block "early exit"))
+  "normal exit"))
+
+result  ; ⟹ "early exit"
+```
+
+`break` exits the innermost (or named) block, returning a value. Syntax: `(break)`, `(break val)`, `(break :name)`, `(break :name val)`. `break` is validated at compile time—it must be inside a block and cannot cross function boundaries.
 
 ### Functional Iteration (map, filter, fold)
 

@@ -405,6 +405,24 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
+            LirInstr::TableGetOrNil { dst, src, key } => {
+                self.ensure_on_top(*src);
+                let key_value = match key {
+                    LirConst::Keyword(name) => Value::keyword(name),
+                    LirConst::String(s) => Value::string(s.clone()),
+                    LirConst::Int(n) => Value::int(*n),
+                    LirConst::Symbol(sym) => Value::symbol(sym.0),
+                    LirConst::Bool(b) => Value::bool(*b),
+                    LirConst::Nil => Value::NIL,
+                    _ => panic!("TableGetOrNil: unsupported key type"),
+                };
+                let const_idx = self.bytecode.add_constant(key_value);
+                self.bytecode.emit(Instruction::TableGetOrNil);
+                self.bytecode.emit_u16(const_idx);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
             LirInstr::BinOp { dst, op, lhs, rhs } => {
                 // Check if lhs and rhs are already the top two stack elements
                 // (lhs at top-1, rhs at top). This is the common case from the
@@ -478,6 +496,27 @@ impl Emitter {
             LirInstr::IsPair { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsPair);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::IsArray { dst, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::IsArray);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::IsTable { dst, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::IsTable);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::ArrayLen { dst, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::ArrayLen);
                 self.pop();
                 self.push_reg(*dst);
             }

@@ -43,7 +43,8 @@ impl Lowerer {
             } => self.lower_if(cond, then_branch, else_branch),
 
             HirKind::Begin(exprs) => self.lower_begin(exprs),
-            HirKind::Block(exprs) => self.lower_block(exprs),
+            HirKind::Block { block_id, body, .. } => self.lower_block(block_id, body),
+            HirKind::Break { block_id, value } => self.lower_break(block_id, value),
 
             HirKind::Call {
                 func,
@@ -234,18 +235,72 @@ impl Lowerer {
         Ok(last_reg)
     }
 
-    fn lower_block(&mut self, exprs: &[Hir]) -> Result<Reg, String> {
-        // Pop intermediate results to keep the stack clean
-        if exprs.is_empty() {
-            return self.emit_const(LirConst::Nil);
+    fn lower_block(&mut self, block_id: &BlockId, body: &[Hir]) -> Result<Reg, String> {
+        let result_reg = self.fresh_reg();
+        let exit_label = self.fresh_label();
+
+        self.block_lower_contexts.push(BlockLowerContext {
+            block_id: *block_id,
+            result_reg,
+            exit_label,
+        });
+
+        // Lower body (same as lower_begin but simpler — body is typically a single Begin node)
+        if body.is_empty() {
+            let nil_reg = self.emit_const(LirConst::Nil)?;
+            self.emit(LirInstr::Move {
+                dst: result_reg,
+                src: nil_reg,
+            });
+        } else {
+            let mut last_reg = self.lower_expr(&body[0])?;
+            for expr in body.iter().skip(1) {
+                self.emit(LirInstr::Pop { src: last_reg });
+                last_reg = self.lower_expr(expr)?;
+            }
+            self.emit(LirInstr::Move {
+                dst: result_reg,
+                src: last_reg,
+            });
         }
-        let mut last_reg = self.lower_expr(&exprs[0])?;
-        for expr in exprs.iter().skip(1) {
-            // Pop the previous result before evaluating the next expression
-            self.emit(LirInstr::Pop { src: last_reg });
-            last_reg = self.lower_expr(expr)?;
-        }
-        Ok(last_reg)
+
+        self.block_lower_contexts.pop();
+
+        // Normal exit: jump to the exit label
+        self.terminate(Terminator::Jump(exit_label));
+        self.start_new_block(exit_label);
+
+        Ok(result_reg)
+    }
+
+    fn lower_break(&mut self, block_id: &BlockId, value: &Hir) -> Result<Reg, String> {
+        // Find the target block context
+        let target = self
+            .block_lower_contexts
+            .iter()
+            .rev()
+            .find(|ctx| ctx.block_id == *block_id)
+            .ok_or_else(|| format!("Internal error: no block context for {:?}", block_id))?;
+
+        let target_result_reg = target.result_reg;
+        let target_exit_label = target.exit_label;
+
+        // Lower the value expression
+        let value_reg = self.lower_expr(value)?;
+
+        // Move value to the block's result register and jump to exit
+        self.emit(LirInstr::Move {
+            dst: target_result_reg,
+            src: value_reg,
+        });
+        self.terminate(Terminator::Jump(target_exit_label));
+
+        // Start a new (unreachable) block for any dead code after the break
+        let dead_label = self.fresh_label();
+        self.start_new_block(dead_label);
+
+        // Return a dummy register (code after break is dead)
+        Ok(self.fresh_reg())
     }
 
     fn lower_while(&mut self, cond: &Hir, body: &Hir) -> Result<Reg, String> {

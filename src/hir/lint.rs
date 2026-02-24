@@ -4,6 +4,7 @@
 //! legacy Expr-based linter but operates on the new pipeline's HIR.
 
 use crate::hir::expr::{Hir, HirKind};
+use crate::hir::pattern::{HirPattern, PatternLiteral};
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::lint::rules;
 use crate::reader::SourceLoc;
@@ -106,10 +107,20 @@ impl HirLinter {
                 }
             }
 
-            HirKind::Begin(exprs) | HirKind::Block(exprs) => {
+            HirKind::Begin(exprs) => {
                 for e in exprs {
                     self.check(e, symbols);
                 }
+            }
+
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    self.check(e, symbols);
+                }
+            }
+
+            HirKind::Break { value, .. } => {
+                self.check(value, symbols);
             }
 
             HirKind::Call { func, args, .. } => {
@@ -165,6 +176,17 @@ impl HirLinter {
                     }
                     self.check(body, symbols);
                 }
+
+                // Check for non-exhaustive match
+                if !arms.is_empty() && !is_exhaustive_match(arms) {
+                    self.diagnostics.push(Diagnostic::new(
+                        Severity::Warning,
+                        "W003",
+                        "non-exhaustive-match",
+                        "match expression may not cover all cases; consider adding a wildcard (_) or variable pattern as the last arm",
+                        loc.clone(),
+                    ));
+                }
             }
 
             HirKind::Yield(expr) => {
@@ -186,6 +208,40 @@ impl HirLinter {
             HirKind::Import { .. } | HirKind::ModuleRef { .. } => {}
         }
     }
+}
+
+/// Check if a match expression's arms are exhaustive.
+///
+/// A match is considered exhaustive if:
+/// - The last arm's pattern is a wildcard or variable (always matches), OR
+/// - The arms cover both `true` and `false` boolean literals
+fn is_exhaustive_match(arms: &[(HirPattern, Option<Hir>, Hir)]) -> bool {
+    // Check if last arm is a catch-all (wildcard or variable without guard)
+    if let Some((pat, guard, _)) = arms.last() {
+        if guard.is_none() && matches!(pat, HirPattern::Wildcard | HirPattern::Var(_)) {
+            return true;
+        }
+    }
+
+    // Check if all boolean values are covered (without guards)
+    let mut has_true = false;
+    let mut has_false = false;
+    for (pat, guard, _) in arms {
+        if guard.is_none() {
+            if let HirPattern::Literal(PatternLiteral::Bool(b)) = pat {
+                if *b {
+                    has_true = true;
+                } else {
+                    has_false = true;
+                }
+            }
+        }
+    }
+    if has_true && has_false {
+        return true;
+    }
+
+    false
 }
 
 impl Default for HirLinter {

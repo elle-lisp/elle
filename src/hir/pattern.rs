@@ -34,6 +34,10 @@ pub enum HirPattern {
         elements: Vec<HirPattern>,
         rest: Option<Box<HirPattern>>,
     },
+
+    /// Match a table/struct by keyword keys
+    /// Each entry is (keyword_name, pattern_for_value)
+    Table { entries: Vec<(String, HirPattern)> },
 }
 
 /// Literal values that can appear in patterns
@@ -89,6 +93,11 @@ impl HirPattern {
                 }
                 if let Some(r) = rest {
                     r.collect_bindings(out);
+                }
+            }
+            HirPattern::Table { entries } => {
+                for (_, pattern) in entries {
+                    pattern.collect_bindings(out);
                 }
             }
             HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
