@@ -22,11 +22,19 @@ impl Lowerer {
             HirKind::Letrec { bindings, body } => self.lower_letrec(bindings, body),
             HirKind::Lambda {
                 params,
+                rest_param,
                 captures,
                 body,
                 num_locals,
                 inferred_effect,
-            } => self.lower_lambda_expr(params, captures, body, *num_locals, inferred_effect),
+            } => self.lower_lambda_expr(
+                params,
+                rest_param.as_ref(),
+                captures,
+                body,
+                *num_locals,
+                inferred_effect,
+            ),
 
             HirKind::If {
                 cond,
@@ -45,6 +53,9 @@ impl Lowerer {
 
             HirKind::Set { target, value } => self.lower_set(target, value),
             HirKind::Define { binding, value } => self.lower_define(*binding, value),
+            HirKind::Destructure { pattern, value } => {
+                self.lower_destructure_expr(pattern, value, &hir.span)
+            }
 
             HirKind::While { cond, body } => self.lower_while(cond, body),
             HirKind::For { var, iter, body } => self.lower_for(*var, iter, body),
@@ -162,21 +173,26 @@ impl Lowerer {
     }
 
     fn lower_begin(&mut self, exprs: &[Hir]) -> Result<Reg, String> {
-        // Pre-allocate slots for all local Define bindings
+        // Pre-allocate slots for all local Define and Destructure bindings
         // This enables mutual recursion where lambda A captures variable B
         // before B's Define has been lowered
         for expr in exprs {
-            if let HirKind::Define { binding, .. } = &expr.kind {
+            let bindings_to_preallocate: Vec<Binding> = match &expr.kind {
+                HirKind::Define { binding, .. } => vec![*binding],
+                HirKind::Destructure { pattern, .. } => pattern.bindings().bindings,
+                _ => continue,
+            };
+            for binding in bindings_to_preallocate {
                 if binding.is_global() {
                     continue;
                 }
                 // Allocate slot now so captures can find it
-                if !self.binding_to_slot.contains_key(binding) {
-                    let slot = self.allocate_slot(*binding);
+                if !self.binding_to_slot.contains_key(&binding) {
+                    let slot = self.allocate_slot(binding);
 
                     // Inside lambdas, local variables are part of the closure environment
                     if self.in_lambda {
-                        self.upvalue_bindings.insert(*binding);
+                        self.upvalue_bindings.insert(binding);
                     }
 
                     // Check if this binding needs a cell

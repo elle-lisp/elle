@@ -57,7 +57,16 @@ impl<'a> Analyzer<'a> {
     /// Get the callee's known arity, if available.
     fn get_callee_arity(&self, callee: &Hir) -> Option<Arity> {
         match &callee.kind {
-            HirKind::Lambda { params, .. } => Some(Arity::Exact(params.len())),
+            HirKind::Lambda {
+                params, rest_param, ..
+            } => {
+                if rest_param.is_some() {
+                    // Variadic: fixed params (excluding rest slot) is AtLeast
+                    Some(Arity::AtLeast(params.len() - 1))
+                } else {
+                    Some(Arity::Exact(params.len()))
+                }
+            }
             HirKind::Var(binding) => {
                 // Check local arity env first
                 if let Some(arity) = self.arity_env.get(binding) {

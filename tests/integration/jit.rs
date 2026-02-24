@@ -10,7 +10,7 @@ use elle::lir::{
     SpannedTerminator, Terminator, UnaryOp,
 };
 use elle::syntax::Span;
-use elle::value::Value;
+use elle::value::{Arity, Value};
 
 // =============================================================================
 // Helper Functions
@@ -55,7 +55,7 @@ fn compile_and_call(lir: &LirFunction, args: &[u64]) -> Result<Value, JitError> 
 #[test]
 fn test_jit_identity() {
     // fn(x) -> x
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -73,7 +73,7 @@ fn test_jit_identity() {
 #[test]
 fn test_jit_constant() {
     // fn() -> 42
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -97,7 +97,7 @@ fn test_jit_constant() {
 #[test]
 fn test_jit_nil() {
     // fn() -> nil
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -121,7 +121,7 @@ fn test_jit_nil() {
 #[test]
 fn test_jit_bool_true() {
     // fn() -> #t
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -145,7 +145,7 @@ fn test_jit_bool_true() {
 #[test]
 fn test_jit_bool_false() {
     // fn() -> #f
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -169,7 +169,7 @@ fn test_jit_bool_false() {
 #[test]
 fn test_jit_empty_list() {
     // fn() -> ()
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -197,7 +197,7 @@ fn test_jit_empty_list() {
 #[test]
 fn test_jit_add() {
     // fn(x, y) -> x + y
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -226,7 +226,7 @@ fn test_jit_add() {
 #[test]
 fn test_jit_sub() {
     // fn(x, y) -> x - y
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -255,7 +255,7 @@ fn test_jit_sub() {
 #[test]
 fn test_jit_mul() {
     // fn(x, y) -> x * y
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -284,7 +284,7 @@ fn test_jit_mul() {
 #[test]
 fn test_jit_div() {
     // fn(x, y) -> x / y
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -313,7 +313,7 @@ fn test_jit_div() {
 #[test]
 fn test_jit_rem() {
     // fn(x, y) -> x % y
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -342,7 +342,7 @@ fn test_jit_rem() {
 #[test]
 fn test_jit_neg() {
     // fn(x) -> -x
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -372,7 +372,7 @@ fn test_jit_neg() {
 #[test]
 fn test_jit_lt_true() {
     // fn(x, y) -> x < y
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -400,7 +400,7 @@ fn test_jit_lt_true() {
 
 #[test]
 fn test_jit_lt_false() {
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -428,7 +428,7 @@ fn test_jit_lt_false() {
 
 #[test]
 fn test_jit_eq() {
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -465,7 +465,7 @@ fn test_jit_eq() {
 #[test]
 fn test_jit_branch_true() {
     // fn(x) -> if x then 1 else 0
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -517,7 +517,7 @@ fn test_jit_branch_true() {
 #[test]
 fn test_jit_branch_false() {
     // fn(x) -> if x then 1 else 0
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -566,7 +566,7 @@ fn test_jit_branch_false() {
 #[test]
 fn test_jit_branch_nil() {
     // nil is falsy
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -614,7 +614,7 @@ fn test_jit_branch_nil() {
 #[test]
 fn test_jit_branch_integer_truthy() {
     // Non-zero integers are truthy
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -665,7 +665,7 @@ fn test_jit_branch_integer_truthy() {
 
 #[test]
 fn test_jit_rejects_yielding() {
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::yields();
@@ -690,7 +690,7 @@ fn test_jit_rejects_yielding() {
 #[test]
 fn test_jit_call_compiles() {
     // Test that Call instruction compiles (Phase 3)
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -718,12 +718,12 @@ fn test_jit_call_compiles() {
 #[test]
 fn test_jit_rejects_make_closure() {
     // MakeClosure is still unsupported (Phase 4+)
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::none();
 
-    let inner_func = Box::new(LirFunction::new(0));
+    let inner_func = Box::new(LirFunction::new(Arity::Exact(0)));
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
         LirInstr::MakeClosure {
@@ -749,7 +749,7 @@ fn test_jit_rejects_make_closure() {
 #[test]
 fn test_jit_conditional_arithmetic() {
     // fn(x) -> if (x = 0) then 1 else (x * 2)
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 4;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -830,7 +830,7 @@ fn test_jit_conditional_arithmetic() {
 #[test]
 fn test_jit_chained_arithmetic() {
     // fn(a, b, c) -> (a + b) * c
-    let mut func = LirFunction::new(3);
+    let mut func = LirFunction::new(Arity::Exact(3));
     func.num_regs = 5;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -880,7 +880,7 @@ fn test_jit_chained_arithmetic() {
 
 #[test]
 fn test_jit_bit_and() {
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -909,7 +909,7 @@ fn test_jit_bit_and() {
 
 #[test]
 fn test_jit_bit_or() {
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -938,7 +938,7 @@ fn test_jit_bit_or() {
 
 #[test]
 fn test_jit_shl() {
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -971,7 +971,7 @@ fn test_jit_shl() {
 
 #[test]
 fn test_jit_not_true() {
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -996,7 +996,7 @@ fn test_jit_not_true() {
 
 #[test]
 fn test_jit_not_false() {
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1021,7 +1021,7 @@ fn test_jit_not_false() {
 
 #[test]
 fn test_jit_not_nil() {
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1050,7 +1050,7 @@ fn test_jit_not_nil() {
 
 #[test]
 fn test_jit_float_constant() {
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1073,7 +1073,7 @@ fn test_jit_float_constant() {
 
 #[test]
 fn test_jit_float_add() {
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1109,7 +1109,7 @@ fn test_jit_float_add() {
 #[test]
 fn test_jit_cons() {
     // fn(x, y) -> cons(x, y)
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1141,7 +1141,7 @@ fn test_jit_cons() {
 fn test_jit_car_cdr() {
     // fn(pair) -> car(pair) + cdr(pair)
     // Assumes pair is (a . b) where a and b are integers
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 4;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1184,7 +1184,7 @@ fn test_jit_car_cdr() {
 #[test]
 fn test_jit_is_pair() {
     // fn(x) -> is_pair(x)
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1215,7 +1215,7 @@ fn test_jit_is_pair() {
 #[test]
 fn test_jit_make_array() {
     // fn(a, b, c) -> array(a, b, c)
-    let mut func = LirFunction::new(3);
+    let mut func = LirFunction::new(Arity::Exact(3));
     func.num_regs = 4;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1260,7 +1260,7 @@ fn test_jit_make_array() {
 #[test]
 fn test_jit_make_cell() {
     // fn(x) -> make_cell(x)
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1287,7 +1287,7 @@ fn test_jit_make_cell() {
 #[test]
 fn test_jit_load_cell() {
     // fn(cell) -> load_cell(cell)
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1313,7 +1313,7 @@ fn test_jit_load_cell() {
 #[test]
 fn test_jit_store_cell() {
     // fn(cell, value) -> store_cell(cell, value); load_cell(cell)
-    let mut func = LirFunction::new(2);
+    let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1352,7 +1352,7 @@ fn test_jit_store_cell() {
 fn test_jit_tail_call_compiles() {
     // TailCall should now compile (not return UnsupportedInstruction)
     // Build a simple function: fn(x) -> tail_call(x)
-    let mut func = LirFunction::new(1);
+    let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
     func.effect = Effect::none();
@@ -1396,7 +1396,7 @@ fn test_jit_self_tail_call_loop() {
     // Use begin to wrap multiple expressions
     let result = eval(
         r#"(begin
-        (def (count-down n)
+        (defn count-down (n)
             (if (= n 0) 0 (count-down (- n 1))))
         (count-down 100000))"#,
         &mut symbols,
@@ -1419,7 +1419,7 @@ fn test_jit_self_tail_call_accumulator() {
 
     let result = eval(
         r#"(begin
-        (def (sum-to n acc)
+        (defn sum-to (n acc)
             (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
         (sum-to 10000 0))"#,
         &mut symbols,
@@ -1448,7 +1448,7 @@ fn test_jit_self_tail_call_with_swapped_args() {
     // Trace: (3,10) -> (10,2) -> (2,9) -> (9,1) -> (1,8) -> (8,0) -> (0,7) -> 7
     let result = eval(
         r#"(begin
-        (def (swap-test a b)
+        (defn swap-test (a b)
             (if (= a 0) b (swap-test b (- a 1))))
         (swap-test 3 10))"#,
         &mut symbols,
@@ -1472,7 +1472,7 @@ fn test_jit_self_tail_call_fibonacci_iterative() {
 
     let result = eval(
         r#"(begin
-        (def (fib-iter n a b)
+        (defn fib-iter (n a b)
             (if (= n 0) a (fib-iter (- n 1) b (+ a b))))
         (fib-iter 20 0 1))"#,
         &mut symbols,
@@ -1492,7 +1492,7 @@ fn test_jit_rejects_yields_raises_effect() {
     // Effect::yields_raises() has may_suspend() = true.
     // The JIT gate must reject this — fiber/resume and fiber/signal
     // propagate this effect to their callers.
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::yields_raises();
@@ -1523,7 +1523,7 @@ fn test_jit_accepts_raises_only_effect() {
     // Effect::raises() has may_suspend() = false.
     // The JIT gate should accept this — fiber/new, fiber/status, etc.
     // have this effect and are safe to call from JIT code.
-    let mut func = LirFunction::new(0);
+    let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.effect = Effect::raises();

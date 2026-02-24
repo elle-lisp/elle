@@ -156,6 +156,11 @@ fn mark(hir: &mut Hir, in_tail: bool) {
             mark(value, false);
         }
 
+        // Destructure: value is not in tail position
+        HirKind::Destructure { value, .. } => {
+            mark(value, false);
+        }
+
         // Yield: value is not in tail position
         HirKind::Yield(expr) => {
             mark(expr, false);
@@ -276,7 +281,10 @@ mod tests {
                 collect_calls(iter, calls);
                 collect_calls(body, calls);
             }
-            HirKind::Set { value, .. } | HirKind::Define { value, .. } | HirKind::Yield(value) => {
+            HirKind::Set { value, .. }
+            | HirKind::Define { value, .. }
+            | HirKind::Destructure { value, .. }
+            | HirKind::Yield(value) => {
                 collect_calls(value, calls);
             }
             HirKind::Block(exprs) => {

@@ -3,7 +3,7 @@
 // These tests verify that three bug fixes remain correct across a wide range
 // of inputs using property-based testing:
 // 1. StoreCapture stack mismatch (let bindings inside lambdas)
-// 2. (def (f x) ...) shorthand expansion
+// 2. defn function definition syntax
 // 3. List display (no `. ()` in proper lists)
 
 use elle::ffi::primitives::context::set_symbol_table;
@@ -125,16 +125,16 @@ proptest! {
 }
 
 // ============================================================================
-// Bug 2: (def (f x) ...) shorthand
+// Bug 2: defn
 // ============================================================================
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
 
-    /// Property: (def (f x) body) is equivalent to (def f (fn (x) body))
+    /// Property: (defn f (x) body) is equivalent to (def f (fn (x) body))
     #[test]
     fn define_shorthand_equivalent(x in -1000i64..1000) {
-        let shorthand = format!("(def (f x) (+ x 1)) (f {})", x);
+        let shorthand = format!("(defn f (x) (+ x 1)) (f {})", x);
         let longhand = format!("(def f (fn (x) (+ x 1))) (f {})", x);
         let r1 = eval(&shorthand);
         let r2 = eval(&longhand);
@@ -146,7 +146,7 @@ proptest! {
     /// Property: shorthand with multiple params matches longhand
     #[test]
     fn define_shorthand_multi_param(a in -100i64..100, b in -100i64..100) {
-        let shorthand = format!("(def (add a b) (+ a b)) (add {} {})", a, b);
+        let shorthand = format!("(defn add (a b) (+ a b)) (add {} {})", a, b);
         let longhand = format!("(def add (fn (a b) (+ a b))) (add {} {})", a, b);
         let r1 = eval(&shorthand);
         let r2 = eval(&longhand);
@@ -161,7 +161,7 @@ proptest! {
         let expected: u64 = (1..=n).product();
         let expected = if n == 0 { 1 } else { expected };
         let code = format!(
-            "(def (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact {})", n
+            "(defn fact (n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact {})", n
         );
         let result = eval(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
@@ -171,7 +171,7 @@ proptest! {
     /// Property: shorthand with three params matches longhand
     #[test]
     fn define_shorthand_three_params(a in -50i64..50, b in -50i64..50, c in -50i64..50) {
-        let shorthand = format!("(def (sum3 a b c) (+ a (+ b c))) (sum3 {} {} {})", a, b, c);
+        let shorthand = format!("(defn sum3 (a b c) (+ a (+ b c))) (sum3 {} {} {})", a, b, c);
         let longhand = format!("(def sum3 (fn (a b c) (+ a (+ b c)))) (sum3 {} {} {})", a, b, c);
         let r1 = eval(&shorthand);
         let r2 = eval(&longhand);
@@ -183,7 +183,7 @@ proptest! {
     /// Property: shorthand with conditional body
     #[test]
     fn define_shorthand_conditional(x in -100i64..100) {
-        let shorthand = format!("(def (abs x) (if (< x 0) (- 0 x) x)) (abs {})", x);
+        let shorthand = format!("(defn abs (x) (if (< x 0) (- 0 x) x)) (abs {})", x);
         let longhand = format!("(def abs (fn (x) (if (< x 0) (- 0 x) x))) (abs {})", x);
         let r1 = eval(&shorthand);
         let r2 = eval(&longhand);
@@ -198,7 +198,7 @@ proptest! {
     /// Property: shorthand with let body
     #[test]
     fn define_shorthand_with_let(x in -100i64..100) {
-        let shorthand = format!("(def (double x) (let ((y x)) (+ y y))) (double {})", x);
+        let shorthand = format!("(defn double (x) (let ((y x)) (+ y y))) (double {})", x);
         let longhand = format!("(def double (fn (x) (let ((y x)) (+ y y)))) (double {})", x);
         let r1 = eval(&shorthand);
         let r2 = eval(&longhand);
@@ -368,7 +368,7 @@ proptest! {
     #[test]
     fn shorthand_with_let_list_display(n in 1usize..10) {
         let code = format!(
-            "(def (make-list x) (if (= x 0) (list) (let ((y x)) (cons y (make-list (- x 1)))))) (make-list {})", n
+            "(defn make-list (x) (if (= x 0) (list) (let ((y x)) (cons y (make-list (- x 1)))))) (make-list {})", n
         );
         let result = eval(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
@@ -382,7 +382,7 @@ proptest! {
     fn shorthand_recursive_with_let(n in 0usize..15) {
         // Build list using shorthand define with let inside
         let code = format!(
-            "(def (build n) (if (= n 0) (list) (let ((rest (build (- n 1)))) (cons n rest)))) (length (build {}))", n
+            "(defn build (n) (if (= n 0) (list) (let ((rest (build (- n 1)))) (cons n rest)))) (length (build {}))", n
         );
         let result = eval(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);

@@ -8,9 +8,9 @@ mod pattern;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
-use crate::hir::{Binding, Hir, HirKind};
+use crate::hir::{Binding, Hir, HirKind, HirPattern};
 use crate::syntax::Span;
-use crate::value::{SymbolId, Value};
+use crate::value::{Arity, SymbolId, Value};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
@@ -45,7 +45,7 @@ pub struct Lowerer {
 impl Lowerer {
     pub fn new() -> Self {
         Lowerer {
-            current_func: LirFunction::new(0),
+            current_func: LirFunction::new(Arity::Exact(0)),
             current_block: BasicBlock::new(Label(0)),
             next_reg: 0,
             next_label: 1, // 0 is entry
@@ -67,7 +67,7 @@ impl Lowerer {
 
     /// Lower a HIR expression to LIR
     pub fn lower(&mut self, hir: &Hir) -> Result<LirFunction, String> {
-        self.current_func = LirFunction::new(0);
+        self.current_func = LirFunction::new(Arity::Exact(0));
         self.current_block = BasicBlock::new(Label(0));
         self.next_reg = 0;
         self.next_label = 1;
@@ -84,7 +84,7 @@ impl Lowerer {
 
         Ok(std::mem::replace(
             &mut self.current_func,
-            LirFunction::new(0),
+            LirFunction::new(Arity::Exact(0)),
         ))
     }
 

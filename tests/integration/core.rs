@@ -775,10 +775,10 @@ fn test_even_odd() {
 fn test_recursive_lambda_fibonacci() {
     // Test basic recursive lambda
     let code = r#"
-        (def fib (fn (n) 
+        (defn fib (n) 
           (if (< n 2) 
             n 
-            (+ (fib (- n 1)) (fib (- n 2))))))
+            (+ (fib (- n 1)) (fib (- n 2)))))
         (fib 5)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(5));
@@ -788,10 +788,10 @@ fn test_recursive_lambda_fibonacci() {
 fn test_recursive_lambda_fibonacci_10() {
     // Test fibonacci(10) = 55
     let code = r#"
-        (def fib (fn (n) 
+        (defn fib (n) 
           (if (< n 2) 
             n 
-            (+ (fib (- n 1)) (fib (- n 2))))))
+            (+ (fib (- n 1)) (fib (- n 2)))))
         (fib 10)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(55));
@@ -801,8 +801,8 @@ fn test_recursive_lambda_fibonacci_10() {
 fn test_tail_recursive_sum() {
     // Test tail-recursive sum accumulation
     let code = r#"
-        (def sum-to (fn (n acc)
-          (if (= n 0) acc (sum-to (- n 1) (+ acc n)))))
+        (defn sum-to (n acc)
+          (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
         (sum-to 100 0)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(5050));
@@ -812,10 +812,10 @@ fn test_tail_recursive_sum() {
 fn test_recursive_countdown() {
     // Test simple countdown recursion
     let code = r#"
-        (def countdown (fn (n)
+        (defn countdown (n)
           (if (<= n 0)
             0
-            (+ n (countdown (- n 1))))))
+            (+ n (countdown (- n 1)))))
         (countdown 5)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(15)); // 5 + 4 + 3 + 2 + 1
@@ -825,10 +825,10 @@ fn test_recursive_countdown() {
 fn test_nested_recursive_functions() {
     // Test nested function definitions with recursion
     let code = r#"
-        (def outer (fn (n)
-          (def inner (fn (x)
-            (if (< x 1) 0 (+ x (inner (- x 1))))))
-          (inner n)))
+        (defn outer (n)
+          (defn inner (x)
+            (if (< x 1) 0 (+ x (inner (- x 1)))))
+          (inner n))
         (outer 5)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(15)); // 5 + 4 + 3 + 2 + 1
@@ -838,7 +838,7 @@ fn test_nested_recursive_functions() {
 fn test_simple_lambda_call() {
     // Simple lambda that takes a parameter and returns it
     let code = r#"
-        (def identity (fn (x) x))
+        (defn identity (x) x)
         (identity 42)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(42));
@@ -848,7 +848,7 @@ fn test_simple_lambda_call() {
 fn test_lambda_with_arithmetic() {
     // Lambda that does arithmetic on its parameter
     let code = r#"
-        (def double (fn (x) (* x 2)))
+        (defn double (x) (* x 2))
         (double 21)
     "#;
     assert_eq!(eval(code).unwrap(), Value::int(42));
@@ -858,7 +858,7 @@ fn test_lambda_with_arithmetic() {
 fn test_lambda_with_comparison() {
     // Lambda that uses comparison on its parameter
     let code = r#"
-        (def is-positive (fn (x) (> x 0)))
+        (defn is-positive (x) (> x 0))
         (is-positive 5)
     "#;
     assert_eq!(eval(code).unwrap(), Value::bool(true));
@@ -1418,9 +1418,8 @@ fn test_closure_with_local_define_and_param_arithmetic() {
 
 #[test]
 fn test_let_inside_lambda_with_append() {
-    let result = eval(
-        "(def f (fn (x) (if (= x 0) (list) (let ((y x)) (append (list y) (f (- x 1))))))) (f 3)",
-    );
+    let result =
+        eval("(defn f (x) (if (= x 0) (list) (let ((y x)) (append (list y) (f (- x 1)))))) (f 3)");
     // Should be (3 2 1)
     assert!(result.is_ok());
     let val = result.unwrap();
@@ -1430,35 +1429,35 @@ fn test_let_inside_lambda_with_append() {
 
 #[test]
 fn test_let_inside_lambda_values_correct() {
-    let result = eval("(def f (fn (x) (let ((y x)) y))) (f 42)");
+    let result = eval("(defn f (x) (let ((y x)) y)) (f 42)");
     assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_multiple_let_bindings_in_lambda() {
-    let result = eval("(def f (fn (x) (let ((y x) (z (+ x 1))) (+ y z)))) (f 10)");
+    let result = eval("(defn f (x) (let ((y x) (z (+ x 1))) (+ y z))) (f 10)");
     assert_eq!(result.unwrap(), Value::int(21));
 }
 
 // ============================================================================
-// Bug fix tests: (def (f x) ...) shorthand
+// Bug fix tests: defn
 // ============================================================================
 
 #[test]
 fn test_define_shorthand() {
-    let result = eval("(def (f x) (+ x 1)) (f 42)");
+    let result = eval("(defn f (x) (+ x 1)) (f 42)");
     assert_eq!(result.unwrap(), Value::int(43));
 }
 
 #[test]
 fn test_define_shorthand_multiple_params() {
-    let result = eval("(def (add a b) (+ a b)) (add 3 4)");
+    let result = eval("(defn add (a b) (+ a b)) (add 3 4)");
     assert_eq!(result.unwrap(), Value::int(7));
 }
 
 #[test]
 fn test_define_shorthand_with_body() {
-    let result = eval("(def (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)");
+    let result = eval("(defn fact (n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)");
     assert_eq!(result.unwrap(), Value::int(120));
 }
 

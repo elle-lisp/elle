@@ -4,6 +4,74 @@ A summary of recent additions and improvements to the Elle language.
 
 ## Recent Additions
 
+### Destructuring
+
+Elle now supports compiler-level destructuring in `def`, `var`, `let`, `let*`,
+and function parameters. Inspired by Janet's destructuring semantics.
+
+**List destructuring:**
+
+```lisp
+(def (a b c) (list 1 2 3))
+a ⟹ 1, b ⟹ 2, c ⟹ 3
+```
+
+**Array destructuring:**
+
+```lisp
+(def [x y] [10 20])
+x ⟹ 10, y ⟹ 20
+```
+
+**Wildcard `_`** — skip elements you don't need:
+
+```lisp
+(def (_ b _) (list 1 2 3))
+b ⟹ 2
+```
+
+**Rest patterns `& name`** — collect remaining elements:
+
+```lisp
+(def (head & tail) (list 1 2 3 4))
+head ⟹ 1, tail ⟹ (2 3 4)
+
+(def [first & others] [10 20 30])
+first ⟹ 10, others ⟹ [20 30]
+```
+
+**Nested patterns:**
+
+```lisp
+(def ((a b) c) (list (list 1 2) 3))
+a ⟹ 1, b ⟹ 2, c ⟹ 3
+```
+
+**In function parameters:**
+
+```lisp
+(defn add-pair ((a b)) (+ a b))
+(add-pair (list 3 4)) ⟹ 7
+```
+
+**Silent nil semantics:** Missing values become `nil`, wrong types produce
+`nil` for all bindings. No runtime errors from destructuring.
+
+See `examples/destructuring.lisp` for comprehensive examples.
+
+### defn
+
+`defn` is a shorthand for defining named functions:
+
+```lisp
+(defn add (x y) (+ x y))
+; equivalent to: (def add (fn (x y) (+ x y)))
+```
+
+The old `(def (f x) body)` shorthand has been removed in favor of `defn`.
+
+---
+
 ## nil vs Empty List: The Full Picture
 
 Elle distinguishes between `nil` (absence of value) and `()` (empty list). They are **different values** with different NaN-boxed tags:
@@ -613,6 +681,8 @@ If upgrading from pre-exception-handling versions:
 
 | Feature | Version | Status |
 |---------|---------|--------|
+| Destructuring | Recent | Stable |
+| defn | Recent | Stable |
 | fn keyword | Recent | Stable |
 | try-catch-finally | Recent | Stable |
 | Condition system | Recent | Stable |

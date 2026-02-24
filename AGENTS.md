@@ -151,6 +151,12 @@ Things that look wrong but aren't:
   Bits 3-7 are VM-internal (resume, FFI, propagate, cancel, query, halt),
   Bits 9-15 are reserved, and Bits 16-31 are for user-defined signal types.
   See `src/value/fiber.rs` for the full bit layout.
+- Destructuring uses **silent nil semantics**: missing values become `nil`,
+  wrong types produce `nil`, no runtime errors. This is separate from `match`
+  pattern matching which is conditional. `CarOrNil`/`CdrOrNil`/`ArrayRefOrNil`
+  are dedicated bytecode instructions for this — they never signal errors.
+- `defn` and `let*` are desugared in the Rust expander, not as `defmacro`
+  macros. Elle does not yet have a prelude loading mechanism.
 
 ## Conventions
 

@@ -2,7 +2,7 @@
 
 use crate::effects::Effect;
 use crate::syntax::Span;
-use crate::value::SymbolId;
+use crate::value::{Arity, SymbolId};
 
 /// Virtual register
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,8 +29,8 @@ impl Label {
 pub struct LirFunction {
     /// Function name (for debugging)
     pub name: Option<String>,
-    /// Number of parameters
-    pub arity: u16,
+    /// Function arity (Exact for fixed, AtLeast for variadic)
+    pub arity: Arity,
     /// Basic blocks
     pub blocks: Vec<BasicBlock>,
     /// Entry block label
@@ -52,7 +52,7 @@ pub struct LirFunction {
 }
 
 impl LirFunction {
-    pub fn new(arity: u16) -> Self {
+    pub fn new(arity: Arity) -> Self {
         LirFunction {
             name: None,
             arity,
@@ -207,6 +207,16 @@ pub enum LirInstr {
     Dup { dst: Reg, src: Reg },
     /// Pop a register's value from the stack (discard it).
     Pop { src: Reg },
+
+    // === Destructuring (silent nil) ===
+    /// Car with silent nil: returns nil if not a cons cell
+    CarOrNil { dst: Reg, src: Reg },
+    /// Cdr with silent nil: returns nil if not a cons cell
+    CdrOrNil { dst: Reg, src: Reg },
+    /// Array ref with silent nil: returns nil if out of bounds or not an array
+    ArrayRefOrNil { dst: Reg, src: Reg, index: u16 },
+    /// Array slice from index: returns a new array from index to end, or empty array
+    ArraySliceFrom { dst: Reg, src: Reg, index: u16 },
 
     // === Coroutines ===
     /// Load the resume value after a yield.

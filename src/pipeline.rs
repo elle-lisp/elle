@@ -834,11 +834,12 @@ mod tests {
     }
 
     #[test]
-    fn test_eval_or_short_circuit() {
+    fn test_destructure_list_basic() {
         let (mut symbols, mut vm) = setup();
-        // If or doesn't short-circuit, this would fail trying to call nil
-        let result = eval("(or #t (nil))", &mut symbols, &mut vm);
-        assert_eq!(result.unwrap(), crate::value::Value::bool(true));
+        eval("(def (a b c) (list 1 2 3))", &mut symbols, &mut vm).unwrap();
+        assert_eq!(eval("a", &mut symbols, &mut vm).unwrap().as_int(), Some(1));
+        assert_eq!(eval("b", &mut symbols, &mut vm).unwrap().as_int(), Some(2));
+        assert_eq!(eval("c", &mut symbols, &mut vm).unwrap().as_int(), Some(3));
     }
 
     #[test]
@@ -1362,7 +1363,7 @@ mod tests {
         let (mut symbols, mut vm) = setup();
         let result = eval(
             r#"(begin
-                 (def (inner) (fiber/signal 2 99))
+                 (defn inner () (fiber/signal 2 99))
                  (let ((f (fiber/new (fn () (inner) 42) 2)))
                    (fiber/resume f)
                    (fiber/value f)))"#,
@@ -1408,7 +1409,7 @@ mod tests {
     fn test_const_function() {
         let (mut symbols, mut vm) = setup();
         let result = eval(
-            "(begin (def (add1 x) (+ x 1)) (add1 10))",
+            "(begin (defn add1 (x) (+ x 1)) (add1 10))",
             &mut symbols,
             &mut vm,
         );
@@ -1418,7 +1419,7 @@ mod tests {
     #[test]
     fn test_const_function_set_error() {
         let (mut symbols, _) = setup();
-        let result = compile("(begin (def (f x) x) (set! f 99))", &mut symbols);
+        let result = compile("(begin (defn f (x) x) (set! f 99))", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
     }

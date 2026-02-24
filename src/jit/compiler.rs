@@ -378,8 +378,9 @@ impl JitCompiler {
         //   (used for let-bindings inside the function body)
         // All use the same Cranelift variable namespace, so declare enough for all
         let arg_var_base = lir.num_regs;
-        let num_locally_defined = lir.num_locals.saturating_sub(lir.arity) as u32;
-        let local_var_base = arg_var_base + lir.arity as u32;
+        let arity_params = lir.arity.fixed_params() as u16;
+        let num_locally_defined = lir.num_locals.saturating_sub(arity_params) as u32;
+        let local_var_base = arg_var_base + arity_params as u32;
         let max_var = std::cmp::max(
             std::cmp::max(lir.num_regs, lir.num_locals as u32),
             local_var_base + num_locally_defined,
@@ -416,7 +417,7 @@ impl JitCompiler {
         translator.self_bits = Some(self_bits);
 
         // Load initial args into arg variables
-        for i in 0..lir.arity as u32 {
+        for i in 0..arity_params as u32 {
             let offset = (i as i32) * 8;
             let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
             let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
@@ -488,13 +489,14 @@ mod tests {
         BasicBlock, BinOp, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
     };
     use crate::syntax::Span;
+    use crate::value::Arity;
 
     fn make_simple_lir() -> LirFunction {
         // Create a simple function that returns its first argument
         // fn(x) -> x
         // The LIR uses LoadCapture to access parameters.
         // With num_captures=0, LoadCapture index 0 loads from args[0].
-        let mut func = LirFunction::new(1);
+        let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 1;
         func.num_captures = 0;
         func.effect = Effect::none();
@@ -519,7 +521,7 @@ mod tests {
         // Create a function that adds two arguments
         // fn(x, y) -> x + y
         // With num_captures=0, LoadCapture index 0 and 1 load from args[0] and args[1].
-        let mut func = LirFunction::new(2);
+        let mut func = LirFunction::new(Arity::Exact(2));
         func.num_regs = 3;
         func.num_captures = 0;
         func.effect = Effect::none();

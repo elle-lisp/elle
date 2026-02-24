@@ -96,6 +96,20 @@ impl HirSymbolExtractor {
                 self.walk(value, index, symbols);
             }
 
+            HirKind::Destructure { pattern, value } => {
+                // Record all bindings in the pattern
+                for binding in pattern.bindings().bindings {
+                    self.record_definition(
+                        binding,
+                        SymbolKind::Variable,
+                        &hir.span,
+                        index,
+                        symbols,
+                    );
+                }
+                self.walk(value, index, symbols);
+            }
+
             HirKind::Let { bindings, body } => {
                 for (binding_id, init) in bindings {
                     self.record_definition(

@@ -74,3 +74,6 @@ mod time_elapsed {
 mod hygiene {
     include!("hygiene.rs");
 }
+mod destructuring {
+    include!("destructuring.rs");
+}

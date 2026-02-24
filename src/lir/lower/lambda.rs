@@ -2,12 +2,14 @@
 
 use super::*;
 use crate::hir::CaptureInfo;
+use crate::value::Arity;
 
 impl Lowerer {
     /// Lower a lambda expression (creates closure with captures)
     pub(super) fn lower_lambda_expr(
         &mut self,
         params: &[Binding],
+        rest_param: Option<&Binding>,
         captures: &[CaptureInfo],
         body: &Hir,
         num_locals: u16,
@@ -88,8 +90,14 @@ impl Lowerer {
         }
 
         // Lower the lambda body to a separate LirFunction
-        let nested_lir =
-            self.lower_lambda_body(params, captures, body, num_locals, *inferred_effect)?;
+        let nested_lir = self.lower_lambda_body(
+            params,
+            rest_param,
+            captures,
+            body,
+            num_locals,
+            *inferred_effect,
+        )?;
 
         // Create closure with the nested function
         let dst = self.fresh_reg();
@@ -105,16 +113,21 @@ impl Lowerer {
     fn lower_lambda_body(
         &mut self,
         params: &[Binding],
+        rest_param: Option<&Binding>,
         captures: &[CaptureInfo],
         body: &Hir,
         _num_locals: u16,
         inferred_effect: crate::effects::Effect,
     ) -> Result<LirFunction, String> {
+        // Compute arity: if variadic, fixed params = total - 1 (rest slot)
+        let arity = if rest_param.is_some() {
+            Arity::AtLeast(params.len() - 1)
+        } else {
+            Arity::Exact(params.len())
+        };
+
         // Save state
-        let saved_func = std::mem::replace(
-            &mut self.current_func,
-            LirFunction::new(params.len() as u16),
-        );
+        let saved_func = std::mem::replace(&mut self.current_func, LirFunction::new(arity));
         let saved_block = std::mem::replace(&mut self.current_block, BasicBlock::new(Label(0)));
         let saved_reg = self.next_reg;
         let saved_label = self.next_label;

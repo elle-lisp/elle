@@ -213,3 +213,67 @@ pub fn handle_array_set(vm: &mut VM) {
     // Note: Arrays are immutable in this implementation
     vm.fiber.stack.push(val);
 }
+
+/// Car with silent nil: returns nil if not a cons cell.
+/// Used by destructuring — missing values become nil, no errors.
+pub fn handle_car_or_nil(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on CarOrNil");
+    match val.as_cons() {
+        Some(cons) => vm.fiber.stack.push(cons.first),
+        None => vm.fiber.stack.push(Value::NIL),
+    }
+}
+
+/// Cdr with silent nil: returns nil if not a cons cell.
+/// Used by destructuring — missing values become nil, no errors.
+pub fn handle_cdr_or_nil(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on CdrOrNil");
+    match val.as_cons() {
+        Some(cons) => vm.fiber.stack.push(cons.rest),
+        None => vm.fiber.stack.push(Value::NIL),
+    }
+}
+
+/// Array ref with silent nil: returns nil if out of bounds or not an array.
+/// Operand: u16 index (immediate, read from bytecode).
+/// Used by destructuring — missing values become nil, no errors.
+pub fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+    let index = vm.read_u16(bytecode, ip) as usize;
+    let arr = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on ArrayRefOrNil");
+    let result = arr
+        .as_array()
+        .and_then(|vec_ref| vec_ref.borrow().get(index).copied());
+    vm.fiber.stack.push(result.unwrap_or(Value::NIL));
+}
+
+pub fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+    let index = vm.read_u16(bytecode, ip) as usize;
+    let arr = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on ArraySliceFrom");
+    let result = if let Some(vec_ref) = arr.as_array() {
+        let borrowed = vec_ref.borrow();
+        if index < borrowed.len() {
+            Value::array(borrowed[index..].to_vec())
+        } else {
+            Value::array(vec![])
+        }
+    } else {
+        Value::array(vec![])
+    };
+    vm.fiber.stack.push(result);
+}
