@@ -261,11 +261,11 @@
 (assert-list-eq (my-filter above-50 test-values) (list 75 125) "filter > 50")
 
 ;; Pattern 3: Pipe - apply functions in sequence
-(def pipe (fn (x . functions)
+(def pipe (fn (x functions)
    "Apply functions in sequence to x"
-   (if (= (length functions) 0)
+   (if (empty? functions)
        x
-       (pipe (((first functions)) x) (rest functions)))))
+       (pipe ((first functions) x) (rest functions)))))
 
 ;; ============================================================================
 ;; 6. REAL-WORLD PATTERNS

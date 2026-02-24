@@ -3,14 +3,16 @@
 //! This module provides the end-to-end compilation functions.
 
 use crate::compiler::Bytecode;
-use crate::effects::{get_primitive_effects, Effect};
+use crate::effects::Effect;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{AnalysisResult, Analyzer, Hir};
 use crate::lir::{Emitter, Lowerer};
+use crate::primitives::build_primitive_meta;
 use crate::primitives::register_primitives;
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Expander, Syntax, SyntaxKind};
+use crate::value::types::Arity;
 use crate::value::SymbolId;
 use crate::vm::VM;
 use std::collections::HashMap;
@@ -29,8 +31,11 @@ pub struct AnalyzeResult {
 }
 
 /// Scan an expanded syntax form for `(var/def name (fn ...))` patterns.
-/// Returns the SymbolId of the name if this is a binding-lambda form.
-fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<SymbolId> {
+/// Returns the SymbolId and syntactic arity if this is a binding-lambda form.
+fn scan_define_lambda(
+    syntax: &Syntax,
+    symbols: &mut SymbolTable,
+) -> Option<(SymbolId, Option<Arity>)> {
     if let SyntaxKind::List(items) = &syntax.kind {
         if items.len() >= 3 {
             if let Some(name) = items[0].as_symbol() {
@@ -41,7 +46,13 @@ fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<Symb
                             if let Some(first) = val_items.first() {
                                 if let Some(kw) = first.as_symbol() {
                                     if kw == "fn" {
-                                        return Some(symbols.intern(def_name));
+                                        let sym = symbols.intern(def_name);
+                                        // Extract arity from the parameter list
+                                        let arity = val_items
+                                            .get(1)
+                                            .and_then(|s| s.as_list())
+                                            .map(|params| Arity::Exact(params.len()));
+                                        return Some((sym, arity));
                                     }
                                 }
                             }
@@ -85,8 +96,8 @@ pub fn eval_syntax(
 ) -> Result<crate::value::Value, String> {
     let expanded = expander.expand(syntax, symbols, vm)?;
 
-    let primitive_effects = get_primitive_effects(symbols);
-    let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+    let meta = build_primitive_meta(symbols);
+    let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);
 
@@ -112,12 +123,11 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
     // Phase 2: Macro expansion (internal VM for macro bodies)
     let mut expander = Expander::new();
     let mut macro_vm = VM::new();
-    let _effects = register_primitives(&mut macro_vm, symbols);
+    let meta = register_primitives(&mut macro_vm, symbols);
     let expanded = expander.expand(syntax, symbols, &mut macro_vm)?;
 
-    // Phase 3: Analyze to HIR with interprocedural effect tracking
-    let primitive_effects = get_primitive_effects(symbols);
-    let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+    // Phase 3: Analyze to HIR with interprocedural effect and arity tracking
+    let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let mut analysis = analyzer.analyze(&expanded)?;
 
     // Phase 3.5: Mark tail calls
@@ -152,7 +162,7 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
     let syntaxes = read_syntax_all(source)?;
     let mut expander = Expander::new();
     let mut macro_vm = VM::new();
-    let _effects = register_primitives(&mut macro_vm, symbols);
+    let meta = register_primitives(&mut macro_vm, symbols);
 
     // Expand all forms first (expansion is idempotent)
     let mut expanded_forms = Vec::new();
@@ -161,11 +171,15 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
         expanded_forms.push(expanded);
     }
 
-    // Pre-scan: find all (def name (fn ...)) patterns and seed as Pure
+    // Pre-scan: find all (def name (fn ...)) patterns and seed effects/arities
     let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
+    let mut global_arities: HashMap<SymbolId, Arity> = HashMap::new();
     for form in &expanded_forms {
-        if let Some(sym) = scan_define_lambda(form, symbols) {
+        if let Some((sym, arity)) = scan_define_lambda(form, symbols) {
             global_effects.insert(sym, Effect::none());
+            if let Some(arity) = arity {
+                global_arities.insert(sym, arity);
+            }
         }
     }
 
@@ -187,18 +201,23 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
         let mut new_global_effects: HashMap<SymbolId, Effect> = HashMap::new();
 
         for form in &expanded_forms {
-            let primitive_effects = get_primitive_effects(symbols);
-            let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+            let mut analyzer =
+                Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
             // Seed with current global effects (from pre-scan or previous iteration)
             analyzer.set_global_effects(global_effects.clone());
+            // Seed with global arities from pre-scan and previous forms
+            analyzer.set_global_arities(global_arities.clone());
             // Seed with immutable globals from pre-scan
             analyzer.set_immutable_globals(immutable_globals.clone());
 
             let mut analysis = analyzer.analyze(form)?;
 
-            // Collect effects from this form's defines
+            // Collect effects and arities from this form's defines
             for (sym, effect) in analyzer.take_defined_global_effects() {
                 new_global_effects.insert(sym, effect);
+            }
+            for (sym, arity) in analyzer.take_defined_global_arities() {
+                global_arities.insert(sym, arity);
             }
 
             // Merge defined immutable globals from this form
@@ -252,8 +271,8 @@ pub fn eval(
     let mut expander = Expander::new();
     let expanded = expander.expand(syntax, symbols, vm)?;
 
-    let primitive_effects = get_primitive_effects(symbols);
-    let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+    let meta = build_primitive_meta(symbols);
+    let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);
 
@@ -278,8 +297,8 @@ pub fn analyze(
     let syntax = read_syntax(source)?;
     let mut expander = Expander::new();
     let expanded = expander.expand(syntax, symbols, vm)?;
-    let primitive_effects = get_primitive_effects(symbols);
-    let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+    let meta = build_primitive_meta(symbols);
+    let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let analysis = analyzer.analyze(&expanded)?;
     Ok(AnalyzeResult { hir: analysis.hir })
 }
@@ -301,11 +320,15 @@ pub fn analyze_all(
         expanded_forms.push(expanded);
     }
 
-    // Pre-scan: find all (def name (fn ...)) patterns and seed as Pure
+    // Pre-scan: find all (def name (fn ...)) patterns and seed effects/arities
     let mut global_effects: HashMap<SymbolId, Effect> = HashMap::new();
+    let mut global_arities: HashMap<SymbolId, Arity> = HashMap::new();
     for form in &expanded_forms {
-        if let Some(sym) = scan_define_lambda(form, symbols) {
+        if let Some((sym, arity)) = scan_define_lambda(form, symbols) {
             global_effects.insert(sym, Effect::none());
+            if let Some(arity) = arity {
+                global_arities.insert(sym, arity);
+            }
         }
     }
 
@@ -319,6 +342,7 @@ pub fn analyze_all(
     }
 
     // Fixpoint loop: analyze until effects stabilize
+    let meta = build_primitive_meta(symbols);
     let mut analysis_results: Vec<AnalysisResult> = Vec::new();
     const MAX_ITERATIONS: usize = 10;
 
@@ -327,15 +351,19 @@ pub fn analyze_all(
         let mut new_global_effects: HashMap<SymbolId, Effect> = HashMap::new();
 
         for form in &expanded_forms {
-            let primitive_effects = get_primitive_effects(symbols);
-            let mut analyzer = Analyzer::new_with_primitive_effects(symbols, primitive_effects);
+            let mut analyzer =
+                Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
             analyzer.set_global_effects(global_effects.clone());
+            analyzer.set_global_arities(global_arities.clone());
             analyzer.set_immutable_globals(immutable_globals.clone());
 
             let analysis = analyzer.analyze(form)?;
 
             for (sym, effect) in analyzer.take_defined_global_effects() {
                 new_global_effects.insert(sym, effect);
+            }
+            for (sym, arity) in analyzer.take_defined_global_arities() {
+                global_arities.insert(sym, arity);
             }
 
             // Merge defined immutable globals from this form
@@ -1427,5 +1455,72 @@ mod tests {
         let result = compile("((fn () (def x 42) (set! x 99)))", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
+    }
+
+    #[test]
+    fn test_arity_cons_wrong_args() {
+        // cons requires exactly 2 arguments; passing 1 should be a compile-time arity error
+        let mut symbols = SymbolTable::new();
+        let result = compile("(cons 1)", &mut symbols);
+        assert!(result.is_err(), "Expected compile error for (cons 1)");
+        assert!(result.unwrap_err().contains("arity"));
+    }
+
+    #[test]
+    fn test_arity_various_primitives() {
+        // first expects 1 arg, 0 should fail
+        let mut symbols = SymbolTable::new();
+        let result = compile("(first)", &mut symbols);
+        assert!(result.is_err(), "first with 0 args should fail");
+        assert!(result.unwrap_err().contains("arity"));
+
+        // not expects exactly 1 arg, 2 should fail
+        let mut symbols = SymbolTable::new();
+        let result = compile("(not 1 2)", &mut symbols);
+        assert!(result.is_err(), "not with 2 args should fail");
+        assert!(result.unwrap_err().contains("arity"));
+
+        // cons expects exactly 2 args, 3 should fail
+        let mut symbols = SymbolTable::new();
+        let result = compile("(cons 1 2 3)", &mut symbols);
+        assert!(result.is_err(), "cons with 3 args should fail");
+        assert!(result.unwrap_err().contains("arity"));
+
+        // + accepts 0+ args, so (+) should succeed
+        let mut symbols = SymbolTable::new();
+        let result = compile("(+)", &mut symbols);
+        assert!(result.is_ok(), "(+) should succeed since + accepts 0+ args");
+    }
+
+    #[test]
+    fn test_arity_user_shadow_disables_check() {
+        // When user redefines a primitive, arity checking should NOT apply
+        // the primitive's arity to the user's version
+        let mut symbols = SymbolTable::new();
+        let result = compile("(begin (var cons 42) (cons 1))", &mut symbols);
+        assert!(
+            !result.as_ref().err().is_some_and(|e| e.contains("arity")),
+            "User-shadowed cons should not get primitive arity check, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_arity_in_nested_positions() {
+        // Arity checking should work in nested calls, let bodies, and lambda bodies
+        let mut symbols = SymbolTable::new();
+        let result = compile("(+ 1 (cons 1))", &mut symbols);
+        assert!(result.is_err(), "Nested (cons 1) should fail arity check");
+        assert!(result.unwrap_err().contains("arity"));
+
+        let mut symbols = SymbolTable::new();
+        let result = compile("(let ((x 1)) (cons x))", &mut symbols);
+        assert!(result.is_err(), "(cons x) in let body should fail");
+        assert!(result.unwrap_err().contains("arity"));
+
+        let mut symbols = SymbolTable::new();
+        let result = compile("(fn (x) (cons x))", &mut symbols);
+        assert!(result.is_err(), "(cons x) in lambda body should fail");
+        assert!(result.unwrap_err().contains("arity"));
     }
 }

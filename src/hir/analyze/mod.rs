@@ -25,6 +25,7 @@ use crate::effects::Effect;
 use crate::symbol::SymbolTable;
 use crate::syntax::{ScopeId, Span};
 use crate::value::heap::BindingScope;
+use crate::value::types::Arity;
 use crate::value::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -100,6 +101,17 @@ pub struct Analyzer<'a> {
     /// Effects of globally-defined functions in this form (for cross-form tracking)
     /// Populated during analysis, extracted after analysis completes.
     defined_global_effects: HashMap<SymbolId, Effect>,
+    /// Arity environment: maps local function bindings to their arity.
+    arity_env: HashMap<Binding, Arity>,
+    /// Known arities of primitive functions, from PrimitiveMeta.
+    primitive_arities: HashMap<SymbolId, Arity>,
+    /// Known arities of global functions, from cross-form scanning.
+    global_arities: HashMap<SymbolId, Arity>,
+    /// Arities defined during this analysis pass, for fixpoint iteration.
+    defined_global_arities: HashMap<SymbolId, Arity>,
+    /// Bindings explicitly created by var/def forms (to distinguish from
+    /// implicit global references when checking primitive arities).
+    user_defined_globals: HashSet<Binding>,
     /// Tracks effect sources within the current lambda body for polymorphic inference
     current_effect_sources: EffectSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
@@ -111,16 +123,25 @@ pub struct Analyzer<'a> {
 }
 
 impl<'a> Analyzer<'a> {
-    /// Create a new analyzer without primitive effects
-    /// Use `new_with_primitive_effects` for full interprocedural effect tracking
+    /// Create a new analyzer without primitive effects or arities
     pub fn new(symbols: &'a mut SymbolTable) -> Self {
-        Self::new_with_primitive_effects(symbols, HashMap::new())
+        Self::new_with_primitives(symbols, HashMap::new(), HashMap::new())
     }
 
     /// Create a new analyzer with primitive effects for interprocedural tracking
+    /// (convenience wrapper that passes empty arities)
     pub fn new_with_primitive_effects(
         symbols: &'a mut SymbolTable,
         primitive_effects: HashMap<SymbolId, Effect>,
+    ) -> Self {
+        Self::new_with_primitives(symbols, primitive_effects, HashMap::new())
+    }
+
+    /// Create a new analyzer with primitive effects and arities
+    pub fn new_with_primitives(
+        symbols: &'a mut SymbolTable,
+        primitive_effects: HashMap<SymbolId, Effect>,
+        primitive_arities: HashMap<SymbolId, Arity>,
     ) -> Self {
         let mut analyzer = Analyzer {
             symbols,
@@ -131,6 +152,11 @@ impl<'a> Analyzer<'a> {
             primitive_effects,
             global_effects: HashMap::new(),
             defined_global_effects: HashMap::new(),
+            arity_env: HashMap::new(),
+            primitive_arities,
+            global_arities: HashMap::new(),
+            defined_global_arities: HashMap::new(),
+            user_defined_globals: HashSet::new(),
             current_effect_sources: EffectSources::default(),
             current_lambda_params: Vec::new(),
             immutable_globals: std::collections::HashSet::new(),
@@ -149,6 +175,16 @@ impl<'a> Analyzer<'a> {
     /// Take the defined global effects (consumes them, for use after analysis)
     pub fn take_defined_global_effects(&mut self) -> HashMap<SymbolId, Effect> {
         std::mem::take(&mut self.defined_global_effects)
+    }
+
+    /// Set global arities from previous forms (for cross-form arity tracking)
+    pub fn set_global_arities(&mut self, arities: HashMap<SymbolId, Arity>) {
+        self.global_arities = arities;
+    }
+
+    /// Take the defined global arities (consumes them, for use after analysis)
+    pub fn take_defined_global_arities(&mut self) -> HashMap<SymbolId, Arity> {
+        std::mem::take(&mut self.defined_global_arities)
     }
 
     /// Set immutable globals from previous forms (for cross-form const tracking)

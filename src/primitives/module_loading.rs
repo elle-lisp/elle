@@ -1,4 +1,7 @@
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Import a module file
@@ -158,3 +161,29 @@ pub fn prim_add_module_path(args: &[Value]) -> (SignalBits, Value) {
         )
     }
 }
+
+/// Declarative primitive definitions for module loading operations
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "module/import",
+        func: prim_import_file,
+        effect: Effect::raises(),
+        arity: Arity::Exact(1),
+        doc: "Import a module file and execute it in the current context",
+        params: &["path"],
+        category: "module",
+        example: "(module/import \"lib/utils.elle\")",
+        aliases: &["import-file"],
+    },
+    PrimitiveDef {
+        name: "module/add-path",
+        func: prim_add_module_path,
+        effect: Effect::raises(),
+        arity: Arity::Exact(1),
+        doc: "Add a directory to the module search path",
+        params: &["path"],
+        category: "module",
+        example: "(module/add-path \"./lib\")",
+        aliases: &["add-module-path"],
+    },
+];

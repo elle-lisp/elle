@@ -1,6 +1,9 @@
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::primitives::registration::register_primitives;
 use crate::symbol::SymbolTable;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 use crate::vm::VM;
 use std::rc::Rc;
@@ -360,3 +363,40 @@ pub fn prim_current_thread_id(_args: &[Value]) -> (SignalBits, Value) {
     let thread_id = std::thread::current().id();
     (SIG_OK, Value::string(format!("{:?}", thread_id)))
 }
+
+/// Declarative primitive definitions for concurrency operations
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "os/spawn",
+        func: prim_spawn,
+        effect: Effect::raises(),
+        arity: Arity::Exact(1),
+        doc: "Spawn a new thread that executes a closure with captured immutable values",
+        params: &["closure"],
+        category: "os",
+        example: "(os/spawn (fn [] (+ 1 2)))",
+        aliases: &["spawn"],
+    },
+    PrimitiveDef {
+        name: "os/join",
+        func: prim_join,
+        effect: Effect::raises(),
+        arity: Arity::Exact(1),
+        doc: "Wait for a thread to complete and return its result",
+        params: &["thread-handle"],
+        category: "os",
+        example: "(os/join thread-handle)",
+        aliases: &["join"],
+    },
+    PrimitiveDef {
+        name: "os/thread-id",
+        func: prim_current_thread_id,
+        effect: Effect::none(),
+        arity: Arity::Exact(0),
+        doc: "Return the ID of the current thread",
+        params: &[],
+        category: "os",
+        example: "(os/thread-id)",
+        aliases: &["current-thread-id"],
+    },
+];

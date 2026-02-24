@@ -6,4 +6,4 @@ pub mod diagnostics;
 pub mod rules;
 
 pub use diagnostics::{Diagnostic, DiagnosticContext, Severity};
-pub use rules::{builtin_arity, check_call_arity, check_naming_convention};
+pub use rules::check_naming_convention;

@@ -5,6 +5,8 @@
 //! - Time measurement (instant, duration, CPU time)
 //! - Bytecode and JIT disassembly
 
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -166,6 +168,23 @@ pub fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
 // VM-access introspection (SIG_QUERY)
 // ============================================================================
 
+/// (doc name) — look up documentation for a primitive by name (string or symbol)
+///
+/// Sends a SIG_QUERY to the VM which looks up the name in its
+/// `primitive_docs` map and returns a formatted doc string.
+pub fn prim_doc(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("doc: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_QUERY, Value::cons(Value::keyword("doc"), args[0]))
+}
+
 /// (vm/query op arg) — query VM state
 ///
 /// The single gateway to SIG_QUERY. `op` is a string or keyword
@@ -174,6 +193,7 @@ pub fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Operations:
 /// - "call-count" closure → int
+/// - "doc" name → string
 /// - "global?" symbol → bool
 /// - "fiber/self" _ → fiber or nil
 pub fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
@@ -302,3 +322,161 @@ pub fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
         )
     }
 }
+
+/// Declarative primitive definitions for debugging operations.
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "closure?",
+        func: prim_is_closure,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if value is a bytecode closure",
+        params: &["value"],
+        category: "",
+        example: "(closure? (fn (x) x))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "jit?",
+        func: prim_is_jit,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if closure has JIT-compiled code",
+        params: &["value"],
+        category: "",
+        example: "(jit? (fn (x) x))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "pure?",
+        func: prim_is_pure,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if closure has Pure effect (does not suspend)",
+        params: &["value"],
+        category: "",
+        example: "(pure? (fn (x) x))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "coro?",
+        func: crate::primitives::coroutines::prim_is_coroutine,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if value is a coroutine (fiber-based)",
+        params: &["value"],
+        category: "",
+        example: "(coro? (coro/new (fn () 42)))",
+        aliases: &["coroutine?"],
+    },
+    PrimitiveDef {
+        name: "fn/mutates-params?",
+        func: prim_mutates_params,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if closure mutates any parameters",
+        params: &["value"],
+        category: "fn",
+        example: "(fn/mutates-params? (fn (x) (set! x 1)))",
+        aliases: &["mutates-params?"],
+    },
+    PrimitiveDef {
+        name: "fn/raises?",
+        func: prim_raises,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if closure may raise an error",
+        params: &["value"],
+        category: "fn",
+        example: "(fn/raises? (fn (x) (/ 1 x)))",
+        aliases: &["raises?"],
+    },
+    PrimitiveDef {
+        name: "fn/arity",
+        func: prim_arity,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Returns closure arity as int, pair, or nil",
+        params: &["value"],
+        category: "fn",
+        example: "(fn/arity (fn (x y) x))",
+        aliases: &["arity"],
+    },
+    PrimitiveDef {
+        name: "fn/captures",
+        func: prim_captures,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Returns number of captured variables, or nil",
+        params: &["value"],
+        category: "fn",
+        example: "(fn/captures (let ((x 1)) (fn () x)))",
+        aliases: &["captures"],
+    },
+    PrimitiveDef {
+        name: "fn/bytecode-size",
+        func: prim_bytecode_size,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Returns size of bytecode in bytes, or nil",
+        params: &["value"],
+        category: "fn",
+        example: "(fn/bytecode-size (fn (x) x))",
+        aliases: &["bytecode-size"],
+    },
+    PrimitiveDef {
+        name: "doc",
+        func: prim_doc,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Look up documentation for a primitive.",
+        params: &["name"],
+        category: "",
+        example: "(doc \"cons\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "vm/query",
+        func: prim_vm_query,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Query VM state (call-count, doc, global?, fiber/self)",
+        params: &["op", "arg"],
+        category: "",
+        example: "(vm/query \"call-count\" some-fn)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "string->keyword",
+        func: prim_string_to_keyword,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Convert a string to a keyword",
+        params: &["str"],
+        category: "",
+        example: "(string->keyword \"foo\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fn/disasm",
+        func: prim_disbit,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Disassemble a closure's bytecode into a list of instruction strings.",
+        params: &["closure"],
+        category: "fn",
+        example: "(fn/disasm (fn (x) x))",
+        aliases: &["disbit", "fn/disbit"],
+    },
+    PrimitiveDef {
+        name: "fn/disasm-jit",
+        func: prim_disjit,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Disassemble a closure's JIT-compiled Cranelift IR, or nil if not JIT'd.",
+        params: &["closure"],
+        category: "fn",
+        example: "(fn/disasm-jit (fn (x) x))",
+        aliases: &["disjit", "fn/disjit"],
+    },
+];

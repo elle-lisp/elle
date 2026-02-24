@@ -21,7 +21,7 @@ debug, ffi) and which parameter indices propagate their callee's effects.
 | `Effect::halts()` | May halt (SIG_HALT) |
 | `Effect::polymorphic(n)` | Effect depends on parameter n |
 | `Effect::polymorphic_raises(n)` | Polymorphic + may raise |
-| `get_primitive_effects` | Returns effect map for already-interned primitives |
+
 
 ## Predicates
 
@@ -82,7 +82,7 @@ Used across the pipeline and the runtime:
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | ~350 | `Effect` struct, constructors, predicates, Display, combine, tests |
-| `primitives.rs` | ~220 | Registers known primitive effects |
+| `primitives.rs` | ~5 | Empty — primitive effects now live in each module's PRIMITIVES table |
 
 ## Invariants
 

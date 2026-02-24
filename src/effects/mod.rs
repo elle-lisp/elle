@@ -5,10 +5,6 @@
 //! parameter indices propagate their callee's effects (for higher-order
 //! functions like map/filter/fold).
 
-mod primitives;
-
-pub use primitives::get_primitive_effects;
-
 use crate::value::fiber::SignalBits;
 use crate::value::fiber::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_YIELD};
 use std::fmt;

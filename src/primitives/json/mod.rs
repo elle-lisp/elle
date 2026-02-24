@@ -9,7 +9,10 @@ mod serializer;
 pub use parser::JsonParser;
 pub use serializer::{escape_json_string, serialize_value, serialize_value_pretty};
 
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Parse a JSON string into Elle values
@@ -77,6 +80,43 @@ pub fn prim_json_serialize_pretty(args: &[Value]) -> (SignalBits, Value) {
     };
     (SIG_OK, Value::string(json_str))
 }
+
+/// Declarative primitive definitions for JSON operations
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "json/parse",
+        func: prim_json_parse,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Parse a JSON string into Elle values",
+        params: &["json-string"],
+        category: "json",
+        example: r#"(json/parse "{\"name\": \"Alice\", \"age\": 30}")"#,
+        aliases: &["json-parse"],
+    },
+    PrimitiveDef {
+        name: "json/serialize",
+        func: prim_json_serialize,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Serialize an Elle value to compact JSON",
+        params: &["value"],
+        category: "json",
+        example: "(json/serialize (table :name \"Bob\" :age 25))",
+        aliases: &["json-serialize"],
+    },
+    PrimitiveDef {
+        name: "json/pretty",
+        func: prim_json_serialize_pretty,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Serialize an Elle value to pretty-printed JSON with 2-space indentation",
+        params: &["value"],
+        category: "json",
+        example: "(json/pretty (list 1 2 3))",
+        aliases: &["json-serialize-pretty"],
+    },
+];
 
 #[cfg(test)]
 mod tests {

@@ -1,7 +1,36 @@
 //! Struct operations primitives (immutable hash maps)
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, TableKey, Value};
 use std::collections::BTreeMap;
+
+/// Declarative table of struct primitives.
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "struct",
+        func: prim_struct,
+        effect: Effect::none(),
+        arity: Arity::AtLeast(0),
+        doc: "Create an immutable struct from key-value pairs",
+        params: &[],
+        category: "",
+        example: "(struct :a 1 :b 2)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "struct/del",
+        func: prim_struct_del,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Create a new struct without a key (immutable)",
+        params: &["struct", "key"],
+        category: "struct",
+        example: "(struct/del (struct :a 1 :b 2) :a)",
+        aliases: &["struct-del"],
+    },
+];
 
 /// Convert a Value to a TableKey
 fn value_to_table_key(val: &Value) -> Result<TableKey, Value> {

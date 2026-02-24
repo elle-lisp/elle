@@ -1,6 +1,9 @@
 //! Meta-programming primitives (gensym, datum->syntax, syntax->datum)
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::syntax::Syntax;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -156,3 +159,40 @@ pub fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
 
     (SIG_OK, syntax_rc.to_value(symbols))
 }
+
+/// Declarative primitive definitions for meta-programming operations.
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "meta/gensym",
+        func: prim_gensym,
+        effect: Effect::none(),
+        arity: Arity::Range(0, 1),
+        doc: "Generate a unique symbol with optional prefix",
+        params: &["prefix"],
+        category: "meta",
+        example: "(meta/gensym \"tmp\")",
+        aliases: &["gensym"],
+    },
+    PrimitiveDef {
+        name: "meta/datum->syntax",
+        func: prim_datum_to_syntax,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Create a syntax object with lexical context from another syntax object",
+        params: &["context", "datum"],
+        category: "meta",
+        example: "(meta/datum->syntax stx 'x)",
+        aliases: &["datum->syntax"],
+    },
+    PrimitiveDef {
+        name: "meta/syntax->datum",
+        func: prim_syntax_to_datum,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Strip scope information from a syntax object, returning the plain value",
+        params: &["stx"],
+        category: "meta",
+        example: "(meta/syntax->datum stx)",
+        aliases: &["syntax->datum"],
+    },
+];

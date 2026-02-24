@@ -249,19 +249,15 @@ mod tests {
     #[test]
     fn test_hir_linter_arity_check() {
         let (mut symbols, mut vm) = setup();
-        // cons expects 2 arguments
+        // cons expects 2 arguments — the analyzer catches this as a hard error
         let result = analyze("(cons 1)", &mut symbols, &mut vm);
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, &symbols);
-
-        assert!(linter.has_warnings());
-        assert!(linter
-            .diagnostics()
-            .iter()
-            .any(|d| d.rule == "arity-mismatch"));
+        match result {
+            Err(ref msg) => assert!(
+                msg.contains("arity error"),
+                "expected arity error, got: {msg}"
+            ),
+            Ok(_) => panic!("expected arity error for (cons 1)"),
+        }
     }
 
     #[test]

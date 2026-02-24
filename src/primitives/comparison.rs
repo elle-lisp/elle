@@ -1,5 +1,8 @@
 //! Comparison primitives
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Equality comparison
@@ -142,3 +145,62 @@ pub fn prim_ge(args: &[Value]) -> (SignalBits, Value) {
     };
     (SIG_OK, if result { Value::TRUE } else { Value::FALSE })
 }
+
+/// Declarative primitive definitions for comparison functions.
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "=",
+        func: prim_eq,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Test equality of two values",
+        params: &["a", "b"],
+        category: "",
+        example: "(= 1 1)",
+        aliases: &["eq?"],
+    },
+    PrimitiveDef {
+        name: "<",
+        func: prim_lt,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Test if first number is less than second",
+        params: &["a", "b"],
+        category: "",
+        example: "(< 1 2)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: ">",
+        func: prim_gt,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Test if first number is greater than second",
+        params: &["a", "b"],
+        category: "",
+        example: "(> 2 1)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "<=",
+        func: prim_le,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Test if first number is less than or equal to second",
+        params: &["a", "b"],
+        category: "",
+        example: "(<= 1 2)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: ">=",
+        func: prim_ge,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Test if first number is greater than or equal to second",
+        params: &["a", "b"],
+        category: "",
+        example: "(>= 2 1)",
+        aliases: &[],
+    },
+];

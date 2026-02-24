@@ -15,6 +15,21 @@ impl<'a> Analyzer<'a> {
             args.push(hir);
         }
 
+        // Compile-time arity checking
+        if let Some(arity) = self.get_callee_arity(&func) {
+            let arg_count = args.len();
+            if !arity.matches(arg_count) {
+                return Err(format!(
+                    "{}: arity error: {} expects {} argument{}, got {}",
+                    span,
+                    self.callee_name(&func),
+                    arity,
+                    if arity == Arity::Exact(1) { "" } else { "s" },
+                    arg_count,
+                ));
+            }
+        }
+
         // Interprocedural effect tracking: what effect does CALLING this function have?
         // First, get the raw callee effect (before polymorphic resolution)
         let raw_callee_effect = self.get_raw_callee_effect(&func);
@@ -37,6 +52,46 @@ impl<'a> Analyzer<'a> {
             span,
             effect,
         ))
+    }
+
+    /// Get the callee's known arity, if available.
+    fn get_callee_arity(&self, callee: &Hir) -> Option<Arity> {
+        match &callee.kind {
+            HirKind::Lambda { params, .. } => Some(Arity::Exact(params.len())),
+            HirKind::Var(binding) => {
+                // Check local arity env first
+                if let Some(arity) = self.arity_env.get(binding) {
+                    return Some(*arity);
+                }
+                // Fall back to primitive/global arities,
+                // but only if this binding was NOT explicitly defined by the user
+                // (user definitions shadow primitives even for non-lambda values)
+                if binding.is_global() && !self.user_defined_globals.contains(binding) {
+                    if let Some(arity) = self.primitive_arities.get(&binding.name()) {
+                        return Some(*arity);
+                    }
+                    if let Some(arity) = self.global_arities.get(&binding.name()) {
+                        return Some(*arity);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Get a human-readable name for the callee (for error messages).
+    fn callee_name(&self, callee: &Hir) -> String {
+        match &callee.kind {
+            HirKind::Var(binding) => {
+                if let Some(name) = self.symbols.name(binding.name()) {
+                    return name.to_string();
+                }
+                "<unknown>".to_string()
+            }
+            HirKind::Lambda { .. } => "<lambda>".to_string(),
+            _ => "<expression>".to_string(),
+        }
     }
 
     /// Get the raw callee effect without resolving polymorphic effects.

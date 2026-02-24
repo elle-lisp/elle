@@ -18,9 +18,12 @@
 //! - fiber/cancel: Inject error into suspended fiber
 //! - fiber?: Type predicate
 
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{
     Fiber, FiberStatus, SignalBits, SIG_CANCEL, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_RESUME,
 };
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Return a keyword Value for a FiberStatus.
@@ -494,6 +497,142 @@ pub fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
     // Return SIG_CANCEL — VM will handle execution
     (SIG_CANCEL, args[0])
 }
+
+/// Declarative primitive definitions for fiber operations
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "fiber/new",
+        func: prim_fiber_new,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Create a fiber from a closure with a signal mask",
+        params: &["closure", "mask"],
+        category: "fiber",
+        example: "(fiber/new (fn [] 42) 0)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/resume",
+        func: prim_fiber_resume,
+        effect: Effect::yields_raises(),
+        arity: Arity::Range(1, 2),
+        doc: "Resume a fiber, optionally delivering a value",
+        params: &["fiber", "value"],
+        category: "fiber",
+        example: "(fiber/resume f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/signal",
+        func: prim_fiber_signal,
+        effect: Effect::yields_raises(),
+        arity: Arity::Exact(2),
+        doc: "Emit a signal from the current fiber",
+        params: &["bits", "value"],
+        category: "fiber",
+        example: "(fiber/signal 2 42)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/status",
+        func: prim_fiber_status,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the fiber's lifecycle status (:new, :alive, :suspended, :dead, :error)",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/status f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/value",
+        func: prim_fiber_value,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the signal payload from the fiber's last signal",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/value f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/bits",
+        func: prim_fiber_bits,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the signal bits from the fiber's last signal",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/bits f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/mask",
+        func: prim_fiber_mask,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the fiber's signal mask",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/mask f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber?",
+        func: prim_is_fiber,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if a value is a fiber",
+        params: &["value"],
+        category: "",
+        example: "(fiber? f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/parent",
+        func: prim_fiber_parent,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the parent fiber, or nil if none",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/parent f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/child",
+        func: prim_fiber_child,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the most recently resumed child fiber, or nil if none",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/child f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/propagate",
+        func: prim_fiber_propagate,
+        effect: Effect::yields_raises(),
+        arity: Arity::Exact(1),
+        doc: "Re-raise a caught signal from a child fiber, preserving the child chain",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/propagate f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/cancel",
+        func: prim_fiber_cancel,
+        effect: Effect::raises(),
+        arity: Arity::Exact(2),
+        doc: "Inject an error into a suspended fiber",
+        params: &["fiber", "error"],
+        category: "fiber",
+        example: "(fiber/cancel f error)",
+        aliases: &[],
+    },
+];
 
 #[cfg(test)]
 mod tests {

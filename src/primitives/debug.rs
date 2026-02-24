@@ -1,4 +1,7 @@
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, list, Value};
 
 /// Prints a value with debug information
@@ -173,3 +176,40 @@ fn get_memory_usage() -> (u64, u64) {
     // Unsupported platform
     (0, 0)
 }
+
+/// Declarative primitive definitions for debug operations.
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "debug/print",
+        func: prim_debug_print,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Prints a value with debug information to stderr",
+        params: &["value"],
+        category: "debug",
+        example: "(debug/print 42)",
+        aliases: &["debug-print"],
+    },
+    PrimitiveDef {
+        name: "debug/trace",
+        func: prim_trace,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Traces execution with a label, prints to stderr, returns value",
+        params: &["label", "value"],
+        category: "debug",
+        example: "(debug/trace \"x\" 42)",
+        aliases: &["trace"],
+    },
+    PrimitiveDef {
+        name: "debug/memory",
+        func: prim_memory_usage,
+        effect: Effect::none(),
+        arity: Arity::Exact(0),
+        doc: "Returns memory usage statistics as (rss-bytes virtual-bytes)",
+        params: &[],
+        category: "debug",
+        example: "(debug/memory)",
+        aliases: &["memory-usage"],
+    },
+];
