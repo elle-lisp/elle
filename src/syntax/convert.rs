@@ -27,9 +27,9 @@ impl Syntax {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 crate::value::list(values)
             }
-            SyntaxKind::Vector(items) => {
+            SyntaxKind::Array(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
-                Value::vector(values)
+                Value::array(values)
             }
             SyntaxKind::Quote(inner) => {
                 let quote_sym = symbols.intern("quote");
@@ -89,13 +89,13 @@ impl Syntax {
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
             SyntaxKind::List(syntaxes?)
-        } else if let Some(vec_ref) = value.as_vector() {
+        } else if let Some(vec_ref) = value.as_array() {
             let items = vec_ref.borrow().clone();
             let syntaxes: Result<Vec<Syntax>, String> = items
                 .iter()
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
-            SyntaxKind::Vector(syntaxes?)
+            SyntaxKind::Array(syntaxes?)
         } else {
             return Err(format!("Cannot convert {:?} to Syntax", value));
         };
@@ -216,20 +216,20 @@ mod tests {
     }
 
     #[test]
-    fn test_roundtrip_vector() {
+    fn test_roundtrip_array() {
         let mut symbols = SymbolTable::new();
         let syntax = Syntax::new(
-            SyntaxKind::Vector(vec![Syntax::new(SyntaxKind::Int(1), test_span())]),
+            SyntaxKind::Array(vec![Syntax::new(SyntaxKind::Int(1), test_span())]),
             test_span(),
         );
         let value = syntax.to_value(&mut symbols);
         let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
         match result.kind {
-            SyntaxKind::Vector(items) => {
+            SyntaxKind::Array(items) => {
                 assert_eq!(items.len(), 1);
                 assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
             }
-            other => panic!("expected Vector, got {:?}", other),
+            other => panic!("expected Array, got {:?}", other),
         }
     }
 

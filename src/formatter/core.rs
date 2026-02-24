@@ -91,7 +91,7 @@ fn format_value(
             HeapObject::String(s) => {
                 return format!("\"{}\"", s.escape_default());
             }
-            HeapObject::Vector(v) => {
+            HeapObject::Array(v) => {
                 if let Ok(elements) = v.try_borrow() {
                     if elements.is_empty() {
                         return "[]".to_string();

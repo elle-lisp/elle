@@ -130,14 +130,14 @@ impl VM {
                 Instruction::Cdr => {
                     data::handle_cdr(self);
                 }
-                Instruction::MakeVector => {
-                    data::handle_make_vector(self, bc, &mut ip);
+                Instruction::MakeArray => {
+                    data::handle_make_array(self, bc, &mut ip);
                 }
-                Instruction::VectorRef => {
-                    data::handle_vector_ref(self);
+                Instruction::ArrayRef => {
+                    data::handle_array_ref(self);
                 }
-                Instruction::VectorSet => {
-                    data::handle_vector_set(self);
+                Instruction::ArraySet => {
+                    data::handle_array_set(self);
                 }
 
                 // Arithmetic (integer)

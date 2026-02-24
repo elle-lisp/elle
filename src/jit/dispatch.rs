@@ -89,15 +89,15 @@ pub extern "C" fn elle_jit_cdr(pair_bits: u64) -> u64 {
     }
 }
 
-/// Allocate a vector from an array of elements
+/// Allocate an array from a list of elements
 #[no_mangle]
-pub extern "C" fn elle_jit_make_vector(elements: *const u64, count: u32) -> u64 {
+pub extern "C" fn elle_jit_make_array(elements: *const u64, count: u32) -> u64 {
     let mut vec = Vec::with_capacity(count as usize);
     for i in 0..count as usize {
         let bits = unsafe { *elements.add(i) };
         vec.push(unsafe { Value::from_bits(bits) });
     }
-    Value::vector(vec).to_bits()
+    Value::array(vec).to_bits()
 }
 
 /// Check if value is a pair (cons cell)
@@ -458,17 +458,17 @@ mod tests {
     }
 
     #[test]
-    fn test_make_vector() {
+    fn test_make_array() {
         let elements = [
             Value::int(1).to_bits(),
             Value::int(2).to_bits(),
             Value::int(3).to_bits(),
         ];
-        let vec_bits = elle_jit_make_vector(elements.as_ptr(), 3);
+        let vec_bits = elle_jit_make_array(elements.as_ptr(), 3);
         let vec = unsafe { Value::from_bits(vec_bits) };
 
-        assert!(vec.is_vector());
-        let vec_ref = vec.as_vector().unwrap();
+        assert!(vec.is_array());
+        let vec_ref = vec.as_array().unwrap();
         let borrowed = vec_ref.borrow();
         assert_eq!(borrowed.len(), 3);
         assert_eq!(borrowed[0].as_int(), Some(1));

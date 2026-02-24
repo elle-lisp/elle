@@ -85,21 +85,21 @@
             }
           ]
         },
-        {
-          "type": "heading",
-          "level": 3,
-          "content": [
-            {
-              "type": "paragraph",
-              "text": "**Vectors**"
-            },
-            {
-              "type": "code",
-              "language": "lisp",
-              "text": "[1 2 3]             ; Vector literal\n(vector 1 2 3)      ; Create vector\n(nth vec 0)         ; Access by index\n(length vec)        ; Get length"
-            }
-          ]
-        },
+         {
+           "type": "heading",
+           "level": 3,
+           "content": [
+             {
+               "type": "paragraph",
+               "text": "**Arrays**"
+             },
+             {
+               "type": "code",
+               "language": "lisp",
+               "text": "[1 2 3]             ; Array literal\n(array 1 2 3)       ; Create array\n(nth arr 0)         ; Access by index\n(length arr)        ; Get length"
+             }
+           ]
+         },
         {
           "type": "heading",
           "level": 3,

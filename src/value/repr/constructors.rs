@@ -120,12 +120,12 @@ impl Value {
         }))
     }
 
-    /// Create a vector.
+    /// Create an array.
     #[inline]
-    pub fn vector(elements: Vec<Value>) -> Self {
+    pub fn array(elements: Vec<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::Vector(RefCell::new(elements)))
+        alloc(HeapObject::Array(RefCell::new(elements)))
     }
 
     /// Create an empty mutable table.

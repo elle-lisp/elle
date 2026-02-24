@@ -31,7 +31,7 @@ Elle distinguishes between `nil` (absence of value) and `()` (empty list). They 
 | `()` | ✓ Yes | Empty list (distinct from nil) |
 | `0` | ✓ Yes | Zero is truthy |
 | `""` | ✓ Yes | Empty string is truthy |
-| `[]` | ✓ Yes | Empty vector is truthy |
+| `[]` | ✓ Yes | Empty array is truthy |
 | All other values | ✓ Yes | Default |
 
 **Only `#f` and `nil` are falsy.** Everything else, including the empty list, is truthy.
@@ -449,13 +449,13 @@ Call a function with arguments from a list:
 (length s)           ⟹ 2
 ```
 
-### Vectors
+### Arrays
 
 ```lisp
 (var v [1 2 3])
 (length v)           ⟹ 3
-(vector-ref v 1)     ⟹ 2
-(vector-set! v 0 99) ⟹ [99 2 3]
+(array-ref v 1)      ⟹ 2
+(array-set! v 0 99)  ⟹ [99 2 3]
 ```
 
 ### Lists

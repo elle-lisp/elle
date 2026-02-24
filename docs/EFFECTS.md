@@ -574,7 +574,7 @@ The compiler's effect information guides JIT decisions:
 (fiber/closure fiber) → closure
 
 ;; The operand stack (for debugging)
-(fiber/stack fiber) → vector
+(fiber/stack fiber) → array
 
 ;; Dynamic bindings (fiber-scoped state)
 (fiber/env fiber) → table | nil

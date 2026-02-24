@@ -2,7 +2,7 @@
 ;
 ; This example demonstrates Elle's type system:
 ; - type-of: Get the type of any value
-; - Type predicates: number?, symbol?, string?, list?, vector?, table?, closure?, coro?
+; - Type predicates: number?, symbol?, string?, list?, array?, table?, closure?, coro?
 ; - Type conversions: string, number, symbol
 ; - Type checking patterns
 ; - Assertions verifying type operations
@@ -34,9 +34,9 @@
 (var person '(:name :John :age :30 :city :NYC))
 (assert-eq (first person) :name "first element of person list is :name")
 
-; Keywords in vectors
+; Keywords in arrays
 (var options [1 :option-a 2 :option-b 3])
-(assert-eq (vector-ref options 1) :option-a "second element of options vector is :option-a")
+(assert-eq (array-ref options 1) :option-a "second element of options array is :option-a")
 
 ; Building configuration with keywords
 (var settings (list :debug #t :host "localhost" :port 8080))
@@ -80,9 +80,9 @@
 (var vars '(x y z))
 (assert-eq (first vars) 'x "first element of vars list is 'x")
 
-; Symbols in vectors
-(var ops (vector 'add 'subtract 'multiply))
-(assert-eq (vector-ref ops 0) 'add "first element of ops vector is 'add")
+; Symbols in arrays
+(var ops (array 'add 'subtract 'multiply))
+(assert-eq (array-ref ops 0) 'add "first element of ops array is 'add")
 
 ; Symbols are distinct from keywords
 (assert-false (eq? 'name :name) "symbol 'name is not eq? to keyword :name")
@@ -131,9 +131,9 @@
 (var nums (list 1 2 3 4 5))
 (assert-eq (first nums) 1 "first element of nums list is 1")
 
-; Numbers in vectors
+; Numbers in arrays
 (var values [10 20 30 40 50])
-(assert-eq (vector-ref values 0) 10 "first element of values vector is 10")
+(assert-eq (array-ref values 0) 10 "first element of values array is 10")
 
 ; Arithmetic with numbers
 (assert-eq (+ 10 5) 15 "arithmetic: 10 + 5 = 15")
@@ -178,9 +178,9 @@
 (var words (list "apple" "banana" "cherry"))
 (assert-eq (first words) "apple" "first element of words list is \"apple\"")
 
-; Strings in vectors
+; Strings in arrays
 (var messages ["hello" "world" "!"])
-(assert-eq (vector-ref messages 0) "hello" "first element of messages vector is \"hello\"")
+(assert-eq (array-ref messages 0) "hello" "first element of messages array is \"hello\"")
 
 ; String concatenation
 (var greeting (string-append "Hello, " "World!"))
@@ -219,9 +219,9 @@
 (var flags (list #t #f #t))
 (assert-eq (first flags) #t "first element of flags list is #t")
 
-; Booleans in vectors
+; Booleans in arrays
 (var states [#t #f #t #f])
-(assert-eq (vector-ref states 0) #t "first element of states vector is #t")
+(assert-eq (array-ref states 0) #t "first element of states array is #t")
 
 ; Boolean predicates
 (assert-true (boolean? #t) "boolean? returns true for #t")
@@ -253,9 +253,9 @@
 (var maybe-values (list 1 nil 3))
 (assert-eq (first (rest maybe-values)) nil "second element of maybe-values list is nil")
 
-; Nil in vectors
+; Nil in arrays
 (var optional [10 nil 30])
-(assert-eq (vector-ref optional 1) nil "second element of optional vector is nil")
+(assert-eq (array-ref optional 1) nil "second element of optional array is nil")
 
 ; Nil predicates
 (assert-true (nil? nil) "nil? returns true for nil")
@@ -279,11 +279,11 @@
 (assert-eq (first (rest mixed-list)) 'symbol "second element is symbol")
 (assert-eq (first (rest (rest mixed-list))) 42 "third element is number")
 
-; Mixed vector
-(var mixed-vec (vector :id 'user 123 "Alice" #t))
-(assert-eq (vector-ref mixed-vec 0) :id "first element is keyword")
-(assert-eq (vector-ref mixed-vec 1) 'user "second element is symbol")
-(assert-eq (vector-ref mixed-vec 2) 123 "third element is number")
+; Mixed array
+(var mixed-arr (array :id 'user 123 "Alice" #t))
+(assert-eq (array-ref mixed-arr 0) :id "first element is keyword")
+(assert-eq (array-ref mixed-arr 1) 'user "second element is symbol")
+(assert-eq (array-ref mixed-arr 2) 123 "third element is number")
 
 (display "✓ Mixed atoms verified\n")
 
@@ -385,7 +385,7 @@
 (var test-symbol 'symbol)
 (var test-string "hello")
 (var test-bool #t)
-(var test-vector (vector 1 2 3))
+(var test-array (array 1 2 3))
 
 ; Display type information
 (display "nil: ")
@@ -434,10 +434,10 @@
 (display (boolean? test-bool))
 (newline)
 
-(display "vector: ")
-(display test-vector)
+(display "array: ")
+(display test-array)
 (display " -> list?=")
-(display (list? test-vector))
+(display (list? test-array))
 (newline)
 
 ;; ============================================================================
@@ -467,18 +467,18 @@
 (display "✓ Type predicate combinations verified\n")
 
 ;; ============================================================================
-;; SECTION 13: Vectors
+;; SECTION 13: Arrays
 ;; ============================================================================
 
-(display "\n=== Vectors ===\n")
+(display "\n=== Arrays ===\n")
 
-; Vectors are a distinct type from lists
-(var test-vec (vector 1 2 3))
-(display "Vector: ")
-(display test-vec)
+; Arrays are a distinct type from lists
+(var test-arr (array 1 2 3))
+(display "Array: ")
+(display test-arr)
 (newline)
-(assert-false (list? test-vec) "vector is not a list")
-(display "✓ vectors are distinct from lists\n")
+(assert-false (list? test-arr) "array is not a list")
+(display "✓ arrays are distinct from lists\n")
 
 ; ========================================
 ; TYPE CONVERSION SECTION
@@ -899,7 +899,7 @@
 (assert-false (box? 42) "box? returns false for number")
 (assert-false (box? "hello") "box? returns false for string")
 (assert-false (box? (list 1 2 3)) "box? returns false for list")
-(assert-false (box? (vector 1 2 3)) "box? returns false for vector")
+(assert-false (box? (array 1 2 3)) "box? returns false for array")
 
 (display "✓ box? works correctly\n")
 
@@ -1065,9 +1065,9 @@
 (assert-true (if '() #t #f) "empty list is truthy in if")
 (display "empty list is truthy (not falsy like C)\n")
 
-; Empty vector is truthy (unlike C)
-(assert-true (if [] #t #f) "empty vector is truthy in if")
-(display "empty vector is truthy (not falsy like C)\n")
+; Empty array is truthy (unlike C)
+(assert-true (if [] #t #f) "empty array is truthy in if")
+(display "empty array is truthy (not falsy like C)\n")
 
 ; Non-empty string is truthy
 (assert-true (if "hello" #t #f) "non-empty string is truthy in if")
@@ -1077,9 +1077,9 @@
 (assert-true (if '(a b c) #t #f) "non-empty list is truthy in if")
 (display "non-empty list is truthy\n")
 
-; Non-empty vector is truthy
-(assert-true (if [1 2 3] #t #f) "non-empty vector is truthy in if")
-(display "non-empty vector is truthy\n")
+; Non-empty array is truthy
+(assert-true (if [1 2 3] #t #f) "non-empty array is truthy in if")
+(display "non-empty array is truthy\n")
 
 ; Symbols are truthy
 (assert-true (if 'symbol #t #f) "symbol is truthy in if")
@@ -1122,7 +1122,7 @@
 (display "  - 0 is truthy (not falsy like C)\n")
 (display "  - \"\" (empty string) is truthy\n")
 (display "  - '() (empty list) is truthy\n")
-(display "  - [] (empty vector) is truthy\n")
+(display "  - [] (empty array) is truthy\n")
 (display "  - All other values are truthy\n")
 
 (display "✓ Truthiness semantics verified\n")

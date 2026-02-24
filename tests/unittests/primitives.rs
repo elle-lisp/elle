@@ -1810,11 +1810,11 @@ fn test_json_serialize_roundtrip() {
 }
 
 #[test]
-fn test_json_serialize_vectors() {
+fn test_json_serialize_arrays() {
     let (vm, mut symbols) = setup();
     let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
 
-    let vec = Value::vector(vec![Value::int(1), Value::int(2), Value::int(3)]);
+    let vec = Value::array(vec![Value::int(1), Value::int(2), Value::int(3)]);
     let result = call_primitive(&json_serialize, &[vec]);
     assert_eq!(result.unwrap(), Value::string("[1,2,3]"));
 }
@@ -1850,7 +1850,7 @@ fn test_json_serialize_errors() {
 
 // Disassembly tests
 #[test]
-fn test_disbit_returns_vector_of_strings() {
+fn test_disbit_returns_array_of_strings() {
     let (vm, mut symbols) = setup();
     let disbit = get_primitive(&vm, &mut symbols, "disbit");
 
@@ -1860,9 +1860,9 @@ fn test_disbit_returns_vector_of_strings() {
     let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
 
     let disasm = call_primitive(&disbit, &[result]).unwrap();
-    let vec = disasm.as_vector().expect("disbit should return a vector");
+    let vec = disasm.as_array().expect("disbit should return an array");
     let vec = vec.borrow();
-    assert!(!vec.is_empty(), "disbit should return non-empty vector");
+    assert!(!vec.is_empty(), "disbit should return non-empty array");
     for elem in vec.iter() {
         assert!(
             elem.as_string().is_some(),
@@ -1888,7 +1888,7 @@ fn test_disbit_arity_error() {
 }
 
 #[test]
-fn test_disjit_returns_vector_for_pure_closure() {
+fn test_disjit_returns_array_for_pure_closure() {
     let (vm, mut symbols) = setup();
     let disjit = get_primitive(&vm, &mut symbols, "disjit");
 
@@ -1899,9 +1899,9 @@ fn test_disjit_returns_vector_for_pure_closure() {
 
     let ir = call_primitive(&disjit, &[result]).unwrap();
     if !ir.is_nil() {
-        let vec = ir.as_vector().expect("disjit should return a vector");
+        let vec = ir.as_array().expect("disjit should return an array");
         let vec = vec.borrow();
-        assert!(!vec.is_empty(), "disjit should return non-empty vector");
+        assert!(!vec.is_empty(), "disjit should return non-empty array");
         for elem in vec.iter() {
             assert!(
                 elem.as_string().is_some(),

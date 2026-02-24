@@ -66,8 +66,8 @@ impl fmt::Display for Value {
             return self.fmt_cons(f);
         }
 
-        // Vector
-        if let Some(vec_ref) = self.as_vector() {
+        // Array
+        if let Some(vec_ref) = self.as_array() {
             let vec = vec_ref.borrow();
             write!(f, "[")?;
             for (i, v) in vec.iter().enumerate() {
@@ -191,8 +191,8 @@ impl fmt::Debug for Value {
         if self.as_cons().is_some() {
             return self.fmt_cons_debug(f);
         }
-        // Vector
-        if let Some(vec_ref) = self.as_vector() {
+        // Array
+        if let Some(vec_ref) = self.as_array() {
             let vec = vec_ref.borrow();
             write!(f, "[")?;
             for (i, v) in vec.iter().enumerate() {

@@ -11,7 +11,7 @@ This document provides comprehensive documentation for all built-in primitives i
 5. [String Operations](#string-operations)
 6. [Type Operations](#type-operations)
 7. [Math Functions](#math-functions)
-8. [Vector Operations](#vector-operations)
+8. [Array Operations](#array-operations)
 9. [Table Operations](#table-operations)
 10. [Struct Operations](#struct-operations)
 11. [Higher-Order Functions](#higher-order-functions)
@@ -1126,41 +1126,41 @@ e
 
 ---
 
-## Vector Operations
+## Array Operations
 
-### `vector` (Create Vector)
+### `array` (Create Array)
 
-**Semantics**: Creates a mutable vector from arguments.
+**Semantics**: Creates a mutable array from arguments.
 
 **Usage**:
 ```lisp
-(var v (vector 1 2 3 4 5))
+(var v (array 1 2 3 4 5))
 (length v)
 ⟹ 5
 ```
 
-**Note**: Use `length` (polymorphic) instead of `vector-length` for getting vector length.
+**Note**: Use `length` (polymorphic) instead of `array-length` for getting array length.
 
-### `vector-ref` (Vector Reference)
+### `array-ref` (Array Reference)
 
 **Semantics**: Returns element at given index.
 
 **Usage**:
 ```lisp
-(var v (vector 'a 'b 'c))
-(vector-ref v 1)
+(var v (array 'a 'b 'c))
+(array-ref v 1)
 ⟹ b
 ```
 
-### `vector-set!` (Vector Set)
+### `array-set!` (Array Set)
 
-**Semantics**: Sets element at given index (mutates vector).
+**Semantics**: Sets element at given index (mutates array).
 
 **Usage**:
 ```lisp
-(var v (vector 1 2 3))
-(vector-set! v 1 99)
-(vector-ref v 1)
+(var v (array 1 2 3))
+(array-set! v 1 99)
+(array-ref v 1)
 ⟹ 99
 ```
 
@@ -2123,7 +2123,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 - Elle `Float` → JSON number (always includes decimal point)
 - Elle `String` → JSON string with proper escaping
 - Elle List → JSON array
-- Elle Vector → JSON array
+- Elle Array → JSON array
 - Elle Table → JSON object (keys must be strings)
 - Elle Struct → JSON object (keys must be strings)
 

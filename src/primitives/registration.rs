@@ -52,6 +52,7 @@ use super::module_loading::{prim_add_module_path, prim_import_file};
 use super::package::{prim_package_info, prim_package_version};
 use super::process::{prim_exit, prim_halt};
 
+use super::array::{prim_array, prim_array_ref, prim_array_set};
 use super::string::{
     prim_any_to_string, prim_char_at, prim_keyword_to_string, prim_number_to_string,
     prim_string_append, prim_string_contains, prim_string_downcase, prim_string_ends_with,
@@ -69,7 +70,6 @@ use super::type_check::{
     prim_is_boolean, prim_is_keyword, prim_is_list, prim_is_nil, prim_is_number, prim_is_pair,
     prim_is_string, prim_is_symbol, prim_type_of,
 };
-use super::vector::{prim_vector, prim_vector_ref, prim_vector_set};
 
 /// Register all primitive functions with the VM.
 /// Returns a map of primitive effects for use by the analyzer.
@@ -464,29 +464,29 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> HashMap<Sy
         Effect::raises(),
     );
 
-    // Vector operations - can raise
+    // Array operations - can raise
     register_fn(
         vm,
         symbols,
         &mut effects,
-        "vector",
-        prim_vector,
+        "array",
+        prim_array,
         Effect::none(),
     );
     register_fn(
         vm,
         symbols,
         &mut effects,
-        "vector-ref",
-        prim_vector_ref,
+        "array-ref",
+        prim_array_ref,
         Effect::raises(),
     );
     register_fn(
         vm,
         symbols,
         &mut effects,
-        "vector-set!",
-        prim_vector_set,
+        "array-set!",
+        prim_array_set,
         Effect::raises(),
     );
 

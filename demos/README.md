@@ -36,7 +36,7 @@ A classic backtracking algorithm that solves the N-Queens chess problem. Tests:
 ### Matrix Operations (`./matrix-ops/`)
 
 Pure Lisp matrix operations testing numeric computation and performance. Tests:
-- **Dense matrix representation** (vector of vectors, 2D arrays)
+- **Dense matrix representation** (array of arrays, 2D arrays)
 - **Numeric computation** (matrix multiply, transpose, LU decomposition)
 - **Performance at different scales** (16x16, 64x64, 256x256 matrices)
 - **Loops vs functional iteration** patterns

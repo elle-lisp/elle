@@ -53,7 +53,7 @@ See `assertions.lisp` for the standard assertion library documentation.
 ### Basics (Tier 1)
 - **hello.lisp** - Simple greeting, basic output, and shebang script examples
 - **math-and-logic.lisp** - Arithmetic, math functions, predicates (even?/odd?), and logical operations (and, or, not, xor)
-- **lists-and-vectors.lisp** - List operations (first, rest, cons), vector operations (vector-ref, vector-set!), and comparisons
+- **lists-and-arrays.lisp** - List operations (first, rest, cons), array operations (array-ref, array-set!), and comparisons
 - **types.lisp** - All atomic types (keywords, symbols, numbers, strings, booleans, nil), type predicates, type conversions, and mutable storage with boxes
 
 ### Computation (Tier 2)
@@ -184,11 +184,11 @@ echo $?
   - Directory operations and path manipulation
   - File information and properties
 
-- `list-operations.lisp` + `vector-operations.lisp` → **lists-and-vectors.lisp**
-  - List operations (first, rest, cons) and List Module
-  - Vector creation, access (vector-ref), and mutation (vector-set!)
-  - Vectors vs lists comparison
-  - Polymorphic length function
+- `list-operations.lisp` + `array-operations.lisp` → **lists-and-arrays.lisp**
+   - List operations (first, rest, cons) and List Module
+   - Array creation, access (array-ref), and mutation (array-set!)
+   - Arrays vs lists comparison
+   - Polymorphic length function
 
 - `math-operations.lisp` + `logic-operations.lisp` → **math-and-logic.lisp**
   - Basic arithmetic (+, -, *, /, mod)
@@ -286,8 +286,8 @@ echo $?
 - `type-checking.lisp` (merged into types.lisp)
 - `keywords.lisp` (renamed to atoms.lisp, then merged into types.lisp)
 - `file-io.lisp` (renamed to io.lisp)
-- `list-operations.lisp` (merged into lists-and-vectors.lisp)
-- `vector-operations.lisp` (merged into lists-and-vectors.lisp)
+- `list-operations.lisp` (merged into lists-and-arrays.lisp)
+- `array-operations.lisp` (merged into lists-and-arrays.lisp)
 - `math-operations.lisp` (merged into math-and-logic.lisp)
 - `logic-operations.lisp` (merged into math-and-logic.lisp)
 - `file-modules.lisp` (merged into modules.lisp)
@@ -308,9 +308,9 @@ echo $?
 
 ### Polymorphic `length` Function Notes
 The `length` function is polymorphic and works on all sequence types:
-- **Lists**: See `lists-and-vectors.lisp`
+- **Lists**: See `lists-and-arrays.lisp`
 - **Strings**: See `string-operations.lisp`
-- **Vectors**: See `lists-and-vectors.lisp`
+- **Arrays**: See `lists-and-arrays.lisp`
 - **Tables/Structs**: See `tables-and-structs.lisp`
 
 Each file now includes a note about the polymorphic nature of `length`.

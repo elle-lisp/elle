@@ -122,9 +122,9 @@ fn test_marshal_strings_to_pointers() {
 }
 
 #[test]
-fn test_marshal_vectors_to_arrays() {
-    // Test marshaling Elle vectors to C arrays
-    let vector = Value::vector(vec![
+fn test_marshal_arrays_to_c_arrays() {
+    // Test marshaling Elle arrays to C arrays
+    let arr = Value::array(vec![
         Value::int(1),
         Value::int(2),
         Value::int(3),
@@ -132,7 +132,7 @@ fn test_marshal_vectors_to_arrays() {
         Value::int(5),
     ]);
 
-    let result = Marshal::elle_to_c(&vector, &CType::Array(Box::new(CType::Int), 5));
+    let result = Marshal::elle_to_c(&arr, &CType::Array(Box::new(CType::Int), 5));
     assert!(result.is_ok());
 
     match result.unwrap() {
@@ -229,7 +229,7 @@ fn test_unmarshal_floats() {
 
 #[test]
 fn test_unmarshal_arrays() {
-    // Test unmarshaling C arrays back to Elle vectors
+    // Test unmarshaling C arrays back to Elle arrays
     let carray = CValue::Array(vec![
         CValue::Int(5),
         CValue::Int(10),
@@ -240,7 +240,7 @@ fn test_unmarshal_arrays() {
     let result = Marshal::c_to_elle(&carray, &CType::Array(Box::new(CType::Int), 4));
     assert!(result.is_ok());
 
-    if let Some(vec_ref) = result.unwrap().as_vector() {
+    if let Some(vec_ref) = result.unwrap().as_array() {
         let vec = vec_ref.borrow();
         assert_eq!(vec.len(), 4);
         assert_eq!(vec[0], Value::int(5));
@@ -248,7 +248,7 @@ fn test_unmarshal_arrays() {
         assert_eq!(vec[2], Value::int(15));
         assert_eq!(vec[3], Value::int(20));
     } else {
-        panic!("Expected Value::Vector");
+        panic!("Expected Value::Array");
     }
 }
 
@@ -289,21 +289,21 @@ fn test_roundtrip_marshal_unmarshal_floats() {
 #[test]
 fn test_roundtrip_marshal_unmarshal_arrays() {
     // Test roundtrip marshaling of arrays
-    let original = Value::vector(vec![Value::int(1), Value::int(2), Value::int(3)]);
+    let original = Value::array(vec![Value::int(1), Value::int(2), Value::int(3)]);
 
     let marshaled = Marshal::elle_to_c(&original, &CType::Array(Box::new(CType::Int), 3)).unwrap();
 
     let unmarshaled =
         Marshal::c_to_elle(&marshaled, &CType::Array(Box::new(CType::Int), 3)).unwrap();
 
-    if let Some(vec_ref) = unmarshaled.as_vector() {
+    if let Some(vec_ref) = unmarshaled.as_array() {
         let vec = vec_ref.borrow();
         assert_eq!(vec.len(), 3);
         assert_eq!(vec[0], Value::int(1));
         assert_eq!(vec[1], Value::int(2));
         assert_eq!(vec[2], Value::int(3));
     } else {
-        panic!("Expected Value::Vector");
+        panic!("Expected Value::Array");
     }
 }
 

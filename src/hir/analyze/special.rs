@@ -109,10 +109,10 @@ impl<'a> Analyzer<'a> {
                     items.iter().map(|p| self.analyze_pattern(p)).collect();
                 Ok(HirPattern::List(patterns?))
             }
-            SyntaxKind::Vector(items) => {
+            SyntaxKind::Array(items) => {
                 let patterns: Result<Vec<_>, _> =
                     items.iter().map(|p| self.analyze_pattern(p)).collect();
-                Ok(HirPattern::Vector(patterns?))
+                Ok(HirPattern::Array(patterns?))
             }
             _ => Err(format!("{}: invalid pattern", syntax.span)),
         }

@@ -49,7 +49,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         let vec = value.list_to_vec()?;
         let elements: Result<Vec<String>, String> = vec.iter().map(serialize_value).collect();
         Ok(format!("[{}]", elements?.join(",")))
-    } else if let Some(v) = value.as_vector() {
+    } else if let Some(v) = value.as_array() {
         let borrowed = v.borrow();
         let elements: Result<Vec<String>, String> = borrowed.iter().map(serialize_value).collect();
         Ok(format!("[{}]", elements?.join(",")))
@@ -94,7 +94,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         match tag {
             HeapTag::String => Err("String should have been handled above".to_string()),
             HeapTag::Cons => Err("Cons should have been handled above".to_string()),
-            HeapTag::Vector => Err("Vector should have been handled above".to_string()),
+            HeapTag::Array => Err("Array should have been handled above".to_string()),
             HeapTag::Table => Err("Table should have been handled above".to_string()),
             HeapTag::Struct => Err("Struct should have been handled above".to_string()),
             HeapTag::Closure => Err("Cannot serialize closures to JSON".to_string()),
@@ -164,7 +164,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             elements?.join(&format!(",\n{}", next_indent)),
             indent
         ))
-    } else if let Some(v) = value.as_vector() {
+    } else if let Some(v) = value.as_array() {
         let borrowed = v.borrow();
         if borrowed.is_empty() {
             return Ok("[]".to_string());
@@ -233,7 +233,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         match tag {
             HeapTag::String => Err("String should have been handled above".to_string()),
             HeapTag::Cons => Err("Cons should have been handled above".to_string()),
-            HeapTag::Vector => Err("Vector should have been handled above".to_string()),
+            HeapTag::Array => Err("Array should have been handled above".to_string()),
             HeapTag::Table => Err("Table should have been handled above".to_string()),
             HeapTag::Struct => Err("Struct should have been handled above".to_string()),
             HeapTag::Closure => Err("Cannot serialize closures to JSON".to_string()),

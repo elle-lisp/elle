@@ -37,7 +37,7 @@ Types are specified as keywords: `:int`, `:double`, `:string`, `:pointer`.
 | `Int` | `int64_t` | Sign-extended for smaller types |
 | `Float` | `double` | Converted to/from `float` as needed |
 | `String` | `char*` | Null-terminated, copied |
-| `Vector` | `T*` | Pointer to contiguous data |
+| `Array` | `T*` | Pointer to contiguous data |
 | `Nil` | `NULL` | Null pointer |
 
 ## Structs

@@ -203,9 +203,9 @@ pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
         "not" => "Logical NOT: (not x)",
         "if" => "Conditional: (if condition then else)",
 
-        // Vector operations
-        "vector-ref" => "Get vector element: (vector-ref v index)",
-        "vector-set!" => "Set vector element: (vector-set! v index value)",
+        // Array operations
+        "array-ref" => "Get array element: (array-ref v index)",
+        "array-set!" => "Set array element: (array-set! v index value)",
 
         // I/O
         "print" => "Print to output: (print x)",

@@ -332,16 +332,16 @@ fn test_location_map_has_valid_line_numbers() {
 }
 
 // ============================================================================
-// Test 15: Spawned closure with vector operations
+// Test 15: Spawned closure with array operations
 // ============================================================================
 
 #[test]
-fn test_spawned_closure_vector_operations() {
-    // Closure performs vector operations
+fn test_spawned_closure_array_operations() {
+    // Closure performs array operations
     let result = eval(
         r#"
         (let ((v [1 2 3]))
-          (join (spawn (fn () (vector-ref v 1)))))
+          (join (spawn (fn () (array-ref v 1)))))
         "#,
     );
 

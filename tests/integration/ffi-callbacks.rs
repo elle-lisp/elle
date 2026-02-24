@@ -175,17 +175,13 @@ fn test_callback_with_complex_values() {
         Value::int(1),
         cons(Value::int(2), cons(Value::int(3), Value::NIL)),
     );
-    let vector = Value::vector(vec![
-        Value::int(10),
-        Value::int(20),
-        Value::int(30),
-    ]);
+    let arr = Value::array(vec![Value::int(10), Value::int(20), Value::int(30)]);
 
     let (id1, _) = create_callback(vec![], CType::Pointer(Box::new(CType::Int)));
     let (id2, _) = create_callback(vec![], CType::Pointer(Box::new(CType::Int)));
 
     assert!(register_callback(id1, Rc::new(list)));
-    assert!(register_callback(id2, Rc::new(vector)));
+    assert!(register_callback(id2, Rc::new(arr)));
 
     // Verify retrieval
     assert!(get_callback(id1).is_some());

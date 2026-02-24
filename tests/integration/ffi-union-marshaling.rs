@@ -36,7 +36,7 @@ fn test_union_basic_int_float() {
     assert_eq!(layout.align, 4);
 
     // Set integer value
-    let value = Value::vector(vec![Value::int(42)]);
+    let value = Value::array(vec![Value::int(42)]);
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     match cval {
@@ -74,7 +74,7 @@ fn test_union_long_double() {
     assert_eq!(layout.align, 8);
 
     // Set long value
-    let value = Value::vector(vec![Value::int(123456789)]);
+    let value = Value::array(vec![Value::int(123456789)]);
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     match cval {
@@ -115,7 +115,7 @@ fn test_union_char_int_long() {
     assert_eq!(layout.align, 8);
 
     // Set char value
-    let value = Value::vector(vec![Value::int(65)]); // 'A'
+    let value = Value::array(vec![Value::int(65)]); // 'A'
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     match cval {
@@ -145,7 +145,7 @@ fn test_union_roundtrip_marshaling() {
         ],
     );
 
-    let value = Value::vector(vec![Value::int(999)]);
+    let value = Value::array(vec![Value::int(999)]);
 
     // Marshal to C
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
@@ -153,7 +153,7 @@ fn test_union_roundtrip_marshaling() {
     // Unmarshal back to Elle
     let result = Marshal::unmarshal_union_with_layout(&cval, &layout).unwrap();
 
-    if let Some(vec_ref) = result.as_vector() {
+    if let Some(vec_ref) = result.as_array() {
         let vec = vec_ref.borrow();
             // Both fields should read the same bytes at offset 0
             assert_eq!(vec.len(), 2);
@@ -162,7 +162,7 @@ fn test_union_roundtrip_marshaling() {
             // Second field (long) at offset 0: also contains 999 (though interpreted as larger value)
             assert_eq!(vec[1], Value::int(999));
     } else {
-        panic!("Expected Vector");
+        panic!("Expected Array");
     }
 }
 
@@ -187,7 +187,7 @@ fn test_union_size_matches_largest_field() {
     assert_eq!(layout.size, 4);
 
     // Set char value (first field)
-    let value = Value::vector(vec![Value::int(65)]); // 'A'
+    let value = Value::array(vec![Value::int(65)]); // 'A'
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     match cval {
@@ -279,7 +279,7 @@ fn test_union_multiple_types() {
     assert_eq!(layout.align, 8); // max alignment
 
     // Test with different field sizes
-    let value = Value::vector(vec![Value::int(32767)]); // max short
+    let value = Value::array(vec![Value::int(32767)]); // max short
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     match cval {
@@ -311,7 +311,7 @@ fn test_union_bool_fields() {
     assert_eq!(layout.size, 4); // max(1, 4)
 
     // Set bool to true
-    let value = Value::vector(vec![Value::bool(true)]);
+    let value = Value::array(vec![Value::bool(true)]);
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     match cval {
@@ -342,7 +342,7 @@ fn test_union_zero_initialize() {
     );
 
     // Set int to 42, rest should be zero-initialized
-    let value = Value::vector(vec![Value::int(42)]);
+    let value = Value::array(vec![Value::int(42)]);
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     match cval {
@@ -369,8 +369,8 @@ fn test_union_error_on_empty_value() {
         }],
     );
 
-    // Empty vector should fail
-    let value = Value::vector(vec![]);
+    // Empty array should fail
+    let value = Value::array(vec![]);
     let result = Marshal::marshal_union_with_layout(&value, &layout);
     assert!(result.is_err());
 }
@@ -393,7 +393,7 @@ fn test_union_error_on_too_many_values() {
     );
 
     // Too many values should fail
-    let value = Value::vector(vec![
+    let value = Value::array(vec![
         Value::int(1),
         Value::int(2),
         Value::int(3),
@@ -403,7 +403,7 @@ fn test_union_error_on_too_many_values() {
 }
 
 #[test]
-fn test_union_non_vector_error() {
+fn test_union_non_array_error() {
     let layout = create_union(
         13,
         "test",
@@ -413,7 +413,7 @@ fn test_union_non_vector_error() {
         }],
     );
 
-    // Non-vector should fail
+    // Non-array should fail
     let value = Value::int(42);
     let result = Marshal::marshal_union_with_layout(&value, &layout);
     assert!(result.is_err());
@@ -438,13 +438,13 @@ fn test_union_unmarshal_all_fields_readable() {
     );
 
     // Set int value
-    let value = Value::vector(vec![Value::int(42)]);
+    let value = Value::array(vec![Value::int(42)]);
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     // Unmarshal returns all fields (they all read from offset 0)
     let result = Marshal::unmarshal_union_with_layout(&cval, &layout).unwrap();
 
-    if let Some(vec_ref) = result.as_vector() {
+    if let Some(vec_ref) = result.as_array() {
         let vec = vec_ref.borrow();
             // Should have 2 values (one for each field)
             assert_eq!(vec.len(), 2);
@@ -458,7 +458,7 @@ fn test_union_unmarshal_all_fields_readable() {
                     panic!("Expected float");
                 }
     } else {
-        panic!("Expected Vector");
+        panic!("Expected Array");
     }
 }
 
@@ -476,7 +476,7 @@ fn test_union_unmarshal_size_check() {
     // Create union with correct size
     let correct_union = CValue::Union(vec![1, 2, 3, 4]);
     let result = Marshal::unmarshal_union_with_layout(&correct_union, &layout).unwrap();
-    assert!((result).is_vector());
+    assert!((result).is_array());
 
     // Create union with wrong size
     let wrong_union = CValue::Union(vec![1, 2]); // size 2 instead of 4
@@ -537,7 +537,7 @@ fn test_union_max_field_types() {
     assert_eq!(layout.size, 8);
 
     // Marshal with int value
-    let value = Value::vector(vec![Value::int(100)]);
+    let value = Value::array(vec![Value::int(100)]);
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     match cval {
@@ -570,7 +570,7 @@ fn test_union_pointer_field() {
     assert_eq!(layout.size, 8);
 
     // Test with int value (first field)
-    let value = Value::vector(vec![Value::int(42)]);
+    let value = Value::array(vec![Value::int(42)]);
     let cval = Marshal::marshal_union_with_layout(&value, &layout).unwrap();
 
     match cval {

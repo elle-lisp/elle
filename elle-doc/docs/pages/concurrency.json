@@ -163,14 +163,14 @@
           "code": "; Capture multiple values for a computation\n(let ((a 2) (b 3) (c 4) (d 5))\n  (let ((handle (spawn (lambda ()\n                         (+ (* a b) (* c d))))))\n    (display (join handle))))  ; prints: 26"
         },
         {
-          "type": "text",
-          "text": "Using vectors and collections in spawned threads:"
-        },
-        {
-          "type": "code",
-          "language": "lisp",
-          "code": "; Spawn with vector capture\n(let ((numbers [1 2 3 4 5]))\n  (let ((handle (spawn (lambda ()\n                         (+ 1 (+ 2 (+ 3 (+ 4 5))))))))\n    (display (join handle))))  ; prints: 15"
-        }
+           "type": "text",
+           "text": "Using arrays and collections in spawned threads:"
+         },
+         {
+           "type": "code",
+           "language": "lisp",
+           "code": "; Spawn with array capture\n(let ((numbers [1 2 3 4 5]))\n  (let ((handle (spawn (lambda ()\n                         (+ 1 (+ 2 (+ 3 (+ 4 5))))))))\n    (display (join handle))))  ; prints: 15"
+         }
       ]
     },
     {

@@ -120,7 +120,7 @@
             ["(symbol? x)", "Check if symbol"],
             ["(keyword? x)", "Check if keyword"],
             ["(list? x)", "Check if list"],
-            ["(vector? x)", "Check if vector"],
+             ["(array? x)", "Check if array"],
             ["(table? x)", "Check if table"],
             ["(function? x)", "Check if function"],
             ["(type-of x)", "Get type name as string"]
@@ -150,23 +150,23 @@
         }
       ]
     },
-    {
-      "heading": "Vector Operations",
-      "level": 2,
-      "content": [
-        {
-          "type": "table",
-          "headers": ["Function", "Description"],
-          "rows": [
-            ["(vector a b ...)", "Create a vector"],
-            ["(nth vec i)", "Get element at index"],
-            ["(length vec)", "Get vector length"],
-            ["(vector-append v1 v2)", "Concatenate vectors"],
-            ["(vector-reverse v)", "Reverse a vector"]
-          ]
-        }
-      ]
-    },
+     {
+       "heading": "Array Operations",
+       "level": 2,
+       "content": [
+         {
+           "type": "table",
+           "headers": ["Function", "Description"],
+           "rows": [
+             ["(array a b ...)", "Create an array"],
+             ["(nth arr i)", "Get element at index"],
+             ["(length arr)", "Get array length"],
+             ["(array-append a1 a2)", "Concatenate arrays"],
+             ["(array-reverse a)", "Reverse an array"]
+           ]
+         }
+       ]
+     },
     {
       "heading": "Table Operations",
       "level": 2,

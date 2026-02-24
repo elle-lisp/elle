@@ -350,11 +350,11 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::MakeVector { dst, elements } => {
+            LirInstr::MakeArray { dst, elements } => {
                 for elem in elements {
                     self.ensure_on_top(*elem);
                 }
-                self.bytecode.emit(Instruction::MakeVector);
+                self.bytecode.emit(Instruction::MakeArray);
                 self.bytecode.emit_byte(elements.len() as u8);
                 for _ in elements {
                     self.pop();

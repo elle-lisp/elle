@@ -30,8 +30,8 @@ impl<'a> Analyzer<'a> {
                 }
             }
 
-            // Vector literal - call vector primitive
-            SyntaxKind::Vector(items) => {
+            // Array literal - call array primitive
+            SyntaxKind::Array(items) => {
                 let mut args = Vec::new();
                 let mut effect = Effect::none();
                 for item in items {
@@ -39,8 +39,8 @@ impl<'a> Analyzer<'a> {
                     effect = effect.combine(hir.effect);
                     args.push(hir);
                 }
-                // Look up the 'vector' primitive and call it with the elements
-                let sym = self.symbols.intern("vector");
+                // Look up the 'array' primitive and call it with the elements
+                let sym = self.symbols.intern("array");
                 let id = self.ctx.fresh_binding();
                 self.ctx.register_binding(BindingInfo::global(id, sym));
                 let func = Hir::new(HirKind::Var(id), span.clone(), Effect::none());

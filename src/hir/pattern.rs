@@ -26,8 +26,8 @@ pub enum HirPattern {
     /// Match a list of specific length
     List(Vec<HirPattern>),
 
-    /// Match a vector of specific length
-    Vector(Vec<HirPattern>),
+    /// Match an array of specific length
+    Array(Vec<HirPattern>),
 }
 
 /// Literal values that can appear in patterns
@@ -77,7 +77,7 @@ impl HirPattern {
                 head.collect_bindings(out);
                 tail.collect_bindings(out);
             }
-            HirPattern::List(patterns) | HirPattern::Vector(patterns) => {
+            HirPattern::List(patterns) | HirPattern::Array(patterns) => {
                 for p in patterns {
                     p.collect_bindings(out);
                 }

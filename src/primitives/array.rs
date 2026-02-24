@@ -1,25 +1,25 @@
-//! Vector operations primitives
+//! Array operations primitives
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{error_val, Value};
 
-/// Create a vector from arguments
-pub fn prim_vector(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::vector(args.to_vec()))
+/// Create an array from arguments
+pub fn prim_array(args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, Value::array(args.to_vec()))
 }
 
-/// Get the length of a vector
-pub fn prim_vector_length(args: &[Value]) -> (SignalBits, Value) {
+/// Get the length of an array
+pub fn prim_array_length(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("vector-length: expected 1 argument, got {}", args.len()),
+                format!("array-length: expected 1 argument, got {}", args.len()),
             ),
         );
     }
 
-    if let Some(v) = args[0].as_vector() {
+    if let Some(v) = args[0].as_array() {
         let borrowed = v.borrow();
         (SIG_OK, Value::int(borrowed.len() as i64))
     } else {
@@ -27,35 +27,32 @@ pub fn prim_vector_length(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!(
-                    "vector-length: expected vector, got {}",
-                    args[0].type_name()
-                ),
+                format!("array-length: expected array, got {}", args[0].type_name()),
             ),
         )
     }
 }
 
-/// Get a reference from a vector at an index
-pub fn prim_vector_ref(args: &[Value]) -> (SignalBits, Value) {
+/// Get a reference from an array at an index
+pub fn prim_array_ref(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("vector-ref: expected 2 arguments, got {}", args.len()),
+                format!("array-ref: expected 2 arguments, got {}", args.len()),
             ),
         );
     }
 
-    let vec = match args[0].as_vector() {
+    let vec = match args[0].as_array() {
         Some(v) => v,
         None => {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("vector-ref: expected vector, got {}", args[0].type_name()),
+                    format!("array-ref: expected array, got {}", args[0].type_name()),
                 ),
             )
         }
@@ -67,7 +64,7 @@ pub fn prim_vector_ref(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("vector-ref: expected integer, got {}", args[1].type_name()),
+                    format!("array-ref: expected integer, got {}", args[1].type_name()),
                 ),
             )
         }
@@ -81,7 +78,7 @@ pub fn prim_vector_ref(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "error",
                 format!(
-                    "vector-ref: index {} out of bounds (length {})",
+                    "array-ref: index {} out of bounds (length {})",
                     index,
                     borrowed.len()
                 ),
@@ -90,26 +87,26 @@ pub fn prim_vector_ref(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Set a value in a vector at an index (returns new vector)
-pub fn prim_vector_set(args: &[Value]) -> (SignalBits, Value) {
+/// Set a value in an array at an index (returns new array)
+pub fn prim_array_set(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 3 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("vector-set!: expected 3 arguments, got {}", args.len()),
+                format!("array-set!: expected 3 arguments, got {}", args.len()),
             ),
         );
     }
 
-    let vec_ref = match args[0].as_vector() {
+    let vec_ref = match args[0].as_array() {
         Some(v) => v,
         None => {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("vector-set!: expected vector, got {}", args[0].type_name()),
+                    format!("array-set!: expected array, got {}", args[0].type_name()),
                 ),
             )
         }
@@ -121,7 +118,7 @@ pub fn prim_vector_set(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("vector-set!: expected integer, got {}", args[1].type_name()),
+                    format!("array-set!: expected integer, got {}", args[1].type_name()),
                 ),
             )
         }
@@ -135,7 +132,7 @@ pub fn prim_vector_set(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "error",
                 format!(
-                    "vector-set!: index {} out of bounds (length {})",
+                    "array-set!: index {} out of bounds (length {})",
                     index,
                     vec.len()
                 ),
@@ -145,5 +142,5 @@ pub fn prim_vector_set(args: &[Value]) -> (SignalBits, Value) {
 
     vec[index] = value;
     drop(vec);
-    (SIG_OK, Value::vector(vec_ref.borrow().clone()))
+    (SIG_OK, Value::array(vec_ref.borrow().clone()))
 }

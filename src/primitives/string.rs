@@ -434,7 +434,7 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::string(format!(":{}", name)));
     }
 
-    // Handle heap types (Cons, Vector, etc.)
+    // Handle heap types (Cons, Array, etc.)
     if let Some(_cons) = val.as_cons() {
         // Format as list "(1 2 3)"
         let mut items = Vec::new();
@@ -477,7 +477,7 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::string(list_str));
     }
 
-    if let Some(vec_ref) = val.as_vector() {
+    if let Some(vec_ref) = val.as_array() {
         // Format as "[1, 2, 3]"
         let vec = vec_ref.borrow();
         let mut formatted_items = Vec::new();
@@ -493,7 +493,7 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
                         SIG_ERROR,
                         error_val(
                             "error",
-                            "to-string: failed to convert vector item".to_string(),
+                            "to-string: failed to convert array item".to_string(),
                         ),
                     )
                 }

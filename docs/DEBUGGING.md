@@ -94,7 +94,7 @@ unchanged (for `jit`) or signal an error (for `jit!`).
 | `raises?` | `(raises? value)` | `#t` or `#f` | Returns `#t` if the closure may raise an exception, `#f` if it is guaranteed not to. Returns `#f` for non-closures. |
 
 This is a boolean query. When we add specific exception type tracking in the
-future (§4.6), the return type will change to a vector of exception type
+future (§4.6), the return type will change to a list of exception type
 keywords. See §4.5 for details.
 
 ### 1.4 Additional introspection
@@ -329,7 +329,7 @@ in the effect's signal bits). Returns `#t` if the closure may raise, `#f`
 otherwise.
 
 When we add specific exception type tracking (§4.6), the return type will
-change to a vector of exception type keywords (`:error`, `:type-error`,
+change to a list of exception type keywords (`:error`, `:type-error`,
 `:division-by-zero`, etc.) for closures that may raise, and `#f` for those
 that don't.
 
@@ -338,7 +338,7 @@ that don't.
 Once the boolean tracking is proven correct, we can extend to
 `BTreeSet<u32>` tracking specific exception IDs. This would enable:
 - `try`/`catch` catching `error` to subtract error and its children
-- `raises?` returning a vector of specific exception type keywords
+- `raises?` returning a list of specific exception type keywords
 - Primitive annotations (e.g., `/` raises `:division-by-zero`)
 
 This is additive — the boolean version is a proper subset of the set version.

@@ -42,7 +42,7 @@ fn print_help() {
     println!("  Integer ops: mod, remainder, even?, odd?");
     println!("  Strings:     string-append, string-upcase, string-downcase,");
     println!("               substring, string-index, char-at");
-    println!("  Vectors:     vector, vector-ref, vector-set!");
+    println!("  Arrays:      array, array-ref, array-set!");
     println!("  Types:       type-of, int, float, string");
     println!("  Logic:       not, if");
     println!("  I/O:         display, newline");

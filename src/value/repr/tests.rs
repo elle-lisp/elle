@@ -115,18 +115,18 @@ fn test_cons_constructor() {
 }
 
 #[test]
-fn test_vector_constructor() {
+fn test_array_constructor() {
     let elements = vec![Value::int(1), Value::int(2), Value::int(3)];
-    let v = Value::vector(elements.clone());
-    assert!(v.is_vector());
-    if let Some(vec_ref) = v.as_vector() {
+    let v = Value::array(elements.clone());
+    assert!(v.is_array());
+    if let Some(vec_ref) = v.as_array() {
         let borrowed = vec_ref.borrow();
         assert_eq!(borrowed.len(), 3);
         assert_eq!(borrowed[0], Value::int(1));
         assert_eq!(borrowed[1], Value::int(2));
         assert_eq!(borrowed[2], Value::int(3));
     } else {
-        panic!("Expected vector");
+        panic!("Expected array");
     }
 }
 
@@ -196,7 +196,7 @@ fn test_type_name() {
         Value::cons(Value::NIL, Value::EMPTY_LIST).type_name(),
         "list"
     );
-    assert_eq!(Value::vector(vec![]).type_name(), "vector");
+    assert_eq!(Value::array(vec![]).type_name(), "array");
     assert_eq!(Value::table().type_name(), "table");
     assert_eq!(Value::cell(Value::NIL).type_name(), "cell");
 }
@@ -220,8 +220,8 @@ fn test_truthiness_semantics() {
     // Empty list is truthy (it's nil, but we test the list form)
     assert!(Value::EMPTY_LIST.is_truthy(), "empty list is truthy");
 
-    // Empty vector is truthy
-    assert!(Value::vector(vec![]).is_truthy(), "empty vector is truthy");
+    // Empty array is truthy
+    assert!(Value::array(vec![]).is_truthy(), "empty array is truthy");
 
     // Regular values are truthy
     assert!(Value::int(1).is_truthy(), "1 is truthy");
@@ -241,9 +241,9 @@ fn test_truthiness_semantics() {
     let non_empty_list = Value::cons(Value::int(1), Value::NIL);
     assert!(non_empty_list.is_truthy(), "non-empty list is truthy");
 
-    // Non-empty vector is truthy
-    let non_empty_vec = Value::vector(vec![Value::int(1)]);
-    assert!(non_empty_vec.is_truthy(), "non-empty vector is truthy");
+    // Non-empty array is truthy
+    let non_empty_vec = Value::array(vec![Value::int(1)]);
+    assert!(non_empty_vec.is_truthy(), "non-empty array is truthy");
 
     // Table is truthy
     assert!(Value::table().is_truthy(), "table is truthy");

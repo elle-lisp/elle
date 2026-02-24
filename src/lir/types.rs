@@ -157,8 +157,8 @@ pub enum LirInstr {
     // === Data Construction ===
     /// Construct a cons cell
     Cons { dst: Reg, head: Reg, tail: Reg },
-    /// Construct a vector
-    MakeVector { dst: Reg, elements: Vec<Reg> },
+    /// Construct an array
+    MakeArray { dst: Reg, elements: Vec<Reg> },
     /// Get car of cons
     Car { dst: Reg, pair: Reg },
     /// Get cdr of cons

@@ -58,8 +58,8 @@ fn test_spawn_closure_with_string_capture() {
 }
 
 #[test]
-fn test_spawn_closure_with_vector_capture() {
-    // Test spawning a closure that captures a vector
+fn test_spawn_closure_with_array_capture() {
+    // Test spawning a closure that captures an array
     let result = eval(
         r#"
         (let ((v [1 2 3]))
@@ -356,8 +356,8 @@ fn test_spawn_jit_closure_with_string_capture() {
 }
 
 #[test]
-fn test_spawn_jit_closure_with_vector_capture() {
-    // Test spawning a closure that captures a vector
+fn test_spawn_jit_closure_with_array_capture() {
+    // Test spawning a closure that captures an array
     let result = eval(
         r#"
         (let ((v [10 20 30]))
