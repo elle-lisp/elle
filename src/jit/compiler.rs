@@ -58,7 +58,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) cons: FuncId,
     pub(crate) car: FuncId,
     pub(crate) cdr: FuncId,
-    pub(crate) make_vector: FuncId,
+    pub(crate) make_array: FuncId,
     pub(crate) is_nil: FuncId,
     pub(crate) is_pair: FuncId,
     #[allow(dead_code)]
@@ -130,8 +130,8 @@ impl JitCompiler {
         builder.symbol("elle_jit_car", dispatch::elle_jit_car as *const u8);
         builder.symbol("elle_jit_cdr", dispatch::elle_jit_cdr as *const u8);
         builder.symbol(
-            "elle_jit_make_vector",
-            dispatch::elle_jit_make_vector as *const u8,
+            "elle_jit_make_array",
+            dispatch::elle_jit_make_array as *const u8,
         );
         builder.symbol("elle_jit_is_pair", dispatch::elle_jit_is_pair as *const u8);
         builder.symbol(
@@ -200,11 +200,11 @@ impl JitCompiler {
         ternary_sig.params.push(AbiParam::new(I64));
         ternary_sig.returns.push(AbiParam::new(I64));
 
-        // Make vector signature: (ptr, count) -> i64
-        let mut make_vector_sig = module.make_signature();
-        make_vector_sig.params.push(AbiParam::new(I64)); // elements ptr
-        make_vector_sig.params.push(AbiParam::new(I64)); // count (as i64)
-        make_vector_sig.returns.push(AbiParam::new(I64));
+        // Make array signature: (ptr, count) -> i64
+        let mut make_array_sig = module.make_signature();
+        make_array_sig.params.push(AbiParam::new(I64)); // elements ptr
+        make_array_sig.params.push(AbiParam::new(I64)); // count (as i64)
+        make_array_sig.returns.push(AbiParam::new(I64));
 
         // Call signature: (func, args_ptr, nargs, vm) -> i64
         let mut call_sig = module.make_signature();
@@ -244,7 +244,7 @@ impl JitCompiler {
             cons: declare(module, "elle_jit_cons", &binary_sig)?,
             car: declare(module, "elle_jit_car", &unary_sig)?,
             cdr: declare(module, "elle_jit_cdr", &unary_sig)?,
-            make_vector: declare(module, "elle_jit_make_vector", &make_vector_sig)?,
+            make_array: declare(module, "elle_jit_make_array", &make_array_sig)?,
             is_nil: declare(module, "elle_jit_is_nil", &unary_sig)?,
             is_pair: declare(module, "elle_jit_is_pair", &unary_sig)?,
             is_truthy: declare(module, "elle_jit_is_truthy", &unary_sig)?,

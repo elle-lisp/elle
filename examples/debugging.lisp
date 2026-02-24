@@ -45,17 +45,17 @@
 
 ;; disbit - bytecode disassembly
 (var disasm-result (disbit add))
-(assert-true (> (length disasm-result) 0) "disbit returns non-empty vector")
-(assert-true (string? (vector-ref disasm-result 0)) "disbit elements are strings")
+(assert-true (> (length disasm-result) 0) "disbit returns non-empty array")
+(assert-true (string? (array-ref disasm-result 0)) "disbit elements are strings")
 (display "  ✓ disbit\n")
 
 ;; disjit - Cranelift IR (may be nil if no LIR stored)
 (var jit-result (disjit add))
-;; disjit returns nil or a vector of strings
+;; disjit returns nil or an array of strings
 (assert-true (or (nil? jit-result)
                  (and (> (length jit-result) 0)
-                      (string? (vector-ref jit-result 0))))
-             "disjit returns nil or vector of strings")
+                      (string? (array-ref jit-result 0))))
+             "disjit returns nil or array of strings")
 (display "  ✓ disjit\n")
 
 (display "\n=== All debugging toolkit tests passed ===\n")

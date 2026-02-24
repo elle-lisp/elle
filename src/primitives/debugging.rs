@@ -234,7 +234,7 @@ pub fn prim_string_to_keyword(args: &[Value]) -> (SignalBits, Value) {
 // Disassembly
 // ============================================================================
 
-/// (disbit closure) — disassemble bytecode as vector of strings
+/// (disbit closure) — disassemble bytecode as array of strings
 pub fn prim_disbit(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -252,7 +252,7 @@ pub fn prim_disbit(args: &[Value]) -> (SignalBits, Value) {
         }
         (
             SIG_OK,
-            Value::vector(lines.into_iter().map(Value::string).collect()),
+            Value::array(lines.into_iter().map(Value::string).collect()),
         )
     } else {
         (
@@ -265,7 +265,7 @@ pub fn prim_disbit(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (disjit closure) — return Cranelift IR as vector of strings, or nil
+/// (disjit closure) — return Cranelift IR as array of strings, or nil
 pub fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -288,7 +288,7 @@ pub fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
         match compiler.clif_text(&lir) {
             Ok(lines) => (
                 SIG_OK,
-                Value::vector(lines.into_iter().map(Value::string).collect()),
+                Value::array(lines.into_iter().map(Value::string).collect()),
             ),
             Err(_) => (SIG_OK, Value::NIL),
         }

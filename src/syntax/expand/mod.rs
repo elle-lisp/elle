@@ -152,8 +152,8 @@ impl Expander {
                 // Not a macro call - expand children recursively
                 self.expand_list(items, syntax.span, syntax.scopes, symbols, vm)
             }
-            SyntaxKind::Vector(items) => {
-                self.expand_vector(items, syntax.span, syntax.scopes, symbols, vm)
+            SyntaxKind::Array(items) => {
+                self.expand_array(items, syntax.span, syntax.scopes, symbols, vm)
             }
             SyntaxKind::Quote(_) => {
                 // Don't expand inside quote
@@ -231,7 +231,7 @@ impl Expander {
                     .map(|item| self.add_scope_recursive(item, scope))
                     .collect(),
             ),
-            SyntaxKind::Vector(items) => SyntaxKind::Vector(
+            SyntaxKind::Array(items) => SyntaxKind::Array(
                 items
                     .into_iter()
                     .map(|item| self.add_scope_recursive(item, scope))
@@ -278,7 +278,7 @@ impl Expander {
         ))
     }
 
-    fn expand_vector(
+    fn expand_array(
         &mut self,
         items: &[Syntax],
         span: Span,
@@ -291,7 +291,7 @@ impl Expander {
             .map(|item| self.expand(item.clone(), symbols, vm))
             .collect();
         Ok(Syntax::with_scopes(
-            SyntaxKind::Vector(expanded?),
+            SyntaxKind::Array(expanded?),
             span,
             scopes,
         ))

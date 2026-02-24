@@ -143,11 +143,11 @@ pub fn builtin_arity(name: &str) -> Option<usize> {
         "type-of" => Some(1),
         // Logic
         "not" => Some(1),
-        // Vector operations
-        "vector-ref" => Some(2),
-        "vector-set!" => Some(3),
+        // Array operations
+        "array-ref" => Some(2),
+        "array-set!" => Some(3),
         // Variadic or special forms - return None
-        "list" | "vector" | "var" | "def" | "quote" | "begin" | "let" | "let*" | "fn" | "match"
+        "list" | "array" | "var" | "def" | "quote" | "begin" | "let" | "let*" | "fn" | "match"
         | "if" | "while" | "forever" | "each" => None,
         _ => None,
     }

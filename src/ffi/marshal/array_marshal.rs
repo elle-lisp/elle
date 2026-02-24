@@ -5,7 +5,7 @@ use crate::value::Value;
 
 /// Marshal an array value to C representation.
 pub fn marshal_array(value: &Value, elem_type: &CType, _count: usize) -> Result<CValue, String> {
-    if let Some(vec_ref) = value.as_vector() {
+    if let Some(vec_ref) = value.as_array() {
         let mut elements = Vec::new();
         let vec = vec_ref.borrow();
         for elem in vec.iter() {
@@ -33,7 +33,7 @@ pub fn unmarshal_array(cvalue: &CValue, elem_type: &CType) -> Result<Value, Stri
             for elem in elements {
                 result.push(conversions::c_to_elle(elem, elem_type)?);
             }
-            Ok(Value::vector(result))
+            Ok(Value::array(result))
         }
         _ => Err("Type mismatch in unmarshal: expected array".to_string()),
     }
@@ -44,8 +44,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_marshal_vector_as_array() {
-        let val = Value::vector(vec![Value::int(1), Value::int(2), Value::int(3)]);
+    fn test_marshal_array_as_c_array() {
+        let val = Value::array(vec![Value::int(1), Value::int(2), Value::int(3)]);
         let cval = marshal_array(&val, &CType::Int, 3).unwrap();
         match cval {
             CValue::Array(elems) => {
@@ -76,17 +76,17 @@ mod tests {
     }
 
     #[test]
-    fn test_unmarshal_array_to_vector() {
+    fn test_unmarshal_c_array_to_array() {
         let cval = CValue::Array(vec![CValue::Int(5), CValue::Int(10), CValue::Int(15)]);
         let val = unmarshal_array(&cval, &CType::Int).unwrap();
-        if let Some(vec_ref) = val.as_vector() {
+        if let Some(vec_ref) = val.as_array() {
             let vec = vec_ref.borrow();
             assert_eq!(vec.len(), 3);
             assert_eq!(vec[0], Value::int(5));
             assert_eq!(vec[1], Value::int(10));
             assert_eq!(vec[2], Value::int(15));
         } else {
-            panic!("Expected Vector");
+            panic!("Expected Array");
         }
     }
 }

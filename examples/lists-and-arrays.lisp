@@ -1,8 +1,8 @@
-; Lists and Vectors - Sequence operations and comparisons
+; Lists and Arrays - Sequence operations and comparisons
 
 (import-file "./examples/assertions.lisp")
 
-(display "=== Lists and Vectors ===")
+(display "=== Lists and Arrays ===")
 (newline)
 (newline)
 
@@ -406,111 +406,111 @@
 (newline)
 
 ; ============================================================================
-; PART 2: Vector Operations
+; PART 2: Array Operations
 ; ============================================================================
 
-(display "PART 2: Vector Operations")
+(display "PART 2: Array Operations")
 (newline)
 (newline)
 
-; === Vector Creation ===
-(display "Part 2a: Vector Creation")
+; === Array Creation ===
+(display "Part 2a: Array Creation")
 (newline)
 
-; Create a vector with 5 elements
-(var my-vector (vector 10 20 30 40 50))
-(display "Created vector: ")
-(display my-vector)
+; Create an array with 5 elements
+(var my-array (array 10 20 30 40 50))
+(display "Created array: ")
+(display my-array)
 (newline)
 (newline)
 
-; === Vector Length ===
-(display "Part 2b: Vector Length")
+; === Array Length ===
+(display "Part 2b: Array Length")
 (newline)
 
-; Get the length of the vector
-(display "Vector length: ")
-(display (length my-vector))
+; Get the length of the array
+(display "Array length: ")
+(display (length my-array))
 (newline)
-(assert-eq (length my-vector) 5 "length returns correct length for vector")
+(assert-eq (length my-array) 5 "length returns correct length for array")
 
-; Empty vector has length 0
-(var empty-vec (vector))
-(assert-eq (length empty-vec) 0 "empty vector has length 0")
+; Empty array has length 0
+(var empty-arr (array))
+(assert-eq (length empty-arr) 0 "empty array has length 0")
 (newline)
 
-; === Vector Access (vector-ref) ===
-(display "Part 2c: Vector Access (vector-ref)")
+; === Array Access (array-ref) ===
+(display "Part 2c: Array Access (array-ref)")
 (newline)
 
 ; Access first element (index 0)
 (display "Element at index 0: ")
-(display (vector-ref my-vector 0))
+(display (array-ref my-array 0))
 (newline)
-(assert-eq (vector-ref my-vector 0) 10 "vector-ref index 0 returns first element")
+(assert-eq (array-ref my-array 0) 10 "array-ref index 0 returns first element")
 
 ; Access middle element
 (display "Element at index 2: ")
-(display (vector-ref my-vector 2))
+(display (array-ref my-array 2))
 (newline)
-(assert-eq (vector-ref my-vector 2) 30 "vector-ref index 2 returns middle element")
+(assert-eq (array-ref my-array 2) 30 "array-ref index 2 returns middle element")
 
 ; Access last element
 (display "Element at index 4: ")
-(display (vector-ref my-vector 4))
+(display (array-ref my-array 4))
 (newline)
-(assert-eq (vector-ref my-vector 4) 50 "vector-ref index 4 returns last element")
-(newline)
-
-; === Vector Mutation (vector-set!) ===
-(display "Part 2d: Vector Mutation (vector-set!)")
+(assert-eq (array-ref my-array 4) 50 "array-ref index 4 returns last element")
 (newline)
 
-; Create a mutable vector
-(var mutable-vec (vector 1 2 3 4 5))
-(display "Original vector: ")
-(display mutable-vec)
+; === Array Mutation (array-set!) ===
+(display "Part 2d: Array Mutation (array-set!)")
 (newline)
 
-; Modify first element - vector-set! returns a new vector
-(var mutable-vec (vector-set! mutable-vec 0 100))
+; Create a mutable array
+(var mutable-arr (array 1 2 3 4 5))
+(display "Original array: ")
+(display mutable-arr)
+(newline)
+
+; Modify first element - array-set! returns a new array
+(var mutable-arr (array-set! mutable-arr 0 100))
 (display "After setting index 0 to 100: ")
-(display mutable-vec)
+(display mutable-arr)
 (newline)
-(assert-eq (vector-ref mutable-vec 0) 100 "vector-set! returns new vector with modified element")
+(assert-eq (array-ref mutable-arr 0) 100 "array-set! returns new array with modified element")
 
 ; Modify middle element
-(var mutable-vec (vector-set! mutable-vec 2 300))
+(var mutable-arr (array-set! mutable-arr 2 300))
 (display "After setting index 2 to 300: ")
-(display mutable-vec)
+(display mutable-arr)
 (newline)
-(assert-eq (vector-ref mutable-vec 2) 300 "vector-set! modifies element at index 2")
+(assert-eq (array-ref mutable-arr 2) 300 "array-set! modifies element at index 2")
 
 ; Modify last element
-(var mutable-vec (vector-set! mutable-vec 4 500))
+(var mutable-arr (array-set! mutable-arr 4 500))
 (display "After setting index 4 to 500: ")
-(display mutable-vec)
+(display mutable-arr)
 (newline)
-(assert-eq (vector-ref mutable-vec 4) 500 "vector-set! modifies element at index 4")
-(newline)
-
-; === Vectors vs Lists ===
-(display "Part 2e: Vectors vs Lists")
+(assert-eq (array-ref mutable-arr 4) 500 "array-set! modifies element at index 4")
 (newline)
 
-; Create equivalent list and vector
+; === Arrays vs Lists ===
+(display "Part 2e: Arrays vs Lists")
+(newline)
+
+; Create equivalent list and array
 (var my-list-2 (list 1 2 3 4 5))
-(var my-vec-2 (vector 1 2 3 4 5))
+(var my-arr-2 (array 1 2 3 4 5))
 
 (display "List: ")
 (display my-list-2)
 (newline)
-(display "Vector: ")
-(display my-vec-2)
+(display "Array: ")
+(display my-arr-2)
 (newline)
 
-; Note: vectors and lists are different types
-; Vectors are mutable, lists are immutable
+; Note: arrays and lists are different types
+; Arrays are mutable, lists are immutable
 
 ; Both have length
 (display "List length: ")
@@ -518,29 +518,29 @@
 (newline)
 (assert-eq (length my-list-2) 5 "list length works")
 
-(display "Vector length: ")
-(display (length my-vec-2))
+(display "Array length: ")
+(display (length my-arr-2))
 (newline)
-(assert-eq (length my-vec-2) 5 "vector length works")
+(assert-eq (length my-arr-2) 5 "array length works")
 
-; Lists use first/rest, vectors use vector-ref
+; Lists use first/rest, arrays use array-ref
 (display "List first element: ")
 (display (first my-list-2))
 (newline)
 (assert-eq (first my-list-2) 1 "list first element")
 
-(display "Vector first element: ")
-(display (vector-ref my-vec-2 0))
+(display "Array first element: ")
+(display (array-ref my-arr-2 0))
 (newline)
-(assert-eq (vector-ref my-vec-2 0) 1 "vector first element")
+(assert-eq (array-ref my-arr-2 0) 1 "array first element")
 
-; Vectors are mutable, lists are immutable
+; Arrays are mutable, lists are immutable
 (var test-list (list 10 20 30))
-(var test-vec (vector 10 20 30))
+(var test-arr (array 10 20 30))
 
-; Modify vector - vector-set! returns a new vector
-(var test-vec (vector-set! test-vec 1 200))
-(assert-eq (vector-ref test-vec 1) 200 "vector mutation works")
+; Modify array - array-set! returns a new array
+(var test-arr (array-set! test-arr 1 200))
+(assert-eq (array-ref test-arr 1) 200 "array mutation works")
 
 ; Lists are immutable - cons creates new list
 (var modified-list (cons 5 test-list))
@@ -548,19 +548,19 @@
 (assert-eq (first modified-list) 5 "cons creates new list")
 (newline)
 
-; === Vector with Different Types ===
-(display "Part 2f: Vector with Different Types")
+; === Array with Different Types ===
+(display "Part 2f: Array with Different Types")
 (newline)
 
-; Create vector with mixed types
-(var mixed-vec (vector 42 "hello" 'symbol))
-(display "Mixed type vector: ")
-(display mixed-vec)
+; Create array with mixed types
+(var mixed-arr (array 42 "hello" 'symbol))
+(display "Mixed type array: ")
+(display mixed-arr)
 (newline)
 
-(assert-eq (vector-ref mixed-vec 0) 42 "vector stores numbers")
-(assert-eq (vector-ref mixed-vec 1) "hello" "vector stores strings")
-(assert-eq (vector-ref mixed-vec 2) 'symbol "vector stores symbols")
+(assert-eq (array-ref mixed-arr 0) 42 "array stores numbers")
+(assert-eq (array-ref mixed-arr 1) "hello" "array stores strings")
+(assert-eq (array-ref mixed-arr 2) 'symbol "array stores symbols")
 (newline)
 
 ; ============================================================================
@@ -570,19 +570,19 @@
 (display "PART 3: Polymorphic Operations")
 (newline)
 
-; The `length` function works on both lists and vectors
+; The `length` function works on both lists and arrays
 (var list-len (length (list 1 2 3)))
-(var vec-len (length (vector 1 2 3)))
+(var arr-len (length (array 1 2 3)))
 
 (display "List length: ")
 (display list-len)
 (newline)
 (assert-eq list-len 3 "length works on lists")
 
-(display "Vector length: ")
-(display vec-len)
+(display "Array length: ")
+(display arr-len)
 (newline)
-(assert-eq vec-len 3 "length works on vectors")
+(assert-eq arr-len 3 "length works on arrays")
 
 (display "✓ Polymorphic length verified")
 (newline)
@@ -594,7 +594,7 @@
 
 (display "=== Summary ===")
 (newline)
-(display "Lists and Vectors in Elle:")
+(display "Lists and Arrays in Elle:")
 (newline)
 (display "1. List operations - cons, first/rest, length, reverse, take/drop, nth/last, append")
 (newline)
@@ -602,17 +602,17 @@
 (newline)
 (display "3. Nested lists - Working with lists of lists")
 (newline)
-(display "4. Vector creation - Creating vectors with vector function")
+(display "4. Array creation - Creating arrays with array function")
 (newline)
-(display "5. Vector access - Using vector-ref to access elements")
+(display "5. Array access - Using array-ref to access elements")
 (newline)
-(display "6. Vector mutation - Using vector-set! to modify elements")
+(display "6. Array mutation - Using array-set! to modify elements")
 (newline)
-(display "7. Polymorphic operations - length works on both lists and vectors")
+(display "7. Polymorphic operations - length works on both lists and arrays")
 (newline)
 (newline)
 
-(display "=== Lists and Vectors Complete - All Assertions Passed ===")
+(display "=== Lists and Arrays Complete - All Assertions Passed ===")
 (newline)
 
 (exit 0)

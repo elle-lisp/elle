@@ -197,8 +197,8 @@ fn test_debug_print_with_nested_structures() {
     // debug-print with nested lists
     assert!(eval("(debug-print (list (list 1 2) (list 3 4)))").is_ok());
 
-    // debug-print with vectors
-    assert!(eval("(debug-print (vector 1 2 3))").is_ok());
+    // debug-print with arrays
+    assert!(eval("(debug-print (array 1 2 3))").is_ok());
 }
 
 #[test]

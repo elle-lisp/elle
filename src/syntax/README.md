@@ -25,7 +25,7 @@ pub struct Syntax {
 pub enum SyntaxKind {
     Nil, Bool(bool), Int(i64), Float(f64),
     Symbol(String), Keyword(String), String(String),
-    List(Vec<Syntax>), Vector(Vec<Syntax>),
+    List(Vec<Syntax>), Array(Vec<Syntax>),
     Quote(Box<Syntax>), Quasiquote(Box<Syntax>),
     Unquote(Box<Syntax>), UnquoteSplicing(Box<Syntax>),
 }

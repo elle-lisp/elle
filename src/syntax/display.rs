@@ -29,7 +29,7 @@ impl fmt::Display for SyntaxKind {
                 }
                 write!(f, ")")
             }
-            SyntaxKind::Vector(items) => {
+            SyntaxKind::Array(items) => {
                 write!(f, "[")?;
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {

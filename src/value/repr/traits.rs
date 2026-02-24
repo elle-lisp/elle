@@ -28,8 +28,8 @@ impl PartialEq for Value {
                 // Cons cell comparison
                 (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1 == c2,
 
-                // Vector comparison (compare contents)
-                (HeapObject::Vector(v1), HeapObject::Vector(v2)) => {
+                // Array comparison (compare contents)
+                (HeapObject::Array(v1), HeapObject::Array(v2)) => {
                     v1.borrow().as_slice() == v2.borrow().as_slice()
                 }
 

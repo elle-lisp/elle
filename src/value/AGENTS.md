@@ -86,7 +86,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 NaN-boxing uses the NaN space of IEEE 754 doubles:
 
 - **Immediate**: nil, bool, int (i48), symbol, keyword, float
-- **Heap pointer**: cons, vector, table, closure, fiber, cell, syntax, etc.
+- **Heap pointer**: cons, array, table, closure, fiber, cell, syntax, etc.
 
 ### Syntax objects
 

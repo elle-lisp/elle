@@ -128,11 +128,11 @@ fn test_nested_lists() {
 }
 
 #[test]
-fn test_vector() {
+fn test_array() {
     let vec = vec![Value::int(1), Value::int(2), Value::int(3)];
-    let v = Value::vector(vec);
+    let v = Value::array(vec);
 
-    let vec_ref = v.as_vector().unwrap();
+    let vec_ref = v.as_array().unwrap();
     let borrowed = vec_ref.borrow();
     assert_eq!(borrowed.len(), 3);
     assert_eq!(borrowed[0], Value::int(1));

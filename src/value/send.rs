@@ -33,8 +33,8 @@ pub enum SendValue {
     /// Deep copy of cons cells
     Cons(Box<SendValue>, Box<SendValue>),
 
-    /// Deep copy of vectors
-    Vector(Vec<SendValue>),
+    /// Deep copy of arrays
+    Array(Vec<SendValue>),
 
     /// Deep copy of structs (immutable maps)
     Struct(BTreeMap<crate::value::heap::TableKey, SendValue>),
@@ -92,14 +92,14 @@ impl SendValue {
                 Ok(SendValue::Cons(Box::new(first), Box::new(rest)))
             }
 
-            // Vectors - deep copy all elements
-            HeapObject::Vector(vec_ref) => {
+            // Arrays - deep copy all elements
+            HeapObject::Array(vec_ref) => {
                 let borrowed = vec_ref
                     .try_borrow()
-                    .map_err(|_| "Cannot borrow vector for sending".to_string())?;
+                    .map_err(|_| "Cannot borrow array for sending".to_string())?;
                 let copied: Result<Vec<SendValue>, String> =
                     borrowed.iter().map(|v| SendValue::from_value(*v)).collect();
-                Ok(SendValue::Vector(copied?))
+                Ok(SendValue::Array(copied?))
             }
 
             // Structs - deep copy all values
@@ -170,9 +170,9 @@ impl SendValue {
                 let cons = Cons::new(first_val, rest_val);
                 alloc(HeapObject::Cons(cons))
             }
-            SendValue::Vector(items) => {
+            SendValue::Array(items) => {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
-                alloc(HeapObject::Vector(std::cell::RefCell::new(values)))
+                alloc(HeapObject::Array(std::cell::RefCell::new(values)))
             }
             SendValue::Struct(map) => {
                 let values: BTreeMap<_, _> = map

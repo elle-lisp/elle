@@ -103,7 +103,7 @@ impl SyntaxReader {
     fn read_one(&mut self, token: &OwnedToken, loc: &SourceLoc) -> Result<Syntax, String> {
         match token {
             OwnedToken::LeftParen => self.read_list(loc),
-            OwnedToken::LeftBracket => self.read_vector(loc),
+            OwnedToken::LeftBracket => self.read_array(loc),
             OwnedToken::LeftBrace => self.read_struct(loc),
             OwnedToken::ListSugar => self.read_list_sugar(loc),
 
@@ -210,7 +210,7 @@ impl SyntaxReader {
         }
     }
 
-    fn read_vector(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_array(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
         self.advance(); // skip [
         let mut elements = Vec::new();
 
@@ -218,7 +218,7 @@ impl SyntaxReader {
             match self.current() {
                 None => {
                     return Err(format!(
-                        "{}: unterminated vector (missing closing bracket)",
+                        "{}: unterminated array (missing closing bracket)",
                         start_loc.position()
                     ));
                 }
@@ -226,7 +226,7 @@ impl SyntaxReader {
                     let end_loc = self.current_location();
                     self.advance();
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
-                    return Ok(Syntax::new(SyntaxKind::Vector(elements), span));
+                    return Ok(Syntax::new(SyntaxKind::Array(elements), span));
                 }
                 _ => elements.push(self.read()?),
             }
@@ -465,22 +465,22 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_empty_vector() {
+    fn test_parse_empty_array() {
         let result = lex_and_parse("[]").unwrap();
-        assert!(matches!(result.kind, SyntaxKind::Vector(ref items) if items.is_empty()));
+        assert!(matches!(result.kind, SyntaxKind::Array(ref items) if items.is_empty()));
     }
 
     #[test]
-    fn test_parse_simple_vector() {
+    fn test_parse_simple_array() {
         let result = lex_and_parse("[1 2 3]").unwrap();
         match result.kind {
-            SyntaxKind::Vector(ref items) => {
+            SyntaxKind::Array(ref items) => {
                 assert_eq!(items.len(), 3);
                 assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
                 assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
                 assert!(matches!(items[2].kind, SyntaxKind::Int(3)));
             }
-            _ => panic!("Expected vector"),
+            _ => panic!("Expected array"),
         }
     }
 
@@ -507,13 +507,13 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_list_with_vector() {
+    fn test_parse_list_with_array() {
         let result = lex_and_parse("(1 [2 3] 4)").unwrap();
         match result.kind {
             SyntaxKind::List(ref items) => {
                 assert_eq!(items.len(), 3);
                 assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
-                assert!(matches!(items[1].kind, SyntaxKind::Vector(_)));
+                assert!(matches!(items[1].kind, SyntaxKind::Array(_)));
                 assert!(matches!(items[2].kind, SyntaxKind::Int(4)));
             }
             _ => panic!("Expected list"),
@@ -628,7 +628,7 @@ mod tests {
     fn test_unclosed_bracket() {
         let result = lex_and_parse("[1 2 3");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unterminated vector"));
+        assert!(result.unwrap_err().contains("unterminated array"));
     }
 
     #[test]
@@ -717,7 +717,7 @@ mod tests {
         assert!(matches!(result[0].kind, SyntaxKind::Int(42)));
         assert!(matches!(result[1].kind, SyntaxKind::Symbol(_)));
         assert!(matches!(result[2].kind, SyntaxKind::List(_)));
-        assert!(matches!(result[3].kind, SyntaxKind::Vector(_)));
+        assert!(matches!(result[3].kind, SyntaxKind::Array(_)));
     }
 
     #[test]

@@ -28,6 +28,9 @@ Enforces kebab-case naming for all identifiers.
 
 ✗ (def setValue! (fn [x v] v))  ; Error: should be set-value!
 ✓ (def set-value! (fn [x v] v)) ; Correct
+
+✗ (def arraySet! (fn [a i v] v))  ; Error: should be array-set!
+✓ (def array-set! (fn [a i v] v)) ; Correct
 ```
 
 ### Planned Rules

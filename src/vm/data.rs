@@ -99,7 +99,7 @@ pub fn handle_cdr(vm: &mut VM) {
     }
 }
 
-pub fn handle_make_vector(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+pub fn handle_make_array(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let size = vm.read_u8(bytecode, ip) as usize;
     let mut vec = Vec::with_capacity(size);
     for _ in 0..size {
@@ -107,44 +107,41 @@ pub fn handle_make_vector(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
             vm.fiber
                 .stack
                 .pop()
-                .expect("VM bug: Stack underflow on MakeVector"),
+                .expect("VM bug: Stack underflow on MakeArray"),
         );
     }
     vec.reverse();
-    vm.fiber.stack.push(Value::vector(vec));
+    vm.fiber.stack.push(Value::array(vec));
 }
 
-pub fn handle_vector_ref(vm: &mut VM) {
+pub fn handle_array_ref(vm: &mut VM) {
     let idx = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on VectorRef");
+        .expect("VM bug: Stack underflow on ArrayRef");
     let vec = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on VectorRef");
+        .expect("VM bug: Stack underflow on ArrayRef");
     let Some(idx_val) = idx.as_int() else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!(
-                    "vector-ref: expected integer index, got {}",
-                    idx.type_name()
-                ),
+                format!("array-ref: expected integer index, got {}", idx.type_name()),
             ),
         ));
         vm.fiber.stack.push(Value::NIL);
         return;
     };
-    let Some(vec_ref) = vec.as_vector() else {
+    let Some(vec_ref) = vec.as_array() else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("vector-ref: expected vector, got {}", vec.type_name()),
+                format!("array-ref: expected array, got {}", vec.type_name()),
             ),
         ));
         vm.fiber.stack.push(Value::NIL);
@@ -161,7 +158,7 @@ pub fn handle_vector_ref(vm: &mut VM) {
                 error_val(
                     "error",
                     format!(
-                        "vector-ref: index {} out of bounds (length {})",
+                        "array-ref: index {} out of bounds (length {})",
                         idx_val,
                         vec_borrow.len()
                     ),
@@ -172,29 +169,29 @@ pub fn handle_vector_ref(vm: &mut VM) {
     }
 }
 
-pub fn handle_vector_set(vm: &mut VM) {
+pub fn handle_array_set(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on VectorSet");
+        .expect("VM bug: Stack underflow on ArraySet");
     let idx = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on VectorSet");
+        .expect("VM bug: Stack underflow on ArraySet");
     let vec = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on VectorSet");
+        .expect("VM bug: Stack underflow on ArraySet");
     let Some(_idx_val) = idx.as_int() else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
                 "type-error",
                 format!(
-                    "vector-set!: expected integer index, got {}",
+                    "array-set!: expected integer index, got {}",
                     idx.type_name()
                 ),
             ),
@@ -202,17 +199,17 @@ pub fn handle_vector_set(vm: &mut VM) {
         vm.fiber.stack.push(Value::NIL);
         return;
     };
-    if vec.as_vector().is_none() {
+    if vec.as_array().is_none() {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("vector-set!: expected vector, got {}", vec.type_name()),
+                format!("array-set!: expected array, got {}", vec.type_name()),
             ),
         ));
         vm.fiber.stack.push(Value::NIL);
         return;
     }
-    // Note: Vectors are immutable in this implementation
+    // Note: Arrays are immutable in this implementation
     vm.fiber.stack.push(val);
 }

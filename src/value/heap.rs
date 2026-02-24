@@ -38,7 +38,7 @@ impl Cons {
 pub enum HeapTag {
     String = 0,
     Cons = 1,
-    Vector = 2,
+    Array = 2,
     Table = 3,
     Struct = 4,
     Closure = 5,
@@ -65,8 +65,8 @@ pub enum HeapObject {
     /// Cons cell (list pair)
     Cons(Cons),
 
-    /// Mutable vector
-    Vector(RefCell<Vec<Value>>),
+    /// Mutable array
+    Array(RefCell<Vec<Value>>),
 
     /// Mutable table (hash map)
     Table(RefCell<BTreeMap<TableKey, Value>>),
@@ -132,7 +132,7 @@ impl HeapObject {
         match self {
             HeapObject::String(_) => HeapTag::String,
             HeapObject::Cons(_) => HeapTag::Cons,
-            HeapObject::Vector(_) => HeapTag::Vector,
+            HeapObject::Array(_) => HeapTag::Array,
             HeapObject::Table(_) => HeapTag::Table,
             HeapObject::Struct(_) => HeapTag::Struct,
             HeapObject::Closure(_) => HeapTag::Closure,
@@ -153,7 +153,7 @@ impl HeapObject {
         match self {
             HeapObject::String(_) => "string",
             HeapObject::Cons(_) => "list",
-            HeapObject::Vector(_) => "vector",
+            HeapObject::Array(_) => "array",
             HeapObject::Table(_) => "table",
             HeapObject::Struct(_) => "struct",
             HeapObject::Closure(_) => "closure",
@@ -175,7 +175,7 @@ impl std::fmt::Debug for HeapObject {
         match self {
             HeapObject::String(s) => write!(f, "\"{}\"", s),
             HeapObject::Cons(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
-            HeapObject::Vector(v) => {
+            HeapObject::Array(v) => {
                 if let Ok(borrowed) = v.try_borrow() {
                     write!(f, "{:?}", &*borrowed)
                 } else {

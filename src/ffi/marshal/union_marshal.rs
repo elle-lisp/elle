@@ -5,10 +5,10 @@ use crate::value::Value;
 
 /// Marshal a union value to C representation with layout information.
 ///
-/// The union value should be a vector with a single element: \[field_index_or_value\].
+/// The union value should be an array with a single element: \[field_index_or_value\].
 /// The field is packed at offset 0 (all union fields overlap at offset 0).
 pub fn marshal_union_with_layout(value: &Value, layout: &UnionLayout) -> Result<CValue, String> {
-    if let Some(fields_ref) = value.as_vector() {
+    if let Some(fields_ref) = value.as_array() {
         let fields = fields_ref.borrow();
         // Union must have exactly one field value
         if fields.is_empty() || fields.len() > layout.fields.len() {
@@ -55,7 +55,7 @@ pub fn marshal_union_with_layout(value: &Value, layout: &UnionLayout) -> Result<
 
 /// Unmarshal a C union to Elle value with layout information.
 ///
-/// Returns a vector with all field values (all fields read at offset 0).
+/// Returns an array with all field values (all fields read at offset 0).
 /// In practice, the caller must know which field is active.
 pub fn unmarshal_union_with_layout(cvalue: &CValue, layout: &UnionLayout) -> Result<Value, String> {
     match cvalue {
@@ -76,7 +76,7 @@ pub fn unmarshal_union_with_layout(cvalue: &CValue, layout: &UnionLayout) -> Res
                 field_values.push(field_value);
             }
 
-            Ok(Value::vector(field_values))
+            Ok(Value::array(field_values))
         }
         _ => Err("Type mismatch in unmarshal: expected union".to_string()),
     }

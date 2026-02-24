@@ -6,7 +6,7 @@ Built-in functions. Registered into the VM at startup.
 
 Implement Elle's standard library of built-in functions:
 - Arithmetic, comparison, logic
-- List and vector operations
+- List and array operations
 - String manipulation
 - I/O and file operations
 - Concurrency primitives
@@ -90,7 +90,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `comparison.rs` | `=`, `<`, `>`, `<=`, `>=` |
 | `logic.rs` | `not`, `and`, `or` (functions, not special forms) |
 | `list.rs` | `cons`, `car`, `cdr`, `list`, `length`, `append` |
-| `vector.rs` | `vector`, `vector-ref`, `vector-set!`, `vector-length` |
+| `array.rs` | `array`, `array-ref`, `array-set!`, `array-length` |
 | `string.rs` | `string-length`, `string-append`, `substring` |
 | `table.rs` | `table`, `table-get`, `table-set!` |
 | `structs.rs` | `struct`, `struct-get` |

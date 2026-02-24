@@ -1,4 +1,5 @@
 pub mod arithmetic;
+pub mod array;
 pub mod cell;
 pub mod comparison;
 pub mod concurrency;
@@ -26,7 +27,6 @@ pub mod time;
 pub mod time_def;
 pub mod type_check;
 pub mod utility;
-pub mod vector;
 
 pub use list::{clear_length_symbol_table, set_length_symbol_table};
 pub use module_init::init_stdlib;

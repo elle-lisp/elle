@@ -70,14 +70,14 @@ pub enum Instruction {
     /// Cdr operation
     Cdr,
 
-    /// Vector construction (size)
-    MakeVector,
+    /// Array construction (size)
+    MakeArray,
 
-    /// Vector ref (index)
-    VectorRef,
+    /// Array ref (index)
+    ArrayRef,
 
-    /// Vector set (index)
-    VectorSet,
+    /// Array set (index)
+    ArraySet,
 
     /// Specialized arithmetic operations
     AddInt,

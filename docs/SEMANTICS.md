@@ -20,7 +20,7 @@ Elle has exactly two falsy values:
 | `0` | **Yes** | Zero is truthy (unlike C) |
 | `0.0` | **Yes** | Float zero is truthy |
 | `""` | **Yes** | Empty string is truthy |
-| `[]` | **Yes** | Empty vector is truthy |
+| `[]` | **Yes** | Empty array is truthy |
 | `#t` | **Yes** | Boolean true |
 
 ### Why nil ≠ empty list

@@ -75,7 +75,7 @@ fn test_unexpected_closing_paren_location() {
 }
 
 #[test]
-fn test_unterminated_vector_location() {
+fn test_unterminated_array_location() {
     let mut symbols = SymbolTable::new();
     let input = "[1 2 3";
 
@@ -94,7 +94,7 @@ fn test_unterminated_vector_location() {
     assert!(result.is_err());
     let error = result.unwrap_err();
     assert!(error.contains("1:6")); // EOF at position 6
-    assert!(error.contains("unterminated vector"));
+    assert!(error.contains("unterminated array"));
 }
 
 #[test]

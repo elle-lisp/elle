@@ -249,5 +249,5 @@
 (newline)
 
 ;; NOTE: The `length` function is polymorphic and works on all sequence types
-;; (lists, strings, vectors, tables, structs, keywords). See list-operations.lisp,
-;; vector-operations.lisp, and tables-and-structs.lisp for examples with other types.
+;; (lists, strings, arrays, tables, structs, keywords). See list-operations.lisp,
+;; array-operations.lisp, and tables-and-structs.lisp for examples with other types.

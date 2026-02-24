@@ -654,87 +654,78 @@ fn test_char_at() {
     }
 }
 
-// Vector operations
+// Array operations
 #[test]
-fn test_vector_creation() {
-    if let Some(vec_ref) = eval("(vector 1 2 3)").unwrap().as_vector() {
+fn test_array_creation() {
+    if let Some(vec_ref) = eval("(array 1 2 3)").unwrap().as_array() {
         let v = vec_ref.borrow();
         assert_eq!(v.len(), 3);
         assert_eq!(v[0], Value::int(1));
         assert_eq!(v[1], Value::int(2));
         assert_eq!(v[2], Value::int(3));
     } else {
-        panic!("Expected vector");
+        panic!("Expected array");
     }
 
-    // Empty vector
-    if let Some(vec_ref) = eval("(vector)").unwrap().as_vector() {
+    // Empty array
+    if let Some(vec_ref) = eval("(array)").unwrap().as_array() {
         assert_eq!(vec_ref.borrow().len(), 0)
     } else {
-        panic!("Expected vector");
+        panic!("Expected array");
     }
 }
 
 #[test]
-fn test_vector_length() {
-    assert_eq!(eval("(length (vector 1 2 3))").unwrap(), Value::int(3));
-    assert_eq!(eval("(length (vector))").unwrap(), Value::int(0));
+fn test_array_length() {
+    assert_eq!(eval("(length (array 1 2 3))").unwrap(), Value::int(3));
+    assert_eq!(eval("(length (array))").unwrap(), Value::int(0));
     assert_eq!(
-        eval("(length (vector 10 20 30 40 50))").unwrap(),
+        eval("(length (array 10 20 30 40 50))").unwrap(),
         Value::int(5)
     );
 }
 
 #[test]
-fn test_vector_ref() {
+fn test_array_ref() {
     assert_eq!(
-        eval("(vector-ref (vector 10 20 30) 0)").unwrap(),
+        eval("(array-ref (array 10 20 30) 0)").unwrap(),
         Value::int(10)
     );
     assert_eq!(
-        eval("(vector-ref (vector 10 20 30) 1)").unwrap(),
+        eval("(array-ref (array 10 20 30) 1)").unwrap(),
         Value::int(20)
     );
     assert_eq!(
-        eval("(vector-ref (vector 10 20 30) 2)").unwrap(),
+        eval("(array-ref (array 10 20 30) 2)").unwrap(),
         Value::int(30)
     );
 }
 
 #[test]
-fn test_vector_set() {
-    if let Some(vec_ref) = eval("(vector-set! (vector 1 2 3) 1 99)")
-        .unwrap()
-        .as_vector()
-    {
+fn test_array_set() {
+    if let Some(vec_ref) = eval("(array-set! (array 1 2 3) 1 99)").unwrap().as_array() {
         let v = vec_ref.borrow();
         assert_eq!(v[0], Value::int(1));
         assert_eq!(v[1], Value::int(99));
         assert_eq!(v[2], Value::int(3));
     } else {
-        panic!("Expected vector");
+        panic!("Expected array");
     }
 
     // Set at beginning
-    if let Some(vec_ref) = eval("(vector-set! (vector 1 2 3) 0 100)")
-        .unwrap()
-        .as_vector()
-    {
+    if let Some(vec_ref) = eval("(array-set! (array 1 2 3) 0 100)").unwrap().as_array() {
         let v = vec_ref.borrow();
         assert_eq!(v[0], Value::int(100))
     } else {
-        panic!("Expected vector")
+        panic!("Expected array")
     }
 
     // Set at end
-    if let Some(vec_ref) = eval("(vector-set! (vector 1 2 3) 2 200)")
-        .unwrap()
-        .as_vector()
-    {
+    if let Some(vec_ref) = eval("(array-set! (array 1 2 3) 2 200)").unwrap().as_array() {
         let v = vec_ref.borrow();
         assert_eq!(v[2], Value::int(200))
     } else {
-        panic!("Expected vector")
+        panic!("Expected array")
     }
 }
 #[test]

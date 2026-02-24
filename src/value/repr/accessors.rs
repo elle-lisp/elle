@@ -114,11 +114,11 @@ impl Value {
         self.heap_tag() == Some(HeapTag::Cons)
     }
 
-    /// Check if this is a vector.
+    /// Check if this is an array.
     #[inline]
-    pub fn is_vector(&self) -> bool {
+    pub fn is_array(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Vector)
+        self.heap_tag() == Some(HeapTag::Array)
     }
 
     /// Check if this is a table.
@@ -219,15 +219,15 @@ impl Value {
         }
     }
 
-    /// Extract as vector if this is a vector.
+    /// Extract as array if this is an array.
     #[inline]
-    pub fn as_vector(&self) -> Option<&std::cell::RefCell<Vec<Value>>> {
+    pub fn as_array(&self) -> Option<&std::cell::RefCell<Vec<Value>>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Vector(v) => Some(v),
+            HeapObject::Array(v) => Some(v),
             _ => None,
         }
     }

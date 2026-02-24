@@ -244,18 +244,14 @@ impl<'a> FunctionTranslator<'a> {
                 builder.def_var(var(dst.0), result);
             }
 
-            LirInstr::MakeVector { dst, elements } => {
+            LirInstr::MakeArray { dst, elements } => {
                 // Allocate stack space for elements
                 if elements.is_empty() {
-                    // Empty vector - pass null pointer and 0 count
+                    // Empty array - pass null pointer and 0 count
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let count = builder.ins().iconst(I64, 0);
-                    let result = self.call_helper_binary(
-                        builder,
-                        self.helpers.make_vector,
-                        null_ptr,
-                        count,
-                    )?;
+                    let result =
+                        self.call_helper_binary(builder, self.helpers.make_array, null_ptr, count)?;
                     builder.def_var(var(dst.0), result);
                 } else {
                     // Create stack slot for elements
@@ -274,7 +270,7 @@ impl<'a> FunctionTranslator<'a> {
                     let count = builder.ins().iconst(I64, elements.len() as i64);
                     let result = self.call_helper_binary(
                         builder,
-                        self.helpers.make_vector,
+                        self.helpers.make_array,
                         elements_addr,
                         count,
                     )?;

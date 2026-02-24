@@ -1213,8 +1213,8 @@ fn test_jit_is_pair() {
 }
 
 #[test]
-fn test_jit_make_vector() {
-    // fn(a, b, c) -> vector(a, b, c)
+fn test_jit_make_array() {
+    // fn(a, b, c) -> array(a, b, c)
     let mut func = LirFunction::new(3);
     func.num_regs = 4;
     func.num_captures = 0;
@@ -1225,7 +1225,7 @@ fn test_jit_make_vector() {
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(load_arg(Reg(2), 2));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::MakeVector {
+        LirInstr::MakeArray {
             dst: Reg(3),
             elements: vec![Reg(0), Reg(1), Reg(2)],
         },
@@ -1244,8 +1244,8 @@ fn test_jit_make_vector() {
         ],
     )
     .unwrap();
-    assert!(result.is_vector());
-    let vec = result.as_vector().unwrap();
+    assert!(result.is_array());
+    let vec = result.as_array().unwrap();
     let borrowed = vec.borrow();
     assert_eq!(borrowed.len(), 3);
     assert_eq!(borrowed[0].as_int(), Some(1));

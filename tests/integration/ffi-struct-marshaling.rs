@@ -26,7 +26,7 @@ fn test_struct_marshaling_libc_timeval_like() {
     );
 
     // Create Elle representation
-    let value = Value::vector(vec![
+    let value = Value::array(vec![
         Value::int(1609459200), // 2021-01-01 00:00:00
         Value::int(500000),     // 500 milliseconds
     ]);
@@ -88,7 +88,7 @@ fn test_struct_marshaling_file_stat_like() {
         8,
     );
 
-    let value = Value::vector(vec![
+    let value = Value::array(vec![
         Value::int(2049),     // st_dev
         Value::int(12345678), // st_ino
         Value::int(33188),    // st_mode (regular file, 0644)
@@ -98,16 +98,16 @@ fn test_struct_marshaling_file_stat_like() {
     let cval = Marshal::marshal_struct_with_layout(&value, &layout).unwrap();
     let result = Marshal::unmarshal_struct_with_layout(&cval, &layout).unwrap();
 
-    if let Some(vec_ref) = result.as_vector() {
-            let vec = vec_ref.borrow();
-            assert_eq!(vec.len(), 4);
-            assert_eq!(vec[0], Value::int(2049));
-            assert_eq!(vec[1], Value::int(12345678));
-            assert_eq!(vec[2], Value::int(33188));
-            assert_eq!(vec[3], Value::int(1));
-        } else {
-            panic!("Expected Vector");
-        }
+    if let Some(vec_ref) = result.as_array() {
+        let vec = vec_ref.borrow();
+        assert_eq!(vec.len(), 4);
+        assert_eq!(vec[0], Value::int(2049));
+        assert_eq!(vec[1], Value::int(12345678));
+        assert_eq!(vec[2], Value::int(33188));
+        assert_eq!(vec[3], Value::int(1));
+    } else {
+        panic!("Expected Array");
+    }
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn test_struct_with_padding() {
         4,
     );
 
-    let value = Value::vector(vec![
+    let value = Value::array(vec![
         Value::int(65), // 'A'
         Value::int(1000),
         Value::int(66), // 'B'
@@ -148,14 +148,14 @@ fn test_struct_with_padding() {
     let cval = Marshal::marshal_struct_with_layout(&value, &layout).unwrap();
     let result = Marshal::unmarshal_struct_with_layout(&cval, &layout).unwrap();
 
-    if let Some(vec_ref) = result.as_vector() {
-            let vec = vec_ref.borrow();
-            assert_eq!(vec[0], Value::int(65));
-            assert_eq!(vec[1], Value::int(1000));
-            assert_eq!(vec[2], Value::int(66));
-        } else {
-            panic!("Expected Vector");
-        }
+    if let Some(vec_ref) = result.as_array() {
+        let vec = vec_ref.borrow();
+        assert_eq!(vec[0], Value::int(65));
+        assert_eq!(vec[1], Value::int(1000));
+        assert_eq!(vec[2], Value::int(66));
+    } else {
+        panic!("Expected Array");
+    }
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn test_struct_all_basic_types() {
         8,
     );
 
-    let value = Value::vector(vec![
+    let value = Value::array(vec![
         Value::bool(true),
         Value::int(100),
         Value::int(1000),
@@ -218,32 +218,32 @@ fn test_struct_all_basic_types() {
     let cval = Marshal::marshal_struct_with_layout(&value, &layout).unwrap();
     let result = Marshal::unmarshal_struct_with_layout(&cval, &layout).unwrap();
 
-    if let Some(vec_ref) = result.as_vector() {
-            let vec = vec_ref.borrow();
-            assert_eq!(vec.len(), 7);
-            assert_eq!(vec[0], Value::bool(true));
-            assert_eq!(vec[1], Value::int(100));
-            assert_eq!(vec[2], Value::int(1000));
-            assert_eq!(vec[3], Value::int(100000));
-            assert_eq!(vec[4], Value::int(10000000));
-            if let Some(f) = vec[5].as_float() {
-                assert!((f - 1.5).abs() < 0.01);
-            } else {
-                panic!("Expected float");
-            }
-            if let Some(f) = vec[6].as_float() {
-                assert!((f - std::f64::consts::E).abs() < 0.01);
-            } else {
-                panic!("Expected float");
-            }
+    if let Some(vec_ref) = result.as_array() {
+        let vec = vec_ref.borrow();
+        assert_eq!(vec.len(), 7);
+        assert_eq!(vec[0], Value::bool(true));
+        assert_eq!(vec[1], Value::int(100));
+        assert_eq!(vec[2], Value::int(1000));
+        assert_eq!(vec[3], Value::int(100000));
+        assert_eq!(vec[4], Value::int(10000000));
+        if let Some(f) = vec[5].as_float() {
+            assert!((f - 1.5).abs() < 0.01);
         } else {
-            panic!("Expected Vector");
+            panic!("Expected float");
         }
+        if let Some(f) = vec[6].as_float() {
+            assert!((f - std::f64::consts::E).abs() < 0.01);
+        } else {
+            panic!("Expected float");
+        }
+    } else {
+        panic!("Expected Array");
+    }
 }
 
 #[test]
 fn test_struct_list_to_struct_conversion() {
-    // Test that cons lists are properly converted to vector representation
+    // Test that cons lists are properly converted to array representation
     use elle::value::cons;
 
     let layout = StructLayout::new(

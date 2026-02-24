@@ -63,7 +63,7 @@ impl Reader {
     fn read_one(&mut self, symbols: &mut SymbolTable, token: &OwnedToken) -> Result<Value, String> {
         match token {
             OwnedToken::LeftParen => self.read_list(symbols),
-            OwnedToken::LeftBracket => self.read_vector(symbols),
+            OwnedToken::LeftBracket => self.read_array(symbols),
             OwnedToken::LeftBrace => self.read_struct(symbols),
             OwnedToken::ListSugar => {
                 self.advance();
@@ -251,7 +251,7 @@ impl Reader {
         }
     }
 
-    fn read_vector(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
+    fn read_array(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
         self.advance(); // skip [
         let mut elements = Vec::new();
 
@@ -260,13 +260,13 @@ impl Reader {
                 None => {
                     let loc = self.current_location();
                     return Err(format!(
-                        "{}: unterminated vector (missing closing bracket)",
+                        "{}: unterminated array (missing closing bracket)",
                         loc.position()
                     ));
                 }
                 Some(OwnedToken::RightBracket) => {
                     self.advance();
-                    return Ok(Value::vector(elements));
+                    return Ok(Value::array(elements));
                 }
                 _ => elements.push(self.read(symbols)?),
             }

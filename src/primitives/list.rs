@@ -133,13 +133,13 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         (SIG_OK, Value::int(vec.len() as i64))
     } else if let Some(s) = args[0].as_string() {
         (SIG_OK, Value::int(s.chars().count() as i64))
-    } else if args[0].is_vector() {
-        let vec = match args[0].as_vector() {
+    } else if args[0].is_array() {
+        let vec = match args[0].as_array() {
             Some(v) => v,
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "length: failed to get vector".to_string()),
+                    error_val("error", "length: failed to get array".to_string()),
                 )
             }
         };
@@ -183,7 +183,7 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         (SIG_OK, Value::int(name.chars().count() as i64))
     } else {
         (SIG_ERROR, error_val("type-error", format!(
-            "length: expected collection type (list, string, vector, table, struct, symbol, or keyword), got {}",
+            "length: expected collection type (list, string, array, table, struct, symbol, or keyword), got {}",
             args[0].type_name()
         )))
     }
@@ -203,10 +203,14 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
 
     // nil is not a container - error if passed
     if args[0].is_nil() {
-        return (SIG_ERROR, error_val("type-error",
-            "empty?: expected collection type (list, string, vector, table, or struct), got nil"
-                .to_string(),
-        ));
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                "empty?: expected collection type (list, string, array, table, or struct), got nil"
+                    .to_string(),
+            ),
+        );
     }
 
     let result = if args[0].is_empty_list() {
@@ -215,13 +219,13 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
         false
     } else if let Some(s) = args[0].as_string() {
         s.is_empty()
-    } else if args[0].is_vector() {
-        let vec = match args[0].as_vector() {
+    } else if args[0].is_array() {
+        let vec = match args[0].as_array() {
             Some(v) => v,
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "empty?: failed to get vector".to_string()),
+                    error_val("error", "empty?: failed to get array".to_string()),
                 )
             }
         };
@@ -254,7 +258,7 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "type-error",
                 format!(
-                "empty?: expected collection type (list, string, vector, table, or struct), got {}",
+                "empty?: expected collection type (list, string, array, table, or struct), got {}",
                 args[0].type_name()
             ),
             ),

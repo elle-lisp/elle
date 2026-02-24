@@ -5,8 +5,8 @@ use crate::value::Value;
 
 /// Marshal a struct value to C representation with layout information.
 pub fn marshal_struct_with_layout(value: &Value, layout: &StructLayout) -> Result<CValue, String> {
-    if let Some(vec_ref) = value.as_vector() {
-        // Vector representation: fields in order
+    if let Some(vec_ref) = value.as_array() {
+        // Array representation: fields in order
         let vec = vec_ref.borrow();
         if vec.len() != layout.fields.len() {
             return Err(format!(
@@ -26,9 +26,9 @@ pub fn marshal_struct_with_layout(value: &Value, layout: &StructLayout) -> Resul
 
         Ok(CValue::Struct(bytes))
     } else if value.is_cons() {
-        // List representation: convert to vector first
+        // List representation: convert to array first
         let vec_vals = value.list_to_vec()?;
-        let vec_value = Value::vector(vec_vals);
+        let vec_value = Value::array(vec_vals);
         marshal_struct_with_layout(&vec_value, layout)
     } else {
         Err(format!(
@@ -66,7 +66,7 @@ pub fn unmarshal_struct_with_layout(
                 field_values.push(field_value);
             }
 
-            Ok(Value::vector(field_values))
+            Ok(Value::array(field_values))
         }
         _ => Err(format!(
             "Type mismatch: expected struct {}, got {:?}",
@@ -108,8 +108,8 @@ mod tests {
             4,
         );
 
-        // Create Elle vector [10, 20]
-        let value = Value::vector(vec![Value::int(10), Value::int(20)]);
+        // Create Elle array [10, 20]
+        let value = Value::array(vec![Value::int(10), Value::int(20)]);
 
         // Marshal to struct
         let cval = marshal_struct_with_layout(&value, &layout).unwrap();
@@ -162,13 +162,13 @@ mod tests {
         let val = unmarshal_struct_with_layout(&cval, &layout).unwrap();
 
         // Verify values
-        if let Some(vec_ref) = val.as_vector() {
+        if let Some(vec_ref) = val.as_array() {
             let vec = vec_ref.borrow();
             assert_eq!(vec.len(), 2);
             assert_eq!(vec[0], Value::int(10));
             assert_eq!(vec[1], Value::int(20));
         } else {
-            panic!("Expected Value::Vector");
+            panic!("Expected Value::Array");
         }
     }
 
@@ -199,7 +199,7 @@ mod tests {
         );
 
         // Original values
-        let original = Value::vector(vec![
+        let original = Value::array(vec![
             Value::int(100),
             Value::int(5000),
             Value::float(std::f64::consts::PI),
@@ -212,7 +212,7 @@ mod tests {
         let unmarshaled = unmarshal_struct_with_layout(&marshaled, &layout).unwrap();
 
         // Verify
-        if let Some(vec_ref) = unmarshaled.as_vector() {
+        if let Some(vec_ref) = unmarshaled.as_array() {
             let vec = vec_ref.borrow();
             assert_eq!(vec.len(), 3);
             assert_eq!(vec[0], Value::int(100));
@@ -223,7 +223,7 @@ mod tests {
                 panic!("Expected float");
             }
         } else {
-            panic!("Expected Vector");
+            panic!("Expected Array");
         }
     }
 
@@ -259,7 +259,7 @@ mod tests {
             8,
         );
 
-        let value = Value::vector(vec![
+        let value = Value::array(vec![
             Value::bool(true),
             Value::int(65), // 'A'
             Value::int(42),
@@ -269,7 +269,7 @@ mod tests {
         let cval = marshal_struct_with_layout(&value, &layout).unwrap();
         let result = unmarshal_struct_with_layout(&cval, &layout).unwrap();
 
-        if let Some(vec_ref) = result.as_vector() {
+        if let Some(vec_ref) = result.as_array() {
             let vec = vec_ref.borrow();
             assert_eq!(vec[0], Value::bool(true));
             assert_eq!(vec[1], Value::int(65));
@@ -280,7 +280,7 @@ mod tests {
                 panic!("Expected float");
             }
         } else {
-            panic!("Expected Vector");
+            panic!("Expected Array");
         }
     }
 
@@ -306,7 +306,7 @@ mod tests {
         );
 
         // Only provide 1 field instead of 2
-        let value = Value::vector(vec![Value::int(10)]);
+        let value = Value::array(vec![Value::int(10)]);
 
         let result = marshal_struct_with_layout(&value, &layout);
         assert!(result.is_err());

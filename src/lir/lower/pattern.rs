@@ -296,9 +296,9 @@ impl Lowerer {
 
                 Ok(())
             }
-            HirPattern::Vector(_patterns) => {
-                // TODO: Implement vector pattern matching
-                Err("Vector pattern matching not yet implemented".to_string())
+            HirPattern::Array(_patterns) => {
+                // TODO: Implement array pattern matching
+                Err("Array pattern matching not yet implemented".to_string())
             }
         }
     }

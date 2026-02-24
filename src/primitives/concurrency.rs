@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 ///
 /// A value is safe to send if it contains only immutable data:
 /// - Primitives (nil, bool, int, float, symbol, keyword, string)
-/// - Immutable collections (vector, struct)
+/// - Immutable collections (array, struct)
 /// - Closures (if their captured environment is safe)
 ///
 /// Unsafe values:
@@ -44,7 +44,7 @@ fn is_value_sendable(value: &Value) -> bool {
         HeapObject::String(_) => true,
 
         // Immutable collections are safe
-        HeapObject::Vector(vec) => {
+        HeapObject::Array(vec) => {
             if let Ok(borrowed) = vec.try_borrow() {
                 borrowed.iter().all(is_value_sendable)
             } else {

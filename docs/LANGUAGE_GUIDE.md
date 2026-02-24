@@ -122,16 +122,16 @@ Linked lists are the fundamental collection type in Lisp:
 (nth 1 (list 'a 'b 'c')) ⟹ b
 ```
 
-### Vectors
+### Arrays
 
-Vectors are ordered collections optimized for random access:
+Arrays are ordered collections optimized for random access:
 
 ```lisp
-[1 2 3]             ; Vector literal
-(vector 1 2 3)      ; Create vector
+[1 2 3]             ; Array literal
+(array 1 2 3)       ; Create array
 (length [1 2 3]) ⟹ 3
-(vector-ref [1 2 3] 1) ⟹ 2
-(vector-set! [1 2 3] 0 99) ⟹ [99 2 3]
+(array-ref [1 2 3] 1) ⟹ 2
+(array-set! [1 2 3] 0 99) ⟹ [99 2 3]
 ```
 
 ### Tables
