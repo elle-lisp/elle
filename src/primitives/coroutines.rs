@@ -13,9 +13,12 @@
 //! - coro/>iterator: Identity (fibers are iterable)
 //! - yield-from: Stub (not yet supported)
 
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{
     Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME, SIG_YIELD,
 };
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// (coro/new fn) → fiber
@@ -279,6 +282,87 @@ pub fn prim_coroutine_to_iterator(args: &[Value]) -> (SignalBits, Value) {
         )
     }
 }
+
+/// Declarative primitive definitions for coroutine operations
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "coro/new",
+        func: prim_make_coroutine,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Create a coroutine (fiber with SIG_YIELD mask) from a closure",
+        params: &["closure"],
+        category: "coro",
+        example: "(coro/new (fn [] (+ 1 2)))",
+        aliases: &["make-coroutine"],
+    },
+    PrimitiveDef {
+        name: "coro/status",
+        func: prim_coroutine_status,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the status of a coroutine (:created, :running, :suspended, :done, :error)",
+        params: &["coroutine"],
+        category: "coro",
+        example: "(coro/status co)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "coro/done?",
+        func: prim_coroutine_done,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if a coroutine is done (dead or errored)",
+        params: &["coroutine"],
+        category: "coro",
+        example: "(coro/done? co)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "coro/value",
+        func: prim_coroutine_value,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the signal payload from a coroutine's last signal",
+        params: &["coroutine"],
+        category: "coro",
+        example: "(coro/value co)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "coro/resume",
+        func: prim_coroutine_resume,
+        effect: Effect::yields_raises(),
+        arity: Arity::Range(1, 2),
+        doc: "Resume a coroutine, optionally delivering a value",
+        params: &["coroutine", "value"],
+        category: "coro",
+        example: "(coro/resume co)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "coro/yield-from",
+        func: prim_yield_from,
+        effect: Effect::yields_raises(),
+        arity: Arity::AtLeast(0),
+        doc: "Yield from a coroutine (not yet supported with fibers)",
+        params: &[],
+        category: "coro",
+        example: "(coro/yield-from)",
+        aliases: &["yield-from"],
+    },
+    PrimitiveDef {
+        name: "coro/>iterator",
+        func: prim_coroutine_to_iterator,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Convert a coroutine to an iterator (identity — fibers are iterable)",
+        params: &["coroutine"],
+        category: "coro",
+        example: "(coro/>iterator co)",
+        aliases: &[],
+    },
+];
 
 #[cfg(test)]
 mod tests {

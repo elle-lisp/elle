@@ -1,7 +1,91 @@
 //! Table operations primitives (mutable hash tables)
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, TableKey, Value};
 use std::collections::BTreeMap;
+
+/// Declarative table of table primitives.
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "table",
+        func: prim_table,
+        effect: Effect::none(),
+        arity: Arity::AtLeast(0),
+        doc: "Create a mutable table from key-value pairs",
+        params: &[],
+        category: "",
+        example: "(table :a 1 :b 2)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "get",
+        func: prim_get,
+        effect: Effect::none(),
+        arity: Arity::Range(2, 3),
+        doc: "Get a value from a table or struct by key, with optional default",
+        params: &["collection", "key", "default"],
+        category: "",
+        example: "(get (table :a 1) :a)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "put",
+        func: prim_put,
+        effect: Effect::none(),
+        arity: Arity::Exact(3),
+        doc: "Put a key-value pair into a table or struct",
+        params: &["collection", "key", "value"],
+        category: "",
+        example: "(put (table) :a 1)",
+        aliases: &["put!"],
+    },
+    PrimitiveDef {
+        name: "del",
+        func: prim_del,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Delete a key from a table or struct",
+        params: &["collection", "key"],
+        category: "",
+        example: "(del (table :a 1) :a)",
+        aliases: &["del!"],
+    },
+    PrimitiveDef {
+        name: "keys",
+        func: prim_keys,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get all keys from a table or struct as a list",
+        params: &["collection"],
+        category: "",
+        example: "(keys (table :a 1 :b 2))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "values",
+        func: prim_values,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get all values from a table or struct as a list",
+        params: &["collection"],
+        category: "",
+        example: "(values (table :a 1 :b 2))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "has-key?",
+        func: prim_has_key,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Check if a table or struct has a key",
+        params: &["collection", "key"],
+        category: "",
+        example: "(has-key? (table :a 1) :a)",
+        aliases: &[],
+    },
+];
 
 /// Create a mutable table from key-value pairs
 /// (table key1 val1 key2 val2 ...)

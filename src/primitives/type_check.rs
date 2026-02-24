@@ -1,5 +1,8 @@
 //! Type checking primitives
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Check if value is nil
@@ -133,3 +136,105 @@ pub fn prim_type_of(args: &[Value]) -> (SignalBits, Value) {
     let type_name = args[0].type_name();
     (SIG_OK, Value::keyword(type_name))
 }
+
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "nil?",
+        func: prim_is_nil,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is nil.",
+        params: &["value"],
+        category: "",
+        example: "(nil? nil) ;=> #t\n(nil? 42) ;=> #f",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "pair?",
+        func: prim_is_pair,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a pair (cons cell).",
+        params: &["value"],
+        category: "",
+        example: "(pair? (cons 1 2)) ;=> #t\n(pair? 42) ;=> #f",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "list?",
+        func: prim_is_list,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a list (empty list or cons cell).",
+        params: &["value"],
+        category: "",
+        example: "(list? (list 1 2)) ;=> #t\n(list? 42) ;=> #f",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "number?",
+        func: prim_is_number,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a number.",
+        params: &["value"],
+        category: "",
+        example: "(number? 42) ;=> #t\n(number? \"hello\") ;=> #f",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "symbol?",
+        func: prim_is_symbol,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a symbol.",
+        params: &["value"],
+        category: "",
+        example: "(symbol? 'foo) ;=> #t\n(symbol? 42) ;=> #f",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "string?",
+        func: prim_is_string,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a string.",
+        params: &["value"],
+        category: "",
+        example: "(string? \"hello\") ;=> #t\n(string? 42) ;=> #f",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "boolean?",
+        func: prim_is_boolean,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a boolean.",
+        params: &["value"],
+        category: "",
+        example: "(boolean? #t) ;=> #t\n(boolean? 42) ;=> #f",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "keyword?",
+        func: prim_is_keyword,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a keyword.",
+        params: &["value"],
+        category: "",
+        example: "(keyword? :foo) ;=> #t\n(keyword? 42) ;=> #f",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "type",
+        func: prim_type_of,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the type of a value as a keyword.",
+        params: &["value"],
+        category: "",
+        example: "(type 42) ;=> :integer\n(type \"hello\") ;=> :string",
+        aliases: &["type-of"],
+    },
+];

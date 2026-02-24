@@ -1,5 +1,8 @@
 //! Cell/Box primitives for mutable storage
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Create a mutable cell containing a value
@@ -100,3 +103,50 @@ pub fn prim_box_p(args: &[Value]) -> (SignalBits, Value) {
 
     (SIG_OK, Value::bool(args[0].is_cell()))
 }
+
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "box",
+        func: prim_box,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Create a mutable cell containing a value.",
+        params: &["value"],
+        category: "",
+        example: "(box 42) ;=> #<cell>",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "unbox",
+        func: prim_unbox,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Extract the value from a cell.",
+        params: &["cell"],
+        category: "",
+        example: "(unbox (box 42)) ;=> 42",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "box-set!",
+        func: prim_box_set,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Modify the value in a cell.",
+        params: &["cell", "value"],
+        category: "",
+        example: "(let ((c (box 1))) (box-set! c 2) (unbox c)) ;=> 2",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "box?",
+        func: prim_box_p,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if a value is a box.",
+        params: &["value"],
+        category: "",
+        example: "(box? (box 1)) ;=> #t\n(box? 42) ;=> #f",
+        aliases: &[],
+    },
+];

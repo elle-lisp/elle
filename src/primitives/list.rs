@@ -1,6 +1,9 @@
 //! List manipulation primitives
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::symbol::SymbolTable;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, list, SymbolId, Value};
 use std::cell::RefCell;
 
@@ -305,7 +308,7 @@ pub fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, list(vec))
 }
 
-/// Get the nth element of a list
+/// Get the nth element of a collection (list, array, or string)
 pub fn prim_nth(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -318,31 +321,110 @@ pub fn prim_nth(args: &[Value]) -> (SignalBits, Value) {
     }
 
     let index = match args[0].as_int() {
-        Some(n) => n as usize,
+        Some(n) => {
+            if n < 0 {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("nth: index {} out of bounds (negative index)", n),
+                    ),
+                );
+            }
+            n as usize
+        }
         None => {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("nth: expected integer, got {}", args[0].type_name()),
+                    format!("nth: expected integer index, got {}", args[0].type_name()),
                 ),
             )
         }
     };
-    let vec = match args[1].list_to_vec() {
-        Ok(v) => v,
-        Err(e) => return (SIG_ERROR, error_val("type-error", format!("nth: {}", e))),
-    };
 
-    match vec.get(index).cloned() {
-        Some(v) => (SIG_OK, v),
-        None => (
+    let collection = args[1];
+
+    // Dispatch on collection type
+    if collection.is_cons() || collection.is_empty_list() || collection.is_nil() {
+        // List: walk the list directly without converting to vec
+        let mut current = collection;
+        let mut current_index = 0;
+
+        loop {
+            if current.is_nil() || current.is_empty_list() {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!(
+                            "nth: index {} out of bounds (length {})",
+                            index, current_index
+                        ),
+                    ),
+                );
+            }
+
+            if let Some(cons) = current.as_cons() {
+                if current_index == index {
+                    return (SIG_OK, cons.first);
+                }
+                current = cons.rest;
+                current_index += 1;
+            } else {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!(
+                            "nth: index {} out of bounds (length {})",
+                            index, current_index
+                        ),
+                    ),
+                );
+            }
+        }
+    } else if let Some(array) = collection.as_array() {
+        // Array: use as_array() and index
+        let arr = array.borrow();
+        match arr.get(index) {
+            Some(v) => (SIG_OK, *v),
+            None => (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("nth: index {} out of bounds (length {})", index, arr.len()),
+                ),
+            ),
+        }
+    } else if let Some(s) = collection.as_string() {
+        // String: use chars().nth() and return as 1-char string
+        match s.chars().nth(index) {
+            Some(ch) => (SIG_OK, Value::string(ch.to_string())),
+            None => (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!(
+                        "nth: index {} out of bounds (length {})",
+                        index,
+                        s.chars().count()
+                    ),
+                ),
+            ),
+        }
+    } else {
+        (
             SIG_ERROR,
             error_val(
-                "error",
-                format!("nth: index {} out of bounds (length {})", index, vec.len()),
+                "type-error",
+                format!(
+                    "nth: expected list, array, or string, got {}",
+                    collection.type_name()
+                ),
             ),
-        ),
+        )
     }
 }
 
@@ -436,3 +518,139 @@ pub fn prim_drop(args: &[Value]) -> (SignalBits, Value) {
     let dropped: Vec<Value> = vec.into_iter().skip(count).collect();
     (SIG_OK, list(dropped))
 }
+
+/// Declarative primitive definitions for list operations
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "cons",
+        func: prim_cons,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Construct a cons cell with car and cdr",
+        params: &["car", "cdr"],
+        category: "",
+        example: "(cons 1 (cons 2 ()))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "first",
+        func: prim_first,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the first element (car) of a cons cell",
+        params: &["cell"],
+        category: "",
+        example: "(first (cons 1 2))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "rest",
+        func: prim_rest,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the rest (cdr) of a cons cell",
+        params: &["cell"],
+        category: "",
+        example: "(rest (cons 1 (cons 2 ())))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "list",
+        func: prim_list,
+        effect: Effect::none(),
+        arity: Arity::AtLeast(0),
+        doc: "Create a list from arguments",
+        params: &["elements"],
+        category: "",
+        example: "(list 1 2 3)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "length",
+        func: prim_length,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the length of a collection (list, string, vector, table, struct, symbol, or keyword)",
+        params: &["collection"],
+        category: "",
+        example: "(length (list 1 2 3))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "empty?",
+        func: prim_empty,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if a collection is empty",
+        params: &["collection"],
+        category: "",
+        example: "(empty? (list))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "append",
+        func: prim_append,
+        effect: Effect::none(),
+        arity: Arity::AtLeast(0),
+        doc: "Append multiple lists into a single list",
+        params: &["lists"],
+        category: "",
+        example: "(append (list 1 2) (list 3 4))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "reverse",
+        func: prim_reverse,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Reverse a list",
+        params: &["list"],
+        category: "",
+        example: "(reverse (list 1 2 3))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "nth",
+        func: prim_nth,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Get the nth element of a collection (list, array, or string) (0-indexed)",
+        params: &["index", "collection"],
+        category: "",
+        example: "(nth 1 (list 10 20 30))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "last",
+        func: prim_last,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get the last element of a list",
+        params: &["list"],
+        category: "",
+        example: "(last (list 1 2 3))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "take",
+        func: prim_take,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Take the first n elements of a list",
+        params: &["count", "list"],
+        category: "",
+        example: "(take 2 (list 1 2 3 4))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "drop",
+        func: prim_drop,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Drop the first n elements of a list",
+        params: &["count", "list"],
+        category: "",
+        example: "(drop 2 (list 1 2 3 4))",
+        aliases: &[],
+    },
+];

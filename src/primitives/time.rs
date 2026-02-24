@@ -1,4 +1,7 @@
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -130,3 +133,51 @@ pub fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
         )
     }
 }
+
+/// Declarative primitive definitions for time operations
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "clock/monotonic",
+        func: prim_clock_monotonic,
+        effect: Effect::none(),
+        arity: Arity::Exact(0),
+        doc: "Return seconds elapsed since process start (monotonic clock)",
+        params: &[],
+        category: "clock",
+        example: "(clock/monotonic)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "clock/realtime",
+        func: prim_clock_realtime,
+        effect: Effect::none(),
+        arity: Arity::Exact(0),
+        doc: "Return seconds since Unix epoch (wall clock)",
+        params: &[],
+        category: "clock",
+        example: "(clock/realtime)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "clock/cpu",
+        func: prim_clock_cpu,
+        effect: Effect::none(),
+        arity: Arity::Exact(0),
+        doc: "Return thread CPU time in seconds",
+        params: &[],
+        category: "clock",
+        example: "(clock/cpu)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "time/sleep",
+        func: prim_sleep,
+        effect: Effect::raises(),
+        arity: Arity::Exact(1),
+        doc: "Sleep for the specified number of seconds",
+        params: &["seconds"],
+        category: "time",
+        example: "(time/sleep 1.5)",
+        aliases: &[],
+    },
+];

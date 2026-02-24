@@ -1,5 +1,6 @@
 use crate::error::{LocationMap, StackFrame};
 use crate::ffi::FFISubsystem;
+use crate::primitives::def::PrimitiveDoc;
 use crate::value::fiber::CallFrame;
 use crate::value::{
     Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_OK, SIG_YIELD,
@@ -46,6 +47,9 @@ pub struct VM {
     pub current_source_loc: Option<crate::reader::SourceLoc>,
     /// JIT code cache: bytecode pointer → compiled native code.
     pub jit_cache: FxHashMap<*const u8, Rc<JitCode>>,
+    /// Primitive documentation, keyed by name string for direct lookup.
+    /// Populated during `register_primitives`.
+    pub primitive_docs: HashMap<String, PrimitiveDoc>,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -95,6 +99,7 @@ impl VM {
             pending_tail_call: None,
             current_source_loc: None,
             jit_cache: FxHashMap::default(),
+            primitive_docs: HashMap::new(),
         }
     }
 

@@ -202,17 +202,21 @@ pub extern "C" fn elle_jit_bit_not(a: u64) -> u64 {
 // =============================================================================
 
 /// Equality comparison
+///
+/// Uses `Value::PartialEq` for structural equality on heap values
+/// (cons cells, strings, arrays, tables, structs, tuples).
 #[no_mangle]
 pub extern "C" fn elle_jit_eq(a: u64, b: u64) -> u64 {
-    // For immediate values, bit equality is sufficient
-    // For heap values, we'd need deeper comparison, but for Phase 1
-    // we just compare bits
+    let a = unsafe { Value::from_bits(a) };
+    let b = unsafe { Value::from_bits(b) };
     Value::bool(a == b).to_bits()
 }
 
 /// Not equal comparison
 #[no_mangle]
 pub extern "C" fn elle_jit_ne(a: u64, b: u64) -> u64 {
+    let a = unsafe { Value::from_bits(a) };
+    let b = unsafe { Value::from_bits(b) };
     Value::bool(a != b).to_bits()
 }
 
@@ -412,5 +416,46 @@ mod tests {
             let decoded = extract_int(encoded);
             assert_eq!(decoded, n, "Failed for {}", n);
         }
+    }
+
+    #[test]
+    fn test_eq_heap_values() {
+        // Structurally equal cons cells must compare equal
+        let list1 = Value::cons(Value::int(1), Value::cons(Value::int(2), Value::EMPTY_LIST));
+        let list2 = Value::cons(Value::int(1), Value::cons(Value::int(2), Value::EMPTY_LIST));
+
+        let eq_result = unsafe { Value::from_bits(elle_jit_eq(list1.to_bits(), list2.to_bits())) };
+        assert_eq!(eq_result.as_bool(), Some(true), "equal lists must be eq");
+
+        let ne_result = unsafe { Value::from_bits(elle_jit_ne(list1.to_bits(), list2.to_bits())) };
+        assert_eq!(
+            ne_result.as_bool(),
+            Some(false),
+            "equal lists must not be ne"
+        );
+
+        // Structurally different cons cells must compare unequal
+        let list3 = Value::cons(Value::int(1), Value::cons(Value::int(3), Value::EMPTY_LIST));
+        let ne_diff = unsafe { Value::from_bits(elle_jit_eq(list1.to_bits(), list3.to_bits())) };
+        assert_eq!(
+            ne_diff.as_bool(),
+            Some(false),
+            "different lists must not be eq"
+        );
+
+        // Strings with same content must compare equal
+        let s1 = Value::string("hello".to_string());
+        let s2 = Value::string("hello".to_string());
+        let eq_str = unsafe { Value::from_bits(elle_jit_eq(s1.to_bits(), s2.to_bits())) };
+        assert_eq!(eq_str.as_bool(), Some(true), "equal strings must be eq");
+
+        // Strings with different content must compare unequal
+        let s3 = Value::string("world".to_string());
+        let ne_str = unsafe { Value::from_bits(elle_jit_eq(s1.to_bits(), s3.to_bits())) };
+        assert_eq!(
+            ne_str.as_bool(),
+            Some(false),
+            "different strings must not be eq"
+        );
     }
 }

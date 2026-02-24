@@ -1,11 +1,13 @@
 pub mod arithmetic;
 pub mod array;
+pub mod bitwise;
 pub mod cell;
 pub mod comparison;
 pub mod concurrency;
 pub mod coroutines;
 pub mod debug;
 pub mod debugging;
+pub mod def;
 pub mod display;
 pub mod fibers;
 pub mod file_io;
@@ -26,8 +28,7 @@ pub mod table;
 pub mod time;
 pub mod time_def;
 pub mod type_check;
-pub mod utility;
-
+pub use def::{PrimitiveDef, PrimitiveMeta};
 pub use list::{clear_length_symbol_table, set_length_symbol_table};
 pub use module_init::init_stdlib;
-pub use registration::register_primitives;
+pub use registration::{build_primitive_meta, register_primitives};

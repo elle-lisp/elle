@@ -1,5 +1,8 @@
 //! Process-related primitives
+use crate::effects::Effect;
+use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT};
+use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Exit the process with an optional exit code
@@ -67,6 +70,32 @@ pub fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
     let value = if args.is_empty() { Value::NIL } else { args[0] };
     (SIG_HALT, value)
 }
+
+/// Declarative primitive definitions for process operations
+pub const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "os/exit",
+        func: prim_exit,
+        effect: Effect::raises(),
+        arity: Arity::Range(0, 1),
+        doc: "Exit the process with an optional exit code (0-255)",
+        params: &["code"],
+        category: "os",
+        example: "(os/exit 0)",
+        aliases: &["exit"],
+    },
+    PrimitiveDef {
+        name: "os/halt",
+        func: prim_halt,
+        effect: Effect::halts(),
+        arity: Arity::Range(0, 1),
+        doc: "Halt the VM gracefully, returning a value to the host",
+        params: &["value"],
+        category: "os",
+        example: "(os/halt 42)",
+        aliases: &["halt"],
+    },
+];
 
 #[cfg(test)]
 mod tests {

@@ -40,12 +40,16 @@ impl<'a> Analyzer<'a> {
         let mut bindings = Vec::new();
         for (name, name_scopes, value) in names_and_values {
             let binding = self.bind(name, &name_scopes, BindingScope::Local);
-            // Track effect for interprocedural analysis
+            // Track effect and arity for interprocedural analysis
             if let HirKind::Lambda {
-                inferred_effect, ..
+                params: lambda_params,
+                inferred_effect,
+                ..
             } = &value.kind
             {
                 self.effect_env.insert(binding, *inferred_effect);
+                self.arity_env
+                    .insert(binding, Arity::Exact(lambda_params.len()));
             }
             bindings.push((binding, value));
         }
@@ -100,12 +104,15 @@ impl<'a> Analyzer<'a> {
             effect = effect.combine(value.effect);
 
             let b = self.bind(name, pair[0].scopes.as_slice(), BindingScope::Local);
-            // Track effect for interprocedural analysis
+            // Track effect and arity for interprocedural analysis
             if let HirKind::Lambda {
-                inferred_effect, ..
+                params: lambda_params,
+                inferred_effect,
+                ..
             } = &value.kind
             {
                 self.effect_env.insert(b, *inferred_effect);
+                self.arity_env.insert(b, Arity::Exact(lambda_params.len()));
             }
             bindings.push((b, value));
         }
@@ -163,12 +170,18 @@ impl<'a> Analyzer<'a> {
             let pair = binding.as_list().unwrap();
             let value = self.analyze_expr(&pair[1])?;
             effect = effect.combine(value.effect);
-            // Track effect for interprocedural analysis
+            // Track effect and arity for interprocedural analysis
+            // Note: For mutual recursion, effects may be incomplete at this point
+            // since later bindings haven't been analyzed yet. This is conservative.
             if let HirKind::Lambda {
-                inferred_effect, ..
+                params: lambda_params,
+                inferred_effect,
+                ..
             } = &value.kind
             {
                 self.effect_env.insert(binding_handles[i], *inferred_effect);
+                self.arity_env
+                    .insert(binding_handles[i], Arity::Exact(lambda_params.len()));
             }
             bindings.push((binding_handles[i], value));
         }
@@ -239,20 +252,32 @@ impl<'a> Analyzer<'a> {
                 self.bind(name, name_scopes, BindingScope::Local)
             };
 
-            // Seed effect_env with Pure for lambda forms
+            // Seed effect_env and arity_env for lambda forms so self-recursive calls
+            // don't default to Yields during analysis
             if is_lambda_form {
                 self.effect_env.insert(binding, Effect::none());
+                // Pre-seed arity from syntax (count params in the lambda form)
+                if let Some(list) = items[2].as_list() {
+                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list()) {
+                        self.arity_env
+                            .insert(binding, Arity::Exact(params_syn.len()));
+                    }
+                }
             }
 
             // Now analyze the value (which can reference the binding)
             let value = self.analyze_expr(&items[2])?;
 
-            // Update effect_env with the actual inferred effect
+            // Update effect_env and arity_env with the actual inferred values
             if let HirKind::Lambda {
-                inferred_effect, ..
+                params: lambda_params,
+                inferred_effect,
+                ..
             } = &value.kind
             {
                 self.effect_env.insert(binding, *inferred_effect);
+                self.arity_env
+                    .insert(binding, Arity::Exact(lambda_params.len()));
             }
 
             // Emit a Define (the lowerer checks binding.is_global())
@@ -268,23 +293,38 @@ impl<'a> Analyzer<'a> {
             // At top level, var creates a global binding
             let sym = self.symbols.intern(name);
             let binding = self.bind(name, &[], BindingScope::Global);
+            self.user_defined_globals.insert(binding);
 
-            // Seed effect_env with Pure for lambda forms
+            // Seed effect_env and arity_env for lambda forms so self-recursive calls
+            // don't default to Yields during analysis
             if is_lambda_form {
                 self.effect_env.insert(binding, Effect::none());
+                // Pre-seed arity from syntax (count params in the lambda form)
+                if let Some(list) = items[2].as_list() {
+                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list()) {
+                        let arity = Arity::Exact(params_syn.len());
+                        self.arity_env.insert(binding, arity);
+                        self.defined_global_arities.insert(sym, arity);
+                    }
+                }
             }
 
             // Now analyze the value
             let value = self.analyze_expr(&items[2])?;
 
-            // Update effect_env with the actual inferred effect
+            // Update effect_env and arity_env with the actual inferred values
+            // Also record in defined_global_effects/arities for cross-form tracking
             if let HirKind::Lambda {
-                inferred_effect, ..
+                params: lambda_params,
+                inferred_effect,
+                ..
             } = &value.kind
             {
                 self.effect_env.insert(binding, *inferred_effect);
-                // Record for cross-form effect tracking
                 self.defined_global_effects.insert(sym, *inferred_effect);
+                let arity = Arity::Exact(lambda_params.len());
+                self.arity_env.insert(binding, arity);
+                self.defined_global_arities.insert(sym, arity);
             }
 
             Ok(Hir::new(
@@ -332,20 +372,32 @@ impl<'a> Analyzer<'a> {
             // Mark as immutable
             binding.mark_immutable();
 
-            // Seed effect_env with Pure for lambda forms
+            // Seed effect_env and arity_env for lambda forms so self-recursive calls
+            // don't default to Yields during analysis
             if is_lambda_form {
                 self.effect_env.insert(binding, Effect::none());
+                // Pre-seed arity from syntax (count params in the lambda form)
+                if let Some(list) = items[2].as_list() {
+                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list()) {
+                        self.arity_env
+                            .insert(binding, Arity::Exact(params_syn.len()));
+                    }
+                }
             }
 
             // Now analyze the value
             let value = self.analyze_expr(&items[2])?;
 
-            // Update effect_env with the actual inferred effect
+            // Update effect_env and arity_env with the actual inferred values
             if let HirKind::Lambda {
-                inferred_effect, ..
+                params: lambda_params,
+                inferred_effect,
+                ..
             } = &value.kind
             {
                 self.effect_env.insert(binding, *inferred_effect);
+                self.arity_env
+                    .insert(binding, Arity::Exact(lambda_params.len()));
             }
 
             Ok(Hir::new(
@@ -359,6 +411,7 @@ impl<'a> Analyzer<'a> {
         } else {
             // At top level, def creates a global binding
             let binding = self.bind(name, &[], BindingScope::Global);
+            self.user_defined_globals.insert(binding);
 
             // Mark as immutable
             binding.mark_immutable();
@@ -366,21 +419,36 @@ impl<'a> Analyzer<'a> {
             // Record in defined_immutable_globals for cross-form tracking
             self.defined_immutable_globals.insert(sym);
 
-            // Seed effect_env with Pure for lambda forms
+            // Seed effect_env and arity_env for lambda forms so self-recursive calls
+            // don't default to Yields during analysis
             if is_lambda_form {
                 self.effect_env.insert(binding, Effect::none());
+                // Pre-seed arity from syntax (count params in the lambda form)
+                if let Some(list) = items[2].as_list() {
+                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list()) {
+                        let arity = Arity::Exact(params_syn.len());
+                        self.arity_env.insert(binding, arity);
+                        self.defined_global_arities.insert(sym, arity);
+                    }
+                }
             }
 
             // Now analyze the value
             let value = self.analyze_expr(&items[2])?;
 
-            // Update effect_env with the actual inferred effect
+            // Update effect_env and arity_env with the actual inferred values
+            // Also record in defined_global_effects/arities for cross-form tracking
             if let HirKind::Lambda {
-                inferred_effect, ..
+                params: lambda_params,
+                inferred_effect,
+                ..
             } = &value.kind
             {
                 self.effect_env.insert(binding, *inferred_effect);
                 self.defined_global_effects.insert(sym, *inferred_effect);
+                let arity = Arity::Exact(lambda_params.len());
+                self.arity_env.insert(binding, arity);
+                self.defined_global_arities.insert(sym, arity);
             }
 
             Ok(Hir::new(
@@ -430,8 +498,10 @@ impl<'a> Analyzer<'a> {
         // Mark as mutated
         target.mark_mutated();
 
-        // Invalidate effect tracking for this binding since it's being mutated
+        // Invalidate effect and arity tracking for this binding since it's being mutated
+        // The binding's effect and arity are now uncertain
         self.effect_env.remove(&target);
+        self.arity_env.remove(&target);
 
         let value = self.analyze_expr(&items[2])?;
         let effect = value.effect;

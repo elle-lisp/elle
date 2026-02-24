@@ -2065,3 +2065,46 @@ fn test_fiber_self_identity() {
         "fiber/self should be eq? to the fiber handle"
     );
 }
+
+// ============================================================================
+// doc (SIG_QUERY primitive)
+// ============================================================================
+
+#[test]
+fn test_doc_returns_string_for_known_primitive() {
+    let result = eval_full(r#"(doc "cons")"#).unwrap();
+    let s = result.as_string().expect("doc should return a string");
+    assert!(
+        s.contains("cons"),
+        "doc for cons should contain 'cons', got: {}",
+        s
+    );
+}
+
+#[test]
+fn test_doc_returns_not_found_for_unknown() {
+    let result = eval_full(r#"(doc "zzz-nonexistent")"#).unwrap();
+    let s = result.as_string().expect("doc should return a string");
+    assert!(
+        s.contains("No documentation found"),
+        "doc for unknown should say not found, got: {}",
+        s
+    );
+}
+
+#[test]
+fn test_doc_accepts_keyword() {
+    let result = eval_full(r#"(doc (string->keyword "+"))"#).unwrap();
+    let s = result.as_string().expect("doc should return a string");
+    assert!(
+        s.contains("+"),
+        "doc for + via keyword should contain '+', got: {}",
+        s
+    );
+}
+
+#[test]
+fn test_doc_wrong_arity() {
+    let result = eval_full(r#"(doc "a" "b")"#);
+    assert!(result.is_err(), "doc with 2 args should error");
+}

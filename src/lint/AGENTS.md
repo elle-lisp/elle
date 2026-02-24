@@ -19,7 +19,6 @@ provides the shared types and rule implementations.
 | Function | Purpose |
 |----------|---------|
 | `check_naming_convention` | Warns on non-kebab-case identifiers |
-| `check_call_arity` | Warns on wrong argument count for known functions |
 
 ## Dependents
 
@@ -34,4 +33,4 @@ provides the shared types and rule implementations.
 |------|-------|---------|
 | `mod.rs` | ~5 | Module declarations, re-exports |
 | `diagnostics.rs` | ~180 | `Diagnostic`, `Severity`, formatting |
-| `rules.rs` | ~190 | Naming convention checks, arity checks |
+| `rules.rs` | ~110 | Naming convention checks |

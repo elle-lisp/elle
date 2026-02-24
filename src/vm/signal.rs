@@ -115,6 +115,7 @@ impl VM {
     ///
     /// Operations:
     /// - (:"call-count" . closure) — return call count for closure
+    /// - (:"doc" . name) — return formatted documentation for a primitive
     /// - (:"global?" . symbol) — return #t if symbol is bound as a global
     /// - (:"fiber/self" . _) — return the currently executing fiber, or nil
     fn dispatch_query(&self, value: Value) -> (SignalBits, Value) {
@@ -158,6 +159,26 @@ impl VM {
                     (SIG_OK, Value::bool(self.get_global(sym_id).is_some()))
                 } else {
                     (SIG_OK, Value::FALSE)
+                }
+            }
+            "doc" => {
+                let name = if let Some(s) = arg.as_string() {
+                    s.to_string()
+                } else if let Some(s) = arg.as_keyword_name() {
+                    s.to_string()
+                } else {
+                    return (
+                        SIG_ERROR,
+                        error_val("type-error", "doc: expected string or keyword".to_string()),
+                    );
+                };
+                if let Some(doc) = self.primitive_docs.get(&name) {
+                    (SIG_OK, Value::string(doc.format()))
+                } else {
+                    (
+                        SIG_OK,
+                        Value::string(format!("No documentation found for '{}'", name)),
+                    )
                 }
             }
             "fiber/self" => (SIG_OK, self.current_fiber_value.unwrap_or(Value::NIL)),
