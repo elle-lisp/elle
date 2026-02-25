@@ -148,6 +148,55 @@ proptest! {
     }
 
     // =========================================================================
+    // Out-of-bounds slice returns nil (#339)
+    // =========================================================================
+
+    #[test]
+    fn slice_oob_end_returns_nil(s in "[a-zA-Z0-9]{0,20}", overshoot in 1usize..100) {
+        let len = s.chars().count();
+        let end = len + overshoot;
+        let escaped = escape_for_elle(&s);
+        let code = format!("(string/slice \"{}\" 0 {})", escaped, end);
+        let result = eval_source(&code).unwrap();
+        prop_assert_eq!(result, Value::NIL,
+            "OOB end index should return nil for {:?} with end={}", s, end);
+    }
+
+    #[test]
+    fn slice_oob_start_returns_nil(s in "[a-zA-Z0-9]{0,20}", overshoot in 1usize..100) {
+        let len = s.chars().count();
+        let start = len + overshoot;
+        let end = start + 1;
+        let escaped = escape_for_elle(&s);
+        let code = format!("(string/slice \"{}\" {} {})", escaped, start, end);
+        let result = eval_source(&code).unwrap();
+        prop_assert_eq!(result, Value::NIL,
+            "OOB start index should return nil for {:?} with start={}", s, start);
+    }
+
+    #[test]
+    fn slice_reversed_range_returns_nil(s in "[a-zA-Z0-9]{2,20}", start in 1usize..20, gap in 1usize..10) {
+        let len = s.chars().count();
+        let start = start.min(len);
+        let end = start.saturating_sub(gap);
+        if start > end {
+            let escaped = escape_for_elle(&s);
+            let code = format!("(string/slice \"{}\" {} {})", escaped, start, end);
+            let result = eval_source(&code).unwrap();
+            prop_assert_eq!(result, Value::NIL,
+                "reversed range should return nil for {:?} with start={} end={}", s, start, end);
+        }
+    }
+
+    #[test]
+    fn slice_empty_string_oob_returns_nil(end in 1usize..100) {
+        let code = format!("(string/slice \"\" 0 {})", end);
+        let result = eval_source(&code).unwrap();
+        prop_assert_eq!(result, Value::NIL,
+            "empty string OOB should return nil with end={}", end);
+    }
+
+    // =========================================================================
     // Case conversion properties
     // =========================================================================
 
