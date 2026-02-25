@@ -72,6 +72,16 @@ impl Value {
         }
     }
 
+    /// Extract raw C pointer address if this is a pointer.
+    #[inline]
+    pub fn as_pointer(&self) -> Option<usize> {
+        if self.is_pointer() {
+            Some((self.0 & PAYLOAD_MASK) as usize)
+        } else {
+            None
+        }
+    }
+
     /// Extract keyword name if this is a keyword.
     #[inline]
     pub fn as_keyword_name(&self) -> Option<&str> {
@@ -333,7 +343,7 @@ impl Value {
 
     /// Extract as thread handle if this is a thread handle.
     #[inline]
-    pub fn as_thread_handle(&self) -> Option<&crate::value::heap::ThreadHandleData> {
+    pub fn as_thread_handle(&self) -> Option<&crate::value::heap::ThreadHandle> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
@@ -387,6 +397,8 @@ impl Value {
             "symbol"
         } else if self.is_keyword() {
             "keyword"
+        } else if self.is_pointer() {
+            "pointer"
         } else if self.is_heap() {
             unsafe { deref(*self).type_name() }
         } else {
@@ -399,6 +411,72 @@ impl Value {
     pub fn is_binding(&self) -> bool {
         use crate::value::heap::HeapTag;
         self.heap_tag() == Some(HeapTag::Binding)
+    }
+
+    /// Extract as FFI signature if this is an FFI signature.
+    #[inline]
+    pub fn as_ffi_signature(&self) -> Option<&crate::ffi::types::Signature> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::FFISignature(sig, _) => Some(sig),
+            _ => None,
+        }
+    }
+
+    /// Extract as FFI type descriptor if this is an FFI type.
+    #[inline]
+    pub fn as_ffi_type(&self) -> Option<&crate::ffi::types::TypeDesc> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::FFIType(desc) => Some(desc),
+            _ => None,
+        }
+    }
+
+    /// Get or prepare the cached CIF for an FFI signature.
+    /// Returns None if this is not an FFI signature.
+    ///
+    /// The CIF is lazily prepared on first access and cached for reuse.
+    pub fn get_or_prepare_cif(&self) -> Option<std::cell::Ref<'_, libffi::middle::Cif>> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::FFISignature(sig, cif_cache) => {
+                // Prepare CIF if not cached
+                {
+                    let mut cache = cif_cache.borrow_mut();
+                    if cache.is_none() {
+                        *cache = Some(crate::ffi::call::prepare_cif(sig));
+                    }
+                }
+                // Return a Ref to the cached CIF
+                Some(std::cell::Ref::map(cif_cache.borrow(), |opt| {
+                    opt.as_ref().unwrap()
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract as library handle ID if this is a library handle.
+    #[inline]
+    pub fn as_lib_handle(&self) -> Option<u32> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::LibHandle(id) => Some(*id),
+            _ => None,
+        }
     }
 
     /// Extract as binding inner if this is a binding.

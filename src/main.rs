@@ -1,5 +1,4 @@
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::ffi_primitives;
+use elle::context::{clear_vm_context, set_symbol_table, set_vm_context};
 use elle::pipeline::{compile, compile_all};
 use elle::primitives::set_length_symbol_table;
 use elle::repl::Repl;
@@ -357,7 +356,7 @@ fn main() {
     init_stdlib(&mut vm, &mut symbols);
 
     // Set VM context for FFI primitives
-    ffi_primitives::set_vm_context(&mut vm as *mut VM);
+    set_vm_context(&mut vm as *mut VM);
 
     // Set symbol table context for primitives
     set_symbol_table(&mut symbols as *mut SymbolTable);
@@ -415,7 +414,7 @@ fn main() {
     }
 
     // Clear VM context
-    ffi_primitives::clear_vm_context();
+    clear_vm_context();
 
     if args.len() == 1 {
         println!();

@@ -39,3 +39,6 @@ mod eval {
 mod convert {
     include!("convert.rs");
 }
+mod ffi {
+    include!("ffi.rs");
+}

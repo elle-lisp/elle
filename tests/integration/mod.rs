@@ -5,24 +5,6 @@ mod core {
 mod advanced {
     include!("advanced.rs");
 }
-mod ffi_marshaling {
-    include!("ffi-marshaling.rs");
-}
-mod ffi_callbacks {
-    include!("ffi-callbacks.rs");
-}
-mod ffi_struct_marshaling {
-    include!("ffi-struct-marshaling.rs");
-}
-mod ffi_union_marshaling {
-    include!("ffi-union-marshaling.rs");
-}
-mod ffi_custom_handlers {
-    include!("ffi-custom-handlers.rs");
-}
-mod ffi_handler_integration {
-    include!("ffi-handler-integration.rs");
-}
 mod concurrency {
     include!("concurrency.rs");
 }
@@ -88,4 +70,7 @@ mod eval {
 }
 mod primitives {
     include!("primitives.rs");
+}
+mod ffi {
+    include!("ffi.rs");
 }

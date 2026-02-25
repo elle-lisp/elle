@@ -119,7 +119,6 @@ fn format_value(
             HeapObject::Closure(_) => return "#<closure>".to_string(),
             HeapObject::NativeFn(_) => return "#<native-fn>".to_string(),
             HeapObject::LibHandle(_) => return "#<lib-handle>".to_string(),
-            HeapObject::CHandle(_, _) => return "#<c-handle>".to_string(),
             HeapObject::Tuple(elems) => {
                 let items: Vec<String> = elems
                     .iter()
@@ -133,6 +132,8 @@ fn format_value(
             HeapObject::Fiber(_) => return "#<fiber>".to_string(),
             HeapObject::Syntax(s) => return format!("#<syntax:{}>", s),
             HeapObject::Binding(_) => return "#<binding>".to_string(),
+            HeapObject::FFISignature(_, _) => return "<ffi-signature>".to_string(),
+            HeapObject::FFIType(_) => return "<ffi-type>".to_string(),
         }
     }
 

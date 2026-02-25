@@ -83,6 +83,15 @@ impl Effect {
         }
     }
 
+    /// Calls foreign code and may raise (SIG_FFI | SIG_ERROR).
+    /// Used for FFI primitives that validate arguments before calling C.
+    pub const fn ffi_raises() -> Self {
+        Effect {
+            bits: SIG_FFI | SIG_ERROR,
+            propagates: 0,
+        }
+    }
+
     /// Polymorphic: effect depends on a single parameter (no raise).
     pub const fn polymorphic(param: usize) -> Self {
         Effect {
@@ -312,6 +321,17 @@ mod tests {
     fn test_may_ffi() {
         assert!(!Effect::none().may_ffi());
         assert!(Effect::ffi().may_ffi());
+        assert!(Effect::ffi_raises().may_ffi());
+    }
+
+    #[test]
+    fn test_ffi_raises() {
+        let e = Effect::ffi_raises();
+        assert!(e.may_ffi());
+        assert!(e.may_raise());
+        assert!(!e.may_yield());
+        assert!(!e.may_suspend());
+        assert!(!e.is_polymorphic());
     }
 
     #[test]
@@ -332,6 +352,7 @@ mod tests {
             "polymorphic(0)+raises"
         );
         assert_eq!(format!("{}", Effect::ffi()), "none+ffi");
+        assert_eq!(format!("{}", Effect::ffi_raises()), "none+raises+ffi");
     }
 
     #[test]

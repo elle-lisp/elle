@@ -11,6 +11,7 @@ edition = "2021"
 rustc-hash = "2.0"
 smallvec = "1.11"
 libloading = "0.8"
+libffi = "5.1"
 rustyline = "14"
 libc = "0.2"
 

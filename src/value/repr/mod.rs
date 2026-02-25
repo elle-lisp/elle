@@ -16,6 +16,7 @@
 //! Symbol:    0x7FF9_0000_XXXX_XXXX where X = 32-bit symbol ID
 //! Keyword:   0x7FFA_XXXX_XXXX_XXXX where X = 48-bit interned string pointer
 //! Pointer:   0x7FFB_XXXX_XXXX_XXXX where X = 48-bit heap pointer
+//! CPointer:  0x7FFE_XXXX_XXXX_XXXX where X = 48-bit raw C pointer address
 //! NaN/Inf:   0x7FFD_XXXX_XXXX_XXXX where X = 64-bit float bits (NaN or Infinity)
 
 mod accessors;
@@ -69,6 +70,10 @@ pub(crate) const TAG_POINTER_MASK: u64 = 0xFFFF_0000_0000_0000;
 /// NaN/Infinity tag - upper 16 bits = 0x7FFD, payload is 64-bit float bits
 pub const TAG_NAN: u64 = 0x7FFD_0000_0000_0000;
 pub(crate) const TAG_NAN_MASK: u64 = 0xFFFF_0000_0000_0000;
+
+/// Raw C pointer tag - upper 16 bits = 0x7FFE
+pub const TAG_CPOINTER: u64 = 0x7FFE_0000_0000_0000;
+pub(crate) const TAG_CPOINTER_MASK: u64 = 0xFFFF_0000_0000_0000;
 
 /// Mask for 48-bit payload extraction
 pub(crate) const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
@@ -167,6 +172,12 @@ impl Value {
     #[inline]
     pub fn is_keyword(&self) -> bool {
         (self.0 & TAG_KEYWORD_MASK) == TAG_KEYWORD
+    }
+
+    /// Check if this is a raw C pointer.
+    #[inline]
+    pub fn is_pointer(&self) -> bool {
+        (self.0 & TAG_CPOINTER_MASK) == TAG_CPOINTER
     }
 
     /// Check if this is a heap pointer.

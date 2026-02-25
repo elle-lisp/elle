@@ -20,7 +20,7 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
 
     if let Some(path) = args[0].as_string() {
         // Get VM context for file loading
-        let vm_ptr = match crate::ffi_primitives::get_vm_context() {
+        let vm_ptr = match crate::context::get_vm_context() {
             Some(ptr) => ptr,
             None => {
                 return (
@@ -45,7 +45,7 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             vm.mark_module_loaded(path.to_string());
 
             // Get the caller's symbol table context
-            let symbols_ptr = match crate::ffi_primitives::context::get_symbol_table() {
+            let symbols_ptr = match crate::context::get_symbol_table() {
                 Some(ptr) => ptr,
                 None => {
                     return (
@@ -130,7 +130,7 @@ pub fn prim_add_module_path(args: &[Value]) -> (SignalBits, Value) {
 
     if let Some(path) = args[0].as_string() {
         // Get VM context
-        let vm_ptr = match crate::ffi_primitives::get_vm_context() {
+        let vm_ptr = match crate::context::get_vm_context() {
             Some(ptr) => ptr,
             None => {
                 return (

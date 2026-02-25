@@ -5,12 +5,10 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use crate::syntax::Syntax;
-use crate::value::ffi::ThreadHandle;
 use crate::value::fiber::FiberHandle;
 use crate::value::types::SymbolId;
 use crate::value::Value;
@@ -49,10 +47,11 @@ pub enum HeapTag {
     Float = 9, // For NaN values that can't be inline
     NativeFn = 10,
     LibHandle = 12,
-    CHandle = 13,
     ThreadHandle = 14,
     Fiber = 16,
     Binding = 17,
+    FFISignature = 18,
+    FFIType = 19,
 }
 
 /// All heap-allocated value types.
@@ -96,11 +95,8 @@ pub enum HeapObject {
     /// FFI library handle
     LibHandle(u32),
 
-    /// FFI C pointer handle
-    CHandle(*const c_void, u32),
-
     /// Thread handle for concurrent execution
-    ThreadHandle(ThreadHandleData),
+    ThreadHandle(ThreadHandle),
 
     /// Fiber: independent execution context with its own stack and frames
     Fiber(FiberHandle),
@@ -115,6 +111,16 @@ pub enum HeapObject {
     /// discovers captures and mutations after creating the binding), read-only
     /// during lowering. Never appears at runtime — the VM never sees this type.
     Binding(RefCell<BindingInner>),
+
+    /// Reified FFI function signature with optional cached CIF.
+    /// The CIF is lazily prepared on first use and reused thereafter.
+    FFISignature(
+        crate::ffi::types::Signature,
+        RefCell<Option<libffi::middle::Cif>>,
+    ),
+
+    /// Reified FFI compound type descriptor (struct or array layout)
+    FFIType(crate::ffi::types::TypeDesc),
 }
 
 /// Internal binding metadata, heap-allocated behind the Value pointer.
@@ -143,18 +149,41 @@ pub enum BindingScope {
     Global,
 }
 
-/// Data for thread handles.
+/// Thread handle for concurrent execution.
+///
 /// Holds the result of a spawned thread's execution.
-/// Uses Arc<Mutex<>> to safely share the result across threads.
-pub struct ThreadHandleData {
+/// Uses `Arc<Mutex<>>` to safely share the result across threads.
+#[derive(Clone)]
+pub struct ThreadHandle {
+    /// The result of the spawned thread execution.
+    /// The `Result` is wrapped in `SendValue` to make it Send.
     pub result: Arc<Mutex<Option<Result<crate::value::SendValue, String>>>>,
 }
 
-impl From<ThreadHandle> for ThreadHandleData {
-    fn from(handle: ThreadHandle) -> Self {
-        ThreadHandleData {
-            result: handle.result,
+impl ThreadHandle {
+    /// Create a new thread handle with no result yet
+    pub fn new() -> Self {
+        ThreadHandle {
+            result: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+impl Default for ThreadHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for ThreadHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ThreadHandle")
+    }
+}
+
+impl PartialEq for ThreadHandle {
+    fn eq(&self, _other: &Self) -> bool {
+        false // Thread handles are never equal
     }
 }
 
@@ -174,11 +203,12 @@ impl HeapObject {
             HeapObject::Float(_) => HeapTag::Float,
             HeapObject::NativeFn(_) => HeapTag::NativeFn,
             HeapObject::LibHandle(_) => HeapTag::LibHandle,
-            HeapObject::CHandle(_, _) => HeapTag::CHandle,
             HeapObject::ThreadHandle(_) => HeapTag::ThreadHandle,
             HeapObject::Fiber(_) => HeapTag::Fiber,
             HeapObject::Syntax(_) => HeapTag::Syntax,
             HeapObject::Binding(_) => HeapTag::Binding,
+            HeapObject::FFISignature(_, _) => HeapTag::FFISignature,
+            HeapObject::FFIType(_) => HeapTag::FFIType,
         }
     }
 
@@ -196,11 +226,12 @@ impl HeapObject {
             HeapObject::Float(_) => "float",
             HeapObject::NativeFn(_) => "native-function",
             HeapObject::LibHandle(_) => "library-handle",
-            HeapObject::CHandle(_, _) => "c-handle",
             HeapObject::ThreadHandle(_) => "thread-handle",
             HeapObject::Fiber(_) => "fiber",
             HeapObject::Syntax(_) => "syntax",
             HeapObject::Binding(_) => "binding",
+            HeapObject::FFISignature(_, _) => "ffi-signature",
+            HeapObject::FFIType(_) => "ffi-type",
         }
     }
 }
@@ -234,7 +265,6 @@ impl std::fmt::Debug for HeapObject {
             HeapObject::Float(n) => write!(f, "{}", n),
             HeapObject::NativeFn(_) => write!(f, "<native-fn>"),
             HeapObject::LibHandle(id) => write!(f, "<lib-handle:{}>", id),
-            HeapObject::CHandle(_, id) => write!(f, "<c-handle:{}>", id),
             HeapObject::ThreadHandle(_) => write!(f, "<thread-handle>"),
             HeapObject::Fiber(handle) => match handle.try_with(|fib| fib.status.as_str()) {
                 Some(status) => write!(f, "<fiber:{}>", status),
@@ -242,6 +272,8 @@ impl std::fmt::Debug for HeapObject {
             },
             HeapObject::Syntax(s) => write!(f, "#<syntax:{}>", s),
             HeapObject::Binding(_) => write!(f, "#<binding>"),
+            HeapObject::FFISignature(_, _) => write!(f, "<ffi-signature>"),
+            HeapObject::FFIType(desc) => write!(f, "<ffi-type:{:?}>", desc),
         }
     }
 }

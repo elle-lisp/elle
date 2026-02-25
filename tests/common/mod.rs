@@ -3,7 +3,7 @@
 //! Provides canonical eval and setup functions so test files don't need
 //! to copy-paste their own variants.
 
-use elle::ffi::primitives::context::{set_symbol_table, set_vm_context};
+use elle::context::{set_symbol_table, set_vm_context};
 use elle::{eval_all, init_stdlib, register_primitives, SymbolTable, Value, VM};
 
 /// Evaluate Elle source code through the full pipeline.

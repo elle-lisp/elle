@@ -1,328 +1,221 @@
-//! C function calling via direct invocation.
+//! FFI call dispatch via libffi.
 //!
-//! This module implements function calling for C functions with proper
-//! type marshaling. For x86-64 Linux, we implement the System V AMD64 ABI.
+//! Wraps `libffi::middle::Cif` to perform actual C function calls,
+//! converting between Elle `Value` and C types.
 
-use super::marshal::{CValue, Marshal};
-use super::types::{CType, FunctionSignature};
+use crate::error::{LError, LResult};
+use crate::ffi::marshal::{read_value_from_buffer, to_libffi_type, AlignedBuffer, MarshalledArg};
+use crate::ffi::types::{Signature, TypeDesc};
 use crate::value::Value;
+use libffi::middle::{Cif, CodePtr, Type};
 use std::ffi::c_void;
 
-/// Wrapper around a C function ready to be called.
-#[derive(Debug)]
-pub struct FunctionCall {
-    /// The function signature
-    pub signature: FunctionSignature,
-    /// Raw function pointer from library
-    pub func_ptr: *const c_void,
-}
-
-impl FunctionCall {
-    /// Create a new function call wrapper.
-    pub fn new(signature: FunctionSignature, func_ptr: *const c_void) -> Result<Self, String> {
-        if func_ptr.is_null() {
-            return Err("Function pointer is null".to_string());
-        }
-
-        Ok(FunctionCall {
-            signature,
-            func_ptr,
-        })
-    }
-
-    /// Call the C function with Elle values as arguments.
-    ///
-    /// This implements the x86-64 System V AMD64 ABI for function calling.
-    ///
-    /// # Supported Signatures
-    /// - Up to 6 integer arguments (passed in RDI, RSI, RDX, RCX, R8, R9)
-    /// - Up to 8 floating-point arguments (passed in XMM0-XMM7)
-    /// - Integer or floating-point return values
-    /// - Pointer return values
-    pub fn call(&self, args: &[Value]) -> Result<Value, String> {
-        // Type check argument count
-        if args.len() != self.signature.args.len() {
-            return Err(format!(
-                "Function '{}' expects {} arguments, got {}",
-                self.signature.name,
-                self.signature.args.len(),
-                args.len()
-            ));
-        }
-
-        // For now, we only support functions with up to 6 integer/pointer args
-        // and float returns. Full libffi integration will be in Phase 2b.
-        if args.len() > 6 {
-            return Err("Functions with more than 6 arguments not yet supported".to_string());
-        }
-
-        // Check if any arguments are unsupported types
-        for arg_type in &self.signature.args {
-            if arg_type.is_struct() || arg_type.is_array() {
-                return Err("Struct and array arguments not yet supported".to_string());
-            }
-        }
-
-        // Marshal arguments
-        let mut c_args = Vec::new();
-        for (arg, expected_type) in args.iter().zip(self.signature.args.iter()) {
-            let c_value = Marshal::elle_to_c(arg, expected_type)?;
-            c_args.push(c_value);
-        }
-
-        // Call function via x86-64 calling convention
-        // This is implemented via assembly (see below)
-        let result =
-            unsafe { call_c_function(&self.func_ptr, &c_args, &self.signature.return_type)? };
-
-        // Unmarshal result
-        Marshal::c_to_elle(&result, &self.signature.return_type)
+/// Prepare a libffi CIF from our Signature.
+pub fn prepare_cif(sig: &Signature) -> Cif {
+    let arg_types: Vec<Type> = sig.args.iter().map(to_libffi_type).collect();
+    let ret_type = to_libffi_type(&sig.ret);
+    match sig.fixed_args {
+        Some(fixed) => Cif::new_variadic(arg_types, fixed, ret_type),
+        None => Cif::new(arg_types, ret_type),
     }
 }
 
-/// Call a C function using x86-64 System V AMD64 ABI.
+/// Call a C function through libffi using a pre-prepared CIF.
 ///
-/// # Arguments
-/// - func_ptr: Raw C function pointer
-/// - args: Marshaled argument values
-/// - return_type: Expected return type
-///
-/// # Returns
-/// Marshaled return value
-unsafe fn call_c_function(
-    func_ptr: &*const c_void,
-    args: &[CValue],
-    return_type: &CType,
-) -> Result<CValue, String> {
-    // For x86-64 Linux ABI:
-    // - First 6 integer/pointer args: RDI, RSI, RDX, RCX, R8, R9
-    // - First 8 float args: XMM0-XMM7
-    // - Return value in RAX (int) or XMM0 (float)
-    // - We use inline assembly for this
-
-    match args.len() {
-        0 => call_c_no_args(*func_ptr, return_type),
-        1 => call_c_1_arg(*func_ptr, &args[0], return_type),
-        2 => call_c_2_args(*func_ptr, &args[0], &args[1], return_type),
-        3 => call_c_3_args(*func_ptr, &args[0], &args[1], &args[2], return_type),
-        4 => call_c_4_args(
-            *func_ptr,
-            &args[0],
-            &args[1],
-            &args[2],
-            &args[3],
-            return_type,
-        ),
-        5 => call_c_5_args(
-            *func_ptr,
-            &args[0],
-            &args[1],
-            &args[2],
-            &args[3],
-            &args[4],
-            return_type,
-        ),
-        6 => call_c_6_args(
-            *func_ptr,
-            &args[0],
-            &args[1],
-            &args[2],
-            &args[3],
-            &args[4],
-            &args[5],
-            return_type,
-        ),
-        _ => Err("Too many arguments for x86-64 calling convention".to_string()),
+/// # Safety
+/// The function pointer must be valid and match the signature.
+/// Arguments must match the expected C types.
+/// The CIF must match the signature.
+pub unsafe fn ffi_call(
+    fn_ptr: *const c_void,
+    args: &[Value],
+    sig: &Signature,
+    cif: &Cif,
+) -> LResult<Value> {
+    if args.len() != sig.args.len() {
+        return Err(LError::ffi_error(
+            "call",
+            format!("expected {} arguments, got {}", sig.args.len(), args.len()),
+        ));
     }
-}
 
-// Extract i64 from CValue for integer arguments
-#[allow(dead_code)]
-trait ToI64 {
-    fn to_i64(&self) -> i64;
-}
+    let code_ptr = CodePtr(fn_ptr as *mut c_void);
 
-impl From<&CValue> for i64 {
-    fn from(val: &CValue) -> Self {
-        match val {
-            CValue::Int(n) => *n,
-            CValue::UInt(n) => *n as i64,
-            CValue::Float(f) => f.to_bits() as i64,
-            CValue::Pointer(p) => *p as i64,
-            CValue::String(_) => 0, // String pointer would need special handling
-            CValue::Struct(_) => 0, // Should not happen
-            CValue::Union(_) => 0,  // Unions pass by value, but need special handling
-            CValue::Array(_) => 0,  // Arrays pass by pointer
+    let marshalled: Vec<MarshalledArg> = args
+        .iter()
+        .zip(sig.args.iter())
+        .map(|(val, desc)| MarshalledArg::new(val, desc))
+        .collect::<LResult<Vec<_>>>()?;
+
+    let ffi_args: Vec<libffi::middle::Arg> = marshalled.iter().map(|m| m.as_arg()).collect();
+
+    match &sig.ret {
+        TypeDesc::Void => {
+            cif.call::<()>(code_ptr, &ffi_args);
+            Ok(Value::NIL)
         }
-    }
-}
-
-// Unsafe assembly-based function calling for each argument count
-unsafe fn call_c_no_args(func: *const c_void, ret_type: &CType) -> Result<CValue, String> {
-    let f: extern "C" fn() -> i64 = std::mem::transmute(func);
-    let result = f();
-    extract_result(result, 0.0, ret_type)
-}
-
-unsafe fn call_c_1_arg(
-    func: *const c_void,
-    arg1: &CValue,
-    ret_type: &CType,
-) -> Result<CValue, String> {
-    let arg1_val: i64 = arg1.into();
-    let f: extern "C" fn(i64) -> i64 = std::mem::transmute(func);
-    let result = f(arg1_val);
-    extract_result(result, 0.0, ret_type)
-}
-
-unsafe fn call_c_2_args(
-    func: *const c_void,
-    arg1: &CValue,
-    arg2: &CValue,
-    ret_type: &CType,
-) -> Result<CValue, String> {
-    let arg1_val: i64 = arg1.into();
-    let arg2_val: i64 = arg2.into();
-    let f: extern "C" fn(i64, i64) -> i64 = std::mem::transmute(func);
-    let result = f(arg1_val, arg2_val);
-    extract_result(result, 0.0, ret_type)
-}
-
-unsafe fn call_c_3_args(
-    func: *const c_void,
-    arg1: &CValue,
-    arg2: &CValue,
-    arg3: &CValue,
-    ret_type: &CType,
-) -> Result<CValue, String> {
-    let arg1_val: i64 = arg1.into();
-    let arg2_val: i64 = arg2.into();
-    let arg3_val: i64 = arg3.into();
-    let f: extern "C" fn(i64, i64, i64) -> i64 = std::mem::transmute(func);
-    let result = f(arg1_val, arg2_val, arg3_val);
-    extract_result(result, 0.0, ret_type)
-}
-
-unsafe fn call_c_4_args(
-    func: *const c_void,
-    arg1: &CValue,
-    arg2: &CValue,
-    arg3: &CValue,
-    arg4: &CValue,
-    ret_type: &CType,
-) -> Result<CValue, String> {
-    let arg1_val: i64 = arg1.into();
-    let arg2_val: i64 = arg2.into();
-    let arg3_val: i64 = arg3.into();
-    let arg4_val: i64 = arg4.into();
-    let f: extern "C" fn(i64, i64, i64, i64) -> i64 = std::mem::transmute(func);
-    let result = f(arg1_val, arg2_val, arg3_val, arg4_val);
-    extract_result(result, 0.0, ret_type)
-}
-
-unsafe fn call_c_5_args(
-    func: *const c_void,
-    arg1: &CValue,
-    arg2: &CValue,
-    arg3: &CValue,
-    arg4: &CValue,
-    arg5: &CValue,
-    ret_type: &CType,
-) -> Result<CValue, String> {
-    let arg1_val: i64 = arg1.into();
-    let arg2_val: i64 = arg2.into();
-    let arg3_val: i64 = arg3.into();
-    let arg4_val: i64 = arg4.into();
-    let arg5_val: i64 = arg5.into();
-    let f: extern "C" fn(i64, i64, i64, i64, i64) -> i64 = std::mem::transmute(func);
-    let result = f(arg1_val, arg2_val, arg3_val, arg4_val, arg5_val);
-    extract_result(result, 0.0, ret_type)
-}
-
-#[allow(clippy::too_many_arguments)]
-unsafe fn call_c_6_args(
-    func: *const c_void,
-    arg1: &CValue,
-    arg2: &CValue,
-    arg3: &CValue,
-    arg4: &CValue,
-    arg5: &CValue,
-    arg6: &CValue,
-    ret_type: &CType,
-) -> Result<CValue, String> {
-    let arg1_val: i64 = arg1.into();
-    let arg2_val: i64 = arg2.into();
-    let arg3_val: i64 = arg3.into();
-    let arg4_val: i64 = arg4.into();
-    let arg5_val: i64 = arg5.into();
-    let arg6_val: i64 = arg6.into();
-    let f: extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64 = std::mem::transmute(func);
-    let result = f(arg1_val, arg2_val, arg3_val, arg4_val, arg5_val, arg6_val);
-    extract_result(result, 0.0, ret_type)
-}
-
-/// Extract result based on return type.
-unsafe fn extract_result(
-    int_result: i64,
-    _float_result: f64,
-    ret_type: &CType,
-) -> Result<CValue, String> {
-    match ret_type {
-        CType::Void => Ok(CValue::Int(0)),
-        CType::Float | CType::Double => {
-            // For float returns, we'd need inline asm to read XMM0
-            // For now, we'll return an error
-            Err("Float return values require inline assembly (Phase 2b+)".to_string())
+        TypeDesc::Bool => {
+            let r: std::ffi::c_int = cif.call(code_ptr, &ffi_args);
+            Ok(Value::bool(r != 0))
         }
-        CType::Pointer(_) => Ok(CValue::Pointer(int_result as *const c_void)),
-        _ => Ok(CValue::Int(int_result)),
+        TypeDesc::I8 | TypeDesc::Char => {
+            let r: i8 = cif.call(code_ptr, &ffi_args);
+            Ok(Value::int(r as i64))
+        }
+        TypeDesc::U8 | TypeDesc::UChar => {
+            let r: u8 = cif.call(code_ptr, &ffi_args);
+            Ok(Value::int(r as i64))
+        }
+        TypeDesc::I16 | TypeDesc::Short => {
+            let r: i16 = cif.call(code_ptr, &ffi_args);
+            Ok(Value::int(r as i64))
+        }
+        TypeDesc::U16 | TypeDesc::UShort => {
+            let r: u16 = cif.call(code_ptr, &ffi_args);
+            Ok(Value::int(r as i64))
+        }
+        TypeDesc::I32 | TypeDesc::Int => {
+            let r: std::ffi::c_int = cif.call(code_ptr, &ffi_args);
+            Ok(Value::int(r as i64))
+        }
+        TypeDesc::U32 | TypeDesc::UInt => {
+            let r: std::ffi::c_uint = cif.call(code_ptr, &ffi_args);
+            Ok(Value::int(r as i64))
+        }
+        TypeDesc::I64 | TypeDesc::Long | TypeDesc::SSize => {
+            let r: i64 = cif.call(code_ptr, &ffi_args);
+            Ok(Value::int(r))
+        }
+        TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
+            let r: u64 = cif.call(code_ptr, &ffi_args);
+            Ok(Value::int(r as i64))
+        }
+        TypeDesc::Float => {
+            let r: f32 = cif.call(code_ptr, &ffi_args);
+            Ok(Value::float(r as f64))
+        }
+        TypeDesc::Double => {
+            let r: f64 = cif.call(code_ptr, &ffi_args);
+            Ok(Value::float(r))
+        }
+        TypeDesc::Ptr | TypeDesc::Str => {
+            let r: *const c_void = cif.call(code_ptr, &ffi_args);
+            Ok(Value::pointer(r as usize))
+        }
+        TypeDesc::Struct(sd) => {
+            let (_, total_size) = sd.field_offsets().ok_or_else(|| {
+                LError::ffi_error("call", "cannot compute struct layout for return type")
+            })?;
+            let align = sig.ret.align().unwrap_or(1);
+            let buf = AlignedBuffer::new(total_size, align);
+            let ret = libffi::middle::Ret::new(unsafe {
+                std::slice::from_raw_parts_mut(buf.as_mut_ptr(), total_size.max(1))
+            });
+            cif.call_return_into(code_ptr, &ffi_args, ret);
+            read_value_from_buffer(buf.as_mut_ptr(), &sig.ret)
+        }
+        TypeDesc::Array(ref elem_desc, count) => {
+            let elem_size = elem_desc.size().ok_or_else(|| {
+                LError::ffi_error("call", "cannot compute array element size for return type")
+            })?;
+            let total_size = elem_size * count;
+            let align = elem_desc.align().unwrap_or(1);
+            let buf = AlignedBuffer::new(total_size, align);
+            let ret = libffi::middle::Ret::new(unsafe {
+                std::slice::from_raw_parts_mut(buf.as_mut_ptr(), total_size.max(1))
+            });
+            cif.call_return_into(code_ptr, &ffi_args, ret);
+            read_value_from_buffer(buf.as_mut_ptr(), &sig.ret)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ffi::types::{CallingConvention, Signature};
 
     #[test]
-    fn test_function_call_new() {
-        let sig = FunctionSignature::new(
-            "strlen".to_string(),
-            vec![CType::Pointer(Box::new(CType::Char))],
-            CType::Long,
-        );
-        let func_ptr = 0x1234 as *const c_void;
-        let call = FunctionCall::new(sig, func_ptr).unwrap();
-        assert_eq!(call.signature.name, "strlen");
+    fn test_prepare_cif() {
+        let sig = Signature {
+            convention: CallingConvention::Default,
+            ret: TypeDesc::I32,
+            args: vec![TypeDesc::I32],
+            fixed_args: None,
+        };
+        let _cif = prepare_cif(&sig);
     }
 
     #[test]
-    fn test_function_call_null_pointer() {
-        let sig = FunctionSignature::new("test".to_string(), vec![], CType::Int);
-        let result = FunctionCall::new(sig, std::ptr::null());
-        assert!(result.is_err());
+    fn test_prepare_cif_no_args() {
+        let sig = Signature {
+            convention: CallingConvention::Default,
+            ret: TypeDesc::Void,
+            args: vec![],
+            fixed_args: None,
+        };
+        let _cif = prepare_cif(&sig);
     }
 
     #[test]
-    fn test_argument_count_mismatch() {
-        let sig =
-            FunctionSignature::new("add".to_string(), vec![CType::Int, CType::Int], CType::Int);
-        let func_ptr = 0x1234 as *const c_void;
-        let call = FunctionCall::new(sig, func_ptr).unwrap();
-
-        let args = vec![Value::int(1)];
-        let result = call.call(&args);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("expects 2 arguments, got 1"));
+    fn test_prepare_variadic_cif() {
+        let sig = Signature {
+            convention: CallingConvention::Default,
+            ret: TypeDesc::I32,
+            args: vec![TypeDesc::Ptr, TypeDesc::Size, TypeDesc::Ptr, TypeDesc::I32],
+            fixed_args: Some(3),
+        };
+        let _cif = prepare_cif(&sig);
     }
 
     #[test]
-    fn test_too_many_arguments() {
-        let sig = FunctionSignature::new("too_many".to_string(), vec![CType::Int; 7], CType::Int);
-        let func_ptr = 0x1234 as *const c_void;
-        let call = FunctionCall::new(sig, func_ptr).unwrap();
-
-        let args: Vec<Value> = (0..7).map(Value::int).collect();
-        let result = call.call(&args);
+    fn test_arity_check() {
+        let sig = Signature {
+            convention: CallingConvention::Default,
+            ret: TypeDesc::I32,
+            args: vec![TypeDesc::I32],
+            fixed_args: None,
+        };
+        let cif = prepare_cif(&sig);
+        // Wrong number of args
+        let result = unsafe { ffi_call(std::ptr::null(), &[], &sig, &cif) };
         assert!(result.is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_call_abs() {
+        extern "C" {
+            fn abs(n: std::ffi::c_int) -> std::ffi::c_int;
+        }
+        let sig = Signature {
+            convention: CallingConvention::Default,
+            ret: TypeDesc::Int,
+            args: vec![TypeDesc::Int],
+            fixed_args: None,
+        };
+        let cif = prepare_cif(&sig);
+        let result = unsafe { ffi_call(abs as *const c_void, &[Value::int(-42)], &sig, &cif) };
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_int(), Some(42));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_call_strlen() {
+        extern "C" {
+            fn strlen(s: *const std::ffi::c_char) -> usize;
+        }
+        let sig = Signature {
+            convention: CallingConvention::Default,
+            ret: TypeDesc::Size,
+            args: vec![TypeDesc::Str],
+            fixed_args: None,
+        };
+        let cif = prepare_cif(&sig);
+        let hello = Value::string("hello");
+        let result = unsafe { ffi_call(strlen as *const c_void, &[hello], &sig, &cif) };
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_int(), Some(5));
     }
 }
