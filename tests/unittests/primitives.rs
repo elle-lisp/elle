@@ -395,7 +395,7 @@ fn test_arity_errors() {
 #[test]
 fn test_gensym_generation() {
     let (vm, mut symbols) = setup();
-    elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+    elle::context::set_symbol_table(&mut symbols as *mut SymbolTable);
     let gensym = get_primitive(&vm, &mut symbols, "gensym");
 
     // Generate unique symbols
@@ -412,7 +412,7 @@ fn test_gensym_generation() {
 #[test]
 fn test_gensym_with_prefix() {
     let (vm, mut symbols) = setup();
-    elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+    elle::context::set_symbol_table(&mut symbols as *mut SymbolTable);
     let gensym = get_primitive(&vm, &mut symbols, "gensym");
 
     // Generate symbol with custom prefix
@@ -1175,7 +1175,6 @@ fn test_import_file_primitive() {
 
 #[test]
 fn test_import_file_with_valid_file() {
-    use elle::ffi_primitives;
     use elle::{register_primitives, SymbolTable, VM};
 
     // Use the test module in the repo
@@ -1187,8 +1186,8 @@ fn test_import_file_with_valid_file() {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Set VM context for file loading
-    ffi_primitives::set_vm_context(&mut vm as *mut VM);
-    ffi_primitives::set_symbol_table(&mut symbols as *mut SymbolTable);
+    elle::context::set_vm_context(&mut vm as *mut VM);
+    elle::context::set_symbol_table(&mut symbols as *mut SymbolTable);
 
     // Test loading an existing file
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
@@ -1196,12 +1195,11 @@ fn test_import_file_with_valid_file() {
     assert!(result.is_ok(), "Should successfully load valid file");
 
     // Clean up
-    ffi_primitives::clear_vm_context();
+    elle::context::clear_vm_context();
 }
 
 #[test]
 fn test_import_file_with_invalid_file() {
-    use elle::ffi_primitives;
     use elle::{register_primitives, SymbolTable, VM};
 
     // Set up VM
@@ -1210,7 +1208,7 @@ fn test_import_file_with_invalid_file() {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Set VM context
-    ffi_primitives::set_vm_context(&mut vm as *mut VM);
+    elle::context::set_vm_context(&mut vm as *mut VM);
 
     // Test loading a non-existent file
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
@@ -1218,12 +1216,11 @@ fn test_import_file_with_invalid_file() {
     assert!(result.is_err(), "Should fail for non-existent file");
 
     // Clean up
-    ffi_primitives::clear_vm_context();
+    elle::context::clear_vm_context();
 }
 
 #[test]
 fn test_import_file_circular_dependency_prevention() {
-    use elle::ffi_primitives;
     use elle::{register_primitives, SymbolTable, VM};
 
     let module_path = "test-modules/test.lisp";
@@ -1234,8 +1231,8 @@ fn test_import_file_circular_dependency_prevention() {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Set VM context
-    ffi_primitives::set_vm_context(&mut vm as *mut VM);
-    ffi_primitives::set_symbol_table(&mut symbols as *mut SymbolTable);
+    elle::context::set_vm_context(&mut vm as *mut VM);
+    elle::context::set_symbol_table(&mut symbols as *mut SymbolTable);
 
     let import_file = get_primitive(&vm, &mut symbols, "import-file");
 
@@ -1251,7 +1248,7 @@ fn test_import_file_circular_dependency_prevention() {
     );
 
     // Clean up
-    ffi_primitives::clear_vm_context();
+    elle::context::clear_vm_context();
 }
 
 #[test]
@@ -1270,7 +1267,6 @@ fn test_add_module_path_primitive() {
 
 #[test]
 fn test_add_module_path_with_vm_context() {
-    use elle::ffi_primitives;
     use elle::{register_primitives, SymbolTable, VM};
 
     // Set up VM
@@ -1279,7 +1275,7 @@ fn test_add_module_path_with_vm_context() {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     // Set VM context
-    ffi_primitives::set_vm_context(&mut vm as *mut VM);
+    elle::context::set_vm_context(&mut vm as *mut VM);
 
     let add_path = get_primitive(&vm, &mut symbols, "add-module-path");
 
@@ -1293,7 +1289,7 @@ fn test_add_module_path_with_vm_context() {
     assert!(result.is_ok());
 
     // Clean up
-    ffi_primitives::clear_vm_context();
+    elle::context::clear_vm_context();
 }
 
 #[test]
@@ -1937,7 +1933,7 @@ fn eval_full(input: &str) -> Result<Value, elle::error::LError> {
     let mut symbols = SymbolTable::new();
     let _effects = register_primitives(&mut vm, &mut symbols);
     elle::primitives::init_stdlib(&mut vm, &mut symbols);
-    elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+    elle::context::set_symbol_table(&mut symbols as *mut SymbolTable);
     pipeline_eval(input, &mut symbols, &mut vm).map_err(elle::error::LError::from)
 }
 

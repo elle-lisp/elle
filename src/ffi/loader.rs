@@ -91,6 +91,39 @@ pub fn load_library(path: &str) -> Result<LibraryHandle, String> {
     }
 }
 
+/// Load the current process as a library (equivalent to dlopen(NULL)).
+///
+/// This allows looking up symbols linked into the main executable,
+/// including libc functions on most platforms.
+///
+/// # Returns
+/// * `Ok(library)` - Handle to the current process
+/// * `Err(message)` - If not supported on this platform
+///
+/// # Example
+/// ```text
+/// Load self and look up strlen:
+/// let lib = load_self()?;
+/// let strlen_ptr = lib.get_symbol("strlen")?;
+/// ```
+pub fn load_self() -> Result<LibraryHandle, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use libloading::os::unix::Library as UnixLibrary;
+        let unix_lib = UnixLibrary::this();
+        Ok(LibraryHandle {
+            id: 0, // Will be assigned by FFISubsystem
+            path: "<self>".to_string(),
+            native: unix_lib.into(),
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("Self-process loading not supported on this platform".to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +175,18 @@ mod tests {
             let result = lib.get_symbol("this_function_does_not_exist_in_libc_12345");
             assert!(result.is_err());
         }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_load_self() {
+        let lib = load_self();
+        assert!(lib.is_ok());
+        let lib = lib.unwrap();
+        assert_eq!(lib.path, "<self>");
+        // Should be able to find libc symbols
+        let result = lib.get_symbol("strlen");
+        assert!(result.is_ok());
+        assert!(!result.unwrap().is_null());
     }
 }

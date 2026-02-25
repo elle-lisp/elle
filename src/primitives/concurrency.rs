@@ -73,7 +73,7 @@ fn is_value_sendable(value: &Value) -> bool {
         HeapObject::NativeFn(_) => false,
 
         // Unsafe: FFI handles
-        HeapObject::LibHandle(_) | HeapObject::CHandle(_, _) => false,
+        HeapObject::LibHandle(_) => false,
 
         // Unsafe: thread handles
         HeapObject::ThreadHandle(_) => false,
@@ -99,6 +99,12 @@ fn is_value_sendable(value: &Value) -> bool {
 
         // Bindings are compile-time only, not sendable
         HeapObject::Binding(_) => false,
+
+        // FFI signatures are not sendable
+        HeapObject::FFISignature(_, _) => false,
+
+        // FFI type descriptors are pure data — safe to send
+        HeapObject::FFIType(_) => true,
     }
 }
 
@@ -248,8 +254,8 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> 
     });
 
     // Return a thread handle with the result holder
-    use crate::value::heap::{alloc, HeapObject, ThreadHandleData};
-    let thread_handle_data = ThreadHandleData {
+    use crate::value::heap::{alloc, HeapObject, ThreadHandle};
+    let thread_handle_data = ThreadHandle {
         result: result_holder,
     };
     Ok(alloc(HeapObject::ThreadHandle(thread_handle_data)))

@@ -33,7 +33,7 @@ pub fn handle_eval_instruction(vm: &mut VM) {
         .expect("VM bug: Stack underflow on eval (env)");
 
     // Get symbol table from thread-local context
-    let symbols_ptr = unsafe { crate::ffi::primitives::context::get_symbol_table() };
+    let symbols_ptr = unsafe { crate::context::get_symbol_table() };
     let Some(symbols_ptr) = symbols_ptr else {
         vm.fiber.signal = Some((
             SIG_ERROR,

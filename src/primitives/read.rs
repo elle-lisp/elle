@@ -47,7 +47,7 @@ pub fn prim_read(args: &[Value]) -> (SignalBits, Value) {
 
     // Convert Syntax to Value — needs symbol table for interning symbols
     let symbols = unsafe {
-        match crate::ffi::primitives::context::get_symbol_table() {
+        match crate::context::get_symbol_table() {
             Some(ptr) => &mut *ptr,
             None => {
                 return (
@@ -99,7 +99,7 @@ pub fn prim_read_all(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let symbols = unsafe {
-        match crate::ffi::primitives::context::get_symbol_table() {
+        match crate::context::get_symbol_table() {
             Some(ptr) => &mut *ptr,
             None => {
                 return (

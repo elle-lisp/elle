@@ -36,7 +36,7 @@ pub fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
     // Intern the symbol name so we return a proper symbol value.
     // This requires the symbol table to be set via set_symbol_table().
     unsafe {
-        if let Some(symbols_ptr) = crate::ffi::primitives::context::get_symbol_table() {
+        if let Some(symbols_ptr) = crate::context::get_symbol_table() {
             let id = (*symbols_ptr).intern(&sym_name);
             (SIG_OK, Value::symbol(id.0))
         } else {
@@ -90,7 +90,7 @@ pub fn prim_datum_to_syntax(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let symbols = unsafe {
-        match crate::ffi::primitives::context::get_symbol_table() {
+        match crate::context::get_symbol_table() {
             Some(ptr) => &*ptr,
             None => {
                 return (
@@ -143,7 +143,7 @@ pub fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let symbols = unsafe {
-        match crate::ffi::primitives::context::get_symbol_table() {
+        match crate::context::get_symbol_table() {
             Some(ptr) => &mut *ptr,
             None => {
                 return (

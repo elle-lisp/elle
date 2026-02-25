@@ -42,7 +42,7 @@ pub fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
         eprintln!("[TRACE] {}: {:?}", s, args[1]);
         (SIG_OK, args[1])
     } else if let Some(sym_id) = args[0].as_symbol() {
-        let name = crate::ffi::primitives::context::resolve_symbol_name(sym_id)
+        let name = crate::context::resolve_symbol_name(sym_id)
             .unwrap_or_else(|| format!("#<sym:{}>", sym_id));
         eprintln!("[TRACE] {}: {:?}", name, args[1]);
         (SIG_OK, args[1])

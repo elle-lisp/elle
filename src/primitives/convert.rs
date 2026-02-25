@@ -123,7 +123,7 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
     }
 
     if let Some(sym_id) = val.as_symbol() {
-        return match crate::ffi::primitives::context::resolve_symbol_name(sym_id) {
+        return match crate::context::resolve_symbol_name(sym_id) {
             Some(name) => (SIG_OK, Value::string(name)),
             None => (
                 SIG_ERROR,
@@ -305,7 +305,7 @@ pub fn prim_symbol_to_string(args: &[Value]) -> (SignalBits, Value) {
     }
 
     match args[0].as_symbol() {
-        Some(id) => match crate::ffi::primitives::context::resolve_symbol_name(id) {
+        Some(id) => match crate::context::resolve_symbol_name(id) {
             Some(name) => (SIG_OK, Value::string(name)),
             None => (
                 SIG_ERROR,

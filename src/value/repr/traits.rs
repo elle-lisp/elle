@@ -61,9 +61,6 @@ impl PartialEq for Value {
                 // LibHandle comparison
                 (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1 == h2,
 
-                // CHandle comparison
-                (HeapObject::CHandle(p1, h1), HeapObject::CHandle(p2, h2)) => p1 == p2 && h1 == h2,
-
                 // ThreadHandle comparison (compare by reference)
                 (HeapObject::ThreadHandle(_), HeapObject::ThreadHandle(_)) => {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
@@ -81,6 +78,12 @@ impl PartialEq for Value {
                 (HeapObject::Binding(_), HeapObject::Binding(_)) => {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
+
+                // FFI signature comparison (structural equality, skip CIF cache)
+                (HeapObject::FFISignature(s1, _), HeapObject::FFISignature(s2, _)) => s1 == s2,
+
+                // FFI type descriptor comparison (structural equality)
+                (HeapObject::FFIType(t1), HeapObject::FFIType(t2)) => t1 == t2,
 
                 // Different types are not equal
                 _ => false,

@@ -1,7 +1,4 @@
 // Unit tests harness
-mod ffi {
-    include!("ffi.rs");
-}
 mod symbol {
     include!("symbol.rs");
 }

@@ -105,3 +105,29 @@
      (while (not (coro/done? c))
        (coro/resume c (yield (coro/value c))))
      (coro/value c)))
+
+;; ffi/defbind - convenient FFI function binding
+;; Usage: (ffi/defbind name lib-handle "c-name" return-type [arg-types...])
+;; Expands to a wrapper function that looks up the symbol, creates a signature,
+;; and defines a function that calls it.
+;; Example: (ffi/defbind abs libc "abs" :int [:int])
+;;   => (def abs (let ((ptr__ (ffi/lookup libc "abs"))
+;;                     (sig__ (ffi/signature :int [:int])))
+;;                 (fn (a0) (ffi/call ptr__ sig__ a0))))
+(defmacro ffi/defbind (name lib cname ret-type arg-types)
+  (let* ((ptr-sym (gensym))
+         (sig-sym (gensym))
+         (arg-types-val (syntax->datum arg-types))
+         (arg-count (length arg-types-val))
+         (params (letrec ((gen-params (fn (i acc)
+                                        (if (= i arg-count)
+                                          (reverse acc)
+                                          (gen-params (+ i 1) (cons (gensym) acc))))))
+                   (gen-params 0 '())))
+         (call-args params))
+    `(def ,name
+       (let ((,ptr-sym (ffi/lookup ,lib ,cname))
+             (,sig-sym (ffi/signature ,ret-type ,arg-types)))
+         (fn ,params
+            (ffi/call ,ptr-sym ,sig-sym ,@call-args))))))
+

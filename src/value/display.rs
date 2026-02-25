@@ -9,7 +9,7 @@ use std::fmt;
 
 /// Resolve a symbol ID to its name via the thread-local symbol table.
 fn resolve_symbol(id: u32) -> Option<String> {
-    crate::ffi::primitives::context::resolve_symbol_name(id)
+    crate::context::resolve_symbol_name(id)
 }
 
 impl fmt::Display for Value {
@@ -49,6 +49,10 @@ impl fmt::Display for Value {
 
         if let Some(name) = self.as_keyword_name() {
             return write!(f, ":{}", name);
+        }
+
+        if let Some(addr) = self.as_pointer() {
+            return write!(f, "<pointer 0x{:x}>", addr);
         }
 
         // Handle heap values
@@ -149,6 +153,27 @@ impl fmt::Display for Value {
             return write!(f, "]");
         }
 
+        // FFI signature
+        if self.as_ffi_signature().is_some() {
+            return write!(f, "<ffi-signature>");
+        }
+
+        // FFI type descriptor
+        if let Some(desc) = self.as_ffi_type() {
+            return match desc {
+                crate::ffi::types::TypeDesc::Struct(sd) if sd.fields.len() <= 5 => {
+                    let names: Vec<String> = sd.fields.iter().map(|f| f.short_name()).collect();
+                    write!(f, "<ffi-type:struct({})>", names.join(", "))
+                }
+                _ => write!(f, "<ffi-type:{}>", desc.short_name()),
+            };
+        }
+
+        // Library handle
+        if let Some(id) = self.as_lib_handle() {
+            return write!(f, "<lib-handle:{}>", id);
+        }
+
         // Default for unknown heap types
         write!(f, "<heap:{:#x}>", self.to_bits() & 0x0000_FFFF_FFFF_FFFF)
     }
@@ -184,6 +209,9 @@ impl fmt::Debug for Value {
         }
         if let Some(name) = self.as_keyword_name() {
             return write!(f, ":{}", name);
+        }
+        if let Some(addr) = self.as_pointer() {
+            return write!(f, "<pointer 0x{:x}>", addr);
         }
         if !self.is_heap() {
             return write!(f, "<unknown:{:#x}>", self.to_bits());

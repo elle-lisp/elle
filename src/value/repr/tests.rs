@@ -251,3 +251,151 @@ fn test_truthiness_semantics() {
     // Cell is truthy
     assert!(Value::cell(Value::int(42)).is_truthy(), "cell is truthy");
 }
+
+#[test]
+fn test_pointer() {
+    // NULL pointer becomes nil
+    let null = Value::pointer(0);
+    assert!(null.is_nil());
+    assert!(!null.is_pointer());
+    assert_eq!(null.as_pointer(), None);
+
+    // Non-null pointer
+    let ptr = Value::pointer(0x7F4A_2B3C_0000);
+    assert!(ptr.is_pointer());
+    assert!(!ptr.is_nil());
+    assert!(!ptr.is_heap());
+    assert!(!ptr.is_int());
+    assert_eq!(ptr.as_pointer(), Some(0x7F4A_2B3C_0000));
+    assert_eq!(ptr.type_name(), "pointer");
+
+    // Pointer equality
+    let ptr2 = Value::pointer(0x7F4A_2B3C_0000);
+    assert_eq!(ptr, ptr2);
+
+    // Different pointers are not equal
+    let ptr3 = Value::pointer(0x1234_5678_0000);
+    assert_ne!(ptr, ptr3);
+
+    // Pointers are truthy
+    assert!(ptr.is_truthy());
+
+    // Display format
+    assert_eq!(format!("{}", ptr), "<pointer 0x7f4a2b3c0000>");
+}
+
+#[test]
+fn test_ffi_signature_roundtrip() {
+    use crate::ffi::types::{CallingConvention, Signature, TypeDesc};
+    let sig = Signature {
+        convention: CallingConvention::Default,
+        ret: TypeDesc::I32,
+        args: vec![TypeDesc::Ptr, TypeDesc::U64],
+        fixed_args: None,
+    };
+    let v = Value::ffi_signature(sig.clone());
+    assert!(v.is_heap());
+    assert_eq!(v.as_ffi_signature(), Some(&sig));
+    assert_eq!(v.type_name(), "ffi-signature");
+    assert_eq!(format!("{}", v), "<ffi-signature>");
+}
+
+#[test]
+fn test_lib_handle_roundtrip() {
+    let v = Value::lib_handle(42);
+    assert!(v.is_heap());
+    assert_eq!(v.as_lib_handle(), Some(42));
+    assert_eq!(v.type_name(), "library-handle");
+    assert_eq!(format!("{}", v), "<lib-handle:42>");
+}
+
+#[test]
+fn test_ffi_signature_equality() {
+    use crate::ffi::types::{CallingConvention, Signature, TypeDesc};
+    let sig1 = Signature {
+        convention: CallingConvention::Default,
+        ret: TypeDesc::Void,
+        args: vec![],
+        fixed_args: None,
+    };
+    let sig2 = Signature {
+        convention: CallingConvention::Default,
+        ret: TypeDesc::Void,
+        args: vec![],
+        fixed_args: None,
+    };
+    let sig3 = Signature {
+        convention: CallingConvention::Default,
+        ret: TypeDesc::I32,
+        args: vec![],
+        fixed_args: None,
+    };
+    assert_eq!(
+        Value::ffi_signature(sig1.clone()),
+        Value::ffi_signature(sig2)
+    );
+    assert_ne!(Value::ffi_signature(sig1), Value::ffi_signature(sig3));
+}
+
+#[test]
+fn test_lib_handle_equality() {
+    assert_eq!(Value::lib_handle(1), Value::lib_handle(1));
+    assert_ne!(Value::lib_handle(1), Value::lib_handle(2));
+}
+
+#[test]
+fn test_ffi_signature_not_on_non_signature() {
+    assert_eq!(Value::int(42).as_ffi_signature(), None);
+    assert_eq!(Value::NIL.as_ffi_signature(), None);
+    assert_eq!(Value::string("hello").as_ffi_signature(), None);
+}
+
+#[test]
+fn test_lib_handle_not_on_non_handle() {
+    assert_eq!(Value::int(42).as_lib_handle(), None);
+    assert_eq!(Value::NIL.as_lib_handle(), None);
+    assert_eq!(Value::string("hello").as_lib_handle(), None);
+}
+
+#[test]
+fn test_ffi_type_roundtrip() {
+    use crate::ffi::types::{StructDesc, TypeDesc};
+    let desc = TypeDesc::Struct(StructDesc {
+        fields: vec![TypeDesc::I32, TypeDesc::Double, TypeDesc::Ptr],
+    });
+    let v = Value::ffi_type(desc.clone());
+    assert_eq!(v.type_name(), "ffi-type");
+    assert_eq!(v.as_ffi_type(), Some(&desc));
+}
+
+#[test]
+fn test_ffi_type_equality() {
+    use crate::ffi::types::{StructDesc, TypeDesc};
+    let desc1 = TypeDesc::Struct(StructDesc {
+        fields: vec![TypeDesc::I32, TypeDesc::Double],
+    });
+    let desc2 = TypeDesc::Struct(StructDesc {
+        fields: vec![TypeDesc::I32, TypeDesc::Double],
+    });
+    let desc3 = TypeDesc::Struct(StructDesc {
+        fields: vec![TypeDesc::I32, TypeDesc::I32],
+    });
+    assert_eq!(Value::ffi_type(desc1.clone()), Value::ffi_type(desc2));
+    assert_ne!(Value::ffi_type(desc1), Value::ffi_type(desc3));
+}
+
+#[test]
+fn test_ffi_type_not_on_non_type() {
+    assert_eq!(Value::int(42).as_ffi_type(), None);
+    assert_eq!(Value::NIL.as_ffi_type(), None);
+    assert_eq!(Value::string("hello").as_ffi_type(), None);
+}
+
+#[test]
+fn test_ffi_type_array() {
+    use crate::ffi::types::TypeDesc;
+    let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 10);
+    let v = Value::ffi_type(desc.clone());
+    assert_eq!(v.as_ffi_type(), Some(&desc));
+    assert_eq!(v.type_name(), "ffi-type");
+}

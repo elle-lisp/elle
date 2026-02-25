@@ -147,6 +147,20 @@ pub fn prim_type_of(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::keyword(type_name))
 }
 
+/// Check if value is a raw C pointer
+pub fn prim_is_pointer(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("pointer?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].is_pointer()))
+}
+
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "nil?",
@@ -246,5 +260,16 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "predicate",
         example: "(type 42) ;=> :integer\n(type \"hello\") ;=> :string",
         aliases: &["type-of"],
+    },
+    PrimitiveDef {
+        name: "pointer?",
+        func: prim_is_pointer,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a raw C pointer.",
+        params: &["value"],
+        category: "predicate",
+        example: "(pointer? ptr) ;=> #t\n(pointer? 42) ;=> #f",
+        aliases: &[],
     },
 ];

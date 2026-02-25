@@ -1,316 +1,556 @@
-//! C Callbacks - Enable C code to call Elle functions
+//! FFI callback trampolines.
 //!
-//! This module provides callback wrappers that allow C libraries to call back into Elle code.
-//! Callbacks are registered with metadata about their signature for validation.
+//! Allows passing Elle closures as C function pointers to C APIs
+//! (e.g., qsort comparators, signal handlers, iteration callbacks).
 //!
 //! # Architecture
 //!
-//! - Callbacks are identified by unique IDs
-//! - Callback metadata (arg types, return type) is stored in the FFI subsystem
-//! - The actual Elle closure is managed separately by the VM
-//! - This avoids threading issues with non-thread-safe types like Rc
+//! `create_callback` wraps an Elle closure in a libffi closure. When C
+//! code calls the resulting function pointer, the trampoline:
+//! 1. Reads C arguments using the signature's type descriptors
+//! 2. Gets the VM from thread-local storage
+//! 3. Calls the Elle closure via `execute_bytecode_saving_stack`
+//! 4. Writes the return value back to the result buffer
+//!
+//! # Limitations
+//!
+//! - Callbacks can only be invoked on the thread that created them
+//!   (same VM context). Single-threaded use only.
+//! - If the Elle closure signals an error, the callback writes a
+//!   zero return value and sets a thread-local error flag. The
+//!   caller should check `take_callback_error` after the C function
+//!   returns.
 
+use crate::ffi::call::prepare_cif;
+use crate::ffi::marshal::{read_value_from_buffer, write_value_to_buffer};
+use crate::ffi::types::{Signature, TypeDesc};
+use crate::value::{Closure, Value};
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
-
-use crate::ffi::types::CType;
-use crate::value::Value;
+use std::ffi::c_void;
 use std::rc::Rc;
 
-/// Next callback ID to assign
-static NEXT_CALLBACK_ID: AtomicU32 = AtomicU32::new(1);
+// ── Thread-local error flag ─────────────────────────────────────────
 
-// Thread-local callback registry
-// Maps callback IDs to their associated closures
 thread_local! {
-    static CALLBACK_REGISTRY: Mutex<HashMap<u32, Rc<Value>>> = Mutex::new(HashMap::new());
+    /// Error from the most recent callback invocation, if any.
+    /// Set by the trampoline when the Elle closure signals an error.
+    /// Checked by `ffi/call` after the C function returns.
+    static CALLBACK_ERROR: RefCell<Option<Value>> = const { RefCell::new(None) };
 }
 
-/// Information about a registered callback (thread-safe metadata)
-#[derive(Clone, Debug)]
-pub struct CallbackInfo {
-    /// Unique ID for this callback
-    pub id: u32,
-    /// Argument types for validation
-    pub arg_types: Vec<CType>,
-    /// Return type
-    pub return_type: CType,
+/// Take the pending callback error, if any.
+pub fn take_callback_error() -> Option<Value> {
+    CALLBACK_ERROR.with(|e| e.borrow_mut().take())
 }
 
-impl CallbackInfo {
-    /// Create new callback info
-    pub fn new(id: u32, arg_types: Vec<CType>, return_type: CType) -> Self {
-        CallbackInfo {
-            id,
-            arg_types,
-            return_type,
+fn set_callback_error(err: Value) {
+    CALLBACK_ERROR.with(|e| *e.borrow_mut() = Some(err));
+}
+
+// ── Callback data ───────────────────────────────────────────────────
+
+/// Data captured by an FFI callback trampoline.
+///
+/// Leaked onto the heap (via `Box::leak`) so the libffi closure can
+/// reference it with `'static` lifetime. Recovered and dropped by
+/// `free_callback`.
+struct CallbackData {
+    /// The Elle closure to invoke.
+    closure: Rc<Closure>,
+    /// The signature describing C argument and return types.
+    signature: Signature,
+}
+
+/// An active callback that keeps the libffi closure alive.
+///
+/// Stored in `FFISubsystem::callbacks` keyed by code pointer address.
+pub struct ActiveCallback {
+    /// The libffi closure (owns the trampoline code page).
+    _closure: libffi::middle::Closure<'static>,
+    /// The leaked userdata box (recovered on free).
+    userdata_ptr: *mut CallbackData,
+    /// The callable C function pointer address.
+    pub code_ptr: usize,
+}
+
+// ── Trampoline ──────────────────────────────────────────────────────
+
+/// The generic callback function invoked by libffi.
+///
+/// # Safety
+///
+/// Called by libffi when C code invokes the closure's code pointer.
+/// `args` points to an array of pointers to argument values.
+/// `result` points to a buffer where the return value must be written.
+///
+/// # Coupling: VM context
+///
+/// This function depends on `crate::context::get_vm_context()` returning
+/// a valid VM pointer. It is only safe to invoke callbacks on the thread
+/// where the VM is running and the context is set.
+unsafe extern "C" fn trampoline_callback(
+    _cif: &libffi::low::ffi_cif,
+    result: &mut c_void,
+    args: *const *const c_void,
+    userdata: &CallbackData,
+) {
+    let sig = &userdata.signature;
+    let closure = &userdata.closure;
+
+    // 1. Read C arguments into Elle Values
+    let mut elle_args = Vec::with_capacity(sig.args.len());
+    for (i, arg_desc) in sig.args.iter().enumerate() {
+        let arg_ptr = *args.add(i);
+        // libffi passes a pointer to each argument value.
+        let value = match read_value_from_buffer(arg_ptr as *const u8, arg_desc) {
+            Ok(v) => v,
+            Err(e) => {
+                set_callback_error(crate::value::error_val(
+                    "ffi-error",
+                    format!("callback: failed to read arg {}: {}", i, e),
+                ));
+                zero_result(result, &sig.ret);
+                return;
+            }
+        };
+        elle_args.push(value);
+    }
+
+    // 2. Get VM context
+    let vm_ptr = match crate::context::get_vm_context() {
+        Some(ptr) => ptr,
+        None => {
+            set_callback_error(crate::value::error_val(
+                "ffi-error",
+                "callback: no VM context (wrong thread?)",
+            ));
+            zero_result(result, &sig.ret);
+            return;
+        }
+    };
+    let vm = &mut *vm_ptr;
+
+    // 3. Build closure environment and execute
+    let new_env = build_callback_env(closure, &elle_args);
+    let new_env_rc = Rc::new(new_env);
+
+    vm.fiber.call_depth += 1;
+    let (bits, _ip) =
+        vm.execute_bytecode_saving_stack(&closure.bytecode, &closure.constants, &new_env_rc);
+    vm.fiber.call_depth -= 1;
+
+    // 4. Handle result
+    use crate::value::fiber::{SIG_ERROR, SIG_OK};
+    match bits {
+        SIG_OK => {
+            let (_, value) = vm.fiber.signal.take().unwrap_or((SIG_OK, Value::NIL));
+            write_return_value(result, &value, &sig.ret);
+        }
+        SIG_ERROR => {
+            let (_, err_value) = vm.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
+            set_callback_error(err_value);
+            zero_result(result, &sig.ret);
+        }
+        _ => {
+            // Yield or other signal inside a callback is not supported.
+            set_callback_error(crate::value::error_val(
+                "ffi-error",
+                format!("callback: unexpected signal {} from closure", bits),
+            ));
+            zero_result(result, &sig.ret);
         }
     }
 }
 
-/// Create a new callback ID and metadata
+/// Write an Elle return value into the libffi result buffer.
 ///
-/// # Arguments
-/// - `arg_types`: Types of arguments the callback expects
-/// - `return_type`: Return type of the callback
-///
-/// # Returns
-/// A callback ID and metadata that can be used for validation
-pub fn create_callback(arg_types: Vec<CType>, return_type: CType) -> (u32, CallbackInfo) {
-    let id = NEXT_CALLBACK_ID.fetch_add(1, Ordering::SeqCst);
-    let info = CallbackInfo::new(id, arg_types, return_type);
-    (id, info)
-}
-
-/// Create a C callback wrapper that can be passed to C code
-pub struct CCallback {
-    pub id: u32,
-    pub arg_types: Vec<CType>,
-    pub return_type: CType,
-}
-
-impl CCallback {
-    /// Create a new callback wrapper
-    pub fn new(id: u32, arg_types: Vec<CType>, return_type: CType) -> Self {
-        CCallback {
-            id,
-            arg_types,
-            return_type,
+/// For primitive types, writes directly to avoid going through
+/// `write_value_to_buffer` which may have alignment concerns.
+unsafe fn write_return_value(result: &mut c_void, value: &Value, ret: &TypeDesc) {
+    let ptr = result as *mut c_void as *mut u8;
+    match ret {
+        TypeDesc::Void => {}
+        TypeDesc::I32 | TypeDesc::Int => {
+            let n = value.as_int().unwrap_or(0) as i32;
+            *(ptr as *mut i32) = n;
         }
-    }
-
-    /// Convert callback ID to a pointer that can be passed to C
-    pub fn as_ptr(&self) -> *const std::ffi::c_void {
-        self.id as *const std::ffi::c_void
-    }
-
-    /// Extract callback ID from a pointer returned by C
-    pub fn from_ptr(ptr: *const std::ffi::c_void) -> u32 {
-        ptr as usize as u32
-    }
-}
-
-/// Register a callback with an Elle closure
-///
-/// # Arguments
-/// - id: Callback ID
-/// - closure: The Elle closure/function to call when callback invoked
-///
-/// # Returns
-/// True if successful, false if callback ID already registered
-pub fn register_callback(id: u32, closure: Rc<Value>) -> bool {
-    CALLBACK_REGISTRY.with(|registry| {
-        let mut map = registry.lock().unwrap();
-        use std::collections::hash_map::Entry;
-        match map.entry(id) {
-            Entry::Occupied(_) => false,
-            Entry::Vacant(v) => {
-                v.insert(closure);
-                true
+        TypeDesc::U32 | TypeDesc::UInt => {
+            let n = value.as_int().unwrap_or(0) as u32;
+            *(ptr as *mut u32) = n;
+        }
+        TypeDesc::I64 | TypeDesc::Long | TypeDesc::SSize => {
+            let n = value.as_int().unwrap_or(0);
+            *(ptr as *mut i64) = n;
+        }
+        TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
+            let n = value.as_int().unwrap_or(0) as u64;
+            *(ptr as *mut u64) = n;
+        }
+        TypeDesc::I8 | TypeDesc::Char => {
+            let n = value.as_int().unwrap_or(0) as i8;
+            *(ptr as *mut i8) = n;
+        }
+        TypeDesc::U8 | TypeDesc::UChar => {
+            let n = value.as_int().unwrap_or(0) as u8;
+            *ptr = n;
+        }
+        TypeDesc::I16 | TypeDesc::Short => {
+            let n = value.as_int().unwrap_or(0) as i16;
+            *(ptr as *mut i16) = n;
+        }
+        TypeDesc::U16 | TypeDesc::UShort => {
+            let n = value.as_int().unwrap_or(0) as u16;
+            *(ptr as *mut u16) = n;
+        }
+        TypeDesc::Float => {
+            let f = value
+                .as_float()
+                .or_else(|| value.as_int().map(|i| i as f64))
+                .unwrap_or(0.0);
+            *(ptr as *mut f32) = f as f32;
+        }
+        TypeDesc::Double => {
+            let f = value
+                .as_float()
+                .or_else(|| value.as_int().map(|i| i as f64))
+                .unwrap_or(0.0);
+            *(ptr as *mut f64) = f;
+        }
+        TypeDesc::Bool => {
+            let v: std::ffi::c_int = if value.is_truthy() { 1 } else { 0 };
+            *(ptr as *mut std::ffi::c_int) = v;
+        }
+        TypeDesc::Ptr | TypeDesc::Str => {
+            let p = if value.is_nil() {
+                0usize
+            } else {
+                value.as_pointer().unwrap_or(0)
+            };
+            *(ptr as *mut usize) = p;
+        }
+        TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
+            if let Err(e) = write_value_to_buffer(ptr, value, ret) {
+                set_callback_error(crate::value::error_val(
+                    "ffi-error",
+                    format!("callback: failed to write return value: {}", e),
+                ));
+                zero_result(result, ret);
             }
         }
-    })
-}
-
-/// Retrieve a registered callback closure
-///
-/// # Arguments
-/// - id: Callback ID
-///
-/// # Returns
-/// The Elle closure if found
-pub fn get_callback(id: u32) -> Option<Rc<Value>> {
-    CALLBACK_REGISTRY.with(|registry| {
-        let map = registry.lock().unwrap();
-        map.get(&id).cloned()
-    })
-}
-
-/// Unregister and cleanup a callback
-///
-/// # Arguments
-/// - id: Callback ID
-///
-/// # Returns
-/// True if callback was found and removed
-pub fn unregister_callback(id: u32) -> bool {
-    CALLBACK_REGISTRY.with(|registry| {
-        let mut map = registry.lock().unwrap();
-        map.remove(&id).is_some()
-    })
-}
-
-/// Invoke a callback with the given arguments.
-///
-/// This function is called when C code invokes a callback that was registered as an Elle closure.
-/// It retrieves the closure from the registry, calls it with the provided arguments,
-/// and returns the result.
-///
-/// # Arguments
-/// - id: Callback ID
-/// - args: Arguments to pass to the callback (as Elle values)
-///
-/// # Returns
-/// The result of calling the closure, or an error if callback not found
-pub fn invoke_callback(id: u32, args: Vec<Value>) -> Result<Value, String> {
-    // Retrieve the closure from the registry
-    let _closure =
-        get_callback(id).ok_or_else(|| format!("Callback with ID {} not registered", id))?;
-
-    // For now, this is a placeholder that returns a simple value
-    // In full implementation, this would need to:
-    // 1. Get the current VM context from thread-local storage
-    // 2. Call the closure with the provided arguments
-    // 3. Handle any exceptions that occur
-    // 4. Marshal the return value appropriately
-    //
-    // Since we don't have direct VM access here (to avoid circular dependencies),
-    // this functionality would be called from ffi_primitives or vm.rs with VM context
-
-    // Simple placeholder: return the first argument if provided
-    if !args.is_empty() {
-        Ok(args[0])
-    } else {
-        Ok(Value::NIL)
     }
 }
 
-/// Check if a callback is registered
+/// Build a closure environment for a callback invocation.
 ///
-/// # Arguments
-/// - id: Callback ID
+/// Mirrors `VM::build_closure_env` but without needing `&mut VM`.
+/// The callback runs during a C call, so we build the env directly.
+fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
+    let needed = closure.env_capacity();
+    let mut env = Vec::with_capacity(needed);
+
+    // Copy captured upvalues
+    env.extend(closure.env.iter().copied());
+
+    // Add parameters with cell wrapping as needed
+    match closure.arity {
+        crate::value::Arity::AtLeast(n) => {
+            for (i, arg) in args[..n.min(args.len())].iter().enumerate() {
+                if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                    env.push(Value::local_cell(*arg));
+                } else {
+                    env.push(*arg);
+                }
+            }
+            // Collect remaining args into a list for the rest slot
+            let rest_args = if args.len() > n { &args[n..] } else { &[] };
+            let rest = args_to_list(rest_args);
+            let rest_idx = n;
+            if rest_idx < 64 && (closure.cell_params_mask & (1 << rest_idx)) != 0 {
+                env.push(Value::local_cell(rest));
+            } else {
+                env.push(rest);
+            }
+        }
+        _ => {
+            for (i, arg) in args.iter().enumerate() {
+                if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                    env.push(Value::local_cell(*arg));
+                } else {
+                    env.push(*arg);
+                }
+            }
+        }
+    }
+
+    // Add empty LocalCells for locally-defined variables
+    let num_param_slots = match closure.arity {
+        crate::value::Arity::Exact(n) => n,
+        crate::value::Arity::AtLeast(n) => n + 1,
+        crate::value::Arity::Range(min, _) => min,
+    };
+    let num_locally_defined = closure.num_locals.saturating_sub(num_param_slots);
+    for _ in 0..num_locally_defined {
+        env.push(Value::local_cell(Value::NIL));
+    }
+
+    env
+}
+
+/// Build a cons-list from a slice of values.
+fn args_to_list(args: &[Value]) -> Value {
+    let mut list = Value::EMPTY_LIST;
+    for arg in args.iter().rev() {
+        list = Value::cons(*arg, list);
+    }
+    list
+}
+
+/// Write zeros into the result buffer for the given return type.
 ///
-/// # Returns
-/// True if callback is registered, false otherwise
-pub fn callback_exists(id: u32) -> bool {
-    CALLBACK_REGISTRY.with(|registry| {
-        let map = registry.lock().unwrap();
-        map.contains_key(&id)
+/// Used when the callback encounters an error and must still provide
+/// a valid return value to C.
+unsafe fn zero_result(result: &mut c_void, ret: &TypeDesc) {
+    if let Some(size) = ret.size() {
+        let ptr = result as *mut c_void as *mut u8;
+        std::ptr::write_bytes(ptr, 0, size);
+    }
+}
+
+// ── Public API ──────────────────────────────────────────────────────
+
+/// Create an FFI callback from an Elle closure and a C signature.
+///
+/// Returns an `ActiveCallback` whose `code_ptr` can be passed to C
+/// functions expecting a function pointer.
+pub fn create_callback(
+    closure: Rc<Closure>,
+    signature: Signature,
+) -> Result<ActiveCallback, String> {
+    // Validate: signature must not be variadic (callbacks can't be variadic)
+    if signature.fixed_args.is_some() {
+        return Err("ffi/callback: variadic signatures are not supported for callbacks".into());
+    }
+
+    // Build the libffi CIF
+    let cif = prepare_cif(&signature);
+
+    // Leak the userdata so the closure has 'static lifetime
+    let userdata = Box::new(CallbackData { closure, signature });
+    let userdata_ptr = Box::into_raw(userdata);
+    let userdata_ref: &'static CallbackData = unsafe { &*userdata_ptr };
+
+    // Create the libffi closure.
+    // We use c_void as the return type R because we write the actual
+    // result manually in the trampoline via write_value_to_buffer.
+    let ffi_closure = libffi::middle::Closure::new(cif, trampoline_callback, userdata_ref);
+
+    // code_ptr() returns &unsafe extern "C" fn() — dereference to get
+    // the actual function pointer, then cast to usize.
+    let code_ptr = *ffi_closure.code_ptr() as usize;
+
+    Ok(ActiveCallback {
+        _closure: ffi_closure,
+        userdata_ptr,
+        code_ptr,
     })
+}
+
+/// Free an active callback, recovering the leaked userdata.
+///
+/// # Safety
+///
+/// The caller must ensure that no C code still holds or will call
+/// the function pointer after this returns.
+pub fn free_callback(callback: ActiveCallback) {
+    // Recover the leaked Box and drop it
+    unsafe {
+        drop(Box::from_raw(callback.userdata_ptr));
+    }
+    // The libffi closure (_closure) is dropped automatically
+}
+
+// ── Callback storage ────────────────────────────────────────────────
+
+/// Storage for active callbacks, keyed by code pointer address.
+#[derive(Default)]
+pub struct CallbackStore {
+    callbacks: HashMap<usize, ActiveCallback>,
+}
+
+impl CallbackStore {
+    pub fn new() -> Self {
+        CallbackStore {
+            callbacks: HashMap::new(),
+        }
+    }
+
+    /// Insert a callback and return its code pointer address.
+    pub fn insert(&mut self, callback: ActiveCallback) -> usize {
+        let ptr = callback.code_ptr;
+        self.callbacks.insert(ptr, callback);
+        ptr
+    }
+
+    /// Remove and free a callback by its code pointer address.
+    /// Returns true if the callback was found and freed.
+    pub fn remove(&mut self, code_ptr: usize) -> bool {
+        if let Some(cb) = self.callbacks.remove(&code_ptr) {
+            free_callback(cb);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ffi::types::{CallingConvention, Signature, TypeDesc};
+    use crate::value::Closure;
+    use std::collections::HashMap;
 
-    #[test]
-    fn test_callback_creation() {
-        let (id1, info1) = create_callback(vec![CType::Int], CType::Void);
-        let (id2, info2) = create_callback(vec![CType::Float], CType::Int);
-
-        assert_ne!(id1, id2);
-        assert_eq!(info1.id, id1);
-        assert_eq!(info2.id, id2);
-        assert_eq!(info1.arg_types, vec![CType::Int]);
-        assert_eq!(info2.return_type, CType::Int);
+    /// Create a minimal closure for testing.
+    /// This closure has empty bytecode — it won't execute correctly,
+    /// but it's enough to test callback creation/destruction.
+    fn test_closure(arity: usize) -> Rc<Closure> {
+        use crate::effects::Effect;
+        use crate::error::LocationMap;
+        use crate::value::types::Arity;
+        Rc::new(Closure {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Exact(arity),
+            env: Rc::new(vec![]),
+            num_locals: arity,
+            num_captures: 0,
+            constants: Rc::new(vec![]),
+            effect: Effect::none(),
+            cell_params_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+        })
     }
 
     #[test]
-    fn test_callback_pointer_conversion() {
-        let callback = CCallback::new(12345, vec![], CType::Void);
-        let ptr = callback.as_ptr();
-        let id = CCallback::from_ptr(ptr);
-        assert_eq!(id, 12345);
+    fn test_create_and_free_callback() {
+        let closure = test_closure(2);
+        let sig = Signature {
+            convention: CallingConvention::Default,
+            ret: TypeDesc::I32,
+            args: vec![TypeDesc::Ptr, TypeDesc::Ptr],
+            fixed_args: None,
+        };
+        let cb = create_callback(closure, sig).unwrap();
+        assert_ne!(cb.code_ptr, 0);
+        free_callback(cb);
     }
 
     #[test]
-    fn test_callback_info_clone() {
-        let info = CallbackInfo::new(42, vec![CType::Int, CType::Float], CType::Double);
-        let info2 = info.clone();
-        assert_eq!(info.id, info2.id);
-        assert_eq!(info.arg_types, info2.arg_types);
-    }
-
-    #[test]
-    fn test_callback_registration() {
-        let closure = Rc::new(Value::int(42));
-        let id = 9999;
-
-        // Register callback
-        assert!(register_callback(id, closure.clone()));
-
-        // Should not allow re-registration
-        assert!(!register_callback(id, closure.clone()));
-
-        // Should retrieve the closure
-        let retrieved = get_callback(id);
-        assert!(retrieved.is_some());
-        assert_eq!(*retrieved.unwrap(), Value::int(42));
-
-        // Cleanup
-        assert!(unregister_callback(id));
-        assert!(get_callback(id).is_none());
-    }
-
-    #[test]
-    fn test_callback_unregister_nonexistent() {
-        let id = 8888;
-        assert!(!unregister_callback(id));
-    }
-
-    #[test]
-    fn test_multiple_callbacks() {
-        let closure1 = Rc::new(Value::int(1));
-        let closure2 = Rc::new(Value::int(2));
-        let closure3 = Rc::new(Value::int(3));
-
-        assert!(register_callback(100, closure1.clone()));
-        assert!(register_callback(101, closure2.clone()));
-        assert!(register_callback(102, closure3.clone()));
-
-        assert_eq!(*get_callback(100).unwrap(), Value::int(1));
-        assert_eq!(*get_callback(101).unwrap(), Value::int(2));
-        assert_eq!(*get_callback(102).unwrap(), Value::int(3));
-
-        // Cleanup
-        assert!(unregister_callback(100));
-        assert!(unregister_callback(101));
-        assert!(unregister_callback(102));
-    }
-
-    #[test]
-    fn test_callback_exists() {
-        let closure = Rc::new(Value::int(42));
-        let id = 7777;
-
-        // Callback doesn't exist yet
-        assert!(!callback_exists(id));
-
-        // Register it
-        register_callback(id, closure);
-        assert!(callback_exists(id));
-
-        // Unregister it
-        unregister_callback(id);
-        assert!(!callback_exists(id));
-    }
-
-    #[test]
-    fn test_invoke_callback_simple() {
-        let closure = Rc::new(Value::int(99));
-        let id = 6666;
-
-        register_callback(id, closure);
-
-        // Invoke with no args - should return nil in placeholder
-        let result = invoke_callback(id, vec![]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::NIL);
-
-        // Invoke with args - should return first arg in placeholder
-        let result = invoke_callback(id, vec![Value::int(123)]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::int(123));
-
-        unregister_callback(id);
-    }
-
-    #[test]
-    fn test_invoke_callback_nonexistent() {
-        let id = 5555;
-        let result = invoke_callback(id, vec![]);
+    fn test_variadic_callback_rejected() {
+        let closure = test_closure(2);
+        let sig = Signature {
+            convention: CallingConvention::Default,
+            ret: TypeDesc::I32,
+            args: vec![TypeDesc::Ptr, TypeDesc::I32],
+            fixed_args: Some(1),
+        };
+        let result = create_callback(closure, sig);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not registered"));
+    }
+
+    #[test]
+    fn test_callback_store() {
+        let closure = test_closure(1);
+        let sig = Signature {
+            convention: CallingConvention::Default,
+            ret: TypeDesc::Void,
+            args: vec![TypeDesc::I32],
+            fixed_args: None,
+        };
+        let mut store = CallbackStore::new();
+        let cb = create_callback(closure, sig).unwrap();
+        let ptr = store.insert(cb);
+        assert_ne!(ptr, 0);
+        assert!(store.remove(ptr));
+        assert!(!store.remove(ptr)); // Already removed
+    }
+
+    #[test]
+    fn test_callback_error_flag() {
+        // Ensure the error flag starts empty
+        assert!(take_callback_error().is_none());
+
+        // Set an error
+        set_callback_error(crate::value::error_val("test", "test error"));
+        let err = take_callback_error();
+        assert!(err.is_some());
+
+        // Flag should be cleared after take
+        assert!(take_callback_error().is_none());
+    }
+
+    #[test]
+    fn test_build_callback_env_exact_arity() {
+        let closure = test_closure(2);
+        let args = vec![Value::int(10), Value::int(20)];
+        let env = build_callback_env(&closure, &args);
+        // 0 captures + 2 params + 0 locals = 2
+        assert_eq!(env.len(), 2);
+        assert_eq!(env[0].as_int(), Some(10));
+        assert_eq!(env[1].as_int(), Some(20));
+    }
+
+    #[test]
+    fn test_build_callback_env_with_captures() {
+        use crate::effects::Effect;
+        use crate::error::LocationMap;
+        use crate::value::types::Arity;
+
+        let closure = Rc::new(Closure {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Exact(1),
+            env: Rc::new(vec![Value::int(99)]), // 1 capture
+            num_locals: 2,                      // 1 param + 1 local
+            num_captures: 1,
+            constants: Rc::new(vec![]),
+            effect: Effect::none(),
+            cell_params_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+        });
+        let args = vec![Value::int(42)];
+        let env = build_callback_env(&closure, &args);
+        // 1 capture + 1 param + 1 local = 3
+        assert_eq!(env.len(), 3);
+        assert_eq!(env[0].as_int(), Some(99)); // capture
+        assert_eq!(env[1].as_int(), Some(42)); // param
+                                               // env[2] is a LocalCell(NIL) for the local variable
+    }
+
+    #[test]
+    fn test_zero_result_does_not_crash() {
+        // Allocate a buffer and verify zero_result writes zeros
+        let mut buf = [0xFFu8; 16];
+        unsafe {
+            zero_result(&mut *buf.as_mut_ptr().cast::<c_void>(), &TypeDesc::I32);
+        }
+        // First 4 bytes should be zero (i32 size)
+        assert_eq!(&buf[..4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_zero_result_void() {
+        // Void has no size — zero_result should be a no-op
+        let mut buf = [0xFFu8; 8];
+        unsafe {
+            zero_result(&mut *buf.as_mut_ptr().cast::<c_void>(), &TypeDesc::Void);
+        }
+        // Buffer should be unchanged
+        assert_eq!(&buf, &[0xFF; 8]);
     }
 }

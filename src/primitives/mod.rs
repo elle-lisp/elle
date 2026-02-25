@@ -11,6 +11,7 @@ pub mod debugging;
 pub mod def;
 pub mod display;
 pub mod docs;
+pub mod ffi;
 pub mod fibers;
 pub mod file_io;
 pub mod higher_order_def;
