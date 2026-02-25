@@ -4,19 +4,8 @@
 // and execution via native code.
 
 mod jit_tests {
-    use elle::pipeline::eval as pipeline_eval;
-    use elle::primitives::register_primitives;
-    use elle::symbol::SymbolTable;
+    use crate::common::eval_source;
     use elle::value::Value;
-    use elle::vm::VM;
-
-    /// Helper to evaluate Elle code and return the result
-    fn eval(code: &str) -> Result<Value, String> {
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        let _effects = register_primitives(&mut vm, &mut symbols);
-        pipeline_eval(code, &mut symbols, &mut vm)
-    }
 
     #[test]
     fn test_jit_triggered_by_hot_loop() {
@@ -26,7 +15,7 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (add1 acc))))
             (loop 20 0))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         assert_eq!(result, Value::int(20));
     }
 
@@ -38,7 +27,7 @@ mod jit_tests {
             (defn sum-squares (n acc)
               (if (= n 0) acc (sum-squares (- n 1) (+ acc (square n)))))
             (sum-squares 15 0))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         // Sum of squares from 1 to 15 = 1240
         assert_eq!(result, Value::int(1240));
     }
@@ -53,7 +42,7 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (add5 acc))))
             (loop 15 0))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         // 15 * 5 = 75
         assert_eq!(result, Value::int(75));
     }
@@ -69,7 +58,7 @@ mod jit_tests {
                   (test-comparisons 5 10)
                   (begin (test-comparisons n (+ n 1)) (loop (- n 1)))))
             (loop 15))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         // Should return (false true false true false) for (= 5 10), (< 5 10), etc.
         assert!(result.is_cons());
     }
@@ -83,7 +72,7 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 1) acc (loop (- n 1) (+ acc (mod-div-test n 2)))))
             (loop 15 0))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         // For n from 15 down to 2: (n/2) + (n%2)
         // 15: 7+1=8, 14: 7+0=7, 13: 6+1=7, 12: 6+0=6, 11: 5+1=6, 10: 5+0=5
         // 9: 4+1=5, 8: 4+0=4, 7: 3+1=4, 6: 3+0=3, 5: 2+1=3, 4: 2+0=2
@@ -101,7 +90,7 @@ mod jit_tests {
             (defn sum-abs (n acc)
               (if (= n 0) acc (sum-abs (- n 1) (+ acc (abs (- n 8))))))
             (sum-abs 15 0))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         // Sum of |n - 8| for n from 1 to 15
         // = |1-8| + |2-8| + ... + |15-8|
         // = 7 + 6 + 5 + 4 + 3 + 2 + 1 + 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 = 56
@@ -118,7 +107,7 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (h acc))))
             (loop 12 0))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         // Each call to h adds 4, so 12 * 4 = 48
         assert_eq!(result, Value::int(48));
     }
@@ -132,7 +121,7 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (float-op acc 1.5))))
             (loop 12 1.0))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         assert!(result.is_float());
     }
 
@@ -144,7 +133,7 @@ mod jit_tests {
             (defn loop (n)
               (if (= n 0) (id 42) (begin (id n) (loop (- n 1)))))
             (loop 15))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         assert_eq!(result, Value::int(42));
     }
 
@@ -156,7 +145,7 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (add3 acc n 1))))
             (loop 12 0))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         // Sum of (n + 1) for n from 1 to 12 = 12 + 11 + ... + 1 + 12 = 78 + 12 = 90
         // Actually: acc starts at 0, each iteration adds (acc + n + 1)
         // This is more complex, let's just verify it runs
@@ -174,7 +163,7 @@ mod jit_tests {
             (defn loop (n)
               (if (= n 0) counter (begin (inc!) (loop (- n 1)))))
             (loop 15))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         assert_eq!(result, Value::int(15));
     }
 
@@ -192,7 +181,7 @@ mod jit_tests {
                     (set! results (cons (fib 10) results))
                     (collect (- n 1)))))
             (collect 15))"#;
-        let result = eval(code).unwrap();
+        let result = eval_source(code).unwrap();
         // All results should be fib(10) = 55
         // Verify the list is non-empty and all elements are 55
         assert!(result.is_cons());
@@ -206,7 +195,7 @@ mod jit_tests {
     #[test]
     fn test_jit_tail_call_basic() {
         // Tail-recursive sum — should work correctly with TCO
-        let result = eval(
+        let result = eval_source(
             r#"(begin
             (defn sum-to (n acc)
                 (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
@@ -219,7 +208,7 @@ mod jit_tests {
     #[test]
     fn test_jit_tail_call_deep_recursion() {
         // Deep tail recursion that would blow the stack without TCO
-        let result = eval(
+        let result = eval_source(
             r#"(begin
             (defn count-down (n)
                 (if (= n 0) 0 (count-down (- n 1))))
@@ -232,7 +221,7 @@ mod jit_tests {
     #[test]
     fn test_jit_tail_call_mutual_recursion() {
         // Mutual recursion via tail calls
-        let result = eval(
+        let result = eval_source(
             r#"(begin
             (defn is-even (n)
                 (if (= n 0) #t (is-odd (- n 1))))
@@ -248,7 +237,7 @@ mod jit_tests {
     fn test_jit_does_not_regress_recursive_workloads() {
         // Verify that tail-recursive functions work correctly
         // (they should fall through to interpreter, not JIT)
-        let result = eval(
+        let result = eval_source(
             r#"(begin
             (defn fib-tail (n a b)
                 (if (= n 0) a
@@ -270,7 +259,7 @@ mod jit_tests {
         // `f` is pure (calls a pure function and adds 1).
         // When `f` is JIT-compiled and calls `helper` with x=0,
         // the division-by-zero exception must propagate correctly.
-        let result = eval(
+        let result = eval_source(
             r#"(begin
                 (defn helper (x) (/ 10 x))
                 (defn f (x) (+ (helper x) 1))
@@ -292,7 +281,7 @@ mod jit_tests {
         // Verify that after an exception, subsequent code in the JIT function
         // does NOT execute. If exception propagation is broken, the JIT would
         // continue executing with NIL and produce wrong results.
-        let result = eval(
+        let result = eval_source(
             r#"(begin
                 (defn helper (x) (/ 10 x))
                 (defn f (x)
@@ -317,7 +306,7 @@ mod jit_tests {
     #[test]
     fn test_jit_nested_call_exception_propagates() {
         // Test exception propagation through multiple levels of JIT calls
-        let result = eval(
+        let result = eval_source(
             r#"(begin
                 (defn inner (x) (/ 100 x))
                 (defn middle (x) (+ (inner x) 10))
@@ -349,7 +338,7 @@ mod jit_tests {
     fn test_jit_fiber_predicate_in_hot_loop() {
         // fiber? has Effect::none() — should be JIT-compilable.
         // Call it in a hot loop to trigger JIT, verify correct results.
-        let result = eval(
+        let result = eval_source(
             r#"(begin
                 (defn count-fibers (lst n)
                   (if (= n 0) 0
@@ -365,7 +354,7 @@ mod jit_tests {
     fn test_jit_fiber_new_in_hot_loop() {
         // fiber/new has Effect::raises() — not suspending, JIT-safe.
         // Create fibers in a hot loop, verify they're created correctly.
-        let result = eval(
+        let result = eval_source(
             r#"(begin
                 (defn make-fibers (n)
                   (if (= n 0) #t
@@ -382,21 +371,14 @@ mod jit_tests {
     fn test_jit_fiber_status_in_hot_loop() {
         // fiber/status has Effect::raises() — JIT-safe.
         // Check status of a fiber repeatedly in a hot loop.
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        let _effects = register_primitives(&mut vm, &mut symbols);
-        elle::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
-        let result = pipeline_eval(
+        let result = eval_source(
             r#"(begin
                 (var f (fiber/new (fn () 42) 1))
                 (defn check-status (n)
                   (if (= n 0) (= (fiber/status f) :new)
                     (begin (fiber/status f) (check-status (- n 1)))))
                 (check-status 20))"#,
-            &mut symbols,
-            &mut vm,
         );
-        elle::ffi::primitives::context::clear_symbol_table();
         assert!(
             result.is_ok(),
             "fiber/status in hot loop failed: {:?}",
@@ -411,7 +393,7 @@ mod jit_tests {
         // fiber/resume has Effect::yields_raises() — may_suspend is true.
         // A closure calling fiber/resume should NOT be JIT-compiled, but
         // should still work correctly via the interpreter.
-        let result = eval(
+        let result = eval_source(
             r#"(begin
                 (defn resume-fiber (f)
                   (fiber/resume f))
@@ -431,7 +413,7 @@ mod jit_tests {
         // A pure function and a fiber-using function coexist.
         // The pure function gets JIT-compiled; the fiber one doesn't.
         // Both produce correct results.
-        let result = eval(
+        let result = eval_source(
             r#"(begin
                 (defn pure-add (x y) (+ x y))
                 (defn use-fiber (x)

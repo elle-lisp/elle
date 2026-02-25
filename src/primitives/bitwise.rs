@@ -17,9 +17,18 @@ pub fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Check that all args are integers
-    for arg in args {
-        if arg.as_int().is_none() {
+    let Some(mut result) = args[0].as_int() else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("bit/and: expected integer, got {}", args[0].type_name()),
+            ),
+        );
+    };
+
+    for arg in &args[1..] {
+        let Some(n) = arg.as_int() else {
             return (
                 SIG_ERROR,
                 error_val(
@@ -27,12 +36,8 @@ pub fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
                     format!("bit/and: expected integer, got {}", arg.type_name()),
                 ),
             );
-        }
-    }
-
-    let mut result = args[0].as_int().unwrap();
-    for arg in &args[1..] {
-        result &= arg.as_int().unwrap();
+        };
+        result &= n;
     }
     (SIG_OK, Value::int(result))
 }
@@ -49,9 +54,18 @@ pub fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Check that all args are integers
-    for arg in args {
-        if arg.as_int().is_none() {
+    let Some(mut result) = args[0].as_int() else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("bit/or: expected integer, got {}", args[0].type_name()),
+            ),
+        );
+    };
+
+    for arg in &args[1..] {
+        let Some(n) = arg.as_int() else {
             return (
                 SIG_ERROR,
                 error_val(
@@ -59,12 +73,8 @@ pub fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
                     format!("bit/or: expected integer, got {}", arg.type_name()),
                 ),
             );
-        }
-    }
-
-    let mut result = args[0].as_int().unwrap();
-    for arg in &args[1..] {
-        result |= arg.as_int().unwrap();
+        };
+        result |= n;
     }
     (SIG_OK, Value::int(result))
 }
@@ -81,9 +91,18 @@ pub fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Check that all args are integers
-    for arg in args {
-        if arg.as_int().is_none() {
+    let Some(mut result) = args[0].as_int() else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("bit/xor: expected integer, got {}", args[0].type_name()),
+            ),
+        );
+    };
+
+    for arg in &args[1..] {
+        let Some(n) = arg.as_int() else {
             return (
                 SIG_ERROR,
                 error_val(
@@ -91,12 +110,8 @@ pub fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
                     format!("bit/xor: expected integer, got {}", arg.type_name()),
                 ),
             );
-        }
-    }
-
-    let mut result = args[0].as_int().unwrap();
-    for arg in &args[1..] {
-        result ^= arg.as_int().unwrap();
+        };
+        result ^= n;
     }
     (SIG_OK, Value::int(result))
 }

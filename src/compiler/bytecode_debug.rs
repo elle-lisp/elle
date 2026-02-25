@@ -86,6 +86,9 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     i += 2;
                 }
             }
+            Instruction::Eval => {
+                // No operands — pops 2 from stack, pushes 1
+            }
             _ => {}
         }
 

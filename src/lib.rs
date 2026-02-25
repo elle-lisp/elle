@@ -59,7 +59,7 @@ pub use compiler::Bytecode;
 pub use error::{RuntimeError, SourceLoc};
 pub use lint::diagnostics::{Diagnostic, Severity};
 pub use pipeline::{
-    analyze, analyze_all, compile, compile_all, eval, AnalyzeResult, CompileResult,
+    analyze, analyze_all, compile, compile_all, eval, eval_all, AnalyzeResult, CompileResult,
 };
 pub use primitives::{init_stdlib, register_primitives};
 pub use reader::{read_str, Lexer, Reader};

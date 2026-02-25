@@ -1,90 +1,67 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{list, SymbolTable, Value, VM};
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-
-    // Set symbol table context for primitives that need it (like type-of)
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    // Try to compile as a single expression first
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            // If that fails, try wrapping in a begin
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    // If that also fails, try compiling all expressions
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
+use crate::common::eval_source;
+use elle::{list, Value};
 
 // Basic arithmetic
 #[test]
 fn test_simple_arithmetic() {
-    assert_eq!(eval("(+ 1 2)").unwrap(), Value::int(3));
-    assert_eq!(eval("(- 10 3)").unwrap(), Value::int(7));
-    assert_eq!(eval("(* 4 5)").unwrap(), Value::int(20));
-    assert_eq!(eval("(/ 20 4)").unwrap(), Value::int(5));
+    assert_eq!(eval_source("(+ 1 2)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(- 10 3)").unwrap(), Value::int(7));
+    assert_eq!(eval_source("(* 4 5)").unwrap(), Value::int(20));
+    assert_eq!(eval_source("(/ 20 4)").unwrap(), Value::int(5));
 }
 
 #[test]
 fn test_nested_arithmetic() {
-    assert_eq!(eval("(+ (* 2 3) (- 10 5))").unwrap(), Value::int(11));
-    assert_eq!(eval("(* (+ 1 2) (- 5 2))").unwrap(), Value::int(9));
+    assert_eq!(eval_source("(+ (* 2 3) (- 10 5))").unwrap(), Value::int(11));
+    assert_eq!(eval_source("(* (+ 1 2) (- 5 2))").unwrap(), Value::int(9));
 }
 
 #[test]
 fn test_deeply_nested() {
-    assert_eq!(eval("(+ 1 (+ 2 (+ 3 (+ 4 5))))").unwrap(), Value::int(15));
+    assert_eq!(
+        eval_source("(+ 1 (+ 2 (+ 3 (+ 4 5))))").unwrap(),
+        Value::int(15)
+    );
 }
 
 // Comparisons
 #[test]
 fn test_comparisons() {
-    assert_eq!(eval("(= 5 5)").unwrap(), Value::bool(true));
-    assert_eq!(eval("(= 5 6)").unwrap(), Value::bool(false));
-    assert_eq!(eval("(< 3 5)").unwrap(), Value::bool(true));
-    assert_eq!(eval("(< 5 3)").unwrap(), Value::bool(false));
-    assert_eq!(eval("(> 7 5)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(= 5 5)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(= 5 6)").unwrap(), Value::bool(false));
+    assert_eq!(eval_source("(< 3 5)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(< 5 3)").unwrap(), Value::bool(false));
+    assert_eq!(eval_source("(> 7 5)").unwrap(), Value::bool(true));
 }
 
 // Conditionals
 #[test]
 fn test_if_true() {
-    assert_eq!(eval("(if #t 100 200)").unwrap(), Value::int(100));
+    assert_eq!(eval_source("(if #t 100 200)").unwrap(), Value::int(100));
 }
 
 #[test]
 fn test_if_false() {
-    assert_eq!(eval("(if #f 100 200)").unwrap(), Value::int(200));
+    assert_eq!(eval_source("(if #f 100 200)").unwrap(), Value::int(200));
 }
 
 #[test]
 fn test_if_with_condition() {
-    assert_eq!(eval("(if (> 5 3) 100 200)").unwrap(), Value::int(100));
-    assert_eq!(eval("(if (< 5 3) 100 200)").unwrap(), Value::int(200));
+    assert_eq!(
+        eval_source("(if (> 5 3) 100 200)").unwrap(),
+        Value::int(100)
+    );
+    assert_eq!(
+        eval_source("(if (< 5 3) 100 200)").unwrap(),
+        Value::int(200)
+    );
 }
 
 #[test]
 fn test_nested_if() {
     assert_eq!(
-        eval("(if (> 5 3) (if (< 2 4) 1 2) 3)").unwrap(),
+        eval_source("(if (> 5 3) (if (< 2 4) 1 2) 3)").unwrap(),
         Value::int(1)
     );
 }
@@ -92,13 +69,13 @@ fn test_nested_if() {
 #[test]
 fn test_if_nil_else() {
     // If without else should return nil
-    assert_eq!(eval("(if #f 100)").unwrap(), Value::NIL);
+    assert_eq!(eval_source("(if #f 100)").unwrap(), Value::NIL);
 }
 
 // Lists
 #[test]
 fn test_list_construction() {
-    let result = eval("(list 1 2 3)").unwrap();
+    let result = eval_source("(list 1 2 3)").unwrap();
     assert!(result.is_list());
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
@@ -106,7 +83,7 @@ fn test_list_construction() {
 
 #[test]
 fn test_cons() {
-    let result = eval("(cons 1 (cons 2 (cons 3 nil)))").unwrap();
+    let result = eval_source("(cons 1 (cons 2 (cons 3 nil)))").unwrap();
     assert!(result.is_list());
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec, vec![Value::int(1), Value::int(2), Value::int(3)]);
@@ -114,16 +91,19 @@ fn test_cons() {
 
 #[test]
 fn test_first_rest() {
-    assert_eq!(eval("(first (list 10 20 30))").unwrap(), Value::int(10));
+    assert_eq!(
+        eval_source("(first (list 10 20 30))").unwrap(),
+        Value::int(10)
+    );
 
-    let result = eval("(rest (list 10 20 30))").unwrap();
+    let result = eval_source("(rest (list 10 20 30))").unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec, vec![Value::int(20), Value::int(30)]);
 }
 
 #[test]
 fn test_nested_lists() {
-    let result = eval("(list (list 1 2) (list 3 4))").unwrap();
+    let result = eval_source("(list (list 1 2) (list 3 4))").unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 2);
     assert!(vec[0].is_list());
@@ -133,27 +113,30 @@ fn test_nested_lists() {
 // Quote
 #[test]
 fn test_quote_symbol() {
-    let result = eval("'foo").unwrap();
+    let result = eval_source("'foo").unwrap();
     assert!((result).is_symbol());
 }
 
 #[test]
 fn test_quote_list() {
-    let result = eval("'(1 2 3)").unwrap();
+    let result = eval_source("'(1 2 3)").unwrap();
     assert!(result.is_list());
 }
 
 // Type predicates
 #[test]
 fn test_predicates() {
-    assert_eq!(eval("(nil? nil)").unwrap(), Value::bool(true));
-    assert_eq!(eval("(nil? 0)").unwrap(), Value::bool(false));
+    assert_eq!(eval_source("(nil? nil)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(nil? 0)").unwrap(), Value::bool(false));
 
-    assert_eq!(eval("(number? 42)").unwrap(), Value::bool(true));
-    assert_eq!(eval("(number? nil)").unwrap(), Value::bool(false));
+    assert_eq!(eval_source("(number? 42)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(number? nil)").unwrap(), Value::bool(false));
 
-    assert_eq!(eval("(pair? (cons 1 2))").unwrap(), Value::bool(true));
-    assert_eq!(eval("(pair? nil)").unwrap(), Value::bool(false));
+    assert_eq!(
+        eval_source("(pair? (cons 1 2))").unwrap(),
+        Value::bool(true)
+    );
+    assert_eq!(eval_source("(pair? nil)").unwrap(), Value::bool(false));
 }
 
 // Global definitions
@@ -163,7 +146,7 @@ fn test_define_and_use() {
         (var x 42)
         (+ x 10)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(52));
+    assert_eq!(eval_source(code).unwrap(), Value::int(52));
 }
 
 #[test]
@@ -174,13 +157,13 @@ fn test_multiple_defines() {
         (var c 30)
         (+ a b c)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(60));
+    assert_eq!(eval_source(code).unwrap(), Value::int(60));
 }
 
 // Begin
 #[test]
 fn test_begin() {
-    let result = eval("(begin 1 2 3)").unwrap();
+    let result = eval_source("(begin 1 2 3)").unwrap();
     assert_eq!(result, Value::int(3));
 }
 
@@ -189,45 +172,51 @@ fn test_begin_with_side_effects() {
     let code = r#"
         (begin (var x 10) (var y 20) (+ x y))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 // Complex expressions
 #[test]
 fn test_factorial_logic() {
     // Simulate factorial without recursion: (if (<= n 1) 1 (* n ...))
-    assert_eq!(eval("(if (<= 1 1) 1 (* 1 1))").unwrap(), Value::int(1));
+    assert_eq!(
+        eval_source("(if (<= 1 1) 1 (* 1 1))").unwrap(),
+        Value::int(1)
+    );
 
-    assert_eq!(eval("(if (<= 5 1) 1 (* 5 120))").unwrap(), Value::int(600));
+    assert_eq!(
+        eval_source("(if (<= 5 1) 1 (* 5 120))").unwrap(),
+        Value::int(600)
+    );
 }
 
 #[test]
 fn test_max_logic() {
-    assert_eq!(eval("(if (> 10 5) 10 5)").unwrap(), Value::int(10));
+    assert_eq!(eval_source("(if (> 10 5) 10 5)").unwrap(), Value::int(10));
 
-    assert_eq!(eval("(if (> 3 7) 3 7)").unwrap(), Value::int(7));
+    assert_eq!(eval_source("(if (> 3 7) 3 7)").unwrap(), Value::int(7));
 }
 
 // Error cases
 #[test]
 fn test_division_by_zero() {
-    assert!(eval("(/ 10 0)").is_err());
+    assert!(eval_source("(/ 10 0)").is_err());
 }
 
 #[test]
 fn test_type_error() {
-    assert!(eval("(+ 1 nil)").is_err());
+    assert!(eval_source("(+ 1 nil)").is_err());
 }
 
 #[test]
 fn test_undefined_variable() {
-    assert!(eval("undefined-var").is_err());
+    assert!(eval_source("undefined-var").is_err());
 }
 
 #[test]
 fn test_undefined_variable_error_shows_name() {
     // Issue #300: error message should show the variable name, not a SymbolId
-    let result = eval("nonexistent-foo");
+    let result = eval_source("nonexistent-foo");
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -244,8 +233,8 @@ fn test_undefined_variable_error_shows_name() {
 
 #[test]
 fn test_arity_error() {
-    assert!(eval("(+)").is_ok()); // + accepts 0 args
-    assert!(eval("(first)").is_err()); // first requires 1 arg
+    assert!(eval_source("(+)").is_ok()); // + accepts 0 args
+    assert!(eval_source("(first)").is_err()); // first requires 1 arg
 }
 
 // Stress tests
@@ -258,7 +247,7 @@ fn test_large_list() {
         .join(" ");
     let code = format!("(list {})", numbers);
 
-    let result = eval(&code).unwrap();
+    let result = eval_source(&code).unwrap();
     assert!(result.is_list());
     assert_eq!(result.list_to_vec().unwrap().len(), 100);
 }
@@ -271,27 +260,30 @@ fn test_deep_arithmetic() {
         expr = format!("(+ {} 1)", expr);
     }
 
-    assert_eq!(eval(&expr).unwrap(), Value::int(51));
+    assert_eq!(eval_source(&expr).unwrap(), Value::int(51));
 }
 
 #[test]
 fn test_many_operations() {
     // Chain many operations
-    assert_eq!(eval("(+ 1 2 3 4 5 6 7 8 9 10)").unwrap(), Value::int(55));
+    assert_eq!(
+        eval_source("(+ 1 2 3 4 5 6 7 8 9 10)").unwrap(),
+        Value::int(55)
+    );
 
-    assert_eq!(eval("(* 1 2 3 4 5)").unwrap(), Value::int(120));
+    assert_eq!(eval_source("(* 1 2 3 4 5)").unwrap(), Value::int(120));
 }
 
 // Mixed types
 #[test]
 fn test_int_float_mixing() {
-    if let Some(f) = eval("(+ 1 2.5)").unwrap().as_float() {
+    if let Some(f) = eval_source("(+ 1 2.5)").unwrap().as_float() {
         assert!((f - 3.5).abs() < 1e-10)
     } else {
         panic!("Expected float")
     }
 
-    if let Some(f) = eval("(* 2 3.5)").unwrap().as_float() {
+    if let Some(f) = eval_source("(* 2 3.5)").unwrap().as_float() {
         assert!((f - 7.0).abs() < 1e-10)
     } else {
         panic!("Expected float")
@@ -301,18 +293,21 @@ fn test_int_float_mixing() {
 // Logic combinations
 #[test]
 fn test_not() {
-    assert_eq!(eval("(not #t)").unwrap(), Value::bool(false));
-    assert_eq!(eval("(not #f)").unwrap(), Value::bool(true));
-    assert_eq!(eval("(not nil)").unwrap(), Value::bool(true)); // nil is falsy (represents absence)
-    assert_eq!(eval("(not ())").unwrap(), Value::bool(false)); // empty list is truthy
-    assert_eq!(eval("(not 0)").unwrap(), Value::bool(false)); // 0 is truthy
+    assert_eq!(eval_source("(not #t)").unwrap(), Value::bool(false));
+    assert_eq!(eval_source("(not #f)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(not nil)").unwrap(), Value::bool(true)); // nil is falsy (represents absence)
+    assert_eq!(eval_source("(not ())").unwrap(), Value::bool(false)); // empty list is truthy
+    assert_eq!(eval_source("(not 0)").unwrap(), Value::bool(false)); // 0 is truthy
 }
 
 #[test]
 fn test_complex_conditionals() {
-    assert_eq!(eval("(if (not (< 5 3)) 100 200)").unwrap(), Value::int(100));
+    assert_eq!(
+        eval_source("(if (not (< 5 3)) 100 200)").unwrap(),
+        Value::int(100)
+    );
 
-    assert!(eval("(if (= (+ 2 3) 5) 'yes 'no)")
+    assert!(eval_source("(if (= (+ 2 3) 5) 'yes 'no)")
         .unwrap()
         .as_symbol()
         .is_some());
@@ -321,13 +316,16 @@ fn test_complex_conditionals() {
 // New standard library functions
 #[test]
 fn test_length() {
-    assert_eq!(eval("(length (list 1 2 3 4 5))").unwrap(), Value::int(5));
-    assert_eq!(eval("(length nil)").unwrap(), Value::int(0));
+    assert_eq!(
+        eval_source("(length (list 1 2 3 4 5))").unwrap(),
+        Value::int(5)
+    );
+    assert_eq!(eval_source("(length nil)").unwrap(), Value::int(0));
 }
 
 #[test]
 fn test_append() {
-    let result = eval("(append (list 1 2) (list 3 4) (list 5))").unwrap();
+    let result = eval_source("(append (list 1 2) (list 3 4) (list 5))").unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(
         vec,
@@ -343,17 +341,17 @@ fn test_append() {
 
 #[test]
 fn test_reverse() {
-    let result = eval("(reverse (list 1 2 3))").unwrap();
+    let result = eval_source("(reverse (list 1 2 3))").unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec, vec![Value::int(3), Value::int(2), Value::int(1)]);
 }
 
 #[test]
 fn test_min_max() {
-    assert_eq!(eval("(min 5 3 7 2)").unwrap(), Value::int(2));
-    assert_eq!(eval("(max 5 3 7 2)").unwrap(), Value::int(7));
+    assert_eq!(eval_source("(min 5 3 7 2)").unwrap(), Value::int(2));
+    assert_eq!(eval_source("(max 5 3 7 2)").unwrap(), Value::int(7));
 
-    if let Some(f) = eval("(min 1.5 2 0.5)").unwrap().as_float() {
+    if let Some(f) = eval_source("(min 1.5 2 0.5)").unwrap().as_float() {
         assert!((f - 0.5).abs() < 1e-10)
     } else {
         panic!("Expected float")
@@ -362,10 +360,10 @@ fn test_min_max() {
 
 #[test]
 fn test_abs() {
-    assert_eq!(eval("(abs -5)").unwrap(), Value::int(5));
-    assert_eq!(eval("(abs 5)").unwrap(), Value::int(5));
+    assert_eq!(eval_source("(abs -5)").unwrap(), Value::int(5));
+    assert_eq!(eval_source("(abs 5)").unwrap(), Value::int(5));
 
-    if let Some(f) = eval("(abs -3.5)").unwrap().as_float() {
+    if let Some(f) = eval_source("(abs -3.5)").unwrap().as_float() {
         assert!((f - 3.5).abs() < 1e-10)
     } else {
         panic!("Expected float")
@@ -374,9 +372,9 @@ fn test_abs() {
 
 #[test]
 fn test_type_conversions() {
-    assert_eq!(eval("(int 3.14)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(int 3.14)").unwrap(), Value::int(3));
 
-    if let Some(f) = eval("(float 5)").unwrap().as_float() {
+    if let Some(f) = eval_source("(float 5)").unwrap().as_float() {
         assert!((f - 5.0).abs() < 1e-10)
     } else {
         panic!("Expected float")
@@ -386,13 +384,13 @@ fn test_type_conversions() {
 // String operations
 #[test]
 fn test_string_length() {
-    assert_eq!(eval("(length \"hello\")").unwrap(), Value::int(5));
-    assert_eq!(eval("(length \"\")").unwrap(), Value::int(0));
+    assert_eq!(eval_source("(length \"hello\")").unwrap(), Value::int(5));
+    assert_eq!(eval_source("(length \"\")").unwrap(), Value::int(0));
 }
 
 #[test]
 fn test_string_append() {
-    if let Some(s) = eval("(string-append \"hello\" \" \" \"world\")")
+    if let Some(s) = eval_source("(string-append \"hello\" \" \" \"world\")")
         .unwrap()
         .as_string()
     {
@@ -404,13 +402,19 @@ fn test_string_append() {
 
 #[test]
 fn test_string_case() {
-    if let Some(s) = eval("(string-upcase \"hello\")").unwrap().as_string() {
+    if let Some(s) = eval_source("(string-upcase \"hello\")")
+        .unwrap()
+        .as_string()
+    {
         assert_eq!(s, "HELLO")
     } else {
         panic!("Expected string");
     }
 
-    if let Some(s) = eval("(string-downcase \"WORLD\")").unwrap().as_string() {
+    if let Some(s) = eval_source("(string-downcase \"WORLD\")")
+        .unwrap()
+        .as_string()
+    {
         assert_eq!(s, "world")
     } else {
         panic!("Expected string");
@@ -420,40 +424,52 @@ fn test_string_case() {
 // List utilities
 #[test]
 fn test_nth() {
-    assert_eq!(eval("(nth 0 (list 10 20 30))").unwrap(), Value::int(10));
-    assert_eq!(eval("(nth 1 (list 10 20 30))").unwrap(), Value::int(20));
-    assert_eq!(eval("(nth 2 (list 10 20 30))").unwrap(), Value::int(30));
+    assert_eq!(
+        eval_source("(nth 0 (list 10 20 30))").unwrap(),
+        Value::int(10)
+    );
+    assert_eq!(
+        eval_source("(nth 1 (list 10 20 30))").unwrap(),
+        Value::int(20)
+    );
+    assert_eq!(
+        eval_source("(nth 2 (list 10 20 30))").unwrap(),
+        Value::int(30)
+    );
 }
 
 #[test]
 fn test_last() {
-    assert_eq!(eval("(last (list 1 2 3 4 5))").unwrap(), Value::int(5));
+    assert_eq!(
+        eval_source("(last (list 1 2 3 4 5))").unwrap(),
+        Value::int(5)
+    );
 }
 
 #[test]
 fn test_take_drop() {
-    let take_result = eval("(take 2 (list 1 2 3 4 5))").unwrap();
+    let take_result = eval_source("(take 2 (list 1 2 3 4 5))").unwrap();
     let take_vec = take_result.list_to_vec().unwrap();
     assert_eq!(take_vec, vec![Value::int(1), Value::int(2)]);
 
-    let drop_result = eval("(drop 2 (list 1 2 3 4 5))").unwrap();
+    let drop_result = eval_source("(drop 2 (list 1 2 3 4 5))").unwrap();
     let drop_vec = drop_result.list_to_vec().unwrap();
     assert_eq!(drop_vec, vec![Value::int(3), Value::int(4), Value::int(5)]);
 }
 
 #[test]
 fn test_type() {
-    let result = eval("(type-of 42)").unwrap();
+    let result = eval_source("(type-of 42)").unwrap();
     if !result.is_keyword() {
         panic!("Expected keyword, got: {:?}", result);
     }
 
-    let result = eval("(type-of 3.14)").unwrap();
+    let result = eval_source("(type-of 3.14)").unwrap();
     if !result.is_keyword() {
         panic!("Expected keyword, got: {:?}", result);
     }
 
-    let result = eval("(type-of \"hello\")").unwrap();
+    let result = eval_source("(type-of \"hello\")").unwrap();
     if !result.is_keyword() {
         panic!("Expected keyword, got: {:?}", result);
     }
@@ -462,9 +478,9 @@ fn test_type() {
 #[test]
 fn test_type_of_list_consistency() {
     // Issue #308: type-of should return :list for all list-like values
-    let empty = eval("(type-of ())").unwrap();
-    let proper = eval("(type-of (list 1 2))").unwrap();
-    let cons = eval("(type-of (cons 1 2))").unwrap();
+    let empty = eval_source("(type-of ())").unwrap();
+    let proper = eval_source("(type-of (list 1 2))").unwrap();
+    let cons = eval_source("(type-of (cons 1 2))").unwrap();
 
     assert!(empty.is_keyword(), "expected keyword for empty list");
     assert!(proper.is_keyword(), "expected keyword for proper list");
@@ -481,16 +497,19 @@ fn test_type_of_list_consistency() {
     );
 
     // And that keyword should be :list
-    assert_eq!(eval("(eq? (type-of ()) :list)").unwrap(), Value::TRUE);
+    assert_eq!(
+        eval_source("(eq? (type-of ()) :list)").unwrap(),
+        Value::TRUE
+    );
 }
 
 // Math functions
 #[test]
 fn test_sqrt() {
-    assert_eq!(eval("(sqrt 4)").unwrap(), Value::float(2.0));
-    assert_eq!(eval("(sqrt 9)").unwrap(), Value::float(3.0));
+    assert_eq!(eval_source("(sqrt 4)").unwrap(), Value::float(2.0));
+    assert_eq!(eval_source("(sqrt 9)").unwrap(), Value::float(3.0));
     // Test with float input
-    if let Some(f) = eval("(sqrt 16.0)").unwrap().as_float() {
+    if let Some(f) = eval_source("(sqrt 16.0)").unwrap().as_float() {
         assert!((f - 4.0).abs() < 0.0001)
     } else {
         panic!("Expected float")
@@ -500,21 +519,21 @@ fn test_sqrt() {
 #[test]
 fn test_trigonometric() {
     // sin(0) = 0
-    if let Some(f) = eval("(sin 0)").unwrap().as_float() {
+    if let Some(f) = eval_source("(sin 0)").unwrap().as_float() {
         assert!(f.abs() < 0.0001)
     } else {
         panic!("Expected float")
     }
 
     // cos(0) = 1
-    if let Some(f) = eval("(cos 0)").unwrap().as_float() {
+    if let Some(f) = eval_source("(cos 0)").unwrap().as_float() {
         assert!((f - 1.0).abs() < 0.0001)
     } else {
         panic!("Expected float")
     }
 
     // tan(0) = 0
-    if let Some(f) = eval("(tan 0)").unwrap().as_float() {
+    if let Some(f) = eval_source("(tan 0)").unwrap().as_float() {
         assert!(f.abs() < 0.0001)
     } else {
         panic!("Expected float")
@@ -524,14 +543,14 @@ fn test_trigonometric() {
 #[test]
 fn test_log_functions() {
     // ln(1) = 0
-    if let Some(f) = eval("(log 1)").unwrap().as_float() {
+    if let Some(f) = eval_source("(log 1)").unwrap().as_float() {
         assert!(f.abs() < 0.0001)
     } else {
         panic!("Expected float")
     }
 
     // log base 2 of 8 = 3
-    if let Some(f) = eval("(log 8 2)").unwrap().as_float() {
+    if let Some(f) = eval_source("(log 8 2)").unwrap().as_float() {
         assert!((f - 3.0).abs() < 0.0001)
     } else {
         panic!("Expected float")
@@ -541,14 +560,14 @@ fn test_log_functions() {
 #[test]
 fn test_exp() {
     // exp(0) = 1
-    if let Some(f) = eval("(exp 0)").unwrap().as_float() {
+    if let Some(f) = eval_source("(exp 0)").unwrap().as_float() {
         assert!((f - 1.0).abs() < 0.0001)
     } else {
         panic!("Expected float")
     }
 
     // exp(1) ≈ e
-    if let Some(f) = eval("(exp 1)").unwrap().as_float() {
+    if let Some(f) = eval_source("(exp 1)").unwrap().as_float() {
         assert!((f - std::f64::consts::E).abs() < 0.0001)
     } else {
         panic!("Expected float")
@@ -558,17 +577,17 @@ fn test_exp() {
 #[test]
 fn test_pow() {
     // 2^3 = 8
-    assert_eq!(eval("(pow 2 3)").unwrap(), Value::int(8));
+    assert_eq!(eval_source("(pow 2 3)").unwrap(), Value::int(8));
 
     // 2^-1 = 0.5
-    if let Some(f) = eval("(pow 2 -1)").unwrap().as_float() {
+    if let Some(f) = eval_source("(pow 2 -1)").unwrap().as_float() {
         assert!((f - 0.5).abs() < 0.0001)
     } else {
         panic!("Expected float")
     }
 
     // 2.0^3.0 = 8.0
-    if let Some(f) = eval("(pow 2.0 3.0)").unwrap().as_float() {
+    if let Some(f) = eval_source("(pow 2.0 3.0)").unwrap().as_float() {
         assert!((f - 8.0).abs() < 0.0001)
     } else {
         panic!("Expected float")
@@ -578,37 +597,43 @@ fn test_pow() {
 #[test]
 fn test_floor_ceil_round() {
     // floor
-    assert_eq!(eval("(floor 3)").unwrap(), Value::int(3));
-    assert_eq!(eval("(floor 3.7)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(floor 3)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(floor 3.7)").unwrap(), Value::int(3));
 
     // ceil
-    assert_eq!(eval("(ceil 3)").unwrap(), Value::int(3));
-    assert_eq!(eval("(ceil 3.2)").unwrap(), Value::int(4));
+    assert_eq!(eval_source("(ceil 3)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(ceil 3.2)").unwrap(), Value::int(4));
 
     // round
-    assert_eq!(eval("(round 3)").unwrap(), Value::int(3));
-    assert_eq!(eval("(round 3.4)").unwrap(), Value::int(3));
-    assert_eq!(eval("(round 3.6)").unwrap(), Value::int(4));
+    assert_eq!(eval_source("(round 3)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(round 3.4)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(round 3.6)").unwrap(), Value::int(4));
 }
 
 // String functions
 #[test]
 fn test_substring() {
-    if let Some(s) = eval("(substring \"hello\" 1 4)").unwrap().as_string() {
+    if let Some(s) = eval_source("(substring \"hello\" 1 4)")
+        .unwrap()
+        .as_string()
+    {
         assert_eq!(s, "ell")
     } else {
         panic!("Expected string");
     }
 
     // Test with just start index (to end)
-    if let Some(s) = eval("(substring \"hello\" 2)").unwrap().as_string() {
+    if let Some(s) = eval_source("(substring \"hello\" 2)").unwrap().as_string() {
         assert_eq!(s, "llo")
     } else {
         panic!("Expected string");
     }
 
     // Test from start
-    if let Some(s) = eval("(substring \"hello\" 0 2)").unwrap().as_string() {
+    if let Some(s) = eval_source("(substring \"hello\" 0 2)")
+        .unwrap()
+        .as_string()
+    {
         assert_eq!(s, "he")
     } else {
         panic!("Expected string");
@@ -619,35 +644,38 @@ fn test_substring() {
 fn test_string_index() {
     // Find character in string
     assert_eq!(
-        eval("(string-index \"hello\" \"l\")").unwrap(),
+        eval_source("(string-index \"hello\" \"l\")").unwrap(),
         Value::int(2)
     );
 
     // Character not found
-    assert_eq!(eval("(string-index \"hello\" \"x\")").unwrap(), Value::NIL);
+    assert_eq!(
+        eval_source("(string-index \"hello\" \"x\")").unwrap(),
+        Value::NIL
+    );
 
     // First occurrence
     assert_eq!(
-        eval("(string-index \"hello\" \"l\")").unwrap(),
+        eval_source("(string-index \"hello\" \"l\")").unwrap(),
         Value::int(2)
     );
 }
 
 #[test]
 fn test_char_at() {
-    if let Some(s) = eval("(char-at \"hello\" 0)").unwrap().as_string() {
+    if let Some(s) = eval_source("(char-at \"hello\" 0)").unwrap().as_string() {
         assert_eq!(s, "h")
     } else {
         panic!("Expected string");
     }
 
-    if let Some(s) = eval("(char-at \"hello\" 1)").unwrap().as_string() {
+    if let Some(s) = eval_source("(char-at \"hello\" 1)").unwrap().as_string() {
         assert_eq!(s, "e")
     } else {
         panic!("Expected string");
     }
 
-    if let Some(s) = eval("(char-at \"hello\" 4)").unwrap().as_string() {
+    if let Some(s) = eval_source("(char-at \"hello\" 4)").unwrap().as_string() {
         assert_eq!(s, "o")
     } else {
         panic!("Expected string");
@@ -657,7 +685,7 @@ fn test_char_at() {
 // Array operations
 #[test]
 fn test_array_creation() {
-    if let Some(vec_ref) = eval("(array 1 2 3)").unwrap().as_array() {
+    if let Some(vec_ref) = eval_source("(array 1 2 3)").unwrap().as_array() {
         let v = vec_ref.borrow();
         assert_eq!(v.len(), 3);
         assert_eq!(v[0], Value::int(1));
@@ -668,7 +696,7 @@ fn test_array_creation() {
     }
 
     // Empty array
-    if let Some(vec_ref) = eval("(array)").unwrap().as_array() {
+    if let Some(vec_ref) = eval_source("(array)").unwrap().as_array() {
         assert_eq!(vec_ref.borrow().len(), 0)
     } else {
         panic!("Expected array");
@@ -677,10 +705,13 @@ fn test_array_creation() {
 
 #[test]
 fn test_array_length() {
-    assert_eq!(eval("(length (array 1 2 3))").unwrap(), Value::int(3));
-    assert_eq!(eval("(length (array))").unwrap(), Value::int(0));
     assert_eq!(
-        eval("(length (array 10 20 30 40 50))").unwrap(),
+        eval_source("(length (array 1 2 3))").unwrap(),
+        Value::int(3)
+    );
+    assert_eq!(eval_source("(length (array))").unwrap(), Value::int(0));
+    assert_eq!(
+        eval_source("(length (array 10 20 30 40 50))").unwrap(),
         Value::int(5)
     );
 }
@@ -688,22 +719,25 @@ fn test_array_length() {
 #[test]
 fn test_array_ref() {
     assert_eq!(
-        eval("(array-ref (array 10 20 30) 0)").unwrap(),
+        eval_source("(array-ref (array 10 20 30) 0)").unwrap(),
         Value::int(10)
     );
     assert_eq!(
-        eval("(array-ref (array 10 20 30) 1)").unwrap(),
+        eval_source("(array-ref (array 10 20 30) 1)").unwrap(),
         Value::int(20)
     );
     assert_eq!(
-        eval("(array-ref (array 10 20 30) 2)").unwrap(),
+        eval_source("(array-ref (array 10 20 30) 2)").unwrap(),
         Value::int(30)
     );
 }
 
 #[test]
 fn test_array_set() {
-    if let Some(vec_ref) = eval("(array-set! (array 1 2 3) 1 99)").unwrap().as_array() {
+    if let Some(vec_ref) = eval_source("(array-set! (array 1 2 3) 1 99)")
+        .unwrap()
+        .as_array()
+    {
         let v = vec_ref.borrow();
         assert_eq!(v[0], Value::int(1));
         assert_eq!(v[1], Value::int(99));
@@ -713,7 +747,10 @@ fn test_array_set() {
     }
 
     // Set at beginning
-    if let Some(vec_ref) = eval("(array-set! (array 1 2 3) 0 100)").unwrap().as_array() {
+    if let Some(vec_ref) = eval_source("(array-set! (array 1 2 3) 0 100)")
+        .unwrap()
+        .as_array()
+    {
         let v = vec_ref.borrow();
         assert_eq!(v[0], Value::int(100))
     } else {
@@ -721,7 +758,10 @@ fn test_array_set() {
     }
 
     // Set at end
-    if let Some(vec_ref) = eval("(array-set! (array 1 2 3) 2 200)").unwrap().as_array() {
+    if let Some(vec_ref) = eval_source("(array-set! (array 1 2 3) 2 200)")
+        .unwrap()
+        .as_array()
+    {
         let v = vec_ref.borrow();
         assert_eq!(v[2], Value::int(200))
     } else {
@@ -731,14 +771,14 @@ fn test_array_set() {
 #[test]
 fn test_math_constants() {
     // Test pi
-    if let Some(f) = eval("(pi)").unwrap().as_float() {
+    if let Some(f) = eval_source("(pi)").unwrap().as_float() {
         assert!((f - std::f64::consts::PI).abs() < 0.0001)
     } else {
         panic!("Expected float")
     }
 
     // Test e
-    if let Some(f) = eval("(e)").unwrap().as_float() {
+    if let Some(f) = eval_source("(e)").unwrap().as_float() {
         assert!((f - std::f64::consts::E).abs() < 0.0001)
     } else {
         panic!("Expected float")
@@ -748,22 +788,22 @@ fn test_math_constants() {
 #[test]
 fn test_mod_and_remainder() {
     // Modulo
-    assert_eq!(eval("(mod 17 5)").unwrap(), Value::int(2));
-    assert_eq!(eval("(mod 20 4)").unwrap(), Value::int(0));
-    assert_eq!(eval("(mod -17 5)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(mod 17 5)").unwrap(), Value::int(2));
+    assert_eq!(eval_source("(mod 20 4)").unwrap(), Value::int(0));
+    assert_eq!(eval_source("(mod -17 5)").unwrap(), Value::int(3));
 
     // Remainder
-    assert_eq!(eval("(rem 17 5)").unwrap(), Value::int(2));
-    assert_eq!(eval("(rem 20 4)").unwrap(), Value::int(0));
+    assert_eq!(eval_source("(rem 17 5)").unwrap(), Value::int(2));
+    assert_eq!(eval_source("(rem 20 4)").unwrap(), Value::int(0));
 }
 
 #[test]
 fn test_even_odd() {
-    assert_eq!(eval("(even? 2)").unwrap(), Value::bool(true));
-    assert_eq!(eval("(even? 3)").unwrap(), Value::bool(false));
-    assert_eq!(eval("(odd? 2)").unwrap(), Value::bool(false));
-    assert_eq!(eval("(odd? 3)").unwrap(), Value::bool(true));
-    assert_eq!(eval("(even? 0)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(even? 2)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(even? 3)").unwrap(), Value::bool(false));
+    assert_eq!(eval_source("(odd? 2)").unwrap(), Value::bool(false));
+    assert_eq!(eval_source("(odd? 3)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(even? 0)").unwrap(), Value::bool(true));
 }
 
 // Recursive function tests (issue #6)
@@ -781,7 +821,7 @@ fn test_recursive_lambda_fibonacci() {
             (+ (fib (- n 1)) (fib (- n 2)))))
         (fib 5)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(5));
+    assert_eq!(eval_source(code).unwrap(), Value::int(5));
 }
 
 #[test]
@@ -794,7 +834,7 @@ fn test_recursive_lambda_fibonacci_10() {
             (+ (fib (- n 1)) (fib (- n 2)))))
         (fib 10)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(55));
+    assert_eq!(eval_source(code).unwrap(), Value::int(55));
 }
 
 #[test]
@@ -805,7 +845,7 @@ fn test_tail_recursive_sum() {
           (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
         (sum-to 100 0)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(5050));
+    assert_eq!(eval_source(code).unwrap(), Value::int(5050));
 }
 
 #[test]
@@ -818,7 +858,7 @@ fn test_recursive_countdown() {
             (+ n (countdown (- n 1)))))
         (countdown 5)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(15)); // 5 + 4 + 3 + 2 + 1
+    assert_eq!(eval_source(code).unwrap(), Value::int(15)); // 5 + 4 + 3 + 2 + 1
 }
 
 #[test]
@@ -831,7 +871,7 @@ fn test_nested_recursive_functions() {
           (inner n))
         (outer 5)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(15)); // 5 + 4 + 3 + 2 + 1
+    assert_eq!(eval_source(code).unwrap(), Value::int(15)); // 5 + 4 + 3 + 2 + 1
 }
 
 #[test]
@@ -841,7 +881,7 @@ fn test_simple_lambda_call() {
         (defn identity (x) x)
         (identity 42)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -851,7 +891,7 @@ fn test_lambda_with_arithmetic() {
         (defn double (x) (* x 2))
         (double 21)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -861,7 +901,7 @@ fn test_lambda_with_comparison() {
         (defn is-positive (x) (> x 0))
         (is-positive 5)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::bool(true));
+    assert_eq!(eval_source(code).unwrap(), Value::bool(true));
 }
 
 // Closure scoping tests (Issue #21 - Foundation work on closure improvements)
@@ -873,7 +913,7 @@ fn test_closure_captures_outer_variable() {
         (var x 100)
         ((fn (y) (+ x y)) 20)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(120));
+    assert_eq!(eval_source(code).unwrap(), Value::int(120));
 }
 
 #[test]
@@ -882,7 +922,7 @@ fn test_closure_parameter_shadowing() {
         (var x 100)
         ((fn (x) (+ x 1)) 50)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(51));
+    assert_eq!(eval_source(code).unwrap(), Value::int(51));
 }
 
 #[test]
@@ -893,7 +933,7 @@ fn test_closure_captures_multiple_variables() {
         (var z 30)
         ((fn (a b c) (+ a b c x y z)) 1 2 3)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(66));
+    assert_eq!(eval_source(code).unwrap(), Value::int(66));
 }
 
 #[test]
@@ -902,7 +942,7 @@ fn test_closure_parameter_in_nested_expression() {
         ((fn (x)
           (if (> x 50) (* x 2) (+ x 100))) 25)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(125));
+    assert_eq!(eval_source(code).unwrap(), Value::int(125));
 }
 
 #[test]
@@ -912,7 +952,7 @@ fn test_multiple_closures_independent_params() {
         (def f2 (fn (x) (* x 2)))
         (+ (f1 5) (f2 5))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(25));
+    assert_eq!(eval_source(code).unwrap(), Value::int(25));
 }
 
 #[test]
@@ -921,7 +961,7 @@ fn test_closure_captured_function_call() {
         (def add (fn (a b) (+ a b)))
         ((fn (x y) (add x y)) 10 20)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -930,7 +970,7 @@ fn test_closure_with_list_operations() {
         (var numbers (list 1 2 3 4 5))
         ((fn (lst) (first lst)) numbers)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(1));
+    assert_eq!(eval_source(code).unwrap(), Value::int(1));
 }
 
 #[test]
@@ -940,7 +980,10 @@ fn test_closure_parameter_in_conditional() {
           (if (nil? n) "empty" "nonempty"))
          (list 1))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::string("nonempty".to_string()));
+    assert_eq!(
+        eval_source(code).unwrap(),
+        Value::string("nonempty".to_string())
+    );
 }
 
 #[test]
@@ -948,7 +991,7 @@ fn test_closure_preserves_parameter_type() {
     let code = r#"
         ((fn (s) (string? s)) "hello")
     "#;
-    assert_eq!(eval(code).unwrap(), Value::bool(true));
+    assert_eq!(eval_source(code).unwrap(), Value::bool(true));
 }
 
 // Let-binding tests (Issue #21)
@@ -959,7 +1002,7 @@ fn test_let_simple_binding() {
         (let ((x 5))
           x)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(5));
+    assert_eq!(eval_source(code).unwrap(), Value::int(5));
 }
 
 #[test]
@@ -968,7 +1011,7 @@ fn test_let_with_arithmetic() {
         (let ((x 5))
           (+ x 3))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(8));
+    assert_eq!(eval_source(code).unwrap(), Value::int(8));
 }
 
 #[test]
@@ -977,7 +1020,7 @@ fn test_let_multiple_bindings() {
         (let ((x 5) (y 3))
           (+ x y))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(8));
+    assert_eq!(eval_source(code).unwrap(), Value::int(8));
 }
 
 #[test]
@@ -986,7 +1029,7 @@ fn test_let_binding_with_expressions() {
         (let ((x (+ 2 3)) (y (* 4 5)))
           (+ x y))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(25));
+    assert_eq!(eval_source(code).unwrap(), Value::int(25));
 }
 
 #[test]
@@ -996,7 +1039,7 @@ fn test_let_shadowing_global() {
         (let ((x 20))
           x)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(20));
+    assert_eq!(eval_source(code).unwrap(), Value::int(20));
 }
 
 #[test]
@@ -1007,7 +1050,7 @@ fn test_let_does_not_modify_global() {
           x)
         x
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(10));
+    assert_eq!(eval_source(code).unwrap(), Value::int(10));
 }
 
 #[test]
@@ -1016,7 +1059,7 @@ fn test_let_with_lists() {
         (let ((lst (list 1 2 3)))
           (first lst))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(1));
+    assert_eq!(eval_source(code).unwrap(), Value::int(1));
 }
 
 #[test]
@@ -1025,7 +1068,7 @@ fn test_let_with_string_operations() {
         (let ((s "hello"))
           (string? s))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::bool(true));
+    assert_eq!(eval_source(code).unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -1034,7 +1077,7 @@ fn test_let_with_conditional() {
         (let ((x 10))
           (if (> x 5) "big" "small"))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::string("big".to_string()));
+    assert_eq!(eval_source(code).unwrap(), Value::string("big".to_string()));
 }
 
 #[test]
@@ -1042,7 +1085,7 @@ fn test_let_empty_body_returns_nil() {
     let code = r#"
         (let ((x 5)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::NIL);
+    assert_eq!(eval_source(code).unwrap(), Value::NIL);
 }
 
 #[test]
@@ -1054,7 +1097,7 @@ fn test_let_multiple_body_expressions() {
           (+ x 3))
     "#;
     // Body should return last expression
-    assert_eq!(eval(code).unwrap(), Value::int(8));
+    assert_eq!(eval_source(code).unwrap(), Value::int(8));
 }
 
 #[test]
@@ -1064,7 +1107,7 @@ fn test_let_with_global_reference() {
         (let ((x 50))
           (+ x y))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(150));
+    assert_eq!(eval_source(code).unwrap(), Value::int(150));
 }
 
 #[test]
@@ -1073,7 +1116,7 @@ fn test_let_binding_order() {
         (let ((x 1) (y 2) (z 3))
           (+ x y z))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(6));
+    assert_eq!(eval_source(code).unwrap(), Value::int(6));
 }
 
 #[test]
@@ -1083,7 +1126,7 @@ fn test_let_with_list_literal() {
           (rest x))
     "#;
     assert_eq!(
-        eval(code).unwrap(),
+        eval_source(code).unwrap(),
         list(vec![Value::int(2), Value::int(3)])
     );
 }
@@ -1095,7 +1138,7 @@ fn test_let_shadowing_with_calculation() {
         (let ((x (* 2 x)))
           x)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(20));
+    assert_eq!(eval_source(code).unwrap(), Value::int(20));
 }
 
 #[test]
@@ -1104,7 +1147,7 @@ fn test_let_with_builtin_functions() {
          (let ((len (fn (x) 42)))
            (len nil))
      "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 // Tests for let* (sequential binding with access to previous bindings)
@@ -1115,7 +1158,7 @@ fn test_let_star_empty() {
         (let* ()
           42)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -1124,7 +1167,7 @@ fn test_let_star_simple_binding() {
         (let* ((x 5))
           x)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(5));
+    assert_eq!(eval_source(code).unwrap(), Value::int(5));
 }
 
 #[test]
@@ -1133,31 +1176,34 @@ fn test_let_star_with_multiple_bindings_no_dependencies() {
         (let* ((x 1) (y 2))
           (+ x y))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 // Tests for cond expression (multi-way conditional)
 
 #[test]
 fn test_cond_single_true_clause() {
-    assert_eq!(eval("(cond (#t 42))").unwrap(), Value::int(42));
+    assert_eq!(eval_source("(cond (#t 42))").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_cond_single_false_clause_with_else() {
-    assert_eq!(eval("(cond (#f 42) (else 100))").unwrap(), Value::int(100));
+    assert_eq!(
+        eval_source("(cond (#f 42) (else 100))").unwrap(),
+        Value::int(100)
+    );
 }
 
 #[test]
 fn test_cond_single_false_clause_without_else() {
     // If no clause matches and no else, return nil
-    assert_eq!(eval("(cond (#f 42))").unwrap(), Value::NIL);
+    assert_eq!(eval_source("(cond (#f 42))").unwrap(), Value::NIL);
 }
 
 #[test]
 fn test_cond_first_clause_matches() {
     assert_eq!(
-        eval("(cond ((> 5 3) 100) ((> 4 2) 200))").unwrap(),
+        eval_source("(cond ((> 5 3) 100) ((> 4 2) 200))").unwrap(),
         Value::int(100)
     );
 }
@@ -1165,7 +1211,7 @@ fn test_cond_first_clause_matches() {
 #[test]
 fn test_cond_second_clause_matches() {
     assert_eq!(
-        eval("(cond ((> 3 5) 100) ((> 4 2) 200))").unwrap(),
+        eval_source("(cond ((> 3 5) 100) ((> 4 2) 200))").unwrap(),
         Value::int(200)
     );
 }
@@ -1173,7 +1219,7 @@ fn test_cond_second_clause_matches() {
 #[test]
 fn test_cond_multiple_clauses_with_else() {
     assert_eq!(
-        eval("(cond ((> 3 5) 100) ((> 2 4) 200) (else 300))").unwrap(),
+        eval_source("(cond ((> 3 5) 100) ((> 2 4) 200) (else 300))").unwrap(),
         Value::int(300)
     );
 }
@@ -1186,7 +1232,7 @@ fn test_cond_with_expressions_as_conditions() {
           ((= 2 2) "two-two")
           (else "other"))
     "#;
-    if let Some(s) = eval(code).unwrap().as_string() {
+    if let Some(s) = eval_source(code).unwrap().as_string() {
         assert_eq!(s, "two-two")
     } else {
         panic!("Expected string");
@@ -1201,7 +1247,7 @@ fn test_cond_with_complex_bodies() {
           (#t (+ 2 3))
           (else (+ 4 5)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(5));
+    assert_eq!(eval_source(code).unwrap(), Value::int(5));
 }
 
 #[test]
@@ -1214,7 +1260,7 @@ fn test_cond_with_multiple_body_expressions() {
             (+ 2 2)
             (+ 3 3)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(6));
+    assert_eq!(eval_source(code).unwrap(), Value::int(6));
 }
 
 #[test]
@@ -1227,7 +1273,7 @@ fn test_cond_nested() {
               (else 100)))
           (else 200))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -1239,7 +1285,7 @@ fn test_cond_with_variable_references() {
           ((< x 15) "medium")
           (else "large"))
     "#;
-    if let Some(s) = eval(code).unwrap().as_string() {
+    if let Some(s) = eval_source(code).unwrap().as_string() {
         assert_eq!(s, "medium")
     } else {
         panic!("Expected string");
@@ -1255,7 +1301,7 @@ fn test_cond_respects_clause_order() {
           ((>= 10 3) "second")
           (else "third"))
     "#;
-    if let Some(s) = eval(code).unwrap().as_string() {
+    if let Some(s) = eval_source(code).unwrap().as_string() {
         assert_eq!(s, "first")
     } else {
         panic!("Expected string");
@@ -1272,7 +1318,7 @@ fn test_cond_with_else_body_multiple_expressions() {
             (+ 2 2)
             (* 3 3)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(9));
+    assert_eq!(eval_source(code).unwrap(), Value::int(9));
 }
 
 // Tests for nested lambdas with closure capture
@@ -1290,7 +1336,7 @@ fn test_nested_lambda_single_capture() {
         (var f (make-const 42))
         (f 100)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -1304,7 +1350,7 @@ fn test_nested_lambda_parameter_only() {
          (var f (make-id 100))
          (f 42)
      "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 // TODO: Fix issue #78 - Deeply nested closures with multiple captures
@@ -1320,7 +1366,7 @@ fn test_nested_lambda_parameter_only() {
 //                (* a (* b c))))))
 //          (((make-multiplier 2) 3) 4)
 //      "#;
-//     assert_eq!(eval(code).unwrap(), Value::int(24));
+//     assert_eq!(eval_source(code).unwrap(), Value::int(24));
 // }
 
 // Threading operators (-> and ->>)
@@ -1328,56 +1374,56 @@ fn test_nested_lambda_parameter_only() {
 fn test_thread_first_simple() {
     // (-> 5 (+ 10) (* 2)) => (* (+ 5 10) 2) => 30
     let code = "(-> 5 (+ 10) (* 2))";
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 #[test]
 fn test_thread_first_with_multiple_args() {
     // (-> 5 (+ 10 2) (* 3)) => (* (+ 5 10 2) 3) => 51
     let code = "(-> 5 (+ 10 2) (* 3))";
-    assert_eq!(eval(code).unwrap(), Value::int(51));
+    assert_eq!(eval_source(code).unwrap(), Value::int(51));
 }
 
 #[test]
 fn test_thread_last_simple() {
     // (->> 5 (+ 10) (* 2)) => (* 2 (+ 10 5)) => 30
     let code = "(->> 5 (+ 10) (* 2))";
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 #[test]
 fn test_thread_last_with_multiple_args() {
     // (->> 2 (+ 10) (* 3)) => (* 3 (+ 10 2)) => 36
     let code = "(->> 2 (+ 10) (* 3))";
-    assert_eq!(eval(code).unwrap(), Value::int(36));
+    assert_eq!(eval_source(code).unwrap(), Value::int(36));
 }
 
 #[test]
 fn test_thread_first_chain() {
     // (-> 1 (+ 1) (+ 1) (+ 1)) => (+ (+ (+ 1 1) 1) 1) => 4
     let code = "(-> 1 (+ 1) (+ 1) (+ 1))";
-    assert_eq!(eval(code).unwrap(), Value::int(4));
+    assert_eq!(eval_source(code).unwrap(), Value::int(4));
 }
 
 #[test]
 fn test_thread_last_chain() {
     // (->> 1 (+ 1) (+ 1) (+ 1)) => (+ 1 (+ 1 (+ 1 1))) => 4
     let code = "(->> 1 (+ 1) (+ 1) (+ 1))";
-    assert_eq!(eval(code).unwrap(), Value::int(4));
+    assert_eq!(eval_source(code).unwrap(), Value::int(4));
 }
 
 #[test]
 fn test_thread_first_with_list_ops() {
     // (-> (list 1 2 3) (length)) => (length (list 1 2 3)) => 3
     let code = "(-> (list 1 2 3) (length))";
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 #[test]
 fn test_thread_last_with_list_ops() {
     // (->> (list 1 2 3) (length)) => (length (list 1 2 3)) => 3
     let code = "(->> (list 1 2 3) (length))";
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 #[test]
@@ -1385,7 +1431,7 @@ fn test_thread_first_nested() {
     // Test threading through nested operations
     let code = "(-> 10 (- 3) (+ 5))";
     // (+ (- 10 3) 5) = (+ 7 5) = 12
-    assert_eq!(eval(code).unwrap(), Value::int(12));
+    assert_eq!(eval_source(code).unwrap(), Value::int(12));
 }
 
 #[test]
@@ -1393,7 +1439,7 @@ fn test_thread_last_nested() {
     // Test threading through nested operations
     let code = "(->> 10 (- 3) (+ 5))";
     // (+ 5 (- 3 10)) = (+ 5 -7) = -2
-    assert_eq!(eval(code).unwrap(), Value::int(-2));
+    assert_eq!(eval_source(code).unwrap(), Value::int(-2));
 }
 
 #[test]
@@ -1409,7 +1455,7 @@ fn test_closure_with_local_define_and_param_arithmetic() {
           ((outer 1) 1))
     "#;
     // local = 1 * 2 = 2, y = 1, result = 2 + 1 = 3
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 // ============================================================================
@@ -1418,8 +1464,9 @@ fn test_closure_with_local_define_and_param_arithmetic() {
 
 #[test]
 fn test_let_inside_lambda_with_append() {
-    let result =
-        eval("(defn f (x) (if (= x 0) (list) (let ((y x)) (append (list y) (f (- x 1)))))) (f 3)");
+    let result = eval_source(
+        "(defn f (x) (if (= x 0) (list) (let ((y x)) (append (list y) (f (- x 1)))))) (f 3)",
+    );
     // Should be (3 2 1)
     assert!(result.is_ok());
     let val = result.unwrap();
@@ -1429,13 +1476,13 @@ fn test_let_inside_lambda_with_append() {
 
 #[test]
 fn test_let_inside_lambda_values_correct() {
-    let result = eval("(defn f (x) (let ((y x)) y)) (f 42)");
+    let result = eval_source("(defn f (x) (let ((y x)) y)) (f 42)");
     assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_multiple_let_bindings_in_lambda() {
-    let result = eval("(defn f (x) (let ((y x) (z (+ x 1))) (+ y z))) (f 10)");
+    let result = eval_source("(defn f (x) (let ((y x) (z (+ x 1))) (+ y z))) (f 10)");
     assert_eq!(result.unwrap(), Value::int(21));
 }
 
@@ -1445,19 +1492,19 @@ fn test_multiple_let_bindings_in_lambda() {
 
 #[test]
 fn test_define_shorthand() {
-    let result = eval("(defn f (x) (+ x 1)) (f 42)");
+    let result = eval_source("(defn f (x) (+ x 1)) (f 42)");
     assert_eq!(result.unwrap(), Value::int(43));
 }
 
 #[test]
 fn test_define_shorthand_multiple_params() {
-    let result = eval("(defn add (a b) (+ a b)) (add 3 4)");
+    let result = eval_source("(defn add (a b) (+ a b)) (add 3 4)");
     assert_eq!(result.unwrap(), Value::int(7));
 }
 
 #[test]
 fn test_define_shorthand_with_body() {
-    let result = eval("(defn fact (n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)");
+    let result = eval_source("(defn fact (n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)");
     assert_eq!(result.unwrap(), Value::int(120));
 }
 
@@ -1467,21 +1514,21 @@ fn test_define_shorthand_with_body() {
 
 #[test]
 fn test_list_display_no_dot() {
-    let result = eval("(list 1 2 3)");
+    let result = eval_source("(list 1 2 3)");
     let val = result.unwrap();
     assert_eq!(format!("{}", val), "(1 2 3)");
 }
 
 #[test]
 fn test_single_element_list_display() {
-    let result = eval("(list 1)");
+    let result = eval_source("(list 1)");
     let val = result.unwrap();
     assert_eq!(format!("{}", val), "(1)");
 }
 
 #[test]
 fn test_empty_list_display() {
-    let result = eval("(list)");
+    let result = eval_source("(list)");
     let val = result.unwrap();
     assert_eq!(format!("{}", val), "()");
 }
@@ -1492,32 +1539,32 @@ fn test_empty_list_display() {
 
 #[test]
 fn test_halt_returns_value() {
-    let result = eval("(halt 42)");
+    let result = eval_source("(halt 42)");
     assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_halt_returns_nil() {
-    let result = eval("(halt)");
+    let result = eval_source("(halt)");
     assert_eq!(result.unwrap(), Value::NIL);
 }
 
 #[test]
 fn test_halt_stops_execution() {
     // Code after halt should not execute
-    let result = eval("(begin (halt 1) 2)");
+    let result = eval_source("(begin (halt 1) 2)");
     assert_eq!(result.unwrap(), Value::int(1));
 }
 
 #[test]
 fn test_halt_in_function() {
-    let result = eval("(begin (def f (fn () (halt 99))) (f))");
+    let result = eval_source("(begin (def f (fn () (halt 99))) (f))");
     assert_eq!(result.unwrap(), Value::int(99));
 }
 
 #[test]
 fn test_halt_with_complex_value() {
-    let result = eval("(halt (list 1 2 3))");
+    let result = eval_source("(halt (list 1 2 3))");
     let vec = result.unwrap().list_to_vec().unwrap();
     assert_eq!(vec, vec![Value::int(1), Value::int(2), Value::int(3)]);
 }

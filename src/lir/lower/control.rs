@@ -243,6 +243,18 @@ impl Lowerer {
         Ok(result_reg)
     }
 
+    pub(super) fn lower_eval(&mut self, expr: &Hir, env: &Hir) -> Result<Reg, String> {
+        let env_reg = self.lower_expr(env)?;
+        let expr_reg = self.lower_expr(expr)?;
+        let dst = self.fresh_reg();
+        self.emit(LirInstr::Eval {
+            dst,
+            expr: expr_reg,
+            env: env_reg,
+        });
+        Ok(dst)
+    }
+
     pub(super) fn lower_yield(&mut self, value: &Hir) -> Result<Reg, String> {
         let value_reg = self.lower_expr(value)?;
 

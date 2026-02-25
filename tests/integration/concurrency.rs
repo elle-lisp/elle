@@ -1,38 +1,9 @@
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-
-    // Try to compile as a single expression first
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            // If that fails, try wrapping in a begin
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    // If that also fails, try compiling all expressions
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
+use crate::common::eval_source;
 
 #[test]
 fn test_spawn_closure_with_immutable_capture() {
     // Test spawning a closure that captures an immutable value
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((x 42))
           (let ((handle (spawn (fn () x))))
@@ -46,7 +17,7 @@ fn test_spawn_closure_with_immutable_capture() {
 #[test]
 fn test_spawn_closure_with_string_capture() {
     // Test spawning a closure that captures a string
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((msg "hello from thread"))
           (let ((handle (spawn (fn () msg))))
@@ -60,7 +31,7 @@ fn test_spawn_closure_with_string_capture() {
 #[test]
 fn test_spawn_closure_with_array_capture() {
     // Test spawning a closure that captures an array
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((v [1 2 3]))
           (let ((handle (spawn (fn () v))))
@@ -74,7 +45,7 @@ fn test_spawn_closure_with_array_capture() {
 #[test]
 fn test_spawn_closure_computation() {
     // Test spawning a closure that performs a computation
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((x 10) (y 20))
           (let ((handle (spawn (fn () (+ x y)))))
@@ -92,7 +63,7 @@ fn test_spawn_closure_computation() {
 #[test]
 fn test_spawn_rejects_mutable_table_capture() {
     // Test that spawn rejects closures capturing mutable tables
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((t (table)))
           (spawn (fn () t)))
@@ -110,7 +81,7 @@ fn test_spawn_rejects_mutable_table_capture() {
 #[test]
 fn test_spawn_rejects_native_function() {
     // Test that spawn rejects native functions
-    let result = eval("(spawn +)");
+    let result = eval_source("(spawn +)");
 
     match result {
         Err(e) => {
@@ -123,7 +94,7 @@ fn test_spawn_rejects_native_function() {
 #[test]
 fn test_spawn_wrong_arity() {
     // Test spawn with wrong number of arguments
-    let result = eval("(spawn)");
+    let result = eval_source("(spawn)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("1 argument"));
 }
@@ -131,7 +102,7 @@ fn test_spawn_wrong_arity() {
 #[test]
 fn test_spawn_wrong_arity_two_args() {
     // Test spawn with two arguments
-    let result = eval("(spawn (fn () 1) 2)");
+    let result = eval_source("(spawn (fn () 1) 2)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("1 argument"));
 }
@@ -139,7 +110,7 @@ fn test_spawn_wrong_arity_two_args() {
 #[test]
 fn test_join_wrong_arity() {
     // Test join with no arguments
-    let result = eval("(join)");
+    let result = eval_source("(join)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("1 argument"));
 }
@@ -147,7 +118,7 @@ fn test_join_wrong_arity() {
 #[test]
 fn test_join_wrong_arity_two_args() {
     // Test join with two arguments
-    let result = eval("(join 1 2)");
+    let result = eval_source("(join 1 2)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("1 argument"));
 }
@@ -155,7 +126,7 @@ fn test_join_wrong_arity_two_args() {
 #[test]
 fn test_join_invalid_argument() {
     // Test join with invalid argument
-    let result = eval("(join 42)");
+    let result = eval_source("(join 42)");
     match result {
         Err(e) => {
             assert!(e.contains("thread handle"));
@@ -167,7 +138,7 @@ fn test_join_invalid_argument() {
 #[test]
 fn test_spawn_closure_with_multiple_captures() {
     // Test spawning a closure that captures multiple values
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((a 1) (b 2) (c 3))
           (let ((handle (spawn (fn () (+ a (+ b c))))))
@@ -187,7 +158,7 @@ fn test_spawn_closure_with_multiple_captures() {
 #[test]
 fn test_spawn_closure_with_nil_capture() {
     // Test spawning a closure that captures nil
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((n nil))
           (let ((handle (spawn (fn () n))))
@@ -201,7 +172,7 @@ fn test_spawn_closure_with_nil_capture() {
 #[test]
 fn test_spawn_closure_with_float_capture() {
     // Test spawning a closure that captures a float
-    let result = eval(
+    let result = eval_source(
         r#"
          (let ((f 3.14159))
            (let ((handle (spawn (fn () f))))
@@ -215,7 +186,7 @@ fn test_spawn_closure_with_float_capture() {
 #[test]
 fn test_spawn_closure_with_list_capture() {
     // Test spawning a closure that captures a list
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((lst (list 1 2 3)))
           (let ((handle (spawn (fn () lst))))
@@ -229,7 +200,7 @@ fn test_spawn_closure_with_list_capture() {
 #[test]
 fn test_spawn_closure_no_captures() {
     // Test spawning a closure with no captures
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((handle (spawn (fn () 42))))
           (join handle))
@@ -242,7 +213,7 @@ fn test_spawn_closure_no_captures() {
 #[test]
 fn test_spawn_closure_with_conditional() {
     // Test spawning a closure that uses conditional logic
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((x 10))
           (let ((handle (spawn (fn () (if (> x 5) "big" "small")))))
@@ -257,7 +228,7 @@ fn test_spawn_closure_with_conditional() {
 fn test_sleep() {
     // Test that sleep works and blocks for the right amount of time
     let start = std::time::Instant::now();
-    let result = eval("(time/sleep 0.1)");
+    let result = eval_source("(time/sleep 0.1)");
     let elapsed = start.elapsed();
 
     assert!(result.is_ok());
@@ -271,7 +242,7 @@ fn test_sleep() {
 fn test_sleep_with_int() {
     // Test sleep with integer seconds
     let start = std::time::Instant::now();
-    let result = eval("(time/sleep 0)");
+    let result = eval_source("(time/sleep 0)");
     let elapsed = start.elapsed();
 
     assert!(result.is_ok());
@@ -282,14 +253,14 @@ fn test_sleep_with_int() {
 #[test]
 fn test_current_thread_id() {
     // Test that current-thread-id returns a string
-    let result = eval("(current-thread-id)");
+    let result = eval_source("(current-thread-id)");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_sleep_negative_duration() {
     // Test that negative sleep duration returns an error
-    let result = eval("(time/sleep -1)");
+    let result = eval_source("(time/sleep -1)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("non-negative"));
 }
@@ -297,7 +268,7 @@ fn test_sleep_negative_duration() {
 #[test]
 fn test_sleep_float_negative() {
     // Test negative float sleep duration
-    let result = eval("(time/sleep -0.5)");
+    let result = eval_source("(time/sleep -0.5)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("non-negative"));
 }
@@ -305,7 +276,7 @@ fn test_sleep_float_negative() {
 #[test]
 fn test_sleep_non_numeric() {
     // Test sleep with non-numeric argument
-    let result = eval("(time/sleep \"hello\")");
+    let result = eval_source("(time/sleep \"hello\")");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("number"));
 }
@@ -313,7 +284,7 @@ fn test_sleep_non_numeric() {
 #[test]
 fn test_spawn_closure_with_capture() {
     // Test spawning a closure that captures a variable
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((x 42))
           (let ((closure (fn () x)))
@@ -328,7 +299,7 @@ fn test_spawn_closure_with_capture() {
 #[test]
 fn test_spawn_jit_closure_with_computation() {
     // Test spawning a closure that performs computation
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((a 10) (b 20))
           (let ((closure (fn () (+ a b))))
@@ -343,7 +314,7 @@ fn test_spawn_jit_closure_with_computation() {
 #[test]
 fn test_spawn_jit_closure_with_string_capture() {
     // Test spawning a closure that captures a string
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((msg "hello from jit thread"))
           (let ((closure (fn () msg)))
@@ -358,7 +329,7 @@ fn test_spawn_jit_closure_with_string_capture() {
 #[test]
 fn test_spawn_jit_closure_with_array_capture() {
     // Test spawning a closure that captures an array
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((v [10 20 30]))
           (let ((closure (fn () v)))
@@ -373,7 +344,7 @@ fn test_spawn_jit_closure_with_array_capture() {
 #[test]
 fn test_spawn_jit_closure_with_multiple_captures() {
     // Test spawning a closure that captures multiple values
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((a 1) (b 2) (c 3))
           (let ((closure (fn () (+ a (+ b c)))))
@@ -388,7 +359,7 @@ fn test_spawn_jit_closure_with_multiple_captures() {
 #[test]
 fn test_spawn_jit_closure_with_conditional() {
     // Test spawning a closure that uses conditional logic
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((x 10))
           (let ((closure (fn () (if (> x 5) "big" "small"))))

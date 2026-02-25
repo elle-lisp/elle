@@ -115,6 +115,13 @@ HIR (bindings are inline — no separate HashMap)
     → error, break across function boundary → error. The lowerer compiles
     break to `Move` + `Jump` — no new bytecode instructions needed.
 
+14. **`Eval` compiles and executes a datum at runtime.**
+    `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the
+    analyzer for `(eval expr)` or `(eval expr env)`. The effect is always
+    `Yields` (conservative — eval'd code can do anything). Not in tail
+    position. The VM handler accesses the symbol table via thread-local
+    context and caches the Expander on the VM for reuse.
+
 ## Files
 
 | File | Lines | Content |
@@ -122,7 +129,9 @@ HIR (bindings are inline — no separate HashMap)
 | `mod.rs` | 25 | Re-exports |
 | `analyze/mod.rs` | ~560 | `Analyzer` struct, `ScopedBinding`, scope-aware resolution |
 | `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
-| `analyze/binding.rs` | ~460 | Binding forms: `let`, `def`, `var`, `fn` |
+| `analyze/binding.rs` | ~425 | Binding forms: `let`, `letrec`, `def`/`var`, `set!` |
+| `analyze/destructure.rs` | ~215 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
+| `analyze/lambda.rs` | ~160 | Lambda/fn analysis with captures, params, effects |
 | `analyze/special.rs` | ~180 | Special forms: `match`, `yield`, `module` |
 | `analyze/call.rs` | ~200 | Call analysis and effect tracking |
 | `expr.rs` | ~180 | `Hir`, `HirKind` |

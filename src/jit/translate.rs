@@ -519,6 +519,9 @@ impl<'a> FunctionTranslator<'a> {
                     "TableGetOrNil".to_string(),
                 ));
             }
+            LirInstr::Eval { .. } => {
+                return Err(JitError::UnsupportedInstruction("Eval".to_string()));
+            }
         }
         Ok(false)
     }

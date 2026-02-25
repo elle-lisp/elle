@@ -172,6 +172,9 @@ pub enum Instruction {
     /// Table/struct get with silent nil (for destructuring): returns nil if key missing or wrong type.
     /// Operand: u16 constant pool index (keyword key)
     TableGetOrNil,
+
+    /// Runtime eval: pop expr and env from stack, compile+execute, push result.
+    Eval,
 }
 
 /// Inline cache entry for function lookups

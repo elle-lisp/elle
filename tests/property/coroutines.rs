@@ -4,37 +4,9 @@
 // They exercise the yield/resume mechanics, state transitions, and
 // effect threading through the compilation pipeline.
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
+use crate::common::eval_source;
+use elle::Value;
 use proptest::prelude::*;
-
-/// Helper to evaluate code using the new pipeline
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
 
 /// Helper to collect integers from a cons list
 fn collect_list_ints(value: &Value) -> Vec<i64> {
@@ -80,7 +52,7 @@ proptest! {
             (0..=n).map(|_| "(coro/resume co)".to_string()).collect::<Vec<_>>().join(" ")
         );
 
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
         let list_vals = collect_list_ints(&result.unwrap());
@@ -139,7 +111,7 @@ proptest! {
             final_value
         );
 
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
         // The final value should be the sum of all resume values
@@ -167,7 +139,7 @@ proptest! {
             cond_str, a, b
         );
 
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
         let expected = if cond { a } else { b };
@@ -201,7 +173,7 @@ proptest! {
             (0..=n).map(|_| "(coro/resume co)".to_string()).collect::<Vec<_>>().join(" ")
         );
 
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
         let list_vals = collect_list_ints(&result.unwrap());
@@ -244,7 +216,7 @@ proptest! {
             }).collect::<Vec<_>>().join(" ")
         );
 
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
         // Collect states (they're in reverse order due to cons)
@@ -306,7 +278,7 @@ proptest! {
             ]).collect::<Vec<_>>().join(" ")
         );
 
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
         let list_vals = collect_list_ints(&result.unwrap());
@@ -345,7 +317,7 @@ fn yield_across_call_boundaries() {
             (coro/resume co))
     "#;
 
-    let result = eval(code);
+    let result = eval_source(code);
     assert_eq!(result.unwrap(), Value::int(42));
 }
 
@@ -361,7 +333,7 @@ fn yield_across_two_call_levels() {
             (coro/resume co))
     "#;
 
-    let result = eval(code);
+    let result = eval_source(code);
     // (outer 10) -> (inner 11) -> (yield 33)
     assert_eq!(result.unwrap(), Value::int(33));
 }
@@ -382,7 +354,7 @@ fn yield_across_call_then_resume_then_yield() {
                 (coro/status co)))
     "#;
 
-    let result = eval(code);
+    let result = eval_source(code);
     assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
     let list_vals = collect_list_ints(&result.unwrap());
@@ -410,7 +382,7 @@ fn yield_across_call_with_return_value() {
                 (keyword->string (coro/status co))))
     "#;
 
-    let result = eval(code);
+    let result = eval_source(code);
     assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
     // First resume: yields 5
@@ -435,7 +407,7 @@ fn yield_across_call_with_return_value() {
 fn yield_outside_coroutine_errors() {
     // yield outside of a coroutine context should error
     let code = "(yield 42)";
-    let result = eval(code);
+    let result = eval_source(code);
     assert!(result.is_err(), "yield outside coroutine should error");
     let err_msg = result.unwrap_err();
     assert!(
@@ -453,7 +425,7 @@ fn resume_completed_coroutine_errors() {
             (coro/resume co)
             (coro/resume co))
     "#;
-    let result = eval(code);
+    let result = eval_source(code);
     // Should error because coroutine is already done
     // The error is set via vm.current_exception, so we check for NIL return
     // or an error message
@@ -476,7 +448,7 @@ fn coroutine_that_never_yields() {
             (var co (make-coroutine (fn () (+ 1 2 3))))
             (coro/resume co))
     "#;
-    let result = eval(code);
+    let result = eval_source(code);
     assert!(result.is_ok(), "Pure function as coroutine should work");
     assert_eq!(result.unwrap(), Value::int(6));
 }
@@ -499,7 +471,7 @@ fn mutable_local_preserved_across_resume() {
                 (coro/resume co)
                 (coro/resume co)))
     "#;
-    let result = eval(code);
+    let result = eval_source(code);
     assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
     let list_vals = collect_list_ints(&result.unwrap());
@@ -524,7 +496,7 @@ fn effect_threading_yields_effect_on_closure() {
             (var co (make-coroutine gen))
             (keyword->string (coro/status co)))
     "#;
-    let result = eval(code);
+    let result = eval_source(code);
     assert!(result.is_ok(), "Evaluation failed: {:?}", result);
     assert_eq!(
         result.unwrap(),
@@ -551,7 +523,7 @@ proptest! {
             value
         );
 
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
 
         let list_vals = &result.unwrap();

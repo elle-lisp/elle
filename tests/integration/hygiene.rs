@@ -3,35 +3,8 @@
 // These tests verify that macro-introduced bindings don't capture
 // call-site names and vice versa.
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
+use crate::common::eval_source;
+use elle::Value;
 
 // ============================================================================
 // SECTION 1: Macro hygiene — no accidental capture
@@ -49,7 +22,7 @@ fn test_macro_no_capture() {
           (my-swap x y)
           tmp)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(10));
+    assert_eq!(eval_source(code).unwrap(), Value::int(10));
 }
 
 #[test]
@@ -63,7 +36,7 @@ fn test_macro_no_leak() {
         (with-internal (+ 1 2))
     "#;
     // The body (+ 1 2) should evaluate to 3, not reference internal-var
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 #[test]
@@ -78,7 +51,7 @@ fn test_nested_macro_hygiene() {
 
         (+ (add-tmp-a 10) (add-tmp-b 20))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(33)); // (10+1) + (20+2)
+    assert_eq!(eval_source(code).unwrap(), Value::int(33)); // (10+1) + (20+2)
 }
 
 // ============================================================================
@@ -92,7 +65,7 @@ fn test_non_macro_code_unchanged() {
         (let ((x 10) (y 20))
           (+ x y))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -103,7 +76,7 @@ fn test_non_macro_shadowing_unchanged() {
           (let ((x 20))
             x))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(20));
+    assert_eq!(eval_source(code).unwrap(), Value::int(20));
 }
 
 // ============================================================================
@@ -120,7 +93,7 @@ fn test_macro_with_expression_arg() {
         (let ((val 7))
           (double val))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(14));
+    assert_eq!(eval_source(code).unwrap(), Value::int(14));
 }
 
 #[test]
@@ -134,7 +107,7 @@ fn test_macro_closure_captures_callsite() {
           (let ((f (make-adder amount)))
             (f 10)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(15));
+    assert_eq!(eval_source(code).unwrap(), Value::int(15));
 }
 
 // ============================================================================
@@ -152,7 +125,7 @@ fn test_macro_with_conditional_body_regression() {
 
         (when-true #f 42)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::NIL);
+    assert_eq!(eval_source(code).unwrap(), Value::NIL);
 }
 
 #[test]
@@ -163,7 +136,7 @@ fn test_macro_with_conditional_body_true() {
 
         (when-true #t 42)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 // ============================================================================
@@ -181,7 +154,7 @@ fn test_swap_actually_swaps() {
           (my-swap x y)
           (list x y))
     "#;
-    let result = eval(code).unwrap();
+    let result = eval_source(code).unwrap();
     // After swap: x=2, y=1
     let items = result.list_to_vec().unwrap();
     assert_eq!(items[0], Value::int(2));
@@ -199,7 +172,7 @@ fn test_swap_with_same_named_tmp() {
           (my-swap x y)
           (list tmp x y))
     "#;
-    let result = eval(code).unwrap();
+    let result = eval_source(code).unwrap();
     let items = result.list_to_vec().unwrap();
     // tmp should be unchanged (100), x and y should be swapped
     assert_eq!(items[0], Value::int(100));
@@ -223,7 +196,7 @@ fn test_gensym_in_macro() {
 
         (with-temp (+ 1 2))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 #[test]
@@ -242,7 +215,7 @@ fn test_nested_macro_scope_preservation() {
         (let ((x 10) (y 20))
           (outer-add x y))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -256,7 +229,7 @@ fn test_gensym_produces_unique_bindings() {
 
         (bind-val 10 (bind-val 20 (+ 1 2)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 // ============================================================================
@@ -274,7 +247,7 @@ fn test_anaphoric_if() {
 
         (aif 42 it 0)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -287,7 +260,7 @@ fn test_anaphoric_if_false_branch() {
 
         (aif #f 42 0)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(0));
+    assert_eq!(eval_source(code).unwrap(), Value::int(0));
 }
 
 #[test]
@@ -300,7 +273,7 @@ fn test_anaphoric_if_with_expression() {
 
         (aif (+ 1 2) (+ it 10) 0)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(13));
+    assert_eq!(eval_source(code).unwrap(), Value::int(13));
 }
 
 #[test]
@@ -316,7 +289,7 @@ fn test_anaphoric_if_no_capture_of_outer_it() {
     "#;
     // The `it` in the then-branch refers to the macro-introduced `it` (42),
     // not the outer `it` (999), because the macro's let binding is closer.
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -328,7 +301,7 @@ fn test_datum_to_syntax_with_symbol() {
 
         (bind-as-x 100 (+ x 1))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(101));
+    assert_eq!(eval_source(code).unwrap(), Value::int(101));
 }
 
 #[test]
@@ -342,7 +315,7 @@ fn test_datum_to_syntax_with_syntax_context() {
 
         (bind-it x 42 (+ it 1))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(43));
+    assert_eq!(eval_source(code).unwrap(), Value::int(43));
 }
 
 #[test]
@@ -355,7 +328,7 @@ fn test_datum_to_syntax_with_compound_datum() {
 
         (inject-list x)
     "#;
-    let result = eval(code).unwrap();
+    let result = eval_source(code).unwrap();
     let items = result.list_to_vec().unwrap();
     assert_eq!(items.len(), 3);
     assert_eq!(items[0], Value::int(1));
@@ -376,7 +349,7 @@ fn test_syntax_to_datum_strips_scopes() {
 
         (get-datum 42)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -385,5 +358,5 @@ fn test_syntax_to_datum_non_syntax_passthrough() {
     let code = r#"
         (syntax->datum 42)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }

@@ -8,37 +8,9 @@
 // 5. Table destructuring in fn params equivalent to manual extraction
 // 6. Table in match: type guard rejects non-tables, literal keys filter
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
+use crate::common::eval_source;
+use elle::Value;
 use proptest::prelude::*;
-
-/// Helper to evaluate code using the new pipeline
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
 
 // ============================================================================
 // def table destructuring: round-trip equivalence with get
@@ -51,7 +23,7 @@ proptest! {
     #[test]
     fn def_table_roundtrip_int(x in -1000i64..1000) {
         let destr = format!("(begin (def {{:a v}} {{:a {}}}) v)", x);
-        let result = eval(&destr);
+        let result = eval_source(&destr);
         prop_assert!(result.is_ok(), "Destructuring failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x));
     }
@@ -67,8 +39,8 @@ proptest! {
             "(let ((t {{:a {} :b {}}})) (+ (get t :a) (get t :b)))",
             x, y
         );
-        let r1 = eval(&destr);
-        let r2 = eval(&manual);
+        let r1 = eval_source(&destr);
+        let r2 = eval_source(&manual);
         prop_assert!(r1.is_ok(), "Destructuring failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "Manual get failed: {:?}", r2);
         prop_assert_eq!(
@@ -84,7 +56,7 @@ proptest! {
             "(begin (def {{:x x :y y :z z}} {{:x {} :y {} :z {}}}) (+ x (+ y z)))",
             a, b, c
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
     }
@@ -96,7 +68,7 @@ proptest! {
             "(begin (def {{:missing m}} {{:other {}}}) (nil? m))",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::TRUE);
     }
@@ -105,7 +77,7 @@ proptest! {
     #[test]
     fn def_table_non_table_is_nil(x in -1000i64..1000) {
         let code = format!("(begin (def {{:a a}} {}) (nil? a))", x);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::TRUE);
     }
@@ -129,8 +101,8 @@ proptest! {
             "(begin (defn g (t) (+ (get t :a) (get t :b))) (g {{:a {} :b {}}}))",
             x, y
         );
-        let r1 = eval(&destr);
-        let r2 = eval(&manual);
+        let r1 = eval_source(&destr);
+        let r2 = eval_source(&manual);
         prop_assert!(r1.is_ok(), "Destructuring fn failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "Manual fn failed: {:?}", r2);
         prop_assert_eq!(
@@ -146,7 +118,7 @@ proptest! {
             "(begin (defn f ({{:x x}} y) (+ x y)) (f {{:x {}}} {}))",
             x, y
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x + y));
     }
@@ -166,7 +138,7 @@ proptest! {
             "(let (({{:a a :b b}} {{:a {} :b {}}})) (+ a b))",
             x, y
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x + y));
     }
@@ -178,7 +150,7 @@ proptest! {
             "(let* (({{:x v}} {{:x {}}}) ({{:y w}} {{:y v}})) (+ v w))",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x + x));
     }
@@ -198,7 +170,7 @@ proptest! {
             "(begin (def {{:p {{:x px :y py}}}} {{:p {{:x {} :y {}}}}}) (+ px py))",
             x, y
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x + y));
     }
@@ -210,7 +182,7 @@ proptest! {
             "(begin (def {{:p {{:missing m}}}} {{:p {{:x {}}}}}) (nil? m))",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::TRUE);
     }
@@ -230,7 +202,7 @@ proptest! {
             "(match {{:val {}}} ({{:val v}} v) (_ :fail))",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x));
     }
@@ -242,7 +214,7 @@ proptest! {
             "(match {} ({{:a a}} a) (_ :no-match))",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::keyword("no-match"));
     }
@@ -257,7 +229,7 @@ proptest! {
                (_ :fail))",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x));
     }
@@ -274,7 +246,7 @@ proptest! {
                (_ :fail))",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x + 100));
     }
@@ -286,7 +258,7 @@ proptest! {
             "(match @{{:val {}}} ({{:val v}} v) (_ :fail))",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x));
     }

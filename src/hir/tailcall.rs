@@ -169,6 +169,12 @@ fn mark(hir: &mut Hir, in_tail: bool) {
             mark(expr, false);
         }
 
+        // Eval: neither expr nor env is in tail position (runs in its own context)
+        HirKind::Eval { expr, env } => {
+            mark(expr, false);
+            mark(env, false);
+        }
+
         // Module: body is not in tail position (top-level)
         HirKind::Module { body, .. } => {
             mark(body, false);
@@ -289,6 +295,10 @@ mod tests {
             | HirKind::Destructure { value, .. }
             | HirKind::Yield(value) => {
                 collect_calls(value, calls);
+            }
+            HirKind::Eval { expr, env } => {
+                collect_calls(expr, calls);
+                collect_calls(env, calls);
             }
             HirKind::Block { body, .. } => {
                 for expr in body {

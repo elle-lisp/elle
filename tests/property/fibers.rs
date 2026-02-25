@@ -3,36 +3,9 @@
 // Tests the FiberHandle system, child chain wiring, propagate, and cancel
 // using generated inputs to exercise edge cases that example-based tests miss.
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
+use crate::common::eval_source;
+use elle::Value;
 use proptest::prelude::*;
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
 
 // ============================================================================
 // Property 1: Fiber yield/resume produces values in order
@@ -66,7 +39,7 @@ proptest! {
                 .collect::<Vec<_>>().join(" ")
         );
 
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Eval failed: {:?}", result);
 
         // Collect the list of results
@@ -114,7 +87,7 @@ proptest! {
             signal_bit, payload, mask
         );
 
-        let result = eval(&code);
+        let result = eval_source(&code);
 
         if caught {
             prop_assert!(result.is_ok(),
@@ -158,7 +131,7 @@ proptest! {
                    (list result (fiber/value f))))"#,
             payload
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Cancel new fiber failed: {:?}", result);
 
         // Extract the list: (cancel-result fiber-value)
@@ -192,7 +165,7 @@ proptest! {
                    (list result (fiber/value f))))"#,
             payload
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Cancel suspended fiber failed: {:?}", result);
 
         let list = result.unwrap();
@@ -234,7 +207,7 @@ proptest! {
                  (fiber/propagate f))"#,
             final_val
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_err(),
             "Propagate from dead fiber should fail, got: {:?}", result);
         let err = result.unwrap_err();
@@ -251,7 +224,7 @@ proptest! {
                  (fiber/propagate f))"#,
             payload
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         // Propagate re-raises the error — it should surface as an error
         // to the root (since the root has no mask for it)
         prop_assert!(result.is_err(),
@@ -276,7 +249,7 @@ proptest! {
                  (fiber/cancel f "too late"))"#,
             final_val
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_err(),
             "Cancel dead fiber should fail, got: {:?}", result);
     }
@@ -293,7 +266,7 @@ proptest! {
                  (keyword->string (fiber/status f)))"#,
             payload
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(),
             "Cancel suspended fiber should succeed, got: {:?}", result);
         let val = result.unwrap();
@@ -314,7 +287,7 @@ proptest! {
                    (fiber/cancel f "already errored")))"#,
             payload
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_err(),
             "Cancel errored fiber should fail, got: {:?}", result);
     }
@@ -345,7 +318,7 @@ proptest! {
                    (fiber/resume outer)))"#,
             inner_val, outer_val
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Nested resume failed: {:?}", result);
         let val = result.unwrap();
         let n = val.as_int();
@@ -382,7 +355,7 @@ proptest! {
                  (list (coro/resume co) (coro/resume co {})))"#,
             base, resume_val
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Multi-frame yield failed: {:?}", result);
 
         let list = result.unwrap();
@@ -435,7 +408,7 @@ proptest! {
                    (keyword->string (coro/status co))))"#,
             val1, val2, resume1
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Re-yield failed: {:?}", result);
 
         let list = result.unwrap();
@@ -487,7 +460,7 @@ proptest! {
                  (coro/resume co))"#,
             val
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         // First resume yields val (ok), second resume triggers division by zero
         prop_assert!(result.is_err(),
             "Error during multi-frame resume should propagate, got: {:?}", result);
@@ -528,7 +501,7 @@ proptest! {
                      (fiber/resume a))))"#,
             c_val, b_add, a_add
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "3-level nested resume failed: {:?}", result);
         let val = result.unwrap();
         let expected = c_val + b_add + a_add;
