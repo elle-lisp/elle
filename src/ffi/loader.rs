@@ -65,8 +65,10 @@ impl LibraryHandle {
 pub fn load_library(path: &str) -> Result<LibraryHandle, String> {
     #[cfg(target_os = "linux")]
     {
-        // Verify the file exists
-        if !Path::new(path).exists() {
+        // Only check existence for absolute/relative paths.
+        // Bare names like "libm.so.6" are resolved by the dynamic linker
+        // via LD_LIBRARY_PATH / /etc/ld.so.cache — don't reject them.
+        if path.contains('/') && !Path::new(path).exists() {
             return Err(format!("Library file not found: {}", path));
         }
 
