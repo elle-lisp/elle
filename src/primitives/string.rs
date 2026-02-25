@@ -133,16 +133,7 @@ pub fn prim_substring(args: &[Value]) -> (SignalBits, Value) {
     };
 
     if start > char_count || end > char_count || start > end {
-        return (
-            SIG_ERROR,
-            error_val(
-                "error",
-                format!(
-                    "substring: index {} out of bounds (length {})",
-                    start, char_count
-                ),
-            ),
-        );
+        return (SIG_OK, Value::NIL);
     }
 
     // Convert character indices to byte indices
