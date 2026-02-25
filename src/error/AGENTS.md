@@ -69,7 +69,6 @@ Everything. 34 files import from this module. Key consumers:
 | `types.rs` | 300 | `LError`, `ErrorKind`, `LResult`, Display impl |
 | `builders.rs` | 160 | Constructor methods on `LError` |
 | `runtime.rs` | 53 | Legacy `RuntimeError` (deprecate eventually) |
-| `sourceloc.rs` | ~50 | `SourceLoc` definition |
 | `formatting.rs` | ~100 | Rich error formatting |
 
 ## Anti-patterns

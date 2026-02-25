@@ -3,13 +3,12 @@
 mod builders;
 pub mod formatting;
 mod runtime;
-mod sourceloc;
 mod types;
 
 use std::collections::HashMap;
 
 // Re-export core types
-pub use sourceloc::SourceLoc;
+pub use crate::reader::SourceLoc;
 pub use types::{ErrorKind, LError, LResult, StackFrame, TraceSource};
 
 // Keep RuntimeError for now (can deprecate later)

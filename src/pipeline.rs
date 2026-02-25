@@ -290,6 +290,24 @@ pub fn eval(
     vm.execute(&bytecode).map_err(|e| e.to_string())
 }
 
+/// Compile and execute multiple top-level forms.
+///
+/// Each form is compiled with fixpoint effect inference (like `compile_all`)
+/// then executed sequentially. Returns the value of the last form.
+/// Returns `Ok(Value::NIL)` for empty input.
+pub fn eval_all(
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+) -> Result<crate::value::Value, String> {
+    let results = compile_all(source, symbols)?;
+    let mut last_value = crate::value::Value::NIL;
+    for result in results {
+        last_value = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
+    }
+    Ok(last_value)
+}
+
 /// Analyze source code without generating bytecode.
 /// Used by linter and LSP which need HIR but not bytecode.
 pub fn analyze(
@@ -1528,5 +1546,215 @@ mod tests {
         let result = compile("(fn (x) (cons x))", &mut symbols);
         assert!(result.is_err(), "(cons x) in lambda body should fail");
         assert!(result.unwrap_err().contains("arity"));
+    }
+
+    // === Eval special form ===
+
+    #[test]
+    fn test_eval_simple_literal() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '42)", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(42));
+    }
+
+    #[test]
+    fn test_eval_quoted_expression() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(+ 1 2))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(3));
+    }
+
+    #[test]
+    fn test_eval_list_construction() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval (list '+ 1 2))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(3));
+    }
+
+    #[test]
+    fn test_eval_with_env() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(+ x y) {:x 10 :y 20})", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(30));
+    }
+
+    #[test]
+    fn test_eval_nil_env() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(+ 3 4) nil)", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(7));
+    }
+
+    #[test]
+    fn test_eval_arity_error() {
+        let (mut symbols, _vm) = setup();
+        // eval with no arguments
+        let result = compile("(eval)", &mut symbols);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("eval"));
+    }
+
+    #[test]
+    fn test_eval_too_many_args() {
+        let (mut symbols, _vm) = setup();
+        // eval with three arguments should fail at compile time
+        let result = compile("(eval 'a 'b 'c)", &mut symbols);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("eval"));
+    }
+
+    #[test]
+    fn test_eval_returns_string() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '\"hello\")", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::string("hello"));
+    }
+
+    #[test]
+    fn test_eval_returns_bool() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '#t)", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::TRUE);
+    }
+
+    #[test]
+    fn test_eval_returns_nil() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval 'nil)", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::NIL);
+    }
+
+    #[test]
+    fn test_eval_with_macros() {
+        // eval'd code should have access to prelude macros like `when`
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(when #t 42))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(42));
+    }
+
+    #[test]
+    fn test_eval_with_begin() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(begin 1 2 3))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(3));
+    }
+
+    #[test]
+    fn test_eval_with_let_in_evald_code() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(let ((x 10)) (+ x 5)))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(15));
+    }
+
+    #[test]
+    fn test_eval_with_closure_in_evald_code() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(let ((x 1)) ((fn () x))))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(1));
+    }
+
+    #[test]
+    fn test_eval_result_in_computation() {
+        // eval's return value used in a larger expression
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(+ 1 (eval '2))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(3));
+    }
+
+    #[test]
+    fn test_eval_inside_let() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(let ((x 10)) (eval '(+ 1 2)))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(3));
+    }
+
+    #[test]
+    fn test_eval_inside_lambda() {
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("((fn () (eval '42)))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(42));
+    }
+
+    #[test]
+    fn test_eval_nested() {
+        // eval within eval'd code
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(eval '42))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(42));
+    }
+
+    #[test]
+    fn test_eval_invalid_env_type() {
+        // env must be a table/struct/nil — a string should error
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '42 \"bad\")", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("table or struct"));
+    }
+
+    #[test]
+    fn test_eval_empty_env() {
+        // Empty mutable table env should work fine
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(+ 1 2) (table))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(result.unwrap(), crate::value::Value::int(3));
+    }
+
+    #[test]
+    fn test_eval_compilation_error() {
+        // eval'd code with invalid syntax should produce a runtime error
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let result = eval("(eval '(if))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_eval_sequential_caching() {
+        // Multiple evals should work (tests expander caching)
+        let (mut symbols, mut vm) = setup();
+        crate::ffi::primitives::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+        let r1 = eval("(eval '(+ 1 2))", &mut symbols, &mut vm);
+        assert_eq!(r1.unwrap(), crate::value::Value::int(3));
+        let r2 = eval("(eval '(* 3 4))", &mut symbols, &mut vm);
+        crate::ffi::primitives::context::clear_symbol_table();
+        assert_eq!(r2.unwrap(), crate::value::Value::int(12));
     }
 }

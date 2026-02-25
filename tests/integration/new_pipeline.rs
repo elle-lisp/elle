@@ -3,17 +3,10 @@
 // These tests verify that code compiled through the new pipeline
 // produces correct results when executed.
 
-use elle::pipeline::{compile, eval as pipeline_eval};
+use crate::common::eval_source;
+use elle::pipeline::compile;
 use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
-
-/// Helper to evaluate code using the new pipeline
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    pipeline_eval(input, &mut symbols, &mut vm)
-}
+use elle::{SymbolTable, VM};
 
 /// Helper that compiles but doesn't execute (for testing compilation only)
 fn compiles(input: &str) -> bool {
@@ -552,7 +545,7 @@ fn test_trace_vm_execution() {
                 (my-fold f (f init (first lst)) (rest lst)))))
         (my-fold process 0 (list 1)))"#; // Only one element for simpler trace
 
-    let result = eval(code);
+    let result = eval_source(code);
     println!("Result: {:?}", result);
 
     // Also try with the non-begin version to compare

@@ -595,6 +595,18 @@ impl Emitter {
                 // Just register the resume value.
                 self.push_reg(*dst);
             }
+
+            LirInstr::Eval { dst, expr, env } => {
+                // Stack order: env on bottom, expr on top
+                // (VM pops expr first, then env)
+                self.ensure_on_top(*env);
+                self.ensure_on_top(*expr);
+                self.bytecode.emit(Instruction::Eval);
+                // Eval pops 2 values and pushes 1 result
+                self.pop(); // expr
+                self.pop(); // env
+                self.push_reg(*dst);
+            }
         }
     }
 

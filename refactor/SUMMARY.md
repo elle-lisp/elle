@@ -44,7 +44,7 @@ cell wrapping.
 
 | Sub | What |
 |-----|------|
-| B.1 | JIT deletion: removed Cranelift, old compiler, ~12,500 lines |
+| B.1 | Old JIT deletion: removed previous Cranelift code, old compiler, ~12,500 lines |
 | B.2 | value_old migration: all types now in `value/` submodules |
 | B.3 | LocationMap: source locations flow through entire pipeline |
 | B.4 | Thread transfer tests: closures transfer with location data |
@@ -56,7 +56,6 @@ cell wrapping.
 | C.1 | Quasiquote templates: `eval_quasiquote_to_syntax` for direct Syntax tree construction |
 | C.2 | Compile-time macro operations: `macro?` and `expand-macro` in Expander |
 | C.3 | Module-qualified names: lexer recognizes `module:name`, Expander resolves to flat names |
-| C.4 | yield-from delegation: `delegate` field on Coroutine, proper suspension semantics |
 | Tests | All 8 previously-ignored tests now pass; zero ignored tests remain |
 
 ### Phase D: Documentation cleanup (PR #282)
@@ -108,6 +107,87 @@ Performance optimizations:
 - Every primitive declares its effect at registration time
 - Design docs: `docs/EFFECTS.md`, `docs/JANET.md`
 
+## Hammer Time II analysis (Feb 2026)
+
+Full codebase audit. 46,170 lines in `src/`, 2,063 in `elle-lsp/elle-lint`.
+19 top-level modules, 3 workspace members.
+
+### Codebase health
+
+| Metric | Value |
+|--------|-------|
+| Total source lines (src/) | 46,170 |
+| Files over 500 lines | ~35 |
+| Files over 300 lines (old target) | 66 |
+| Production `unwrap()` on user data | 7 |
+| Duplicated test helpers | 20+ files |
+| Dead re-exports | 4 |
+| TODOs in production code | 0 |
+| TODOs in test code | 1 (issue #78) |
+
+### File size analysis
+
+Previous target was 300 lines / 5-10KB. Revised to 500 lines with
+category-specific exceptions after analysis showed 66/130 files violated
+the old target — the convention was wrong, not the code.
+
+**Largest files:**
+
+| File | Lines | Bytes | Category |
+|------|------:|------:|----------|
+| `pipeline.rs` | 1,532 | 53K | 74% inline tests — extract to integration tests |
+| `primitives/string.rs` | 1,219 | 35K | Independent functions — split |
+| `primitives/file_io.rs` | 1,047 | 30K | Independent functions — split |
+| `hir/analyze/binding.rs` | 923 | 36K | Cohesive binding analysis — split by form |
+| `lir/emit.rs` | 903 | 36K | Dispatch table — keep, extract helpers within file |
+| `primitives/fibers.rs` | 890 | 27K | Independent functions — split |
+| `jit/translate.rs` | 780 | 34K | Dispatch table — keep |
+| `primitives/table.rs` | 763 | 23K | Borderline — leave for now |
+| `primitives/list.rs` | 743 | 22K | Borderline — leave for now |
+| `reader/syntax_parser.rs` | 721 | 25K | Parser — keep |
+
+### Structural issues found
+
+**Production unwraps (7):** `primitives/bitwise.rs` has 6 `as_int().unwrap()`
+calls in a validate-then-unwrap pattern. `primitives/string.rs` has 1
+`chars().next().unwrap()` after a count check. All are safe today but fragile
+— changing the validation logic would silently introduce panics.
+
+**Test helper duplication:** `eval()` helper copy-pasted in 20+ test files
+with 3 semantic variants: (1) standard with `set_symbol_table`, (2) without
+FFI context, (3) JIT-specific using `pipeline::eval()`. `setup()` duplicated
+in 7+ files.
+
+**Dead re-exports:**
+- `compiler/mod.rs` re-exports `symbols::{SymbolDef, SymbolIndex, SymbolKind}` — 0 uses
+- `vm/core.rs` re-exports `CallFrame as FiberCallFrame` — 0 uses
+- `error/sourceloc.rs` is a 6-line re-export shim — 1 use in `primitives/concurrency.rs`
+- `value/heap.rs` re-exports `Arity` from `types` — 0 uses via `heap::Arity`
+
+**`register_builtin_docs()` (333 lines):** Documents special forms and prelude
+macros (`if`, `let`, `fn`, `defn`, `->`, `try`, etc.). NOT derivable from
+`PRIMITIVES` tables. Must be preserved but can be extracted to its own file.
+
+**Circular dependencies:** `pipeline <-> primitives` (module loading calls
+`compile`) and `primitives <-> vm` (registration vs dispatch). Both are
+logical cycles already broken at runtime. The `pipeline <-> primitives` cycle
+is mediated by unsafe global state (`get_vm_context()`). Not worth breaking
+— the cure (callbacks/trait objects) is worse than the disease.
+
+**`elle-lint` in `elle-lsp/Cargo.toml`:** Declared but unused at the Rust
+level. No `use elle_lint::` anywhere in elle-lsp.
+
+### What the analysis ruled out
+
+| Considered | Rejected because |
+|------------|------------------|
+| Split `lir/emit.rs` into multiple files | 459-line match is a flat dispatch table — locality matters more than file size |
+| Split `jit/translate.rs` into files | Same reason |
+| Break `pipeline <-> primitives` cycle | Already broken by raw pointer. Real fix = redesign unsafe global state |
+| Shared import prelude for primitives | Saves ~65 lines across 13 files. Not worth the indirection. |
+| File size limit on test files | Tests are append-only, rarely clobbered |
+| 300-line file target | 66/130 files violated it. 500 lines is the right grain for a compiler. |
+
 ## Current state
 
 1,768 tests passing. Zero ignored (except 2 doc-tests). Clean clippy,
@@ -116,12 +196,21 @@ fmt, rustdoc. nqueens N=12 produces 14,200 solutions (~18-19s release).
 ### Remaining bottleneck
 JIT-compiled code calls `elle_jit_call` for non-self calls, which always
 routes through the interpreter (`vm.execute_bytecode`). JIT code is only
-0.36% of nqueens runtime; 59% is interpreter overhead from JIT→VM bounces.
+0.36% of nqueens runtime; 59% is interpreter overhead from JIT->VM bounces.
 
-### Next: Fiber/Signal System
+### Next: Hammer Time II (Phases H.1-H.5)
+
+See `PLAN.md` for the detailed refactoring plan. Execution order:
+1. H.1 — Fix 7 production unwraps (correctness)
+2. H.3 — Remove dead re-exports (cleanup)
+3. H.4 — Split oversized primitive files (line count)
+4. H.2 — Consolidate test infrastructure (maintainability)
+5. H.5 — Split analyzer binding.rs (complexity)
+
+### After Hammer Time II: Fiber/Signal System
 See `docs/FIBERS.md` for the implementation plan and `docs/EFFECTS.md` for
 the design rationale. Unifies exception handling, coroutines, and effects
-into a single fiber/signal mechanism. Surface syntax: `try`/`catch`/`finally`.
+into a single fiber/signal mechanism. Surface syntax: `try`/`catch` + `defer`.
 
 ## Not yet done
 
@@ -129,19 +218,11 @@ into a single fiber/signal mechanism. Surface syntax: `try`/`catch`/`finally`.
 - Module system: `import` emits nil (module-qualified names now supported)
 - `higher_order.rs` map/filter/fold don't support closures (only native fns)
 
-### Error system
-Current system uses two error channels:
-- `Err(String)` = VM bug (uncatchable)
-- `vm.current_exception` = runtime error (catchable by `try`/`catch`)
-
-Being replaced by the unified fiber/signal model where all non-local
-control flow is a signal. See `docs/FIBERS.md`.
-
 ## What was planned but won't happen
 
 | Original plan | Actual outcome |
 |---------------|----------------|
-| `Expr` as intermediate between Syntax and HIR | Skipped — Syntax → HIR directly |
+| `Expr` as intermediate between Syntax and HIR | Skipped — Syntax -> HIR directly |
 | CPS as canonical IR for all yielding code | Replaced by bytecode continuations |
 | Unified `LError` error system | Two-channel system instead |
 | `Closure`/`JitClosure` merge in Value | JIT removed entirely (Phase B) |
@@ -149,7 +230,8 @@ control flow is a signal. See `docs/FIBERS.md`.
 | Tiered JIT | Deferred to future Phase E |
 | Bytecode format redesign (32-bit instructions) | Not planned |
 | Inline jump instructions in LIR | Eliminated in favor of proper basic blocks |
-| CL condition/restart system | Replaced by try/catch/finally over fibers |
+| CL condition/restart system | Replaced by try/catch + defer over fibers |
+| 300-line file target | Replaced by 500-line target with category exceptions |
 
 ## File inventory
 

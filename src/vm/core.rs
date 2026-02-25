@@ -13,9 +13,6 @@ use std::rc::Rc;
 
 use crate::jit::JitCode;
 
-// Re-export CallFrame from fiber (it now lives there)
-pub use crate::value::fiber::CallFrame as FiberCallFrame;
-
 type TailCallInfo = (Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>);
 
 pub struct VM {
@@ -50,6 +47,9 @@ pub struct VM {
     /// Documentation for all named forms (primitives, special forms, macros).
     /// Keyed by name string for direct lookup via `doc` and `vm/primitive-meta`.
     pub docs: HashMap<String, Doc>,
+    /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
+    /// on every eval call. Taken out during eval, put back after.
+    pub eval_expander: Option<crate::syntax::Expander>,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -100,6 +100,7 @@ impl VM {
             current_source_loc: None,
             jit_cache: FxHashMap::default(),
             docs: HashMap::new(),
+            eval_expander: None,
         }
     }
 

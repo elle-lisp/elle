@@ -2,35 +2,8 @@
 // Tests comprehensive capture behavior across nested scopes, let bindings,
 // mutable captures, and coroutine interactions.
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
+use crate::common::eval_source;
+use elle::Value;
 
 // ============================================================================
 // SECTION 1: Deeply Nested Captures (4+ levels)
@@ -42,7 +15,7 @@ fn test_capture_from_great_grandparent() {
     let code = r#"
         (((((fn (a) (fn (b) (fn (c) (fn (d) (+ a b c d))))) 1) 2) 3) 4)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(10));
+    assert_eq!(eval_source(code).unwrap(), Value::int(10));
 }
 
 #[test]
@@ -51,7 +24,7 @@ fn test_capture_skip_levels() {
     let code = r#"
         ((((fn (x) (fn (y) (fn (z) (+ x z)))) 10) 20) 5)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(15));
+    assert_eq!(eval_source(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -60,7 +33,7 @@ fn test_five_level_nesting() {
     let code = r#"
         ((((((fn (a) (fn (b) (fn (c) (fn (d) (fn (e) (+ a b c d e)))))) 1) 2) 3) 4) 5)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(15));
+    assert_eq!(eval_source(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -69,7 +42,7 @@ fn test_capture_alternating_levels() {
     let code = r#"
         (((((fn (a) (fn (b) (fn (c) (fn (d) (+ a c))))) 10) 20) 30) 40)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(40));
+    assert_eq!(eval_source(code).unwrap(), Value::int(40));
 }
 
 #[test]
@@ -78,7 +51,7 @@ fn test_deeply_nested_all_params() {
     let code = r#"
         (((((fn (a) (fn (b) (fn (c) (fn (d) (* a (+ b (- c d))))))) 2) 3) 4) 1)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(12)); // 2 * (3 + (4 - 1)) = 2 * 6 = 12
+    assert_eq!(eval_source(code).unwrap(), Value::int(12)); // 2 * (3 + (4 - 1)) = 2 * 6 = 12
 }
 
 // ============================================================================
@@ -93,7 +66,7 @@ fn test_let_inside_lambda_capture() {
                       (fn () (+ x y)))) 5)))
           (f))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(15));
+    assert_eq!(eval_source(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -105,7 +78,7 @@ fn test_nested_let_lambda_let() {
                         (fn () (+ a b c)))) 2)))
             (f)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(6));
+    assert_eq!(eval_source(code).unwrap(), Value::int(6));
 }
 
 #[test]
@@ -115,7 +88,7 @@ fn test_lambda_captures_let_binding() {
           (let ((f (fn () x)))
             (f)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(5));
+    assert_eq!(eval_source(code).unwrap(), Value::int(5));
 }
 
 #[test]
@@ -126,7 +99,7 @@ fn test_multiple_lambdas_same_let_scope() {
                 (f2 (fn () y)))
             (+ (f1) (f2))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -137,7 +110,7 @@ fn test_lambda_in_let_captures_outer_let() {
             (let ((f (fn () (+ outer inner))))
               (f))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(150));
+    assert_eq!(eval_source(code).unwrap(), Value::int(150));
 }
 
 #[test]
@@ -148,7 +121,7 @@ fn test_let_star_with_lambda_capture() {
                (f (fn () (+ x y))))
           (f))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 // ============================================================================
@@ -162,7 +135,7 @@ fn test_set_on_let_bound_capture() {
           (let ((inc (fn () (begin (set! x (+ x 1)) x))))
             (begin (inc) (inc) (inc))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 #[test]
@@ -174,7 +147,7 @@ fn test_set_on_locally_defined_capture() {
              (def inc (fn () (begin (set! counter (+ counter 1)) counter)))
              (begin (inc) (inc) (inc)))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 #[test]
@@ -185,7 +158,7 @@ fn test_multiple_closures_share_mutable_capture() {
                 (get (fn () x)))
             (begin (inc) (inc) (get))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(2));
+    assert_eq!(eval_source(code).unwrap(), Value::int(2));
 }
 
 #[test]
@@ -199,7 +172,7 @@ fn test_nested_mutable_captures() {
     "#;
     // x increments 3 times (shared), y increments 3 times (local to g)
     // Final: x=3, y=3, result=6
-    assert_eq!(eval(code).unwrap(), Value::int(6));
+    assert_eq!(eval_source(code).unwrap(), Value::int(6));
 }
 
 #[test]
@@ -210,7 +183,7 @@ fn test_mutable_capture_across_lambda_levels() {
             (let ((g (f)))
               (begin (g) (g) (g)))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 #[test]
@@ -222,7 +195,7 @@ fn test_multiple_mutable_captures() {
                 (sum (fn () (+ x y))))
             (begin (inc-x) (inc-y) (inc-x) (sum))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 // ============================================================================
@@ -238,7 +211,7 @@ fn test_coroutine_captures_from_nested_let() {
               (let ((co (make-coroutine gen)))
                 (coro/resume co)))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -249,7 +222,7 @@ fn test_coroutine_captures_lambda_param() {
              (let ((co (make-coroutine gen)))
                (coro/resume co)))) 42)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -261,7 +234,7 @@ fn test_coroutine_captures_multiple_levels() {
                 (let ((co (make-coroutine gen)))
                   (coro/resume co)))) 20)) 10)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -272,7 +245,7 @@ fn test_coroutine_with_mutable_capture() {
             (let ((co (make-coroutine gen)))
               (coro/resume co))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(1));
+    assert_eq!(eval_source(code).unwrap(), Value::int(1));
 }
 
 #[test]
@@ -284,7 +257,7 @@ fn test_coroutine_captures_let_star_binding() {
                (co (make-coroutine gen)))
           (coro/resume co))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(20));
+    assert_eq!(eval_source(code).unwrap(), Value::int(20));
 }
 
 // ============================================================================
@@ -299,7 +272,7 @@ fn test_closure_returning_closure_with_captures() {
             (let ((g (f)))
               (g))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(5));
+    assert_eq!(eval_source(code).unwrap(), Value::int(5));
 }
 
 #[test]
@@ -310,7 +283,7 @@ fn test_shadowing_in_nested_scopes() {
             (let ((g (f 20)))
               (g))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(20));
+    assert_eq!(eval_source(code).unwrap(), Value::int(20));
 }
 
 #[test]
@@ -321,7 +294,7 @@ fn test_capture_with_shadowing_outer() {
             (let ((g (f)))
               (g))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(20));
+    assert_eq!(eval_source(code).unwrap(), Value::int(20));
 }
 
 #[test]
@@ -332,7 +305,7 @@ fn test_multiple_captures_same_variable() {
                 (g (fn () (+ x x))))
             (+ (f) (g))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(15));
+    assert_eq!(eval_source(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -343,7 +316,7 @@ fn test_capture_in_conditional() {
             (let ((g (f #t)))
               (g))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(10));
+    assert_eq!(eval_source(code).unwrap(), Value::int(10));
 }
 
 #[test]
@@ -353,7 +326,7 @@ fn test_capture_in_loop_body() {
           (let ((f (fn () (begin (set! x (+ x 1)) x))))
             (begin (f) (f) (f) x)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(3));
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
 }
 
 // ============================================================================
@@ -366,7 +339,7 @@ fn test_empty_lambda_capture() {
     let code = r#"
         ((fn () 42))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -375,7 +348,7 @@ fn test_lambda_unused_parameter() {
     let code = r#"
         ((fn (x) 42) 10)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -386,7 +359,7 @@ fn test_capture_unused_let_binding() {
           (let ((f (fn () x)))
             (f)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(10));
+    assert_eq!(eval_source(code).unwrap(), Value::int(10));
 }
 
 #[test]
@@ -397,7 +370,7 @@ fn test_many_captures_same_closure() {
           (let ((f (fn () (+ a b c d e))))
             (f)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(15));
+    assert_eq!(eval_source(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -409,7 +382,7 @@ fn test_capture_in_nested_let_star() {
                (f (fn () (+ a b c))))
           (f))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(6));
+    assert_eq!(eval_source(code).unwrap(), Value::int(6));
 }
 
 #[test]
@@ -419,7 +392,7 @@ fn test_lambda_param_shadows_let_binding() {
           (let ((f (fn (x) (+ x 5))))
             (f 20)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(25));
+    assert_eq!(eval_source(code).unwrap(), Value::int(25));
 }
 
 #[test]
@@ -430,7 +403,7 @@ fn test_nested_lambda_param_shadowing() {
             (let ((g (f 20)))
               (g 30))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(30));
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
 }
 
 #[test]
@@ -440,7 +413,7 @@ fn test_capture_with_define_in_lambda() {
           (let ((f (fn () (begin (var y (+ x 5)) y))))
             (f)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(15));
+    assert_eq!(eval_source(code).unwrap(), Value::int(15));
 }
 
 #[test]
@@ -452,7 +425,7 @@ fn test_mutual_recursion_with_captures() {
             (def is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
             (is-even limit)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::bool(true));
+    assert_eq!(eval_source(code).unwrap(), Value::bool(true));
 }
 
 #[test]
@@ -463,7 +436,7 @@ fn test_capture_across_define_boundary() {
             (def f (fn () x))
             (f)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(10));
+    assert_eq!(eval_source(code).unwrap(), Value::int(10));
 }
 
 // ============================================================================
@@ -479,7 +452,7 @@ fn test_self_recursive_function_via_define_inside_fn() {
              (def fact (fn (x) (if (= x 0) 1 (* x (fact (- x 1))))))
              (fact n))) 6)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(720));
+    assert_eq!(eval_source(code).unwrap(), Value::int(720));
 }
 
 #[test]
@@ -492,7 +465,7 @@ fn test_nested_lambda_capturing_locally_defined_variable() {
              (def f (fn () x))
              (f))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -507,7 +480,7 @@ fn test_multiple_closures_sharing_mutable_state_via_define() {
              (setter 42)
              (getter))) 0)
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(42));
+    assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
 
 #[test]
@@ -520,7 +493,7 @@ fn test_mutual_recursion_via_define_inside_fn() {
              (def is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
              (is-even 8))))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::bool(true));
+    assert_eq!(eval_source(code).unwrap(), Value::bool(true));
 }
 
 // ============================================================================
@@ -549,7 +522,7 @@ fn test_let_inside_closure_does_not_corrupt_caller_stack() {
             (check 5)
             x))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(100));
+    assert_eq!(eval_source(code).unwrap(), Value::int(100));
 }
 
 #[test]
@@ -564,7 +537,7 @@ fn test_let_inside_closure_returns_correct_value() {
               (+ sum diff))))
           (f 10 3))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(20));
+    assert_eq!(eval_source(code).unwrap(), Value::int(20));
 }
 
 #[test]
@@ -579,7 +552,7 @@ fn test_letrec_inside_closure_does_not_corrupt_caller_stack() {
             (process 5)
             result))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(999));
+    assert_eq!(eval_source(code).unwrap(), Value::int(999));
 }
 
 #[test]
@@ -594,7 +567,7 @@ fn test_multiple_closures_with_let_dont_interfere() {
                 (r2 (g 20)))
             (+ r1 r2)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::int(51));
+    assert_eq!(eval_source(code).unwrap(), Value::int(51));
 }
 
 #[test]
@@ -610,5 +583,5 @@ fn test_closure_let_with_string_operations() {
           (let ((msg "say hello world"))
             (checker msg)))
     "#;
-    assert_eq!(eval(code).unwrap(), Value::bool(true));
+    assert_eq!(eval_source(code).unwrap(), Value::bool(true));
 }

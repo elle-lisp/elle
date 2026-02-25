@@ -3,36 +3,9 @@
 // Verifies that closures spawned in new threads correctly preserve their
 // LocationMap for error reporting.
 
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-
-    // Try to compile as a single expression first
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            // If that fails, try wrapping in a begin
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    // If that also fails, try compiling all expressions
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
+use crate::common::eval_source;
+use elle::pipeline::compile;
+use elle::SymbolTable;
 
 // ============================================================================
 // Test 1: Spawned closure with division by zero error
@@ -42,7 +15,7 @@ fn eval(input: &str) -> Result<Value, String> {
 fn test_spawned_closure_division_by_zero() {
     // Spawn a closure that will error (division by zero)
     // The error from the joined thread should be reported
-    let result = eval(
+    let result = eval_source(
         r#"
         (join (spawn (fn () (/ 42 0))))
         "#,
@@ -67,7 +40,7 @@ fn test_spawned_closure_division_by_zero() {
 #[test]
 fn test_spawned_closure_with_captures_division_by_zero() {
     // A closure that captures a variable, spawned to another thread, errors
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((divisor 0))
           (join (spawn (fn () (/ 42 divisor)))))
@@ -93,7 +66,7 @@ fn test_spawned_closure_with_captures_division_by_zero() {
 #[test]
 fn test_spawned_closure_success() {
     // Even successful closures should work correctly
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((x 10) (y 20))
           (join (spawn (fn () (+ x y)))))
@@ -111,7 +84,7 @@ fn test_spawned_closure_success() {
 #[test]
 fn test_multiple_spawned_closures_one_errors() {
     // Spawn multiple closures, one of which errors
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((h1 (spawn (fn () 42)))
               (h2 (spawn (fn () (/ 1 0)))))
@@ -131,7 +104,7 @@ fn test_multiple_spawned_closures_one_errors() {
 #[test]
 fn test_spawned_closure_type_error() {
     // A closure that causes a type error in the spawned thread
-    let result = eval(
+    let result = eval_source(
         r#"
         (join (spawn (fn () (+ "hello" 42))))
         "#,
@@ -159,7 +132,7 @@ fn test_spawned_closure_type_error() {
 #[test]
 fn test_closure_with_multiple_captures_and_error() {
     // A closure that captures multiple values and then errors
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((a 1) (b 2) (c 0))
           (join (spawn (fn () (/ (+ a b) c)))))
@@ -197,7 +170,7 @@ fn test_compiled_closure_has_location_map() {
 #[test]
 fn test_spawned_closure_error_message_format() {
     // Verify that errors from spawned threads have reasonable formatting
-    let result = eval(
+    let result = eval_source(
         r#"
         (join (spawn (fn () (car 42))))
         "#,
@@ -222,7 +195,7 @@ fn test_spawned_closure_error_message_format() {
 #[test]
 fn test_spawned_closure_captured_computation() {
     // Closure captures computed values
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((x (+ 1 2))
               (y (* 3 4)))
@@ -241,7 +214,7 @@ fn test_spawned_closure_captured_computation() {
 #[test]
 fn test_spawned_closure_with_conditional() {
     // Closure uses conditional logic
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((x 10))
           (join (spawn (fn () (if (> x 5) "big" "small")))))
@@ -259,7 +232,7 @@ fn test_spawned_closure_with_conditional() {
 #[test]
 fn test_spawned_closure_constants_transferred() {
     // Closure uses constants (literals in the body)
-    let result = eval(
+    let result = eval_source(
         r#"
         (join (spawn (fn () (+ 100 200))))
         "#,
@@ -276,7 +249,7 @@ fn test_spawned_closure_constants_transferred() {
 #[test]
 fn test_spawned_closure_string_constant() {
     // Closure returns a string constant
-    let result = eval(
+    let result = eval_source(
         r#"
         (join (spawn (fn () "hello from thread")))
         "#,
@@ -293,7 +266,7 @@ fn test_spawned_closure_string_constant() {
 #[test]
 fn test_spawned_closure_error_propagation() {
     // Error should propagate from spawned thread to joining thread
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((handle (spawn (fn () (/ 1 0)))))
           (join handle))
@@ -338,7 +311,7 @@ fn test_location_map_has_valid_line_numbers() {
 #[test]
 fn test_spawned_closure_array_operations() {
     // Closure performs array operations
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((v [1 2 3]))
           (join (spawn (fn () (array-ref v 1)))))
@@ -390,7 +363,7 @@ proptest! {
             "(let ((captured {})) (join (spawn (fn () (+ captured {})))))",
             a, b
         );
-        let result = eval(&spawn_source);
+        let result = eval_source(&spawn_source);
         prop_assert!(
             result.is_ok(),
             "Spawn/join should succeed for: {}",
@@ -410,7 +383,7 @@ proptest! {
     #[test]
     fn prop_spawned_closure_propagates_div_by_zero(a in 1i64..100) {
         let source = format!("(join (spawn (fn () (/ {} 0))))", a);
-        let result = eval(&source);
+        let result = eval_source(&source);
 
         prop_assert!(
             result.is_err(),
@@ -437,7 +410,7 @@ proptest! {
             "(let ((x {}) (y {}) (z {})) (join (spawn (fn () (+ x (+ y z))))))",
             a, b, c
         );
-        let result = eval(&source);
+        let result = eval_source(&source);
 
         prop_assert!(
             result.is_ok(),

@@ -6,37 +6,9 @@
 // 2. defn function definition syntax
 // 3. List display (no `. ()` in proper lists)
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
+use crate::common::eval_source;
+use elle::Value;
 use proptest::prelude::*;
-
-/// Helper to evaluate code using the new pipeline
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
 
 // ============================================================================
 // Bug 1: StoreCapture stack mismatch (let bindings inside lambdas)
@@ -51,7 +23,7 @@ proptest! {
         let code = format!(
             "(def f (fn (x) (let ((y x)) y))) (f {})", x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x));
     }
@@ -62,7 +34,7 @@ proptest! {
         let code = format!(
             "(def f (fn (a b) (let ((x a) (y b)) (+ x y)))) (f {} {})", a, b
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
@@ -73,7 +45,7 @@ proptest! {
         let code = format!(
             "(def f (fn (x) (if (= x 0) (list) (let ((y x)) (cons y (f (- x 1))))))) (length (f {}))", n
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(n as i64));
     }
@@ -84,7 +56,7 @@ proptest! {
         let code = format!(
             "(def f (fn (x) (if (= x 0) (list) (let ((y x)) (append (list y) (f (- x 1))))))) (length (f {}))", n
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(n as i64));
     }
@@ -95,7 +67,7 @@ proptest! {
         let code = format!(
             "(def f (fn (a b c) (let ((x a) (y b) (z c)) (+ x (+ y z))))) (f {} {} {})", a, b, c
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
     }
@@ -106,7 +78,7 @@ proptest! {
         let code = format!(
             "(def f (fn (a b) (let ((x a)) (let ((y b)) (+ x y))))) (f {} {})", x, y
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x + y));
     }
@@ -117,7 +89,7 @@ proptest! {
         let code = format!(
             "(def f (fn (x) (let ((y (* x 2)) (z (+ x 1))) (+ y z)))) (f {})", x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         // y = x * 2, z = x + 1, result = y + z = 3x + 1
         prop_assert_eq!(result.unwrap(), Value::int(3 * x + 1));
@@ -136,8 +108,8 @@ proptest! {
     fn define_shorthand_equivalent(x in -1000i64..1000) {
         let shorthand = format!("(defn f (x) (+ x 1)) (f {})", x);
         let longhand = format!("(def f (fn (x) (+ x 1))) (f {})", x);
-        let r1 = eval(&shorthand);
-        let r2 = eval(&longhand);
+        let r1 = eval_source(&shorthand);
+        let r2 = eval_source(&longhand);
         prop_assert!(r1.is_ok(), "Shorthand failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "Longhand failed: {:?}", r2);
         prop_assert_eq!(r1.unwrap(), r2.unwrap());
@@ -148,8 +120,8 @@ proptest! {
     fn define_shorthand_multi_param(a in -100i64..100, b in -100i64..100) {
         let shorthand = format!("(defn add (a b) (+ a b)) (add {} {})", a, b);
         let longhand = format!("(def add (fn (a b) (+ a b))) (add {} {})", a, b);
-        let r1 = eval(&shorthand);
-        let r2 = eval(&longhand);
+        let r1 = eval_source(&shorthand);
+        let r2 = eval_source(&longhand);
         prop_assert!(r1.is_ok(), "Shorthand failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "Longhand failed: {:?}", r2);
         prop_assert_eq!(r1.unwrap(), r2.unwrap());
@@ -163,7 +135,7 @@ proptest! {
         let code = format!(
             "(defn fact (n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact {})", n
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(expected as i64));
     }
@@ -173,8 +145,8 @@ proptest! {
     fn define_shorthand_three_params(a in -50i64..50, b in -50i64..50, c in -50i64..50) {
         let shorthand = format!("(defn sum3 (a b c) (+ a (+ b c))) (sum3 {} {} {})", a, b, c);
         let longhand = format!("(def sum3 (fn (a b c) (+ a (+ b c)))) (sum3 {} {} {})", a, b, c);
-        let r1 = eval(&shorthand);
-        let r2 = eval(&longhand);
+        let r1 = eval_source(&shorthand);
+        let r2 = eval_source(&longhand);
         prop_assert!(r1.is_ok(), "Shorthand failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "Longhand failed: {:?}", r2);
         prop_assert_eq!(r1.unwrap(), r2.unwrap());
@@ -185,8 +157,8 @@ proptest! {
     fn define_shorthand_conditional(x in -100i64..100) {
         let shorthand = format!("(defn abs (x) (if (< x 0) (- 0 x) x)) (abs {})", x);
         let longhand = format!("(def abs (fn (x) (if (< x 0) (- 0 x) x))) (abs {})", x);
-        let r1 = eval(&shorthand);
-        let r2 = eval(&longhand);
+        let r1 = eval_source(&shorthand);
+        let r2 = eval_source(&longhand);
         prop_assert!(r1.is_ok(), "Shorthand failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "Longhand failed: {:?}", r2);
         let v1 = r1.unwrap();
@@ -200,8 +172,8 @@ proptest! {
     fn define_shorthand_with_let(x in -100i64..100) {
         let shorthand = format!("(defn double (x) (let ((y x)) (+ y y))) (double {})", x);
         let longhand = format!("(def double (fn (x) (let ((y x)) (+ y y)))) (double {})", x);
-        let r1 = eval(&shorthand);
-        let r2 = eval(&longhand);
+        let r1 = eval_source(&shorthand);
+        let r2 = eval_source(&longhand);
         prop_assert!(r1.is_ok(), "Shorthand failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "Longhand failed: {:?}", r2);
         let v1 = r1.unwrap();
@@ -227,7 +199,7 @@ proptest! {
         } else {
             format!("(list {})", elements)
         };
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         let display = format!("{}", result.unwrap());
         prop_assert!(!display.contains(". ()"),
@@ -244,7 +216,7 @@ proptest! {
         for i in (1..=n).rev() {
             code = format!("(cons {} {})", i, code);
         }
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         let display = format!("{}", result.unwrap());
         prop_assert!(!display.contains(". ()"),
@@ -260,7 +232,7 @@ proptest! {
         } else {
             format!("(length (list {}))", elements)
         };
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(n as i64));
     }
@@ -273,7 +245,7 @@ proptest! {
         for _ in 0..depth {
             code = format!("(list {})", code);
         }
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         let display = format!("{}", result.unwrap());
         prop_assert!(!display.contains(". ()"),
@@ -290,7 +262,7 @@ proptest! {
         all.sort(); // Deterministic order
         let elements = all.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ");
         let code = format!("(list {})", elements);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         let display = format!("{}", result.unwrap());
         prop_assert!(!display.contains(". ()"),
@@ -309,7 +281,7 @@ proptest! {
             "(append (list {}) (list {}))",
             xs_str, ys_str
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         let display = format!("{}", result.unwrap());
         prop_assert!(!display.contains(". ()"),
@@ -346,7 +318,7 @@ proptest! {
 
             (length (foo {} (list 0)))
         "#, n);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         // n=3: 3 is safe, 2 is not, 1 is not, 0 is base -> (3) -> length 1
         // n=4: 4,3 are safe, 2,1 are not -> (4 3) -> length 2
@@ -370,7 +342,7 @@ proptest! {
         let code = format!(
             "(defn make-list (x) (if (= x 0) (list) (let ((y x)) (cons y (make-list (- x 1)))))) (make-list {})", n
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         let display = format!("{}", result.unwrap());
         prop_assert!(!display.contains(". ()"),
@@ -384,7 +356,7 @@ proptest! {
         let code = format!(
             "(defn build (n) (if (= n 0) (list) (let ((rest (build (- n 1)))) (cons n rest)))) (length (build {}))", n
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(n as i64));
     }

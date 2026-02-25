@@ -233,6 +233,11 @@ pub enum LirInstr {
     /// At runtime, the resume value is on top of the operand stack
     /// (pushed by the VM's resume_continuation).
     LoadResumeValue { dst: Reg },
+
+    // === Runtime Eval ===
+    /// Runtime eval: compile and execute a datum.
+    /// Pops env and expr from stack, compiles and executes, pushes result.
+    Eval { dst: Reg, expr: Reg, env: Reg },
 }
 
 /// Binary operations

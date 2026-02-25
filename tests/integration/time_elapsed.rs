@@ -5,21 +5,9 @@
 // - Stopwatches maintain monotonicity across multiple samples
 // - time/elapsed captures the thunk's return value
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::eval as pipeline_eval;
-use elle::primitives::{init_stdlib, register_primitives};
-use elle::{SymbolTable, Value, VM};
+use crate::common::eval_source;
+use elle::Value;
 use proptest::prelude::*;
-
-/// Helper to evaluate code using the new pipeline
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    init_stdlib(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-    pipeline_eval(input, &mut symbols, &mut vm)
-}
 
 /// Extract floats from a cons-list Value (returned in reverse order, so we reverse)
 fn extract_float_list(list_val: Value) -> Vec<f64> {
@@ -55,7 +43,7 @@ proptest! {
               (first (rest result)))
         "#;
 
-        let result = eval(expr);
+        let result = eval_source(expr);
         prop_assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
         let elapsed = result.unwrap();
@@ -77,7 +65,7 @@ fn elapsed_time_captures_result() {
           (first result))
     "#;
 
-    let result = eval(expr);
+    let result = eval_source(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
     assert_eq!(result.unwrap(), Value::int(42));
 }
@@ -89,7 +77,7 @@ fn elapsed_time_with_sleep() {
           (first (rest result)))
     "#;
 
-    let result = eval(expr);
+    let result = eval_source(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
     let elapsed = result.unwrap();
@@ -121,7 +109,7 @@ fn stopwatch_samples_are_monotonic() {
           samples)
     "#;
 
-    let result = eval(expr);
+    let result = eval_source(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
     let samples = extract_float_list(result.unwrap());
@@ -146,7 +134,7 @@ fn stopwatch_measures_elapsed_time() {
               (- t2 t1))))
     "#;
 
-    let result = eval(expr);
+    let result = eval_source(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
     let elapsed = result.unwrap();

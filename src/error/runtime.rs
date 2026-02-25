@@ -1,6 +1,6 @@
 //! Runtime error with location and context information
 
-use super::sourceloc::SourceLoc;
+use crate::reader::SourceLoc;
 use std::fmt;
 
 /// Runtime error with optional source location

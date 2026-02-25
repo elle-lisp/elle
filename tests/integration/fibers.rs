@@ -1,34 +1,7 @@
 // Integration tests for fiber primitives (FiberHandle, child chain, propagate, cancel)
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
+use crate::common::eval_source;
+use elle::Value;
 
 // ── fiber/child: child chain wiring ──────────────────────────────
 
@@ -37,7 +10,7 @@ fn test_fiber_child_set_after_uncaught_signal() {
     // When a child's signal is NOT caught (propagates), parent.child
     // should remain set. We test this by having the inner fiber error
     // with mask=0 (not caught), then checking the outer's child.
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((inner (fiber/new (fn () (fiber/signal 1 "err")) 0)))
           (let ((outer (fiber/new
@@ -61,7 +34,7 @@ fn test_fiber_child_set_after_uncaught_signal() {
 #[test]
 fn test_fiber_child_nil_before_resume() {
     // A fiber that hasn't resumed any child should have nil child
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () 42) 0)))
           (fiber/child f))
@@ -76,7 +49,7 @@ fn test_fiber_child_nil_before_resume() {
 #[test]
 fn test_fiber_propagate_error() {
     // Create a fiber that errors, catch it, then propagate
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((inner (fiber/new (fn () (fiber/signal 1 "boom")) 1)))
           (fiber/resume inner)
@@ -94,7 +67,7 @@ fn test_fiber_propagate_yield() {
     // Create a fiber that yields, catch it, then propagate the yield.
     // The outer fiber propagates the inner's yield signal.
     // The root catches it via the outer's mask=2.
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((inner (fiber/new (fn () (fiber/signal 2 99)) 2)))
           (let ((outer (fiber/new
@@ -112,7 +85,7 @@ fn test_fiber_propagate_yield() {
 #[test]
 fn test_fiber_propagate_dead_fiber_errors() {
     // Propagating from a dead (completed) fiber should error
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () 42) 0)))
           (fiber/resume f)
@@ -134,7 +107,7 @@ fn test_fiber_propagate_dead_fiber_errors() {
 fn test_fiber_cancel_suspended_fiber() {
     // Cancel a suspended fiber — it should end up in error state
     // mask=3 catches both SIG_ERROR and SIG_YIELD
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () (fiber/signal 2 "waiting") 99) 3)))
           (fiber/resume f)
@@ -152,7 +125,7 @@ fn test_fiber_cancel_suspended_fiber() {
 fn test_fiber_cancel_new_fiber() {
     // Cancel a fiber that was never started
     // mask=1 catches SIG_ERROR so the cancel result is caught
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () 42) 1)))
           (fiber/cancel f "never started")
@@ -167,7 +140,7 @@ fn test_fiber_cancel_new_fiber() {
 #[test]
 fn test_fiber_cancel_dead_fiber_errors() {
     // Cancelling a completed fiber should error
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () 42) 0)))
           (fiber/resume f)
@@ -182,7 +155,7 @@ fn test_fiber_cancel_returns_error_value() {
     // Cancel a new fiber with mask=1 (catches SIG_ERROR).
     // The cancel injects an error; the mask catches it; the result
     // is the error value.
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () 42) 1)))
           (fiber/cancel f "injected"))
@@ -195,7 +168,7 @@ fn test_fiber_cancel_returns_error_value() {
 
 #[test]
 fn test_fiber_resume_basic() {
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () 42) 0)))
           (fiber/resume f))
@@ -207,7 +180,7 @@ fn test_fiber_resume_basic() {
 
 #[test]
 fn test_fiber_yield_and_resume() {
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () (fiber/signal 2 10) 20) 2)))
           (+ (fiber/resume f) (fiber/resume f)))
@@ -219,7 +192,7 @@ fn test_fiber_yield_and_resume() {
 
 #[test]
 fn test_fiber_error_caught_by_mask() {
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () (fiber/signal 1 "oops")) 1)))
           (fiber/resume f))
@@ -231,7 +204,7 @@ fn test_fiber_error_caught_by_mask() {
 
 #[test]
 fn test_fiber_error_propagates_without_mask() {
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () (fiber/signal 1 "oops")) 0)))
           (fiber/resume f))
@@ -247,7 +220,7 @@ fn test_fiber_error_propagates_without_mask() {
 fn test_fiber_propagate_preserves_child_chain() {
     // After fiber/propagate, the propagating fiber's child should be
     // set to the fiber being propagated from.
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((inner (fiber/new (fn () (fiber/signal 1 "err")) 1)))
           (let ((outer (fiber/new
@@ -272,7 +245,7 @@ fn test_fiber_propagate_preserves_child_chain() {
 fn test_fiber_propagate_child_identity() {
     // fiber/child after propagate should return the same fiber object
     // (identity preserved via cached value)
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((inner (fiber/new (fn () (fiber/signal 2 99)) 2)))
           (let ((outer (fiber/new
@@ -297,7 +270,7 @@ fn test_fiber_propagate_child_identity() {
 #[test]
 fn test_fiber_resume_in_tail_position() {
     // fiber/resume as the last expression in a fiber body (tail position)
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((inner (fiber/new (fn () 42) 0)))
           (let ((outer (fiber/new (fn () (fiber/resume inner)) 0)))
@@ -311,7 +284,7 @@ fn test_fiber_resume_in_tail_position() {
 #[test]
 fn test_fiber_resume_yield_in_tail_position() {
     // fiber/resume in tail position where inner fiber yields
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((inner (fiber/new (fn () (fiber/signal 2 10) 20) 2)))
           (let ((outer (fiber/new (fn () (fiber/resume inner)) 0)))
@@ -326,7 +299,7 @@ fn test_fiber_resume_yield_in_tail_position() {
 #[test]
 fn test_fiber_cancel_in_tail_position() {
     // fiber/cancel as the last expression in a fiber body (tail position)
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((target (fiber/new (fn () 42) 1)))
           (let ((canceller (fiber/new
@@ -342,7 +315,7 @@ fn test_fiber_cancel_in_tail_position() {
 #[test]
 fn test_fiber_cancel_suspended_in_tail_position() {
     // Cancel a suspended fiber from tail position
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((target (fiber/new (fn () (fiber/signal 2 0) 99) 3)))
           (fiber/resume target)
@@ -373,7 +346,7 @@ fn test_fiber_cancel_suspended_in_tail_position() {
 #[test]
 fn test_three_level_nested_fiber_resume() {
     // A resumes B which resumes C. C yields, B catches and adds, A gets result.
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((c (fiber/new (fn () (fiber/signal 2 10)) 2)))
           (let ((b (fiber/new
@@ -396,7 +369,7 @@ fn test_three_level_nested_fiber_resume() {
 fn test_three_level_nested_fiber_error_propagation() {
     // A resumes B which resumes C. C errors, B doesn't catch (mask=0),
     // error propagates to A which catches (mask=1).
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((c (fiber/new (fn () (fiber/signal 1 "deep error")) 0)))
           (let ((b (fiber/new
@@ -421,7 +394,7 @@ fn test_three_level_nested_fiber_error_propagation() {
 #[test]
 fn test_fiber_parent_identity() {
     // fiber/parent called twice on the same fiber should return eq? values
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () 42) 0)))
           (let ((outer (fiber/new
@@ -444,7 +417,7 @@ fn test_fiber_parent_identity() {
 #[test]
 fn test_fiber_child_identity() {
     // fiber/child called twice on the same fiber should return eq? values
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((inner (fiber/new (fn () (fiber/signal 1 "err")) 0)))
           (let ((outer (fiber/new
@@ -473,7 +446,7 @@ fn test_caught_sig_error_leaves_fiber_suspended() {
     // When a fiber signals SIG_ERROR and the mask catches it, the fiber
     // should be left in :suspended status (not :error). This is the core
     // bug fix for issue #299.
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () (fiber/signal 1 "oops") "recovered") 1)))
           (fiber/resume f)
@@ -493,7 +466,7 @@ fn test_caught_sig_error_fiber_is_resumable() {
     // A fiber that caught SIG_ERROR should be resumable. After catching
     // the error, the fiber should be able to continue execution and return
     // its recovery value.
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () (fiber/signal 1 "oops") "recovered") 1)))
           (fiber/resume f)
@@ -513,7 +486,7 @@ fn test_uncaught_sig_error_produces_error_status() {
     // When a fiber signals SIG_ERROR and the mask does NOT catch it,
     // the error should propagate and the fiber should be in :error status.
     // This confirms that uncaught errors still work as before.
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () (fiber/signal 1 "oops")) 0)))
           (fiber/resume f))
@@ -528,7 +501,7 @@ fn test_cancel_always_produces_error_status() {
     // fiber/cancel is terminal: it always puts the fiber in :error status,
     // regardless of the mask. This is unchanged behavior, but we verify it
     // to ensure cancel is distinct from caught SIG_ERROR.
-    let result = eval(
+    let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () (fiber/signal 2 "waiting") 99) 3)))
           (fiber/resume f)

@@ -220,6 +220,11 @@ impl HirSymbolExtractor {
                 self.walk(e, index, symbols);
             }
 
+            HirKind::Eval { expr, env } => {
+                self.walk(expr, index, symbols);
+                self.walk(env, index, symbols);
+            }
+
             HirKind::Module { body, .. } => {
                 self.walk(body, index, symbols);
             }

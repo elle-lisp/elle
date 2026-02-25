@@ -190,4 +190,12 @@ pub enum HirKind {
         module: SymbolId,
         name: SymbolId,
     },
+
+    /// Runtime eval: compile and execute a datum.
+    /// `expr` evaluates to the value to compile.
+    /// `env` evaluates to a table of name→value bindings (or nil for global-only).
+    Eval {
+        expr: Box<Hir>,
+        env: Box<Hir>,
+    },
 }

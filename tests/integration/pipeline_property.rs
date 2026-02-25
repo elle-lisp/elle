@@ -4,24 +4,9 @@
 // properties hold when code is compiled and executed through the new pipeline.
 // This file replaces coverage currently only in old-pipeline tests.
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::eval as pipeline_eval;
-use elle::primitives::{init_stdlib, register_primitives};
-use elle::{SymbolTable, Value, VM};
+use crate::common::eval_source;
+use elle::Value;
 use proptest::prelude::*;
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    init_stdlib(&mut vm, &mut symbols);
-
-    // Set the symbol table in thread-local context for primitives that need it
-    // (e.g., type-of needs to intern type names as keywords)
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    pipeline_eval(input, &mut symbols, &mut vm)
-}
 
 // ============================================================================
 // 1. String Operations (50 cases)
@@ -41,7 +26,7 @@ proptest! {
             "(= (length (string-append \"{}\" \"{}\")) (+ (length \"{}\") (length \"{}\")))",
             a, b, a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -53,7 +38,7 @@ proptest! {
             "(let ((s \"{}\")) (= (substring s 0 (length s)) s))",
             s
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -66,7 +51,7 @@ proptest! {
             "(= (string-downcase (string-upcase \"{}\")) \"{}\")",
             s, s
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -76,7 +61,7 @@ proptest! {
     fn string_length_correct(s in "[a-z]{1,10}") {
         let expected_len = s.len() as i64;
         let expr = format!("(length \"{}\")", s);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(expected_len));
@@ -94,7 +79,7 @@ proptest! {
     fn type_of_integer_returns_keyword(n in -1000i64..1000) {
         // type-of returns a keyword for integers
         let expr = format!("(type-of {})", n);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert!(result.unwrap().is_keyword(), "expected keyword for type-of integer");
@@ -109,7 +94,7 @@ proptest! {
             format!("{}", n)
         };
         let expr = format!("(type-of {})", float_str);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert!(result.unwrap().is_keyword(), "expected keyword for type-of float");
@@ -118,7 +103,7 @@ proptest! {
     #[test]
     fn type_of_string_returns_keyword(s in "[a-z]{1,10}") {
         let expr = format!("(type-of \"{}\")", s);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert!(result.unwrap().is_keyword(), "expected keyword for type-of string");
@@ -128,7 +113,7 @@ proptest! {
     fn type_of_bool_returns_keyword(b in prop::bool::ANY) {
         let bool_str = if b { "#t" } else { "#f" };
         let expr = format!("(type-of {})", bool_str);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert!(result.unwrap().is_keyword(), "expected keyword for type-of bool");
@@ -144,7 +129,7 @@ proptest! {
             format!("{}", n)
         };
         let expr = format!("(int {})", float_str);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(expected));
@@ -154,7 +139,7 @@ proptest! {
     fn float_conversion_preserves_int(n in -1000i64..1000) {
         // (float n) should equal n when compared as float
         let expr = format!("(= (float {}) {}.0)", n, n);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -165,7 +150,7 @@ proptest! {
         // Check that the result is a float by verifying it's not equal to its truncated value
         // (since int + non-integer float should produce a non-integer float)
         let expr = format!("(let ((r (+ {} {}))) (not (= r (int r))))", i, f);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -174,7 +159,7 @@ proptest! {
     #[test]
     fn type_error_on_add_nil(n in -100i64..100) {
         let expr = format!("(+ {} nil)", n);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_err(), "expected error for (+ {} nil)", n);
     }
@@ -196,7 +181,7 @@ proptest! {
             "(let ((t (table))) (begin (put t {} {}) (get t {})))",
             key, value, key
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(value));
@@ -206,7 +191,7 @@ proptest! {
     fn table_creation_returns_table(_dummy in 0i64..1) {
         // Just verify table creation doesn't error
         let expr = "(table)";
-        let result = eval(expr);
+        let result = eval_source(expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert!(result.unwrap().is_table(), "expected table");
@@ -216,7 +201,7 @@ proptest! {
     fn struct_creation_returns_struct(_dummy in 0i64..1) {
         // Just verify struct creation doesn't error
         let expr = "(struct)";
-        let result = eval(expr);
+        let result = eval_source(expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert!(result.unwrap().is_struct(), "expected struct");
@@ -232,7 +217,7 @@ proptest! {
                  (+ (get t {}) (get t {}))))",
             k1, v1, k2, v2, k1, k2
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v1 + v2));
@@ -249,7 +234,7 @@ proptest! {
     #[test]
     fn match_variable_binding_int(n in -100i64..100) {
         let expr = format!("(match {} (x (+ x 1)))", n);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(n + 1));
@@ -258,7 +243,7 @@ proptest! {
     #[test]
     fn match_variable_binding_string(s in "[a-z]{1,10}") {
         let expr = format!("(match \"{}\" (x (string-append x \"!\")))", s);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = format!("{}!", s);
@@ -268,7 +253,7 @@ proptest! {
     #[test]
     fn match_nested(a in -50i64..50, b in -50i64..50) {
         let expr = format!("(match {} (x (match {} (y (+ x y)))))", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -278,7 +263,7 @@ proptest! {
     fn match_variable_shadowing(a in -50i64..50, b in -50i64..50) {
         // Inner x shadows outer x
         let expr = format!("(match {} (x (match {} (x x))))", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -288,7 +273,7 @@ proptest! {
     fn match_float_literal_exact(f in 1.0f64..10.0) {
         // Only exact match hits
         let expr = format!("(match {} ({} \"hit\") (_ \"miss\"))", f, f);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("hit"));
@@ -298,7 +283,7 @@ proptest! {
     fn match_with_computed_scrutinee(a in -50i64..50, b in -50i64..50) {
         let sum = a + b;
         let expr = format!("(match (+ {} {}) ({} \"hit\") (_ \"miss\"))", a, b, sum);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("hit"));
@@ -317,7 +302,7 @@ proptest! {
             "(begin (def f (fn (n) (if (<= n 0) 0 (f (- n 1))))) (f {}))",
             n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "countdown failed for n={}: {:?}", n, result);
         prop_assert_eq!(result.unwrap(), Value::int(0));
@@ -334,7 +319,7 @@ proptest! {
                (sum-iter {} 0))",
             n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "accumulator sum failed for n={}: {:?}", n, result);
         prop_assert_eq!(result.unwrap(), Value::int(expected));
@@ -350,7 +335,7 @@ proptest! {
                (= (is-even {}) {}))",
             n, if expected { "#t" } else { "#f" }
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "mutual recursion failed for n={}: {:?}", n, result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -368,7 +353,7 @@ proptest! {
     fn reverse_list_first_element(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
         // (first (reverse (list a b c))) = c
         let expr = format!("(first (reverse (list {} {} {})))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(c));
@@ -378,7 +363,7 @@ proptest! {
     fn append_lists_length(a in -100i64..100, b in -100i64..100) {
         // (length (append (list a) (list b))) = 2
         let expr = format!("(length (append (list {}) (list {})))", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(2));
@@ -388,7 +373,7 @@ proptest! {
     fn nth_returns_correct_element(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
         // (nth 0 (list a b c)) = a
         let expr = format!("(nth 0 (list {} {} {}))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -398,7 +383,7 @@ proptest! {
     fn last_returns_last_element(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
         // (last (list a b c)) = c
         let expr = format!("(last (list {} {} {}))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(c));
@@ -409,7 +394,7 @@ proptest! {
         let elements: Vec<String> = (0..len).map(|i| i.to_string()).collect();
         let list_str = elements.join(" ");
         let expr = format!("(length (map (fn (x) x) (list {})))", list_str);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(len as i64));
@@ -418,7 +403,7 @@ proptest! {
     #[test]
     fn filter_all_true_preserves_length(a in 1i64..50, b in 1i64..50, c in 1i64..50) {
         let expr = format!("(length (filter (fn (x) #t) (list {} {} {})))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(3));
@@ -427,7 +412,7 @@ proptest! {
     #[test]
     fn fold_sum(a in -30i64..30, b in -30i64..30, c in -30i64..30) {
         let expr = format!("(fold + 0 (list {} {} {}))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
@@ -437,7 +422,7 @@ proptest! {
     fn take_returns_prefix(a in -50i64..50, b in -50i64..50, c in -50i64..50) {
         // (first (take 2 (list a b c))) = a
         let expr = format!("(first (take 2 (list {} {} {})))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -447,7 +432,7 @@ proptest! {
     fn drop_removes_prefix(a in -50i64..50, b in -50i64..50, c in -50i64..50) {
         // (first (drop 1 (list a b c))) = b
         let expr = format!("(first (drop 1 (list {} {} {})))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -465,7 +450,7 @@ proptest! {
     fn box_unbox_roundtrip_int(n in -1000i64..1000) {
         // (unbox (box n)) = n
         let expr = format!("(unbox (box {}))", n);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "box/unbox roundtrip failed for {}: {:?}", n, result);
         prop_assert_eq!(result.unwrap(), Value::int(n));
     }
@@ -477,7 +462,7 @@ proptest! {
             "(let ((b (box {}))) (begin (box-set! b {}) (unbox b)))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "box-set! failed for a={}, b={}: {:?}", a, b, result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
     }
@@ -486,7 +471,7 @@ proptest! {
     fn box_predicate_on_box(n in -100i64..100) {
         // (box? (box n)) = #t
         let expr = format!("(box? (box {}))", n);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "box? failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
     }
@@ -495,7 +480,7 @@ proptest! {
     fn box_predicate_on_non_box(n in -100i64..100) {
         // (box? n) = #f
         let expr = format!("(box? {})", n);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "box? on non-box failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(false));
     }
@@ -517,7 +502,7 @@ proptest! {
                  (begin {} (get))))",
             (1..=n).map(|_| "(inc)".to_string()).collect::<Vec<_>>().join(" ")
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "shared box mutation failed for n={}: {:?}", n, result);
         prop_assert_eq!(result.unwrap(), Value::int(n));
     }
@@ -526,7 +511,7 @@ proptest! {
     fn box_unbox_roundtrip_string(s in "[a-z]{1,8}") {
         // (unbox (box "s")) = "s"
         let expr = format!("(unbox (box \"{}\"))", s);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "box/unbox string roundtrip failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string(&*s));
     }
@@ -538,7 +523,7 @@ proptest! {
             "(let ((b (box 0))) (begin (box-set! b {}) (box-set! b {}) (box-set! b {}) (unbox b)))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "multiple box-set! failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(c));
     }

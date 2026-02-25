@@ -1,4 +1,5 @@
 // Main test harness - discovers all tests from subdirectories
+mod common;
 mod unittests {
     include!("unittests/mod.rs");
 }

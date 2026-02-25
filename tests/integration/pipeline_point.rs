@@ -3,20 +3,8 @@
 // These tests cover semantic categories that don't lend themselves to property testing.
 // They verify specific behaviors of the new Syntax → HIR → LIR → Bytecode pipeline.
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::eval as pipeline_eval;
-use elle::primitives::{init_stdlib, register_primitives};
-use elle::{SymbolTable, Value, VM};
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    init_stdlib(&mut vm, &mut symbols);
-    // Set symbol table context for primitives like type-of that need it
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-    pipeline_eval(input, &mut symbols, &mut vm)
-}
+use crate::common::eval_source;
+use elle::Value;
 
 // ============================================================================
 // 1. Shebang Handling
@@ -27,28 +15,28 @@ fn eval(input: &str) -> Result<Value, String> {
 #[test]
 fn test_shebang_with_env_elle() {
     // Source starting with #!/usr/bin/env elle should evaluate correctly
-    let result = eval("#!/usr/bin/env elle\n(+ 1 2)");
+    let result = eval_source("#!/usr/bin/env elle\n(+ 1 2)");
     assert_eq!(result.unwrap(), Value::int(3));
 }
 
 #[test]
 fn test_shebang_short_form() {
     // Source starting with #!elle should evaluate correctly
-    let result = eval("#!elle\n42");
+    let result = eval_source("#!elle\n42");
     assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_no_shebang_works_normally() {
     // Source without shebang works normally
-    let result = eval("(+ 10 20)");
+    let result = eval_source("(+ 10 20)");
     assert_eq!(result.unwrap(), Value::int(30));
 }
 
 #[test]
 fn test_shebang_with_complex_expression() {
     // Shebang followed by complex expression
-    let result = eval("#!/usr/bin/env elle\n(let ((x 5)) (* x x))");
+    let result = eval_source("#!/usr/bin/env elle\n(let ((x 5)) (* x x))");
     assert_eq!(result.unwrap(), Value::int(25));
 }
 
@@ -63,7 +51,7 @@ fn test_shebang_with_complex_expression() {
 #[test]
 fn test_defmacro_my_when_true() {
     // Define a simple when macro and test with true condition
-    let result = eval(
+    let result = eval_source(
         "(begin
            (defmacro my-when (test body) `(if ,test ,body nil))
            (my-when #t 42))",
@@ -74,7 +62,7 @@ fn test_defmacro_my_when_true() {
 #[test]
 fn test_defmacro_my_when_false() {
     // Define a simple when macro and test with false condition
-    let result = eval(
+    let result = eval_source(
         "(begin
            (defmacro my-when (test body) `(if ,test ,body nil))
            (my-when #f 42))",
@@ -86,7 +74,7 @@ fn test_defmacro_my_when_false() {
 fn test_macro_predicate() {
     // Test macro? predicate after defining a macro
     // macro? is handled at expansion time - it checks if the symbol names a macro
-    let result = eval(
+    let result = eval_source(
         "(begin
            (defmacro my-when (test body) `(if ,test ,body nil))
            (macro? my-when))",
@@ -97,7 +85,7 @@ fn test_macro_predicate() {
 #[test]
 fn test_macro_predicate_non_macro() {
     // Test macro? predicate on a non-macro (built-in function)
-    let result = eval("(macro? +)");
+    let result = eval_source("(macro? +)");
     assert_eq!(result.unwrap(), Value::bool(false));
 }
 
@@ -106,7 +94,7 @@ fn test_expand_macro() {
     // Test expand-macro returns the expanded form
     // expand-macro is handled at expansion time - it expands the quoted form
     // and returns the result as quoted data
-    let result = eval(
+    let result = eval_source(
         "(begin
            (defmacro my-when (test body) `(if ,test ,body nil))
            (expand-macro '(my-when #t 42)))",
@@ -130,14 +118,14 @@ fn test_expand_macro() {
 #[test]
 fn test_module_qualified_string_upcase() {
     // Test module-qualified syntax: string:upcase
-    let result = eval("(string:upcase \"hello\")");
+    let result = eval_source("(string:upcase \"hello\")");
     assert_eq!(result.unwrap(), Value::string("HELLO"));
 }
 
 #[test]
 fn test_module_qualified_math_abs() {
     // Test module-qualified syntax: math:abs
-    let result = eval("(math:abs -5)");
+    let result = eval_source("(math:abs -5)");
     assert_eq!(result.unwrap(), Value::int(5));
 }
 
@@ -153,7 +141,7 @@ fn test_module_qualified_math_abs() {
 #[test]
 fn test_table_creation_empty() {
     // (table) creates empty table
-    let result = eval("(table)").unwrap();
+    let result = eval_source("(table)").unwrap();
     assert!(result.is_table());
 }
 
@@ -161,7 +149,7 @@ fn test_table_creation_empty() {
 fn test_table_put_and_get() {
     // (put table key value) then (get table key) returns value
     // Note: Tables use string keys, not keywords
-    let result = eval(
+    let result = eval_source(
         r#"(let ((t (table)))
            (put t "key" 42)
            (get t "key"))"#,
@@ -172,21 +160,21 @@ fn test_table_put_and_get() {
 #[test]
 fn test_struct_creation_empty() {
     // (struct) creates empty struct
-    let result = eval("(struct)").unwrap();
+    let result = eval_source("(struct)").unwrap();
     assert!(result.is_struct());
 }
 
 #[test]
 fn test_table_type_check() {
     // Verify table type using type_name() on Rust side
-    let result = eval("(table)").unwrap();
+    let result = eval_source("(table)").unwrap();
     assert_eq!(result.type_name(), "table");
 }
 
 #[test]
 fn test_struct_type_check() {
     // Verify struct type using type_name() on Rust side
-    let result = eval("(struct)").unwrap();
+    let result = eval_source("(struct)").unwrap();
     assert_eq!(result.type_name(), "struct");
 }
 
@@ -194,7 +182,7 @@ fn test_struct_type_check() {
 fn test_type_of_table() {
     // (type-of (table)) returns :table keyword
     // We verify by checking that (eq? (type-of (table)) :table) is true
-    let result = eval("(eq? (type-of (table)) :table)");
+    let result = eval_source("(eq? (type-of (table)) :table)");
     assert_eq!(result.unwrap(), Value::bool(true));
 }
 
@@ -202,14 +190,14 @@ fn test_type_of_table() {
 fn test_type_of_struct() {
     // (type-of (struct)) returns :struct keyword
     // We verify by checking that (eq? (type-of (struct)) :struct) is true
-    let result = eval("(eq? (type-of (struct)) :struct)");
+    let result = eval_source("(eq? (type-of (struct)) :struct)");
     assert_eq!(result.unwrap(), Value::bool(true));
 }
 
 #[test]
 fn test_table_with_string_keys() {
     // Table with string key-value pairs
-    let result = eval(
+    let result = eval_source(
         r#"(let ((t (table "a" 1 "b" 2)))
            (+ (get t "a") (get t "b")))"#,
     );
@@ -219,7 +207,7 @@ fn test_table_with_string_keys() {
 #[test]
 fn test_struct_with_string_keys() {
     // Struct with string key-value pairs
-    let result = eval(
+    let result = eval_source(
         r#"(let ((s (struct "x" 10 "y" 20)))
            (+ (get s "x") (get s "y")))"#,
     );
@@ -229,7 +217,7 @@ fn test_struct_with_string_keys() {
 #[test]
 fn test_table_has_key() {
     // Test has-key? on table
-    let result = eval(
+    let result = eval_source(
         r#"(let ((t (table "a" 1)))
            (has-key? t "a"))"#,
     );
@@ -239,7 +227,7 @@ fn test_table_has_key() {
 #[test]
 fn test_table_has_key_missing() {
     // Test has-key? on table for missing key
-    let result = eval(
+    let result = eval_source(
         r#"(let ((t (table "a" 1)))
            (has-key? t "b"))"#,
     );
@@ -254,7 +242,7 @@ fn test_table_has_key_missing() {
 #[test]
 fn test_table_mutation() {
     // Tables are mutable - put modifies in place
-    let result = eval(
+    let result = eval_source(
         r#"(let ((t (table)))
            (put t "a" 1)
            (put t "a" 2)
@@ -267,7 +255,7 @@ fn test_table_mutation() {
 fn test_struct_immutability() {
     // Structs are immutable - put returns a new struct
     // We test that get works on initial values
-    let result = eval(
+    let result = eval_source(
         r#"(let ((s (struct "x" 42)))
            (get s "x"))"#,
     );
@@ -277,7 +265,7 @@ fn test_struct_immutability() {
 #[test]
 fn test_nested_table_operations() {
     // Nested table operations
-    let result = eval(
+    let result = eval_source(
         r#"(let ((outer (table)))
            (put outer "inner" (table))
            (put (get outer "inner") "value" 42)
@@ -289,7 +277,7 @@ fn test_nested_table_operations() {
 #[test]
 fn test_defmacro_with_quasiquote() {
     // Macro using quasiquote for template
-    let result = eval(
+    let result = eval_source(
         "(begin
            (defmacro add-one (x) `(+ ,x 1))
            (add-one 41))",
@@ -300,7 +288,7 @@ fn test_defmacro_with_quasiquote() {
 #[test]
 fn test_threading_macro_first() {
     // Thread-first macro (->) is built into the Expander
-    let result = eval("(-> 5 (+ 3) (* 2))");
+    let result = eval_source("(-> 5 (+ 3) (* 2))");
     // (-> 5 (+ 3) (* 2)) => (* (+ 5 3) 2) => (* 8 2) => 16
     assert_eq!(result.unwrap(), Value::int(16));
 }
@@ -308,7 +296,7 @@ fn test_threading_macro_first() {
 #[test]
 fn test_threading_macro_last() {
     // Thread-last macro (->>) is built into the Expander
-    let result = eval("(->> 5 (+ 3) (* 2))");
+    let result = eval_source("(->> 5 (+ 3) (* 2))");
     // (->> 5 (+ 3) (* 2)) => (* 2 (+ 3 5)) => (* 2 8) => 16
     assert_eq!(result.unwrap(), Value::int(16));
 }
@@ -316,7 +304,7 @@ fn test_threading_macro_last() {
 #[test]
 fn test_table_keys() {
     // Test keys function on table
-    let result = eval(
+    let result = eval_source(
         r#"(let ((t (table "a" 1 "b" 2)))
            (length (keys t)))"#,
     );
@@ -326,7 +314,7 @@ fn test_table_keys() {
 #[test]
 fn test_table_values() {
     // Test values function on table
-    let result = eval(
+    let result = eval_source(
         r#"(let ((t (table "a" 1 "b" 2)))
            (length (values t)))"#,
     );
@@ -336,7 +324,7 @@ fn test_table_values() {
 #[test]
 fn test_table_del() {
     // Test del function on table (mutates in place)
-    let result = eval(
+    let result = eval_source(
         r#"(let ((t (table "a" 1 "b" 2)))
            (del t "a")
            (has-key? t "a"))"#,
@@ -347,7 +335,7 @@ fn test_table_del() {
 #[test]
 fn test_struct_put_returns_new() {
     // Structs are immutable - put returns a new struct, original unchanged
-    let result = eval(
+    let result = eval_source(
         r#"(let ((s (struct "x" 1)))
            (let ((s2 (put s "x" 2)))
              (list (get s "x") (get s2 "x"))))"#,
@@ -360,7 +348,7 @@ fn test_struct_put_returns_new() {
 #[test]
 fn test_get_with_default() {
     // Test get with default value for missing key
-    let result = eval(
+    let result = eval_source(
         r#"(let ((t (table)))
            (get t "missing" 42))"#,
     );
@@ -377,34 +365,34 @@ fn test_get_with_default() {
 #[test]
 fn test_let_parallel_binding() {
     // Standard let: all init expressions evaluated in outer scope
-    let result = eval("(let ((x 10) (y 20)) (+ x y))").unwrap();
+    let result = eval_source("(let ((x 10) (y 20)) (+ x y))").unwrap();
     assert_eq!(result, Value::int(30));
 }
 
 #[test]
 fn test_let_parallel_binding_shadowing() {
     // y should see the OUTER x (999), not the inner x (10)
-    let result = eval("(begin (var x 999) (let ((x 10) (y x)) y))").unwrap();
+    let result = eval_source("(begin (var x 999) (let ((x 10) (y x)) y))").unwrap();
     assert_eq!(result, Value::int(999));
 }
 
 #[test]
 fn test_let_star_sequential_binding() {
     // let*: y should see the inner x (10)
-    let result = eval("(begin (var x 999) (let* ((x 10) (y x)) y))").unwrap();
+    let result = eval_source("(begin (var x 999) (let* ((x 10) (y x)) y))").unwrap();
     assert_eq!(result, Value::int(10));
 }
 
 #[test]
 fn test_let_body_sees_bindings() {
     // Body should see the let bindings
-    let result = eval("(let ((x 42)) x)").unwrap();
+    let result = eval_source("(let ((x 42)) x)").unwrap();
     assert_eq!(result, Value::int(42));
 }
 
 #[test]
 fn test_let_nested_shadowing() {
     // Inner let shadows outer let
-    let result = eval("(let ((x 1)) (let ((x 2)) x))").unwrap();
+    let result = eval_source("(let ((x 1)) (let ((x 2)) x))").unwrap();
     assert_eq!(result, Value::int(2));
 }

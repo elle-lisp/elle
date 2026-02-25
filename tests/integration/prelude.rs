@@ -1,34 +1,7 @@
 // Integration tests for prelude macros (when, unless, try, protect, defer, with)
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
-
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
+use crate::common::eval_source;
+use elle::Value;
 
 // ============================================================================
 // SECTION 1: when
@@ -36,23 +9,23 @@ fn eval(input: &str) -> Result<Value, String> {
 
 #[test]
 fn test_when_true() {
-    assert_eq!(eval("(when #t 42)").unwrap(), Value::int(42));
+    assert_eq!(eval_source("(when #t 42)").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_when_false() {
-    assert_eq!(eval("(when #f 42)").unwrap(), Value::NIL);
+    assert_eq!(eval_source("(when #f 42)").unwrap(), Value::NIL);
 }
 
 #[test]
 fn test_when_multi_body() {
-    assert_eq!(eval("(when #t 1 2 3)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(when #t 1 2 3)").unwrap(), Value::int(3));
 }
 
 #[test]
 fn test_when_truthy_value() {
     // Non-boolean truthy value
-    assert_eq!(eval("(when 1 42)").unwrap(), Value::int(42));
+    assert_eq!(eval_source("(when 1 42)").unwrap(), Value::int(42));
 }
 
 // ============================================================================
@@ -61,17 +34,17 @@ fn test_when_truthy_value() {
 
 #[test]
 fn test_unless_true() {
-    assert_eq!(eval("(unless #t 42)").unwrap(), Value::NIL);
+    assert_eq!(eval_source("(unless #t 42)").unwrap(), Value::NIL);
 }
 
 #[test]
 fn test_unless_false() {
-    assert_eq!(eval("(unless #f 42)").unwrap(), Value::int(42));
+    assert_eq!(eval_source("(unless #f 42)").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_unless_multi_body() {
-    assert_eq!(eval("(unless #f 1 2 3)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(unless #f 1 2 3)").unwrap(), Value::int(3));
 }
 
 // ============================================================================
@@ -80,19 +53,22 @@ fn test_unless_multi_body() {
 
 #[test]
 fn test_try_catch_no_error() {
-    assert_eq!(eval("(try 42 (catch e :error))").unwrap(), Value::int(42));
+    assert_eq!(
+        eval_source("(try 42 (catch e :error))").unwrap(),
+        Value::int(42)
+    );
 }
 
 #[test]
 fn test_try_catch_catches_error() {
-    let result = eval("(try (/ 1 0) (catch e :caught))");
+    let result = eval_source("(try (/ 1 0) (catch e :caught))");
     assert_eq!(result.unwrap(), Value::keyword("caught"));
 }
 
 #[test]
 fn test_try_catch_binds_error() {
     // The error binding should be available in the handler
-    let result = eval("(try (/ 1 0) (catch e e))");
+    let result = eval_source("(try (/ 1 0) (catch e e))");
     assert!(result.is_ok());
     // e should be the error value (a cons cell / error tuple)
     let val = result.unwrap();
@@ -103,7 +79,7 @@ fn test_try_catch_binds_error() {
 fn test_try_catch_multi_body() {
     // Multiple body forms before the catch clause
     assert_eq!(
-        eval("(try 1 2 (+ 20 22) (catch e :error))").unwrap(),
+        eval_source("(try 1 2 (+ 20 22) (catch e :error))").unwrap(),
         Value::int(42)
     );
 }
@@ -111,7 +87,7 @@ fn test_try_catch_multi_body() {
 #[test]
 fn test_try_catch_multi_handler() {
     // Multiple handler forms — last one is the result
-    let result = eval("(try (/ 1 0) (catch e 1 2 :caught))");
+    let result = eval_source("(try (/ 1 0) (catch e 1 2 :caught))");
     assert_eq!(result.unwrap(), Value::keyword("caught"));
 }
 
@@ -121,7 +97,7 @@ fn test_try_catch_multi_handler() {
 
 #[test]
 fn test_protect_success() {
-    let result = eval("(protect 42)");
+    let result = eval_source("(protect 42)");
     assert!(result.is_ok());
     let val = result.unwrap();
     let arr = val.as_array().unwrap();
@@ -132,7 +108,7 @@ fn test_protect_success() {
 
 #[test]
 fn test_protect_failure() {
-    let result = eval("(protect (/ 1 0))");
+    let result = eval_source("(protect (/ 1 0))");
     assert!(result.is_ok());
     let val = result.unwrap();
     let arr = val.as_array().unwrap();
@@ -149,7 +125,7 @@ fn test_protect_failure() {
 #[test]
 fn test_defer_runs_cleanup() {
     assert_eq!(
-        eval("(begin (var cleaned #f) (defer (set! cleaned #t) 42) cleaned)").unwrap(),
+        eval_source("(begin (var cleaned #f) (defer (set! cleaned #t) 42) cleaned)").unwrap(),
         Value::bool(true)
     );
 }
@@ -157,7 +133,7 @@ fn test_defer_runs_cleanup() {
 #[test]
 fn test_defer_returns_body_value() {
     assert_eq!(
-        eval("(begin (var x 0) (defer (set! x 1) 42))").unwrap(),
+        eval_source("(begin (var x 0) (defer (set! x 1) 42))").unwrap(),
         Value::int(42)
     );
 }
@@ -166,8 +142,10 @@ fn test_defer_returns_body_value() {
 fn test_defer_runs_cleanup_on_error() {
     // Cleanup should run even when body errors
     assert_eq!(
-        eval("(begin (var cleaned #f) (try (defer (set! cleaned #t) (/ 1 0)) (catch e cleaned)))")
-            .unwrap(),
+        eval_source(
+            "(begin (var cleaned #f) (try (defer (set! cleaned #t) (/ 1 0)) (catch e cleaned)))"
+        )
+        .unwrap(),
         Value::bool(true)
     );
 }
@@ -180,7 +158,7 @@ fn test_defer_runs_cleanup_on_error() {
 fn test_with_basic() {
     // Use with to bind a resource and clean it up
     assert_eq!(
-        eval(
+        eval_source(
             r#"(begin
                 (defn make-resource () :resource)
                 (defn free-resource (r) nil)
@@ -195,7 +173,7 @@ fn test_with_basic() {
 #[test]
 fn test_with_cleanup_runs() {
     assert_eq!(
-        eval(
+        eval_source(
             r#"(begin
                 (var cleaned #f)
                 (defn make () :resource)
@@ -215,7 +193,7 @@ fn test_with_cleanup_runs() {
 
 #[test]
 fn test_butlast_basic() {
-    let result = eval("(butlast (list 1 2 3))").unwrap();
+    let result = eval_source("(butlast (list 1 2 3))").unwrap();
     let items = result.list_to_vec().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0], Value::int(1));
@@ -224,14 +202,14 @@ fn test_butlast_basic() {
 
 #[test]
 fn test_butlast_single() {
-    let result = eval("(butlast (list 1))").unwrap();
+    let result = eval_source("(butlast (list 1))").unwrap();
     // Should return empty list
     assert!(result.list_to_vec().unwrap().is_empty());
 }
 
 #[test]
 fn test_butlast_empty_errors() {
-    let result = eval("(butlast (list))");
+    let result = eval_source("(butlast (list))");
     assert!(result.is_err());
 }
 
@@ -244,7 +222,7 @@ fn test_try_hygiene_no_capture() {
     // The try macro introduces an internal binding `f`.
     // A call-site variable named `f` should not be affected.
     assert_eq!(
-        eval(
+        eval_source(
             r#"(let ((f 99))
                 (try (+ f 1) (catch e :error)))"#
         )
@@ -258,7 +236,7 @@ fn test_defer_hygiene_no_capture() {
     // The defer macro introduces an internal binding `f`.
     // A call-site variable named `f` should not be affected.
     assert_eq!(
-        eval(
+        eval_source(
             r#"(begin
                 (var cleaned #f)
                 (let ((f 99))

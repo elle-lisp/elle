@@ -154,6 +154,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for `handle_tail_call` env building |
+| `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude) |
 
 ### Key Fiber fields (on `vm.fiber`)
 
@@ -211,6 +212,7 @@ Key methods:
 | `comparison.rs` | ~100 | Eq, Lt, Gt, Le, Ge |
 | `types.rs` | ~50 | IsNil, IsEmptyList, IsPair, Not |
 | `data.rs` | ~100 | Cons, Car, Cdr, MakeVector |
+| `eval.rs` | ~180 | Runtime eval: compile+execute datum, env wrapping |
 | `scope/` | ~200 | Runtime scope stack (legacy) |
 
 ## Truthiness

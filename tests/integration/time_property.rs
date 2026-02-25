@@ -5,21 +5,9 @@
 // - Realtime clocks return plausible Unix timestamps
 // - Both clocks advance together
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::eval as pipeline_eval;
-use elle::primitives::{init_stdlib, register_primitives};
-use elle::{SymbolTable, Value, VM};
+use crate::common::eval_source;
+use elle::Value;
 use proptest::prelude::*;
-
-/// Helper to evaluate code using the new pipeline
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    init_stdlib(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-    pipeline_eval(input, &mut symbols, &mut vm)
-}
 
 /// Extract floats from a cons-list Value (returned in reverse order, so we reverse)
 fn extract_float_list(list_val: Value) -> Vec<f64> {
@@ -57,7 +45,7 @@ fn clock_monotonic_never_decreases() {
           times)
     "#;
 
-    let result = eval(expr);
+    let result = eval_source(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
     let times = extract_float_list(result.unwrap());
@@ -78,7 +66,7 @@ proptest! {
     #[test]
     fn clock_monotonic_is_non_negative(_seed in 0u32..50) {
         let expr = "(clock/monotonic)";
-        let result = eval(expr);
+        let result = eval_source(expr);
 
         prop_assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
         let val = result.unwrap();
@@ -104,7 +92,7 @@ proptest! {
     fn clock_realtime_is_plausible(_seed in 0u32..50) {
         // Past Nov 2023 (1_700_000_000) and before ~2049 (2_500_000_000)
         let expr = "(clock/realtime)";
-        let result = eval(expr);
+        let result = eval_source(expr);
 
         prop_assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
         let val = result.unwrap();
@@ -139,7 +127,7 @@ fn clock_realtime_multiple_reads_are_monotonic() {
           times)
     "#;
 
-    let result = eval(expr);
+    let result = eval_source(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
     let times = extract_float_list(result.unwrap());
@@ -169,7 +157,7 @@ fn monotonic_and_realtime_advance_together() {
             (list (- mono2 mono1) (- real2 real1))))
     "#;
 
-    let result = eval(expr);
+    let result = eval_source(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
     let times_list = result.unwrap();
@@ -220,7 +208,7 @@ proptest! {
                 (list (> mono2 mono1) (>= real2 real1))))
         "#;
 
-        let result = eval(expr);
+        let result = eval_source(expr);
         prop_assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
         let times_list = result.unwrap();

@@ -16,7 +16,9 @@
 
 mod binding;
 mod call;
+mod destructure;
 mod forms;
+mod lambda;
 mod special;
 
 use super::binding::{Binding, CaptureInfo, CaptureKind};

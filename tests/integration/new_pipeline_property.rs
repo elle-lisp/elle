@@ -3,19 +3,9 @@
 // These tests verify semantic correctness by checking mathematical properties
 // hold when code is compiled and executed through the new pipeline.
 
-use elle::pipeline::eval as pipeline_eval;
-use elle::primitives::{init_stdlib, register_primitives};
-use elle::{SymbolTable, Value, VM};
+use crate::common::eval_source;
+use elle::Value;
 use proptest::prelude::*;
-
-/// Helper to evaluate code using the new pipeline
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    init_stdlib(&mut vm, &mut symbols);
-    pipeline_eval(input, &mut symbols, &mut vm)
-}
 
 // ============================================================================
 // Arithmetic Properties
@@ -29,8 +19,8 @@ proptest! {
         let expr1 = format!("(+ {} {})", a, b);
         let expr2 = format!("(+ {} {})", b, a);
 
-        let r1 = eval(&expr1);
-        let r2 = eval(&expr2);
+        let r1 = eval_source(&expr1);
+        let r2 = eval_source(&expr2);
 
         prop_assert!(r1.is_ok(), "expr1 failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "expr2 failed: {:?}", r2);
@@ -42,8 +32,8 @@ proptest! {
         let expr1 = format!("(+ (+ {} {}) {})", a, b, c);
         let expr2 = format!("(+ {} (+ {} {}))", a, b, c);
 
-        let r1 = eval(&expr1);
-        let r2 = eval(&expr2);
+        let r1 = eval_source(&expr1);
+        let r2 = eval_source(&expr2);
 
         prop_assert!(r1.is_ok(), "expr1 failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "expr2 failed: {:?}", r2);
@@ -53,7 +43,7 @@ proptest! {
     #[test]
     fn addition_identity(a in -1000i64..1000) {
         let expr = format!("(+ {} 0)", a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -64,8 +54,8 @@ proptest! {
         let expr1 = format!("(* {} {})", a, b);
         let expr2 = format!("(* {} {})", b, a);
 
-        let r1 = eval(&expr1);
-        let r2 = eval(&expr2);
+        let r1 = eval_source(&expr1);
+        let r2 = eval_source(&expr2);
 
         prop_assert!(r1.is_ok(), "expr1 failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "expr2 failed: {:?}", r2);
@@ -75,7 +65,7 @@ proptest! {
     #[test]
     fn multiplication_identity(a in -1000i64..1000) {
         let expr = format!("(* {} 1)", a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -84,7 +74,7 @@ proptest! {
     #[test]
     fn subtraction_inverse_of_addition(a in -500i64..500, b in -500i64..500) {
         let expr = format!("(- (+ {} {}) {})", a, b, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -93,7 +83,7 @@ proptest! {
     #[test]
     fn division_inverse_of_multiplication(a in -100i64..100, b in 1i64..100) {
         let expr = format!("(/ (* {} {}) {})", a, b, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -110,7 +100,7 @@ proptest! {
     #[test]
     fn equality_reflexive(a in -1000i64..1000) {
         let expr = format!("(= {} {})", a, a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -121,8 +111,8 @@ proptest! {
         let expr1 = format!("(= {} {})", a, b);
         let expr2 = format!("(= {} {})", b, a);
 
-        let r1 = eval(&expr1);
-        let r2 = eval(&expr2);
+        let r1 = eval_source(&expr1);
+        let r2 = eval_source(&expr2);
 
         prop_assert!(r1.is_ok(), "expr1 failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "expr2 failed: {:?}", r2);
@@ -132,7 +122,7 @@ proptest! {
     #[test]
     fn less_than_irreflexive(a in -1000i64..1000) {
         let expr = format!("(< {} {})", a, a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(false));
@@ -144,8 +134,8 @@ proptest! {
             let expr1 = format!("(< {} {})", a, b);
             let expr2 = format!("(< {} {})", b, a);
 
-            let r1 = eval(&expr1);
-            let r2 = eval(&expr2);
+            let r1 = eval_source(&expr1);
+            let r2 = eval_source(&expr2);
 
             prop_assert!(r1.is_ok());
             prop_assert!(r2.is_ok());
@@ -165,7 +155,7 @@ proptest! {
     #[test]
     fn if_true_returns_then(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(if #t {} {})", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -174,7 +164,7 @@ proptest! {
     #[test]
     fn if_false_returns_else(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(if #f {} {})", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -184,7 +174,7 @@ proptest! {
     fn if_with_computed_condition(a in -100i64..100, b in -100i64..100) {
         // (if (< a b) a b) should return the smaller value
         let expr = format!("(if (< {} {}) {} {})", a, b, a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if a < b { a } else { b };
@@ -198,7 +188,7 @@ proptest! {
             "(if (< {} {}) (if (< {} {}) {} {}) {})",
             a, b, a, c, a, c, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
     }
@@ -214,7 +204,7 @@ proptest! {
     #[test]
     fn let_binds_value(a in -1000i64..1000) {
         let expr = format!("(let ((x {})) x)", a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -223,7 +213,7 @@ proptest! {
     #[test]
     fn let_shadows_outer(outer in -100i64..100, inner in -100i64..100) {
         let expr = format!("(let ((x {})) (let ((x {})) x))", outer, inner);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(inner));
@@ -236,7 +226,7 @@ proptest! {
             "(let ((x {})) (begin (let ((x {})) x) x))",
             outer, inner
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(outer));
@@ -245,7 +235,7 @@ proptest! {
     #[test]
     fn let_multiple_bindings(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(let ((x {}) (y {})) (+ x y))", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -262,7 +252,7 @@ proptest! {
     #[test]
     fn lambda_identity(a in -1000i64..1000) {
         let expr = format!("((fn (x) x) {})", a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -271,7 +261,7 @@ proptest! {
     #[test]
     fn lambda_constant(a in -100i64..100, b in -100i64..100) {
         let expr = format!("((fn (x) {}) {})", b, a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -283,7 +273,7 @@ proptest! {
             "(let ((y {})) ((fn (x) (+ x y)) {}))",
             captured, arg
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(arg + captured));
@@ -292,7 +282,7 @@ proptest! {
     #[test]
     fn lambda_multiple_args(a in -50i64..50, b in -50i64..50, c in -50i64..50) {
         let expr = format!("((fn (x y z) (+ x (+ y z))) {} {} {})", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
@@ -309,7 +299,7 @@ proptest! {
     #[test]
     fn list_first_returns_first(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(first (list {} {}))", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -319,7 +309,7 @@ proptest! {
     fn list_length_correct(len in 0usize..10) {
         let elements: Vec<String> = (0..len).map(|i| i.to_string()).collect();
         let expr = format!("(length (list {}))", elements.join(" "));
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(len as i64));
@@ -328,7 +318,7 @@ proptest! {
     #[test]
     fn cons_then_first(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(first (cons {} {}))", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -337,7 +327,7 @@ proptest! {
     #[test]
     fn cons_then_rest(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(rest (cons {} {}))", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -355,7 +345,7 @@ proptest! {
     fn not_involution(b in prop::bool::ANY) {
         let bool_str = if b { "#t" } else { "#f" };
         let expr = format!("(not (not {}))", bool_str);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(b));
@@ -365,7 +355,7 @@ proptest! {
     fn and_with_false_is_false(b in prop::bool::ANY) {
         let bool_str = if b { "#t" } else { "#f" };
         let expr = format!("(and {} #f)", bool_str);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(false));
@@ -375,7 +365,7 @@ proptest! {
     fn or_with_true_is_true(b in prop::bool::ANY) {
         let bool_str = if b { "#t" } else { "#f" };
         let expr = format!("(or {} #t)", bool_str);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -390,8 +380,8 @@ proptest! {
         let expr1 = format!("(not (and {} {}))", a_str, b_str);
         let expr2 = format!("(or (not {}) (not {}))", a_str, b_str);
 
-        let r1 = eval(&expr1);
-        let r2 = eval(&expr2);
+        let r1 = eval_source(&expr1);
+        let r2 = eval_source(&expr2);
 
         prop_assert!(r1.is_ok());
         prop_assert!(r2.is_ok());
@@ -409,7 +399,7 @@ proptest! {
     #[test]
     fn match_literal_exact(a in -100i64..100) {
         let expr = format!("(match {} ({} \"hit\") (_ \"miss\"))", a, a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("hit"));
@@ -420,7 +410,7 @@ proptest! {
         // Match against a different literal, should fall to wildcard
         let other = a.wrapping_add(1);
         let expr = format!("(match {} ({} \"hit\") (_ \"miss\"))", a, other);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("miss"));
@@ -429,7 +419,7 @@ proptest! {
     #[test]
     fn match_with_computed_body(a in -50i64..50, b in -50i64..50) {
         let expr = format!("(match {} ({} (+ {} {})) (_ 0))", a, a, a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -451,7 +441,7 @@ proptest! {
         } else {
             format!("(length [{}])", elements.join(" "))
         };
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(len as i64));
@@ -460,7 +450,7 @@ proptest! {
     #[test]
     fn array_ref_first(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(array-ref [{} {}] 0)", a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -480,7 +470,7 @@ proptest! {
         let b = a.wrapping_add(1);
         let c = a.wrapping_add(2);
         let expr = format!("(match {} ({} \"first\") ({} \"second\") ({} \"third\") (_ \"default\"))", a, a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("first"));
@@ -492,7 +482,7 @@ proptest! {
         let b = a.wrapping_add(1);
         let c = a.wrapping_add(2);
         let expr = format!("(match {} ({} \"first\") ({} \"second\") ({} \"third\") (_ \"default\"))", b, a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("second"));
@@ -504,7 +494,7 @@ proptest! {
         let b = a.wrapping_add(1);
         let c = a.wrapping_add(2);
         let expr = format!("(match {} ({} \"first\") ({} \"second\") ({} \"third\") (_ \"default\"))", c, a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("third"));
@@ -514,7 +504,7 @@ proptest! {
     fn match_with_arithmetic_in_body(a in -50i64..50, b in -50i64..50) {
         // Match with computation in body (the bug we just fixed)
         let expr = format!("(match {} ({} (+ {} {})) (_ 0))", a, a, a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -523,7 +513,7 @@ proptest! {
     #[test]
     fn match_nil_pattern(a in -100i64..100) {
         let expr = format!("(match nil (nil \"is-nil\") ({} \"is-num\") (_ \"other\"))", a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("is-nil"));
@@ -548,7 +538,7 @@ proptest! {
             "(let ((sum 0)) (begin (each x (list {}) (set! sum (+ sum x))) sum))",
             list_str
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (1..=len as i64).sum();
@@ -559,7 +549,7 @@ proptest! {
     fn each_empty_list_no_iteration(a in -100i64..100) {
         // Each over empty list should not execute body, return nil
         let expr = format!("(let ((x {})) (begin (each y (list) (set! x 999)) x))", a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a)); // x unchanged
@@ -586,7 +576,7 @@ proptest! {
         }
         expr.push(')');
 
-        let result = eval(&expr);
+        let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(increments as i64));
     }
@@ -600,7 +590,7 @@ proptest! {
                 (begin (c1) (c1) (c2) (list (c1) (c2))))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         // c1 called 3 times: a+1, a+2, a+3
@@ -621,7 +611,7 @@ proptest! {
                  (begin {})))",
             start, calls
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(start + increments as i64));
@@ -636,7 +626,7 @@ proptest! {
                  (begin (c) (c) (c))))",
             start
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(start + 3));
@@ -658,7 +648,7 @@ proptest! {
                    (+ (c1) (c2)))))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int((a + 3) + (b + 2)));
@@ -672,7 +662,7 @@ proptest! {
                  (begin (add) (add) x)))",
             outer, delta
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(outer + 2 * delta));
@@ -689,7 +679,7 @@ proptest! {
                  (begin (inc) (inc) (dec) (get))))",
             init
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(init + 1)); // +2 -1 = +1
@@ -705,7 +695,7 @@ proptest! {
                  (begin (outer {}) (outer {}))))",
             a, b, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + b));
@@ -721,7 +711,7 @@ proptest! {
                  (begin (m) (m) (m))))",
             delta, param
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(param + 3 * delta));
@@ -740,7 +730,7 @@ proptest! {
                  (begin {})))",
             init, calls
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = init + values.iter().sum::<i64>();
@@ -762,7 +752,7 @@ proptest! {
             "(if {} (let ((x {})) x) (let ((y {})) y))",
             cond_str, a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if cond { a } else { b };
@@ -773,7 +763,7 @@ proptest! {
     fn if_in_lambda_body(cond in prop::bool::ANY, a in -100i64..100, b in -100i64..100) {
         let cond_str = if cond { "#t" } else { "#f" };
         let expr = format!("((fn () (if {} {} {})))", cond_str, a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if cond { a } else { b };
@@ -786,7 +776,7 @@ proptest! {
             "((fn (x) (match x ({} \"a\") ({} \"b\") (_ \"other\"))) {})",
             a, b, a
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("a"));
@@ -798,7 +788,7 @@ proptest! {
             "(match {} ({} ((fn (x) (+ x {})) {})) (_ 0))",
             a, a, b, a
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -815,7 +805,7 @@ proptest! {
     #[test]
     fn begin_returns_last(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
         let expr = format!("(begin {} {} {})", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(c));
@@ -828,7 +818,7 @@ proptest! {
             "(let ((x {})) (begin (set! x {}) x))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -845,7 +835,7 @@ proptest! {
     #[test]
     fn cond_first_true(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
         let expr = format!("(cond (#t {}) (#t {}) (else {}))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -854,7 +844,7 @@ proptest! {
     #[test]
     fn cond_falls_through_to_else(a in -100i64..100) {
         let expr = format!("(cond (#f 1) (#f 2) (else {}))", a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -866,7 +856,7 @@ proptest! {
             "(cond ((< {} {}) \"less\") ((= {} {}) \"equal\") (else \"greater\"))",
             a, threshold, a, threshold
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if a < threshold {
@@ -890,7 +880,7 @@ proptest! {
     #[test]
     fn quasiquote_with_unquote(a in -100i64..100) {
         let expr = format!("(let ((x {})) `(1 ,x 3))", a);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         // If quasiquote is supported, check result is a list with x interpolated
         if let Ok(val) = result {
@@ -936,7 +926,7 @@ proptest! {
                ((make-adder {}) {}))",
             n, x
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x + n));
@@ -949,7 +939,7 @@ proptest! {
                ((make-mult {}) {}))",
             n, x
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x * n));
@@ -967,7 +957,7 @@ proptest! {
                 (composed {}))",
             a
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int((a * 2) + 1));
@@ -986,7 +976,7 @@ proptest! {
         }
         expr.push(')');
 
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(start + n as i64));
@@ -1008,7 +998,7 @@ proptest! {
                ((curry-add {}) {}))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -1029,7 +1019,7 @@ proptest! {
                (fact {}))",
             n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (1..=n as i64).product();
@@ -1044,7 +1034,7 @@ proptest! {
                (sum-to {}))",
             n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (0..=n as i64).sum();
@@ -1060,7 +1050,7 @@ proptest! {
                (my-length (list {})))",
             list_str
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(len as i64));
@@ -1073,7 +1063,7 @@ proptest! {
                (sum-iter {} 0))",
             n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (0..=n as i64).sum();
@@ -1088,7 +1078,7 @@ proptest! {
                (is-even {}))",
             n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(n % 2 == 0));
@@ -1109,7 +1099,7 @@ proptest! {
                (+ ((first fns) {}) ((first (rest fns)) {})))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int((a + 1) + (b * 2)));
@@ -1123,7 +1113,7 @@ proptest! {
                ((f {}) {}))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -1144,7 +1134,7 @@ proptest! {
                (+ (first result) (+ (first (rest result)) (first (rest (rest result))))))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int((a+1) + (b+1) + (c+1)));
@@ -1157,7 +1147,7 @@ proptest! {
                (list (first result) (first (rest result))))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         if let Ok(vec) = result.unwrap().list_to_vec() {
@@ -1172,7 +1162,7 @@ proptest! {
         let elements: Vec<String> = (0..len).map(|i| i.to_string()).collect();
         let list_str = elements.join(" ");
         let expr = format!("(length (map (fn (x) x) (list {})))", list_str);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(len as i64));
@@ -1184,7 +1174,7 @@ proptest! {
             "(length (filter (fn (x) (> x 0)) (list {} {} {})))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = [a, b, c].iter().filter(|&&x| x > 0).count() as i64;
@@ -1197,7 +1187,7 @@ proptest! {
             "(length (filter (fn (x) #t) (list {} {})))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(2));
@@ -1209,7 +1199,7 @@ proptest! {
             "(length (filter (fn (x) #f) (list {} {})))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(0));
@@ -1218,7 +1208,7 @@ proptest! {
     #[test]
     fn fold_sum(a in -30i64..30, b in -30i64..30, c in -30i64..30) {
         let expr = format!("(fold + 0 (list {} {} {}))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
@@ -1227,7 +1217,7 @@ proptest! {
     #[test]
     fn fold_product(a in 1i64..10, b in 1i64..10, c in 1i64..10) {
         let expr = format!("(fold * 1 (list {} {} {}))", a, b, c);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a * b * c));
@@ -1236,7 +1226,7 @@ proptest! {
     #[test]
     fn fold_with_initial(init in -50i64..50, a in -30i64..30, b in -30i64..30) {
         let expr = format!("(fold + {} (list {} {}))", init, a, b);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(init + a + b));
@@ -1245,7 +1235,7 @@ proptest! {
     #[test]
     fn fold_empty_returns_initial(init in -100i64..100) {
         let expr = format!("(fold + {} (list))", init);
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(init));
@@ -1258,7 +1248,7 @@ proptest! {
             "(fold + 0 (map (fn (x) (* x 2)) (list {} {} {})))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
@@ -1271,7 +1261,7 @@ proptest! {
             "(fold + 0 (filter (fn (x) (> x 0)) (list {} {} {})))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = [a, b, c].iter().filter(|&&x| x > 0).sum();
@@ -1287,7 +1277,7 @@ proptest! {
                   (+ (first result) (first (rest result)))))",
             n, a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int((a + n) + (b + n)));
@@ -1309,7 +1299,7 @@ proptest! {
                    (list {} {} {}))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "define in fold lambda failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
@@ -1328,7 +1318,7 @@ proptest! {
                    (list {} {}))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "nested define in fold failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(2 * (a + 1) + 2 * (b + 1)));
@@ -1349,7 +1339,7 @@ proptest! {
                      (list {} {})))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "function with define called from fold failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int((2 * a + 1) + (2 * b + 1)));
@@ -1371,7 +1361,7 @@ proptest! {
                    (list {} {}))",
             a, b, a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "nested fold with define failed: {:?}", result);
         // Each outer element multiplied by each inner element, summed
@@ -1392,7 +1382,7 @@ proptest! {
                    (list {} {}))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "define in fold with strings failed: {:?}", result);
         let expected = format!("[{}][{}]", a, b);
@@ -1410,7 +1400,7 @@ proptest! {
                             (list {} {} {})))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "map with internal define failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a*a + b*b + c*c));
@@ -1427,7 +1417,7 @@ proptest! {
                              (list {} {} {})))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "filter with internal define failed: {:?}", result);
         let expected = [a, b, c].iter().filter(|&&x| x.abs() > 5).count() as i64;
@@ -1462,7 +1452,7 @@ proptest! {
                (fold-acc process 0 (list {} {} {})))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "parameter name collision bug: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
@@ -1486,7 +1476,7 @@ proptest! {
                (fold-init process 0 (list {} {} {})))",
             a, b, c
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "fold-init failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
@@ -1509,7 +1499,7 @@ proptest! {
                (((outer {}) {}) 3))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "deeply nested lambdas with locals failed: {:?}", result);
         // outer-local = a * 2
@@ -1531,7 +1521,7 @@ proptest! {
                  (+ (f) x)))",
             outer_val, inner_val
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "local shadows captured variable failed: {:?}", result);
         // f returns inner_val (the shadowing local)
@@ -1559,7 +1549,7 @@ proptest! {
                  (+ (f1 {}) (f2 {}))))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "multiple closures with independent locals failed: {:?}", result);
         // f1 returns a * 2, f2 returns b * 3
@@ -1585,7 +1575,7 @@ proptest! {
                (check))",
             n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "letrec mutual recursion in lambda failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(n % 2 == 0));
@@ -1601,7 +1591,7 @@ proptest! {
                (outer {}))",
             b, a
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "nested letrec failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a * b));
@@ -1617,7 +1607,7 @@ proptest! {
                  (double-add {})))",
             outer, n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "letrec with captured outer failed: {:?}", result);
         // double-add(n) = add-base(add-base(n)) = (n + base) + base = n + 2*base
@@ -1636,7 +1626,7 @@ proptest! {
                (compute {}))",
             n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "self-recursive with local define failed: {:?}", result);
         let expected: i64 = (1..=n as i64).sum();
@@ -1657,7 +1647,7 @@ proptest! {
                  (begin {} (get))))",
             calls
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "counter in letrec failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(increments as i64));
@@ -1673,7 +1663,7 @@ proptest! {
                (f {}))",
             n
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "three-way mutual letrec failed: {:?}", result);
         let expected = match n % 3 {
@@ -1696,7 +1686,7 @@ proptest! {
                   (apply-twice double {})))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "letrec with higher order failed: {:?}", result);
         // apply-twice add-one a = a + 2
@@ -1715,7 +1705,7 @@ proptest! {
                ((outer {}) {}))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "nested lambda with define failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a * 2 + b));
@@ -1734,7 +1724,7 @@ proptest! {
                (compute))",
             a, b
         );
-        let result = eval(&expr);
+        let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "sequential defines failed: {:?}", result);
         let x = a;

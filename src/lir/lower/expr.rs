@@ -75,6 +75,7 @@ impl Lowerer {
             HirKind::Module { body, .. } => self.lower_expr(body),
             HirKind::Import { .. } => self.emit_const(LirConst::Nil),
             HirKind::ModuleRef { .. } => self.emit_const(LirConst::Nil),
+            HirKind::Eval { expr, env } => self.lower_eval(expr, env),
         }
     }
 

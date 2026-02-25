@@ -46,6 +46,11 @@ impl Expander {
         self.macros.insert(def.name.clone(), def);
     }
 
+    /// Check if any macros are registered (used to detect if prelude is loaded)
+    pub fn has_macros(&self) -> bool {
+        !self.macros.is_empty()
+    }
+
     /// Load the standard prelude macros.
     ///
     /// Parses and expands `prelude.lisp`, which registers macro

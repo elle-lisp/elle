@@ -176,7 +176,8 @@ Things that look wrong but aren't:
 ## Conventions
 
 - Files and directories: lowercase, single-word when possible.
-- Target file size: 300 lines / 5-10KB. Refactor when exceeded.
+- Target file size: 500 lines / 15KB. Dispatch tables (match-heavy) up to
+  800 lines. Primitive collections up to 400 lines. Refactor when exceeded.
 - Prefer formal types over hashes/maps for structured data.
 - Validation at boundaries, not recovery at use sites.
 - Tests reflect architecture: unit tests for modules, integration tests for

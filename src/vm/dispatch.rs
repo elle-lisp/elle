@@ -296,6 +296,11 @@ impl VM {
                 Instruction::Yield => {
                     return self.handle_yield(bytecode, constants, closure_env, ip);
                 }
+
+                // Runtime eval — compile and execute a datum
+                Instruction::Eval => {
+                    super::eval::handle_eval_instruction(self);
+                }
             }
 
             // If an error or halt signal was set by the instruction, propagate.

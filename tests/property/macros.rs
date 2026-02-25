@@ -9,37 +9,9 @@
 // 5. Named blocks with break
 // 6. Macro hygiene
 
-use elle::ffi::primitives::context::set_symbol_table;
-use elle::pipeline::{compile, compile_all};
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, Value, VM};
+use crate::common::eval_source;
+use elle::Value;
 use proptest::prelude::*;
-
-/// Helper to evaluate code using the new pipeline
-fn eval(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    match compile(input, &mut symbols) {
-        Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-        Err(_) => {
-            let wrapped = format!("(begin {})", input);
-            match compile(&wrapped, &mut symbols) {
-                Ok(result) => vm.execute(&result.bytecode).map_err(|e| e.to_string()),
-                Err(_) => {
-                    let results = compile_all(input, &mut symbols)?;
-                    let mut last_result = Value::NIL;
-                    for result in results {
-                        last_result = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-                    }
-                    Ok(last_result)
-                }
-            }
-        }
-    }
-}
 
 // ============================================================================
 // defn equivalence tests
@@ -53,8 +25,8 @@ proptest! {
     fn defn_equiv_def_fn(a in -1000i64..1000, b in -1000i64..1000) {
         let defn_code = format!("(defn f (x y) (+ x y)) (f {} {})", a, b);
         let def_code = format!("(def f (fn (x y) (+ x y))) (f {} {})", a, b);
-        let r1 = eval(&defn_code);
-        let r2 = eval(&def_code);
+        let r1 = eval_source(&defn_code);
+        let r2 = eval_source(&def_code);
         prop_assert!(r1.is_ok(), "defn code failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "def+fn code failed: {:?}", r2);
         prop_assert_eq!(format!("{}", r1.unwrap()), format!("{}", r2.unwrap()));
@@ -67,7 +39,7 @@ proptest! {
             "(defn f (x y) (+ x 1) (+ x y)) (f {} {})",
             a, b
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
@@ -76,7 +48,7 @@ proptest! {
     #[test]
     fn defn_single_param(x in -1000i64..1000) {
         let code = format!("(defn double (x) (* x 2)) (double {})", x);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x * 2));
     }
@@ -88,7 +60,7 @@ proptest! {
             "(defn sum3 (a b c) (+ a (+ b c))) (sum3 {} {} {})",
             a, b, c
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
     }
@@ -100,7 +72,7 @@ proptest! {
             "(defn abs (x) (if (< x 0) (- 0 x) x)) (abs {})",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x.abs()));
     }
@@ -114,7 +86,7 @@ proptest! {
             "(defn fact (n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact {})",
             n
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(expected as i64));
     }
@@ -131,7 +103,7 @@ proptest! {
     #[test]
     fn let_star_sequential(a in -500i64..500, b in -500i64..500) {
         let code = format!("(let* ((x {}) (y (+ x {}))) y)", a, b);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
@@ -141,8 +113,8 @@ proptest! {
     fn let_star_equiv_nested_let(a in -500i64..500, b in -500i64..500) {
         let star_code = format!("(let* ((x {}) (y {})) (+ x y))", a, b);
         let nested_code = format!("(let ((x {})) (let ((y {})) (+ x y)))", a, b);
-        let r1 = eval(&star_code);
-        let r2 = eval(&nested_code);
+        let r1 = eval_source(&star_code);
+        let r2 = eval_source(&nested_code);
         prop_assert!(r1.is_ok(), "let* code failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "nested let code failed: {:?}", r2);
         prop_assert_eq!(format!("{}", r1.unwrap()), format!("{}", r2.unwrap()));
@@ -155,7 +127,7 @@ proptest! {
             "(let* ((x {}) (y (+ x {})) (z (+ y {}))) z)",
             a, b, c
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
     }
@@ -164,7 +136,7 @@ proptest! {
     #[test]
     fn let_star_empty_bindings(v in -1000i64..1000) {
         let code = format!("(let* () {})", v);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v));
     }
@@ -173,7 +145,7 @@ proptest! {
     #[test]
     fn let_star_single_binding(x in -1000i64..1000) {
         let code = format!("(let* ((y {})) y)", x);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x));
     }
@@ -185,7 +157,7 @@ proptest! {
             "(let* ((y (* {} 2)) (z (+ y 1))) z)",
             x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         // y = x * 2, z = y + 1 = 2x + 1
         prop_assert_eq!(result.unwrap(), Value::int(2 * x + 1));
@@ -204,8 +176,8 @@ proptest! {
     fn thread_first_single(v in -1000i64..1000, a in -1000i64..1000) {
         let threaded = format!("(-> {} (+ {}))", v, a);
         let manual = format!("(+ {} {})", v, a);
-        let r1 = eval(&threaded);
-        let r2 = eval(&manual);
+        let r1 = eval_source(&threaded);
+        let r2 = eval_source(&manual);
         prop_assert!(r1.is_ok(), "threaded code failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "manual code failed: {:?}", r2);
         prop_assert_eq!(format!("{}", r1.unwrap()), format!("{}", r2.unwrap()));
@@ -216,8 +188,8 @@ proptest! {
     fn thread_first_chain(v in -100i64..100, a in -100i64..100, b in -100i64..100) {
         let threaded = format!("(-> {} (+ {}) (* {}))", v, a, b);
         let manual = format!("(* (+ {} {}) {})", v, a, b);
-        let r1 = eval(&threaded);
-        let r2 = eval(&manual);
+        let r1 = eval_source(&threaded);
+        let r2 = eval_source(&manual);
         prop_assert!(r1.is_ok(), "threaded code failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "manual code failed: {:?}", r2);
         prop_assert_eq!(format!("{}", r1.unwrap()), format!("{}", r2.unwrap()));
@@ -228,8 +200,8 @@ proptest! {
     fn thread_first_three_ops(v in -50i64..50, a in -50i64..50, b in -50i64..50, c in -50i64..50) {
         let threaded = format!("(-> {} (+ {}) (* {}) (- {}))", v, a, b, c);
         let manual = format!("(- (* (+ {} {}) {}) {})", v, a, b, c);
-        let r1 = eval(&threaded);
-        let r2 = eval(&manual);
+        let r1 = eval_source(&threaded);
+        let r2 = eval_source(&manual);
         prop_assert!(r1.is_ok(), "threaded code failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "manual code failed: {:?}", r2);
         prop_assert_eq!(format!("{}", r1.unwrap()), format!("{}", r2.unwrap()));
@@ -239,7 +211,7 @@ proptest! {
     #[test]
     fn thread_first_identity(v in -1000i64..1000) {
         let code = format!("(-> {})", v);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v));
     }
@@ -257,8 +229,8 @@ proptest! {
     fn thread_last_single(v in -1000i64..1000, a in -1000i64..1000) {
         let threaded = format!("(->> {} (- {}))", v, a);
         let manual = format!("(- {} {})", a, v);
-        let r1 = eval(&threaded);
-        let r2 = eval(&manual);
+        let r1 = eval_source(&threaded);
+        let r2 = eval_source(&manual);
         prop_assert!(r1.is_ok(), "threaded code failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "manual code failed: {:?}", r2);
         prop_assert_eq!(format!("{}", r1.unwrap()), format!("{}", r2.unwrap()));
@@ -269,8 +241,8 @@ proptest! {
     fn thread_last_chain(v in -100i64..100, a in -100i64..100, b in -100i64..100) {
         let threaded = format!("(->> {} (- {}) (- {}))", v, a, b);
         let manual = format!("(- {} (- {} {}))", b, a, v);
-        let r1 = eval(&threaded);
-        let r2 = eval(&manual);
+        let r1 = eval_source(&threaded);
+        let r2 = eval_source(&manual);
         prop_assert!(r1.is_ok(), "threaded code failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "manual code failed: {:?}", r2);
         prop_assert_eq!(format!("{}", r1.unwrap()), format!("{}", r2.unwrap()));
@@ -280,7 +252,7 @@ proptest! {
     #[test]
     fn thread_last_identity(v in -1000i64..1000) {
         let code = format!("(->> {})", v);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v));
     }
@@ -297,7 +269,7 @@ proptest! {
     #[test]
     fn block_returns_last(v in -1000i64..1000) {
         let code = format!("(block {})", v);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v));
     }
@@ -306,7 +278,7 @@ proptest! {
     #[test]
     fn break_short_circuits(v in -1000i64..1000, dead in -1000i64..1000) {
         let code = format!("(block (break {}) {})", v, dead);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v));
     }
@@ -321,7 +293,7 @@ proptest! {
             "(block :outer (block :inner (break :outer {}) {}) 999)",
             outer_val, inner_val
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(outer_val));
     }
@@ -338,7 +310,7 @@ proptest! {
             "(block :outer (block :inner (break :inner {}) {}) {})",
             inner_val, outer_val, outer_val
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(outer_val));
     }
@@ -347,7 +319,7 @@ proptest! {
     #[test]
     fn block_multiple_exprs(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
         let code = format!("(block {} {} {})", a, b, c);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(c));
     }
@@ -359,7 +331,7 @@ proptest! {
             "(let ((x {})) (block (let ((x {})) x)) x)",
             outer_val, inner_val
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(outer_val));
     }
@@ -376,7 +348,7 @@ proptest! {
     #[test]
     fn macro_hygiene_when(v in -1000i64..1000) {
         let code = format!("(when #t {})", v);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v));
     }
@@ -385,7 +357,7 @@ proptest! {
     #[test]
     fn macro_hygiene_unless(v in -1000i64..1000) {
         let code = format!("(unless #f {})", v);
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v));
     }
@@ -397,7 +369,7 @@ proptest! {
             "(defn outer (x) (defn inner (y) (+ y x)) (inner {})) (outer {})",
             a, b
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
@@ -409,7 +381,7 @@ proptest! {
             "(defn f (x) (let* ((y (+ x {})) (z (+ y {}))) z)) (f {})",
             a, b, 0
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
@@ -421,7 +393,7 @@ proptest! {
             "(defn f (x) (-> x (+ {}))) (f {})",
             a, x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x + a));
     }
@@ -433,7 +405,7 @@ proptest! {
             "(defn f (x) (->> x (- {}))) (f {})",
             a, x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a - x));
     }
@@ -445,7 +417,7 @@ proptest! {
             "(defn f (x) (block (break {}) {})) (f {})",
             x, y, 0
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x));
     }
@@ -465,7 +437,7 @@ proptest! {
             "(defn f (x) (let* ((y (+ x {})) (z (+ y {}))) (-> z (* 2)))) (f {})",
             a, b, 0
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         // y = x + a = 0 + a = a
         // z = y + b = a + b
@@ -482,7 +454,7 @@ proptest! {
             "(block :a (block :b (block :c (break :b {}) {}) {}) {})",
             a, b, c, c
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(c));
     }
@@ -494,7 +466,7 @@ proptest! {
             "(defn f (x) (block (if (< x 0) (break {}) (+ x {})))) (f {})",
             y, 1, x
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         if x < 0 {
             prop_assert_eq!(result.unwrap(), Value::int(y));
@@ -510,7 +482,7 @@ proptest! {
             "(let* ((x {}) (y (-> x (+ {})))) y)",
             a, b
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
     }
@@ -522,7 +494,7 @@ proptest! {
             "(let* ((x {}) (y (->> x (- {})))) y)",
             a, b
         );
-        let result = eval(&code);
+        let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b - a));
     }

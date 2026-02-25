@@ -193,6 +193,11 @@ impl HirLinter {
                 self.check(expr, symbols);
             }
 
+            HirKind::Eval { expr, env } => {
+                self.check(expr, symbols);
+                self.check(env, symbols);
+            }
+
             HirKind::And(exprs) | HirKind::Or(exprs) => {
                 for e in exprs {
                     self.check(e, symbols);

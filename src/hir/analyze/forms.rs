@@ -126,6 +126,7 @@ impl<'a> Analyzer<'a> {
                         "yield" => return self.analyze_yield(items, span),
                         "match" => return self.analyze_match(items, span),
                         "cond" => return self.analyze_cond(items, span),
+                        "eval" => return self.analyze_eval(items, span),
                         "module" => return self.analyze_module(items, span),
                         "import" => return self.analyze_import(items, span),
                         // (doc <symbol>) → (doc "<symbol-name>")
@@ -442,6 +443,32 @@ impl<'a> Analyzer<'a> {
         }
 
         Ok(Hir::new(HirKind::Or(exprs), span, effect))
+    }
+
+    pub(crate) fn analyze_eval(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        // (eval expr) or (eval expr env)
+        if items.len() < 2 || items.len() > 3 {
+            return Err(format!(
+                "{}: eval: expected 1 or 2 arguments, got {}",
+                span,
+                items.len() - 1
+            ));
+        }
+        let expr = self.analyze_expr(&items[1])?;
+        let env = if items.len() == 3 {
+            self.analyze_expr(&items[2])?
+        } else {
+            Hir::pure(HirKind::Nil, span.clone())
+        };
+        let effect = Effect::yields().combine(expr.effect).combine(env.effect);
+        Ok(Hir::new(
+            HirKind::Eval {
+                expr: Box::new(expr),
+                env: Box::new(env),
+            },
+            span,
+            effect,
+        ))
     }
 
     pub(crate) fn analyze_cond(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
