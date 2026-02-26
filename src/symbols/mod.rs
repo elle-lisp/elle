@@ -221,7 +221,7 @@ pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
         "match" => "Pattern matching: (match value (pattern body) ...)",
         "while" => "Loop: (while condition body)",
         "each" => "Each loop: (each var iterable body) - iterate over a collection",
-        "forever" => "Infinite loop: (forever body...) - syntactic sugar for (while #t body...)",
+        "forever" => "Infinite loop: (forever body...) - syntactic sugar for (while true body...)",
 
         _ => return None,
     })

@@ -313,7 +313,7 @@ fn test_capture_in_conditional() {
     let code = r#"
         (let ((x 10))
           (let ((f (fn (cond) (if cond (fn () x) (fn () 0)))))
-            (let ((g (f #t)))
+            (let ((g (f true)))
               (g))))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(10));
@@ -421,8 +421,8 @@ fn test_mutual_recursion_with_captures() {
     let code = r#"
         (let ((limit 4))
           (begin
-            (def is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
-            (def is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
+            (def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
+            (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
             (is-even limit)))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::bool(true));
@@ -489,8 +489,8 @@ fn test_mutual_recursion_via_define_inside_fn() {
     let code = r#"
         ((fn ()
            (begin
-             (def is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
-             (def is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
+             (def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
+             (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
              (is-even 8))))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::bool(true));

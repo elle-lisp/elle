@@ -31,7 +31,7 @@
   ((>= score 90) "A")
   ((>= score 80) "B")
   ((>= score 70) "C")
-  (#t "F")))  ; Default case
+  (true "F")))  ; Default case
 (display "Grade for 85: ")
 (display grade)
 (newline)
@@ -66,7 +66,7 @@
   ((< age 13) "child")
   ((< age 18) "teen")
   ((< age 65) "adult")
-  (#t "senior")))
+  (true "senior")))
 (display "Status for age 25: ")
 (display status)
 (newline)
@@ -104,7 +104,7 @@
 
 (display "Example 2a-2: Forever loop concept")
 (newline)
-(display "Forever is syntactic sugar for (while #t ...)")
+(display "Forever is syntactic sugar for (while true ...)")
 (newline)
 (display "It creates an infinite loop that must be exited via break or exception")
 (newline)
@@ -265,7 +265,7 @@
 (newline)
 (display "1. cond - Multi-way conditionals")
 (newline)
-(display "2. forever - Infinite loops (syntactic sugar for while #t)")
+(display "2. forever - Infinite loops (syntactic sugar for while true)")
 (newline)
 (display "3. match - Pattern matching with literal, wildcard, and list patterns")
 (newline)

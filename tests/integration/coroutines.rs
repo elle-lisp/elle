@@ -122,7 +122,7 @@ fn test_coroutine_status_done() {
 
 #[test]
 fn test_coroutine_done_predicate() {
-    // (coro/done? co) should return #f initially, #t after completion
+    // (coro/done? co) should return false initially, true after completion
     let result = eval_source(
         r#"
          (var co (make-coroutine (fn () 42)))
@@ -132,7 +132,7 @@ fn test_coroutine_done_predicate() {
          "#,
     );
     assert!(result.is_ok());
-    // Result is a list of two booleans: [#f, #t]
+    // Result is a list of two booleans: [false, true]
     if let Some(cons) = result.unwrap().as_cons() {
         assert_eq!(cons.first, Value::bool(false), "Initially not done");
         if let Some(cons2) = cons.rest.as_cons() {
@@ -280,7 +280,7 @@ fn test_yield_star_simple() {
     );
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
     // outer yields 10, then 20, then completes with :final
-    assert_eq!(format!("{:?}", result.unwrap()), "(10 20 #t :final)");
+    assert_eq!(format!("{:?}", result.unwrap()), "(10 20 true :final)");
 }
 
 // ============================================================================
@@ -621,7 +621,7 @@ fn test_cannot_resume_errored_coroutine() {
 
 #[test]
 fn test_coroutine_predicate() {
-    // (coro? val) should return #t for coroutines
+    // (coro? val) should return true for coroutines
     let result = eval_source(
         r#"
          (var co (make-coroutine (fn () 42)))
@@ -750,7 +750,7 @@ fn test_cps_yield_in_if() {
     let result = eval_source(
         r#"
         (def gen (fn ()
-            (if #t
+            (if true
                 (yield 1)
                 (yield 2))))
         (var co (make-coroutine gen))
@@ -766,7 +766,7 @@ fn test_cps_yield_in_else() {
     let result = eval_source(
         r#"
         (def gen (fn ()
-            (if #f
+            (if false
                 (yield 1)
                 (yield 2))))
         (var co (make-coroutine gen))
@@ -841,7 +841,7 @@ fn test_cps_yield_in_and() {
     let result = eval_source(
         r#"
         (def gen (fn ()
-            (and #t (yield 42))))
+            (and true (yield 42))))
         (var co (make-coroutine gen))
         (coro/resume co)
         "#,
@@ -855,7 +855,7 @@ fn test_cps_yield_in_or() {
     let result = eval_source(
         r#"
         (def gen (fn ()
-            (or #f (yield 42))))
+            (or false (yield 42))))
         (var co (make-coroutine gen))
         (coro/resume co)
         "#,
@@ -870,8 +870,8 @@ fn test_cps_yield_in_cond() {
         r#"
         (def gen (fn ()
             (cond
-                (#f (yield 1))
-                (#t (yield 2))
+                (false (yield 1))
+                (true (yield 2))
                 (else (yield 3)))))
         (var co (make-coroutine gen))
         (coro/resume co)
@@ -963,7 +963,7 @@ fn test_yield_various_literal_types() {
           (yield 'symbol-val)
           (yield 42)
           (yield "string")
-          (yield #t)
+          (yield true)
           (yield nil)))
         (var co (make-coroutine gen))
         (list

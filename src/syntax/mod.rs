@@ -260,8 +260,8 @@ mod tests {
         let span = Span::new(0, 2, 1, 1);
         let true_syntax = Syntax::new(SyntaxKind::Bool(true), span.clone());
         let false_syntax = Syntax::new(SyntaxKind::Bool(false), span);
-        assert_eq!(true_syntax.to_string(), "#t");
-        assert_eq!(false_syntax.to_string(), "#f");
+        assert_eq!(true_syntax.to_string(), "true");
+        assert_eq!(false_syntax.to_string(), "false");
     }
 
     #[test]

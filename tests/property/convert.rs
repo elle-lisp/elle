@@ -73,7 +73,7 @@ proptest! {
 
     #[test]
     fn string_from_bool_is_correct(b in prop::bool::ANY) {
-        let source = if b { "(string #t)" } else { "(string #f)" };
+        let source = if b { "(string true)" } else { "(string false)" };
         let result = eval_source(source).unwrap();
         let s = result.as_string().expect("should be string");
         let expected = if b { "true" } else { "false" };

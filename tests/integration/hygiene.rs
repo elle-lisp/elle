@@ -116,14 +116,14 @@ fn test_macro_closure_captures_callsite() {
 
 #[test]
 fn test_macro_with_conditional_body_regression() {
-    // This was a regression: wrapping #f in a syntax object made it truthy.
+    // This was a regression: wrapping false in a syntax object made it truthy.
     // The hybrid wrapping approach (atoms via Quote, compounds via SyntaxLiteral)
     // fixes this.
     let code = r#"
         (defmacro when-true (cond body)
           `(if ,cond ,body nil))
 
-        (when-true #f 42)
+        (when-true false 42)
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::NIL);
 }
@@ -134,7 +134,7 @@ fn test_macro_with_conditional_body_true() {
         (defmacro when-true (cond body)
           `(if ,cond ,body nil))
 
-        (when-true #t 42)
+        (when-true true 42)
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(42));
 }
@@ -258,7 +258,7 @@ fn test_anaphoric_if_false_branch() {
           `(let ((,(datum->syntax test 'it) ,test))
              (if ,(datum->syntax test 'it) ,then ,else)))
 
-        (aif #f 42 0)
+        (aif false 42 0)
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(0));
 }

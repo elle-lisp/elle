@@ -365,7 +365,7 @@ fn test_match_syntax_parsing() {
 fn test_match_wildcard_catches_any() {
     // Wildcard pattern matches any value
     assert!(eval_source("(match 42 (_ \"matched\"))").is_ok());
-    assert!(eval_source("(match \"test\" (_ #t))").is_ok());
+    assert!(eval_source("(match \"test\" (_ true))").is_ok());
 }
 
 #[test]
@@ -387,7 +387,7 @@ fn test_match_returns_result_expression() {
 #[test]
 fn test_match_clause_ordering() {
     // First matching clause should be used
-    assert!(eval_source("(match 5 (5 #t) (5 #f))").is_ok());
+    assert!(eval_source("(match 5 (5 true) (5 false))").is_ok());
 }
 
 #[test]
@@ -628,7 +628,7 @@ fn test_match_guard_basic() {
 #[test]
 fn test_match_guard_with_literal() {
     assert_eq!(
-        eval_source("(match 10 (10 when #f \"nope\") (10 \"yes\"))").unwrap(),
+        eval_source("(match 10 (10 when false \"nope\") (10 \"yes\"))").unwrap(),
         Value::string("yes")
     );
 }
@@ -736,7 +736,7 @@ fn test_variadic_macro_arity_error() {
 fn test_variadic_macro_when_multi_body() {
     // when with multiple body expressions via & rest
     assert_eq!(
-        eval_source("(begin (defmacro my-when (test & body) `(if ,test (begin ,@body) nil)) (my-when #t 1 2 3))")
+        eval_source("(begin (defmacro my-when (test & body) `(if ,test (begin ,@body) nil)) (my-when true 1 2 3))")
             .unwrap(),
         Value::int(3)
     );

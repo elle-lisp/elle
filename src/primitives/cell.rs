@@ -89,7 +89,7 @@ pub fn prim_box_set(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// (box? value) -> bool
 ///
-/// Returns #t if the value is a box, #f otherwise
+/// Returns true if the value is a box, false otherwise
 pub fn prim_box_p(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -146,7 +146,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if a value is a box.",
         params: &["value"],
         category: "cell",
-        example: "(box? (box 1)) ;=> #t\n(box? 42) ;=> #f",
+        example: "(box? (box 1)) ;=> true\n(box? 42) ;=> false",
         aliases: &[],
     },
 ];

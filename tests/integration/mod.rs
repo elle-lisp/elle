@@ -77,3 +77,6 @@ mod ffi {
 mod bracket_errors {
     include!("bracket_errors.rs");
 }
+mod booleans {
+    include!("booleans.rs");
+}

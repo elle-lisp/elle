@@ -137,7 +137,7 @@
 (def expr-gen (fn ()
   (yield (+ 1 2 3))
   (yield (* 4 5))
-  (yield (if #t 100 200))))
+  (yield (if true 100 200))))
 
 (var co-expr (coro/new expr-gen))
 (assert-eq (coro/resume co-expr) 6 "Sum expression")

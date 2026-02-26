@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn test_compile_if() {
         let (mut symbols, _) = setup();
-        let result = compile("(if #t 1 2)", &mut symbols);
+        let result = compile("(if true 1 2)", &mut symbols);
         assert!(result.is_ok());
     }
 
@@ -501,28 +501,28 @@ mod tests {
     #[test]
     fn test_compile_and() {
         let (mut symbols, _) = setup();
-        let result = compile("(and #t #t #f)", &mut symbols);
+        let result = compile("(and true true false)", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_or() {
         let (mut symbols, _) = setup();
-        let result = compile("(or #f #f #t)", &mut symbols);
+        let result = compile("(or false false true)", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_while() {
         let (mut symbols, _) = setup();
-        let result = compile("(while #f nil)", &mut symbols);
+        let result = compile("(while false nil)", &mut symbols);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_cond() {
         let (mut symbols, _) = setup();
-        let result = compile("(cond (#t 1) (else 2))", &mut symbols);
+        let result = compile("(cond (true 1) (else 2))", &mut symbols);
         assert!(result.is_ok());
     }
 
@@ -577,7 +577,7 @@ mod tests {
     #[test]
     fn test_eval_if_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(if #t 42 0)", &mut symbols, &mut vm);
+        let result = eval("(if true 42 0)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(42)),
             Err(e) => panic!("Expected Ok(42), got Err: {}", e),
@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn test_eval_if_false() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(if #f 42 0)", &mut symbols, &mut vm);
+        let result = eval("(if false 42 0)", &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::int(0)),
             Err(e) => panic!("Expected Ok(0), got Err: {}", e),
@@ -770,21 +770,25 @@ mod tests {
     #[test]
     fn test_eval_cond_first_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(cond (#t 42))", &mut symbols, &mut vm);
+        let result = eval("(cond (true 42))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_eval_cond_second_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(cond (#f 1) (#t 42))", &mut symbols, &mut vm);
+        let result = eval("(cond (false 1) (true 42))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
     #[test]
     fn test_eval_cond_else() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(cond (#f 1) (#f 2) (else 42))", &mut symbols, &mut vm);
+        let result = eval(
+            "(cond (false 1) (false 2) (else 42))",
+            &mut symbols,
+            &mut vm,
+        );
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
@@ -800,14 +804,14 @@ mod tests {
     #[test]
     fn test_eval_and_all_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(and #t #t #t)", &mut symbols, &mut vm);
+        let result = eval("(and true true true)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(true));
     }
 
     #[test]
     fn test_eval_and_one_false() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(and #t #f #t)", &mut symbols, &mut vm);
+        let result = eval("(and true false true)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(false));
     }
 
@@ -822,7 +826,7 @@ mod tests {
     fn test_eval_and_short_circuit() {
         let (mut symbols, mut vm) = setup();
         // If and doesn't short-circuit, this would fail trying to call nil
-        let result = eval("(and #f (nil))", &mut symbols, &mut vm);
+        let result = eval("(and false (nil))", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(false));
     }
 
@@ -838,21 +842,21 @@ mod tests {
     #[test]
     fn test_eval_or_all_false() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(or #f #f #f)", &mut symbols, &mut vm);
+        let result = eval("(or false false false)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(false));
     }
 
     #[test]
     fn test_eval_or_one_true() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(or #f #t #f)", &mut symbols, &mut vm);
+        let result = eval("(or false true false)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::bool(true));
     }
 
     #[test]
     fn test_eval_or_returns_first_truthy() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(or #f 42 99)", &mut symbols, &mut vm);
+        let result = eval("(or false 42 99)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
@@ -877,7 +881,7 @@ mod tests {
     #[test]
     fn test_eval_while_never_executes() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(while #f 42)", &mut symbols, &mut vm);
+        let result = eval("(while false 42)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::NIL);
     }
 
@@ -1024,12 +1028,12 @@ mod tests {
     fn test_intrinsic_not() {
         let (mut symbols, mut vm) = setup();
         assert_eq!(
-            eval("(not #t)", &mut symbols, &mut vm).unwrap(),
+            eval("(not true)", &mut symbols, &mut vm).unwrap(),
             crate::value::Value::bool(false)
         );
         let (mut symbols, mut vm) = setup();
         assert_eq!(
-            eval("(not #f)", &mut symbols, &mut vm).unwrap(),
+            eval("(not false)", &mut symbols, &mut vm).unwrap(),
             crate::value::Value::bool(true)
         );
     }
@@ -1217,11 +1221,11 @@ mod tests {
 (var check-safe-helper
   (fn (col remaining row-offset)
     (if (empty? remaining)
-      #t
+      true
       (let ((placed-col (first remaining)))
         (if (or (= col placed-col)
                 (= row-offset (abs (- col placed-col))))
-          #f
+          false
           (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
 
 (var safe?
@@ -1281,7 +1285,7 @@ mod tests {
         crate::context::clear_symbol_table();
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::bool(true)),
-            Err(e) => panic!("Expected Ok(#t), got Err: {}", e),
+            Err(e) => panic!("Expected Ok(true), got Err: {}", e),
         }
     }
 
@@ -1316,7 +1320,7 @@ mod tests {
         crate::context::clear_symbol_table();
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::bool(true)),
-            Err(e) => panic!("Expected Ok(#t), got Err: {}", e),
+            Err(e) => panic!("Expected Ok(true), got Err: {}", e),
         }
     }
 
@@ -1365,7 +1369,7 @@ mod tests {
         );
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::bool(true)),
-            Err(e) => panic!("Expected Ok(#t), got Err: {}", e),
+            Err(e) => panic!("Expected Ok(true), got Err: {}", e),
         }
     }
 
@@ -1375,7 +1379,7 @@ mod tests {
         let result = eval(r#"(fiber? 42)"#, &mut symbols, &mut vm);
         match result {
             Ok(v) => assert_eq!(v, crate::value::Value::bool(false)),
-            Err(e) => panic!("Expected Ok(#f), got Err: {}", e),
+            Err(e) => panic!("Expected Ok(false), got Err: {}", e),
         }
     }
 
@@ -1626,7 +1630,7 @@ mod tests {
     fn test_eval_returns_bool() {
         let (mut symbols, mut vm) = setup();
         crate::context::set_symbol_table(&mut symbols as *mut SymbolTable);
-        let result = eval("(eval '#t)", &mut symbols, &mut vm);
+        let result = eval("(eval 'true)", &mut symbols, &mut vm);
         crate::context::clear_symbol_table();
         assert_eq!(result.unwrap(), crate::value::Value::TRUE);
     }
@@ -1645,7 +1649,7 @@ mod tests {
         // eval'd code should have access to prelude macros like `when`
         let (mut symbols, mut vm) = setup();
         crate::context::set_symbol_table(&mut symbols as *mut SymbolTable);
-        let result = eval("(eval '(when #t 42))", &mut symbols, &mut vm);
+        let result = eval("(eval '(when true 42))", &mut symbols, &mut vm);
         crate::context::clear_symbol_table();
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }

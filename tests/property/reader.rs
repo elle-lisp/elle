@@ -66,11 +66,13 @@ fn arb_source_depth(depth: u32) -> BoxedStrategy<String> {
             // Integers
             10 => (INT_MIN..=INT_MAX).prop_map(|n| format!("{}", n)),
             // Booleans
-            2 => prop::bool::ANY.prop_map(|b| if b { "#t".to_string() } else { "#f".to_string() }),
+            2 => prop::bool::ANY.prop_map(|b| if b { "true".to_string() } else { "false".to_string() }),
             // nil
             1 => Just("nil".to_string()),
             // Symbols (simple identifier-safe names, excluding reserved words)
-            5 => "[a-z][a-z0-9\\-]{0,8}".prop_map(|s| s),
+            5 => "[a-z][a-z0-9\\-]{0,8}"
+                .prop_filter("not a keyword literal", |s| !matches!(s.as_str(), "nil" | "true" | "false"))
+                .prop_map(|s| s),
             // Keywords
             3 => "[a-z][a-z0-9\\-]{0,8}".prop_map(|s| format!(":{}", s)),
             // Strings (with limited character set to avoid escape issues)
@@ -131,12 +133,24 @@ proptest! {
 
     #[test]
     fn bool_roundtrip(b in prop::bool::ANY) {
-        let source = if b { "#t" } else { "#f" };
+        let source = if b { "true" } else { "false" };
         let parsed = read_syntax(source).unwrap();
         let displayed = format!("{}", parsed);
         let reparsed = read_syntax(&displayed).unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Bool roundtrip failed: {} -> {}", source, displayed);
+    }
+
+    #[test]
+    fn bool_legacy_roundtrip(b in prop::bool::ANY) {
+        let source = if b { "#t" } else { "#f" };
+        let parsed = read_syntax(source).unwrap();
+        // Display now emits "true"/"false"
+        let displayed = format!("{}", parsed);
+        let expected_display = if b { "true" } else { "false" };
+        prop_assert_eq!(&displayed, expected_display);
+        let reparsed = read_syntax(&displayed).unwrap();
+        prop_assert!(syntax_eq(&parsed, &reparsed));
     }
 
     #[test]

@@ -130,7 +130,7 @@ proptest! {
 
     #[test]
     fn yield_in_conditional(cond in prop::bool::ANY, a in -1000i64..1000, b in -1000i64..1000) {
-        let cond_str = if cond { "#t" } else { "#f" };
+        let cond_str = if cond { "true" } else { "false" };
         let code = format!(
             r#"(begin
                 (def gen (fn () (if {} (yield {}) (yield {}))))

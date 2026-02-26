@@ -116,7 +116,7 @@ impl VM {
     /// Operations:
     /// - (:"call-count" . closure) — return call count for closure
     /// - (:"doc" . name) — return formatted documentation for a primitive
-    /// - (:"global?" . symbol) — return #t if symbol is bound as a global
+    /// - (:"global?" . symbol) — return true if symbol is bound as a global
     /// - (:"fiber/self" . _) — return the currently executing fiber, or nil
     /// - (:"list-primitives" . _) — return sorted list of all primitive names
     /// - (:"primitive-meta" . name) — return struct with primitive metadata

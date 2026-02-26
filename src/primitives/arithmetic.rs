@@ -403,7 +403,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Test if integer is even.",
         params: &["n"],
         category: "arithmetic",
-        example: "(even? 4) ;=> #t\n(even? 3) ;=> #f",
+        example: "(even? 4) ;=> true\n(even? 3) ;=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -414,7 +414,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Test if integer is odd.",
         params: &["n"],
         category: "arithmetic",
-        example: "(odd? 3) ;=> #t\n(odd? 4) ;=> #f",
+        example: "(odd? 3) ;=> true\n(odd? 4) ;=> false",
         aliases: &[],
     },
 ];

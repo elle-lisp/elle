@@ -19,8 +19,8 @@ fn test_read_string() {
 
 #[test]
 fn test_read_boolean() {
-    assert_eq!(eval_source("(read \"#t\")").unwrap(), Value::TRUE);
-    assert_eq!(eval_source("(read \"#f\")").unwrap(), Value::FALSE);
+    assert_eq!(eval_source("(read \"true\")").unwrap(), Value::TRUE);
+    assert_eq!(eval_source("(read \"false\")").unwrap(), Value::FALSE);
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn test_integer_from_bad_string() {
 
 #[test]
 fn test_integer_type_error() {
-    let result = eval_source("(integer #t)");
+    let result = eval_source("(integer true)");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("type"));
 }
@@ -122,8 +122,8 @@ fn test_string_from_float() {
 
 #[test]
 fn test_string_from_bool() {
-    assert_eq!(eval_source("(string #t)").unwrap(), Value::string("true"));
-    assert_eq!(eval_source("(string #f)").unwrap(), Value::string("false"));
+    assert_eq!(eval_source("(string true)").unwrap(), Value::string("true"));
+    assert_eq!(eval_source("(string false)").unwrap(), Value::string("false"));
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn test_any_to_string() {
         Value::string("42")
     );
     assert_eq!(
-        eval_source("(any->string #t)").unwrap(),
+        eval_source("(any->string true)").unwrap(),
         Value::string("true")
     );
 }

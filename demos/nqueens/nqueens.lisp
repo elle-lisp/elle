@@ -6,11 +6,11 @@
 (var check-safe-helper
   (fn (col remaining row-offset)
     (if (empty? remaining)
-      #t
+      true
       (let ((placed-col (first remaining)))
         (if (or (= col placed-col)
                 (= row-offset (abs (- col placed-col))))
-          #f
+          false
           (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
 
 (var safe?

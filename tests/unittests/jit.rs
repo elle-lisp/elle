@@ -224,9 +224,9 @@ mod jit_tests {
         let result = eval_source(
             r#"(begin
             (defn is-even (n)
-                (if (= n 0) #t (is-odd (- n 1))))
+                (if (= n 0) true (is-odd (- n 1))))
             (defn is-odd (n)
-                (if (= n 0) #f (is-even (- n 1))))
+                (if (= n 0) false (is-even (- n 1))))
             (is-even 100))"#,
         );
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -357,7 +357,7 @@ mod jit_tests {
         let result = eval_source(
             r#"(begin
                 (defn make-fibers (n)
-                  (if (= n 0) #t
+                  (if (= n 0) true
                     (begin
                       (fiber/new (fn () n) 1)
                       (make-fibers (- n 1)))))

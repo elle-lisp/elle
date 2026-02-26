@@ -321,11 +321,11 @@ fn test_destructure_string_values() {
 #[test]
 fn test_destructure_boolean_values() {
     assert_eq!(
-        eval_source("(begin (def (a b) (list #t #f)) a)").unwrap(),
+        eval_source("(begin (def (a b) (list true false)) a)").unwrap(),
         Value::bool(true)
     );
     assert_eq!(
-        eval_source("(begin (def (a b) (list #t #f)) b)").unwrap(),
+        eval_source("(begin (def (a b) (list true false)) b)").unwrap(),
         Value::bool(false)
     );
 }

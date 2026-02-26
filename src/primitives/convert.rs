@@ -371,7 +371,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert any value to its string representation.",
         params: &["x"],
         category: "conversion",
-        example: "(any->string 42) ;=> \"42\"\n(any->string #t) ;=> \"true\"",
+        example: "(any->string 42) ;=> \"42\"\n(any->string true) ;=> \"true\"",
         aliases: &[],
     },
     PrimitiveDef {

@@ -303,7 +303,7 @@ pub fn prim_fiber_mask(args: &[Value]) -> (SignalBits, Value) {
 
 /// (fiber? value) → bool
 ///
-/// Type predicate: returns #t if the value is a fiber.
+/// Type predicate: returns true if the value is a fiber.
 pub fn prim_is_fiber(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (

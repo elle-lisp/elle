@@ -85,12 +85,12 @@ proptest! {
 
 #[test]
 fn eval_quoted_true() {
-    assert_eq!(eval_source("(eval '#t)").unwrap(), Value::TRUE);
+    assert_eq!(eval_source("(eval 'true)").unwrap(), Value::TRUE);
 }
 
 #[test]
 fn eval_quoted_false() {
-    assert_eq!(eval_source("(eval '#f)").unwrap(), Value::FALSE);
+    assert_eq!(eval_source("(eval 'false)").unwrap(), Value::FALSE);
 }
 
 // === Property: eval of quoted string is identity ===

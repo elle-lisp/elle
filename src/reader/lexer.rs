@@ -203,6 +203,7 @@ impl<'a> Lexer<'a> {
     pub fn next_token_with_loc(&mut self) -> Result<Option<TokenWithLoc<'a>>, String> {
         self.skip_whitespace();
         let loc = self.get_loc();
+        let start_pos = self.pos;
 
         match self.current() {
             None => Ok(None),
@@ -211,6 +212,7 @@ impl<'a> Lexer<'a> {
                 Ok(Some(TokenWithLoc {
                     token: Token::LeftParen,
                     loc,
+                    len: self.pos - start_pos,
                 }))
             }
             Some(')') => {
@@ -218,6 +220,7 @@ impl<'a> Lexer<'a> {
                 Ok(Some(TokenWithLoc {
                     token: Token::RightParen,
                     loc,
+                    len: self.pos - start_pos,
                 }))
             }
             Some('[') => {
@@ -225,6 +228,7 @@ impl<'a> Lexer<'a> {
                 Ok(Some(TokenWithLoc {
                     token: Token::LeftBracket,
                     loc,
+                    len: self.pos - start_pos,
                 }))
             }
             Some(']') => {
@@ -232,6 +236,7 @@ impl<'a> Lexer<'a> {
                 Ok(Some(TokenWithLoc {
                     token: Token::RightBracket,
                     loc,
+                    len: self.pos - start_pos,
                 }))
             }
             Some('{') => {
@@ -239,6 +244,7 @@ impl<'a> Lexer<'a> {
                 Ok(Some(TokenWithLoc {
                     token: Token::LeftBrace,
                     loc,
+                    len: self.pos - start_pos,
                 }))
             }
             Some('}') => {
@@ -246,6 +252,7 @@ impl<'a> Lexer<'a> {
                 Ok(Some(TokenWithLoc {
                     token: Token::RightBrace,
                     loc,
+                    len: self.pos - start_pos,
                 }))
             }
             Some('\'') => {
@@ -253,6 +260,7 @@ impl<'a> Lexer<'a> {
                 Ok(Some(TokenWithLoc {
                     token: Token::Quote,
                     loc,
+                    len: self.pos - start_pos,
                 }))
             }
             Some('`') => {
@@ -260,6 +268,7 @@ impl<'a> Lexer<'a> {
                 Ok(Some(TokenWithLoc {
                     token: Token::Quasiquote,
                     loc,
+                    len: self.pos - start_pos,
                 }))
             }
             Some(',') => {
@@ -269,11 +278,13 @@ impl<'a> Lexer<'a> {
                     Ok(Some(TokenWithLoc {
                         token: Token::UnquoteSplicing,
                         loc,
+                        len: self.pos - start_pos,
                     }))
                 } else {
                     Ok(Some(TokenWithLoc {
                         token: Token::Unquote,
                         loc,
+                        len: self.pos - start_pos,
                     }))
                 }
             }
@@ -282,6 +293,7 @@ impl<'a> Lexer<'a> {
                 Ok(Some(TokenWithLoc {
                     token: Token::ListSugar,
                     loc,
+                    len: self.pos - start_pos,
                 }))
             }
             Some(':') => {
@@ -295,15 +307,15 @@ impl<'a> Lexer<'a> {
                     Ok(Some(TokenWithLoc {
                         token: Token::Keyword(keyword),
                         loc,
+                        len: self.pos - start_pos,
                     }))
                 }
             }
-            Some('"') => self.read_string().map(|s| {
-                Some(TokenWithLoc {
-                    token: Token::String(s),
-                    loc,
-                })
-            }),
+            Some('"') => {
+                let token = Token::String(self.read_string()?);
+                let len = self.pos - start_pos;
+                Ok(Some(TokenWithLoc { token, loc, len }))
+            }
             Some(c) if c.is_ascii_digit() || c == '-' || c == '+' => {
                 // Check if it's a number or symbol
                 if let Some(next) = self.peek(1) {
@@ -313,10 +325,12 @@ impl<'a> Lexer<'a> {
                         Ok(Some(TokenWithLoc {
                             token: Token::Symbol(sym),
                             loc,
+                            len: self.pos - start_pos,
                         }))
                     } else {
-                        self.read_number()
-                            .map(|t| Some(TokenWithLoc { token: t, loc }))
+                        let token = self.read_number()?;
+                        let len = self.pos - start_pos;
+                        Ok(Some(TokenWithLoc { token, loc, len }))
                     }
                 } else if c == '-' || c == '+' {
                     let (start, end) = self.read_symbol();
@@ -324,10 +338,12 @@ impl<'a> Lexer<'a> {
                     Ok(Some(TokenWithLoc {
                         token: Token::Symbol(sym),
                         loc,
+                        len: self.pos - start_pos,
                     }))
                 } else {
-                    self.read_number()
-                        .map(|t| Some(TokenWithLoc { token: t, loc }))
+                    let token = self.read_number()?;
+                    let len = self.pos - start_pos;
+                    Ok(Some(TokenWithLoc { token, loc, len }))
                 }
             }
             Some('#') => {
@@ -338,6 +354,7 @@ impl<'a> Lexer<'a> {
                         Ok(Some(TokenWithLoc {
                             token: Token::Bool(true),
                             loc,
+                            len: self.pos - start_pos,
                         }))
                     }
                     Some('f') => {
@@ -345,6 +362,7 @@ impl<'a> Lexer<'a> {
                         Ok(Some(TokenWithLoc {
                             token: Token::Bool(false),
                             loc,
+                            len: self.pos - start_pos,
                         }))
                     }
                     _ => Err("Invalid # syntax".to_string()),
@@ -353,15 +371,30 @@ impl<'a> Lexer<'a> {
             Some(_) => {
                 let (start, end) = self.read_symbol();
                 let sym = self.slice(start, end);
+                let len = self.pos - start_pos;
                 if sym == "nil" {
                     Ok(Some(TokenWithLoc {
                         token: Token::Nil,
                         loc,
+                        len,
+                    }))
+                } else if sym == "true" {
+                    Ok(Some(TokenWithLoc {
+                        token: Token::Bool(true),
+                        loc,
+                        len,
+                    }))
+                } else if sym == "false" {
+                    Ok(Some(TokenWithLoc {
+                        token: Token::Bool(false),
+                        loc,
+                        len,
                     }))
                 } else {
                     Ok(Some(TokenWithLoc {
                         token: Token::Symbol(sym),
                         loc,
+                        len,
                     }))
                 }
             }
@@ -371,5 +404,58 @@ impl<'a> Lexer<'a> {
     pub fn next_token(&mut self) -> Result<Option<Token<'a>>, String> {
         self.next_token_with_loc()
             .map(|opt| opt.map(|twl| twl.token))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lex_single(input: &str) -> Token<'_> {
+        let mut lexer = Lexer::new(input);
+        lexer.next_token().unwrap().unwrap()
+    }
+
+    #[test]
+    fn true_word_lexes_as_bool() {
+        assert!(matches!(lex_single("true"), Token::Bool(true)));
+    }
+
+    #[test]
+    fn false_word_lexes_as_bool() {
+        assert!(matches!(lex_single("false"), Token::Bool(false)));
+    }
+
+    #[test]
+    fn hash_t_lexes_as_bool() {
+        assert!(matches!(lex_single("#t"), Token::Bool(true)));
+    }
+
+    #[test]
+    fn hash_f_lexes_as_bool() {
+        assert!(matches!(lex_single("#f"), Token::Bool(false)));
+    }
+
+    #[test]
+    fn true_question_mark_is_symbol() {
+        assert!(matches!(lex_single("true?"), Token::Symbol("true?")));
+    }
+
+    #[test]
+    fn trueish_is_symbol() {
+        assert!(matches!(lex_single("trueish"), Token::Symbol("trueish")));
+    }
+
+    #[test]
+    fn false_positive_is_symbol() {
+        assert!(matches!(
+            lex_single("false-positive"),
+            Token::Symbol("false-positive")
+        ));
+    }
+
+    #[test]
+    fn truetrue_is_symbol() {
+        assert!(matches!(lex_single("truetrue"), Token::Symbol("truetrue")));
     }
 }

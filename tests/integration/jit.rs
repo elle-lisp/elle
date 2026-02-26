@@ -120,7 +120,7 @@ fn test_jit_nil() {
 
 #[test]
 fn test_jit_bool_true() {
-    // fn() -> #t
+    // fn() -> true
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
@@ -144,7 +144,7 @@ fn test_jit_bool_true() {
 
 #[test]
 fn test_jit_bool_false() {
-    // fn() -> #f
+    // fn() -> false
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;

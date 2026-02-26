@@ -13,7 +13,7 @@ use crate::value::{error_val, Value};
 /// ```lisp
 /// (read "(+ 1 2)")   ; → '(+ 1 2)
 /// (read "42")         ; → 42
-/// (read "#t")         ; → #t
+/// (read "true")         ; → true
 /// ```
 pub fn prim_read(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {

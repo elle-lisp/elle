@@ -73,8 +73,8 @@
 (newline)
 
 ;; string-contains? Assertions
-(assert-eq (string-contains? "hello world" "world") #t "contains 'world' in 'hello world'")
-(assert-eq (string-contains? "hello" "xyz") #f "does not contain 'xyz' in 'hello'")
+(assert-eq (string-contains? "hello world" "world") true "contains 'world' in 'hello world'")
+(assert-eq (string-contains? "hello" "xyz") false "does not contain 'xyz' in 'hello'")
 (newline)
 
 ; string-starts-with?: Check if starts with prefix
@@ -89,8 +89,8 @@
 (newline)
 
 ;; string-starts-with? Assertions
-(assert-eq (string-starts-with? "hello" "hel") #t "starts with 'hel'")
-(assert-eq (string-starts-with? "hello" "world") #f "does not start with 'world'")
+(assert-eq (string-starts-with? "hello" "hel") true "starts with 'hel'")
+(assert-eq (string-starts-with? "hello" "world") false "does not start with 'world'")
 (newline)
 
 ; string-ends-with?: Check if ends with suffix
@@ -105,8 +105,8 @@
 (newline)
 
 ;; string-ends-with? Assertions
-(assert-eq (string-ends-with? "hello" "llo") #t "ends with 'llo'")
-(assert-eq (string-ends-with? "hello" "world") #f "does not end with 'world'")
+(assert-eq (string-ends-with? "hello" "llo") true "ends with 'llo'")
+(assert-eq (string-ends-with? "hello" "world") false "does not end with 'world'")
 (newline)
 
 ; string-join: Join list of strings with separator

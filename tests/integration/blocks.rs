@@ -103,7 +103,7 @@ fn break_inner_value_used_by_outer() {
 #[test]
 fn break_in_if_true() {
     assert_eq!(
-        run("(block :done (if #t (break :done 42) 0) 99)"),
+        run("(block :done (if true (break :done 42) 0) 99)"),
         Value::int(42)
     );
 }
@@ -112,7 +112,7 @@ fn break_in_if_true() {
 fn break_in_if_false() {
     // Condition is false, so break is not taken; block returns 99
     assert_eq!(
-        run("(block :done (if #f (break :done 42) 0) 99)"),
+        run("(block :done (if false (break :done 42) 0) 99)"),
         Value::int(99)
     );
 }
@@ -124,7 +124,7 @@ fn break_in_loop() {
         run("(begin
                (var i 0)
                (block :done
-                 (while #t
+                 (while true
                    (begin
                      (if (= i 5) (break :done i) nil)
                      (set! i (+ i 1))))))"),
@@ -194,11 +194,11 @@ fn first_break_wins() {
 fn conditional_breaks() {
     // Different breaks taken based on condition
     assert_eq!(
-        run("(block :done (if #t (break :done 10) (break :done 20)) 99)"),
+        run("(block :done (if true (break :done 10) (break :done 20)) 99)"),
         Value::int(10)
     );
     assert_eq!(
-        run("(block :done (if #f (break :done 10) (break :done 20)) 99)"),
+        run("(block :done (if false (break :done 10) (break :done 20)) 99)"),
         Value::int(20)
     );
 }
@@ -229,7 +229,7 @@ fn break_in_while() {
     assert_eq!(
         run("(begin
                (var i 0)
-               (while #t
+               (while true
                  (begin
                    (if (= i 5) (break :while i) nil)
                    (set! i (+ i 1)))))"),
@@ -243,7 +243,7 @@ fn break_in_while_unnamed() {
     assert_eq!(
         run("(begin
                (var i 0)
-               (while #t
+               (while true
                  (begin
                    (if (= i 3) (break nil) nil)
                    (set! i (+ i 1)))))"),

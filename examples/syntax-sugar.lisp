@@ -181,10 +181,10 @@
     (display "=== Forever - Infinite Loop Sugar ===")
     (newline)
     
-    ; forever is syntactic sugar for (while #t ...)
+    ; forever is syntactic sugar for (while true ...)
     ; Use case: Infinite loops that continue until some condition breaks them
     
-    (display "Forever is syntactic sugar for (while #t ...)")
+    (display "Forever is syntactic sugar for (while true ...)")
     (newline)
     (newline)
     
@@ -194,7 +194,7 @@
     (display "Concept: forever creates an infinite loop")
     (newline)
     (var count 0)
-    (var should-continue #t)
+    (var should-continue true)
     (display "Simulating forever with while #t:")
     (newline)
     (while should-continue
@@ -207,7 +207,7 @@
           (begin
             (display "  Exiting loop")
             (newline)
-            (set! should-continue #f)))))
+            (set! should-continue false)))))
     (display "Counter after loop: ")
     (display count)
     (newline)
@@ -219,7 +219,7 @@
     (newline)
     (var x 0)
     (var y 0)
-    (var keep-looping #t)
+    (var keep-looping true)
     (display "Simulating forever with while #t:")
     (newline)
     (while keep-looping
@@ -232,7 +232,7 @@
         (display y)
         (newline)
         (if (>= x 2)
-          (set! keep-looping #f))))
+          (set! keep-looping false))))
     (display "Final: x = ")
     (display x)
     (display ", y = ")
@@ -241,19 +241,19 @@
     (assert-eq x 2 "Loop should exit when x reaches 2")
     (assert-eq y 4 "y should be 4 after loop")
     
-    ; Example 3: Comparison with while #t
+    ; Example 3: Comparison with while true
     (newline)
-    (display "Example 3: Forever vs (while #t ...)")
+    (display "Example 3: Forever vs (while true ...)")
     (newline)
-    (display "Forever is equivalent to: (while #t body)")
+    (display "Forever is equivalent to: (while true body)")
     (newline)
     (var result-forever 0)
-    (var loop-active #t)
+    (var loop-active true)
     (while loop-active
       (begin
         (set! result-forever (+ result-forever 1))
         (if (= result-forever 5)
-          (set! loop-active #f))))
+          (set! loop-active false))))
     (display "Result from forever simulation: ")
     (display result-forever)
     (newline)
@@ -276,7 +276,7 @@
     (newline)
     (display "2. Thread-last (->>) - Insert value as last argument")
     (newline)
-    (display "3. Forever - Infinite loop sugar for (while #t ...)")
+    (display "3. Forever - Infinite loop sugar for (while true ...)")
     (newline)
   )
 )

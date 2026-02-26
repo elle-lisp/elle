@@ -751,7 +751,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if string contains substring.",
         params: &["s", "substr"],
         category: "string",
-        example: "(string/contains? \"hello\" \"ell\") ;=> #t",
+        example: "(string/contains? \"hello\" \"ell\") ;=> true",
         aliases: &["string-contains?"],
     },
     PrimitiveDef {
@@ -762,7 +762,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if string starts with prefix.",
         params: &["s", "prefix"],
         category: "string",
-        example: "(string/starts-with? \"hello\" \"he\") ;=> #t",
+        example: "(string/starts-with? \"hello\" \"he\") ;=> true",
         aliases: &["string-starts-with?"],
     },
     PrimitiveDef {
@@ -773,7 +773,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if string ends with suffix.",
         params: &["s", "suffix"],
         category: "string",
-        example: "(string/ends-with? \"hello\" \"lo\") ;=> #t",
+        example: "(string/ends-with? \"hello\" \"lo\") ;=> true",
         aliases: &["string-ends-with?"],
     },
     PrimitiveDef {

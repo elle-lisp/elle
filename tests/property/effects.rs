@@ -103,8 +103,8 @@ proptest! {
 
     #[test]
     fn boolean_ops_are_pure(a in prop::bool::ANY, b in prop::bool::ANY) {
-        let a_str = if a { "#t" } else { "#f" };
-        let b_str = if b { "#t" } else { "#f" };
+        let a_str = if a { "true" } else { "false" };
+        let b_str = if b { "true" } else { "false" };
 
         let effect = infer_effect(&format!("(and {} {})", a_str, b_str)).unwrap();
         prop_assert!(!effect.may_yield(),

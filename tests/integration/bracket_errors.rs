@@ -26,7 +26,7 @@ fn match_arm_non_list_error() {
 
 #[test]
 fn cond_clause_bracket_error() {
-    let err = eval_source("(cond [#t 1])").unwrap_err();
+    let err = eval_source("(cond [true 1])").unwrap_err();
     assert!(
         err.contains("not brackets"),
         "Expected hint about brackets, got: {err}"

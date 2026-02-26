@@ -9,9 +9,9 @@
 ;;   - assert-equal(actual, expected, msg)
 ;;     Alias for assert-eq
 ;;   - assert-true(val, msg)
-;;     Assert that val is #t
+;;     Assert that val is true
 ;;   - assert-false(val, msg)
-;;     Assert that val is #f
+;;     Assert that val is false
 ;;   - assert-list-eq(actual, expected, msg)
 ;;     Assert that two lists are equal (same length and elements)
 ;;   - assert-not-nil(val, msg)
@@ -29,7 +29,7 @@
         (eq? actual expected)
         (= actual expected))))
     (if matches
-        #t
+        true
         (begin
           (display "FAIL: ")
           (display msg)
@@ -42,11 +42,11 @@
 
 (def assert-true (fn (val msg)
   "Assert that val is #t"
-  (assert-eq val #t msg)))
+  (assert-eq val true msg)))
 
 (def assert-false (fn (val msg)
   "Assert that val is #f"
-  (assert-eq val #f msg)))
+  (assert-eq val false msg)))
 
 (def assert-list-eq (fn (actual expected msg)
   "Assert that two lists are equal (same length and elements)"
@@ -56,7 +56,7 @@
       ; A plain let would leave check-all unbound in its own body.
       (letrec ((check-all (fn (index)
         (if (>= index (length actual))
-            #t
+            true
             (if (if (symbol? (nth index expected))
                     (eq? (nth index actual) (nth index expected))
                     (= (nth index actual) (nth index expected)))
@@ -90,7 +90,7 @@
 (def assert-not-nil (fn (val msg)
   "Assert that val is not nil"
   (if (not (eq? val nil))
-      #t
+      true
       (begin
         (display "FAIL: ")
         (display msg)
@@ -103,7 +103,7 @@
 (def assert-string-eq (fn (actual expected msg)
   "Assert that two strings are equal"
   (if (= actual expected)
-      #t
+      true
       (begin
         (display "FAIL: ")
         (display msg)

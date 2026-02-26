@@ -203,12 +203,12 @@ fn test_type_name() {
 
 #[test]
 fn test_truthiness_semantics() {
-    // Only nil and #f are falsy
+    // Only nil and false are falsy
     assert!(!Value::NIL.is_truthy(), "nil is falsy");
-    assert!(!Value::FALSE.is_truthy(), "#f is falsy");
+    assert!(!Value::FALSE.is_truthy(), "false is falsy");
 
-    // #t is truthy
-    assert!(Value::TRUE.is_truthy(), "#t is truthy");
+    // true is truthy
+    assert!(Value::TRUE.is_truthy(), "true is truthy");
 
     // Zero is truthy (not falsy like in C)
     assert!(Value::int(0).is_truthy(), "0 is truthy");
