@@ -1,17 +1,10 @@
 //! Find references support for LSP
-//!
-//! Handles textDocument/references requests by finding all usages of a symbol
-//! and returning their locations. Supports the include_declaration parameter
-//! to optionally include the symbol's definition location.
 
-use elle::symbol::SymbolTable;
-use elle::symbols::SymbolIndex;
+use crate::symbol::SymbolTable;
+use crate::symbols::SymbolIndex;
 use serde_json::{json, Value};
 
 /// Find all references to a symbol at a given position
-///
-/// Returns an array of Location objects representing all uses of the symbol,
-/// optionally including the definition location if include_declaration is true.
 pub fn find_references(
     line: u32,
     character: u32,
@@ -25,7 +18,6 @@ pub fn find_references(
 
     let mut references = Vec::new();
 
-    // Look for the symbol at the cursor position (check both usages and definitions)
     let mut target_symbol = None;
     let mut closest_distance = usize::MAX;
 
@@ -35,7 +27,6 @@ pub fn find_references(
             if usage_loc.line == target_line {
                 let distance = (target_col as isize - usage_loc.col as isize).unsigned_abs();
                 if distance < closest_distance && distance <= 10 {
-                    // Within 10 characters of the symbol
                     target_symbol = Some(*sym_id);
                     closest_distance = distance;
                 }
@@ -56,7 +47,6 @@ pub fn find_references(
 
     // If we found a symbol, collect all its references
     if let Some(sym_id) = target_symbol {
-        // Add all usages of the symbol
         if let Some(usages) = symbol_index.symbol_usages.get(&sym_id) {
             for usage_loc in usages {
                 let uri = format!("file://{}", usage_loc.file);
@@ -76,7 +66,6 @@ pub fn find_references(
             }
         }
 
-        // Optionally add the definition location
         if include_declaration {
             if let Some(def_loc) = symbol_index.symbol_locations.get(&sym_id) {
                 let uri = format!("file://{}", def_loc.file);
@@ -94,7 +83,6 @@ pub fn find_references(
                     }
                 }));
             } else if let Some(def) = symbol_index.definitions.get(&sym_id) {
-                // Fallback to definition from symbol table
                 if let Some(def_loc) = &def.location {
                     let uri = format!("file://{}", def_loc.file);
                     references.push(json!({

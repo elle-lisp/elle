@@ -23,14 +23,16 @@ provides the shared types and rule implementations.
 ## Dependents
 
 - `hir/lint.rs` — HIR linter calls rules and produces Diagnostics
-- `elle-lint` — re-exports Diagnostic/Severity for CLI output
-- `elle-lsp` — uses Diagnostic/Severity for LSP diagnostics
+- `lint/cli.rs` — Linter wrapper for CLI output
+- `lsp/state.rs` — uses Diagnostic/Severity for LSP diagnostics
 - `compiler/linter/` — re-export
 
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | ~5 | Module declarations, re-exports |
+| `mod.rs` | ~12 | Module declarations, re-exports |
 | `diagnostics.rs` | ~180 | `Diagnostic`, `Severity`, formatting |
 | `rules.rs` | ~110 | Naming convention checks |
+| `cli.rs` | ~160 | `Linter`, `LintConfig`, `OutputFormat` |
+| `run.rs` | ~100 | CLI entry point, directory traversal |

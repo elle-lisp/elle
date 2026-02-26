@@ -54,9 +54,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 
 | Product | Path | Purpose |
 |---------|------|---------|
-| elle | `src/` | Interpreter/compiler |
-| elle-lsp | `elle-lsp/` | Language server |
-| elle-lint | `elle-lint/` | Static analysis |
+| elle | `src/` | Interpreter/compiler (includes `--lint` and `--lsp` modes) |
 | elle-doc | `elle-doc/` | Documentation site generator (written in Elle) |
 
 ## Directories
@@ -64,6 +62,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 | Path | Contains |
 |------|----------|
 | `src/` | Core interpreter/compiler |
+| `src/lsp/` | Language server protocol implementation |
 | `examples/` | Executable semantics documentation |
 | `tests/` | Unit, integration, property tests |
 | `benches/` | Criterion and IAI benchmarks |

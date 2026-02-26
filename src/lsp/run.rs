@@ -1,16 +1,12 @@
-//! Elle Language Server Protocol implementation
-//!
-//! A resident compiler-based LSP server for Elle Lisp providing:
-//! - Real-time diagnostics from integrated compiler linter
-//! - Hover information with symbol lookup
-//! - Code completion suggestions
-//! - Navigation to symbol definitions
+//! LSP server main loop and JSON-RPC dispatch.
 
-use elle_lsp::{completion, definition, formatting, hover, references, rename, CompilerState};
+use crate::lsp::{completion, definition, formatting, hover, references, rename, CompilerState};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 
-fn main() {
+/// Run the LSP server. Reads JSON-RPC from stdin, writes to stdout.
+/// Returns 0 on clean shutdown.
+pub fn run() -> i32 {
     let mut compiler_state = CompilerState::new();
 
     let stdin = std::io::stdin();
@@ -25,7 +21,7 @@ fn main() {
         loop {
             line.clear();
             if reader.read_line(&mut line).unwrap() == 0 {
-                return; // EOF
+                return 0; // EOF
             }
 
             if line == "\r\n" || line == "\n" {
@@ -51,8 +47,6 @@ fn main() {
 
         let message = String::from_utf8_lossy(&buf);
         if let Ok(request) = serde_json::from_str::<Value>(&message) {
-            // LSP spec: Notifications have no "id" field and must NOT receive a response.
-            // Requests have an "id" field and MUST receive a response.
             let (response, notifications) = handle_request(&request, &mut compiler_state);
 
             // Only send response for requests (not notifications)
@@ -62,7 +56,7 @@ fn main() {
                 let _ = stdout.flush();
             }
 
-            // Send notifications (e.g., diagnostics) - these are server-initiated
+            // Send notifications (e.g., diagnostics)
             for notification in notifications {
                 let body = notification.to_string();
                 let _ = write!(stdout, "Content-Length: {}\r\n\r\n{}", body.len(), body);
@@ -70,6 +64,8 @@ fn main() {
             }
         }
     }
+
+    0
 }
 
 /// Extract the word/prefix at the given position
@@ -87,7 +83,6 @@ fn extract_prefix_at_position(text: &str, line: u32, character: u32) -> String {
         return String::new();
     }
 
-    // Find the start of the word by going backwards from the cursor
     let mut start = col;
     for (i, ch) in target_line[..col].chars().rev().enumerate() {
         if !ch.is_alphanumeric() && ch != '-' && ch != '_' {
@@ -158,7 +153,6 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                         compiler_state.on_document_open(uri.to_string(), text.to_string());
                         compiler_state.compile_document(uri);
 
-                        // Send diagnostics notification
                         if let Some(doc) = compiler_state.get_document(uri) {
                             let diags: Vec<_> = doc
                                 .diagnostics
@@ -174,9 +168,9 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                                             "end": { "line": line - 1, "character": col }
                                         },
                                         "severity": match d.severity {
-                                            elle::lint::diagnostics::Severity::Error => 1,
-                                            elle::lint::diagnostics::Severity::Warning => 2,
-                                            elle::lint::diagnostics::Severity::Info => 3,
+                                            crate::lint::diagnostics::Severity::Error => 1,
+                                            crate::lint::diagnostics::Severity::Warning => 2,
+                                            crate::lint::diagnostics::Severity::Info => 3,
                                         },
                                         "code": d.code,
                                         "source": "elle-lint",
@@ -219,7 +213,6 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                             compiler_state.on_document_change(uri, text.to_string());
                             compiler_state.compile_document(uri);
 
-                            // Send diagnostics notification
                             if let Some(doc) = compiler_state.get_document(uri) {
                                 let diags: Vec<_> = doc
                                     .diagnostics
@@ -235,9 +228,9 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                                                 "end": { "line": line - 1, "character": col }
                                             },
                                         "severity": match d.severity {
-                                            elle::lint::diagnostics::Severity::Error => 1,
-                                            elle::lint::diagnostics::Severity::Warning => 2,
-                                            elle::lint::diagnostics::Severity::Info => 3,
+                                            crate::lint::diagnostics::Severity::Error => 1,
+                                            crate::lint::diagnostics::Severity::Warning => 2,
+                                            crate::lint::diagnostics::Severity::Info => 3,
                                         },
                                             "code": d.code,
                                             "source": "elle-lint",
@@ -328,7 +321,6 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                             position.get("line").and_then(|l| l.as_u64()),
                             position.get("character").and_then(|c| c.as_u64()),
                         ) {
-                            // Get the word at the cursor for prefix matching
                             let prefix = if let Some(doc) = compiler_state.get_document(uri) {
                                 extract_prefix_at_position(
                                     &doc.source_text,
@@ -409,7 +401,6 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                             position.get("line").and_then(|l| l.as_u64()),
                             position.get("character").and_then(|c| c.as_u64()),
                         ) {
-                            // Get include_declaration parameter (defaults to false per LSP spec)
                             let include_declaration = params
                                 .get("context")
                                 .and_then(|ctx| ctx.get("includeDeclaration"))
@@ -447,11 +438,9 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                     .and_then(|u| u.as_str())
                 {
                     if let Some(doc) = compiler_state.get_document(uri) {
-                        // Calculate the end position of the document
                         let (end_line, end_char) =
                             formatting::document_end_position(&doc.source_text);
 
-                        // Format the document
                         match formatting::format_document(&doc.source_text, end_line, end_char) {
                             Ok(edits) => result = edits,
                             Err(e) => {

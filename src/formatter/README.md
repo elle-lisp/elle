@@ -31,4 +31,4 @@ pub struct FormatterConfig {
 ## See Also
 
 - [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- `elle-lint/` - uses formatter for style checking
+- `src/lsp/formatting.rs` - uses formatter for LSP document formatting

@@ -1,4 +1,4 @@
-# elle-lsp
+# lsp
 
 Language Server Protocol implementation for Elle.
 
@@ -15,8 +15,8 @@ Provide IDE features for Elle via the LSP protocol:
 
 ## Architecture
 
-elle-lsp is a synchronous LSP server reading JSON-RPC from stdin and writing
-to stdout. It uses the new pipeline exclusively:
+Synchronous LSP server reading JSON-RPC from stdin, writing to stdout.
+Uses the new pipeline exclusively:
 
 ```
 Source → analyze_all → HIR + bindings
@@ -29,26 +29,21 @@ Source → analyze_all → HIR + bindings
 the document and rebuilds the `SymbolIndex` and diagnostics. IDE features
 (hover, completion, definition, references, rename) query the `SymbolIndex`.
 
+Invoked via `elle --lsp`.
+
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
-| `src/main.rs` | ~550 | LSP message loop, JSON-RPC dispatch |
-| `src/lib.rs` | ~20 | Module declarations |
-| `src/compiler_state.rs` | ~200 | Document state, compilation, symbol extraction |
-| `src/hover.rs` | ~110 | Hover provider |
-| `src/completion.rs` | ~180 | Completion provider |
-| `src/definition.rs` | ~110 | Go-to-definition |
-| `src/references.rs` | ~160 | Find references |
-| `src/rename.rs` | ~350 | Rename with validation |
-| `src/formatting.rs` | ~110 | Document formatting via `elle::formatter` |
-
-## Dependencies
-
-- `elle` — core library (analyze_all, HirLinter, extract_symbols_from_hir, SymbolIndex)
-- `elle-lint` — not used directly (linting is done via elle's HirLinter)
-- `lsp-types` — LSP type definitions
-- `serde` / `serde_json` — JSON-RPC serialization
+| `mod.rs` | ~12 | Module declarations |
+| `run.rs` | ~470 | LSP message loop, JSON-RPC dispatch |
+| `state.rs` | ~180 | Document state, compilation, symbol extraction |
+| `hover.rs` | ~110 | Hover provider |
+| `completion.rs` | ~175 | Completion provider |
+| `definition.rs` | ~110 | Go-to-definition |
+| `references.rs` | ~160 | Find references |
+| `rename.rs` | ~350 | Rename with validation |
+| `formatting.rs` | ~106 | Document formatting via `elle::formatter` |
 
 ## Invariants
 

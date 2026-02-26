@@ -1,10 +1,7 @@
 //! Go-to-definition support for LSP
-//!
-//! Handles textDocument/definition requests by finding symbol
-//! definitions using the symbol index and returning their locations.
 
-use elle::symbol::SymbolTable;
-use elle::symbols::SymbolIndex;
+use crate::symbol::SymbolTable;
+use crate::symbols::SymbolIndex;
 use serde_json::{json, Value};
 
 /// Find definition location for a symbol at a given position
@@ -28,7 +25,6 @@ pub fn find_definition(
             if usage_loc.line == target_line {
                 let distance = (target_col as isize - usage_loc.col as isize).unsigned_abs();
                 if distance < closest_distance && distance <= 10 {
-                    // Within 10 characters of the symbol
                     closest_symbol = Some(*sym_id);
                     closest_distance = distance;
                 }
@@ -49,14 +45,9 @@ pub fn find_definition(
 
     // If we found a symbol, get its definition location
     closest_symbol.and_then(|sym_id| {
-        // Look up the definition location
         if let Some(def_loc) = symbol_index.symbol_locations.get(&sym_id) {
-            // Convert file URI: filename to file:///absolute/path
-            // Phase 1: use the filename from the symbol index as-is
-            // Phase 2: implement proper file resolution
             let uri = format!("file://{}", def_loc.file);
 
-            // LSP uses 0-based line and character numbers
             Some(json!({
                 "uri": uri,
                 "range": {
@@ -71,7 +62,6 @@ pub fn find_definition(
                 }
             }))
         } else if let Some(def) = symbol_index.definitions.get(&sym_id) {
-            // Fallback to definition from symbol table
             if let Some(def_loc) = &def.location {
                 let uri = format!("file://{}", def_loc.file);
                 Some(json!({
@@ -103,7 +93,7 @@ mod tests {
     #[test]
     fn test_find_definition_returns_none_for_empty_index() {
         let index = SymbolIndex::new();
-        let symbol_table = elle::SymbolTable::new();
+        let symbol_table = crate::SymbolTable::new();
 
         let definition = find_definition(0, 0, &index, &symbol_table);
         assert!(definition.is_none());

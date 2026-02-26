@@ -275,8 +275,8 @@ These were open during design; now answered by the implementation:
    Analyzer handles `quote` by converting to a Value via `to_value()`.
    Symbols inside quotes are interned, not resolved.
 
-2. **Analysis-only paths.** Both `elle-lsp` and `elle-lint` already
-   create VMs. `analyze`/`analyze_all` take `&mut VM`.
+2. **Analysis-only paths.** Both `lsp/` and `lint/cli` already
+    create VMs. `analyze`/`analyze_all` take `&mut VM`.
 
 3. **Effect system interaction.** Effect inference happens after
    expansion, so macros that expand to effectful code get correct
