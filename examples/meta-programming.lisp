@@ -147,12 +147,12 @@
   (let ((g (gensym "tmp")))
     `(let ((,g ,val)) ,body)))
 
-(with-temp 42 (assert-true #t "gensym macro expanded without error"))
+(with-temp 42 (assert-true true "gensym macro expanded without error"))
 
 ; Two expansions get different gensyms, so they don't collide.
 (with-temp 1
   (with-temp 2
-    (assert-true #t "nested gensym macros don't collide")))
+    (assert-true true "nested gensym macros don't collide")))
 
 ; ========================================
 ; 12. datum->syntax: anaphoric macros
@@ -169,7 +169,7 @@
 (assert-eq (aif 42 it 0) 42
   "aif: `it` is bound to the test value")
 
-(assert-eq (aif #f 42 0) 0
+(assert-eq (aif false 42 0) 0
   "aif: false test takes else branch")
 
 (assert-eq (aif (+ 1 2) (+ it 10) 0) 13

@@ -19,8 +19,8 @@ fn test_eval_string_literal() {
 
 #[test]
 fn test_eval_boolean() {
-    assert_eq!(eval_source("(eval '#t)").unwrap(), Value::TRUE);
-    assert_eq!(eval_source("(eval '#f)").unwrap(), Value::FALSE);
+    assert_eq!(eval_source("(eval 'true)").unwrap(), Value::TRUE);
+    assert_eq!(eval_source("(eval 'false)").unwrap(), Value::FALSE);
 }
 
 #[test]
@@ -94,13 +94,13 @@ fn test_eval_env_integer_invalid() {
 
 #[test]
 fn test_eval_with_when_macro() {
-    assert_eq!(eval_source("(eval '(when #t 42))").unwrap(), Value::int(42));
+    assert_eq!(eval_source("(eval '(when true 42))").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_eval_with_unless_macro() {
     assert_eq!(
-        eval_source("(eval '(unless #f 99))").unwrap(),
+        eval_source("(eval '(unless false 99))").unwrap(),
         Value::int(99)
     );
 }
@@ -178,7 +178,7 @@ fn test_eval_result_in_let_binding() {
 
 #[test]
 fn test_eval_in_conditional() {
-    assert_eq!(eval_source("(if (eval '#t) 1 2)").unwrap(), Value::int(1));
+    assert_eq!(eval_source("(if (eval 'true) 1 2)").unwrap(), Value::int(1));
 }
 
 // === Nested eval ===
@@ -278,7 +278,7 @@ fn test_read_eval_literal() {
 #[test]
 fn test_eval_with_cond() {
     assert_eq!(
-        eval_source("(eval '(cond ((= 1 2) \"no\") (#t \"yes\")))").unwrap(),
+        eval_source("(eval '(cond ((= 1 2) \"no\") (true \"yes\")))").unwrap(),
         Value::string("yes")
     );
 }

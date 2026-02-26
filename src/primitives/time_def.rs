@@ -8,7 +8,7 @@ pub fn define_time_functions(vm: &mut VM, symbols: &mut SymbolTable) {
         (def time/stopwatch (fn ()
           (coro/new (fn ()
             (let ((start (clock/monotonic)))
-              (while #t
+              (while true
                 (yield (- (clock/monotonic) start))))))))
     "#;
 

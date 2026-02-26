@@ -28,12 +28,12 @@ fn test_literal_float() {
 
 #[test]
 fn test_literal_bool_true() {
-    assert!(compiles("#t"));
+    assert!(compiles("true"));
 }
 
 #[test]
 fn test_literal_bool_false() {
-    assert!(compiles("#f"));
+    assert!(compiles("false"));
 }
 
 #[test]
@@ -55,27 +55,27 @@ fn test_literal_keyword() {
 
 #[test]
 fn test_if_simple() {
-    assert!(compiles("(if #t 1 2)"));
+    assert!(compiles("(if true 1 2)"));
 }
 
 #[test]
 fn test_if_nested() {
-    assert!(compiles("(if (if #t #t #f) 1 2)"));
+    assert!(compiles("(if (if true true false) 1 2)"));
 }
 
 #[test]
 fn test_cond_simple() {
-    assert!(compiles("(cond (#t 1))"));
+    assert!(compiles("(cond (true 1))"));
 }
 
 #[test]
 fn test_cond_with_else() {
-    assert!(compiles("(cond (#f 1) (else 2))"));
+    assert!(compiles("(cond (false 1) (else 2))"));
 }
 
 #[test]
 fn test_cond_multiple_clauses() {
-    assert!(compiles("(cond (#f 1) (#f 2) (#t 3) (else 4))"));
+    assert!(compiles("(cond (false 1) (false 2) (true 3) (else 4))"));
 }
 
 #[test]
@@ -85,12 +85,12 @@ fn test_and_empty() {
 
 #[test]
 fn test_and_single() {
-    assert!(compiles("(and #t)"));
+    assert!(compiles("(and true)"));
 }
 
 #[test]
 fn test_and_multiple() {
-    assert!(compiles("(and #t #t #f)"));
+    assert!(compiles("(and true true false)"));
 }
 
 #[test]
@@ -100,12 +100,12 @@ fn test_or_empty() {
 
 #[test]
 fn test_or_single() {
-    assert!(compiles("(or #f)"));
+    assert!(compiles("(or false)"));
 }
 
 #[test]
 fn test_or_multiple() {
-    assert!(compiles("(or #f #f #t)"));
+    assert!(compiles("(or false false true)"));
 }
 
 // ============ Binding Tests ============
@@ -191,7 +191,7 @@ fn test_call_nested() {
 
 #[test]
 fn test_while_simple() {
-    assert!(compiles("(while #f nil)"));
+    assert!(compiles("(while false nil)"));
 }
 
 #[test]
@@ -509,27 +509,27 @@ fn test_lambda_with_nested_lambda() {
 
 #[test]
 fn test_if_with_complex_condition() {
-    assert!(compiles("(if (and #t (or #f #t)) 1 2)"));
+    assert!(compiles("(if (and true (or false true)) 1 2)"));
 }
 
 #[test]
 fn test_nested_if() {
-    assert!(compiles("(if #t (if #t 1 2) (if #f 3 4))"));
+    assert!(compiles("(if true (if true 1 2) (if false 3 4))"));
 }
 
 #[test]
 fn test_cond_all_false_with_else() {
-    assert!(compiles("(cond (#f 1) (#f 2) (else 3))"));
+    assert!(compiles("(cond (false 1) (false 2) (else 3))"));
 }
 
 #[test]
 fn test_and_short_circuit() {
-    assert!(compiles("(and #t #f #t)"));
+    assert!(compiles("(and true false true)"));
 }
 
 #[test]
 fn test_or_short_circuit() {
-    assert!(compiles("(or #f #t #f)"));
+    assert!(compiles("(or false true false)"));
 }
 
 #[test]

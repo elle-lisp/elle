@@ -21,7 +21,7 @@
             {
               "type": "code",
               "language": "lisp",
-              "text": "nil          ; The null value\n#t           ; True\n#f           ; False"
+              "text": "nil          ; The null value\ntrue         ; True\nfalse        ; False"
             }
           ]
         },
@@ -279,7 +279,7 @@
             {
               "type": "code",
               "language": "lisp",
-              "text": "(cond\n  ((< x 0) (display \"negative\"))\n  ((= x 0) (display \"zero\"))\n  (#t (display \"positive\")))"
+              "text": "(cond\n  ((< x 0) (display \"negative\"))\n  ((= x 0) (display \"zero\"))\n  (true (display \\\"positive\\\")))"
             }
           ]
         },

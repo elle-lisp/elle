@@ -188,7 +188,7 @@ impl fmt::Display for Value {
 }
 
 impl fmt::Debug for Value {
-    /// Machine-readable representation. Strings are quoted, bools are #t/#f.
+    /// Machine-readable representation. Strings are quoted, bools are true/false.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_nil() {
             return write!(f, "nil");
@@ -200,7 +200,7 @@ impl fmt::Debug for Value {
             return write!(f, "#<undefined>");
         }
         if let Some(b) = self.as_bool() {
-            return write!(f, "{}", if b { "#t" } else { "#f" });
+            return write!(f, "{}", if b { "true" } else { "false" });
         }
         if let Some(n) = self.as_int() {
             return write!(f, "{}", n);

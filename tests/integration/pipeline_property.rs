@@ -111,7 +111,7 @@ proptest! {
 
     #[test]
     fn type_of_bool_returns_keyword(b in prop::bool::ANY) {
-        let bool_str = if b { "#t" } else { "#f" };
+        let bool_str = if b { "true" } else { "false" };
         let expr = format!("(type-of {})", bool_str);
         let result = eval_source(&expr);
 
@@ -330,10 +330,10 @@ proptest! {
         let expected = n % 2 == 0;
         let expr = format!(
             "(begin
-               (def is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
-               (def is-odd (fn (n) (if (= n 0) #f (is-even (- n 1)))))
+               (def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
+               (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
                (= (is-even {}) {}))",
-            n, if expected { "#t" } else { "#f" }
+            n, if expected { "true" } else { "false" }
         );
         let result = eval_source(&expr);
 
@@ -402,7 +402,7 @@ proptest! {
 
     #[test]
     fn filter_all_true_preserves_length(a in 1i64..50, b in 1i64..50, c in 1i64..50) {
-        let expr = format!("(length (filter (fn (x) #t) (list {} {} {})))", a, b, c);
+        let expr = format!("(length (filter (fn (x) true) (list {} {} {})))", a, b, c);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -469,7 +469,7 @@ proptest! {
 
     #[test]
     fn box_predicate_on_box(n in -100i64..100) {
-        // (box? (box n)) = #t
+        // (box? (box n)) = true
         let expr = format!("(box? (box {}))", n);
         let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "box? failed: {:?}", result);
@@ -478,7 +478,7 @@ proptest! {
 
     #[test]
     fn box_predicate_on_non_box(n in -100i64..100) {
-        // (box? n) = #f
+        // (box? n) = false
         let expr = format!("(box? {})", n);
         let result = eval_source(&expr);
         prop_assert!(result.is_ok(), "box? on non-box failed: {:?}", result);

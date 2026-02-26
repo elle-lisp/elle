@@ -9,17 +9,17 @@ use elle::Value;
 
 #[test]
 fn test_when_true() {
-    assert_eq!(eval_source("(when #t 42)").unwrap(), Value::int(42));
+    assert_eq!(eval_source("(when true 42)").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_when_false() {
-    assert_eq!(eval_source("(when #f 42)").unwrap(), Value::NIL);
+    assert_eq!(eval_source("(when false 42)").unwrap(), Value::NIL);
 }
 
 #[test]
 fn test_when_multi_body() {
-    assert_eq!(eval_source("(when #t 1 2 3)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(when true 1 2 3)").unwrap(), Value::int(3));
 }
 
 #[test]
@@ -34,17 +34,17 @@ fn test_when_truthy_value() {
 
 #[test]
 fn test_unless_true() {
-    assert_eq!(eval_source("(unless #t 42)").unwrap(), Value::NIL);
+    assert_eq!(eval_source("(unless true 42)").unwrap(), Value::NIL);
 }
 
 #[test]
 fn test_unless_false() {
-    assert_eq!(eval_source("(unless #f 42)").unwrap(), Value::int(42));
+    assert_eq!(eval_source("(unless false 42)").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_unless_multi_body() {
-    assert_eq!(eval_source("(unless #f 1 2 3)").unwrap(), Value::int(3));
+    assert_eq!(eval_source("(unless false 1 2 3)").unwrap(), Value::int(3));
 }
 
 // ============================================================================
@@ -125,7 +125,7 @@ fn test_protect_failure() {
 #[test]
 fn test_defer_runs_cleanup() {
     assert_eq!(
-        eval_source("(begin (var cleaned #f) (defer (set! cleaned #t) 42) cleaned)").unwrap(),
+        eval_source("(begin (var cleaned false) (defer (set! cleaned true) 42) cleaned)").unwrap(),
         Value::bool(true)
     );
 }
@@ -143,7 +143,7 @@ fn test_defer_runs_cleanup_on_error() {
     // Cleanup should run even when body errors
     assert_eq!(
         eval_source(
-            "(begin (var cleaned #f) (try (defer (set! cleaned #t) (/ 1 0)) (catch e cleaned)))"
+            "(begin (var cleaned false) (try (defer (set! cleaned true) (/ 1 0)) (catch e cleaned)))"
         )
         .unwrap(),
         Value::bool(true)
@@ -175,9 +175,9 @@ fn test_with_cleanup_runs() {
     assert_eq!(
         eval_source(
             r#"(begin
-                (var cleaned #f)
+                (var cleaned false)
                 (defn make () :resource)
-                (defn cleanup (r) (set! cleaned #t))
+                (defn cleanup (r) (set! cleaned true))
                 (with r (make) cleanup
                   42)
                 cleaned)"#
@@ -238,9 +238,9 @@ fn test_defer_hygiene_no_capture() {
     assert_eq!(
         eval_source(
             r#"(begin
-                (var cleaned #f)
+                (var cleaned false)
                 (let ((f 99))
-                  (defer (set! cleaned #t) (+ f 1))))"#
+                  (defer (set! cleaned true) (+ f 1))))"#
         )
         .unwrap(),
         Value::int(100)

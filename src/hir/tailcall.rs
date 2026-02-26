@@ -416,8 +416,8 @@ mod tests {
 
     #[test]
     fn test_while_body_not_tail() {
-        // (fn () (while #t (f))) - f is NOT in tail position (loop body)
-        let hir = analyze_and_mark("(fn () (while #t (f)))");
+        // (fn () (while true (f))) - f is NOT in tail position (loop body)
+        let hir = analyze_and_mark("(fn () (while true (f)))");
         let calls = find_calls(&hir);
         assert_eq!(calls, vec![false]); // loop body is not tail
     }

@@ -34,7 +34,7 @@ fn test_value_equality() {
 // ============================================================================
 // nil is FALSY (represents absence, logical false)
 // () (empty list) is TRUTHY (it's a list, just empty - distinct from nil)
-// #f is FALSY (explicit boolean false)
+// false is FALSY (explicit boolean false)
 // 0 is TRUTHY (numbers are always truthy)
 // ============================================================================
 
@@ -207,7 +207,7 @@ fn test_is_nil_semantics() {
     // (is-nil 0) → false
     assert!(!Value::int(0).is_nil());
 
-    // (is-nil #f) → false
+    // (is-nil false) → false
     assert!(!Value::bool(false).is_nil());
 }
 

@@ -13,7 +13,7 @@ impl fmt::Display for SyntaxKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SyntaxKind::Nil => write!(f, "nil"),
-            SyntaxKind::Bool(b) => write!(f, "{}", if *b { "#t" } else { "#f" }),
+            SyntaxKind::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             SyntaxKind::Int(n) => write!(f, "{}", n),
             SyntaxKind::Float(n) => write!(f, "{}", n),
             SyntaxKind::Symbol(s) => write!(f, "{}", s),

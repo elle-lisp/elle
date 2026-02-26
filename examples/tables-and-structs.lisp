@@ -175,7 +175,7 @@
 (assert-eq (length empty-struct) 0 "Empty struct length is 0")
 
 ; Test 20: Struct with mixed value types
-(var mixed {1 42 2 3.14 3 "text" 4 #t})
+(var mixed {1 42 2 3.14 3 "text" 4 true})
 (display (newline))
 (display "Struct with mixed types: ")
 (display mixed)

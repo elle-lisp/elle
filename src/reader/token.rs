@@ -61,6 +61,12 @@ impl SourceLoc {
 pub struct TokenWithLoc<'a> {
     pub token: Token<'a>,
     pub loc: SourceLoc,
+    /// Source byte length of the token. Computed by the lexer so the syntax
+    /// parser can build accurate spans without per-token-type heuristics.
+    /// Previously, span width was hardcoded per variant (and wrong for
+    /// multi-digit integers and floats) or bolted onto individual variants
+    /// like `Bool(bool, usize)`.
+    pub len: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]

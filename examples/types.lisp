@@ -39,7 +39,7 @@
 (assert-eq (array-ref options 1) :option-a "second element of options array is :option-a")
 
 ; Building configuration with keywords
-(var settings (list :debug #t :host "localhost" :port 8080))
+(var settings (list :debug true :host "localhost" :port 8080))
 (assert-eq (first settings) :debug "first element of settings is :debug")
 
 ; Keywords as data structure labels
@@ -196,36 +196,36 @@
 
 ; Boolean values
 (display "Booleans: ")
-(display #t)
+(display true)
 (display " ")
-(display #f)
+(display false)
 (newline)
 
 ; Boolean type
 (display "Type of #t: ")
-(display (type-of #t))
+(display (type-of true))
 (newline)
 
 (display "Type of #f: ")
-(display (type-of #f))
+(display (type-of false))
 (newline)
 
 ; Boolean equality
-(assert-true (= #t #t) "boolean equality: #t = #t")
-(assert-true (= #f #f) "boolean equality: #f = #f")
-(assert-false (= #t #f) "boolean inequality: #t ≠ #f")
+(assert-true (= true true) "boolean equality: true = #t")
+(assert-true (= false false) "boolean equality: false = #f")
+(assert-false (= true false) "boolean inequality: true ≠ #f")
 
 ; Booleans in lists
-(var flags (list #t #f #t))
-(assert-eq (first flags) #t "first element of flags list is #t")
+(var flags (list true false true))
+(assert-eq (first flags) true "first element of flags list is #t")
 
 ; Booleans in arrays
-(var states [#t #f #t #f])
-(assert-eq (array-ref states 0) #t "first element of states array is #t")
+(var states [true false true false])
+(assert-eq (array-ref states 0) true "first element of states array is #t")
 
 ; Boolean predicates
-(assert-true (boolean? #t) "boolean? returns true for #t")
-(assert-true (boolean? #f) "boolean? returns true for #f")
+(assert-true (boolean? true) "boolean? returns true for #t")
+(assert-true (boolean? false) "boolean? returns true for #f")
 (assert-false (boolean? 42) "boolean? returns false for 42")
 
 (display "✓ Booleans verified\n")
@@ -260,7 +260,7 @@
 ; Nil predicates
 (assert-true (nil? nil) "nil? returns true for nil")
 (assert-false (nil? 42) "nil? returns false for 42")
-(assert-false (nil? #f) "nil? returns false for #f")
+(assert-false (nil? false) "nil? returns false for #f")
 
 ; Empty list is not nil in Elle
 (assert-false (nil? '()) "nil? returns false for empty list")
@@ -274,13 +274,13 @@
 (display "\n=== Mixed Atoms in Collections ===\n")
 
 ; Mixed list
-(var mixed-list (list :key 'symbol 42 "string" #t nil))
+(var mixed-list (list :key 'symbol 42 "string" true nil))
 (assert-eq (first mixed-list) :key "first element is keyword")
 (assert-eq (first (rest mixed-list)) 'symbol "second element is symbol")
 (assert-eq (first (rest (rest mixed-list))) 42 "third element is number")
 
 ; Mixed array
-(var mixed-arr (array :id 'user 123 "Alice" #t))
+(var mixed-arr (array :id 'user 123 "Alice" true))
 (assert-eq (array-ref mixed-arr 0) :id "first element is keyword")
 (assert-eq (array-ref mixed-arr 1) 'user "second element is symbol")
 (assert-eq (array-ref mixed-arr 2) 123 "third element is number")
@@ -338,10 +338,10 @@
 (assert-false (string? 123) "string? returns false for number")
 (assert-false (string? '()) "string? returns false for list")
 
-(assert-true (boolean? #t) "boolean? returns true for #t")
-(assert-true (boolean? #f) "boolean? returns true for #f")
+(assert-true (boolean? true) "boolean? returns true for #t")
+(assert-true (boolean? false) "boolean? returns true for #f")
 (assert-false (boolean? 1) "boolean? returns false for number")
-(assert-false (boolean? 'true) "boolean? returns false for symbol")
+(assert-true (boolean? 'true) "boolean? returns true for quoted true (true is a literal)")
 (assert-false (boolean? "true") "boolean? returns false for string")
 (assert-false (boolean? '()) "boolean? returns false for list")
 
@@ -363,11 +363,11 @@
 (assert-true (string? "hello") "string? works for strings")
 (assert-false (string? 'hello) "string? returns false for symbols")
 
-(assert-true (boolean? #t) "boolean? works for booleans")
+(assert-true (boolean? true) "boolean? works for booleans")
 (assert-false (boolean? 1) "boolean? returns false for numbers")
 
 (assert-true (nil? nil) "nil? works for nil")
-(assert-false (nil? #f) "nil? returns false for false")
+(assert-false (nil? false) "nil? returns false for false")
 
 (display "✓ Type checking verified\n")
 
@@ -384,7 +384,7 @@
 (var test-number 42)
 (var test-symbol 'symbol)
 (var test-string "hello")
-(var test-bool #t)
+(var test-bool true)
 (var test-array (array 1 2 3))
 
 ; Display type information
@@ -459,10 +459,10 @@
 (assert-false (symbol? "hello") "string is not a symbol")
 
 ; Boolean values are distinct
-(assert-true (boolean? #t) "#t is boolean")
-(assert-true (boolean? #f) "#f is boolean")
-(assert-false (= #t 1) "#t is not equal to 1")
-(assert-false (= #f 0) "#f is not equal to 0")
+(assert-true (boolean? true) "true is boolean")
+(assert-true (boolean? false) "false is boolean")
+(assert-false (= true 1) "true is not equal to 1")
+(assert-false (= false 0) "false is not equal to 0")
 
 (display "✓ Type predicate combinations verified\n")
 
@@ -563,14 +563,14 @@
 (display (string 'hello))
 (newline)
 
-(display "  string(#t) = ")
-(display (string #t))
+(display "  string(true) = ")
+(display (string true))
 (newline)
 
 (assert-true (string? (string 42)) "string(42) returns a string")
 (assert-true (string? (string 3.14)) "string(3.14) returns a string")
 (assert-true (string? (string 'hello)) "string('hello) returns a string")
-(assert-true (string? (string #t)) "string(#t) returns a string")
+(assert-true (string? (string true)) "string(true) returns a string")
 
 (display "✓ string conversion works\n")
 
@@ -697,8 +697,8 @@
 (display (any->string "hello"))
 (newline)
 
-(display "  any->string(#t) = ")
-(display (any->string #t))
+(display "  any->string(true) = ")
+(display (any->string true))
 (newline)
 
 (display "  any->string((1 2 3)) = ")
@@ -709,7 +709,7 @@
 (assert-true (string? (any->string 3.14)) "any->string(3.14) returns string")
 (assert-true (string? (any->string 'symbol)) "any->string('symbol) returns string")
 (assert-true (string? (any->string "hello")) "any->string(\"hello\") returns string")
-(assert-true (string? (any->string #t)) "any->string(#t) returns string")
+(assert-true (string? (any->string true)) "any->string(true) returns string")
 (assert-true (string? (any->string (list 1 2 3))) "any->string(list) returns string")
 
 (display "✓ any->string conversion works\n")
@@ -787,7 +787,7 @@
 (display "✓ Symbols ('symbol)\n")
 (display "✓ Numbers (integers and floats)\n")
 (display "✓ Strings (\"string\")\n")
-(display "✓ Booleans (#t, #f)\n")
+(display "✓ Booleans (#t, false)\n")
 (display "✓ Nil (nil)\n")
 (display "✓ Mixed atoms in collections\n")
 
@@ -974,7 +974,7 @@
 (display "✓ Symbols ('symbol)\n")
 (display "✓ Numbers (integers and floats)\n")
 (display "✓ Strings (\"string\")\n")
-(display "✓ Booleans (#t, #f)\n")
+(display "✓ Booleans (#t, false)\n")
 (display "✓ Nil (nil)\n")
 (display "✓ Mixed atoms in collections\n")
 
@@ -1024,69 +1024,69 @@
 
 (display "\n=== Truthiness Semantics ===\n")
 
-; In Elle, only nil and #f are falsy. Everything else is truthy.
+; In Elle, only nil and false are falsy. Everything else is truthy.
 ; This is different from languages like C where 0, "", [], etc. are falsy.
 
 (display "\n=== Falsy Values ===\n")
 
 ; nil is falsy
-(assert-false (if nil #t #f) "nil is falsy in if")
+(assert-false (if nil true false) "nil is falsy in if")
 (display "nil is falsy\n")
 
-; #f is falsy
-(assert-false (if #f #t #f) "#f is falsy in if")
-(display "#f is falsy\n")
+; false is falsy
+(assert-false (if false true false) "false is falsy in if")
+(display "false is falsy\n")
 
-(display "✓ Only nil and #f are falsy\n")
+(display "✓ Only nil and false are falsy\n")
 
 (display "\n=== Truthy Values ===\n")
 
-; #t is truthy
-(assert-true (if #t #t #f) "#t is truthy in if")
-(display "#t is truthy\n")
+; true is truthy
+(assert-true (if true true false) "true is truthy in if")
+(display "true is truthy\n")
 
 ; Zero is truthy (unlike C)
-(assert-true (if 0 #t #f) "0 is truthy in if")
+(assert-true (if 0 true false) "0 is truthy in if")
 (display "0 is truthy (not falsy like C)\n")
 
 ; Negative numbers are truthy
-(assert-true (if -1 #t #f) "-1 is truthy in if")
+(assert-true (if -1 true false) "-1 is truthy in if")
 (display "-1 is truthy\n")
 
 ; Floats are truthy
-(assert-true (if 3.14 #t #f) "3.14 is truthy in if")
+(assert-true (if 3.14 true false) "3.14 is truthy in if")
 (display "3.14 is truthy\n")
 
 ; Empty string is truthy (unlike C)
-(assert-true (if "" #t #f) "empty string is truthy in if")
+(assert-true (if "" true false) "empty string is truthy in if")
 (display "empty string is truthy (not falsy like C)\n")
 
 ; Empty list is truthy (unlike C)
-(assert-true (if '() #t #f) "empty list is truthy in if")
+(assert-true (if '() true false) "empty list is truthy in if")
 (display "empty list is truthy (not falsy like C)\n")
 
 ; Empty array is truthy (unlike C)
-(assert-true (if [] #t #f) "empty array is truthy in if")
+(assert-true (if [] true false) "empty array is truthy in if")
 (display "empty array is truthy (not falsy like C)\n")
 
 ; Non-empty string is truthy
-(assert-true (if "hello" #t #f) "non-empty string is truthy in if")
+(assert-true (if "hello" true false) "non-empty string is truthy in if")
 (display "non-empty string is truthy\n")
 
 ; Non-empty list is truthy
-(assert-true (if '(a b c) #t #f) "non-empty list is truthy in if")
+(assert-true (if '(a b c) true false) "non-empty list is truthy in if")
 (display "non-empty list is truthy\n")
 
 ; Non-empty array is truthy
-(assert-true (if [1 2 3] #t #f) "non-empty array is truthy in if")
+(assert-true (if [1 2 3] true false) "non-empty array is truthy in if")
 (display "non-empty array is truthy\n")
 
 ; Symbols are truthy
-(assert-true (if 'symbol #t #f) "symbol is truthy in if")
+(assert-true (if 'symbol true false) "symbol is truthy in if")
 (display "symbol is truthy\n")
 
 ; Keywords are truthy
-(assert-true (if :keyword #t #f) "keyword is truthy in if")
+(assert-true (if :keyword true false) "keyword is truthy in if")
 (display "keyword is truthy\n")
 
 (display "✓ All other values are truthy\n")
@@ -1097,7 +1097,7 @@
 (var test-value 0)
 (var result (cond
   ((nil? test-value) "is nil")
-  ((= test-value #f) "is false")
+  ((= test-value false) "is false")
   (test-value "is truthy")
   (else "unreachable")))
 (assert-eq result "is truthy" "0 is truthy in cond")
@@ -1106,12 +1106,12 @@
 ; Using truthiness in and/or
 (assert-eq (and 1 2 3) 3 "and returns last value if all truthy")
 (assert-eq (and 1 nil 3) nil "and returns first falsy value")
-(assert-eq (and 1 #f 3) #f "and returns first falsy value")
+(assert-eq (and 1 false 3) false "and returns first falsy value")
 (display "and returns last truthy or first falsy\n")
 
 ; Using truthiness in or
-(assert-eq (or nil #f "hello") "hello" "or returns first truthy value")
-(assert-eq (or nil #f) #f "or returns last value if all falsy")
+(assert-eq (or nil false "hello") "hello" "or returns first truthy value")
+(assert-eq (or nil false) false "or returns last value if all falsy")
 (display "or returns first truthy or last value\n")
 
 (display "✓ Truthiness works in conditionals\n")

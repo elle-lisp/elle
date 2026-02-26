@@ -347,7 +347,7 @@ proptest! {
     /// Property: when macro works correctly
     #[test]
     fn macro_hygiene_when(v in -1000i64..1000) {
-        let code = format!("(when #t {})", v);
+        let code = format!("(when true {})", v);
         let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v));
@@ -356,7 +356,7 @@ proptest! {
     /// Property: unless macro works correctly
     #[test]
     fn macro_hygiene_unless(v in -1000i64..1000) {
-        let code = format!("(unless #f {})", v);
+        let code = format!("(unless false {})", v);
         let result = eval_source(&code);
         prop_assert!(result.is_ok(), "Evaluation failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(v));

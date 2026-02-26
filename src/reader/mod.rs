@@ -52,17 +52,19 @@ pub fn read_syntax(input: &str) -> Result<Syntax, String> {
     let mut lexer = Lexer::new(&input_owned);
     let mut tokens = Vec::new();
     let mut locations = Vec::new();
+    let mut lengths = Vec::new();
 
     while let Some(token_with_loc) = lexer.next_token_with_loc()? {
         tokens.push(OwnedToken::from(token_with_loc.token));
         locations.push(token_with_loc.loc);
+        lengths.push(token_with_loc.len);
     }
 
     if tokens.is_empty() {
         return Err("No input".to_string());
     }
 
-    let mut parser = SyntaxReader::new(tokens, locations);
+    let mut parser = SyntaxReader::new(tokens, locations, lengths);
     let result = parser.read()?;
 
     // Check for trailing tokens after the expression
@@ -85,17 +87,19 @@ pub fn read_syntax_all(input: &str) -> Result<Vec<Syntax>, String> {
     let mut lexer = Lexer::new(&input_owned);
     let mut tokens = Vec::new();
     let mut locations = Vec::new();
+    let mut lengths = Vec::new();
 
     while let Some(token_with_loc) = lexer.next_token_with_loc()? {
         tokens.push(OwnedToken::from(token_with_loc.token));
         locations.push(token_with_loc.loc);
+        lengths.push(token_with_loc.len);
     }
 
     if tokens.is_empty() {
         return Ok(Vec::new());
     }
 
-    let mut parser = SyntaxReader::new(tokens, locations);
+    let mut parser = SyntaxReader::new(tokens, locations, lengths);
     parser.read_all()
 }
 

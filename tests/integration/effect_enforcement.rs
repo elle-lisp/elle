@@ -53,9 +53,9 @@ fn test_effect_yield_in_begin() {
 
 #[test]
 fn test_effect_yield_in_if() {
-    // (if #t (yield 1) 2) should have Yields effect
+    // (if true (yield 1) 2) should have Yields effect
     let (mut symbols, mut vm) = setup();
-    let result = analyze("(if #t (yield 1) 2)", &mut symbols, &mut vm).unwrap();
+    let result = analyze("(if true (yield 1) 2)", &mut symbols, &mut vm).unwrap();
     assert_eq!(result.hir.effect, Effect::yields());
 }
 
@@ -312,10 +312,10 @@ fn test_effect_multiple_calls_mixed() {
 #[test]
 fn test_effect_conditional_yield() {
     // (def maybe-yield (fn (x) (if x (yield 1) 2)))
-    // (maybe-yield #t) should have Yields effect
+    // (maybe-yield true) should have Yields effect
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (def maybe-yield (fn (x) (if x (yield 1) 2))) (maybe-yield #t))",
+        "(begin (def maybe-yield (fn (x) (if x (yield 1) 2))) (maybe-yield true))",
         &mut symbols,
         &mut vm,
     )
@@ -369,7 +369,7 @@ fn test_effect_pure_primitives() {
         "(first (list 1 2))",
         "(rest (list 1 2))",
         "(length (list 1 2 3))",
-        "(not #t)",
+        "(not true)",
         "(number? 42)",
         "(string? \"hello\")",
     ];

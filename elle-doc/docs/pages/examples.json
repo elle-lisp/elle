@@ -127,7 +127,7 @@
         {
           "type": "code",
           "language": "lisp",
-          "text": ";; Parse JSON\n(define json-str \"{\\\"name\\\": \\\"Bob\\\", \\\"age\\\": 25}\")\n(define data (json-parse json-str))\n\n(display \"Name: \")\n(display (get data \"name\"))\n(newline)\n\n;; Create and serialize\n(define person (table))\n(put person \"name\" \"Charlie\")\n(put person \"age\" 35)\n(put person \"active\" #t)\n\n(define json-output (json-serialize person))\n(display \"JSON: \")\n(display json-output)\n(newline)"
+          "text": ";; Parse JSON\n(define json-str \"{\\\"name\\\": \\\"Bob\\\", \\\"age\\\": 25}\")\n(define data (json-parse json-str))\n\n(display \"Name: \")\n(display (get data \"name\"))\n(newline)\n\n;; Create and serialize\n(define person (table))\n(put person \"name\" \"Charlie\")\n(put person \"age\" 35)\n(put person \\\"active\\\" true)\n\n(define json-output (json-serialize person))\n(display \"JSON: \")\n(display json-output)\n(newline)"
         }
       ]
     },

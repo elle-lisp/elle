@@ -303,9 +303,9 @@ proptest! {
             (var check
               (fn (x remaining)
                 (if (empty? remaining)
-                  #t
+                  true
                   (if (or (= x 1) (= x 2))
-                    #f
+                    false
                     (check x (rest remaining))))))
 
             (var foo

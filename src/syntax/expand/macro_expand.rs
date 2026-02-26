@@ -97,7 +97,7 @@ impl Expander {
         // SyntaxLiteral to preserve scope sets through the Value round-trip.
         // Atoms (nil, bool, int, float, string, keyword) are quoted normally —
         // they don't participate in binding resolution and wrapping them as
-        // syntax objects would change their runtime semantics (e.g., #f wrapped
+        // syntax objects would change their runtime semantics (e.g., false wrapped
         // in a syntax object becomes truthy).
         // Bind fixed params
         let mut bindings: Vec<Syntax> = macro_def

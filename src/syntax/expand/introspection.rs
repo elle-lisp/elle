@@ -6,7 +6,7 @@ use crate::syntax::{Span, Syntax, SyntaxKind};
 use crate::vm::VM;
 
 impl Expander {
-    /// Handle (macro? symbol) - returns #t if symbol is a defined macro, #f otherwise
+    /// Handle (macro? symbol) - returns true if symbol is a defined macro, false otherwise
     ///
     /// This is handled at expansion time because:
     /// 1. The Expander knows which macros are defined

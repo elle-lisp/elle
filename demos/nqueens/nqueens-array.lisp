@@ -8,12 +8,12 @@
   (fn (col queens idx row)
     "Check col against queens[idx..row). row = current number of placed queens."
     (if (= idx row)
-      #t
+      true
       (let ((placed-col (array/ref queens idx)))
         (let ((row-dist (- row idx)))
           (if (or (= col placed-col)
                   (= row-dist (abs (- col placed-col))))
-            #f
+            false
             (check-safe-helper col queens (+ idx 1) row)))))))
 
 (var safe?

@@ -101,7 +101,7 @@
         ((string-contains? type "blockquote") (render-blockquote block))
         ((string-contains? type "table") (render-table block))
         ((string-contains? type "note") (render-note block))
-        (#t "")))))
+        (true "")))))
 
 ;; Render a section with heading and content blocks
 (var render-section

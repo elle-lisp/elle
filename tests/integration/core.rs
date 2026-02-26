@@ -38,12 +38,12 @@ fn test_comparisons() {
 // Conditionals
 #[test]
 fn test_if_true() {
-    assert_eq!(eval_source("(if #t 100 200)").unwrap(), Value::int(100));
+    assert_eq!(eval_source("(if true 100 200)").unwrap(), Value::int(100));
 }
 
 #[test]
 fn test_if_false() {
-    assert_eq!(eval_source("(if #f 100 200)").unwrap(), Value::int(200));
+    assert_eq!(eval_source("(if false 100 200)").unwrap(), Value::int(200));
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn test_nested_if() {
 #[test]
 fn test_if_nil_else() {
     // If without else should return nil
-    assert_eq!(eval_source("(if #f 100)").unwrap(), Value::NIL);
+    assert_eq!(eval_source("(if false 100)").unwrap(), Value::NIL);
 }
 
 // Lists
@@ -293,8 +293,8 @@ fn test_int_float_mixing() {
 // Logic combinations
 #[test]
 fn test_not() {
-    assert_eq!(eval_source("(not #t)").unwrap(), Value::bool(false));
-    assert_eq!(eval_source("(not #f)").unwrap(), Value::bool(true));
+    assert_eq!(eval_source("(not true)").unwrap(), Value::bool(false));
+    assert_eq!(eval_source("(not false)").unwrap(), Value::bool(true));
     assert_eq!(eval_source("(not nil)").unwrap(), Value::bool(true)); // nil is falsy (represents absence)
     assert_eq!(eval_source("(not ())").unwrap(), Value::bool(false)); // empty list is truthy
     assert_eq!(eval_source("(not 0)").unwrap(), Value::bool(false)); // 0 is truthy
@@ -1183,13 +1183,13 @@ fn test_let_star_with_multiple_bindings_no_dependencies() {
 
 #[test]
 fn test_cond_single_true_clause() {
-    assert_eq!(eval_source("(cond (#t 42))").unwrap(), Value::int(42));
+    assert_eq!(eval_source("(cond (true 42))").unwrap(), Value::int(42));
 }
 
 #[test]
 fn test_cond_single_false_clause_with_else() {
     assert_eq!(
-        eval_source("(cond (#f 42) (else 100))").unwrap(),
+        eval_source("(cond (false 42) (else 100))").unwrap(),
         Value::int(100)
     );
 }
@@ -1197,7 +1197,7 @@ fn test_cond_single_false_clause_with_else() {
 #[test]
 fn test_cond_single_false_clause_without_else() {
     // If no clause matches and no else, return nil
-    assert_eq!(eval_source("(cond (#f 42))").unwrap(), Value::NIL);
+    assert_eq!(eval_source("(cond (false 42))").unwrap(), Value::NIL);
 }
 
 #[test]
@@ -1243,8 +1243,8 @@ fn test_cond_with_expressions_as_conditions() {
 fn test_cond_with_complex_bodies() {
     let code = r#"
         (cond
-          (#f (+ 1 1))
-          (#t (+ 2 3))
+          (false (+ 1 1))
+          (true (+ 2 3))
           (else (+ 4 5)))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(5));
@@ -1255,7 +1255,7 @@ fn test_cond_with_multiple_body_expressions() {
     // Cond body can have multiple expressions, returns the last one
     let code = r#"
         (cond
-          (#t
+          (true
             (+ 1 1)
             (+ 2 2)
             (+ 3 3)))
@@ -1267,9 +1267,9 @@ fn test_cond_with_multiple_body_expressions() {
 fn test_cond_nested() {
     let code = r#"
         (cond
-          (#t
+          (true
             (cond
-              (#t 42)
+              (true 42)
               (else 100)))
           (else 200))
     "#;
@@ -1312,7 +1312,7 @@ fn test_cond_respects_clause_order() {
 fn test_cond_with_else_body_multiple_expressions() {
     let code = r#"
         (cond
-          (#f 100)
+          (false 100)
           (else
             (+ 1 1)
             (+ 2 2)

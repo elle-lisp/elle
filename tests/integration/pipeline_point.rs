@@ -54,7 +54,7 @@ fn test_defmacro_my_when_true() {
     let result = eval_source(
         "(begin
            (defmacro my-when (test body) `(if ,test ,body nil))
-           (my-when #t 42))",
+           (my-when true 42))",
     );
     assert_eq!(result.unwrap(), Value::int(42));
 }
@@ -65,7 +65,7 @@ fn test_defmacro_my_when_false() {
     let result = eval_source(
         "(begin
            (defmacro my-when (test body) `(if ,test ,body nil))
-           (my-when #f 42))",
+           (my-when false 42))",
     );
     assert_eq!(result.unwrap(), Value::NIL);
 }
@@ -97,14 +97,14 @@ fn test_expand_macro() {
     let result = eval_source(
         "(begin
            (defmacro my-when (test body) `(if ,test ,body nil))
-           (expand-macro '(my-when #t 42)))",
+           (expand-macro '(my-when true 42)))",
     );
-    // Should return something like (if #t 42 nil)
+    // Should return something like (if true 42 nil)
     assert!(result.is_ok());
     // Verify the expanded form is a list starting with 'if
     let expanded = result.unwrap();
     let items = expanded.list_to_vec().expect("should be a list");
-    assert_eq!(items.len(), 4); // (if #t 42 nil)
+    assert_eq!(items.len(), 4); // (if true 42 nil)
     assert!(items[0].is_symbol()); // 'if
 }
 

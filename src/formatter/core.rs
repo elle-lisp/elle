@@ -61,7 +61,7 @@ fn format_value(
     }
 
     if let Some(b) = value.as_bool() {
-        return if b { "#t" } else { "#f" }.to_string();
+        return if b { "true" } else { "false" }.to_string();
     }
 
     if let Some(n) = value.as_int() {
@@ -266,10 +266,10 @@ mod tests {
     #[test]
     fn test_format_boolean() {
         let config = FormatterConfig::default();
-        let formatted_true = format_code("#t", &config).unwrap();
-        let formatted_false = format_code("#f", &config).unwrap();
-        assert_eq!(formatted_true, "#t");
-        assert_eq!(formatted_false, "#f");
+        let formatted_true = format_code("true", &config).unwrap();
+        let formatted_false = format_code("false", &config).unwrap();
+        assert_eq!(formatted_true, "true");
+        assert_eq!(formatted_false, "false");
     }
 
     #[test]

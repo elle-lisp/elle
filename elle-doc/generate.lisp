@@ -56,7 +56,7 @@
               (string-append (first state) "<" tag ">" part "</" tag ">")
               (string-append (first state) part))
             (not (first (rest state)))))
-        (list "" #f)
+        (list "" false)
         parts))))
 
 ;; Format inline markdown: **bold**, *italic*, `code`
@@ -461,7 +461,7 @@ tbody tr:nth-child(even) {
       ((string-contains? (get block "type") "table") (render-table block))
       ((string-contains? (get block "type") "note") (render-note block))
       ((string-contains? (get block "type") "heading") "")
-      (#t ""))))
+      (true ""))))
 
 ;; Render blocks in a section
 (var render-blocks-in-section
@@ -575,7 +575,7 @@ tbody tr:nth-child(even) {
       ((= cat "pkg") "Packages")
       ((= cat "module") "Modules")
       ((= cat "bit") "Bitwise Operations")
-      (#t cat))))
+      (true cat))))
 
 ;; Build a function signature string like "(cons car cdr)" from metadata
 (var build-signature
@@ -653,7 +653,7 @@ tbody tr:nth-child(even) {
              (extra
                (fold (fn (acc cat)
                        (if (fold (fn (found c) (or found (= c cat)))
-                                 #f
+                                 false
                                  category-order)
                          acc
                          (append acc (list (build-category-section

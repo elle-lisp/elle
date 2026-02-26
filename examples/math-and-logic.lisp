@@ -183,12 +183,12 @@
 (display "pi = ")
 (display (pi))
 (newline)
-(assert-true #t "pi is available")
+(assert-true true "pi is available")
 
 (display "e = ")
 (display (e))
 (newline)
-(assert-true #t "e is available")
+(assert-true true "e is available")
 
 (newline)
 
@@ -357,16 +357,16 @@
 ; Check if list alternates between even and odd
 (def alternates? (fn (lst)
   (if (empty? lst)
-      #t
+      true
       (if (empty? (rest lst))
-          #t
+          true
           (if (even? (first lst))
               (if (odd? (first (rest lst)))
                   (alternates? (rest lst))
-                  #f)
+                  false)
               (if (even? (first (rest lst)))
                   (alternates? (rest lst))
-                  #f))))))
+                  false))))))
 
 (var alternating (list 1 2 3 4 5 6))
 (var not-alternating (list 1 3 5 7))
@@ -417,40 +417,40 @@
 ; === NOT Operation ===
 (display "\n=== NOT Operation ===\n")
 
-(assert-true (not #f) "not #f = #t")
-(assert-false (not #t) "not #t = #f")
-(assert-false (not 1) "not 1 = #f (non-false is truthy)")
-(assert-false (not "hello") "not \"hello\" = #f (non-false is truthy)")
-(assert-false (not '()) "not () = #f (empty list is truthy)")
+(assert-true (not false) "not false = #t")
+(assert-false (not true) "not true = #f")
+(assert-false (not 1) "not 1 = false (non-false is truthy)")
+(assert-false (not "hello") "not \"hello\" = false (non-false is truthy)")
+(assert-false (not '()) "not () = false (empty list is truthy)")
 
 ; === Test 0 Truthiness ===
 (display "\n=== Test 0 Truthiness ===\n")
 
 ; Test that 0 is truthy in Elle
-(assert-true (if 0 #t #f) "0 is truthy")
-(assert-false (not 0) "not 0 = #f (0 is truthy)")
+(assert-true (if 0 true false) "0 is truthy")
+(assert-false (not 0) "not 0 = false (0 is truthy)")
 
 (display "Truth table for NOT:\n")
-(display "  not #t = ")
-(display (not #t))
+(display "  not true = ")
+(display (not true))
 (newline)
-(display "  not #f = ")
-(display (not #f))
+(display "  not false = ")
+(display (not false))
 (newline)
 
 ; === AND Operation ===
 (display "\n=== AND Operation ===\n")
 
 ; AND with two arguments - returns last value if all truthy, else first falsy
-(assert-eq (and #t #t) #t "and #t #t = #t")
-(assert-eq (and #t #f) #f "and #t #f = #f")
-(assert-eq (and #f #t) #f "and #f #t = #f")
-(assert-eq (and #f #f) #f "and #f #f = #f")
+(assert-eq (and true true) true "and true true = #t")
+(assert-eq (and true false) false "and true false = #f")
+(assert-eq (and false true) false "and false true = #f")
+(assert-eq (and false false) false "and false false = #f")
 
 ; AND with multiple arguments - returns last value if all truthy
-(assert-eq (and #t #t #t) #t "and #t #t #t = #t")
-(assert-eq (and #t #t #f) #f "and #t #t #f = #f")
-(assert-eq (and #f #t #t) #f "and #f #t #t = #f")
+(assert-eq (and true true true) true "and true true true = #t")
+(assert-eq (and true true false) false "and true true false = #f")
+(assert-eq (and false true true) false "and false true true = #f")
 
 ; AND with numbers - returns last value (all args are evaluated)
 (assert-eq (and 1 2 3) 3 "and 1 2 3 = 3 (last value)")
@@ -460,89 +460,89 @@
 (assert-true (and) "and with no args = #t")
 
 (display "Truth table for AND:\n")
-(display "  and #t #t = ")
-(display (and #t #t))
+(display "  and true true = ")
+(display (and true true))
 (newline)
-(display "  and #t #f = ")
-(display (and #t #f))
+(display "  and true false = ")
+(display (and true false))
 (newline)
-(display "  and #f #t = ")
-(display (and #f #t))
+(display "  and false true = ")
+(display (and false true))
 (newline)
-(display "  and #f #f = ")
-(display (and #f #f))
+(display "  and false false = ")
+(display (and false false))
 (newline)
 
 ; === OR Operation ===
 (display "\n=== OR Operation ===\n")
 
 ; OR with two arguments - returns first truthy value or last value
-(assert-eq (or #t #t) #t "or #t #t = #t")
-(assert-eq (or #t #f) #t "or #t #f = #t")
-(assert-eq (or #f #t) #t "or #f #t = #t")
-(assert-eq (or #f #f) #f "or #f #f = #f")
+(assert-eq (or true true) true "or true true = #t")
+(assert-eq (or true false) true "or true false = #t")
+(assert-eq (or false true) true "or false true = #t")
+(assert-eq (or false false) false "or false false = #f")
 
 ; OR with multiple arguments - returns first truthy or last value
-(assert-eq (or #f #f #t) #t "or #f #f #t = #t")
-(assert-eq (or #f #f #f) #f "or #f #f #f = #f")
-(assert-eq (or #f #t #f) #t "or #f #t #f = #t")
+(assert-eq (or false false true) true "or false false true = #t")
+(assert-eq (or false false false) false "or false false false = #f")
+(assert-eq (or false true false) true "or false true false = #t")
 
 ; OR with numbers - returns first truthy value (0 is truthy)
 (assert-eq (or 0 1) 0 "or 0 1 = 0 (0 is truthy, returns first)")
-(assert-eq (or #f 1) 1 "or #f 1 = 1 (first truthy)")
-(assert-eq (or #f #f) #f "or #f #f = #f")
+(assert-eq (or false 1) 1 "or false 1 = 1 (first truthy)")
+(assert-eq (or false false) false "or false false = #f")
 
 ; OR with no arguments
 (assert-false (or) "or with no args = #f")
 
 (display "Truth table for OR:\n")
-(display "  or #t #t = ")
-(display (or #t #t))
+(display "  or true true = ")
+(display (or true true))
 (newline)
-(display "  or #t #f = ")
-(display (or #t #f))
+(display "  or true false = ")
+(display (or true false))
 (newline)
-(display "  or #f #t = ")
-(display (or #f #t))
+(display "  or false true = ")
+(display (or false true))
 (newline)
-(display "  or #f #f = ")
-(display (or #f #f))
+(display "  or false false = ")
+(display (or false false))
 (newline)
 
 ; === XOR Operation ===
 (display "\n=== XOR Operation ===\n")
 
 ; XOR with two arguments (true if odd number of truthy values)
-(assert-false (xor #t #t) "xor #t #t = #f (even number of truthy)")
-(assert-true (xor #t #f) "xor #t #f = #t (odd number of truthy)")
-(assert-true (xor #f #t) "xor #f #t = #t (odd number of truthy)")
-(assert-false (xor #f #f) "xor #f #f = #f (even number of truthy)")
+(assert-false (xor true true) "xor true true = false (even number of truthy)")
+(assert-true (xor true false) "xor true false = true (odd number of truthy)")
+(assert-true (xor false true) "xor false true = true (odd number of truthy)")
+(assert-false (xor false false) "xor false false = false (even number of truthy)")
 
 ; XOR with multiple arguments
-(assert-true (xor #t #t #t) "xor #t #t #t = #t (odd number of truthy)")
-(assert-false (xor #t #t #t #t) "xor #t #t #t #t = #f (even number of truthy)")
-(assert-true (xor #t #f #f) "xor #t #f #f = #t (odd number of truthy)")
-(assert-false (xor #f #f #f) "xor #f #f #f = #f (even number of truthy)")
+(assert-true (xor true true true) "xor true true true = true (odd number of truthy)")
+(assert-false (xor true true true true) "xor true true true true = false (even number of truthy)")
+(assert-true (xor true false false) "xor true false false = true (odd number of truthy)")
+(assert-false (xor false false false) "xor false false false = false (even number of truthy)")
 
 ; XOR with no arguments
 (assert-false (xor) "xor with no args = #f")
 
 ; XOR with single argument
-(assert-true (xor #t) "xor #t = #t")
-(assert-false (xor #f) "xor #f = #f")
+(assert-true (xor true) "xor true = #t")
+(assert-false (xor false) "xor false = #f")
 
 (display "Truth table for XOR (2 args):\n")
-(display "  xor #t #t = ")
-(display (xor #t #t))
+(display "  xor true true = ")
+(display (xor true true))
 (newline)
-(display "  xor #t #f = ")
-(display (xor #t #f))
+(display "  xor true false = ")
+(display (xor true false))
 (newline)
-(display "  xor #f #t = ")
-(display (xor #f #t))
+(display "  xor false true = ")
+(display (xor false true))
 (newline)
-(display "  xor #f #f = ")
-(display (xor #f #f))
+(display "  xor false false = ")
+(display (xor false false))
 (newline)
 
 ; === Note on Evaluation ===
@@ -559,7 +559,7 @@
 
 ; Check if number is in range
 (def in-range? (fn (x min max)
-  (if (and (>= x min) (<= x max)) #t #f)))
+  (if (and (>= x min) (<= x max)) true false)))
 
 (assert-true (in-range? 5 0 10) "5 is in range [0, 10]")
 (assert-false (in-range? 15 0 10) "15 is not in range [0, 10]")
@@ -567,17 +567,17 @@
 
 ; Check if value is valid (not nil and not false)
 (def valid? (fn (x)
-  (if (and (not (nil? x)) (not (eq? x #f))) #t #f)))
+  (if (and (not (nil? x)) (not (eq? x false))) true false)))
 
 (assert-true (valid? 42) "42 is valid")
 (assert-true (valid? "hello") "\"hello\" is valid")
 (assert-true (valid? '()) "() is valid (empty list is truthy)")
-(assert-false (valid? #f) "#f is not valid")
+(assert-false (valid? false) "false is not valid")
 (display "✓ valid? works\n")
 
 ; Check if value is positive or zero
 (def non-negative? (fn (x)
-  (if (or (> x 0) (= x 0)) #t #f)))
+  (if (or (> x 0) (= x 0)) true false)))
 
 (assert-true (non-negative? 5) "5 is non-negative")
 (assert-true (non-negative? 0) "0 is non-negative")
@@ -589,11 +589,11 @@
 
 ; Complex condition: (a AND b) OR (NOT c)
 (def complex-check (fn (a b c)
-  (if (or (and a b) (not c)) #t #f)))
+  (if (or (and a b) (not c)) true false)))
 
-(assert-true (complex-check #t #t #f) "(#t AND #t) OR (NOT #f) = #t")
-(assert-true (complex-check #f #f #f) "(#f AND #f) OR (NOT #f) = #t")
-(assert-false (complex-check #f #f #t) "(#f AND #f) OR (NOT #t) = #f")
+(assert-true (complex-check true true false) "(true AND true) OR (NOT false) = #t")
+(assert-true (complex-check false false false) "(false AND false) OR (NOT false) = #t")
+(assert-false (complex-check false false true) "(false AND false) OR (NOT true) = #f")
 (display "✓ Complex logical expressions work\n")
 
 ; === Predicate Combinations ===

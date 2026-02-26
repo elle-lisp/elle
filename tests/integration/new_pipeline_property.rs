@@ -154,7 +154,7 @@ proptest! {
 
     #[test]
     fn if_true_returns_then(a in -100i64..100, b in -100i64..100) {
-        let expr = format!("(if #t {} {})", a, b);
+        let expr = format!("(if true {} {})", a, b);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -163,7 +163,7 @@ proptest! {
 
     #[test]
     fn if_false_returns_else(a in -100i64..100, b in -100i64..100) {
-        let expr = format!("(if #f {} {})", a, b);
+        let expr = format!("(if false {} {})", a, b);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -343,7 +343,7 @@ proptest! {
 
     #[test]
     fn not_involution(b in prop::bool::ANY) {
-        let bool_str = if b { "#t" } else { "#f" };
+        let bool_str = if b { "true" } else { "false" };
         let expr = format!("(not (not {}))", bool_str);
         let result = eval_source(&expr);
 
@@ -353,8 +353,8 @@ proptest! {
 
     #[test]
     fn and_with_false_is_false(b in prop::bool::ANY) {
-        let bool_str = if b { "#t" } else { "#f" };
-        let expr = format!("(and {} #f)", bool_str);
+        let bool_str = if b { "true" } else { "false" };
+        let expr = format!("(and {} false)", bool_str);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -363,8 +363,8 @@ proptest! {
 
     #[test]
     fn or_with_true_is_true(b in prop::bool::ANY) {
-        let bool_str = if b { "#t" } else { "#f" };
-        let expr = format!("(or {} #t)", bool_str);
+        let bool_str = if b { "true" } else { "false" };
+        let expr = format!("(or {} true)", bool_str);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -374,8 +374,8 @@ proptest! {
     #[test]
     fn de_morgan_and(a in prop::bool::ANY, b in prop::bool::ANY) {
         // not(a and b) == (not a) or (not b)
-        let a_str = if a { "#t" } else { "#f" };
-        let b_str = if b { "#t" } else { "#f" };
+        let a_str = if a { "true" } else { "false" };
+        let b_str = if b { "true" } else { "false" };
 
         let expr1 = format!("(not (and {} {}))", a_str, b_str);
         let expr2 = format!("(or (not {}) (not {}))", a_str, b_str);
@@ -747,7 +747,7 @@ proptest! {
 
     #[test]
     fn nested_let_in_if(cond in prop::bool::ANY, a in -100i64..100, b in -100i64..100) {
-        let cond_str = if cond { "#t" } else { "#f" };
+        let cond_str = if cond { "true" } else { "false" };
         let expr = format!(
             "(if {} (let ((x {})) x) (let ((y {})) y))",
             cond_str, a, b
@@ -761,7 +761,7 @@ proptest! {
 
     #[test]
     fn if_in_lambda_body(cond in prop::bool::ANY, a in -100i64..100, b in -100i64..100) {
-        let cond_str = if cond { "#t" } else { "#f" };
+        let cond_str = if cond { "true" } else { "false" };
         let expr = format!("((fn () (if {} {} {})))", cond_str, a, b);
         let result = eval_source(&expr);
 
@@ -834,7 +834,7 @@ proptest! {
 
     #[test]
     fn cond_first_true(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
-        let expr = format!("(cond (#t {}) (#t {}) (else {}))", a, b, c);
+        let expr = format!("(cond (true {}) (true {}) (else {}))", a, b, c);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -843,7 +843,7 @@ proptest! {
 
     #[test]
     fn cond_falls_through_to_else(a in -100i64..100) {
-        let expr = format!("(cond (#f 1) (#f 2) (else {}))", a);
+        let expr = format!("(cond (false 1) (false 2) (else {}))", a);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -1073,8 +1073,8 @@ proptest! {
     #[test]
     fn mutual_recursion_even_odd(n in 0u8..20) {
         let expr = format!(
-            "(letrec ((is-even (fn (n) (if (= n 0) #t (is-odd (- n 1)))))
-                      (is-odd (fn (n) (if (= n 0) #f (is-even (- n 1))))))
+            "(letrec ((is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
+                      (is-odd (fn (n) (if (= n 0) false (is-even (- n 1))))))
                (is-even {}))",
             n
         );
@@ -1184,7 +1184,7 @@ proptest! {
     #[test]
     fn filter_all_true_preserves(a in 1i64..50, b in 1i64..50) {
         let expr = format!(
-            "(length (filter (fn (x) #t) (list {} {})))",
+            "(length (filter (fn (x) true) (list {} {})))",
             a, b
         );
         let result = eval_source(&expr);
@@ -1196,7 +1196,7 @@ proptest! {
     #[test]
     fn filter_all_false_empty(a in -50i64..50, b in -50i64..50) {
         let expr = format!(
-            "(length (filter (fn (x) #f) (list {} {})))",
+            "(length (filter (fn (x) false) (list {} {})))",
             a, b
         );
         let result = eval_source(&expr);
@@ -1569,8 +1569,8 @@ proptest! {
         // Mutual recursion inside a lambda using letrec
         let expr = format!(
             "(let ((check (fn ()
-                            (letrec ((is-even (fn (x) (if (= x 0) #t (is-odd (- x 1)))))
-                                     (is-odd (fn (x) (if (= x 0) #f (is-even (- x 1))))))
+                            (letrec ((is-even (fn (x) (if (= x 0) true (is-odd (- x 1)))))
+                                     (is-odd (fn (x) (if (= x 0) false (is-even (- x 1))))))
                               (is-even {})))))
                (check))",
             n

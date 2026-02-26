@@ -278,7 +278,7 @@ fn test_macro_predicate_true() {
     };
     expander.define_macro(macro_def);
 
-    // (macro? my-macro) should return #t
+    // (macro? my-macro) should return true
     let check = Syntax::new(
         SyntaxKind::List(vec![
             Syntax::new(SyntaxKind::Symbol("macro?".to_string()), span.clone()),
@@ -290,7 +290,7 @@ fn test_macro_predicate_true() {
     let result = expander.expand(check, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
-    assert_eq!(expanded.to_string(), "#t");
+    assert_eq!(expanded.to_string(), "true");
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn test_macro_predicate_false() {
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
-    // (macro? not-a-macro) should return #f
+    // (macro? not-a-macro) should return false
     let check = Syntax::new(
         SyntaxKind::List(vec![
             Syntax::new(SyntaxKind::Symbol("macro?".to_string()), span.clone()),
@@ -311,7 +311,7 @@ fn test_macro_predicate_false() {
     let result = expander.expand(check, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
-    assert_eq!(expanded.to_string(), "#f");
+    assert_eq!(expanded.to_string(), "false");
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn test_macro_predicate_non_symbol() {
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
 
-    // (macro? 42) should return #f (not a symbol)
+    // (macro? 42) should return false (not a symbol)
     let check = Syntax::new(
         SyntaxKind::List(vec![
             Syntax::new(SyntaxKind::Symbol("macro?".to_string()), span.clone()),
@@ -332,7 +332,7 @@ fn test_macro_predicate_non_symbol() {
     let result = expander.expand(check, &mut symbols, &mut vm);
     assert!(result.is_ok());
     let expanded = result.unwrap();
-    assert_eq!(expanded.to_string(), "#f");
+    assert_eq!(expanded.to_string(), "false");
 }
 
 #[test]
@@ -646,7 +646,7 @@ fn test_macro_with_conditional_body() {
         .expand(defmacro_syntax, &mut symbols, &mut vm)
         .unwrap();
 
-    // (maybe-negate 42 #t) should expand to (- 42) because negate? is #t
+    // (maybe-negate 42 true) should expand to (- 42) because negate? is true
     let call_true = Syntax::new(
         SyntaxKind::List(vec![
             Syntax::new(SyntaxKind::Symbol("maybe-negate".to_string()), span.clone()),
@@ -658,7 +658,7 @@ fn test_macro_with_conditional_body() {
     let result = expander.expand(call_true, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "(- 42)");
 
-    // (maybe-negate 42 #f) should expand to just 42 because negate? is #f
+    // (maybe-negate 42 false) should expand to just 42 because negate? is false
     let call_false = Syntax::new(
         SyntaxKind::List(vec![
             Syntax::new(SyntaxKind::Symbol("maybe-negate".to_string()), span.clone()),

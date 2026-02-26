@@ -96,7 +96,7 @@
 (display serialized-nil)
 (newline)
 
-(var serialized-bool (json-serialize #t))
+(var serialized-bool (json-serialize true))
 (display "Serialized true: ")
 (display serialized-bool)
 (newline)
@@ -125,23 +125,23 @@
 (newline)
 
 ;; Test Elle native booleans with JSON operations
-(display "Testing Elle native booleans (#t, #f):")
+(display "Testing Elle native booleans (#t, false):")
 (newline)
 
-(var elle-true #t)
-(var elle-false #f)
+(var elle-true true)
+(var elle-false false)
 
 (var serialized-elle-true (json-serialize elle-true))
 (display "Serialized Elle #t: ")
 (display serialized-elle-true)
 (newline)
-(assert-eq serialized-elle-true "true" "Elle bool #t serializes to JSON 'true'")
+(assert-eq serialized-elle-true "true" "Elle bool true serializes to JSON 'true'")
 
 (var serialized-elle-false (json-serialize elle-false))
 (display "Serialized Elle #f: ")
 (display serialized-elle-false)
 (newline)
-(assert-eq serialized-elle-false "false" "Elle bool #f serializes to JSON 'false'")
+(assert-eq serialized-elle-false "false" "Elle bool false serializes to JSON 'false'")
 
 ;; Test JSON-parsed booleans
 (display "\nTesting JSON-parsed booleans:")
@@ -187,27 +187,27 @@
 (newline)
 (assert-eq serialized-mixed-bools "[true,false,false,true]" "Mixed Elle and JSON bools serialize identically")
 
-;; Test that Elle #t and JSON-parsed true serialize the same way
-(var elle-true-serialized (json-serialize #t))
+;; Test that Elle true and JSON-parsed true serialize the same way
+(var elle-true-serialized (json-serialize true))
 (var json-true-serialized (json-serialize (json-parse "true")))
-(display "Elle #t serialized: ")
+(display "Elle true serialized: ")
 (display elle-true-serialized)
 (newline)
 (display "JSON true serialized: ")
 (display json-true-serialized)
 (newline)
-(assert-eq elle-true-serialized json-true-serialized "Elle #t and JSON true serialize identically")
+(assert-eq elle-true-serialized json-true-serialized "Elle true and JSON true serialize identically")
 
-;; Test that Elle #f and JSON-parsed false serialize the same way
-(var elle-false-serialized (json-serialize #f))
+;; Test that Elle false and JSON-parsed false serialize the same way
+(var elle-false-serialized (json-serialize false))
 (var json-false-serialized (json-serialize (json-parse "false")))
-(display "Elle #f serialized: ")
+(display "Elle false serialized: ")
 (display elle-false-serialized)
 (newline)
 (display "JSON false serialized: ")
 (display json-false-serialized)
 (newline)
-(assert-eq elle-false-serialized json-false-serialized "Elle #f and JSON false serialize identically")
+(assert-eq elle-false-serialized json-false-serialized "Elle false and JSON false serialize identically")
 
 ;; Example 6: Serialize lists as arrays
 (display "\n=== Example 6: Serializing Lists ===")
@@ -220,7 +220,7 @@
 (newline)
 (assert-eq serialized-list "[1,2,3,4,5]" "json-serialize list returns JSON array")
 
-(var mixed-list (list 1 "two" #t nil 3.14))
+(var mixed-list (list 1 "two" true nil 3.14))
 (var serialized-mixed (json-serialize mixed-list))
 (display "Serialized mixed list: ")
 (display serialized-mixed)
@@ -234,7 +234,7 @@
 (var my-table (table))
 (put my-table "name" "Charlie")
 (put my-table "age" 25)
-(put my-table "active" #t)
+(put my-table "active" true)
 
 (var serialized-table (json-serialize my-table))
 (display "Serialized table: ")
@@ -288,12 +288,12 @@
 (var config (table))
 (put config "app_name" "MyApp")
 (put config "version" "1.0.0")
-(put config "debug" #f)
+(put config "debug" false)
 
 (var settings (table))
 (put settings "timeout" 30)
 (put settings "retries" 3)
-(put settings "verbose" #t)
+(put settings "verbose" true)
 
 (put config "settings" settings)
 

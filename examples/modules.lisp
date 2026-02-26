@@ -122,7 +122,7 @@
       ((eq? op 'length) length)
       ((eq? op 'upcase) string-upcase)
       ((eq? op 'downcase) string-downcase)
-      (else #f)))))
+      (else false)))))
 
 (var string-ns (string-module))
 
@@ -183,7 +183,7 @@
       ((eq? op 'add) +)
       ((eq? op 'sub) -)
       ((eq? op 'mul) *)
-      (else #f)))))
+      (else false)))))
 
 (def extended-module (fn ()
   (let ((base (base-module)))
@@ -252,7 +252,7 @@
     (cond
       ((eq? op 'test-add) (fn (a b) (= (+ a b) 15)))
       ((eq? op 'test-mul) (fn (a b) (= (* a b) 50)))
-      (else #f)))))
+      (else false)))))
 
 (var test-mod (test-module))
 

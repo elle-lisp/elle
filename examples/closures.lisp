@@ -169,11 +169,11 @@
 (newline)
 
 ;; Section 4 Assertions
-(assert-eq (is-positive 5) #t "is-positive(5) = true")
-(assert-eq (is-negative -3) #t "is-negative(-3) = true")
-(assert-eq (is-zero 0) #t "is-zero(0) = true")
-(assert-eq (is-even 4) #t "is-even(4) = true")
-(assert-eq (is-even 7) #f "is-even(7) = false")
+(assert-eq (is-positive 5) true "is-positive(5) = true")
+(assert-eq (is-negative -3) true "is-negative(-3) = true")
+(assert-eq (is-zero 0) true "is-zero(0) = true")
+(assert-eq (is-even 4) true "is-even(4) = true")
+(assert-eq (is-even 7) false "is-even(7) = false")
 (newline)
 
 ;; ============================================================================
@@ -275,8 +275,8 @@
 ;; Section 6 Assertions
 (assert-eq (closure-1 8) 50 "closure-1(8) = 50")
 (assert-eq (closure-2 2) 84 "closure-2(2) = 84")
-(assert-eq (above-50 75) #t "above-50(75) = true")
-(assert-eq (above-100 75) #f "above-100(75) = false")
+(assert-eq (above-50 75) true "above-50(75) = true")
+(assert-eq (above-100 75) false "above-100(75) = false")
 (newline)
 
 ;; ============================================================================
@@ -866,13 +866,13 @@
 (var is-even
   (fn (n)
     (if (= n 0)
-      #t
+      true
       (is-odd (- n 1)))))
 
 (var is-odd
   (fn (n)
     (if (= n 0)
-      #f
+      false
       (is-even (- n 1)))))
 
 (display "Testing even/odd predicates:")
@@ -897,12 +897,12 @@
 (newline)
 
 ;; Verify mutual recursion
-(assert-eq (is-even 0) #t "is-even(0) = #t")
-(assert-eq (is-even 4) #t "is-even(4) = #t")
-(assert-eq (is-even 7) #f "is-even(7) = #f")
-(assert-eq (is-odd 1) #t "is-odd(1) = #t")
-(assert-eq (is-odd 5) #t "is-odd(5) = #t")
-(assert-eq (is-odd 8) #f "is-odd(8) = #f")
+(assert-eq (is-even 0) true "is-even(0) = #t")
+(assert-eq (is-even 4) true "is-even(4) = #t")
+(assert-eq (is-even 7) false "is-even(7) = #f")
+(assert-eq (is-odd 1) true "is-odd(1) = #t")
+(assert-eq (is-odd 5) true "is-odd(5) = #t")
+(assert-eq (is-odd 8) false "is-odd(8) = #f")
 
 (newline)
 
@@ -933,8 +933,8 @@
 ;; Mutual recursion with nested definitions requires letrec
 ;; (var does not support forward references)
 (def run-even-odd (fn ()
-  (letrec ((is-even-local (fn (n) (if (= n 0) #t (is-odd-local (- n 1)))))
-           (is-odd-local (fn (n) (if (= n 0) #f (is-even-local (- n 1))))))
+  (letrec ((is-even-local (fn (n) (if (= n 0) true (is-odd-local (- n 1)))))
+           (is-odd-local (fn (n) (if (= n 0) false (is-even-local (- n 1))))))
     (is-even-local 8))))
 
 (display "Is 8 even (nested letrec)? ")
@@ -942,7 +942,7 @@
 (newline)
 
 ;; Verify nested mutual recursion with letrec
-(assert-eq (run-even-odd) #t "8 should be even")
+(assert-eq (run-even-odd) true "8 should be even")
 
 (newline)
 
