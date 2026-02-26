@@ -156,10 +156,10 @@ pub enum Instruction {
     /// Cdr with silent nil (for destructuring): returns nil if not a cons
     CdrOrNil,
 
-    /// Array ref with silent nil (for destructuring): returns nil if out of bounds
+    /// Array/tuple ref with silent nil (for destructuring): returns nil if out of bounds
     /// Operand: u16 index (immediate)
     ArrayRefOrNil,
-    /// Array slice from index (for & rest destructuring): returns sub-array from index to end
+    /// Array/tuple slice from index (for & rest destructuring): returns sub-array from index to end
     /// Operand: u16 index (immediate)
     ArraySliceFrom,
 

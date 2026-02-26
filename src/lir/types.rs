@@ -219,9 +219,9 @@ pub enum LirInstr {
     CarOrNil { dst: Reg, src: Reg },
     /// Cdr with silent nil: returns nil if not a cons cell
     CdrOrNil { dst: Reg, src: Reg },
-    /// Array ref with silent nil: returns nil if out of bounds or not an array
+    /// Array/tuple ref with silent nil: returns nil if out of bounds or not an array/tuple
     ArrayRefOrNil { dst: Reg, src: Reg, index: u16 },
-    /// Array slice from index: returns a new array from index to end, or empty array
+    /// Array/tuple slice from index: returns a new array from index to end, or empty array
     ArraySliceFrom { dst: Reg, src: Reg, index: u16 },
     /// Table/struct get with silent nil: returns nil if key not found or wrong type.
     /// `key` is a constant pool index holding a keyword Value.

@@ -1,6 +1,6 @@
 # Hygienic Macros: Implementation Plan
 
-Reference: docs/MACROS.md
+Reference: docs/macros.md
 
 Three PRs total. PR 1 (dead code cleanup) and PR 2 (VM-based expansion)
 are complete. PR 3 (hygiene) remains.
@@ -169,7 +169,7 @@ Counterfactual: remove scope stamping, verify capture occurs
 
 - `src/hir/AGENTS.md` — document scope-aware lookup
 - `src/syntax/AGENTS.md` — update hygiene section
-- `docs/MACROS.md` — update hygiene section as implemented
+- `docs/macros.md` — update hygiene section as implemented
 
 ---
 

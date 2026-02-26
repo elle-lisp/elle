@@ -238,12 +238,12 @@ Features that are now possible with VM-based macros:
 
 | Feature | Defined in | Status |
 |---------|-----------|--------|
-| `try`/`catch` | `docs/EXCEPT.md` | Ready to implement |
-| `defer` | `docs/JANET.md` | Ready to implement |
-| `with` | `docs/JANET.md` | Ready to implement |
-| `protect` | `docs/JANET.md` | Ready to implement |
-| `generate` | `docs/JANET.md` | Ready to implement |
-| `bench` | `docs/DEBUGGING.md` | Ready to implement |
+| `try`/`catch` | `docs/except.md` | Ready to implement |
+| `defer` | `docs/janet.md` | Ready to implement |
+| `with` | `docs/janet.md` | Ready to implement |
+| `protect` | `docs/janet.md` | Ready to implement |
+| `generate` | `docs/janet.md` | Ready to implement |
+| `bench` | `docs/debugging.md` | Ready to implement |
 | `swap` | — | Ready (automatic hygiene via PR 3) |
 | Anaphoric macros | — | Implemented via `datum->syntax` |
 | `assert` (variadic) | — | Needs variadic macro params |

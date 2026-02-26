@@ -105,7 +105,7 @@ Performance optimizations:
 - Effect type reworked to struct `{ yield_behavior, may_raise }`
 - `is_pure()` fixed — pure functions CAN raise
 - Every primitive declares its effect at registration time
-- Design docs: `docs/EFFECTS.md`, `docs/JANET.md`
+- Design docs: `docs/effects.md`, `docs/janet.md`
 
 ## Hammer Time II analysis (Feb 2026)
 
@@ -208,7 +208,7 @@ See `PLAN.md` for the detailed refactoring plan. Execution order:
 5. H.5 — Split analyzer binding.rs (complexity)
 
 ### After Hammer Time II: Fiber/Signal System
-See `docs/FIBERS.md` for the implementation plan and `docs/EFFECTS.md` for
+See `docs/fibers.md` for the implementation plan and `docs/effects.md` for
 the design rationale. Unifies exception handling, coroutines, and effects
 into a single fiber/signal mechanism. Surface syntax: `try`/`catch` + `defer`.
 

@@ -15,7 +15,7 @@ only compile pure functions.
 
 These have been unified into a single mechanism: **fibers with signals**.
 Coroutines are fibers that yield. Errors are signals. The effect system
-tracks signal bits. See `docs/FIBERS.md` for the implementation reference.
+tracks signal bits. See `docs/fibers.md` for the implementation reference.
 
 
 ## Prior Art
@@ -53,7 +53,7 @@ there's no static tracking of effects. You can't look at a function and know
 what signals it might emit. Optimization opportunities that depend on static
 knowledge are unavailable.
 
-See `docs/JANET.md` for the full architectural analysis.
+See `docs/janet.md` for the full architectural analysis.
 
 ### Koka
 
@@ -394,7 +394,7 @@ The closure carries its effect bits. The fiber's mask determines which
 signals it catches from children. There is no `effects` field on the Fiber
 — effects are a compile-time property of the closure, not the fiber.
 
-See `docs/FIBERS.md` for the full Fiber, SuspendedFrame, and FiberHandle
+See `docs/fibers.md` for the full Fiber, SuspendedFrame, and FiberHandle
 documentation.
 
 
@@ -746,7 +746,7 @@ and faster. Current implementation: flat.
 ## Resolved Questions
 
 - **Signal resumption**: Yes. Resume value is pushed onto the child's operand
-  stack. See `docs/FIBERS.md`.
+  stack. See `docs/fibers.md`.
 
 - **Error representation**: Errors are `[:keyword "message"]` tuples. No
   `Condition` type, no exception hierarchy. Pattern matching on the payload

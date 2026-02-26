@@ -298,7 +298,7 @@ Closures carry an `Effect` with signal bits describing what they might emit.
 The fiber's mask determines which signals are caught. The effect system is
 compile-time; signals are runtime. Same bitfield, different timing.
 
-See `docs/EFFECTS.md` for the effect system design.
+See `docs/effects.md` for the effect system design.
 
 
 ## What's Not Implemented Yet

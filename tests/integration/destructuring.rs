@@ -888,3 +888,67 @@ fn test_table_wildcard_value() {
         Value::int(20)
     );
 }
+
+// === Tuple destructuring (bracket patterns on tuples) ===
+// Tuples are immutable sequences. Currently the only way to get a tuple in
+// user code is through error values (which are tuples [:kind "msg"]).
+// The try/catch tests in prelude.rs cover the primary use case.
+// These tests use a helper that captures an error value as a tuple.
+
+fn make_error_tuple() -> &'static str {
+    // Trigger a division-by-zero error and capture the error tuple
+    "(let ((f (fiber/new (fn () (/ 1 0)) 1)))
+       (fiber/resume f nil)
+       (fiber/value f))"
+}
+
+#[test]
+fn test_let_destructure_tuple() {
+    // Error values are tuples — bracket destructuring should extract elements
+    let src = format!("(let (([a b] {})) b)", make_error_tuple());
+    let result = eval_source(&src);
+    assert_eq!(result.unwrap(), Value::string("division by zero"));
+}
+
+#[test]
+fn test_let_destructure_tuple_first() {
+    let src = format!("(let (([a b] {})) a)", make_error_tuple());
+    let result = eval_source(&src);
+    assert_eq!(result.unwrap(), Value::keyword("division-by-zero"));
+}
+
+#[test]
+fn test_match_array_pattern_does_not_match_tuple() {
+    // match [a b] should NOT match tuples — only arrays
+    let src = format!(
+        "(match {} ([a b] :matched) (_ :fell-through))",
+        make_error_tuple()
+    );
+    let result = eval_source(&src);
+    assert_eq!(result.unwrap(), Value::keyword("fell-through"));
+}
+
+#[test]
+fn test_destructure_non_sequential_gives_nil() {
+    // Destructuring a non-array, non-tuple value gives nil (silent nil semantics)
+    assert_eq!(eval_source("(let (([a b] 42)) a)").unwrap(), Value::NIL);
+    assert_eq!(
+        eval_source(r#"(let (([a b] "hello")) a)"#).unwrap(),
+        Value::NIL
+    );
+}
+
+#[test]
+fn test_def_tuple_basic() {
+    // Destructure an error tuple via def
+    let src = format!("(begin (def [a b] {}) a)", make_error_tuple());
+    assert_eq!(
+        eval_source(&src).unwrap(),
+        Value::keyword("division-by-zero")
+    );
+    let src = format!("(begin (def [a b] {}) b)", make_error_tuple());
+    assert_eq!(
+        eval_source(&src).unwrap(),
+        Value::string("division by zero")
+    );
+}

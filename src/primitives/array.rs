@@ -10,6 +10,11 @@ pub fn prim_array(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::array(args.to_vec()))
 }
 
+/// Create a tuple from arguments
+pub fn prim_tuple(args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, Value::tuple(args.to_vec()))
+}
+
 /// Get a reference from an array at an index
 pub fn prim_array_ref(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
@@ -234,6 +239,17 @@ pub fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
+        name: "tuple",
+        func: prim_tuple,
+        effect: Effect::none(),
+        arity: Arity::AtLeast(0),
+        doc: "Create an immutable tuple from arguments.",
+        params: &[],
+        category: "array",
+        example: "(tuple 1 2 3) ;=> [1 2 3]",
+        aliases: &[],
+    },
+    PrimitiveDef {
         name: "array",
         func: prim_array,
         effect: Effect::none(),
@@ -241,7 +257,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Create a mutable array from arguments.",
         params: &[],
         category: "array",
-        example: "(array 1 2 3) ;=> [1 2 3]",
+        example: "(array 1 2 3) ;=> @[1 2 3]",
         aliases: &[],
     },
     PrimitiveDef {

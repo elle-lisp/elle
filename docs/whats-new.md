@@ -188,7 +188,7 @@ The distinction matters because `(nil? ())` returns `#f`, so the wrong version w
 (empty? (rest (list 1)))  ; ⟹ #t (it's empty)
 ```
 
-See `docs/SEMANTICS.md` for the authoritative specification.
+See `docs/semantics.md` for the authoritative specification.
 
 ## Recent Additions
 
@@ -252,7 +252,7 @@ Elle now provides comprehensive exception handling with the `try-catch-finally` 
 
 ### Condition System
 
-> **Deprecated.** See `docs/FIBERS.md` for the replacement design.
+> **Deprecated.** See `docs/fibers.md` for the replacement design.
 
 Beyond simple exceptions, Elle provides a sophisticated condition system for handling expected error scenarios:
 
@@ -702,8 +702,8 @@ If upgrading from pre-exception-handling versions:
 
 ## Further Reading
 
-- **LANGUAGE_GUIDE.md**: Comprehensive language tutorial
-- **CONTROL_FLOW.md**: Detailed control flow documentation
-- **BUILTINS.md**: Complete builtin functions reference
-- **SCOPING_GUIDE.md**: Variable scoping and closures
+- **language-guide.md**: Comprehensive language tutorial
+- **control-flow.md**: Detailed control flow documentation
+- **builtins.md**: Complete builtin functions reference
+- **scoping-guide.md**: Variable scoping and closures
 - **examples/**: Browse example programs
