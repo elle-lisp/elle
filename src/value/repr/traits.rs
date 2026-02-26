@@ -85,6 +85,11 @@ impl PartialEq for Value {
                 // FFI type descriptor comparison (structural equality)
                 (HeapObject::FFIType(t1), HeapObject::FFIType(t2)) => t1 == t2,
 
+                // Managed pointer comparison (by identity, not address)
+                (HeapObject::ManagedPointer(_), HeapObject::ManagedPointer(_)) => {
+                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
+                }
+
                 // Different types are not equal
                 _ => false,
             }

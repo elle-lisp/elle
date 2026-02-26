@@ -44,6 +44,46 @@ fn resolve_type_desc(value: &Value, context: &str) -> Result<TypeDesc, (SignalBi
     ))
 }
 
+// ── Pointer extraction helper ───────────────────────────────────────
+
+/// Extract a raw pointer address from a Value that is either a raw CPointer
+/// or a managed pointer. Returns an error for nil, freed, or wrong-type values.
+fn extract_pointer_addr(value: &Value, context: &str) -> Result<usize, (SignalBits, Value)> {
+    if value.is_nil() {
+        return Err((
+            SIG_ERROR,
+            error_val(
+                "argument-error",
+                format!("{}: cannot use null pointer", context),
+            ),
+        ));
+    }
+    // Raw CPointer (unmanaged — from ffi/lookup, ffi/call returns, etc.)
+    if let Some(addr) = value.as_pointer() {
+        return Ok(addr);
+    }
+    // Managed pointer (from ffi/malloc)
+    if let Some(cell) = value.as_managed_pointer() {
+        return match cell.get() {
+            Some(addr) => Ok(addr),
+            None => Err((
+                SIG_ERROR,
+                error_val(
+                    "use-after-free",
+                    format!("{}: pointer has been freed", context),
+                ),
+            )),
+        };
+    }
+    Err((
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("{}: expected pointer, got {}", context, value.type_name()),
+        ),
+    ))
+}
+
 // ── Library loading ─────────────────────────────────────────────────
 
 pub fn prim_ffi_native(args: &[Value]) -> (SignalBits, Value) {
@@ -520,7 +560,7 @@ pub fn prim_ffi_malloc(args: &[Value]) -> (SignalBits, Value) {
             error_val("ffi-error", "ffi/malloc: allocation failed"),
         )
     } else {
-        (SIG_OK, Value::pointer(ptr as usize))
+        (SIG_OK, Value::managed_pointer(ptr as usize))
     }
 }
 
@@ -534,6 +574,21 @@ pub fn prim_ffi_free(args: &[Value]) -> (SignalBits, Value) {
     if args[0].is_nil() {
         return (SIG_OK, Value::NIL); // free(NULL) is a no-op
     }
+    // Managed pointer: check not already freed, then invalidate
+    if let Some(cell) = args[0].as_managed_pointer() {
+        return match cell.get() {
+            Some(addr) => {
+                cell.set(None);
+                unsafe { libc::free(addr as *mut libc::c_void) };
+                (SIG_OK, Value::NIL)
+            }
+            None => (
+                SIG_ERROR,
+                error_val("double-free", "ffi/free: pointer has already been freed"),
+            ),
+        };
+    }
+    // Raw CPointer: free without lifecycle tracking (backwards compat)
     let addr = match args[0].as_pointer() {
         Some(a) => a,
         None => {
@@ -559,23 +614,9 @@ pub fn prim_ffi_read(args: &[Value]) -> (SignalBits, Value) {
             error_val("arity-error", "ffi/read: expected 2 arguments"),
         );
     }
-    if args[0].is_nil() {
-        return (
-            SIG_ERROR,
-            error_val("argument-error", "ffi/read: cannot read from null pointer"),
-        );
-    }
-    let addr = match args[0].as_pointer() {
-        Some(a) => a,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("ffi/read: expected pointer, got {}", args[0].type_name()),
-                ),
-            )
-        }
+    let addr = match extract_pointer_addr(&args[0], "ffi/read") {
+        Ok(a) => a,
+        Err(e) => return e,
     };
     let desc = match resolve_type_desc(&args[1], "ffi/read") {
         Ok(t) => t,
@@ -644,23 +685,9 @@ pub fn prim_ffi_write(args: &[Value]) -> (SignalBits, Value) {
             error_val("arity-error", "ffi/write: expected 3 arguments"),
         );
     }
-    if args[0].is_nil() {
-        return (
-            SIG_ERROR,
-            error_val("argument-error", "ffi/write: cannot write to null pointer"),
-        );
-    }
-    let addr = match args[0].as_pointer() {
-        Some(a) => a,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("ffi/write: expected pointer, got {}", args[0].type_name()),
-                ),
-            )
-        }
+    let addr = match extract_pointer_addr(&args[0], "ffi/write") {
+        Ok(a) => a,
+        Err(e) => return e,
     };
     let desc = match resolve_type_desc(&args[1], "ffi/write") {
         Ok(t) => t,
@@ -806,6 +833,19 @@ pub fn prim_ffi_write(args: &[Value]) -> (SignalBits, Value) {
                     0usize
                 } else if let Some(a) = value.as_pointer() {
                     a
+                } else if let Some(cell) = value.as_managed_pointer() {
+                    match cell.get() {
+                        Some(a) => a,
+                        None => {
+                            return (
+                                SIG_ERROR,
+                                error_val(
+                                    "use-after-free",
+                                    "ffi/write: source pointer has been freed",
+                                ),
+                            )
+                        }
+                    }
                 } else {
                     return (
                         SIG_ERROR,
@@ -858,17 +898,9 @@ pub fn prim_ffi_string(args: &[Value]) -> (SignalBits, Value) {
     if args[0].is_nil() {
         return (SIG_OK, Value::NIL);
     }
-    let addr = match args[0].as_pointer() {
-        Some(a) => a,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("ffi/string: expected pointer, got {}", args[0].type_name()),
-                ),
-            )
-        }
+    let addr = match extract_pointer_addr(&args[0], "ffi/string") {
+        Ok(a) => a,
+        Err(e) => return e,
     };
 
     let ptr = addr as *const std::ffi::c_char;
@@ -1269,7 +1301,7 @@ mod tests {
     fn test_ffi_malloc_free() {
         let result = prim_ffi_malloc(&[Value::int(100)]);
         assert_eq!(result.0, SIG_OK);
-        assert!(result.1.as_pointer().is_some());
+        assert!(result.1.as_managed_pointer().is_some());
         let ptr_val = result.1;
 
         let free_result = prim_ffi_free(&[ptr_val]);
@@ -1406,7 +1438,7 @@ mod tests {
         let alloc = prim_ffi_malloc(&[Value::int(16)]);
         assert_eq!(alloc.0, SIG_OK);
         let ptr = alloc.1;
-        let addr = ptr.as_pointer().unwrap();
+        let addr = ptr.as_managed_pointer().unwrap().get().unwrap();
         unsafe {
             let p = addr as *mut u8;
             for (i, &b) in b"hello\0".iter().enumerate() {

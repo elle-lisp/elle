@@ -479,6 +479,19 @@ impl Value {
         }
     }
 
+    /// Extract the managed pointer cell, if this is a managed pointer.
+    #[inline]
+    pub fn as_managed_pointer(&self) -> Option<&std::cell::Cell<Option<usize>>> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::ManagedPointer(cell) => Some(cell),
+            _ => None,
+        }
+    }
+
     /// Extract as binding inner if this is a binding.
     #[inline]
     pub fn as_binding(&self) -> Option<&std::cell::RefCell<crate::value::heap::BindingInner>> {

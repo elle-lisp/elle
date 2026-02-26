@@ -105,6 +105,9 @@ fn is_value_sendable(value: &Value) -> bool {
 
         // FFI type descriptors are pure data — safe to send
         HeapObject::FFIType(_) => true,
+
+        // Managed pointers are not sendable (Cell is not thread-safe)
+        HeapObject::ManagedPointer(_) => false,
     }
 }
 

@@ -122,6 +122,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             HeapTag::Binding => Err("Cannot serialize bindings to JSON".to_string()),
             HeapTag::FFISignature => Err("Cannot serialize FFI signatures to JSON".to_string()),
             HeapTag::FFIType => Err("Cannot serialize FFI type descriptors to JSON".to_string()),
+            HeapTag::ManagedPointer => Err("Cannot serialize pointers to JSON".to_string()),
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())
@@ -271,6 +272,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             HeapTag::Binding => Err("Cannot serialize bindings to JSON".to_string()),
             HeapTag::FFISignature => Err("Cannot serialize FFI signatures to JSON".to_string()),
             HeapTag::FFIType => Err("Cannot serialize FFI type descriptors to JSON".to_string()),
+            HeapTag::ManagedPointer => Err("Cannot serialize pointers to JSON".to_string()),
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())

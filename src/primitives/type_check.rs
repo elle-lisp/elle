@@ -158,7 +158,10 @@ pub fn prim_is_pointer(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].is_pointer()))
+    (
+        SIG_OK,
+        Value::bool(args[0].is_pointer() || args[0].as_managed_pointer().is_some()),
+    )
 }
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[

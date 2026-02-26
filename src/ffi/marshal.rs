@@ -256,6 +256,13 @@ impl MarshalledArg {
                     ArgStorage::Ptr(std::ptr::null())
                 } else if let Some(addr) = value.as_pointer() {
                     ArgStorage::Ptr(addr as *const c_void)
+                } else if let Some(cell) = value.as_managed_pointer() {
+                    match cell.get() {
+                        Some(addr) => ArgStorage::Ptr(addr as *const c_void),
+                        None => {
+                            return Err(LError::ffi_type_error("ptr", "pointer has been freed"));
+                        }
+                    }
                 } else {
                     return Err(LError::ffi_type_error(
                         "ptr",
@@ -487,6 +494,13 @@ pub(crate) fn write_value_to_buffer(
                 std::ptr::null::<c_void>()
             } else if let Some(addr) = value.as_pointer() {
                 addr as *const c_void
+            } else if let Some(cell) = value.as_managed_pointer() {
+                match cell.get() {
+                    Some(addr) => addr as *const c_void,
+                    None => {
+                        return Err(LError::ffi_type_error("ptr", "pointer has been freed"));
+                    }
+                }
             } else {
                 return Err(LError::ffi_type_error(
                     "ptr",

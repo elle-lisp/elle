@@ -160,6 +160,9 @@ impl SendValue {
             // Unsafe: FFI signatures (contain non-Send types like Cif)
             HeapObject::FFISignature(_, _) => Err("Cannot send FFI signature".to_string()),
 
+            // Unsafe: managed pointers (lifecycle state is not thread-safe with Cell)
+            HeapObject::ManagedPointer(_) => Err("Cannot send managed pointer".to_string()),
+
             // FFI type descriptors are pure data — safe to send
             HeapObject::FFIType(desc) => Ok(SendValue::FFIType(desc.clone())),
         }

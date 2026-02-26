@@ -106,6 +106,84 @@ fn test_ffi_malloc_negative_error() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_ffi_double_free_error() {
+    let result = eval_source(
+        "(let ((ptr (ffi/malloc 8)))
+           (ffi/free ptr)
+           (ffi/free ptr))",
+    );
+    assert!(result.is_err(), "Double free should signal an error");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("already been freed") || err.contains("double-free"),
+        "Error should mention double-free: {}",
+        err
+    );
+}
+
+#[test]
+fn test_ffi_use_after_free_read_error() {
+    let result = eval_source(
+        "(let ((ptr (ffi/malloc 8)))
+           (ffi/write ptr :int 42)
+           (ffi/free ptr)
+           (ffi/read ptr :int))",
+    );
+    assert!(
+        result.is_err(),
+        "Use-after-free read should signal an error"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("freed"),
+        "Error should mention freed pointer: {}",
+        err
+    );
+}
+
+#[test]
+fn test_ffi_use_after_free_write_error() {
+    let result = eval_source(
+        "(let ((ptr (ffi/malloc 8)))
+           (ffi/free ptr)
+           (ffi/write ptr :int 99))",
+    );
+    assert!(
+        result.is_err(),
+        "Use-after-free write should signal an error"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("freed"),
+        "Error should mention freed pointer: {}",
+        err
+    );
+}
+
+#[test]
+fn test_ffi_managed_pointer_normal_use() {
+    let result = eval_source(
+        "(let ((ptr (ffi/malloc 8)))
+           (ffi/write ptr :int 42)
+           (let ((v (ffi/read ptr :int)))
+             (ffi/free ptr)
+             v))",
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_ffi_pointer_predicate_managed() {
+    let result = eval_source(
+        "(let ((ptr (ffi/malloc 8)))
+           (let ((r (pointer? ptr)))
+             (ffi/free ptr)
+             r))",
+    );
+    assert_eq!(result.unwrap(), Value::bool(true));
+}
+
 // ── Library loading and calling ─────────────────────────────────────
 
 #[cfg(target_os = "linux")]

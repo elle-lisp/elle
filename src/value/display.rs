@@ -131,6 +131,14 @@ impl fmt::Display for Value {
             };
         }
 
+        // Managed pointer
+        if let Some(cell) = self.as_managed_pointer() {
+            return match cell.get() {
+                Some(addr) => write!(f, "<pointer 0x{:x}>", addr),
+                None => write!(f, "<freed-pointer>"),
+            };
+        }
+
         // Syntax object
         if let Some(s) = self.as_syntax() {
             return write!(f, "#<syntax:{}>", s.as_ref());
