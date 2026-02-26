@@ -19,12 +19,18 @@ All CI/CD checks must pass before a PR can be merged:
 3. **Clippy** (`clippy`) - Linting and code quality analysis
 4. **Dependency Audit** (`audit`) - Security vulnerability scanning
 5. **Examples** (`examples`) - Example compilation and verification
-6. **Code Coverage** (`coverage`) - Coverage analysis and Codecov reporting
+6. **Benchmarks** (`benchmarks`) - Performance regression detection
 7. **Documentation** (`docs`) - Documentation generation and build validation
 
 ### All-Checks Status
 
 An additional check (`all-checks`) waits for all above checks to complete and reports the final status. This is the check that must pass.
+
+> **Note**: Validation checks (test, fmt, clippy, examples, benchmarks) run
+> on pull request events only. When a PR is merged to main, the push event
+> triggers coverage, benchmark publishing, documentation generation, and
+> Pages deployment — the validation checks are not re-run since they already
+> passed on the PR.
 
 ### Additional Settings
 
@@ -131,4 +137,4 @@ If status checks need to be updated:
 
 ---
 
-**Last Updated**: February 5, 2026
+**Last Updated**: February 26, 2026

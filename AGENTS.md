@@ -102,8 +102,10 @@ cargo build --release && ./target/release/elle elle-doc/generate.lisp
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
-CI runs: tests (stable/beta/nightly), fmt, clippy, examples, coverage,
-benchmarks, rustdoc, elle-doc site generation. All must pass.
+CI runs on PRs: tests (stable/beta/nightly), fmt, clippy, examples,
+benchmarks (with regression reporting), rustdoc, elle-doc site generation.
+All must pass. Main-push runs coverage, benchmark publishing, docs generation,
+and Pages deployment.
 
 ## Invariants
 
