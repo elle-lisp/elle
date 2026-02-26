@@ -516,3 +516,79 @@ fn test_cancel_always_produces_error_status() {
         "Cancelled fiber should always be in error status"
     );
 }
+
+// ── fiber with signal parameter (#346) ──────────────────────────
+
+#[test]
+fn test_fiber_closure_with_signal_parameter() {
+    // Regression test for #346: fiber closure with a signal parameter
+    // panicked with "Upvalue index 0 out of bounds (env size: 0)".
+    // The resume value should be passed as the closure's argument.
+    let result = eval_source(
+        r#"
+        (let ((f (fiber/new (fn (s) (+ s 42)) 0)))
+          (fiber/resume f 8))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(result.unwrap(), Value::int(50));
+}
+
+#[test]
+fn test_fiber_signal_parameter_with_valid_bits() {
+    // Close to the original #346 reproduction: fiber closure receives
+    // signal bits as its parameter and uses them in fiber/signal.
+    // With mask=2 (catches yield), the signal value should be returned.
+    let result = eval_source(
+        r#"
+        (let ((f (fiber/new (fn (s) (fiber/signal s 42)) 2)))
+          (fiber/resume f 2)
+          (fiber/value f))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_fiber_param_nil_default_no_panic() {
+    // Original #346 reproduction: no resume value means s=nil.
+    // fiber/signal with nil bits is a type error, not a VM panic.
+    // The fiber's error mask (1) catches it.
+    let result = eval_source(
+        r#"
+        (let ((f (fiber/new (fn (s) (fiber/signal s 42)) 1)))
+          (fiber/resume f)
+          (keyword->string (fiber/status f)))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    // The fiber should be suspended (error caught by mask=1)
+    assert_eq!(result.unwrap(), Value::string("suspended"));
+}
+
+#[test]
+fn test_fiber_closure_with_resume_value_as_parameter() {
+    // First resume passes a value that becomes the closure's argument.
+    let result = eval_source(
+        r#"
+        (let ((f (fiber/new (fn (x) (* x x)) 0)))
+          (fiber/resume f 7))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(result.unwrap(), Value::int(49));
+}
+
+#[test]
+fn test_fiber_zero_param_closure_still_works() {
+    // Ensure zero-parameter closures continue to work after the fix.
+    let result = eval_source(
+        r#"
+        (let ((f (fiber/new (fn () 42) 0)))
+          (fiber/resume f))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(result.unwrap(), Value::int(42));
+}

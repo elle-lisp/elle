@@ -235,7 +235,7 @@ impl VM {
             vm.fiber.status = FiberStatus::Alive;
 
             if is_first_resume {
-                vm.do_fiber_first_resume()
+                vm.do_fiber_first_resume(resume_value)
             } else {
                 vm.do_fiber_subsequent_resume(resume_value)
             }
@@ -244,13 +244,30 @@ impl VM {
 
     /// First resume of a New fiber — build env and execute closure bytecode.
     ///
+    /// The `resume_value` is passed as the closure's argument when the
+    /// closure expects a parameter (e.g., a signal parameter). For
+    /// zero-parameter closures, no arguments are passed.
+    ///
     /// Uses execute_bytecode_saving_stack (not execute_bytecode_inner) because
     /// the fiber body may end with a TailCall. execute_bytecode_saving_stack
     /// handles pending tail calls in a loop, while execute_bytecode_inner does
     /// not.
-    fn do_fiber_first_resume(&mut self) -> SignalBits {
+    fn do_fiber_first_resume(&mut self, resume_value: Value) -> SignalBits {
         let closure = self.fiber.closure.clone();
-        let env_rc = self.build_closure_env(&closure, &[]);
+
+        // Build args from resume_value based on closure arity.
+        // fiber/resume provides at most one value, so we pass it as a
+        // single argument when the closure expects parameters.
+        let args: &[Value] = match closure.arity {
+            crate::value::Arity::Exact(0) => &[],
+            _ => &[resume_value],
+        };
+
+        if !self.check_arity(&closure.arity, args.len()) {
+            return SIG_ERROR;
+        }
+
+        let env_rc = self.build_closure_env(&closure, args);
 
         let (bits, ip) =
             self.execute_bytecode_saving_stack(&closure.bytecode, &closure.constants, &env_rc);
