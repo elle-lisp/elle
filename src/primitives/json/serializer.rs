@@ -58,8 +58,12 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         let mut pairs = Vec::new();
         for (k, v) in table.iter() {
             let key_str = match k {
-                TableKey::String(s) => escape_json_string(s),
-                _ => return Err("Table keys must be strings for JSON serialization".to_string()),
+                TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
+                _ => {
+                    return Err(
+                        "Table keys must be strings or keywords for JSON serialization".to_string(),
+                    )
+                }
             };
             let val_str = serialize_value(v)?;
             pairs.push(format!("{}:{}", key_str, val_str));
@@ -69,18 +73,20 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         let mut pairs = Vec::new();
         for (k, v) in s.iter() {
             let key_str = match k {
-                TableKey::String(s) => escape_json_string(s),
-                _ => return Err("Struct keys must be strings for JSON serialization".to_string()),
+                TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
+                _ => {
+                    return Err(
+                        "Struct keys must be strings or keywords for JSON serialization"
+                            .to_string(),
+                    )
+                }
             };
             let val_str = serialize_value(v)?;
             pairs.push(format!("{}:{}", key_str, val_str));
         }
         Ok(format!("{{{}}}", pairs.join(",")))
-    } else if value.is_keyword() {
-        // Serialize keywords as strings (without the colon prefix)
-        // Note: We don't have access to the symbol table here, so we'll use the ID
-        // In practice, keywords should be converted to strings before serialization
-        Err("Cannot serialize keyword without symbol table context".to_string())
+    } else if let Some(name) = value.as_keyword_name() {
+        Ok(escape_json_string(name))
     } else if value.is_closure() {
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
@@ -191,8 +197,12 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         let mut pairs = Vec::new();
         for (k, v) in table.iter() {
             let key_str = match k {
-                TableKey::String(s) => escape_json_string(s),
-                _ => return Err("Table keys must be strings for JSON serialization".to_string()),
+                TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
+                _ => {
+                    return Err(
+                        "Table keys must be strings or keywords for JSON serialization".to_string(),
+                    )
+                }
             };
             let val_str = serialize_value_pretty(v, indent_level + 1)?;
             pairs.push(format!("{}: {}", key_str, val_str));
@@ -210,8 +220,13 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         let mut pairs = Vec::new();
         for (k, v) in s.iter() {
             let key_str = match k {
-                TableKey::String(s) => escape_json_string(s),
-                _ => return Err("Struct keys must be strings for JSON serialization".to_string()),
+                TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
+                _ => {
+                    return Err(
+                        "Struct keys must be strings or keywords for JSON serialization"
+                            .to_string(),
+                    )
+                }
             };
             let val_str = serialize_value_pretty(v, indent_level + 1)?;
             pairs.push(format!("{}: {}", key_str, val_str));
@@ -222,8 +237,8 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             pairs.join(&format!(",\n{}", next_indent)),
             indent
         ))
-    } else if value.is_keyword() {
-        Err("Cannot serialize keyword without symbol table context".to_string())
+    } else if let Some(name) = value.as_keyword_name() {
+        Ok(escape_json_string(name))
     } else if value.is_closure() {
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
