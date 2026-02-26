@@ -76,4 +76,4 @@ return (SIG_ERROR, Value::condition(Condition::arity_error("expected 2 arguments
 
 - [AGENTS.md](AGENTS.md) - technical reference for LLM agents
 - `src/vm/call.rs` - dispatches primitive calls, handles signal bits
-- `docs/BUILTINS.md` - user-facing primitive documentation
+- `docs/builtins.md` - user-facing primitive documentation

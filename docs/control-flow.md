@@ -428,7 +428,7 @@ Extract information from exceptions:
 
 > **Deprecated.** The condition system (`define-condition`, `catch-condition`,
 > `condition-get`, `signal`) will be replaced by the fiber/signal model with
-> `try`/`catch`/`finally` surface syntax. See `docs/FIBERS.md` for the new
+> `try`/`catch`/`finally` surface syntax. See `docs/fibers.md` for the new
 > design. The primitives below still work but will be removed in a future
 > release.
 

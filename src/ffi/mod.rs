@@ -1,7 +1,7 @@
 //! Elle Foreign Function Interface (FFI) subsystem.
 //!
 //! Enables calling C functions from Elle code. This module is being rebuilt
-//! to match the design in docs/FFI.md.
+//! to match the design in docs/ffi.md.
 
 pub mod call;
 pub mod callback;

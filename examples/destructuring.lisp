@@ -77,6 +77,41 @@
 (newline)
 (newline)
 
+; Tuple destructuring with bracket pattern
+; (tuples are immutable sequences; see docs/types.md)
+(def [ta tb] (tuple :hello 42))
+(assert-eq ta :hello "tuple destructure first")
+(assert-eq tb 42 "tuple destructure second")
+(display "  (def [ta tb] (tuple :hello 42)) => ta=")
+(display ta) (display " tb=") (display tb)
+(newline)
+
+; Short tuple gives nil for missing
+(def [tc td te] (tuple :only-one))
+(assert-eq tc :only-one "short tuple first")
+(assert-eq td nil "short tuple missing => nil")
+(display "  (def [tc td te] (tuple :only-one)) => tc=")
+(display tc) (display " td=") (display td)
+(newline)
+
+; Tuple rest collects remaining into array
+(def [tf & trest] (tuple :a :b :c))
+(assert-eq tf :a "tuple rest: first")
+(assert-eq (array-ref trest 0) :b "tuple rest: rest[0]")
+(display "  (def [tf & trest] (tuple :a :b :c)) => tf=")
+(display tf) (display " trest=") (display trest)
+(newline)
+
+; Error value destructuring (the motivating use case for tuple destructuring)
+(def err-tuple (tuple :division-by-zero "division by zero"))
+(def [ek em] err-tuple)
+(assert-eq ek :division-by-zero "error tuple: kind")
+(assert-eq em "division by zero" "error tuple: message")
+(display "  (def [ek em] err-tuple) => ek=")
+(display ek) (display " em=") (display em)
+(newline)
+(newline)
+
 ; ============================================================================
 ; PART 3: Nested Destructuring
 ; ============================================================================

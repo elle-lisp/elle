@@ -242,33 +242,47 @@ pub fn handle_cdr_or_nil(vm: &mut VM) {
     }
 }
 
-/// Array ref with silent nil: returns nil if out of bounds or not an array.
+/// Indexed ref with silent nil: returns nil if out of bounds or not an array/tuple.
 /// Operand: u16 index (immediate, read from bytecode).
 /// Used by destructuring — missing values become nil, no errors.
 pub fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let index = vm.read_u16(bytecode, ip) as usize;
-    let arr = vm
+    let val = vm
         .fiber
         .stack
         .pop()
         .expect("VM bug: Stack underflow on ArrayRefOrNil");
-    let result = arr
-        .as_array()
-        .and_then(|vec_ref| vec_ref.borrow().get(index).copied());
+    let result = if let Some(vec_ref) = val.as_array() {
+        vec_ref.borrow().get(index).copied()
+    } else if let Some(elems) = val.as_tuple() {
+        elems.get(index).copied()
+    } else {
+        None
+    };
     vm.fiber.stack.push(result.unwrap_or(Value::NIL));
 }
 
+/// Slice from index with silent nil: returns sub-array from index to end.
+/// Works on both arrays and tuples; result is always an array.
+/// Operand: u16 index (immediate, read from bytecode).
+/// Used by & rest destructuring — collects remaining elements.
 pub fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let index = vm.read_u16(bytecode, ip) as usize;
-    let arr = vm
+    let val = vm
         .fiber
         .stack
         .pop()
         .expect("VM bug: Stack underflow on ArraySliceFrom");
-    let result = if let Some(vec_ref) = arr.as_array() {
+    let result = if let Some(vec_ref) = val.as_array() {
         let borrowed = vec_ref.borrow();
         if index < borrowed.len() {
             Value::array(borrowed[index..].to_vec())
+        } else {
+            Value::array(vec![])
+        }
+    } else if let Some(elems) = val.as_tuple() {
+        if index < elems.len() {
+            Value::array(elems[index..].to_vec())
         } else {
             Value::array(vec![])
         }

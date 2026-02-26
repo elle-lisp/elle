@@ -154,18 +154,28 @@ Things that look wrong but aren't:
 - Destructuring uses **silent nil semantics**: missing values become `nil`,
   wrong types produce `nil`, no runtime errors. This is separate from `match`
   pattern matching which is conditional. `CarOrNil`/`CdrOrNil`/`ArrayRefOrNil`/
-  `TableGetOrNil` are dedicated bytecode instructions for this — they never
-  signal errors. In `match`, compound patterns (`Cons`, `List`, `Array`,
-  `Table`) emit type guards (`IsPair`, `IsArray`, `IsTable`) that branch to
-  the fail label before extracting elements.
+  `ArraySliceFrom`/`TableGetOrNil` are dedicated bytecode instructions for
+  this — they never signal errors. `ArrayRefOrNil` and `ArraySliceFrom` handle
+  both arrays and tuples — bracket destructuring works on any indexed sequential
+  type. In `match`, however, `[a b]` patterns only match arrays (the `IsArray`
+  guard rejects tuples before element extraction). In `match`, compound patterns
+  (`Cons`, `List`, `Array`, `Table`) emit type guards (`IsPair`, `IsArray`,
+  `IsTable`) that branch to the fail label before extracting elements.
 - `defn`, `let*`, `->`, `->>`, `when`, `unless`, `try`/`catch`, `protect`,
   `defer`, `with`, and `yield*` are prelude macros defined in `prelude.lisp`,
   loaded by the Expander before user code expansion. The prelude is embedded
   via `include_str!` and parsed/expanded on each Expander creation.
-- `{:key val ...}` is `SyntaxKind::Table(elements)` in the reader. In
-  expression position, the analyzer desugars it to a `(struct ...)` call.
-  In destructuring position, it produces `HirPattern::Table`. `@{:key val}`
-  (mutable table) remains `SyntaxKind::List` with `table` prepended.
+- Collection literals follow the mutable/immutable split (see `docs/types.md`):
+  bare delimiters are immutable, `@`-prefixed are mutable. `{:key val ...}` →
+  struct (immutable). `@{:key val}` → table (mutable). `[1 2 3]` → tuple
+  (immutable). `@[1 2 3]` → array (mutable). `"hello"` → string (immutable).
+  `@"hello"` → buffer (mutable, not yet implemented). **Caution**: the Rust
+  enum names in the reader/analyzer predate this split and are misleading.
+  `SyntaxKind::Table` actually produces a struct. `SyntaxKind::Array`
+  **currently** produces an array but should produce a tuple. `@{...}` and
+  `@[...]` desugar to `SyntaxKind::List` with `table` or `list` prepended
+  (the `@[...]` case should change to `array`). In destructuring position,
+  `{...}` produces `HirPattern::Table` and `[...]` produces `HirPattern::Array`.
 - `begin` and `block` are distinct forms. `begin` sequences expressions
   without creating a scope (bindings leak into the enclosing scope). `block`
   sequences expressions within a new lexical scope (bindings are contained).

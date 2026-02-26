@@ -91,6 +91,19 @@ fn test_try_catch_multi_handler() {
     assert_eq!(result.unwrap(), Value::keyword("caught"));
 }
 
+#[test]
+fn test_try_catch_destructured_error() {
+    // Error values are tuples [:kind "msg"] — bracket destructuring should work
+    let result = eval_source("(try (/ 1 0) (catch [kind msg] kind))");
+    assert_eq!(result.unwrap(), Value::keyword("division-by-zero"));
+}
+
+#[test]
+fn test_try_catch_destructured_error_message() {
+    let result = eval_source("(try (/ 1 0) (catch [kind msg] msg))");
+    assert_eq!(result.unwrap(), Value::string("division by zero"));
+}
+
 // ============================================================================
 // SECTION 4: protect
 // ============================================================================

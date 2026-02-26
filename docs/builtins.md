@@ -2,6 +2,8 @@
 
 This document provides comprehensive documentation for all built-in primitives in Elle, including their semantics, argument requirements, and usage examples with output.
 
+See `docs/types.md` for the complete type system reference.
+
 ## Table of Contents
 
 1. [Arithmetic Operations](#arithmetic-operations)
@@ -2325,7 +2327,7 @@ Parse JSON, modify, and serialize back:
 ## Condition System
 
 > **Deprecated.** These primitives will be replaced by the fiber/signal
-> model. See `docs/FIBERS.md`. They still work but will be removed.
+> model. See `docs/fibers.md`. They still work but will be removed.
 
 The condition system provides sophisticated error handling beyond simple exceptions, allowing custom signal types with registered handlers.
 

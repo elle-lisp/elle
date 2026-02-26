@@ -35,6 +35,7 @@ Elle is a Lisp dialect implemented in Rust with a focus on performance and expre
 ## Basic Data Types
 
 Elle's type system provides a rich set of data types for different programming needs.
+See `docs/types.md` for the complete type system reference.
 
 ### Nil and Booleans
 
@@ -570,7 +571,7 @@ Get information from exceptions:
 
 > **Deprecated.** The condition system described below will be replaced by
 > the fiber/signal model with `try`/`catch`/`finally` surface syntax. See
-> `docs/FIBERS.md`. These primitives still work but will be removed.
+> `docs/fibers.md`. These primitives still work but will be removed.
 
 Elle provides a modern condition system for sophisticated error handling and signaling.
 
@@ -1104,6 +1105,6 @@ Use the condition system for expected error cases:
 
 ## Further Reading
 
-- **BUILTINS.md**: Comprehensive reference of all built-in primitives
-- **SCOPING_GUIDE.md**: Detailed explanation of variable scoping rules
+- **builtins.md**: Comprehensive reference of all built-in primitives
+- **scoping-guide.md**: Detailed explanation of variable scoping rules
 - **examples/**: Browse example programs for common patterns

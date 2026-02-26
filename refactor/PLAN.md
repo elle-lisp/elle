@@ -159,12 +159,12 @@ Each phase is a standalone PR. Run full test suite between phases.
 
 ## Future work
 
-### Fiber/Signal System (see docs/FIBERS.md)
+### Fiber/Signal System (see docs/fibers.md)
 
 The next major milestone unifies exception handling, coroutines, and effect
 inference into a single fiber/signal mechanism. Surface syntax: `try`/`catch`/
-`defer`. See `docs/FIBERS.md` for the implementation plan and
-`docs/EFFECTS.md` for the design rationale.
+`defer`. See `docs/fibers.md` for the implementation plan and
+`docs/effects.md` for the design rationale.
 
 ### JIT Phase 5: Intra-JIT calling
 
@@ -183,7 +183,7 @@ single highest-impact optimization remaining for nqueens-class benchmarks.
 - Replace `Effect { yield_behavior, may_raise }` with `SignalBits` bitfield
 - 16 compiler-reserved bits + 16 user-defined bits
 - Effect declarations as contracts (not hints)
-- See docs/EFFECTS.md and docs/FIBERS.md
+- See docs/effects.md and docs/fibers.md
 
 ### Semantic gaps
 
