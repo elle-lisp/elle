@@ -530,4 +530,67 @@ mod tests {
         let mut parser = JsonParser::new("\"\\uDC00\"");
         assert!(parser.parse().is_err());
     }
+
+    #[test]
+    fn test_serialize_keyword_table_keys() {
+        let mut map = BTreeMap::new();
+        map.insert(
+            crate::value::TableKey::Keyword("x".to_string()),
+            Value::int(1),
+        );
+        map.insert(
+            crate::value::TableKey::Keyword("y".to_string()),
+            Value::int(2),
+        );
+        let table = Value::table_from(map);
+
+        let result = serialize_value(&table).unwrap();
+        assert!(result.contains("\"x\""));
+        assert!(result.contains("\"y\""));
+    }
+
+    #[test]
+    fn test_serialize_keyword_table_keys_pretty() {
+        let mut map = BTreeMap::new();
+        map.insert(
+            crate::value::TableKey::Keyword("name".to_string()),
+            Value::string("Alice"),
+        );
+        let table = Value::table_from(map);
+
+        let result = serialize_value_pretty(&table, 0).unwrap();
+        assert!(result.contains("\"name\": \"Alice\""));
+    }
+
+    #[test]
+    fn test_serialize_keyword_value() {
+        let kw = Value::keyword("hello");
+        let result = serialize_value(&kw).unwrap();
+        assert_eq!(result, "\"hello\"");
+    }
+
+    #[test]
+    fn test_serialize_keyword_value_pretty() {
+        let kw = Value::keyword("hello");
+        let result = serialize_value_pretty(&kw, 0).unwrap();
+        assert_eq!(result, "\"hello\"");
+    }
+
+    #[test]
+    fn test_serialize_mixed_string_keyword_keys() {
+        let mut map = BTreeMap::new();
+        map.insert(
+            crate::value::TableKey::String("a".to_string()),
+            Value::int(1),
+        );
+        map.insert(
+            crate::value::TableKey::Keyword("b".to_string()),
+            Value::int(2),
+        );
+        let table = Value::table_from(map);
+
+        let result = serialize_value(&table).unwrap();
+        assert!(result.contains("\"a\""));
+        assert!(result.contains("\"b\""));
+    }
 }
