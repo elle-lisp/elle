@@ -220,3 +220,45 @@ fn break_with_let_value() {
         Value::int(42)
     );
 }
+
+// === Break in while loops ===
+
+#[test]
+fn break_in_while() {
+    // break :while targets the implicit block wrapping the while loop
+    assert_eq!(
+        run("(begin
+               (var i 0)
+               (while #t
+                 (begin
+                   (if (= i 5) (break :while i) nil)
+                   (set! i (+ i 1)))))"),
+        Value::int(5)
+    );
+}
+
+#[test]
+fn break_in_while_unnamed() {
+    // unnamed break targets innermost block (the implicit while block)
+    assert_eq!(
+        run("(begin
+               (var i 0)
+               (while #t
+                 (begin
+                   (if (= i 3) (break nil) nil)
+                   (set! i (+ i 1)))))"),
+        Value::NIL
+    );
+}
+
+#[test]
+fn while_without_break() {
+    // normal while still returns nil
+    assert_eq!(
+        run("(begin
+               (var i 0)
+               (while (< i 3)
+                 (set! i (+ i 1))))"),
+        Value::NIL
+    );
+}

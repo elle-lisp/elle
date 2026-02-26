@@ -306,11 +306,6 @@ impl Lowerer {
 
     fn lower_while(&mut self, cond: &Hir, body: &Hir) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
-        // While returns nil
-        self.emit(LirInstr::Const {
-            dst: result_reg,
-            value: LirConst::Nil,
-        });
 
         let cond_label = self.fresh_label();
         let body_label = self.fresh_label();
@@ -336,8 +331,12 @@ impl Lowerer {
         self.terminate(Terminator::Jump(cond_label));
         self.finish_block();
 
-        // Done block
+        // Done block — emit nil result here so it's tracked in this block
         self.current_block = BasicBlock::new(done_label);
+        self.emit(LirInstr::Const {
+            dst: result_reg,
+            value: LirConst::Nil,
+        });
         Ok(result_reg)
     }
 

@@ -114,6 +114,8 @@ HIR (bindings are inline — no separate HashMap)
     The analyzer validates: break outside block → error, unknown block name
     → error, break across function boundary → error. The lowerer compiles
     break to `Move` + `Jump` — no new bytecode instructions needed.
+    `while` wraps its `While` node in an implicit `Block` named `"while"`,
+    so `(break :while val)` or unnamed `(break)` can exit a while loop.
 
 14. **`Eval` compiles and executes a datum at runtime.**
     `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the
