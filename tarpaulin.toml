@@ -1,5 +1,0 @@
-# Tarpaulin configuration for coverage
-# Optimized for fast coverage generation
-
-# Output format
-out = ["Xml"]
