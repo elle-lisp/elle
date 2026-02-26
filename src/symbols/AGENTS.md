@@ -24,7 +24,7 @@ the shared types.
 ## Dependents
 
 - `hir/symbols.rs` — HIR-based symbol extraction builds SymbolIndex
-- `elle-lsp` — all IDE features query SymbolIndex
+- `lsp/` — all IDE features query SymbolIndex
 - `compiler/symbol_index.rs` — re-export
 
 ## Files

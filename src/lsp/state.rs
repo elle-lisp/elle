@@ -3,11 +3,11 @@
 //! Manages compilation state for open documents and provides
 //! symbol index for IDE features.
 
-use elle::hir::{extract_symbols_from_hir, HirLinter};
-use elle::lint::diagnostics::{Diagnostic, Severity};
-use elle::symbol::SymbolTable;
-use elle::symbols::SymbolIndex;
-use elle::{analyze_all, init_stdlib, register_primitives, VM};
+use crate::hir::{extract_symbols_from_hir, HirLinter};
+use crate::lint::diagnostics::{Diagnostic, Severity};
+use crate::symbol::SymbolTable;
+use crate::symbols::SymbolIndex;
+use crate::{analyze_all, init_stdlib, register_primitives, VM};
 use std::collections::HashMap;
 
 /// Document state: source + diagnostics + symbol index

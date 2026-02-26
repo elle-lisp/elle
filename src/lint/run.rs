@@ -1,23 +1,17 @@
-//! Command-line interface for elle-lint
+//! CLI entry point for `elle --lint`.
 
-use elle_lint::{LintConfig, Linter, OutputFormat, Severity};
-use std::env;
+use crate::lint::cli::{LintConfig, Linter, OutputFormat};
+use crate::lint::diagnostics::Severity;
 use std::path::Path;
-use std::process;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2 {
-        eprintln!("Usage: elle-lint [--format json|text] [--level error|warning|info] <file|dir>");
-        process::exit(1);
-    }
-
+/// Run the linter with the given arguments (everything after `--lint`).
+/// Returns an exit code: 0 = clean, 1 = errors, 2 = warnings only.
+pub fn run(args: &[String]) -> i32 {
     let mut format = OutputFormat::Human;
     let mut min_severity = Severity::Info;
     let mut files = Vec::new();
 
-    let mut i = 1;
+    let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--format" => {
@@ -28,7 +22,7 @@ fn main() {
                         "text" | "human" => OutputFormat::Human,
                         other => {
                             eprintln!("Unknown format: {}", other);
-                            process::exit(1);
+                            return 1;
                         }
                     };
                 }
@@ -42,14 +36,14 @@ fn main() {
                         "info" => Severity::Info,
                         other => {
                             eprintln!("Unknown severity: {}", other);
-                            process::exit(1);
+                            return 1;
                         }
                     };
                 }
             }
             "--help" | "-h" => {
                 print_help();
-                process::exit(0);
+                return 0;
             }
             other => {
                 if !other.starts_with('-') {
@@ -62,7 +56,7 @@ fn main() {
 
     if files.is_empty() {
         eprintln!("Error: no files specified");
-        process::exit(1);
+        return 1;
     }
 
     let config = LintConfig {
@@ -70,23 +64,30 @@ fn main() {
         format,
     };
     let mut linter = Linter::new(config);
+    let mut had_errors = false;
 
     for file_path in files {
         let path = Path::new(&file_path);
         if path.is_file() {
             if let Err(e) = linter.lint_file(path) {
                 eprintln!("Error linting {}: {}", file_path, e);
+                had_errors = true;
             }
         } else if path.is_dir() {
-            // Recursively lint directory
             lint_directory(&mut linter, path);
         } else {
             eprintln!("File not found: {}", file_path);
+            had_errors = true;
         }
     }
 
     println!("{}", linter.format_output());
-    process::exit(linter.exit_code());
+
+    if had_errors {
+        1
+    } else {
+        linter.exit_code()
+    }
 }
 
 fn lint_directory(linter: &mut Linter, dir: &Path) {
@@ -107,9 +108,9 @@ fn lint_directory(linter: &mut Linter, dir: &Path) {
 }
 
 fn print_help() {
-    println!("elle-lint - Opinionated linter for Elle Lisp");
+    println!("elle --lint - Opinionated linter for Elle Lisp");
     println!();
-    println!("Usage: elle-lint [OPTIONS] <file|dir>...");
+    println!("Usage: elle --lint [OPTIONS] <file|dir>...");
     println!();
     println!("Options:");
     println!("  --format <format>     Output format: text (default), json");
@@ -117,7 +118,7 @@ fn print_help() {
     println!("  --help, -h            Show this help message");
     println!();
     println!("Examples:");
-    println!("  elle-lint script.lisp");
-    println!("  elle-lint src/ --format json");
-    println!("  elle-lint script.l --level error");
+    println!("  elle --lint script.lisp");
+    println!("  elle --lint src/ --format json");
+    println!("  elle --lint script.l --level error");
 }

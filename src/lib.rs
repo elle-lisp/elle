@@ -43,6 +43,7 @@ pub mod hir;
 pub mod jit;
 pub mod lint;
 pub mod lir;
+pub mod lsp;
 pub mod pipeline;
 pub mod primitives;
 pub mod reader;
@@ -55,7 +56,10 @@ pub mod vm;
 
 pub use compiler::Bytecode;
 pub use error::{RuntimeError, SourceLoc};
-pub use lint::diagnostics::{Diagnostic, Severity};
+pub use lint::{
+    cli::{LintConfig, Linter, OutputFormat},
+    diagnostics::{Diagnostic, Severity},
+};
 pub use pipeline::{
     analyze, analyze_all, compile, compile_all, eval, eval_all, AnalyzeResult, CompileResult,
 };

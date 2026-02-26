@@ -52,8 +52,8 @@ HIR (bindings are inline — no separate HashMap)
 
 - `lir/lower/` - consumes HIR, reads `binding.needs_cell()` / `binding.is_global()` directly
 - `pipeline.rs` - orchestrates Syntax → HIR → LIR → Bytecode
-- `elle-lint` - uses `HirLinter` for static analysis
-- `elle-lsp` - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
+- `lint/cli.rs` - uses `HirLinter` for static analysis
+- `lsp/state.rs` - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
 
 ## Invariants
 

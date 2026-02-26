@@ -1,6 +1,6 @@
-//! Integration tests for elle-lint
-
-use elle_lint::{LintConfig, Linter, OutputFormat, Severity};
+/// Integration tests for lint functionality
+use elle::lint::cli::{LintConfig, Linter, OutputFormat};
+use elle::lint::diagnostics::Severity;
 use std::path::Path;
 
 #[test]

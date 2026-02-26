@@ -1,9 +1,6 @@
 //! Code formatting support for LSP
-//!
-//! Handles textDocument/formatting requests by formatting the entire document
-//! or a range using the Elle formatter.
 
-use elle::formatter::{format_code, FormatterConfig};
+use crate::formatter::{format_code, FormatterConfig};
 use serde_json::{json, Value};
 
 /// Result of a formatting operation
@@ -22,9 +19,6 @@ pub struct Range {
 }
 
 /// Format an entire document
-///
-/// Returns a TextEdit that replaces the entire document with the formatted version.
-/// If formatting fails, returns an error message.
 pub fn format_document(
     source: &str,
     end_line: u32,
@@ -32,10 +26,8 @@ pub fn format_document(
 ) -> Result<Vec<Value>, String> {
     let config = FormatterConfig::default();
 
-    // Format the entire document
     let formatted = format_code(source, &config)?;
 
-    // Create a TextEdit that replaces the entire document
     let edit = json!({
         "range": {
             "start": { "line": 0, "character": 0 },
@@ -48,9 +40,6 @@ pub fn format_document(
 }
 
 /// Calculate the line and character position at the end of a document
-///
-/// Returns (line, character) where line is 0-based and character is the
-/// column position at the end of the last line.
 pub fn document_end_position(source: &str) -> (u32, u32) {
     let lines: Vec<&str> = source.lines().collect();
 

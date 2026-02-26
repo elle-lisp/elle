@@ -1,10 +1,7 @@
 //! Hover information support for LSP
-//!
-//! Handles textDocument/hover requests by finding symbols at
-//! the cursor position and returning their documentation.
 
-use elle::symbol::SymbolTable;
-use elle::symbols::{get_primitive_documentation, SymbolIndex, SymbolKind};
+use crate::symbol::SymbolTable;
+use crate::symbols::{get_primitive_documentation, SymbolIndex, SymbolKind};
 use serde_json::{json, Value};
 
 /// Find hoverable information at a given position
@@ -19,7 +16,6 @@ pub fn find_hover_info(
     let target_col = character as usize + 1;
 
     // Look for symbols at this location
-    // For now, find the closest symbol usage or definition
     let mut closest_symbol = None;
     let mut closest_distance = usize::MAX;
 
@@ -29,7 +25,6 @@ pub fn find_hover_info(
             if usage_loc.line == target_line {
                 let distance = (target_col as isize - usage_loc.col as isize).unsigned_abs();
                 if distance < closest_distance && distance <= 10 {
-                    // Within 10 characters of the symbol
                     closest_symbol = Some(*sym_id);
                     closest_distance = distance;
                 }
@@ -102,7 +97,7 @@ mod tests {
     #[test]
     fn test_hover_info_returns_none_for_empty_index() {
         let index = SymbolIndex::new();
-        let symbol_table = elle::SymbolTable::new();
+        let symbol_table = crate::SymbolTable::new();
 
         let hover = find_hover_info(0, 0, &index, &symbol_table);
         assert!(hover.is_none());

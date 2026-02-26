@@ -1,17 +1,9 @@
-//! Elle Linter - Opinionated static analysis for Elle Lisp
-//!
-//! Provides comprehensive linting rules for Elle code including:
-//! - Naming conventions
-//! - Arity validation
-//! - Unused variable detection
-//! - Pattern matching validation
-//!
-//! This crate wraps the HIR-based linter from the new pipeline.
+//! Lint CLI wrapper — configuration, output formatting, and the Linter type.
 
-pub use elle::lint::diagnostics::{Diagnostic, Severity};
-
-use elle::symbol::SymbolTable;
-use elle::{init_stdlib, register_primitives, VM};
+use crate::hir::HirLinter;
+use crate::lint::diagnostics::{Diagnostic, Severity};
+use crate::symbol::SymbolTable;
+use crate::{analyze_all, init_stdlib, register_primitives, VM};
 use std::path::Path;
 
 /// Main linter configuration
@@ -58,12 +50,12 @@ impl Linter {
         init_stdlib(&mut vm, &mut symbols);
 
         // Use pipeline: parse -> expand -> analyze -> HIR
-        let analyses = elle::analyze_all(code, &mut symbols, &mut vm)
+        let analyses = analyze_all(code, &mut symbols, &mut vm)
             .map_err(|e| format!("Analysis error: {}", e))?;
 
         // Lint each analyzed form
         for analysis in &analyses {
-            let mut hir_linter = elle::hir::HirLinter::new();
+            let mut hir_linter = HirLinter::new();
             hir_linter.lint(&analysis.hir, &symbols);
             self.diagnostics
                 .extend(hir_linter.diagnostics().iter().cloned());

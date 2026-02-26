@@ -1,10 +1,7 @@
 //! Code completion support for LSP
-//!
-//! Provides completion suggestions for Elle Lisp symbols,
-//! including built-ins and user-defined symbols.
 
-use elle::symbol::SymbolTable;
-use elle::symbols::{get_primitive_documentation, SymbolIndex, SymbolKind};
+use crate::symbol::SymbolTable;
+use crate::symbols::{get_primitive_documentation, SymbolIndex, SymbolKind};
 use serde_json::{json, Value};
 
 /// Get completion items at the given position
@@ -139,7 +136,7 @@ mod tests {
     #[test]
     fn test_completion_empty() {
         let index = SymbolIndex::new();
-        let symbol_table = elle::SymbolTable::new();
+        let symbol_table = crate::SymbolTable::new();
 
         let completions = get_completions(0, 0, "", &index, &symbol_table);
         // Should at least have built-in symbols
@@ -149,7 +146,7 @@ mod tests {
     #[test]
     fn test_completion_with_prefix() {
         let index = SymbolIndex::new();
-        let symbol_table = elle::SymbolTable::new();
+        let symbol_table = crate::SymbolTable::new();
 
         let completions = get_completions(0, 0, "cons", &index, &symbol_table);
         assert!(!completions.is_empty());
@@ -165,10 +162,9 @@ mod tests {
     #[test]
     fn test_completion_no_match() {
         let index = SymbolIndex::new();
-        let symbol_table = elle::SymbolTable::new();
+        let symbol_table = crate::SymbolTable::new();
 
         let completions = get_completions(0, 0, "xyz123", &index, &symbol_table);
-        // No symbols should match this prefix
         assert!(completions.is_empty());
     }
 }

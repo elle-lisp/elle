@@ -31,7 +31,7 @@ let formatted = format_code(source, config)?;
 
 ## Dependents
 
-- `elle-lint` - formatting checks
+- `lsp/formatting.rs` - document formatting
 - CLI - `elle fmt` command (if implemented)
 
 ## Files

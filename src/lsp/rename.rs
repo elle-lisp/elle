@@ -1,11 +1,7 @@
 //! Symbol renaming support for LSP
-//!
-//! Handles textDocument/rename requests by validating the new name and generating
-//! TextEdits for all occurrences of the symbol to be renamed. Supports both local
-//! and global scope renaming with validation for reserved words and conflicts.
 
-use elle::symbol::SymbolTable;
-use elle::symbols::SymbolIndex;
+use crate::symbol::SymbolTable;
+use crate::symbols::SymbolIndex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -42,53 +38,12 @@ const RESERVED_WORDS: &[&str] = &[
     "use-modules",
 ];
 
-/// Built-in functions that shadow-able
-const BUILTIN_FUNCTIONS: &[&str] = &[
-    "+",
-    "-",
-    "*",
-    "/",
-    "=",
-    "<",
-    ">",
-    "<=",
-    ">=",
-    "number?",
-    "string?",
-    "symbol?",
-    "list?",
-    "pair?",
-    "null?",
-    "procedure?",
-    "car",
-    "cdr",
-    "cons",
-    "length",
-    "append",
-    "reverse",
-    "member",
-    "assoc",
-    "map",
-    "filter",
-    "fold",
-    "reduce",
-    "display",
-    "newline",
-    "read",
-    "open-input-file",
-    "open-output-file",
-    "close-input-port",
-    "close-output-port",
-];
-
 /// Validate that a new name is acceptable for renaming
 fn validate_new_name(new_name: &str) -> Result<(), String> {
-    // Check not empty
     if new_name.is_empty() {
         return Err("New name cannot be empty".to_string());
     }
 
-    // Check valid identifier format (alphanumeric, hyphens, underscores)
     if !new_name
         .chars()
         .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
@@ -99,18 +54,11 @@ fn validate_new_name(new_name: &str) -> Result<(), String> {
         ));
     }
 
-    // Check not a reserved word
     if RESERVED_WORDS.contains(&new_name) {
         return Err(format!(
             "'{}' is a reserved word and cannot be used as a symbol name",
             new_name
         ));
-    }
-
-    // Check not shadowing a builtin (warning-level, but we allow it)
-    if BUILTIN_FUNCTIONS.contains(&new_name) {
-        // This is allowed, but could be warned about
-        // For now, we just allow it silently
     }
 
     Ok(())
@@ -123,14 +71,11 @@ fn check_rename_conflict(
     symbol_index: &SymbolIndex,
     _symbol_table: &SymbolTable,
 ) -> Result<(), String> {
-    // For each symbol ID in the index, check if there's a conflict
     for def in symbol_index.definitions.values() {
         let sym_name = &def.name;
-        // Skip the symbol being renamed
         if sym_name == old_name {
             continue;
         }
-        // Check if the new name already exists in the same scope
         if sym_name == new_name {
             return Err(format!(
                 "Symbol '{}' already exists in this scope",
@@ -143,9 +88,6 @@ fn check_rename_conflict(
 }
 
 /// Rename a symbol at a given position to a new name
-///
-/// Returns a WorkspaceEdit containing all TextEdits needed to perform the rename,
-/// or an error message if validation fails.
 pub fn rename_symbol(
     line: u32,
     character: u32,
@@ -155,10 +97,8 @@ pub fn rename_symbol(
     _source_text: &str,
     uri: &str,
 ) -> Result<Value, String> {
-    // 1. Validate new name
     validate_new_name(new_name)?;
 
-    // 2. Find symbol at position (using same logic as find_references)
     let target_line = line as usize + 1;
     let target_col = character as usize + 1;
 
@@ -166,13 +106,11 @@ pub fn rename_symbol(
     let mut closest_distance = usize::MAX;
     let mut old_name = String::new();
 
-    // Check symbol usages first
     for (sym_id, usages) in &symbol_index.symbol_usages {
         for usage_loc in usages {
             if usage_loc.line == target_line {
                 let distance = (target_col as isize - usage_loc.col as isize).unsigned_abs();
                 if distance < closest_distance && distance <= 10 {
-                    // Look up the symbol name
                     if let Some(def) = symbol_index.definitions.get(sym_id) {
                         target_symbol = Some(*sym_id);
                         closest_distance = distance;
@@ -183,12 +121,10 @@ pub fn rename_symbol(
         }
     }
 
-    // Check symbol definitions
     for (sym_id, loc) in &symbol_index.symbol_locations {
         if loc.line == target_line {
             let distance = (target_col as isize - loc.col as isize).unsigned_abs();
             if distance < closest_distance && distance <= 10 {
-                // Look up the symbol name
                 if let Some(def) = symbol_index.definitions.get(sym_id) {
                     target_symbol = Some(*sym_id);
                     closest_distance = distance;
@@ -202,14 +138,11 @@ pub fn rename_symbol(
         return Err("No symbol found at the given position".to_string());
     }
 
-    // 3. Check for conflicts
     check_rename_conflict(&old_name, new_name, symbol_index, symbol_table)?;
 
-    // 4. Generate TextEdits for all occurrences
     let sym_id = target_symbol.unwrap();
     let mut text_edits = Vec::new();
 
-    // Add edits for all usages
     if let Some(usages) = symbol_index.symbol_usages.get(&sym_id) {
         for usage_loc in usages {
             let file_uri = format!("file://{}", usage_loc.file);
@@ -231,7 +164,6 @@ pub fn rename_symbol(
         }
     }
 
-    // Add edit for the definition location
     if let Some(def_loc) = symbol_index.symbol_locations.get(&sym_id) {
         let file_uri = format!("file://{}", def_loc.file);
         if file_uri == uri || uri.ends_with(&def_loc.file) {
@@ -250,7 +182,6 @@ pub fn rename_symbol(
             }));
         }
     } else if let Some(def) = symbol_index.definitions.get(&sym_id) {
-        // Fallback to definition from symbol table
         if let Some(def_loc) = &def.location {
             let file_uri = format!("file://{}", def_loc.file);
             if file_uri == uri || uri.ends_with(&def_loc.file) {
@@ -271,7 +202,6 @@ pub fn rename_symbol(
         }
     }
 
-    // 5. Return WorkspaceEdit format
     let mut changes = HashMap::new();
     if !text_edits.is_empty() {
         changes.insert(uri.to_string(), text_edits);
@@ -331,7 +261,6 @@ mod tests {
         let source = "(var foo 1)";
         let uri = "file:///test.elle";
 
-        // With empty symbol index, should return error about no symbol found
         let result = rename_symbol(0, 10, "bar", &index, &symbol_table, source, uri);
         assert!(result.is_err());
     }

@@ -346,6 +346,25 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    // Mode switches — dispatch before VM setup
+    if args.iter().any(|a| a == "--lint") {
+        let lint_args: Vec<String> = args[1..]
+            .iter()
+            .filter(|a| a.as_str() != "--lint")
+            .cloned()
+            .collect();
+        let exit_code = elle::lint::run::run(&lint_args);
+        std::process::exit(exit_code);
+    }
+
+    if args.iter().any(|a| a == "--lsp") {
+        let exit_code = elle::lsp::run::run();
+        std::process::exit(exit_code);
+    }
+
+    // VM setup — only reached for interpreter mode
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
 
@@ -364,16 +383,17 @@ fn main() {
     // Set symbol table context for length primitive
     set_length_symbol_table(&mut symbols as *mut SymbolTable);
 
-    // Check for command-line arguments
-    let args: Vec<String> = env::args().collect();
-
     // Check for --help/-h first
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!("Elle v1.0.0\n");
-        println!("Usage: elle [options] [file...]\n");
+        println!("Usage: elle [options] [file...]");
+        println!("       elle --lint [options] <file|dir>...");
+        println!("       elle --lsp\n");
         println!("Options:");
         println!("  -h, --help    Show this help");
-        println!("  -              Read from stdin\n");
+        println!("  -              Read from stdin");
+        println!("  --lint         Run linter");
+        println!("  --lsp          Start language server\n");
         print!("{}", elle::primitives::help_text());
         return;
     }
