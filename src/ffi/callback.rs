@@ -224,8 +224,12 @@ unsafe fn write_return_value(result: &mut c_void, value: &Value, ret: &TypeDesc)
         TypeDesc::Ptr | TypeDesc::Str => {
             let p = if value.is_nil() {
                 0usize
+            } else if let Some(addr) = value.as_pointer() {
+                addr
+            } else if let Some(cell) = value.as_managed_pointer() {
+                cell.get().unwrap_or(0)
             } else {
-                value.as_pointer().unwrap_or(0)
+                0usize
             };
             *(ptr as *mut usize) = p;
         }

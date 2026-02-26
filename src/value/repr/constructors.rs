@@ -267,6 +267,18 @@ impl Value {
         alloc(HeapObject::LibHandle(id))
     }
 
+    /// Create a managed FFI pointer (tracks freed state).
+    /// Used by ffi/malloc. NULL becomes nil (same as raw pointer).
+    #[inline]
+    pub fn managed_pointer(addr: usize) -> Self {
+        if addr == 0 {
+            return Self::NIL;
+        }
+        use crate::value::heap::{alloc, HeapObject};
+        use std::cell::Cell;
+        alloc(HeapObject::ManagedPointer(Cell::new(Some(addr))))
+    }
+
     /// Create a binding value (compile-time only).
     #[inline]
     pub fn binding(

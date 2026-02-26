@@ -52,6 +52,7 @@ pub enum HeapTag {
     Binding = 17,
     FFISignature = 18,
     FFIType = 19,
+    ManagedPointer = 20,
 }
 
 /// All heap-allocated value types.
@@ -121,6 +122,10 @@ pub enum HeapObject {
 
     /// Reified FFI compound type descriptor (struct or array layout)
     FFIType(crate::ffi::types::TypeDesc),
+
+    /// Managed FFI pointer with lifecycle tracking.
+    /// `Some(addr)` = live, `None` = freed. Only for ffi/malloc'd memory.
+    ManagedPointer(std::cell::Cell<Option<usize>>),
 }
 
 /// Internal binding metadata, heap-allocated behind the Value pointer.
@@ -209,6 +214,7 @@ impl HeapObject {
             HeapObject::Binding(_) => HeapTag::Binding,
             HeapObject::FFISignature(_, _) => HeapTag::FFISignature,
             HeapObject::FFIType(_) => HeapTag::FFIType,
+            HeapObject::ManagedPointer(_) => HeapTag::ManagedPointer,
         }
     }
 
@@ -232,6 +238,7 @@ impl HeapObject {
             HeapObject::Binding(_) => "binding",
             HeapObject::FFISignature(_, _) => "ffi-signature",
             HeapObject::FFIType(_) => "ffi-type",
+            HeapObject::ManagedPointer(_) => "pointer",
         }
     }
 }
@@ -274,6 +281,10 @@ impl std::fmt::Debug for HeapObject {
             HeapObject::Binding(_) => write!(f, "#<binding>"),
             HeapObject::FFISignature(_, _) => write!(f, "<ffi-signature>"),
             HeapObject::FFIType(desc) => write!(f, "<ffi-type:{:?}>", desc),
+            HeapObject::ManagedPointer(cell) => match cell.get() {
+                Some(addr) => write!(f, "<managed-pointer 0x{:x}>", addr),
+                None => write!(f, "<freed-pointer>"),
+            },
         }
     }
 }
