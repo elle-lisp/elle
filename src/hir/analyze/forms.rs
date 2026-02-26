@@ -350,14 +350,37 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: while requires condition and body", span));
         }
 
+        // Create an implicit named block so `(break :while val)` works
+        let block_id = BlockId(self.next_block_id);
+        self.next_block_id += 1;
+
+        self.block_contexts.push(BlockContext {
+            block_id,
+            name: Some("while".to_string()),
+            fn_depth: self.fn_depth,
+        });
+
         let cond = self.analyze_expr(&items[1])?;
         let body = self.analyze_expr(&items[2])?;
+
+        self.block_contexts.pop();
+
         let effect = cond.effect.combine(body.effect);
 
-        Ok(Hir::new(
+        let while_node = Hir::new(
             HirKind::While {
                 cond: Box::new(cond),
                 body: Box::new(body),
+            },
+            span.clone(),
+            effect,
+        );
+
+        Ok(Hir::new(
+            HirKind::Block {
+                name: Some("while".to_string()),
+                block_id,
+                body: vec![while_node],
             },
             span,
             effect,
