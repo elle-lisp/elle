@@ -504,9 +504,22 @@ impl<'a> Analyzer<'a> {
         let mut effect = Effect::none();
 
         for clause in &items[1..] {
-            let parts = clause
-                .as_list()
-                .ok_or_else(|| format!("{}: cond clause must be a list", span))?;
+            let parts = clause.as_list().ok_or_else(|| {
+                if matches!(clause.kind, SyntaxKind::Array(_)) {
+                    format!(
+                        "{}: cond clause must use parentheses (test body...), \
+                         not brackets [...]",
+                        clause.span
+                    )
+                } else {
+                    format!(
+                        "{}: cond clause must be a parenthesized list (test body...), \
+                         got {}",
+                        clause.span,
+                        clause.kind_label()
+                    )
+                }
+            })?;
             if parts.is_empty() {
                 continue;
             }

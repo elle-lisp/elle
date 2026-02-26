@@ -167,9 +167,22 @@ impl Expander {
             .to_string();
 
         // Get parameter list
-        let params_syntax = items[2]
-            .as_list()
-            .ok_or_else(|| format!("{}: macro parameters must be a list", span))?;
+        let params_syntax = items[2].as_list().ok_or_else(|| {
+            if matches!(items[2].kind, SyntaxKind::Array(_)) {
+                format!(
+                    "{}: macro parameters must use parentheses (params...), \
+                     not brackets [...]",
+                    items[2].span
+                )
+            } else {
+                format!(
+                    "{}: macro parameters must be a parenthesized list (params...), \
+                     got {}",
+                    items[2].span,
+                    items[2].kind_label()
+                )
+            }
+        })?;
 
         // Parse params, recognizing & as rest separator
         let mut fixed_params = Vec::new();

@@ -1,7 +1,7 @@
 //! Binding forms: let, letrec, define, set!
 
 use super::*;
-use crate::syntax::{ScopeId, Syntax};
+use crate::syntax::{ScopeId, Syntax, SyntaxKind};
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_let(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
@@ -9,9 +9,22 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: let requires bindings list", span));
         }
 
-        let bindings_syntax = items[1]
-            .as_list()
-            .ok_or_else(|| format!("{}: let bindings must be a list", span))?;
+        let bindings_syntax = items[1].as_list().ok_or_else(|| {
+            if matches!(items[1].kind, SyntaxKind::Array(_)) {
+                format!(
+                    "{}: let bindings must use parentheses ((name value) ...), \
+                     not brackets [...]",
+                    items[1].span
+                )
+            } else {
+                format!(
+                    "{}: let bindings must be a parenthesized list ((name value) ...), \
+                     got {}",
+                    items[1].span,
+                    items[1].kind_label()
+                )
+            }
+        })?;
 
         // Phase 1: Analyze all value expressions in the OUTER scope.
         // For destructuring bindings, we record the pattern syntax for Phase 2.
@@ -134,9 +147,22 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: letrec requires bindings and body", span));
         }
 
-        let bindings_syntax = items[1]
-            .as_list()
-            .ok_or_else(|| format!("{}: letrec bindings must be a list", span))?;
+        let bindings_syntax = items[1].as_list().ok_or_else(|| {
+            if matches!(items[1].kind, SyntaxKind::Array(_)) {
+                format!(
+                    "{}: letrec bindings must use parentheses ((name value) ...), \
+                     not brackets [...]",
+                    items[1].span
+                )
+            } else {
+                format!(
+                    "{}: letrec bindings must be a parenthesized list ((name value) ...), \
+                     got {}",
+                    items[1].span,
+                    items[1].kind_label()
+                )
+            }
+        })?;
 
         self.push_scope(false);
 

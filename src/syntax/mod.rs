@@ -123,6 +123,27 @@ impl Syntax {
             _ => None,
         }
     }
+
+    /// Human-readable label for the syntax kind, used in error messages.
+    pub fn kind_label(&self) -> &'static str {
+        match &self.kind {
+            SyntaxKind::Nil => "nil",
+            SyntaxKind::Bool(_) => "boolean",
+            SyntaxKind::Int(_) => "integer",
+            SyntaxKind::Float(_) => "float",
+            SyntaxKind::Symbol(_) => "symbol",
+            SyntaxKind::Keyword(_) => "keyword",
+            SyntaxKind::String(_) => "string",
+            SyntaxKind::List(_) => "list",
+            SyntaxKind::Array(_) => "array",
+            SyntaxKind::Table(_) => "table",
+            SyntaxKind::Quote(_) => "quote",
+            SyntaxKind::Quasiquote(_) => "quasiquote",
+            SyntaxKind::Unquote(_) => "unquote",
+            SyntaxKind::UnquoteSplicing(_) => "unquote-splicing",
+            SyntaxKind::SyntaxLiteral(_) => "syntax-literal",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

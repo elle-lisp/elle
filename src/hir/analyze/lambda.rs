@@ -9,9 +9,22 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: lambda requires parameters and body", span));
         }
 
-        let params_syntax = items[1]
-            .as_list()
-            .ok_or_else(|| format!("{}: lambda parameters must be a list", span))?;
+        let params_syntax = items[1].as_list().ok_or_else(|| {
+            if matches!(items[1].kind, SyntaxKind::Array(_)) {
+                format!(
+                    "{}: lambda parameters must use parentheses (params...), \
+                     not brackets [...]",
+                    items[1].span
+                )
+            } else {
+                format!(
+                    "{}: lambda parameters must be a parenthesized list (params...), \
+                     got {}",
+                    items[1].span,
+                    items[1].kind_label()
+                )
+            }
+        })?;
 
         // Save current captures and parent captures, start fresh for this lambda
         let saved_captures = std::mem::take(&mut self.current_captures);
