@@ -35,9 +35,22 @@ impl<'a> Analyzer<'a> {
         let mut arms = Vec::new();
 
         for arm in &items[2..] {
-            let parts = arm
-                .as_list()
-                .ok_or_else(|| format!("{}: match arm must be a list", span))?;
+            let parts = arm.as_list().ok_or_else(|| {
+                if matches!(arm.kind, SyntaxKind::Array(_)) {
+                    format!(
+                        "{}: match arm must use parentheses (pattern body), \
+                         not brackets [...]",
+                        arm.span
+                    )
+                } else {
+                    format!(
+                        "{}: match arm must be a parenthesized list (pattern body), \
+                         got {}",
+                        arm.span,
+                        arm.kind_label()
+                    )
+                }
+            })?;
             if parts.len() < 2 {
                 return Err(format!("{}: match arm requires pattern and body", span));
             }
