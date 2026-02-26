@@ -199,7 +199,7 @@ Key methods:
 |------|-------|---------|
 | `mod.rs` | ~100 | VM struct, VmResult, public interface |
 | `dispatch.rs` | ~334 | Main execution loop, instruction dispatch, returns `(SignalBits, usize)` |
-| `call.rs` | ~417 | Call, TailCall, JIT dispatch, environment building |
+| `call.rs` | ~574 | Call, TailCall, JIT dispatch (solo + batch), environment building |
 | `signal.rs` | ~177 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch |
 | `fiber.rs` | ~388 | Fiber resume/propagate/cancel, shared swap protocol |
 | `execute.rs` | ~94 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack` |

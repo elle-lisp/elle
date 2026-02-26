@@ -21,6 +21,8 @@ LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 | `JitCompiler` | Translates LIR to native code via Cranelift |
 | `JitCode` | Wrapper for native function pointer + module lifetime |
 | `JitError` | Compilation errors |
+| `BatchMember` | A member of an SCC compilation group (SymbolId + LirFunction) |
+| `discover_compilation_group` | Discover call peers for batch JIT compilation |
 
 ## Calling Convention
 
@@ -71,6 +73,7 @@ Unsupported (returns JitError::UnsupportedInstruction):
 | `runtime.rs` | ~420 | Arithmetic, comparison, type-checking helpers |
 | `dispatch.rs` | ~530 | Data structure, cell, global, function call helpers (incl. JIT-to-JIT) |
 | `code.rs` | ~80 | `JitCode` wrapper type |
+| `group.rs` | ~590 | Compilation group discovery for batch JIT (no Cranelift dependency) |
 
 ## Runtime Helpers
 

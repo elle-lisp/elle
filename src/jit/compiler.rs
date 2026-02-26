@@ -4,6 +4,7 @@
 //! Cranelift IR, then compiles to native x86_64 code.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use cranelift_codegen::ir::types::I64;
 use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, MemFlags, Signature, UserFuncName};
@@ -13,7 +14,8 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
-use crate::lir::{Label, LirFunction};
+use crate::lir::{Label, LirFunction, LirInstr};
+use crate::value::SymbolId;
 
 use super::code::JitCode;
 use super::dispatch;
@@ -25,6 +27,14 @@ use super::JitError;
 #[inline]
 fn var(n: u32) -> Variable {
     Variable::from_u32(n)
+}
+
+/// A member of a compilation group (SCC) for batch JIT compilation.
+pub struct BatchMember<'a> {
+    /// Symbol ID for this function (used to identify it in LoadGlobal)
+    pub sym: SymbolId,
+    /// The LIR function to compile
+    pub lir: &'a LirFunction,
 }
 
 /// JIT compiler that translates LirFunction to native code
@@ -73,6 +83,9 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) call: FuncId,
     pub(crate) tail_call: FuncId,
     pub(crate) has_exception: FuncId,
+    pub(crate) resolve_tail_call: FuncId,
+    pub(crate) call_depth_enter: FuncId,
+    pub(crate) call_depth_exit: FuncId,
 }
 
 impl JitCompiler {
@@ -171,6 +184,18 @@ impl JitCompiler {
             "elle_jit_has_exception",
             dispatch::elle_jit_has_exception as *const u8,
         );
+        builder.symbol(
+            "elle_jit_resolve_tail_call",
+            dispatch::elle_jit_resolve_tail_call as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_call_depth_enter",
+            dispatch::elle_jit_call_depth_enter as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_call_depth_exit",
+            dispatch::elle_jit_call_depth_exit as *const u8,
+        );
 
         let mut module = JITModule::new(builder);
 
@@ -178,6 +203,20 @@ impl JitCompiler {
         let helpers = Self::declare_helpers(&mut module)?;
 
         Ok(JitCompiler { module, helpers })
+    }
+
+    /// Build the standard JIT function signature.
+    /// fn(env: *const Value, args: *const Value, nargs: u32, vm: *mut VM, self_bits: u64) -> Value
+    fn make_jit_signature(&self) -> Signature {
+        let mut sig = self.module.make_signature();
+        sig.call_conv = CallConv::SystemV;
+        sig.params.push(AbiParam::new(I64)); // env pointer
+        sig.params.push(AbiParam::new(I64)); // args pointer
+        sig.params.push(AbiParam::new(I64)); // nargs
+        sig.params.push(AbiParam::new(I64)); // vm pointer
+        sig.params.push(AbiParam::new(I64)); // self_bits
+        sig.returns.push(AbiParam::new(I64)); // return value
+        sig
     }
 
     /// Declare runtime helper functions in the module
@@ -258,6 +297,9 @@ impl JitCompiler {
             call: declare(module, "elle_jit_call", &call_sig)?,
             tail_call: declare(module, "elle_jit_tail_call", &call_sig)?,
             has_exception: declare(module, "elle_jit_has_exception", &unary_sig)?,
+            resolve_tail_call: declare(module, "elle_jit_resolve_tail_call", &binary_sig)?,
+            call_depth_enter: declare(module, "elle_jit_call_depth_enter", &unary_sig)?,
+            call_depth_exit: declare(module, "elle_jit_call_depth_exit", &unary_sig)?,
         })
     }
 
@@ -269,15 +311,7 @@ impl JitCompiler {
         }
 
         // Create function signature
-        // fn(env: *const Value, args: *const Value, nargs: u32, vm: *mut VM, self_bits: u64) -> Value
-        let mut sig = self.module.make_signature();
-        sig.call_conv = CallConv::SystemV;
-        sig.params.push(AbiParam::new(I64)); // env pointer
-        sig.params.push(AbiParam::new(I64)); // args pointer
-        sig.params.push(AbiParam::new(I64)); // nargs (as i64 for simplicity)
-        sig.params.push(AbiParam::new(I64)); // vm pointer
-        sig.params.push(AbiParam::new(I64)); // self_bits (closure identity for self-tail-call detection)
-        sig.returns.push(AbiParam::new(I64)); // return value
+        let sig = self.make_jit_signature();
 
         // Declare the function
         let func_name = lir.name.as_deref().unwrap_or("jit_func");
@@ -292,7 +326,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        self.translate_function(lir, &mut ctx.func)?;
+        self.translate_function(lir, &mut ctx.func, None)?;
 
         // Compile the function
         self.module
@@ -316,14 +350,7 @@ impl JitCompiler {
             return Err(JitError::NotPure);
         }
 
-        let mut sig = self.module.make_signature();
-        sig.call_conv = CallConv::SystemV;
-        sig.params.push(AbiParam::new(I64));
-        sig.params.push(AbiParam::new(I64));
-        sig.params.push(AbiParam::new(I64));
-        sig.params.push(AbiParam::new(I64));
-        sig.params.push(AbiParam::new(I64));
-        sig.returns.push(AbiParam::new(I64));
+        let sig = self.make_jit_signature();
 
         let func_name = lir.name.as_deref().unwrap_or("jit_func");
         let func_id = self
@@ -335,10 +362,84 @@ impl JitCompiler {
         ctx.func.signature = sig;
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-        self.translate_function(lir, &mut ctx.func)?;
+        self.translate_function(lir, &mut ctx.func, None)?;
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())
+    }
+
+    /// Compile multiple mutually recursive functions into a single Cranelift module.
+    ///
+    /// Functions within the group call each other via direct Cranelift `call`
+    /// instructions, eliminating the `elle_jit_call` dispatch overhead.
+    /// External calls (to functions outside the group) still use `elle_jit_call`.
+    pub fn compile_batch(
+        mut self,
+        members: &[BatchMember],
+    ) -> Result<Vec<(SymbolId, JitCode)>, JitError> {
+        // Validate all members are non-suspending
+        for member in members {
+            if member.lir.effect.may_suspend() {
+                return Err(JitError::NotPure);
+            }
+        }
+
+        let sig = self.make_jit_signature();
+
+        // Declare all functions upfront so they can reference each other
+        let mut func_ids: Vec<(SymbolId, FuncId)> = Vec::with_capacity(members.len());
+        let mut scc_peers: HashMap<SymbolId, FuncId> = HashMap::new();
+
+        for (i, member) in members.iter().enumerate() {
+            let name = member
+                .lir
+                .name
+                .as_deref()
+                .map(|n| format!("scc_{}_{}", i, n))
+                .unwrap_or_else(|| format!("scc_{}", i));
+            let func_id = self
+                .module
+                .declare_function(&name, Linkage::Local, &sig)
+                .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
+            func_ids.push((member.sym, func_id));
+            scc_peers.insert(member.sym, func_id);
+        }
+
+        // Define each function with the SCC peer map
+        for (i, member) in members.iter().enumerate() {
+            let (_, func_id) = func_ids[i];
+            let mut ctx = self.module.make_context();
+            ctx.func.signature = sig.clone();
+            ctx.func.name = UserFuncName::user(0, func_id.as_u32());
+
+            self.translate_function(member.lir, &mut ctx.func, Some(&scc_peers))?;
+
+            self.module
+                .define_function(func_id, &mut ctx)
+                .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
+        }
+
+        // Finalize all functions at once
+        self.module
+            .finalize_definitions()
+            .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
+
+        // Collect fn_ptrs before moving module into Arc
+        let fn_ptrs: Vec<(SymbolId, *const u8)> = func_ids
+            .iter()
+            .map(|(sym, fid)| (*sym, self.module.get_finalized_function(*fid)))
+            .collect();
+
+        // Wrap module in shared Arc so all JitCode entries keep it alive
+        let shared_module = Arc::new(super::code::ModuleHolder::new(self.module));
+
+        // Build results — all share the same module
+        let results = fn_ptrs
+            .into_iter()
+            .map(|(sym, ptr)| (sym, JitCode::new_shared(ptr, shared_module.clone())))
+            .collect();
+
+        Ok(results)
     }
 
     /// Translate LIR function to Cranelift IR
@@ -359,16 +460,34 @@ impl JitCompiler {
     ///     // TailCall: if self-call, update arg vars, jump to loop_header
     ///     //           if not self-call, call elle_jit_tail_call, return
     /// ```
+    ///
+    /// When `scc_peers` is provided, calls to functions in the peer map are
+    /// emitted as direct Cranelift calls instead of going through `elle_jit_call`.
     fn translate_function(
         &mut self,
         lir: &LirFunction,
         func: &mut Function,
+        scc_peers: Option<&HashMap<SymbolId, FuncId>>,
     ) -> Result<(), JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
 
         // Create translator context
         let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, lir);
+
+        // Set up SCC peer map for direct calls between mutually recursive functions
+        if let Some(peers) = scc_peers {
+            translator.scc_peers = peers.clone();
+            // Build global_load_map: scan all blocks for LoadGlobal instructions
+            // to map Reg -> SymbolId. Since LIR is SSA, each Reg is assigned once.
+            for bb in &lir.blocks {
+                for spanned in &bb.instructions {
+                    if let LirInstr::LoadGlobal { dst, sym } = &spanned.instr {
+                        translator.global_load_map.insert(*dst, *sym);
+                    }
+                }
+            }
+        }
 
         // Declare variables for all registers, local slots, arg variables, and locally-defined variables
         // - Registers: 0..num_regs (used by LIR instructions)
@@ -598,6 +717,195 @@ mod tests {
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let result = compiler.compile(&lir);
+        assert!(matches!(result, Err(JitError::NotPure)));
+    }
+
+    #[test]
+    fn test_compile_batch_single_function() {
+        // A batch with one function should work identically to compile()
+        let lir = make_simple_lir();
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let members = vec![BatchMember {
+            sym: SymbolId(0),
+            lir: &lir,
+        }];
+        let results = compiler
+            .compile_batch(&members)
+            .expect("Failed to compile batch");
+
+        assert_eq!(results.len(), 1);
+        let (sym, code) = &results[0];
+        assert_eq!(*sym, SymbolId(0));
+
+        let args = [crate::value::Value::int(42).to_bits()];
+        let result =
+            unsafe { code.call(std::ptr::null(), args.as_ptr(), 1, std::ptr::null_mut(), 0) };
+        let value = unsafe { crate::value::Value::from_bits(result) };
+        assert_eq!(value.as_int(), Some(42));
+    }
+
+    #[test]
+    fn test_compile_batch_mutual_calls() {
+        // Two functions that call each other via LoadGlobal + Call.
+        // f(x) = if x <= 0 then x else g(x - 1)
+        // g(x) = f(x)  (just forwards to f)
+        //
+        // We can't actually CALL these without a VM (the direct SCC calls
+        // still need a valid vm pointer for exception checks), but this test
+        // verifies that batch compilation with cross-references succeeds.
+        use crate::lir::{CmpOp, LirConst};
+
+        let sym_f = SymbolId(100);
+        let sym_g = SymbolId(101);
+
+        // Build f: if x <= 0 then x else call g(x - 1)
+        let mut f = LirFunction::new(Arity::Exact(1));
+        f.name = Some("f".to_string());
+        f.num_regs = 8;
+        f.num_captures = 0;
+        f.effect = Effect::none();
+
+        // Block 0 (entry): load arg, check condition
+        let mut b0 = BasicBlock::new(Label(0));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCapture {
+                dst: Reg(0),
+                index: 0,
+            },
+            Span::synthetic(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Int(0),
+            },
+            Span::synthetic(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Compare {
+                dst: Reg(2),
+                op: CmpOp::Le,
+                lhs: Reg(0),
+                rhs: Reg(1),
+            },
+            Span::synthetic(),
+        ));
+        b0.terminator = SpannedTerminator::new(
+            Terminator::Branch {
+                cond: Reg(2),
+                then_label: Label(1),
+                else_label: Label(2),
+            },
+            Span::synthetic(),
+        );
+
+        // Block 1 (base case): return x
+        let mut b1 = BasicBlock::new(Label(1));
+        b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
+
+        // Block 2 (recursive case): call g(x - 1)
+        let mut b2 = BasicBlock::new(Label(2));
+        b2.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(3),
+                value: LirConst::Int(1),
+            },
+            Span::synthetic(),
+        ));
+        b2.instructions.push(SpannedInstr::new(
+            LirInstr::BinOp {
+                dst: Reg(4),
+                op: BinOp::Sub,
+                lhs: Reg(0),
+                rhs: Reg(3),
+            },
+            Span::synthetic(),
+        ));
+        b2.instructions.push(SpannedInstr::new(
+            LirInstr::LoadGlobal {
+                dst: Reg(5),
+                sym: sym_g,
+            },
+            Span::synthetic(),
+        ));
+        b2.instructions.push(SpannedInstr::new(
+            LirInstr::Call {
+                dst: Reg(6),
+                func: Reg(5),
+                args: vec![Reg(4)],
+            },
+            Span::synthetic(),
+        ));
+        b2.terminator = SpannedTerminator::new(Terminator::Return(Reg(6)), Span::synthetic());
+
+        f.blocks = vec![b0, b1, b2];
+        f.entry = Label(0);
+
+        // Build g: tail-call f(x)
+        let mut g = LirFunction::new(Arity::Exact(1));
+        g.name = Some("g".to_string());
+        g.num_regs = 4;
+        g.num_captures = 0;
+        g.effect = Effect::none();
+
+        let mut gb0 = BasicBlock::new(Label(0));
+        gb0.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCapture {
+                dst: Reg(0),
+                index: 0,
+            },
+            Span::synthetic(),
+        ));
+        gb0.instructions.push(SpannedInstr::new(
+            LirInstr::LoadGlobal {
+                dst: Reg(1),
+                sym: sym_f,
+            },
+            Span::synthetic(),
+        ));
+        gb0.instructions.push(SpannedInstr::new(
+            LirInstr::TailCall {
+                func: Reg(1),
+                args: vec![Reg(0)],
+            },
+            Span::synthetic(),
+        ));
+        gb0.terminator = SpannedTerminator::new(Terminator::Unreachable, Span::synthetic());
+
+        g.blocks = vec![gb0];
+        g.entry = Label(0);
+
+        // Compile both together
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let members = vec![
+            BatchMember {
+                sym: sym_f,
+                lir: &f,
+            },
+            BatchMember {
+                sym: sym_g,
+                lir: &g,
+            },
+        ];
+        let results = compiler
+            .compile_batch(&members)
+            .expect("Failed to compile batch");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, sym_f);
+        assert_eq!(results[1].0, sym_g);
+    }
+
+    #[test]
+    fn test_compile_batch_rejects_suspending() {
+        let mut lir = make_simple_lir();
+        lir.effect = Effect::yields();
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let members = vec![BatchMember {
+            sym: SymbolId(0),
+            lir: &lir,
+        }];
+        let result = compiler.compile_batch(&members);
         assert!(matches!(result, Err(JitError::NotPure)));
     }
 }

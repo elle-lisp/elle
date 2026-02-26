@@ -12,8 +12,9 @@ use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
-use crate::lir::{BinOp, CmpOp, Label, LirConst, LirInstr, Terminator, UnaryOp};
+use crate::lir::{BinOp, CmpOp, Label, LirConst, LirInstr, Reg, Terminator, UnaryOp};
 use crate::value::repr::{PAYLOAD_MASK, TAG_EMPTY_LIST, TAG_FALSE, TAG_INT, TAG_NIL, TAG_TRUE};
+use crate::value::SymbolId;
 
 use super::compiler::RuntimeHelpers;
 use super::JitError;
@@ -42,6 +43,13 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) local_var_base: u32,
     /// Loop header block for self-tail-call jumps
     pub(crate) loop_header: Option<cranelift_codegen::ir::Block>,
+    /// SCC peer functions: maps SymbolId -> Cranelift FuncId for direct calls.
+    /// When a Call/TailCall targets a global in this map, we emit a direct
+    /// Cranelift call instead of going through elle_jit_call.
+    pub(crate) scc_peers: HashMap<SymbolId, FuncId>,
+    /// Map from register to the SymbolId it was loaded from (for LoadGlobal).
+    /// Used to detect when a Call/TailCall targets an SCC peer.
+    pub(crate) global_load_map: HashMap<Reg, SymbolId>,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -60,6 +68,8 @@ impl<'a> FunctionTranslator<'a> {
             arg_var_base: 0,
             local_var_base: 0,
             loop_header: None,
+            scc_peers: HashMap::new(),
+            global_load_map: HashMap::new(),
         }
     }
 
@@ -359,12 +369,53 @@ impl<'a> FunctionTranslator<'a> {
                     .vm_ptr
                     .ok_or_else(|| JitError::InvalidLir("Call without vm pointer".to_string()))?;
 
-                if args.is_empty() {
+                // Check if this is a direct call to an SCC peer
+                if let Some(&peer_func_id) = self
+                    .global_load_map
+                    .get(func)
+                    .and_then(|sym| self.scc_peers.get(sym))
+                {
+                    // Track call depth (direct SCC calls bypass elle_jit_call)
+                    let overflow =
+                        self.call_helper_unary(builder, self.helpers.call_depth_enter, vm)?;
+                    // If overflow (non-zero return), bail out (signal already set)
+                    let zero = builder.ins().iconst(I64, 0);
+                    let is_overflow = builder.ins().icmp(IntCC::NotEqual, overflow, zero);
+                    let overflow_block = builder.create_block();
+                    let call_block = builder.create_block();
+                    builder
+                        .ins()
+                        .brif(is_overflow, overflow_block, &[], call_block, &[]);
+
+                    builder.switch_to_block(overflow_block);
+                    builder.seal_block(overflow_block);
+                    let nil = builder.ins().iconst(I64, TAG_NIL as i64);
+                    builder.ins().return_(&[nil]);
+
+                    builder.switch_to_block(call_block);
+                    builder.seal_block(call_block);
+
+                    // Direct call to SCC peer — skip elle_jit_call dispatch
+                    let result = self.emit_direct_scc_call(builder, peer_func_id, args, vm)?;
+                    // Decrement call depth
+                    self.call_helper_unary(builder, self.helpers.call_depth_exit, vm)?;
+                    // Resolve pending tail call if the peer returned TAIL_CALL_SENTINEL
+                    let resolved = self.call_helper_binary(
+                        builder,
+                        self.helpers.resolve_tail_call,
+                        result,
+                        vm,
+                    )?;
+                    builder.def_var(var(dst.0), resolved);
+                    self.emit_exception_check_after_call(builder)?;
+                } else if args.is_empty() {
                     // No args - pass null pointer
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let nargs = builder.ins().iconst(I64, 0);
                     let result = self.call_helper_call(builder, func_val, null_ptr, nargs, vm)?;
                     builder.def_var(var(dst.0), result);
+                    // Check for exception after call - if set, bail out to interpreter
+                    self.emit_exception_check_after_call(builder)?;
                 } else {
                     // Create stack slot for args
                     let slot =
@@ -382,9 +433,9 @@ impl<'a> FunctionTranslator<'a> {
                     let nargs = builder.ins().iconst(I64, args.len() as i64);
                     let result = self.call_helper_call(builder, func_val, args_addr, nargs, vm)?;
                     builder.def_var(var(dst.0), result);
+                    // Check for exception after call - if set, bail out to interpreter
+                    self.emit_exception_check_after_call(builder)?;
                 }
-                // Check for exception after call - if set, bail out to interpreter
-                self.emit_exception_check_after_call(builder)?;
             }
 
             LirInstr::TailCall { func, args } => {
@@ -425,36 +476,58 @@ impl<'a> FunctionTranslator<'a> {
 
                         builder.ins().jump(loop_header, &[]);
 
-                        // Other-call path: use elle_jit_tail_call trampoline
+                        // Other-call path: check SCC peers, then fall back to trampoline
                         builder.switch_to_block(other_call_block);
                         builder.seal_block(other_call_block);
 
-                        let result = if args.is_empty() {
-                            let null_ptr = builder.ins().iconst(I64, 0);
-                            let nargs = builder.ins().iconst(I64, 0);
-                            self.call_helper_tail_call(builder, func_val, null_ptr, nargs, vm)?
+                        if let Some(&peer_func_id) = self
+                            .global_load_map
+                            .get(func)
+                            .and_then(|sym| self.scc_peers.get(sym))
+                        {
+                            // Direct call to SCC peer + return
+                            let result =
+                                self.emit_direct_scc_call(builder, peer_func_id, args, vm)?;
+                            builder.ins().return_(&[result]);
                         } else {
-                            let slot = builder.create_sized_stack_slot(
-                                cranelift_codegen::ir::StackSlotData::new(
-                                    cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                                    (args.len() * 8) as u32,
-                                    0,
-                                ),
-                            );
-                            for (i, arg_reg) in args.iter().enumerate() {
-                                let arg_val = builder.use_var(var(arg_reg.0));
-                                builder.ins().stack_store(arg_val, slot, (i * 8) as i32);
-                            }
-                            let args_addr = builder.ins().stack_addr(I64, slot, 0);
-                            let nargs = builder.ins().iconst(I64, args.len() as i64);
-                            self.call_helper_tail_call(builder, func_val, args_addr, nargs, vm)?
-                        };
-                        builder.ins().return_(&[result]);
+                            let result = if args.is_empty() {
+                                let null_ptr = builder.ins().iconst(I64, 0);
+                                let nargs = builder.ins().iconst(I64, 0);
+                                self.call_helper_tail_call(builder, func_val, null_ptr, nargs, vm)?
+                            } else {
+                                let slot = builder.create_sized_stack_slot(
+                                    cranelift_codegen::ir::StackSlotData::new(
+                                        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                                        (args.len() * 8) as u32,
+                                        0,
+                                    ),
+                                );
+                                for (i, arg_reg) in args.iter().enumerate() {
+                                    let arg_val = builder.use_var(var(arg_reg.0));
+                                    builder.ins().stack_store(arg_val, slot, (i * 8) as i32);
+                                }
+                                let args_addr = builder.ins().stack_addr(I64, slot, 0);
+                                let nargs = builder.ins().iconst(I64, args.len() as i64);
+                                self.call_helper_tail_call(builder, func_val, args_addr, nargs, vm)?
+                            };
+                            builder.ins().return_(&[result]);
+                        }
                         return Ok(true); // Block is terminated
                     }
                 }
 
                 // Fallback: no self-tail-call optimization (arity mismatch or no self_bits)
+                // Check SCC peers before falling back to trampoline
+                if let Some(&peer_func_id) = self
+                    .global_load_map
+                    .get(func)
+                    .and_then(|sym| self.scc_peers.get(sym))
+                {
+                    let result = self.emit_direct_scc_call(builder, peer_func_id, args, vm)?;
+                    builder.ins().return_(&[result]);
+                    return Ok(true);
+                }
+
                 let result = if args.is_empty() {
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let nargs = builder.ins().iconst(I64, 0);
@@ -481,6 +554,7 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             // === Still unsupported (Phase 4+) ===
+            // NOTE: Keep group.rs::has_unsupported_instructions in sync with this list.
             LirInstr::MakeClosure { .. } => {
                 return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
             }
@@ -738,6 +812,70 @@ impl<'a> FunctionTranslator<'a> {
             .module
             .declare_func_in_func(self.helpers.tail_call, builder.func);
         let call = builder.ins().call(func_ref, &[func, args_ptr, nargs, vm]);
+        Ok(builder.inst_results(call)[0])
+    }
+
+    /// Emit a direct call to an SCC peer function.
+    ///
+    /// Uses the standard JIT calling convention:
+    /// `fn(env, args_ptr, nargs, vm, self_bits) -> Value`
+    ///
+    /// For Phase 1, we pass null env (capture-free functions only) and
+    /// 0 for self_bits. This has two consequences:
+    ///
+    /// 1. **Self-tail-call degradation**: When peer A calls peer B directly,
+    ///    B receives `self_bits = 0`. If B is also self-recursive, its
+    ///    self-tail-call optimization won't fire (the comparison against
+    ///    `self_bits` always fails). B's self-recursion goes through
+    ///    `elle_jit_tail_call` instead of becoming a native loop. This
+    ///    means batch-compiled self-recursive functions are *slower* on
+    ///    the peer-called path than solo-compiled ones. Phase 2 should
+    ///    pass the peer's actual closure bits as `self_bits`.
+    ///
+    /// 2. **No mutual tail-call elimination**: Direct SCC calls in tail
+    ///    position use `call + return`, not jumps. Deep mutual tail
+    ///    recursion between peers grows the native stack and will segfault
+    ///    rather than producing a clean stack overflow error. Phase 2
+    ///    should implement function fusion for true mutual TCE.
+    fn emit_direct_scc_call(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        peer_func_id: FuncId,
+        args: &[Reg],
+        vm: cranelift_codegen::ir::Value,
+    ) -> Result<cranelift_codegen::ir::Value, JitError> {
+        let func_ref = self.module.declare_func_in_func(peer_func_id, builder.func);
+
+        // Build args on stack (same layout as standard Call)
+        let (args_ptr, nargs) = if args.is_empty() {
+            let null = builder.ins().iconst(I64, 0);
+            let zero = builder.ins().iconst(I64, 0);
+            (null, zero)
+        } else {
+            let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                (args.len() * 8) as u32,
+                0,
+            ));
+            for (i, arg_reg) in args.iter().enumerate() {
+                let arg_val = builder.use_var(var(arg_reg.0));
+                builder.ins().stack_store(arg_val, slot, (i * 8) as i32);
+            }
+            let addr = builder.ins().stack_addr(I64, slot, 0);
+            let count = builder.ins().iconst(I64, args.len() as i64);
+            (addr, count)
+        };
+
+        // Phase 1: null env for capture-free functions
+        let null_env = builder.ins().iconst(I64, 0);
+        // Use 0 for self_bits — the callee's own self-tail-call detection
+        // won't match against 0, so self-tail-calls within the callee still
+        // go through elle_jit_tail_call. This is safe but suboptimal.
+        let zero_self_bits = builder.ins().iconst(I64, 0);
+
+        let call = builder
+            .ins()
+            .call(func_ref, &[null_env, args_ptr, nargs, vm, zero_self_bits]);
         Ok(builder.inst_results(call)[0])
     }
 

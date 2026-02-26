@@ -7,3 +7,6 @@ site/
 # Profiling data
 perf.data
 perf.data.old
+
+# Issue workflow scratch dirs
+issue-*/

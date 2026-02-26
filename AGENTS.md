@@ -231,3 +231,9 @@ for list termination.
 4. Read a failing test to understand what's expected.
 
 When in doubt, run the tests.
+
+## Agent specs
+
+Agent spec files live in `.opencode/agents/`. Some runtimes rewrite this path
+in the system prompt (e.g. to `.Claude/agents/`). If a rewritten path doesn't
+resolve, always check `.opencode/agents/` — that is the canonical location.

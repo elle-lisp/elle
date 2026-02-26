@@ -11,7 +11,13 @@ use std::sync::Arc;
 /// The JITModule contains raw pointers to executable code. Once finalized,
 /// the code is immutable and can be safely shared between threads.
 /// The module itself should not be modified after finalization.
-struct ModuleHolder(#[allow(dead_code)] cranelift_jit::JITModule);
+pub(crate) struct ModuleHolder(#[allow(dead_code)] cranelift_jit::JITModule);
+
+impl ModuleHolder {
+    pub(crate) fn new(module: cranelift_jit::JITModule) -> Self {
+        ModuleHolder(module)
+    }
+}
 
 // Safety: After finalization, the JITModule only contains immutable code.
 // The raw pointers point to executable memory that doesn't change.
@@ -39,7 +45,18 @@ impl JitCode {
     pub(crate) fn new(fn_ptr: *const u8, module: cranelift_jit::JITModule) -> Self {
         JitCode {
             fn_ptr,
-            _module: Arc::new(ModuleHolder(module)),
+            _module: Arc::new(ModuleHolder::new(module)),
+        }
+    }
+
+    /// Create a new JitCode from a function pointer and a shared module
+    ///
+    /// This constructor is used for batch compilation where multiple JitCode
+    /// instances share one module.
+    pub(crate) fn new_shared(fn_ptr: *const u8, module: Arc<ModuleHolder>) -> Self {
+        JitCode {
+            fn_ptr,
+            _module: module,
         }
     }
 

@@ -8,7 +8,9 @@
 //! - JIT compilation and dispatch
 
 use crate::value::error_val;
-use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
+use crate::value::{
+    SignalBits, SuspendedFrame, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD,
+};
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
 // full cache line regardless of arg count, and the is-inline branch on
@@ -289,6 +291,16 @@ impl VM {
         // If hot, attempt JIT compilation
         if is_hot {
             if let Some(ref lir_func) = closure.lir_function {
+                // Try batch compilation first for capture-free functions
+                if lir_func.num_captures == 0 {
+                    if let Some(result) =
+                        self.try_batch_jit(lir_func, bytecode_ptr, closure, args, func)
+                    {
+                        return Some(result);
+                    }
+                }
+
+                // Solo compilation (original path)
                 match JitCompiler::new() {
                     Ok(compiler) => match compiler.compile(lir_func) {
                         Ok(jit_code) => {
@@ -403,6 +415,106 @@ impl VM {
         };
 
         unsafe { Value::from_bits(result_bits) }
+    }
+
+    // ── Batch JIT ────────────────────────────────────────────────────
+
+    /// Try batch JIT compilation for a hot function and its call peers.
+    ///
+    /// Returns `Some` if batch compilation succeeded and the hot function
+    /// was executed. Returns `None` to fall through to solo compilation.
+    fn try_batch_jit(
+        &mut self,
+        lir_func: &Rc<crate::lir::LirFunction>,
+        bytecode_ptr: *const u8,
+        closure: &crate::value::Closure,
+        args: &[Value],
+        func: Value,
+    ) -> Option<Option<SignalBits>> {
+        let group = crate::jit::discover_compilation_group(lir_func, &self.globals);
+        if group.is_empty() {
+            return None;
+        }
+
+        let hot_sym = self.find_global_sym_for_bytecode(bytecode_ptr)?;
+
+        let compiler = match JitCompiler::new() {
+            Ok(c) => c,
+            Err(e) => {
+                panic!("JIT compiler creation failed: {}. This is a bug.", e);
+            }
+        };
+
+        let mut members = Vec::with_capacity(group.len() + 1);
+        members.push(crate::jit::BatchMember {
+            sym: hot_sym,
+            lir: lir_func,
+        });
+
+        for (sym, lir) in &group {
+            if *sym != hot_sym {
+                members.push(crate::jit::BatchMember { sym: *sym, lir });
+            }
+        }
+
+        if members.len() <= 1 {
+            return None;
+        }
+
+        let results = match compiler.compile_batch(&members) {
+            Ok(r) => r,
+            Err(e) => match &e {
+                crate::jit::JitError::UnsupportedInstruction(_) => {
+                    // Some member has an instruction the JIT can't handle.
+                    // Fall through to solo compilation for the hot function.
+                    return None;
+                }
+                _ => {
+                    panic!(
+                        "Batch JIT compilation failed: {}. \
+                         This is a bug — all members were pre-validated as JIT-compilable.",
+                        e
+                    );
+                }
+            },
+        };
+
+        // Insert all compiled functions into cache
+        let mut hot_jit_code = None;
+        for (sym, jit_code) in results {
+            let jit_code = Rc::new(jit_code);
+            let idx = sym.0 as usize;
+            if let Some(val) = self.globals.get(idx) {
+                if let Some(peer_closure) = val.as_closure() {
+                    let peer_bc_ptr = peer_closure.bytecode.as_ptr();
+                    self.jit_cache.insert(peer_bc_ptr, jit_code.clone());
+                    if sym == hot_sym {
+                        hot_jit_code = Some(jit_code);
+                    }
+                }
+            }
+        }
+
+        if let Some(jit_code) = hot_jit_code {
+            return Some(self.run_jit(&jit_code, closure, args, func));
+        }
+
+        None
+    }
+
+    /// Find the SymbolId for a global closure matching the given bytecode pointer.
+    ///
+    /// O(n) over globals, but runs at most once per hot function (subsequent
+    /// calls hit the jit_cache).
+    fn find_global_sym_for_bytecode(&self, bytecode_ptr: *const u8) -> Option<SymbolId> {
+        for (i, val) in self.globals.iter().enumerate() {
+            if let Some(closure) = val.as_closure() {
+                if closure.bytecode.as_ptr() == bytecode_ptr {
+                    return Some(SymbolId(i as u32));
+                }
+            }
+        }
+        None
     }
 
     // ── Environment building ────────────────────────────────────────
