@@ -1548,3 +1548,229 @@ fn test_jit_accepts_raises_only_effect() {
         result
     );
 }
+
+// =============================================================================
+// Batch JIT: Mutual Recursion Tests
+// =============================================================================
+
+#[test]
+fn test_jit_mutual_recursion_even_odd() {
+    // Classic mutual recursion: is-even? and is-odd? call each other
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _effects = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(begin
+        (var is-even? (fn (n) (if (= n 0) #t (is-odd? (- n 1)))))
+        (var is-odd? (fn (n) (if (= n 0) #f (is-even? (- n 1)))))
+        (list (is-even? 10) (is-odd? 10) (is-even? 11) (is-odd? 11)))"#,
+        &mut symbols,
+        &mut vm,
+    );
+    assert!(result.is_ok(), "even-odd failed: {:?}", result);
+    // (is-even? 10) = #t, (is-odd? 10) = #f, (is-even? 11) = #f, (is-odd? 11) = #t
+    let list = result.unwrap();
+    let first = list.as_cons().unwrap();
+    assert_eq!(first.first.as_bool(), Some(true)); // (is-even? 10)
+    let rest1 = first.rest.as_cons().unwrap();
+    assert_eq!(rest1.first.as_bool(), Some(false)); // (is-odd? 10)
+    let rest2 = rest1.rest.as_cons().unwrap();
+    assert_eq!(rest2.first.as_bool(), Some(false)); // (is-even? 11)
+    let rest3 = rest2.rest.as_cons().unwrap();
+    assert_eq!(rest3.first.as_bool(), Some(true)); // (is-odd? 11)
+}
+
+#[test]
+fn test_jit_mutual_recursion_deep() {
+    // Deep mutual recursion — exercises tail call optimization across SCC.
+    //
+    // NOTE: depth 100 is chosen deliberately. In Phase 1, direct SCC calls
+    // between peers use `call + return` (not jumps), so each mutual call
+    // adds a native stack frame. Deep mutual recursion (e.g., depth 2000+)
+    // would segfault from native stack overflow rather than producing a
+    // clean error. This is a known Phase 1 limitation — Phase 2 will
+    // implement mutual tail-call elimination via function fusion.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _effects = register_primitives(&mut vm, &mut symbols);
+
+    // ping-pong: ping(n) -> pong(n-1), pong(n) -> ping(n-1)
+    // Both are tail calls, so this should handle deep recursion
+    let result = eval(
+        r#"(begin
+        (var ping (fn (n) (if (= n 0) "ping" (pong (- n 1)))))
+        (var pong (fn (n) (if (= n 0) "pong" (ping (- n 1)))))
+        (list (ping 0) (pong 0) (ping 1) (pong 1) (ping 100) (pong 100)))"#,
+        &mut symbols,
+        &mut vm,
+    );
+    assert!(result.is_ok(), "ping-pong failed: {:?}", result);
+    let list = result.unwrap();
+    let vals: Vec<String> = {
+        let mut v = Vec::new();
+        let mut cur = list;
+        while let Some(cons) = cur.as_cons() {
+            v.push(cons.first.as_string().unwrap().to_string());
+            cur = cons.rest;
+        }
+        v
+    };
+    assert_eq!(vals, vec!["ping", "pong", "pong", "ping", "ping", "pong"]);
+}
+
+#[test]
+fn test_jit_mutual_recursion_nqueens_small() {
+    // Verify nqueens works correctly with JIT batch compilation
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _effects = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(begin
+        (var check-safe-helper
+          (fn (col remaining row-offset)
+            (if (empty? remaining)
+              #t
+              (let ((placed-col (first remaining)))
+                (if (or (= col placed-col)
+                        (= row-offset (abs (- col placed-col))))
+                  #f
+                  (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
+
+        (var safe?
+          (fn (col queens)
+            (check-safe-helper col queens 1)))
+
+        (var try-cols-helper
+          (fn (n col queens row)
+            (if (= col n)
+              (list)
+              (if (safe? col queens)
+                (let ((new-queens (cons col queens)))
+                  (append (solve-helper n (+ row 1) new-queens)
+                          (try-cols-helper n (+ col 1) queens row)))
+                (try-cols-helper n (+ col 1) queens row)))))
+
+        (var solve-helper
+          (fn (n row queens)
+            (if (= row n)
+              (list (reverse queens))
+              (try-cols-helper n 0 queens row))))
+
+        (var solve-nqueens
+          (fn (n)
+            (solve-helper n 0 (list))))
+
+        (length (solve-nqueens 8)))"#,
+        &mut symbols,
+        &mut vm,
+    );
+    assert!(result.is_ok(), "nqueens failed: {:?}", result);
+    // 8-queens has 92 solutions
+    assert_eq!(result.unwrap().as_int(), Some(92));
+}
+
+#[test]
+fn test_jit_mutual_recursion_three_way() {
+    // Three mutually recursive functions forming a cycle
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _effects = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(begin
+        (var fa (fn (n) (if (= n 0) "a" (fb (- n 1)))))
+        (var fb (fn (n) (if (= n 0) "b" (fc (- n 1)))))
+        (var fc (fn (n) (if (= n 0) "c" (fa (- n 1)))))
+        (list (fa 0) (fa 1) (fa 2) (fa 3) (fa 6) (fa 9)))"#,
+        &mut symbols,
+        &mut vm,
+    );
+    assert!(result.is_ok(), "three-way failed: {:?}", result);
+    let list = result.unwrap();
+    let vals: Vec<String> = {
+        let mut v = Vec::new();
+        let mut cur = list;
+        while let Some(cons) = cur.as_cons() {
+            v.push(cons.first.as_string().unwrap().to_string());
+            cur = cons.rest;
+        }
+        v
+    };
+    // fa(0)=a, fa(1)=fb(0)=b, fa(2)=fb(1)=fc(0)=c,
+    // fa(3)=fb(2)=fc(1)=fa(0)=a, fa(6)=a, fa(9)=a
+    assert_eq!(vals, vec!["a", "b", "c", "a", "a", "a"]);
+}
+
+#[test]
+fn test_jit_batch_global_mutation_known_limitation() {
+    // Documents a known Phase 1 limitation: after batch JIT compilation,
+    // mutating a global (`set!`) does NOT update the direct SCC calls.
+    // The batch-compiled code still calls the old function because direct
+    // calls are resolved at compilation time, not at runtime.
+    //
+    // This test verifies the program doesn't crash and produces *some*
+    // result. The exact behavior (old vs new function) depends on whether
+    // batch compilation fired for the particular call path.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _effects = register_primitives(&mut vm, &mut symbols);
+
+    // Define mutually recursive functions, call them enough to trigger JIT,
+    // then mutate one global and call again. The result should not crash.
+    let result = eval(
+        r#"(begin
+        (var helper (fn (n) (if (= n 0) "original" (helper (- n 1)))))
+        ;; Call enough times to trigger JIT compilation
+        (helper 10)
+        (helper 10)
+        (helper 10)
+        (helper 10)
+        (helper 10)
+        ;; Mutate the global
+        (set! helper (fn (n) "replaced"))
+        ;; Call again — may use old or new function depending on JIT state.
+        ;; The key invariant: this must not crash.
+        (helper 5))"#,
+        &mut symbols,
+        &mut vm,
+    );
+    assert!(
+        result.is_ok(),
+        "Global mutation after JIT should not crash: {:?}",
+        result
+    );
+    // We accept either result — the point is no crash, no corruption
+    let val = result.unwrap();
+    assert!(
+        val.as_string().is_some(),
+        "Expected a string result, got: {:?}",
+        val
+    );
+}

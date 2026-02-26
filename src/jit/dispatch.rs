@@ -358,6 +358,63 @@ pub extern "C" fn elle_jit_call(
     }
 }
 
+/// Resolve a pending tail call after a direct SCC call.
+///
+/// When a directly-called SCC peer returns TAIL_CALL_SENTINEL (because it
+/// tail-called something outside the SCC), the caller must resolve it.
+/// This helper checks for the sentinel and executes the pending tail call.
+///
+/// Returns the final result value, or TAG_NIL if an error occurred.
+#[no_mangle]
+pub extern "C" fn elle_jit_resolve_tail_call(result: u64, vm: *mut ()) -> u64 {
+    if result != TAIL_CALL_SENTINEL {
+        return result;
+    }
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    if let Some((tail_bc, tail_consts, tail_env)) = vm.pending_tail_call.take() {
+        match vm.execute_closure_bytecode(&tail_bc, &tail_consts, &tail_env) {
+            Ok(val) => val.to_bits(),
+            Err(e) => {
+                vm.fiber.signal = Some((SIG_ERROR, error_val("error", e)));
+                TAG_NIL
+            }
+        }
+    } else {
+        panic!(
+            "VM bug: TAIL_CALL_SENTINEL returned but no pending_tail_call set. \
+             This indicates a bug in the JIT tail call protocol."
+        );
+    }
+}
+
+/// Increment call depth and check for stack overflow.
+///
+/// Used by direct SCC calls (which bypass `elle_jit_call` and its built-in
+/// depth tracking). Returns 0 (falsy) on success, or non-zero (truthy) if
+/// the call depth exceeds 1000 (after setting the error signal on the fiber).
+#[no_mangle]
+pub extern "C" fn elle_jit_call_depth_enter(vm: *mut ()) -> u64 {
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    vm.fiber.call_depth += 1;
+    if vm.fiber.call_depth > 1000 {
+        vm.fiber.signal = Some((SIG_ERROR, error_val("error", "Stack overflow")));
+        vm.fiber.call_depth -= 1;
+        return 1; // truthy — overflow
+    }
+    0 // falsy — ok
+}
+
+/// Decrement call depth after a direct SCC call returns.
+///
+/// Pairs with `elle_jit_call_depth_enter`. Always returns TAG_NIL (ignored
+/// by callers — this is a void-like helper).
+#[no_mangle]
+pub extern "C" fn elle_jit_call_depth_exit(vm: *mut ()) -> u64 {
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    vm.fiber.call_depth -= 1;
+    TAG_NIL
+}
+
 /// Handle a non-self tail call from JIT code.
 ///
 /// If the target closure has JIT code in the cache, calls it directly —

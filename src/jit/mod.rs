@@ -32,12 +32,14 @@
 mod code;
 mod compiler;
 pub(crate) mod dispatch;
+mod group;
 mod runtime;
 mod translate;
 
 pub use code::JitCode;
-pub use compiler::JitCompiler;
+pub use compiler::{BatchMember, JitCompiler};
 pub use dispatch::TAIL_CALL_SENTINEL;
+pub(crate) use group::discover_compilation_group;
 
 use std::fmt;
 
