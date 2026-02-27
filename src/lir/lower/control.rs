@@ -1,43 +1,131 @@
 //! Control flow lowering: and, or, match, handler-case, yield, call
 
 use super::*;
-use crate::hir::HirPattern;
+use crate::hir::{CallArg, HirPattern};
 
 impl Lowerer {
     pub(super) fn lower_call(
         &mut self,
         func: &Hir,
-        args: &[Hir],
+        args: &[CallArg],
         is_tail: bool,
     ) -> Result<Reg, String> {
-        // Check for intrinsic specialization before generic call
-        if let Some(result) = self.try_lower_intrinsic(func, args)? {
-            return Ok(result);
-        }
+        let has_splice = args.iter().any(|a| a.spliced);
 
-        // Lower arguments first, then function
-        // This ensures the stack is in the right order for the Call instruction
-        let mut arg_regs = Vec::new();
-        for arg in args {
-            arg_regs.push(self.lower_expr(arg)?);
-        }
-        let func_reg = self.lower_expr(func)?;
+        if !has_splice {
+            // === Common path: no spliced args ===
+            // Check for intrinsic specialization
+            let plain_args: Vec<&Hir> = args.iter().map(|a| &a.expr).collect();
+            if let Some(result) = self.try_lower_intrinsic(func, &plain_args)? {
+                return Ok(result);
+            }
 
-        if is_tail {
-            self.emit(LirInstr::TailCall {
-                func: func_reg,
-                args: arg_regs,
-            });
-            // After tail call, we need a placeholder reg
-            Ok(self.fresh_reg())
+            let mut arg_regs = Vec::new();
+            for arg in args {
+                arg_regs.push(self.lower_expr(&arg.expr)?);
+            }
+            let func_reg = self.lower_expr(func)?;
+
+            if is_tail {
+                self.emit(LirInstr::TailCall {
+                    func: func_reg,
+                    args: arg_regs,
+                });
+                Ok(self.fresh_reg())
+            } else {
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::Call {
+                    dst,
+                    func: func_reg,
+                    args: arg_regs,
+                });
+                Ok(dst)
+            }
         } else {
-            let dst = self.fresh_reg();
-            self.emit(LirInstr::Call {
-                dst,
-                func: func_reg,
-                args: arg_regs,
+            // === Splice path: build args array, then CallArray ===
+            // Lower all args first
+            let mut lowered: Vec<(Reg, bool)> = Vec::new();
+            for arg in args {
+                let reg = self.lower_expr(&arg.expr)?;
+                lowered.push((reg, arg.spliced));
+            }
+            let func_reg = self.lower_expr(func)?;
+
+            // Build the args array incrementally
+            // Start with MakeArray of the first run of non-spliced args
+            let mut args_reg: Option<Reg> = None;
+
+            for (reg, spliced) in &lowered {
+                match (args_reg, spliced) {
+                    (None, false) => {
+                        // First arg, not spliced: create array with one element
+                        let dst = self.fresh_reg();
+                        self.emit(LirInstr::MakeArray {
+                            dst,
+                            elements: vec![*reg],
+                        });
+                        args_reg = Some(dst);
+                    }
+                    (None, true) => {
+                        // First arg, spliced: create empty array, then extend
+                        let empty = self.fresh_reg();
+                        self.emit(LirInstr::MakeArray {
+                            dst: empty,
+                            elements: vec![],
+                        });
+                        let dst = self.fresh_reg();
+                        self.emit(LirInstr::ArrayExtend {
+                            dst,
+                            array: empty,
+                            source: *reg,
+                        });
+                        args_reg = Some(dst);
+                    }
+                    (Some(arr), false) => {
+                        let dst = self.fresh_reg();
+                        self.emit(LirInstr::ArrayPush {
+                            dst,
+                            array: arr,
+                            value: *reg,
+                        });
+                        args_reg = Some(dst);
+                    }
+                    (Some(arr), true) => {
+                        let dst = self.fresh_reg();
+                        self.emit(LirInstr::ArrayExtend {
+                            dst,
+                            array: arr,
+                            source: *reg,
+                        });
+                        args_reg = Some(dst);
+                    }
+                }
+            }
+
+            let final_args = args_reg.unwrap_or_else(|| {
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::MakeArray {
+                    dst,
+                    elements: vec![],
+                });
+                dst
             });
-            Ok(dst)
+
+            if is_tail {
+                self.emit(LirInstr::TailCallArray {
+                    func: func_reg,
+                    args: final_args,
+                });
+                Ok(self.fresh_reg())
+            } else {
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::CallArray {
+                    dst,
+                    func: func_reg,
+                    args: final_args,
+                });
+                Ok(dst)
+            }
         }
     }
 
@@ -49,7 +137,7 @@ impl Lowerer {
     /// - The global is not mutated (so it still holds the original primitive)
     /// - The SymbolId maps to a known intrinsic
     /// - The argument count matches (2 for binary/compare, 1 for unary)
-    fn try_lower_intrinsic(&mut self, func: &Hir, args: &[Hir]) -> Result<Option<Reg>, String> {
+    fn try_lower_intrinsic(&mut self, func: &Hir, args: &[&Hir]) -> Result<Option<Reg>, String> {
         // Must be a variable reference
         let HirKind::Var(binding) = &func.kind else {
             return Ok(None);
@@ -65,7 +153,7 @@ impl Lowerer {
         // Special case: `-` with 1 arg is negation
         if args.len() == 1 {
             if let Some(IntrinsicOp::Binary(BinOp::Sub)) = self.intrinsics.get(&sym) {
-                let src = self.lower_expr(&args[0])?;
+                let src = self.lower_expr(args[0])?;
                 let dst = self.fresh_reg();
                 self.emit(LirInstr::UnaryOp {
                     dst,
@@ -85,8 +173,8 @@ impl Lowerer {
                 if args.len() != 2 {
                     return Ok(None); // Variadic — fall through to generic call
                 }
-                let lhs = self.lower_expr(&args[0])?;
-                let rhs = self.lower_expr(&args[1])?;
+                let lhs = self.lower_expr(args[0])?;
+                let rhs = self.lower_expr(args[1])?;
                 let dst = self.fresh_reg();
                 self.emit(LirInstr::BinOp { dst, op, lhs, rhs });
                 Ok(Some(dst))
@@ -95,8 +183,8 @@ impl Lowerer {
                 if args.len() != 2 {
                     return Ok(None);
                 }
-                let lhs = self.lower_expr(&args[0])?;
-                let rhs = self.lower_expr(&args[1])?;
+                let lhs = self.lower_expr(args[0])?;
+                let rhs = self.lower_expr(args[1])?;
                 let dst = self.fresh_reg();
                 self.emit(LirInstr::Compare { dst, op, lhs, rhs });
                 Ok(Some(dst))
@@ -105,7 +193,7 @@ impl Lowerer {
                 if args.len() != 1 {
                     return Ok(None);
                 }
-                let src = self.lower_expr(&args[0])?;
+                let src = self.lower_expr(args[0])?;
                 let dst = self.fresh_reg();
                 self.emit(LirInstr::UnaryOp { dst, op, src });
                 Ok(Some(dst))

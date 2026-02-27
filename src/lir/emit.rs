@@ -621,6 +621,41 @@ impl Emitter {
                 self.pop(); // env
                 self.push_reg(*dst);
             }
+
+            LirInstr::ArrayExtend { dst, array, source } => {
+                // Stack: [array, source] → [extended_array]
+                self.ensure_binary_on_top(*array, *source);
+                self.bytecode.emit(Instruction::ArrayExtend);
+                self.pop(); // source
+                self.pop(); // array
+                self.push_reg(*dst);
+            }
+
+            LirInstr::ArrayPush { dst, array, value } => {
+                // Stack: [array, value] → [extended_array]
+                self.ensure_binary_on_top(*array, *value);
+                self.bytecode.emit(Instruction::ArrayPush);
+                self.pop(); // value
+                self.pop(); // array
+                self.push_reg(*dst);
+            }
+
+            LirInstr::CallArray { dst, func, args } => {
+                // Stack: [func, args_array] → [result]
+                self.ensure_binary_on_top(*func, *args);
+                self.bytecode.emit(Instruction::CallArray);
+                self.pop(); // args
+                self.pop(); // func
+                self.push_reg(*dst);
+            }
+
+            LirInstr::TailCallArray { func, args } => {
+                // Stack: [func, args_array] → (tail call, no push)
+                self.ensure_binary_on_top(*func, *args);
+                self.bytecode.emit(Instruction::TailCallArray);
+                self.pop(); // args
+                self.pop(); // func
+            }
         }
     }
 

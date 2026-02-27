@@ -307,6 +307,24 @@ impl VM {
                 Instruction::Eval => {
                     super::eval::handle_eval_instruction(self);
                 }
+                Instruction::ArrayExtend => {
+                    data::handle_array_extend(self);
+                }
+                Instruction::ArrayPush => {
+                    data::handle_array_push(self);
+                }
+                Instruction::CallArray => {
+                    if let Some(bits) =
+                        self.handle_call_array(bytecode, constants, closure_env, &mut ip)
+                    {
+                        return (bits, ip);
+                    }
+                }
+                Instruction::TailCallArray => {
+                    if let Some(bits) = self.handle_tail_call_array(&mut ip, bc) {
+                        return (bits, ip);
+                    }
+                }
             }
 
             // If an error or halt signal was set by the instruction, propagate.

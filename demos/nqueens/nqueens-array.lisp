@@ -1,8 +1,8 @@
-; N-Queens Problem Solver in Elle — mutable array version
-;
-; Uses a single mutable array as a stack for backtracking.
-; Push to place a queen, pop to backtrack. Safety check
-; iterates array indices directly.
+# N-Queens Problem Solver in Elle — mutable array version
+#
+# Uses a single mutable array as a stack for backtracking.
+# Push to place a queen, pop to backtrack. Safety check
+# iterates array indices directly.
 
 (var check-safe-helper
   (fn (col queens idx row)

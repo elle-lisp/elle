@@ -148,6 +148,14 @@ impl SyntaxReader {
                     span,
                 ))
             }
+            OwnedToken::Splice => {
+                let len = self.current_length();
+                self.advance();
+                let inner = self.read()?;
+                let start_span = self.source_loc_to_span(loc, loc.col + len);
+                let span = start_span.merge(&inner.span);
+                Ok(Syntax::new(SyntaxKind::Splice(Box::new(inner)), span))
+            }
 
             OwnedToken::Integer(n) => {
                 let span = self.source_loc_to_span(loc, loc.col + self.current_length());
@@ -407,18 +415,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_bool_true() {
-        let result = lex_and_parse("#t").unwrap();
-        assert!(matches!(result.kind, SyntaxKind::Bool(true)));
-    }
-
-    #[test]
-    fn test_parse_bool_false() {
-        let result = lex_and_parse("#f").unwrap();
-        assert!(matches!(result.kind, SyntaxKind::Bool(false)));
-    }
-
-    #[test]
     fn test_parse_bool_true_word() {
         let result = lex_and_parse("true").unwrap();
         assert!(matches!(result.kind, SyntaxKind::Bool(true)));
@@ -607,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_parse_unquote_splicing() {
-        let result = lex_and_parse(",@x").unwrap();
+        let result = lex_and_parse(",;x").unwrap();
         match result.kind {
             SyntaxKind::UnquoteSplicing(ref inner) => {
                 assert!(matches!(inner.kind, SyntaxKind::Symbol(ref s) if s == "x"));

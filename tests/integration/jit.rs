@@ -1567,14 +1567,14 @@ fn test_jit_mutual_recursion_even_odd() {
 
     let result = eval(
         r#"(begin
-        (var is-even? (fn (n) (if (= n 0) #t (is-odd? (- n 1)))))
-        (var is-odd? (fn (n) (if (= n 0) #f (is-even? (- n 1)))))
+        (var is-even? (fn (n) (if (= n 0) true (is-odd? (- n 1)))))
+        (var is-odd? (fn (n) (if (= n 0) false (is-even? (- n 1)))))
         (list (is-even? 10) (is-odd? 10) (is-even? 11) (is-odd? 11)))"#,
         &mut symbols,
         &mut vm,
     );
     assert!(result.is_ok(), "even-odd failed: {:?}", result);
-    // (is-even? 10) = #t, (is-odd? 10) = #f, (is-even? 11) = #f, (is-odd? 11) = #t
+    // (is-even? 10) = true, (is-odd? 10) = false, (is-even? 11) = false, (is-odd? 11) = true
     let list = result.unwrap();
     let first = list.as_cons().unwrap();
     assert_eq!(first.first.as_bool(), Some(true)); // (is-even? 10)
@@ -1643,19 +1643,19 @@ fn test_jit_mutual_recursion_nqueens_small() {
 
     let result = eval(
         r#"(begin
-        (var check-safe-helper
-          (fn (col remaining row-offset)
-            (if (empty? remaining)
-              #t
-              (let ((placed-col (first remaining)))
-                (if (or (= col placed-col)
-                        (= row-offset (abs (- col placed-col))))
-                  #f
-                  (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
+         (var check-safe-helper
+           (fn (col remaining row-offset)
+             (if (empty? remaining)
+               true
+               (let ((placed-col (first remaining)))
+                 (if (or (= col placed-col)
+                         (= row-offset (abs (- col placed-col))))
+                   false
+                   (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
 
-        (var safe?
-          (fn (col queens)
-            (check-safe-helper col queens 1)))
+         (var safe?
+           (fn (col queens)
+             (check-safe-helper col queens 1)))
 
         (var try-cols-helper
           (fn (n col queens row)
@@ -1747,16 +1747,16 @@ fn test_jit_batch_global_mutation_known_limitation() {
     let result = eval(
         r#"(begin
         (var helper (fn (n) (if (= n 0) "original" (helper (- n 1)))))
-        ;; Call enough times to trigger JIT compilation
+        ## Call enough times to trigger JIT compilation
         (helper 10)
         (helper 10)
         (helper 10)
         (helper 10)
         (helper 10)
-        ;; Mutate the global
+        ## Mutate the global
         (set helper (fn (n) "replaced"))
-        ;; Call again — may use old or new function depending on JIT state.
-        ;; The key invariant: this must not crash.
+        ## Call again — may use old or new function depending on JIT state.
+        ## The key invariant: this must not crash.
         (helper 5))"#,
         &mut symbols,
         &mut vm,

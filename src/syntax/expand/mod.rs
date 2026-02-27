@@ -152,6 +152,14 @@ impl Expander {
                 // Convert quasiquote to code that builds the structure
                 self.quasiquote_to_code(inner, 1, &syntax.span, symbols, vm)
             }
+            SyntaxKind::Splice(inner) => {
+                let expanded = self.expand((**inner).clone(), symbols, vm)?;
+                Ok(Syntax::with_scopes(
+                    SyntaxKind::Splice(Box::new(expanded)),
+                    syntax.span,
+                    syntax.scopes,
+                ))
+            }
             _ => Ok(syntax),
         }
     }
@@ -287,6 +295,9 @@ impl Expander {
             }
             SyntaxKind::UnquoteSplicing(inner) => {
                 SyntaxKind::UnquoteSplicing(Box::new(self.add_scope_recursive(*inner, scope)))
+            }
+            SyntaxKind::Splice(inner) => {
+                SyntaxKind::Splice(Box::new(self.add_scope_recursive(*inner, scope)))
             }
             // Don't recurse into syntax literals — the inner Value::syntax
             // already carries its correct scopes from the original context.

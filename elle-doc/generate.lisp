@@ -1,12 +1,12 @@
 #!/usr/bin/env elle
-;; Elle Documentation Generator
-;; Reads JSON input files and produces static HTML documentation
+## Elle Documentation Generator
+## Reads JSON input files and produces static HTML documentation
 
-;; ============================================================================
-;; HTML generation utilities
-;; ============================================================================
+## ============================================================================
+## HTML generation utilities
+## ============================================================================
 
-;; Escape HTML special characters
+## Escape HTML special characters
 (var html-escape
   (fn (str)
     (if (nil? str)
@@ -23,7 +23,7 @@
             (string 34) "&quot;")
           "'" "&#39;")))))
 
-;; Find delimiter in text starting from character position
+## Find delimiter in text starting from character position
 (def find-closing-helper (fn (text pos tlen delimiter dlen)
   (if (> (+ pos dlen) tlen)
     nil
@@ -34,23 +34,23 @@
 (def find-closing (fn (text start delimiter)
   (find-closing-helper text start (length text) delimiter (length delimiter))))
 
-;; Convert markdown links [text](url) to HTML anchor tags
-;; NOTE: Disabled for now due to compiler bug with define in nested contexts
+## Convert markdown links [text](url) to HTML anchor tags
+## NOTE: Disabled for now due to compiler bug with define in nested contexts
 (def format-links-rec (fn (remaining result)
   (append result remaining)))
 
 (def format-links (fn (text)
   (format-links-rec text "")))
 
-;; Helper function to apply formatting to split parts using fold
-;; Applies a tag (like "strong", "em", "code") to alternating parts
+## Helper function to apply formatting to split parts using fold
+## Applies a tag (like "strong", "em", "code") to alternating parts
 (var apply-formatting
   (fn (parts tag)
     (first
       (fold
         (fn (state part)
-          ;; state is [result, is-active]
-          ;; Avoid variable definitions in fn to work around compiler bug
+          ## state is [result, is-active]
+          ## Avoid variable definitions in fn to work around compiler bug
           (list
             (if (first (rest state))
               (-> (first state) (append "<") (append tag) (append ">") (append part) (append "</") (append tag) (append ">"))
@@ -59,8 +59,8 @@
         (list "" false)
         parts))))
 
-;; Format inline markdown: **bold**, *italic*, `code`
-;; Uses string-split to avoid UTF-8 boundary issues
+## Format inline markdown: **bold**, *italic*, `code`
+## Uses string-split to avoid UTF-8 boundary issues
 (def format-inline (fn (text)
   (format-links
     (apply-formatting
@@ -77,9 +77,9 @@
         "`")
       "code"))))
 
-;; ============================================================================
-;; CSS stylesheet generation
-;; ============================================================================
+## ============================================================================
+## CSS stylesheet generation
+## ============================================================================
 
 (var generate-css
   (fn ()
@@ -382,25 +382,25 @@ tbody tr:nth-child(even) {
 }
 "))
 
-;; ============================================================================
-;; Content block rendering
-;; ============================================================================
+## ============================================================================
+## Content block rendering
+## ============================================================================
 
-;; Render a paragraph block
+## Render a paragraph block
 (var render-paragraph
   (fn (block)
     (-> "<p>" (append (format-inline (get block "text"))) (append "</p>"))))
 
-;; Render a code block
+## Render a code block
 (var render-code
   (fn (block)
     (-> "<pre><code class=\"language-" (append (html-escape (get block "language"))) (append "\">")
       (append (html-escape (get block "text")))
       (append "</code></pre>"))))
 
-;; Render a list block using fold
-;; NOTE: We call format-inline directly without storing in a variable
-;; to work around a compiler bug with variable definitions in fold closures
+## Render a list block using fold
+## NOTE: We call format-inline directly without storing in a variable
+## to work around a compiler bug with variable definitions in fold closures
 (var render-list
   (fn (block)
     (-> "<" (append (if (get block "ordered") "ol" "ul")) (append ">")
@@ -411,12 +411,12 @@ tbody tr:nth-child(even) {
         (get block "items")))
       (append "</") (append (if (get block "ordered") "ol" "ul")) (append ">"))))
 
-;; Render a blockquote block
+## Render a blockquote block
 (var render-blockquote
   (fn (block)
     (-> "<blockquote>" (append (format-inline (get block "text"))) (append "</blockquote>"))))
 
-;; Render a table block using fold
+## Render a table block using fold
 (var render-table
   (fn (block)
     (-> "<table><thead><tr>"
@@ -439,14 +439,14 @@ tbody tr:nth-child(even) {
         (get block "rows")))
       (append "</tbody></table>"))))
 
-;; Render a note/callout block
+## Render a note/callout block
 (var render-note
   (fn (block)
     (-> "<div class=\"note note-" (append (html-escape (get block "kind"))) (append "\">")
       (append (format-inline (get block "text")))
       (append "</div>"))))
 
-;; Main dispatcher
+## Main dispatcher
 (var render-block
   (fn (block)
     (cond
@@ -459,7 +459,7 @@ tbody tr:nth-child(even) {
       ((string-contains? (get block "type") "heading") "")
       (true ""))))
 
-;; Render blocks in a section
+## Render blocks in a section
 (var render-blocks-in-section
   (fn (blocks result)
     (fold
@@ -468,14 +468,14 @@ tbody tr:nth-child(even) {
       result
       blocks)))
 
-;; Render a heading block (nested heading within content)
+## Render a heading block (nested heading within content)
 (var render-heading
   (fn (block)
     (-> "<h" (append (number->string (get block "level"))) (append ">")
       (append (render-blocks-in-section (get block "content") ""))
       (append "</h") (append (number->string (get block "level"))) (append ">"))))
 
-;; Render a section with heading and content blocks
+## Render a section with heading and content blocks
 (var render-section
   (fn (section)
     (-> "<h" (append (number->string (get section "level"))) (append ">")
@@ -483,9 +483,9 @@ tbody tr:nth-child(even) {
       (append "</h") (append (number->string (get section "level"))) (append ">")
       (append (render-blocks-in-section (get section "content") "")))))
 
-;; Render all sections using fold
-;; NOTE: We call render-section directly without storing in a variable
-;; to work around a compiler bug with variable definitions in fold closures
+## Render all sections using fold
+## NOTE: We call render-section directly without storing in a variable
+## to work around a compiler bug with variable definitions in fold closures
 (var render-sections
   (fn (sections)
     (fold
@@ -494,11 +494,11 @@ tbody tr:nth-child(even) {
       ""
       sections)))
 
-;; ============================================================================
-;; Page template generation
-;; ============================================================================
+## ============================================================================
+## Page template generation
+## ============================================================================
 
-;; Render navigation items
+## Render navigation items
 (var render-nav-items
   (fn (items current-slug result)
     (fold
@@ -509,12 +509,12 @@ tbody tr:nth-child(even) {
       result
       items)))
 
-;; Generate navigation HTML
+## Generate navigation HTML
 (var generate-nav
   (fn (nav-items current-slug)
     (render-nav-items nav-items current-slug "")))
 
-;; Generate the full HTML page
+## Generate the full HTML page
 (var generate-page
   (fn (site page nav css body)
     (-> "<!DOCTYPE html>\n"
@@ -540,11 +540,11 @@ tbody tr:nth-child(even) {
       (append "</body>\n")
       (append "</html>\n"))))
 
-;; ============================================================================
-;; Standard library reference generator (from runtime primitive metadata)
-;; ============================================================================
+## ============================================================================
+## Standard library reference generator (from runtime primitive metadata)
+## ============================================================================
 
-;; Map category identifiers to display names
+## Map category identifiers to display names
 (var category-display-name
   (fn (cat)
     (cond
@@ -569,7 +569,7 @@ tbody tr:nth-child(even) {
       ((= cat "bit") "Bitwise Operations")
       (true cat))))
 
-;; Build a function signature string like "(cons car cdr)" from metadata
+## Build a function signature string like "(cons car cdr)" from metadata
 (var build-signature
   (fn (meta)
     (let* ((name (get meta :name))
@@ -579,7 +579,7 @@ tbody tr:nth-child(even) {
         (-> "(" (append name) (append " ") (append (string-join params " ")) (append ")"))))))
 
 
-;; Build the description string, including aliases if any
+## Build the description string, including aliases if any
 (var build-description
   (fn (meta)
     (let* ((doc (get meta :doc))
@@ -588,14 +588,14 @@ tbody tr:nth-child(even) {
         doc
         (-> doc (append " (alias: ") (append (string-join aliases ", ")) (append ")"))))))
 
-;; Group primitives by category, skipping aliases.
-;; Returns a table mapping category-name → list of metadata structs.
+## Group primitives by category, skipping aliases.
+## Returns a table mapping category-name → list of metadata structs.
 (var group-by-category
   (fn (names)
     (fold (fn (groups name)
             (let* ((meta (vm/primitive-meta name))
                    (canonical (get meta :name)))
-              ;; Skip aliases: name passed in doesn't match canonical name
+              ## Skip aliases: name passed in doesn't match canonical name
               (if (not (= name canonical))
                 groups
                 (let* ((cat (get meta :category))
@@ -606,7 +606,7 @@ tbody tr:nth-child(even) {
           (table)
           names)))
 
-;; Build a section (table with heading) for one category
+## Build a section (table with heading) for one category
 (var build-category-section
   (fn (cat-name metas)
     (let* ((rows (map (fn (meta)
@@ -621,19 +621,19 @@ tbody tr:nth-child(even) {
              "level" 2
              "content" (list tbl)))))
 
-;; Preferred category ordering for the stdlib reference page
+## Preferred category ordering for the stdlib reference page
 (var category-order
   (list "" "math" "string" "array" "struct" "json"
         "file" "fn" "fiber" "coro" "clock" "time"
         "meta" "debug" "bit" "os" "pkg" "module" "ffi"))
 
-;; Generate all stdlib sections from runtime primitive metadata
+## Generate all stdlib sections from runtime primitive metadata
 (var generate-stdlib-sections
   (fn ()
     (let* ((names (vm/list-primitives))
            (groups (group-by-category names))
            (all-cats (keys groups)))
-      ;; Build sections in preferred order, then append any unknown categories
+      ## Build sections in preferred order, then append any unknown categories
       (let* ((ordered
                (fold (fn (acc cat)
                        (let* ((metas (get groups cat)))
@@ -642,7 +642,7 @@ tbody tr:nth-child(even) {
                            (append acc (list (build-category-section cat metas))))))
                      (list)
                      category-order))
-             ;; Find categories not in category-order
+             ## Find categories not in category-order
              (extra
                (fold (fn (acc cat)
                        (if (fold (fn (found c) (or found (= c cat)))
@@ -655,34 +655,34 @@ tbody tr:nth-child(even) {
                      all-cats)))
         (append ordered extra)))))
 
-;; ============================================================================
-;; Main generator
-;; ============================================================================
+## ============================================================================
+## Main generator
+## ============================================================================
 
-;; Configuration
+## Configuration
 (var docs-dir "elle-doc/docs")
 (var output-dir "site")
 
-;; Create output directory if it doesn't exist
+## Create output directory if it doesn't exist
 (if (not (directory? output-dir))
   (create-directory-all output-dir))
 
-;; Read and parse site configuration
+## Read and parse site configuration
 (display "Reading site configuration...")
 (newline)
 (var site-json (slurp (join-path docs-dir "site.json")))
 (var site-config (json-parse site-json))
 
-;; Generate and write CSS
+## Generate and write CSS
 (display "Generating CSS...")
 (newline)
 (var css-content (generate-css))
 (spit (join-path output-dir "style.css") css-content)
 
-;; Get navigation items
+## Get navigation items
 (var nav-items (get site-config "nav"))
 
-;; Process each page
+## Process each page
 (var process-pages
   (fn (all-nav-items current-nav-items)
     (if (empty? current-nav-items)
@@ -701,8 +701,8 @@ tbody tr:nth-child(even) {
         (display ".html...")
         (newline)
         
-        ;; For stdlib-reference, generate from runtime metadata
-        ;; For all other pages, read from JSON
+        ## For stdlib-reference, generate from runtime metadata
+        ## For all other pages, read from JSON
         (var page-data
           (if (= slug "stdlib-reference")
             (begin
@@ -713,27 +713,27 @@ tbody tr:nth-child(even) {
               pd)
             (json-parse (slurp page-file))))
         
-        ;; Add slug to page data for template
+        ## Add slug to page data for template
         (put page-data "slug" slug)
         
-        ;; Render content sections
+        ## Render content sections
         (var sections (get page-data "sections"))
         (var body-html (render-sections sections))
         
-        ;; Generate full page (use all-nav-items for navigation)
-        ;; NOTE: We pass slug as a separate parameter to avoid closure issues
+        ## Generate full page (use all-nav-items for navigation)
+        ## NOTE: We pass slug as a separate parameter to avoid closure issues
         (var full-html (generate-page site-config page-data all-nav-items css-content body-html))
         
-        ;; Write HTML file
+        ## Write HTML file
         (var output-file (join-path output-dir (append slug ".html")))
         (spit output-file full-html)
         
-        ;; Process next page
+        ## Process next page
         (process-pages all-nav-items rest-nav-items)))))
 
 (process-pages nav-items nav-items)
 
-;; Print summary
+## Print summary
 (display "Generated documentation in ")
 (display output-dir)
 (display "/")

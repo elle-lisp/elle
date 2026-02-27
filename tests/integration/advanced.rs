@@ -454,7 +454,10 @@ fn test_match_multiple_clauses_ordering() {
 #[test]
 fn test_match_with_static_expressions() {
     // Matched expressions should be evaluated (without pattern variable binding)
-    assert_eq!(eval_source("(match 10 (10 (* 2 3)))").unwrap(), Value::int(6));
+    assert_eq!(
+        eval_source("(match 10 (10 (* 2 3)))").unwrap(),
+        Value::int(6)
+    );
     assert_eq!(eval_source("(match 5 (5 (+ 1 1)))").unwrap(), Value::int(2));
 }
 
@@ -688,7 +691,10 @@ fn test_match_keyword_literal() {
 
 #[test]
 fn test_match_variable_binding() {
-    assert_eq!(eval_source("(match 42 (x (+ x 1)))").unwrap(), Value::int(43));
+    assert_eq!(
+        eval_source("(match 42 (x (+ x 1)))").unwrap(),
+        Value::int(43)
+    );
 }
 
 // No-match returns nil
@@ -706,7 +712,8 @@ fn test_match_no_match_returns_nil() {
 #[test]
 fn test_variadic_macro_basic() {
     assert_eq!(
-        eval_source("(begin (defmacro my-list (& items) `(list ,@items)) (my-list 1 2 3))").unwrap(),
+        eval_source("(begin (defmacro my-list (& items) `(list ,;items)) (my-list 1 2 3))")
+            .unwrap(),
         eval_source("(list 1 2 3)").unwrap()
     );
 }
@@ -714,7 +721,8 @@ fn test_variadic_macro_basic() {
 #[test]
 fn test_variadic_macro_fixed_and_rest() {
     assert_eq!(
-        eval_source("(begin (defmacro my-add (first & rest) `(+ ,first ,@rest)) (my-add 1 2 3))").unwrap(),
+        eval_source("(begin (defmacro my-add (first & rest) `(+ ,first ,;rest)) (my-add 1 2 3))")
+            .unwrap(),
         Value::int(6)
     );
 }
@@ -722,21 +730,23 @@ fn test_variadic_macro_fixed_and_rest() {
 #[test]
 fn test_variadic_macro_empty_rest() {
     assert_eq!(
-        eval_source("(begin (defmacro my-list (& items) `(list ,@items)) (my-list))").unwrap(),
+        eval_source("(begin (defmacro my-list (& items) `(list ,;items)) (my-list))").unwrap(),
         Value::EMPTY_LIST
     );
 }
 
 #[test]
 fn test_variadic_macro_arity_error() {
-    assert!(eval_source("(begin (defmacro foo (a b & rest) `(list ,a ,b ,@rest)) (foo 1))").is_err());
+    assert!(
+        eval_source("(begin (defmacro foo (a b & rest) `(list ,a ,b ,;rest)) (foo 1))").is_err()
+    );
 }
 
 #[test]
 fn test_variadic_macro_when_multi_body() {
     // when with multiple body expressions via & rest
     assert_eq!(
-        eval_source("(begin (defmacro my-when (test & body) `(if ,test (begin ,@body) nil)) (my-when true 1 2 3))")
+        eval_source("(begin (defmacro my-when (test & body) `(if ,test (begin ,;body) nil)) (my-when true 1 2 3))")
             .unwrap(),
         Value::int(3)
     );

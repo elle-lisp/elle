@@ -1,4 +1,4 @@
-; Bad naming conventions - should be flagged by linter
+# Bad naming conventions - should be flagged by linter
 
 (var myVariable 10)
 (var camelCase 42)

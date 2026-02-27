@@ -95,3 +95,6 @@ mod compliance {
 mod buffer {
     include!("buffer.rs");
 }
+mod splice {
+    include!("splice.rs");
+}

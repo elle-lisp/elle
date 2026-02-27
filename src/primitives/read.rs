@@ -11,9 +11,9 @@ use crate::value::{error_val, Value};
 /// `(read str)` → parsed value
 ///
 /// ```lisp
-/// (read "(+ 1 2)")   ; → '(+ 1 2)
-/// (read "42")         ; → 42
-/// (read "true")         ; → true
+/// (read "(+ 1 2)")   # → '(+ 1 2)
+/// (read "42")         # → 42
+/// (read "true")       # → true
 /// ```
 pub fn prim_read(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -66,8 +66,8 @@ pub fn prim_read(args: &[Value]) -> (SignalBits, Value) {
 /// `(read-all str)` → list of parsed values
 ///
 /// ```lisp
-/// (read-all "1 2 3")  ; → (1 2 3)
-/// (read-all "(+ 1 2) (- 3 4)")  ; → ((+ 1 2) (- 3 4))
+/// (read-all "1 2 3")  # → (1 2 3)
+/// (read-all "(+ 1 2) (- 3 4)")  # → ((+ 1 2) (- 3 4))
 /// ```
 pub fn prim_read_all(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -123,7 +123,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Parse the first form from a string, returning a value",
         params: &["str"],
         category: "meta",
-        example: "(read \"(+ 1 2)\") ;=> (+ 1 2)",
+        example: "(read \"(+ 1 2)\") #=> (+ 1 2)",
         aliases: &[],
     },
     PrimitiveDef {
@@ -134,7 +134,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Parse all forms from a string, returning a list of values",
         params: &["str"],
         category: "meta",
-        example: "(read-all \"1 2 3\") ;=> (1 2 3)",
+        example: "(read-all \"1 2 3\") #=> (1 2 3)",
         aliases: &[],
     },
 ];

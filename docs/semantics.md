@@ -9,7 +9,7 @@ Elle has exactly two falsy values:
 
 | Value | Truthy? | Representation |
 |-------|---------|----------------|
-| `#f` | **No** | `Value::FALSE` |
+| `false` | **No** | `Value::FALSE` |
 | `nil` | **No** | `Value::NIL` |
 
 **Everything else is truthy**, including:
@@ -21,7 +21,7 @@ Elle has exactly two falsy values:
 | `0.0` | **Yes** | Float zero is truthy |
 | `""` | **Yes** | Empty string is truthy |
 | `[]` | **Yes** | Empty array is truthy |
-| `#t` | **Yes** | Boolean true |
+| `true` | **Yes** | Boolean true |
 
 ### Why nil ≠ empty list
 
@@ -68,26 +68,26 @@ Lists are built from cons cells and terminate with `EMPTY_LIST`:
 
 | Expression | Result | Notes |
 |------------|--------|-------|
-| `(nil? nil)` | `#t` | Only nil is nil |
-| `(nil? ())` | `#f` | Empty list is NOT nil |
+| `(nil? nil)` | `true` | Only nil is nil |
+| `(nil? ())` | `false` | Empty list is NOT nil |
 | `(empty? nil)` | error | Nil is not a container |
-| `(empty? ())` | `#t` | Empty list is empty |
-| `(list? ())` | `#t` | Empty list is a list |
-| `(list? nil)` | `#f` | Nil is not a list, it represents absence |
-| `(pair? ())` | `#f` | Empty list is not a pair |
-| `(pair? nil)` | `#f` | Nil is not a pair |
+| `(empty? ())` | `true` | Empty list is empty |
+| `(list? ())` | `true` | Empty list is a list |
+| `(list? nil)` | `false` | Nil is not a list, it represents absence |
+| `(pair? ())` | `false` | Empty list is not a pair |
+| `(pair? nil)` | `false` | Nil is not a pair |
 
 ## Conditional Evaluation
 
 The `if` special form evaluates the test expression and:
-- If the result is **falsy** (`#f` or `nil`), evaluates the else branch
+- If the result is **falsy** (`false` or `nil`), evaluates the else branch
 - If the result is **truthy** (anything else), evaluates the then branch
 
 ```lisp
-(if ()  "yes" "no")  ; ⟹ "yes" (empty list is truthy)
-(if nil "yes" "no")  ; ⟹ "no"  (nil is falsy)
-(if 0   "yes" "no")  ; ⟹ "yes" (0 is truthy)
-(if #f  "yes" "no")  ; ⟹ "no"  (#f is falsy)
+(if ()  "yes" "no")  # ⟹ "yes" (empty list is truthy)
+(if nil "yes" "no")  # ⟹ "no"  (nil is falsy)
+(if 0   "yes" "no")  # ⟹ "yes" (0 is truthy)
+(if false  "yes" "no")  # ⟹ "no"  (false is falsy)
 ```
 
 ## Equality
@@ -95,8 +95,8 @@ The `if` special form evaluates the test expression and:
 `nil` and `()` are **not equal**:
 
 ```lisp
-(= nil ())   ; ⟹ #f
-(eq? nil ()) ; ⟹ #f
+(= nil ())   # ⟹ false
+(eq? nil ()) # ⟹ false
 ```
 
 They have different NaN-boxed representations:

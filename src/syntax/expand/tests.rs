@@ -93,7 +93,7 @@ fn test_quasiquote_with_splicing() {
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 10, 1, 1);
 
-    // `(a ,@xs b)
+    // `(a ,;xs b)
     let items = vec![
         Syntax::new(SyntaxKind::Symbol("a".to_string()), span.clone()),
         Syntax::new(

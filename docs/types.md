@@ -7,7 +7,7 @@ other documentation contradicts this document, **this document is correct**.
 
 Elle follows Janet's approach to collection types: every collection has an
 immutable variant and a mutable variant. The immutable variant has bare literal
-syntax; the mutable variant uses the same delimiters prefixed with `@`.
+syntax# the mutable variant uses the same delimiters prefixed with `@`.
 
 | Immutable | Mutable | Delimiters | Immutable example | Mutable example |
 |-----------|---------|------------|-------------------|-----------------|
@@ -27,10 +27,10 @@ mutable array, write `@[1 2 3]`. This is not a cosmetic distinction — it
 affects what operations are valid:
 
 ```lisp
-(def t [1 2 3])        ; tuple — immutable
-(def a @[1 2 3])       ; array — mutable
-(array-set! a 0 99)    ; ok
-(array-set! t 0 99)    ; error: tuples are immutable
+(def t [1 2 3])        # tuple — immutable
+(def a @[1 2 3])       # array — mutable
+(array-set! a 0 99)    # ok
+(array-set! t 0 99)    # error: tuples are immutable
 ```
 
 Error values are tuples: `[:division-by-zero "division by zero"]`. This is why
@@ -62,21 +62,21 @@ These fit in 8 bytes with no allocation.
 
 #### nil
 
-The absence of a value. One of two falsy values (with `#f`).
+The absence of a value. One of two falsy values (with `false`).
 
 ```lisp
-nil             ; literal
-(nil? x)        ; predicate
+nil             # literal
+(nil? x)        # predicate
 ```
 
-Not the same as the empty list `()`. `nil` is falsy; `()` is truthy.
+Not the same as the empty list `()`. `nil` is falsy# `()` is truthy.
 
 #### boolean
 
 ```lisp
-#t              ; true (truthy)
-#f              ; false (falsy)
-(boolean? x)    ; predicate
+true              # true (truthy)
+false              # false (falsy)
+(boolean? x)    # predicate
 ```
 
 #### integer
@@ -84,10 +84,10 @@ Not the same as the empty list `()`. `nil` is falsy; `()` is truthy.
 48-bit signed integer. Range: -2^47 to 2^47-1.
 
 ```lisp
-42              ; literal
--17             ; literal
-0               ; literal
-(number? x)     ; predicate (true for int or float)
+42              # literal
+-17             # literal
+0               # literal
+(number? x)     # predicate (true for int or float)
 ```
 
 No automatic coercion to float. Overflow panics.
@@ -98,9 +98,9 @@ IEEE 754 double-precision. NaN and Infinity are heap-allocated to avoid
 collision with the NaN-boxing scheme.
 
 ```lisp
-3.14            ; literal
-1e10            ; literal
-(number? x)     ; predicate (true for int or float)
+3.14            # literal
+1e10            # literal
+(number? x)     # predicate (true for int or float)
 ```
 
 #### symbol
@@ -108,9 +108,9 @@ collision with the NaN-boxing scheme.
 Interned identifier. Used for variable names, function names.
 
 ```lisp
-foo             ; literal
-'foo            ; quoted
-(symbol? x)     ; predicate
+foo             # literal
+'foo            # quoted
+(symbol? x)     # predicate
 ```
 
 #### keyword
@@ -118,9 +118,9 @@ foo             ; literal
 Self-evaluating interned name. Used for keys, tags, enum-like values.
 
 ```lisp
-:foo            ; literal
-:my-key         ; literal
-(keyword? x)    ; predicate
+:foo            # literal
+:my-key         # literal
+(keyword? x)    # predicate
 ```
 
 #### empty list
@@ -129,9 +129,9 @@ The empty list `()`. Terminates proper lists. **Truthy** (it is a value, not
 the absence of one).
 
 ```lisp
-()              ; literal
-'()             ; quoted
-(empty? x)      ; predicate
+()              # literal
+'()             # quoted
+(empty? x)      # predicate
 ```
 
 #### pointer
@@ -139,7 +139,7 @@ the absence of one).
 Raw C pointer. 48-bit address space. FFI only. NULL becomes nil.
 
 ```lisp
-(pointer? x)    ; predicate
+(pointer? x)    # predicate
 ```
 
 ---
@@ -151,16 +151,16 @@ Raw C pointer. 48-bit address space. FFI only. NULL becomes nil.
 Fixed-length immutable sequence. The immutable counterpart of array.
 
 ```lisp
-[1 2 3]         ; literal (desired — currently creates array)
-(tuple 1 2 3)   ; constructor
+[1 2 3]         # literal (desired — currently creates array)
+(tuple 1 2 3)   # constructor
 ```
 
 Error values are tuples: `[:kind "message"]`. Bracket destructuring works on
 tuples:
 
 ```lisp
-(try (/ 1 0) (catch [kind msg] kind))  ; => :division-by-zero
-(let (([a b] [1 2])) a)                ; => 1
+(try (/ 1 0) (catch [kind msg] kind))  # => :division-by-zero
+(let (([a b] [1 2])) a)                # => 1
 ```
 
 In `match`, bracket patterns `[a b]` match **arrays only** (the `IsArray`
@@ -172,12 +172,12 @@ discrimination. Destructuring in `let`/`def`/`fn` works on both.
 Mutable resizable sequence. The mutable counterpart of tuple.
 
 ```lisp
-@[1 2 3]        ; literal (desired — currently creates list)
-(array 1 2 3)   ; constructor
-(array-ref a 0) ; indexed access
-(array-set! a 0 99) ; mutation
-(array-length a)    ; length
-(array? x)      ; predicate
+@[1 2 3]        # literal (desired — currently creates list)
+(array 1 2 3)   # constructor
+(array-ref a 0) # indexed access
+(array-set! a 0 99) # mutation
+(array-length a)    # length
+(array? x)      # predicate
 ```
 
 #### struct (immutable key-value)
@@ -185,10 +185,10 @@ Mutable resizable sequence. The mutable counterpart of tuple.
 Immutable ordered dictionary. The immutable counterpart of table.
 
 ```lisp
-{:a 1 :b 2}    ; literal
-(struct :a 1 :b 2)  ; constructor
-(get s :a)      ; access
-(struct? x)     ; predicate
+{:a 1 :b 2}    # literal
+(struct :a 1 :b 2)  # constructor
+(get s :a)      # access
+(struct? x)     # predicate
 ```
 
 #### table (mutable key-value)
@@ -196,15 +196,15 @@ Immutable ordered dictionary. The immutable counterpart of table.
 Mutable ordered dictionary. The mutable counterpart of struct.
 
 ```lisp
-@{:a 1 :b 2}   ; literal
-(table :a 1 :b 2)  ; constructor
-(get t :a)      ; access
-(put t :a 99)   ; mutation
-(del t :a)      ; deletion
-(keys t)        ; key list
-(values t)      ; value list
-(has-key? t :a) ; membership
-(table? x)      ; predicate
+@{:a 1 :b 2}   # literal
+(table :a 1 :b 2)  # constructor
+(get t :a)      # access
+(put t :a 99)   # mutation
+(del t :a)      # deletion
+(keys t)        # key list
+(values t)      # value list
+(has-key? t :a) # membership
+(table? x)      # predicate
 ```
 
 #### string (immutable text)
@@ -212,8 +212,8 @@ Mutable ordered dictionary. The mutable counterpart of struct.
 Immutable interned text. The immutable counterpart of buffer.
 
 ```lisp
-"hello"         ; literal
-(string? x)     ; predicate
+"hello"         # literal
+(string? x)     # predicate
 ```
 
 Strings are interned — equality is O(1).
@@ -223,19 +223,19 @@ Strings are interned — equality is O(1).
 Mutable byte sequence. The mutable counterpart of string.
 
 ```lisp
-@"hello"        ; literal (desugars to (string->buffer "hello"))
-(buffer? x)     ; predicate
-(buffer 72 101)  ; constructor from bytes
-(string->buffer "hello")  ; from string (UTF-8 bytes)
-(buffer->string buf)      ; to string (UTF-8)
-(get buf 0)     ; byte at index (as integer)
-(put buf 0 88)  ; set byte at index
-(push buf 33)   ; append byte
-(pop buf)       ; remove and return last byte
-(length buf)    ; byte count
-(empty? buf)    ; empty check
-(append b1 b2)  ; mutate b1 by extending with b2
-(concat b1 b2)  ; return new buffer
+@"hello"        # literal (desugars to (string->buffer "hello"))
+(buffer? x)     # predicate
+(buffer 72 101)  # constructor from bytes
+(string->buffer "hello")  # from string (UTF-8 bytes)
+(buffer->string buf)      # to string (UTF-8)
+(get buf 0)     # byte at index (as integer)
+(put buf 0 88)  # set byte at index
+(push buf 33)   # append byte
+(pop buf)       # remove and return last byte
+(length buf)    # byte count
+(empty? buf)    # empty check
+(append b1 b2)  # mutate b1 by extending with b2
+(concat b1 b2)  # return new buffer
 ```
 
 ---
@@ -247,17 +247,17 @@ Mutable byte sequence. The mutable counterpart of string.
 Singly-linked list built from cons cells. Proper lists terminate with `()`.
 
 ```lisp
-(list 1 2 3)    ; constructor
-'(1 2 3)        ; quoted literal
-(cons 1 (list 2 3)) ; manual construction
-(first l)       ; car
-(rest l)        ; cdr
-(pair? x)       ; predicate (cons cell?)
-(list? x)       ; predicate (cons or empty list?)
-(empty? x)      ; predicate (empty list?)
+(list 1 2 3)    # constructor
+'(1 2 3)        # quoted literal
+(cons 1 (list 2 3)) # manual construction
+(first l)       # car
+(rest l)        # cdr
+(pair? x)       # predicate (cons cell?)
+(list? x)       # predicate (cons or empty list?)
+(empty? x)      # predicate (empty list?)
 ```
 
-Lists are **not** the same as tuples or arrays. Lists are linked; tuples and
+Lists are **not** the same as tuples or arrays. Lists are linked# tuples and
 arrays are contiguous in memory.
 
 ---
@@ -269,9 +269,9 @@ arrays are contiguous in memory.
 Compiled function with captured environment.
 
 ```lisp
-(fn (x) (+ x 1))       ; anonymous
-(defn add1 (x) (+ x 1)) ; named (macro)
-(closure? x)            ; predicate
+(fn (x) (+ x 1))       # anonymous
+(defn add1 (x) (+ x 1)) # named (macro)
+(closure? x)            # predicate
 ```
 
 Closures capture by value. Mutable captures use `LocalCell` (compiler-
@@ -283,7 +283,7 @@ need cell wrapping.
 Rust function registered as a primitive. Not directly constructible from Elle.
 
 ```lisp
-; No literal syntax. Primitives like +, -, cons are native functions.
+# No literal syntax. Primitives like +, -, cons are native functions.
 ```
 
 ---
@@ -296,11 +296,11 @@ Independent execution context with its own stack, call frames, and signal
 mask. See `docs/fibers.md` for the full fiber architecture.
 
 ```lisp
-(fiber/new (fn () body) mask) ; constructor
-(fiber/resume f value)        ; resume
-(fiber/status f)              ; status keyword
-(fiber/value f)               ; last value
-(fiber? x)                    ; predicate
+(fiber/new (fn () body) mask) # constructor
+(fiber/resume f value)        # resume
+(fiber/status f)              # status keyword
+(fiber/value f)               # last value
+(fiber? x)                    # predicate
 ```
 
 #### cell
@@ -312,9 +312,9 @@ Mutable box. Two variants:
   `LoadUpvalue`. Users never see these directly.
 
 ```lisp
-(box 42)        ; create user cell
-(unbox c)       ; read
-(set-box! c 99) ; write
+(box 42)        # create user cell
+(unbox c)       # read
+(set-box! c 99) # write
 ```
 
 ---
@@ -327,8 +327,8 @@ Wraps a syntax tree node with source location and scope information. Used
 during macro expansion for hygiene.
 
 ```lisp
-; Created by quasiquote, quote, and macro expansion.
-; Not typically constructed directly.
+# Created by quasiquote, quote, and macro expansion.
+# Not typically constructed directly.
 ```
 
 #### binding
@@ -361,7 +361,7 @@ Heap-tracked C pointer. Tracks freed state to prevent use-after-free.
 Created by `ffi/malloc`.
 
 ```lisp
-(pointer? x)    ; predicate (matches both raw and managed pointers)
+(pointer? x)    # predicate (matches both raw and managed pointers)
 ```
 
 ---
@@ -371,7 +371,7 @@ Created by `ffi/malloc`.
 | Predicate | Matches |
 |-----------|---------|
 | `nil?` | nil only |
-| `boolean?` | `#t` or `#f` |
+| `boolean?` | `true` or `false` |
 | `number?` | integer or float |
 | `symbol?` | symbol |
 | `keyword?` | keyword |
@@ -421,7 +421,7 @@ Exactly two values are falsy:
 | Value | Truthy? |
 |-------|---------|
 | `nil` | No |
-| `#f` | No |
+| `false` | No |
 | everything else | Yes |
 
 This includes `()`, `0`, `0.0`, `""`, `[]`, `@[]`. All truthy.

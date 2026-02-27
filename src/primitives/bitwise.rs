@@ -265,7 +265,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Bitwise AND of all arguments",
         params: &["xs"],
         category: "bit",
-        example: "(bit/and 12 10) ;=> 8",
+        example: "(bit/and 12 10) #=> 8",
         aliases: &[],
     },
     PrimitiveDef {
@@ -276,7 +276,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Bitwise OR of all arguments",
         params: &["xs"],
         category: "bit",
-        example: "(bit/or 12 10) ;=> 14",
+        example: "(bit/or 12 10) #=> 14",
         aliases: &[],
     },
     PrimitiveDef {
@@ -287,7 +287,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Bitwise XOR of all arguments",
         params: &["xs"],
         category: "bit",
-        example: "(bit/xor 12 10) ;=> 6",
+        example: "(bit/xor 12 10) #=> 6",
         aliases: &[],
     },
     PrimitiveDef {
@@ -298,7 +298,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Bitwise NOT of argument",
         params: &["x"],
         category: "bit",
-        example: "(bit/not 0) ;=> -1",
+        example: "(bit/not 0) #=> -1",
         aliases: &[],
     },
     PrimitiveDef {
@@ -309,7 +309,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Left shift first argument by second argument (clamped to 0-63).",
         params: &["x", "n"],
         category: "bit",
-        example: "(bit/shl 1 3) ;=> 8",
+        example: "(bit/shl 1 3) #=> 8",
         aliases: &["bit/shift-left"],
     },
     PrimitiveDef {
@@ -320,7 +320,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Arithmetic right shift first argument by second argument (clamped to 0-63).",
         params: &["x", "n"],
         category: "bit",
-        example: "(bit/shr 8 2) ;=> 2",
+        example: "(bit/shr 8 2) #=> 2",
         aliases: &["bit/shift-right"],
     },
 ];

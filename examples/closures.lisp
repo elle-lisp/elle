@@ -1,15 +1,15 @@
-;; Closures, Lambdas, and Recursion in Elle - Comprehensive Guide
-;;
-;; This example demonstrates:
-;; - Lambda expressions and closures
-;; - Variable capture and lexical scope
-;; - Function composition and chaining
-;; - Predicates and boolean functions
-;; - List processing with closures
-;; - Environment preservation
-;; - Nested functions and shadowing
-;; - Recursion patterns (self-recursion, mutual recursion, tail recursion)
-;; - Mutable state with closures
+## Closures, Lambdas, and Recursion in Elle - Comprehensive Guide
+##
+## This example demonstrates:
+## - Lambda expressions and closures
+## - Variable capture and lexical scope
+## - Function composition and chaining
+## - Predicates and boolean functions
+## - List processing with closures
+## - Environment preservation
+## - Nested functions and shadowing
+## - Recursion patterns (self-recursion, mutual recursion, tail recursion)
+## - Mutable state with closures
 
 (import-file "./examples/assertions.lisp")
 
@@ -17,48 +17,48 @@
 (newline)
 (newline)
 
-;; ============================================================================
-;; SECTION 1: BASIC LAMBDA EXPRESSIONS
-;; ============================================================================
+## ============================================================================
+## SECTION 1: BASIC LAMBDA EXPRESSIONS
+## ============================================================================
 
 (display "1. BASIC LAMBDA EXPRESSIONS")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Identity function - returns its argument unchanged
+## Identity function - returns its argument unchanged
 (def identity (fn (x) x))
 (display "Identity function: (identity 42) = ")
 (display (identity 42))
 (newline)
 
-;; Addition function - adds two numbers
+## Addition function - adds two numbers
 (def add (fn (x y) (+ x y)))
 (display "Addition function: (add 5 3) = ")
 (display (add 5 3))
 (newline)
 
-;; Doubling function - multiplies by 2
+## Doubling function - multiplies by 2
 (def double (fn (x) (* x 2)))
 (display "Doubling function: (double 21) = ")
 (display (double 21))
 (newline)
 
-;; Absolute value function
+## Absolute value function
 (def abs-val (fn (x)
   (if (< x 0) (- x) x)))
 (display "Absolute value: (abs-val -15) = ")
 (display (abs-val -15))
 (newline)
 
-;; Maximum of two values
+## Maximum of two values
 (def max-of-two (fn (x y)
   (if (> x y) x y)))
 (display "Maximum of two: (max-of-two 10 25) = ")
 (display (max-of-two 10 25))
 (newline)
 
-;; Section 1 Assertions
+## Section 1 Assertions
 (assert-eq (identity 42) 42 "identity(42) = 42")
 (assert-eq (add 5 3) 8 "add(5, 3) = 8")
 (assert-eq (double 21) 42 "double(21) = 42")
@@ -66,30 +66,30 @@
 (assert-eq (max-of-two 10 25) 25 "max-of-two(10, 25) = 25")
 (newline)
 
-;; ============================================================================
-;; SECTION 2: VARIABLE CAPTURE AND LEXICAL SCOPE
-;; ============================================================================
+## ============================================================================
+## SECTION 2: VARIABLE CAPTURE AND LEXICAL SCOPE
+## ============================================================================
 
 (display "2. VARIABLE CAPTURE AND LEXICAL SCOPE")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Create a closure that captures the outer variable 'base'
+## Create a closure that captures the outer variable 'base'
 (var base 100)
 (def add-to-base (fn (x) (+ base x)))
 (display "Closure capturing 'base' (100): (add-to-base 50) = ")
 (display (add-to-base 50))
 (newline)
 
-;; Multiple variables captured from outer scope
+## Multiple variables captured from outer scope
 (var multiplier 2)
 (def compute (fn (x) (+ base (* multiplier x))))
 (display "Capturing 'base' and 'multiplier': (compute 25) = ")
 (display (compute 25))
 (newline)
 
-;; Captured value changes persist in closure
+## Captured value changes persist in closure
 (var offset 10)
 (def apply-offset (fn (x) (+ offset x)))
 (display "With offset 10: (apply-offset 5) = ")
@@ -97,20 +97,20 @@
 (newline)
 (newline)
 
-;; ============================================================================
-;; SECTION 3: FUNCTION COMPOSITION AND CHAINING
-;; ============================================================================
+## ============================================================================
+## SECTION 3: FUNCTION COMPOSITION AND CHAINING
+## ============================================================================
 
 (display "3. FUNCTION COMPOSITION")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Create specialized functions that work together
+## Create specialized functions that work together
 (def add-one (fn (x) (+ x 1)))
 (def times-two (fn (x) (* x 2)))
 
-;; Apply functions in sequence
+## Apply functions in sequence
 (var x-value 5)
 (display "Starting value: ")
 (display x-value)
@@ -126,23 +126,23 @@
 (display after-times-two)
 (newline)
 
-;; Section 3 Assertions
+## Section 3 Assertions
 (assert-eq (add-one 5) 6 "add-one(5) = 6")
 (assert-eq (times-two 6) 12 "times-two(6) = 12")
 (assert-eq after-add-one 6 "composition: 5 + 1 = 6")
 (assert-eq after-times-two 12 "composition: (5 + 1) * 2 = 12")
 (newline)
 
-;; ============================================================================
-;; SECTION 4: PREDICATES AND BOOLEAN FUNCTIONS
-;; ============================================================================
+## ============================================================================
+## SECTION 4: PREDICATES AND BOOLEAN FUNCTIONS
+## ============================================================================
 
 (display "4. PREDICATES AND BOOLEAN FUNCTIONS")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Create predicates (functions returning boolean)
+## Create predicates (functions returning boolean)
 (def is-positive (fn (x) (> x 0)))
 (def is-negative (fn (x) (< x 0)))
 (def is-zero (fn (x) (= x 0)))
@@ -168,7 +168,7 @@
 (display (is-even 7))
 (newline)
 
-;; Section 4 Assertions
+## Section 4 Assertions
 (assert-eq (is-positive 5) true "is-positive(5) = true")
 (assert-eq (is-negative -3) true "is-negative(-3) = true")
 (assert-eq (is-zero 0) true "is-zero(0) = true")
@@ -176,16 +176,16 @@
 (assert-eq (is-even 7) false "is-even(7) = false")
 (newline)
 
-;; ============================================================================
-;; SECTION 5: LIST PROCESSING WITH CLOSURES
-;; ============================================================================
+## ============================================================================
+## SECTION 5: LIST PROCESSING WITH CLOSURES
+## ============================================================================
 
 (display "5. LIST OPERATIONS WITH CLOSURES")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; List manipulation functions
+## List manipulation functions
 (def list-sum (fn (lst)
   (if (= (length lst) 0)
     0
@@ -196,7 +196,7 @@
 (display (list-sum my-list))
 (newline)
 
-;; List length counter
+## List length counter
 (def list-count (fn (lst)
   (if (= (length lst) 0)
     0
@@ -206,7 +206,7 @@
 (display (list-count my-list))
 (newline)
 
-;; List doubler
+## List doubler
 (def double-all (fn (lst)
   (if (= (length lst) 0)
     (list)
@@ -216,7 +216,7 @@
 (display (double-all (list 1 2 3 4 5)))
 (newline)
 
-;; Find maximum in list
+## Find maximum in list
 (def find-max (fn (lst)
   (if (= (length lst) 1)
     (first lst)
@@ -226,22 +226,22 @@
 (display (find-max (list 3 7 2 9 1 5)))
 (newline)
 
-;; Section 5 Assertions
+## Section 5 Assertions
 (assert-eq (list-sum (list 1 2 3 4 5)) 15 "list-sum([1,2,3,4,5]) = 15")
 (assert-eq (list-count (list 1 2 3 4 5)) 5 "list-count([1,2,3,4,5]) = 5")
 (assert-eq (find-max (list 3 7 2 9 1 5)) 9 "find-max([3,7,2,9,1,5]) = 9")
 (newline)
 
-;; ============================================================================
-;; SECTION 6: ENVIRONMENT PRESERVATION - MULTIPLE CLOSURES
-;; ============================================================================
+## ============================================================================
+## SECTION 6: ENVIRONMENT PRESERVATION - MULTIPLE CLOSURES
+## ============================================================================
 
 (display "6. ENVIRONMENT PRESERVATION")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Each closure has its own captured environment
+## Each closure has its own captured environment
 (var outer-base 42)
 (def closure-1 (fn (x) (+ outer-base x)))
 (def closure-2 (fn (x) (* outer-base x)))
@@ -257,7 +257,7 @@
 (display (closure-2 2))
 (newline)
 
-;; Multiple closures with different captured context
+## Multiple closures with different captured context
 (var threshold-1 50)
 (def above-50 (fn (x) (> x threshold-1)))
 
@@ -272,26 +272,26 @@
 (display (above-100 75))
 (newline)
 
-;; Section 6 Assertions
+## Section 6 Assertions
 (assert-eq (closure-1 8) 50 "closure-1(8) = 50")
 (assert-eq (closure-2 2) 84 "closure-2(2) = 84")
 (assert-eq (above-50 75) true "above-50(75) = true")
 (assert-eq (above-100 75) false "above-100(75) = false")
 (newline)
 
-;; ============================================================================
-;; SECTION 7: NESTED FUNCTIONS AND SCOPE SHADOWING
-;; ============================================================================
+## ============================================================================
+## SECTION 7: NESTED FUNCTIONS AND SCOPE SHADOWING
+## ============================================================================
 
 (display "7. NESTED FUNCTIONS AND SHADOWING")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Outer and inner scopes
+## Outer and inner scopes
 (var outer-x 10)
 
-;; This closure shadows the outer-x with its parameter
+## This closure shadows the outer-x with its parameter
 (def shadow-test (fn (outer-x)
   (+ outer-x 5)))
 
@@ -302,7 +302,7 @@
 (display (shadow-test 20))
 (newline)
 
-;; The original outer-x is unchanged
+## The original outer-x is unchanged
 (def use-outer (fn (y)
   (+ outer-x y)))
 
@@ -310,35 +310,35 @@
 (display (use-outer 15))
 (newline)
 
-;; Section 7 Assertions
+## Section 7 Assertions
 (assert-eq (shadow-test 20) 25 "shadow-test(20) = 25")
 (assert-eq (use-outer 15) 25 "use-outer(15) = 25")
 (newline)
 
-;; ============================================================================
-;; SECTION 8: PARAMETER VS. ENVIRONMENT VARIABLES
-;; ============================================================================
+## ============================================================================
+## SECTION 8: PARAMETER VS. ENVIRONMENT VARIABLES
+## ============================================================================
 
 (display "8. PARAMETER VS. ENVIRONMENT VARIABLES")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Environment variables are accessed from closure scope
+## Environment variables are accessed from closure scope
 (var env-var 30)
 (def uses-env (fn (x) (+ env-var x)))
 (display "Environment variable capture: (uses-env 20) = ")
 (display (uses-env 20))
 (newline)
 
-;; Parameters are local to the function
+## Parameters are local to the function
 (def add-params (fn (a b c)
   (+ a b c)))
 (display "Function parameters: (add-params 10 20 30) = ")
 (display (add-params 10 20 30))
 (newline)
 
-;; Both parameters and environment variables work together
+## Both parameters and environment variables work together
 (var mixed-context 50)
 (def mixed-func (fn (param)
   (+ mixed-context param)))
@@ -346,22 +346,22 @@
 (display (mixed-func 10))
 (newline)
 
-;; Section 8 Assertions
+## Section 8 Assertions
 (assert-eq (uses-env 20) 50 "uses-env(20) = 50")
 (assert-eq (add-params 10 20 30) 60 "add-params(10,20,30) = 60")
 (assert-eq (mixed-func 10) 60 "mixed-func(10) = 60")
 (newline)
 
-;; ============================================================================
-;; SECTION 9: COMPLEX CONDITIONS IN LAMBDAS
-;; ============================================================================
+## ============================================================================
+## SECTION 9: COMPLEX CONDITIONS IN LAMBDAS
+## ============================================================================
 
 (display "9. CONDITIONAL LOGIC IN CLOSURES")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Complex conditional logic
+## Complex conditional logic
 (def classify (fn (n)
   (if (< n 0)
     "negative"
@@ -393,7 +393,7 @@
 (display (classify 200))
 (newline)
 
-;; Section 9 Assertions
+## Section 9 Assertions
 (assert-eq (classify -5) "negative" "classify(-5) = negative")
 (assert-eq (classify 0) "zero" "classify(0) = zero")
 (assert-eq (classify 7) "small" "classify(7) = small")
@@ -401,16 +401,16 @@
 (assert-eq (classify 200) "large" "classify(200) = large")
 (newline)
 
-;; ============================================================================
-;; SECTION 10: REUSABLE FUNCTION PATTERNS
-;; ============================================================================
+## ============================================================================
+## SECTION 10: REUSABLE FUNCTION PATTERNS
+## ============================================================================
 
 (display "10. REUSABLE FUNCTION PATTERNS")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Template pattern - parameterized function behavior
+## Template pattern - parameterized function behavior
 (var threshold 10)
 (def filter-above (fn (lst)
   (if (= (length lst) 0)
@@ -423,7 +423,7 @@
 (display (filter-above (list 5 15 8 20 3 12)))
 (newline)
 
-;; String builder with captured parts
+## String builder with captured parts
 (var greeting-start "Hello")
 (var greeting-end "!")
 (def make-greeting (fn (name)
@@ -437,22 +437,22 @@
 (display (make-greeting "Bob"))
 (newline)
 
-;; Section 10 Assertions
+## Section 10 Assertions
 (assert-eq (make-greeting "Alice") "Hello, Alice!" "make-greeting(Alice) = Hello, Alice!")
 (assert-eq (make-greeting "Bob") "Hello, Bob!" "make-greeting(Bob) = Hello, Bob!")
 (newline)
 
-;; ============================================================================
-;; SECTION 11: LOCAL VARIABLES IN LAMBDA BODIES (PHASE 4)
-;; ============================================================================
+## ============================================================================
+## SECTION 11: LOCAL VARIABLES IN LAMBDA BODIES (PHASE 4)
+## ============================================================================
 
 (display "11. LOCAL VARIABLES IN LAMBDA BODIES (PHASE 4)")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Before Phase 4, define inside fn didn't work properly.
-;; Now local variables are stored as cells in the closure environment.
+## Before Phase 4, define inside fn didn't work properly.
+## Now local variables are stored as cells in the closure environment.
 (var compute
   (fn ()
     (begin
@@ -467,16 +467,16 @@
 (assert-eq result1 30 "Local variables should compute to 30")
 (newline)
 
-;; ============================================================================
-;; SECTION 12: MUTATION WITH set! INSIDE LAMBDAS (PHASE 4)
-;; ============================================================================
+## ============================================================================
+## SECTION 12: MUTATION WITH set! INSIDE LAMBDAS (PHASE 4)
+## ============================================================================
 
 (display "12. MUTATION WITH set! INSIDE LAMBDAS (PHASE 4)")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; set! now works on locally-defined variables inside fn bodies
+## set! now works on locally-defined variables inside fn bodies
 (var mutate-test
   (fn ()
     (begin
@@ -491,16 +491,16 @@
 (assert-eq result2 42 "set! mutation should result in 42")
 (newline)
 
-;; ============================================================================
-;; SECTION 13: NESTED CLOSURE CAPTURE OF LOCAL VARIABLES (PHASE 4)
-;; ============================================================================
+## ============================================================================
+## SECTION 13: NESTED CLOSURE CAPTURE OF LOCAL VARIABLES (PHASE 4)
+## ============================================================================
 
 (display "13. NESTED CLOSURE CAPTURE OF LOCAL VARIABLES (PHASE 4)")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; A locally-defined variable can be captured by a nested fn
+## A locally-defined variable can be captured by a nested fn
 (var make-adder
   (fn (base)
     (begin
@@ -516,17 +516,17 @@
 (assert-eq result3 115 "Nested capture should result in 115")
 (newline)
 
-;; ============================================================================
-;; SECTION 14: SHARED MUTABLE STATE — COUNTER PATTERN (PHASE 4)
-;; ============================================================================
+## ============================================================================
+## SECTION 14: SHARED MUTABLE STATE — COUNTER PATTERN (PHASE 4)
+## ============================================================================
 
 (display "14. SHARED MUTABLE STATE — COUNTER PATTERN (PHASE 4)")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; The classic closure counter pattern: a factory that returns
-;; a closure sharing mutable state via a cell
+## The classic closure counter pattern: a factory that returns
+## a closure sharing mutable state via a cell
 (var make-counter
   (fn ()
     (begin
@@ -553,16 +553,16 @@
 (assert-eq c1-val3 3 "Third counter call should be 3")
 (newline)
 
-;; ============================================================================
-;; SECTION 15: INDEPENDENT COUNTERS (SEPARATE STATE) (PHASE 4)
-;; ============================================================================
+## ============================================================================
+## SECTION 15: INDEPENDENT COUNTERS (SEPARATE STATE) (PHASE 4)
+## ============================================================================
 
 (display "15. INDEPENDENT COUNTERS (SEPARATE STATE) (PHASE 4)")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; Each call to make-counter creates independent state
+## Each call to make-counter creates independent state
 (var c1 (make-counter))
 (var c2 (make-counter))
 
@@ -583,16 +583,16 @@
 (assert-eq c2-a 1 "c2 first call should be 1 (independent)")
 (newline)
 
-;; ============================================================================
-;; SECTION 16: ACCUMULATOR PATTERN (PHASE 4)
-;; ============================================================================
+## ============================================================================
+## SECTION 16: ACCUMULATOR PATTERN (PHASE 4)
+## ============================================================================
 
 (display "16. ACCUMULATOR PATTERN (PHASE 4)")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; An accumulator that adds values to a running total
+## An accumulator that adds values to a running total
 (var make-accumulator
   (fn (initial)
     (begin
@@ -619,17 +619,17 @@
 (assert-eq acc3 135 "Accumulator third call should be 135")
 (newline)
 
-;; ============================================================================
-;; SECTION 17: WHILE LOOP WITH set! (ISSUE #106 FIX) (PHASE 4)
-;; ============================================================================
+## ============================================================================
+## SECTION 17: WHILE LOOP WITH set! (ISSUE #106 FIX) (PHASE 4)
+## ============================================================================
 
 (display "17. WHILE LOOP WITH set! (ISSUE #106 FIX) (PHASE 4)")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; This was the original bug from issue #106:
-;; set! inside a fn body used to fail with "Undefined global variable"
+## This was the original bug from issue #106:
+## set! inside a fn body used to fail with "Undefined global variable"
 (var sum-to-n
   (fn (n)
     (begin
@@ -648,25 +648,25 @@
 (assert-eq sum-result 55 "Sum 1..10 should be 55")
 (newline)
 
-;; ============================================================================
-;; SECTION 18: MULTIPLE CLOSURES SHARING STATE (PHASE 4)
-;; ============================================================================
+## ============================================================================
+## SECTION 18: MULTIPLE CLOSURES SHARING STATE (PHASE 4)
+## ============================================================================
 
 (display "18. MULTIPLE CLOSURES SHARING STATE (PHASE 4)")
 (newline)
 (display "--------------------------------")
 (newline)
 
-;; A pair of closures that share the same mutable cell
-;; (getter and setter pattern)
-;; We return multiple closures from one factory using a list.
+## A pair of closures that share the same mutable cell
+## (getter and setter pattern)
+## We return multiple closures from one factory using a list.
 (var make-box
   (fn (initial)
     (begin
       (var value initial)
       (list
-        (fn () value)                          ;; getter
-        (fn (new-val) (set value new-val))))))  ;; setter
+        (fn () value)                          ## getter
+        (fn (new-val) (set value new-val))))))  ## setter
 
 (var box (make-box 0))
 (var box-get (first box))
@@ -687,9 +687,9 @@
 (assert-eq box-after 42 "Box after set should be 42")
 (newline)
 
-;; ============================================================================
-;; SUMMARY
-;; ============================================================================
+## ============================================================================
+## SUMMARY
+## ============================================================================
 
 (display "=== SUMMARY ===")
 (newline)
@@ -735,23 +735,23 @@
 (display "=== All Examples Complete - All Assertions Passed ===")
 (newline)
 
-; ============================================================================
-; SECTION 19: RECURSION PATTERNS
-; ============================================================================
+# ============================================================================
+# SECTION 19: RECURSION PATTERNS
+# ============================================================================
 
 (display "\n=== RECURSION PATTERNS ===")
 (newline)
 (newline)
 
-; ============================================================================
-; Part 1: Self-Recursion - Fibonacci
-; ============================================================================
+# ============================================================================
+# Part 1: Self-Recursion - Fibonacci
+# ============================================================================
 
 (display "Part 1: Self-Recursion - Fibonacci")
 (newline)
 (newline)
 
-;; Define a recursive Fibonacci function
+## Define a recursive Fibonacci function
 (def fib (fn (n)
   (if (= n 0)
     0
@@ -759,7 +759,7 @@
       1
       (+ (fib (- n 1)) (fib (- n 2)))))))
 
-;; Display computed Fibonacci numbers
+## Display computed Fibonacci numbers
 (display "Fibonacci Sequence (Computed):")
 (newline)
 
@@ -791,7 +791,7 @@
 (display (fib 10))
 (newline)
 
-;; Verify basic Fibonacci values
+## Verify basic Fibonacci values
 (assert-eq (fib 0) 0 "fib(0) = 0")
 (assert-eq (fib 1) 1 "fib(1) = 1")
 (assert-eq (fib 2) 1 "fib(2) = 1")
@@ -802,7 +802,7 @@
 
 (newline)
 
-;; More efficient Fibonacci using accumulator/tail-recursion pattern
+## More efficient Fibonacci using accumulator/tail-recursion pattern
 (display "Self-Recursion with Accumulator (Tail-Recursive):")
 (newline)
 (newline)
@@ -826,7 +826,7 @@
 (display (fib-acc 20))
 (newline)
 
-;; Verify accumulator-based Fibonacci
+## Verify accumulator-based Fibonacci
 (assert-eq (fib-acc 0) 0 "fib-acc(0) = 0")
 (assert-eq (fib-acc 5) 5 "fib-acc(5) = 5")
 (assert-eq (fib-acc 10) 55 "fib-acc(10) = 55")
@@ -835,7 +835,7 @@
 
 (newline)
 
-;; Factorial - another self-recursive example
+## Factorial - another self-recursive example
 (display "Self-Recursion - Factorial:")
 (newline)
 (newline)
@@ -855,9 +855,9 @@
 
 (newline)
 
-; ============================================================================
-; Part 2: Mutual Recursion
-; ============================================================================
+# ============================================================================
+# Part 2: Mutual Recursion
+# ============================================================================
 
 (display "Part 2: Mutual Recursion - Even/Odd Predicates")
 (newline)
@@ -896,7 +896,7 @@
 (display (is-odd 8))
 (newline)
 
-;; Verify mutual recursion
+## Verify mutual recursion
 (assert-eq (is-even 0) true "is-even(0) = #t")
 (assert-eq (is-even 4) true "is-even(4) = #t")
 (assert-eq (is-even 7) false "is-even(7) = #f")
@@ -906,9 +906,9 @@
 
 (newline)
 
-; ============================================================================
-; Part 3: Recursion with Nested Definitions
-; ============================================================================
+# ============================================================================
+# Part 3: Recursion with Nested Definitions
+# ============================================================================
 
 (display "Part 3: Recursion with Nested Definitions")
 (newline)
@@ -923,15 +923,15 @@
 (display (run-factorial 6))
 (newline)
 
-;; Verify nested recursion
+## Verify nested recursion
 (assert-eq (run-factorial 6) 720 "Factorial of 6 should be 720")
 (assert-eq (run-factorial 5) 120 "Factorial of 5 should be 120")
 (assert-eq (run-factorial 0) 1 "Factorial of 0 should be 1")
 
 (newline)
 
-;; Mutual recursion with nested definitions requires letrec
-;; (var does not support forward references)
+## Mutual recursion with nested definitions requires letrec
+## (var does not support forward references)
 (def run-even-odd (fn ()
   (letrec ((is-even-local (fn (n) (if (= n 0) true (is-odd-local (- n 1)))))
            (is-odd-local (fn (n) (if (= n 0) false (is-even-local (- n 1))))))
@@ -941,14 +941,14 @@
 (display (run-even-odd))
 (newline)
 
-;; Verify nested mutual recursion with letrec
+## Verify nested mutual recursion with letrec
 (assert-eq (run-even-odd) true "8 should be even")
 
 (newline)
 
-; ============================================================================
-; Part 4: Countdown with Two Functions
-; ============================================================================
+# ============================================================================
+# Part 4: Countdown with Two Functions
+# ============================================================================
 
 (display "Part 4: Countdown with Two Functions")
 (newline)
@@ -978,9 +978,9 @@
 (newline)
 (newline)
 
-; ============================================================================
-; Part 5: String Processing with Mutual Recursion
-; ============================================================================
+# ============================================================================
+# Part 5: String Processing with Mutual Recursion
+# ============================================================================
 
 (display "Part 5: String Processing with Mutual Recursion")
 (newline)
@@ -1004,9 +1004,9 @@
 (newline)
 (newline)
 
-; ============================================================================
-; Part 6: Factorial with Helper - Mutual Style
-; ============================================================================
+# ============================================================================
+# Part 6: Factorial with Helper - Mutual Style
+# ============================================================================
 
 (display "Part 6: Factorial with Helper Function")
 (newline)
@@ -1030,15 +1030,15 @@
 (display (factorial-mutual 7))
 (newline)
 
-;; Verify factorial with helper
+## Verify factorial with helper
 (assert-eq (factorial-mutual 5) 120 "factorial-mutual(5) = 120")
 (assert-eq (factorial-mutual 7) 5040 "factorial-mutual(7) = 5040")
 
 (newline)
 
-; ============================================================================
-; Part 7: Three-Way Mutual Recursion
-; ============================================================================
+# ============================================================================
+# Part 7: Three-Way Mutual Recursion
+# ============================================================================
 
 (display "Part 7: Three-Way Mutual Recursion")
 (newline)
@@ -1066,8 +1066,8 @@
 (display (func-a 5))
 (newline)
 
-;; Verify three-way recursion
-;; func-a(5) -> func-b(4) -> func-c(3) -> func-a(2) -> func-b(1) -> func-c(0) = "C-done"
+## Verify three-way recursion
+## func-a(5) -> func-b(4) -> func-c(3) -> func-a(2) -> func-b(1) -> func-c(0) = "C-done"
 (assert-eq (func-a 5) "C-done" "func-a(5) = C-done")
 (assert-eq (func-b 4) "C-done" "func-b(4) = C-done")
 (assert-eq (func-c 3) "C-done" "func-c(3) = C-done")
@@ -1077,9 +1077,9 @@
 
 (newline)
 
-; ============================================================================
-; Part 8: Filtering with Mutual Recursion
-; ============================================================================
+# ============================================================================
+# Part 8: Filtering with Mutual Recursion
+# ============================================================================
 
 (display "Part 8: Filtering with Mutual Recursion")
 (newline)
@@ -1107,15 +1107,15 @@
 (display (first (rest separated)))
 (newline)
 
-;; Verify filtering
+## Verify filtering
 (assert-list-eq (first separated) (list 2 4 6) "Evens should be (2 4 6)")
 (assert-list-eq (first (rest separated)) (list 1 3 5) "Odds should be (1 3 5)")
 
 (newline)
 
-; ============================================================================
-; Part 9: Alternating Pattern with Limited Depth
-; ============================================================================
+# ============================================================================
+# Part 9: Alternating Pattern with Limited Depth
+# ============================================================================
 
 (display "Part 9: Alternating Pattern")
 (newline)
@@ -1141,7 +1141,7 @@
 (display (step-y 4))
 (newline)
 
-;; Verify alternating pattern
+## Verify alternating pattern
 (assert-eq (step-x 3) "Y" "step-x(3) = Y")
 (assert-eq (step-y 4) "Y" "step-y(4) = Y")
 (assert-eq (step-x 0) "X" "step-x(0) = X")

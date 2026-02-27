@@ -1,13 +1,13 @@
-; Scope and Binding in Elle
-;
-; This example demonstrates:
-; - Global scope and variable binding
-; - Local scope with let
-; - Function scope and parameters
-; - Shadowing and scope resolution
-; - Closure scope and variable capture
-; - Dynamic scope patterns
-; - Assertions verifying scope behavior
+# Scope and Binding in Elle
+#
+# This example demonstrates:
+# - Global scope and variable binding
+# - Local scope with let
+# - Function scope and parameters
+# - Shadowing and scope resolution
+# - Closure scope and variable capture
+# - Dynamic scope patterns
+# - Assertions verifying scope behavior
 
 (import-file "./examples/assertions.lisp")
 
@@ -15,17 +15,17 @@
 (newline)
 (newline)
 
-; ============================================================================
-; PART 0: The begin Form - Sequencing (No Scope)
-; ============================================================================
+# ============================================================================
+# PART 0: The begin Form - Sequencing (No Scope)
+# ============================================================================
 
 (display "PART 0: The begin Form - Sequencing (No Scope)")
 (newline)
 (newline)
 
-; begin sequences multiple expressions and returns the last value.
-; It does NOT create a new scope—bindings defined inside begin
-; go into the enclosing scope.
+# begin sequences multiple expressions and returns the last value.
+# It does NOT create a new scope—bindings defined inside begin
+# go into the enclosing scope.
 
 (display "Simple begin sequencing:")
 (var result (begin
@@ -36,43 +36,43 @@
 (newline)
 (assert-eq result 30 "begin sequences and returns last value")
 
-; Variables defined in begin DO leak into enclosing scope
+# Variables defined in begin DO leak into enclosing scope
 (display "Variables leak from begin into enclosing scope:")
 (display "x = ")
-(display x)  ; x is accessible here because begin doesn't create scope
+(display x)  # x is accessible here because begin doesn't create scope
 (newline)
 (assert-eq x 10 "x is accessible after begin")
 
 (newline)
 
-; ============================================================================
-; PART 0.5: The block Form - Scoped Sequencing
-; ============================================================================
+# ============================================================================
+# PART 0.5: The block Form - Scoped Sequencing
+# ============================================================================
 
 (display "PART 0.5: The block Form - Scoped Sequencing")
 (newline)
 (newline)
 
-; block sequences expressions within a NEW lexical scope.
-; Bindings defined inside block do NOT leak out.
-; You can optionally name a block and use break to exit early.
+# block sequences expressions within a NEW lexical scope.
+# Bindings defined inside block do NOT leak out.
+# You can optionally name a block and use break to exit early.
 
 (display "Simple block with scope isolation:")
 (var outer-x 100)
 (block
-  (var inner-x 50)  ; Local to block
+  (var inner-x 50)  # Local to block
   (display "inner-x = ")
   (display inner-x)
   (newline)
   (assert-eq inner-x 50 "inner-x is 50 inside block"))
 
-; inner-x is NOT accessible here
+# inner-x is NOT accessible here
 (display "outer-x = ")
 (display outer-x)
 (newline)
 (assert-eq outer-x 100 "outer-x is still 100 outside block")
 
-; Named block with break
+# Named block with break
 (display "Named block with break:")
 (var break-result (block :search
   (var x 10)
@@ -85,15 +85,15 @@
 
 (newline)
 
-; ============================================================================
-; PART 1: BINDING FORMS - Basic let Binding
-; ============================================================================
+# ============================================================================
+# PART 1: BINDING FORMS - Basic let Binding
+# ============================================================================
 
 (display "PART 1: BINDING FORMS - Basic let Binding")
 (newline)
 (newline)
 
-;; Example 1: Simple let binding
+## Example 1: Simple let binding
 (display "Example 1: Simple let binding")
 (newline)
 (display "---")
@@ -107,7 +107,7 @@
 
 (newline)
 
-;; Example 2: Multiple independent bindings
+## Example 2: Multiple independent bindings
 (display "Example 2: Multiple independent bindings")
 (newline)
 (display "---")
@@ -121,7 +121,7 @@
 
 (newline)
 
-;; Example 3: let with expressions
+## Example 3: let with expressions
 (display "Example 3: let with expressions")
 (newline)
 (display "---")
@@ -135,15 +135,15 @@
 
 (newline)
 
-; ============================================================================
-; PART 2: let* (Sequential Binding)
-; ============================================================================
+# ============================================================================
+# PART 2: let* (Sequential Binding)
+# ============================================================================
 
 (display "PART 2: let* (Sequential Binding)")
 (newline)
 (newline)
 
-;; Example 1: Simple sequential binding
+## Example 1: Simple sequential binding
 (display "Example 1: Simple sequential binding")
 (newline)
 (display "---")
@@ -157,7 +157,7 @@
 
 (newline)
 
-;; Example 2: Sequential binding with dependencies
+## Example 2: Sequential binding with dependencies
 (display "Example 2: Sequential binding with dependencies")
 (newline)
 (display "---")
@@ -175,7 +175,7 @@
 
 (newline)
 
-;; Example 3: Multiple sequential bindings
+## Example 3: Multiple sequential bindings
 (display "Example 3: Multiple sequential bindings")
 (newline)
 (display "---")
@@ -197,15 +197,15 @@
 
 (newline)
 
-; ============================================================================
-; PART 3: Function Parameters (Binding)
-; ============================================================================
+# ============================================================================
+# PART 3: Function Parameters (Binding)
+# ============================================================================
 
 (display "PART 3: Function Parameters (Binding)")
 (newline)
 (newline)
 
-;; Example 1: Simple function parameters
+## Example 1: Simple function parameters
 (display "Example 1: Simple function parameters")
 (newline)
 (display "---")
@@ -221,7 +221,7 @@
 
 (newline)
 
-;; Example 2: Function with multiple parameters
+## Example 2: Function with multiple parameters
 (display "Example 2: Function with multiple parameters")
 (newline)
 (display "---")
@@ -237,15 +237,15 @@
 
 (newline)
 
-; ============================================================================
-; PART 4: SCOPE - Global Scope
-; ============================================================================
+# ============================================================================
+# PART 4: SCOPE - Global Scope
+# ============================================================================
 
-;; Global variables are defined at the top level
+## Global variables are defined at the top level
 (var global-x 100)
 (var global-y 200)
 
-;; They can be accessed anywhere
+## They can be accessed anywhere
 (display "PART 4: SCOPE - Global Scope")
 (newline)
 (newline)
@@ -257,11 +257,11 @@
 
 (newline)
 
-; ============================================================================
-; PART 5: Function Scope (Local Variables)
-; ============================================================================
+# ============================================================================
+# PART 5: Function Scope (Local Variables)
+# ============================================================================
 
-;; Parameters are local to the function
+## Parameters are local to the function
 (def add-numbers (fn (x y)
   (+ x y)))
 
@@ -275,7 +275,7 @@
 (newline)
 (assert-eq add-result 7 "3 + 4 should be 7")
 
-;; Parameters shadow outer variables
+## Parameters shadow outer variables
 (var x 1000)
 (def shadowing-function (fn (x)
   (+ x 1)))
@@ -292,15 +292,15 @@
 
 (newline)
 
-; ============================================================================
-; PART 6: Lexical Scoping
-; ============================================================================
+# ============================================================================
+# PART 6: Lexical Scoping
+# ============================================================================
 
 (display "PART 6: Lexical Scoping")
 (newline)
 (newline)
 
-;; Example 1: Scope isolation
+## Example 1: Scope isolation
 (display "Example 1: Scope isolation")
 (newline)
 (display "---")
@@ -325,7 +325,7 @@
 
 (newline)
 
-;; Example 2: Nested scopes
+## Example 2: Nested scopes
 (display "Example 2: Nested scopes")
 (newline)
 (display "---")
@@ -347,7 +347,7 @@
 
 (newline)
 
-;; Example 3: Closure captures lexical scope
+## Example 3: Closure captures lexical scope
 (display "Example 3: Closure captures lexical scope")
 (newline)
 (display "---")
@@ -371,15 +371,15 @@
 
 (newline)
 
-; ============================================================================
-; PART 7: Shadowing Rules
-; ============================================================================
+# ============================================================================
+# PART 7: Shadowing Rules
+# ============================================================================
 
 (display "PART 7: Shadowing Rules")
 (newline)
 (newline)
 
-;; Example 1: let creates new binding
+## Example 1: let creates new binding
 (display "Example 1: let creates new binding")
 (newline)
 (display "---")
@@ -393,7 +393,7 @@
 
 (newline)
 
-;; Example 2: let* sequential shadowing
+## Example 2: let* sequential shadowing
 (display "Example 2: let* sequential shadowing")
 (newline)
 (display "---")
@@ -407,7 +407,7 @@
 
 (newline)
 
-;; Example 3: Function parameter shadowing
+## Example 3: Function parameter shadowing
 (display "Example 3: Function parameter shadowing")
 (newline)
 (display "---")
@@ -427,11 +427,11 @@
 
 (newline)
 
-; ============================================================================
-; PART 8: Let-binding Shadowing
-; ============================================================================
+# ============================================================================
+# PART 8: Let-binding Shadowing
+# ============================================================================
 
-;; Let-bindings can shadow outer variables
+## Let-bindings can shadow outer variables
 (var x 100)
 
 (display "PART 8: Let-binding Shadowing")
@@ -448,16 +448,16 @@
 (display "Outside let - x is back to: ")
 (display x)
 (newline)
-;; Note: Elle's let creates a new lexical binding, outer scope unchanged
+## Note: Elle's let creates a new lexical binding, outer scope unchanged
 (assert-eq x 100 "x outside let unchanged - let creates shadow binding")
 
 (newline)
 
-; ============================================================================
-; PART 9: Loop Variable Scoping
-; ============================================================================
+# ============================================================================
+# PART 9: Loop Variable Scoping
+# ============================================================================
 
-;; While loops have their own scope
+## While loops have their own scope
 (display "PART 9: Loop Variable Scoping")
 (newline)
 (newline)
@@ -478,7 +478,7 @@
 (newline)
 (assert-eq counter 3 "Counter after loop should be 3")
 
-;; Each loops iterate with proper variable scoping
+## Each loops iterate with proper variable scoping
 (display "Each loop scoping example:")
 (newline)
 
@@ -488,15 +488,15 @@
     (display item)
     (newline)))
 
-;; 'item' is scoped to the loop - not accessible here
+## 'item' is scoped to the loop - not accessible here
 
 (newline)
 
-; ============================================================================
-; PART 10: Closures and Captured Variables
-; ============================================================================
+# ============================================================================
+# PART 10: Closures and Captured Variables
+# ============================================================================
 
-;; Closures can capture variables from their defining scope
+## Closures can capture variables from their defining scope
 (def make-counter (fn (start)
   (fn ()
     (set start (+ start 1))
@@ -519,7 +519,7 @@
 (newline)
 (assert-eq c1-second 12 "Counter1 second call should be 12")
 
-;; Different closure instance has its own captured value
+## Different closure instance has its own captured value
 (var counter2 (make-counter 100))
 (display "Counter2 call 1: ")
 (var c2-first (counter2))
@@ -529,11 +529,11 @@
 
 (newline)
 
-; ============================================================================
-; PART 11: Nested Functions and Scope Chain
-; ============================================================================
+# ============================================================================
+# PART 11: Nested Functions and Scope Chain
+# ============================================================================
 
-;; Inner functions can access outer function's variables
+## Inner functions can access outer function's variables
 (var outer-var 42)
 
 (display "PART 11: Nested Functions and Scope Chain")
@@ -550,26 +550,26 @@
 (display nested-result)
 (newline)
 (assert-eq nested-result 57 "Nested function should compute to 57")
-;; x=5, y=10, outer-var=42 -> 5 + 10 + 42 = 57
+## x=5, y=10, outer-var=42 -> 5 + 10 + 42 = 57
 
 (newline)
 
-; ============================================================================
-; PART 12: Loop Variable Isolation
-; ============================================================================
+# ============================================================================
+# PART 12: Loop Variable Isolation
+# ============================================================================
 
 (begin
   (display "PART 12: Loop Variable Isolation")
   (newline)
   
-  ;; Global variable
+  ## Global variable
   (var counter 0)
   (display "Before loop: counter = ")
   (display counter)
   (newline)
   (assert-eq counter 0 "Counter should start at 0")
   
-  ;; While loop with local variable
+  ## While loop with local variable
   (while (< counter 3)
     (begin
       (display "In loop: counter = ")
@@ -583,15 +583,15 @@
   (assert-eq counter 3 "Counter should be 3 after loop")
   (newline))
 
-; ============================================================================
-; PART 13: Nested Loops with Proper Scoping
-; ============================================================================
+# ============================================================================
+# PART 13: Nested Loops with Proper Scoping
+# ============================================================================
 
 (begin
   (display "PART 13: Nested Loops with Proper Scoping")
   (newline)
   
-  ;; Outer loop
+  ## Outer loop
   (var i 0)
   (while (< i 2)
     (begin
@@ -599,7 +599,7 @@
       (display i)
       (newline)
       
-      ;; Inner loop with separate variable
+      ## Inner loop with separate variable
       (var j 0)
       (while (< j 2)
         (begin
@@ -619,9 +619,9 @@
   (assert-eq i 2 "i should be 2 after nested loops")
   (newline))
 
-; ============================================================================
-; PART 14: For Loop Variable Isolation
-; ============================================================================
+# ============================================================================
+# PART 14: For Loop Variable Isolation
+# ============================================================================
 
 (begin
   (display "PART 14: Each Loop Variable Isolation")
@@ -634,16 +634,16 @@
       (display " ")))
   (newline)
   
-  ;; 'item' is not accessible here - it's scoped to the loop
+  ## 'item' is not accessible here - it's scoped to the loop
   (display "After loop, 'item' is only defined in loop scope")
   (newline)
-  ;; Verify the each loop executed 3 times
+  ## Verify the each loop executed 3 times
   (assert-eq (length (list "apple" "banana" "cherry")) 3 "List should have 3 items")
   (newline))
 
-; ============================================================================
-; PART 15: Define in Loop Body (GCD Algorithm)
-; ============================================================================
+# ============================================================================
+# PART 15: Define in Loop Body (GCD Algorithm)
+# ============================================================================
 
 (begin
   (display "PART 15: Define in Loop Body (GCD Algorithm)")
@@ -657,7 +657,7 @@
   
   (while (> b 0)
     (begin
-      ;; Define temporary variable in loop body
+      ## Define temporary variable in loop body
       (var temp (% a b))
       (display "  a=")
       (display a)
@@ -676,9 +676,9 @@
   (assert-eq a 6 "GCD of 48 and 18 should be 6")
   (newline))
 
-; ============================================================================
-; PART 16: Variable Shadowing in Loops
-; ============================================================================
+# ============================================================================
+# PART 16: Variable Shadowing in Loops
+# ============================================================================
 
 (begin
   (display "PART 16: Variable Shadowing in Loops")
@@ -690,11 +690,11 @@
   (newline)
   (assert-eq x 100 "Global x should be 100")
   
-  ;; Loop creates a scope where x can be "shadowed" 
-  ;; (though we don't create new x, we modify existing one)
+  ## Loop creates a scope where x can be "shadowed" 
+  ## (though we don't create new x, we modify existing one)
   (each n (list 1 2 3)
     (begin
-      ;; Here x refers to the global x
+      ## Here x refers to the global x
       (display "In loop, global x = ")
       (display x)
       (newline)))
@@ -705,18 +705,18 @@
   (assert-eq x 100 "Global x should still be 100 after loop")
   (newline))
 
-; ============================================================================
-; PART 17: Scope Hierarchy
-; ============================================================================
+# ============================================================================
+# PART 17: Scope Hierarchy
+# ============================================================================
 
 (begin
   (display "PART 17: Scope Hierarchy")
   (newline)
   
-  ;; Global variables
+  ## Global variables
   (var global_var 1000)
   
-  ;; We can access global variables inside loops
+  ## We can access global variables inside loops
   (each item (list "a" "b")
     (begin
       (display "Item: ")
@@ -725,28 +725,28 @@
       (display global_var)
       (newline)))
   
-  ;; Variables defined in loops are local to those loops
-  ;; This is now properly enforced
+  ## Variables defined in loops are local to those loops
+  ## This is now properly enforced
   (display "Loop scope properly isolated")
   (newline)
   (assert-eq global_var 1000 "Global variable should be 1000")
   (newline))
 
-; ============================================================================
-; PART 18: Best Practices
-; ============================================================================
+# ============================================================================
+# PART 18: Best Practices
+# ============================================================================
 
 (display "PART 18: Best Practices")
 (newline)
 (newline)
 
-;; 1. Use global variables sparingly
-;; 2. Use let-bindings for temporary local variables
-;; 3. Use function parameters for values that change behavior
-;; 4. Be aware of variable shadowing - it can be confusing!
-;; 5. Use descriptive variable names to avoid confusion
+## 1. Use global variables sparingly
+## 2. Use let-bindings for temporary local variables
+## 3. Use function parameters for values that change behavior
+## 4. Be aware of variable shadowing - it can be confusing!
+## 5. Use descriptive variable names to avoid confusion
 
-;; Example: Good practice - using let for intermediate values
+## Example: Good practice - using let for intermediate values
 (let ((temp-result (* 5 6))
       (temp-sum (+ 10 20)))
   (display "Good practice result: ")
@@ -757,42 +757,42 @@
 
 (newline)
 
-; ============================================================================
-; PART 19: Common Scoping Mistakes
-; ============================================================================
+# ============================================================================
+# PART 19: Common Scoping Mistakes
+# ============================================================================
 
 (display "PART 19: Common Scoping Mistakes")
 (newline)
 (newline)
 
-;; MISTAKE 1: Assuming loop variables persist (they don't in proper scoping)
-;; (each i (list 1 2 3) (print i))
-;; (print i)  ; ERROR: i is not defined outside the loop
+## MISTAKE 1: Assuming loop variables persist (they don't in proper scoping)
+## (each i (list 1 2 3) (print i))
+## (print i)  # ERROR: i is not defined outside the loop
 
-;; MISTAKE 2: Modifying global instead of local
+## MISTAKE 2: Modifying global instead of local
 (var count 0)
 
 (fn ()
-  (set count (+ count 1))  ; Modifies global!
+  (set count (+ count 1))  # Modifies global!
   count)
 
-;; To fix, use a parameter:
+## To fix, use a parameter:
 (fn (count)
   (+ count 1))
 
-;; MISTAKE 3: Expecting sequential binding in let (use let* instead)
-;; This would fail:
-;; (let ((x 5)
-;;       (y (+ x 1)))  ; ERROR: x not bound yet in let
-;;   (+ x y))
+## MISTAKE 3: Expecting sequential binding in let (use let* instead)
+## This would fail:
+## (let ((x 5)
+##       (y (+ x 1)))  # ERROR: x not bound yet in let
+##   (+ x y))
 
 (display "Common mistakes documented")
 (newline)
 (newline)
 
-; ============================================================================
-; END OF SCOPE AND BINDING EXPLANATION
-; ============================================================================
+# ============================================================================
+# END OF SCOPE AND BINDING EXPLANATION
+# ============================================================================
 
 (display "=== All Scope and Binding Examples Complete - All Assertions Passed ===")
 (newline)

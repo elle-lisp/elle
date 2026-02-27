@@ -72,7 +72,8 @@ impl fmt::Display for SyntaxKind {
             SyntaxKind::Quote(inner) => write!(f, "'{}", inner),
             SyntaxKind::Quasiquote(inner) => write!(f, "`{}", inner),
             SyntaxKind::Unquote(inner) => write!(f, ",{}", inner),
-            SyntaxKind::UnquoteSplicing(inner) => write!(f, ",@{}", inner),
+            SyntaxKind::UnquoteSplicing(inner) => write!(f, ",;{}", inner),
+            SyntaxKind::Splice(inner) => write!(f, ";{}", inner),
             SyntaxKind::SyntaxLiteral(v) => write!(f, "#<syntax-literal:{:?}>", v),
         }
     }

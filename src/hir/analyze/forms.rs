@@ -1,6 +1,7 @@
 //! Core form analysis: analyze_expr and control flow forms
 
 use super::*;
+use crate::hir::expr::CallArg;
 use crate::syntax::{Syntax, SyntaxKind};
 
 impl<'a> Analyzer<'a> {
@@ -34,11 +35,11 @@ impl<'a> Analyzer<'a> {
                 let mut args = Vec::new();
                 let mut effect = Effect::none();
                 for item in items {
-                    let hir = self.analyze_expr(item)?;
+                    let (inner, spliced) = Self::unwrap_splice(item);
+                    let hir = self.analyze_expr(inner)?;
                     effect = effect.combine(hir.effect);
-                    args.push(hir);
+                    args.push(CallArg { expr: hir, spliced });
                 }
-                // Look up the 'tuple' primitive and call it with the elements
                 let sym = self.symbols.intern("tuple");
                 let binding = Binding::new(sym, BindingScope::Global);
                 let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
@@ -58,11 +59,11 @@ impl<'a> Analyzer<'a> {
                 let mut args = Vec::new();
                 let mut effect = Effect::none();
                 for item in items {
-                    let hir = self.analyze_expr(item)?;
+                    let (inner, spliced) = Self::unwrap_splice(item);
+                    let hir = self.analyze_expr(inner)?;
                     effect = effect.combine(hir.effect);
-                    args.push(hir);
+                    args.push(CallArg { expr: hir, spliced });
                 }
-                // Look up the 'array' primitive and call it with the elements
                 let sym = self.symbols.intern("array");
                 let binding = Binding::new(sym, BindingScope::Global);
                 let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
@@ -82,9 +83,20 @@ impl<'a> Analyzer<'a> {
                 let mut args = Vec::new();
                 let mut effect = Effect::none();
                 for item in items {
+                    if matches!(&item.kind, SyntaxKind::Splice(_))
+                        || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
+                    {
+                        return Err(format!(
+                            "{}: splice is not supported in struct constructors (key-value types require key-value pairs)",
+                            item.span
+                        ));
+                    }
                     let hir = self.analyze_expr(item)?;
                     effect = effect.combine(hir.effect);
-                    args.push(hir);
+                    args.push(CallArg {
+                        expr: hir,
+                        spliced: false,
+                    });
                 }
                 let sym = self.symbols.intern("struct");
                 let binding = Binding::new(sym, BindingScope::Global);
@@ -105,9 +117,20 @@ impl<'a> Analyzer<'a> {
                 let mut args = Vec::new();
                 let mut effect = Effect::none();
                 for item in items {
+                    if matches!(&item.kind, SyntaxKind::Splice(_))
+                        || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
+                    {
+                        return Err(format!(
+                            "{}: splice is not supported in table constructors (key-value types require key-value pairs)",
+                            item.span
+                        ));
+                    }
                     let hir = self.analyze_expr(item)?;
                     effect = effect.combine(hir.effect);
-                    args.push(hir);
+                    args.push(CallArg {
+                        expr: hir,
+                        spliced: false,
+                    });
                 }
                 let sym = self.symbols.intern("table");
                 let binding = Binding::new(sym, BindingScope::Global);
@@ -139,6 +162,12 @@ impl<'a> Analyzer<'a> {
                     span
                 ))
             }
+
+            // Splice outside of call/constructor position is an error
+            SyntaxKind::Splice(_) => Err(format!(
+                "{}: splice can only be used in function call arguments and data constructors",
+                span
+            )),
 
             // List - could be special form or function call
             SyntaxKind::List(items) => {
@@ -190,6 +219,12 @@ impl<'a> Analyzer<'a> {
                                 };
                                 return self.analyze_call(&rewritten, span);
                             }
+                        }
+                        "splice" => {
+                            return Err(format!(
+                                "{}: splice can only be used in function call arguments and data constructors",
+                                span
+                            ));
                         }
                         _ => {}
                     }

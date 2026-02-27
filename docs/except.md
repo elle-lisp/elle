@@ -58,7 +58,7 @@ Instruction handlers (Add, Sub, Car, Cdr, etc.) set `fiber.signal` directly:
 
 ```rust
 self.fiber.signal = Some((SIG_ERROR, error_val("type-error", msg)));
-self.fiber.stack.push(Value::NIL); // keep stack consistent
+self.fiber.stack.push(Value::NIL)# // keep stack consistent
 ```
 
 The dispatch loop checks `fiber.signal` after each instruction and returns
@@ -85,13 +85,13 @@ Error handling is fiber signal handling. The pattern:
    - `SIG_ERROR` (1): child errored, read `fiber/value` for the error tuple
 
 ```lisp
-;; Manual error handling (try macro will sugar this)
-(let ((f (fiber/new (fn () (/ 1 0)) 1)))  ; mask = SIG_ERROR
+;# Manual error handling (try macro will sugar this)
+(let ((f (fiber/new (fn () (/ 1 0)) 1)))  # mask = SIG_ERROR
   (fiber/resume f nil)
   (if (= (fiber/status f) :dead)
-    (fiber/value f)                        ; normal result
+    (fiber/value f)                        # normal result
     (begin
-      (println "caught:" (fiber/value f))  ; error tuple
+      (println "caught:" (fiber/value f))  # error tuple
       :recovered)))
 ```
 
@@ -105,8 +105,8 @@ it with a recovery value:
            (let ((x (fiber/signal 1 [:need-value "provide a default"])))
              (* x 2)))
          1)))
-  (fiber/resume f nil)          ; child signals, suspends
-  (fiber/resume f 21))          ; resume with recovery value → 42
+  (fiber/resume f nil)          # child signals, suspends
+  (fiber/resume f 21))          # resume with recovery value → 42
 ```
 
 The resume value is pushed onto the child's operand stack. Execution
@@ -153,7 +153,7 @@ transitioning it to `Error` status.
   (catch e
     (handle-error e)))
 
-;; Expands to approximately:
+;# Expands to approximately:
 (let ((f (fiber/new (fn () (risky-operation)) 1)))
   (fiber/resume f nil)
   (if (= (fiber/status f) :error)

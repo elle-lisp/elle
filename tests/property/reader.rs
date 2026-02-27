@@ -151,18 +151,6 @@ proptest! {
     }
 
     #[test]
-    fn bool_legacy_roundtrip(b in prop::bool::ANY) {
-        let source = if b { "#t" } else { "#f" };
-        let parsed = read_syntax(source).unwrap();
-        // Display now emits "true"/"false"
-        let displayed = format!("{}", parsed);
-        let expected_display = if b { "true" } else { "false" };
-        prop_assert_eq!(&displayed, expected_display);
-        let reparsed = read_syntax(&displayed).unwrap();
-        prop_assert!(syntax_eq(&parsed, &reparsed));
-    }
-
-    #[test]
     fn string_roundtrip(s in "[a-zA-Z0-9 ]{0,30}") {
         let source = format!("\"{}\"", s);
         let parsed = read_syntax(&source).unwrap();

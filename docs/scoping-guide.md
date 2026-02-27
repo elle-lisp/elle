@@ -14,9 +14,9 @@ Variables defined at the top level are global and accessible everywhere.
 (var global-x 100)
 
 (var my-function (lambda ()
-  (display global-x)))  ; Can access global-x
+  (display global-x)))  # Can access global-x
 
-(my-function)  ; Prints: 100
+(my-function)  # Prints: 100
 ```
 
 ### 2. Function Scope (Parameters & Captures)
@@ -27,10 +27,10 @@ Function parameters are local to the function and shadow outer variables.
 (var x 100)
 
 (var add-one (lambda (x)
-  (+ x 1)))  ; x is parameter, shadows global x
+  (+ x 1)))  # x is parameter, shadows global x
 
-(add-one 5)   ; Returns 6
-x             ; Still 100
+(add-one 5)   # Returns 6
+x             # Still 100
 ```
 
 ### 3. Block Scope
@@ -41,10 +41,10 @@ Block scopes are created by `block` expressions. The `block` form creates a new 
 (var x 100)
 
 (block
-  (var x 50)  ; Block-scoped, shadows outer x
-  (display x))   ; Prints: 50
+  (var x 50)  # Block-scoped, shadows outer x
+  (display x))   # Prints: 50
 
-(display x)      ; Prints: 100
+(display x)      # Prints: 100
 ```
 
 You can optionally name a block and use `break` to exit early with a value:
@@ -56,7 +56,7 @@ You can optionally name a block and use `break` to exit early with a value:
     (break :my-block "early exit"))
   "normal exit"))
 
-result  ; ⟹ "early exit"
+result  # ⟹ "early exit"
 ```
 
 ### 4. Loop Scope
@@ -71,8 +71,8 @@ While and for loops create their own scope for loop variables.
     (display counter)
     (set counter (+ counter 1))))
 
-; counter exists globally and is modified
-; The loop body has loop scope
+# counter exists globally and is modified
+# The loop body has loop scope
 ```
 
 **Important**: Loop variables don't leak out of loops:
@@ -81,7 +81,7 @@ While and for loops create their own scope for loop variables.
 (for i (list 1 2 3)
   (display i))
 
-; i is NOT accessible here - loop scoped!
+# i is NOT accessible here - loop scoped!
 ```
 
 ### 5. Let-Binding Scope
@@ -91,9 +91,9 @@ Let-bindings create local variables with scope isolation.
 ```lisp
 (let ((x 5)
       (y 10))
-  (display (+ x y)))  ; x and y are local
+  (display (+ x y)))  # x and y are local
 
-; x and y are NOT accessible here
+# x and y are NOT accessible here
 ```
 
 ## Scope Chain Lookup
@@ -111,9 +111,9 @@ When a variable is referenced, Elle searches for it in this order:
 (var outer-function (lambda (param-x)
   (let ((let-x 5))
     (display (+ global-x param-x let-x)))))
-    ; Lookup order: let-x (found) → param-x (found) → global-x (found)
+    # Lookup order: let-x (found) → param-x (found) → global-x (found)
 
-(outer-function 2)  ; Prints: 1 + 2 + 5 = 8
+(outer-function 2)  # Prints: 1 + 2 + 5 = 8
 ```
 
 ## Variable Shadowing
@@ -123,10 +123,10 @@ Inner scopes can shadow (hide) outer scope variables:
 ```lisp
 (var x 100)
 
-(lambda (x)  ; Parameter x shadows global x
-  (+ x 1))   ; References parameter x, not global
+(lambda (x)  # Parameter x shadows global x
+  (+ x 1))   # References parameter x, not global
 
-(call-lambda-with 5)  ; Returns 6, not 101
+(call-lambda-with 5)  # Returns 6, not 101
 ```
 
 This is usually clear when variables have descriptive names:
@@ -134,7 +134,7 @@ This is usually clear when variables have descriptive names:
 ```lisp
 (var total 1000)
 
-(lambda (total)  ; OK: parameter total shadows global total
+(lambda (total)  # OK: parameter total shadows global total
   (+ total 100))
 ```
 
@@ -143,8 +143,8 @@ But can be confusing with poor naming:
 ```lisp
 (var x 100)
 
-(lambda (x)  ; Confusing: hides outer x
-  (let ((x 5))  ; Even more confusing!
+(lambda (x)  # Confusing: hides outer x
+  (let ((x 5))  # Even more confusing!
     (+ x 1)))
 ```
 
@@ -156,7 +156,7 @@ The `set` operator modifies existing variables:
 (var counter 0)
 
 (lambda ()
-  (set counter (+ counter 1))  ; Modifies global counter
+  (set counter (+ counter 1))  # Modifies global counter
   counter)
 ```
 
@@ -166,7 +166,7 @@ The `set` operator modifies existing variables:
 (var outer-var 100)
 
 (lambda ()
-  (set outer-var 200)  ; Modifies outer-var in global scope
+  (set outer-var 200)  # Modifies outer-var in global scope
 )
 ```
 
@@ -178,14 +178,14 @@ In regular `let`, binding expressions cannot reference previous bindings:
 
 ```lisp
 (let ((x 5)
-      (y 10))   ; y cannot reference x
+      (y 10))   # y cannot reference x
   (+ x y))
 ```
 
 This is valid:
 ```lisp
 (let ((x 5)
-      (y (+ 2 3)))   ; (2 + 3) is evaluated independently
+      (y (+ 2 3)))   # (2 + 3) is evaluated independently
   (+ x y))
 ```
 
@@ -195,10 +195,10 @@ This is valid:
 
 ```lisp
 (let* ((x 5)
-       (y (+ x 1))    ; Can reference x!
-       (z (+ y 1)))   ; Can reference y!
+       (y (+ x 1))    # Can reference x!
+       (z (+ y 1)))   # Can reference y!
   (+ x y z))
-; Result: 5 + 6 + 7 = 18
+# Result: 5 + 6 + 7 = 18
 ```
 
 ## Common Scoping Patterns
@@ -225,8 +225,8 @@ Create functions with captured variables:
 (var double (make-multiplier 2))
 (var triple (make-multiplier 3))
 
-(double 5)   ; Returns 10
-(triple 5)   ; Returns 15
+(double 5)   # Returns 10
+(triple 5)   # Returns 15
 ```
 
 ### Pattern 3: Loop Accumulation
@@ -237,7 +237,7 @@ Use a global or let-bound accumulator with loops:
 (let ((sum 0))
   (for item (list 1 2 3 4 5)
     (set sum (+ sum item)))
-  sum)  ; Returns 15
+  sum)  # Returns 15
 ```
 
 ### Pattern 4: Nested Functions
@@ -247,10 +247,10 @@ Inner functions access outer scope:
 ```lisp
 (var make-adder (lambda (base)
   (lambda (x)
-    (+ base x))))  ; Can access base from outer scope
+    (+ base x))))  # Can access base from outer scope
 
 (var add-10 (make-adder 10))
-(add-10 5)  ; Returns 15
+(add-10 5)  # Returns 15
 ```
 
 ## Scope Errors
@@ -258,22 +258,22 @@ Inner functions access outer scope:
 ### Undefined Variable
 
 ```lisp
-(display undefined-var)  ; ERROR: Undefined global variable
+(display undefined-var)  # ERROR: Undefined global variable
 ```
 
 **Fix**: Define the variable first:
 ```lisp
 (var undefined-var 42)
-(display undefined-var)  ; OK
+(display undefined-var)  # OK
 ```
 
 ### Variable Out of Scope
 
 ```lisp
 (let ((x 5))
-  (display x))  ; OK - inside let
+  (display x))  # OK - inside let
 
-(display x)     ; ERROR: x not defined
+(display x)     # ERROR: x not defined
 ```
 
 **Fix**: Use the variable inside its scope:
@@ -288,7 +288,7 @@ Inner functions access outer scope:
 (for i (list 1 2 3)
   (display i))
 
-(display i)  ; ERROR: i not defined (loop-scoped)
+(display i)  # ERROR: i not defined (loop-scoped)
 ```
 
 **Fix**: Use loop-bound variables only inside the loop:
@@ -296,7 +296,7 @@ Inner functions access outer scope:
 (for i (list 1 2 3)
   (display i))
 
-; Process results outside loop with global accumulator
+# Process results outside loop with global accumulator
 (let ((sum 0))
   (for i (list 1 2 3)
     (set sum (+ sum i)))

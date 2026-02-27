@@ -1,14 +1,14 @@
-;; Content block rendering
+## Content block rendering
 
 (import-file "elle-doc/lib/html.lisp")
 
-;; Render a paragraph block
+## Render a paragraph block
 (var render-paragraph
   (fn (block)
     (let ((text (get block "text")))
       (-> "<p>" (append (format-inline text)) (append "</p>")))))
 
-;; Render a code block
+## Render a code block
 (var render-code
   (fn (block)
     (let ((text (get block "text"))
@@ -17,13 +17,13 @@
         (append (html-escape text))
         (append "</code></pre>")))))
 
-;; Render a list block
+## Render a list block
 (var render-list
   (fn (block)
     (let ((items (get block "items"))
           (ordered (get block "ordered"))
           (tag (if ordered "ol" "ul")))
-      ;; Use fold to concatenate all rendered list items
+      ## Use fold to concatenate all rendered list items
       (let ((rendered-items
               (fold
                 (fn (acc item)
@@ -34,19 +34,19 @@
           (append rendered-items)
           (append "</") (append tag) (append ">"))))))
 
-;; Render a blockquote block
+## Render a blockquote block
 (var render-blockquote
   (fn (block)
     (let ((text (get block "text")))
       (-> "<blockquote>" (append (format-inline text)) (append "</blockquote>")))))
 
-;; Render a table block
+## Render a table block
 (var render-table
   (fn (block)
     (let ((headers (get block "headers"))
           (rows (get block "rows")))
       
-      ;; Render header cells using fold
+      ## Render header cells using fold
       (let ((rendered-headers
               (fold
                 (fn (acc header)
@@ -54,7 +54,7 @@
                 ""
                 headers)))
         
-        ;; Render a single row of cells using fold
+        ## Render a single row of cells using fold
         (var render-row-cells
           (fn (cells)
             (fold
@@ -63,7 +63,7 @@
               ""
               cells)))
         
-        ;; Render all rows using fold
+        ## Render all rows using fold
         (let ((rendered-rows
                 (fold
                   (fn (acc row)
@@ -77,7 +77,7 @@
             (append rendered-rows)
             (append "</tbody></table>"))))))
 
-;; Render a note/callout block
+## Render a note/callout block
 (var render-note
   (fn (block)
     (let ((text (get block "text"))
@@ -86,7 +86,7 @@
         (append (format-inline text))
         (append "</div>")))))
 
-;; Main dispatcher
+## Main dispatcher
 (var render-block
   (fn (block)
     (let ((type (get block "type")))
@@ -99,14 +99,14 @@
         ((string-contains? type "note") (render-note block))
         (true "")))))
 
-;; Render a section with heading and content blocks
+## Render a section with heading and content blocks
 (var render-section
   (fn (section)
     (let ((heading (get section "heading"))
           (level (get section "level"))
           (content (get section "content")))
       (var level-str (number->string level))
-      ;; Use fold to render all blocks
+      ## Use fold to render all blocks
       (let ((rendered-content
               (fold
                 (fn (acc block)
@@ -117,7 +117,7 @@
         (-> "<h" (append level-str) (append ">") (append (html-escape heading)) (append "</h") (append level-str) (append ">")
           (append rendered-content))))))
 
-;; Render all sections using fold
+## Render all sections using fold
 (var render-sections
   (fn (sections)
     (fold

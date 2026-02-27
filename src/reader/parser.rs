@@ -137,6 +137,12 @@ impl Reader {
                 let uqs_sym = Value::symbol(symbols.intern("unquote-splicing").0);
                 Ok(Value::cons(uqs_sym, Value::cons(val, Value::EMPTY_LIST)))
             }
+            OwnedToken::Splice => {
+                self.advance();
+                let val = self.read(symbols)?;
+                let splice_sym = Value::symbol(symbols.intern("splice").0);
+                Ok(Value::cons(splice_sym, Value::cons(val, Value::EMPTY_LIST)))
+            }
             OwnedToken::Integer(n) => {
                 let val = Value::int(*n);
                 self.advance();

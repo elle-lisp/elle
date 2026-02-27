@@ -408,7 +408,7 @@ For operators like `+`, which accept any number of arguments:
 
 - **0 args**: Return the identity constant (`0` for `+`, `1` for `*`)
 - **1 arg**: Apply the operator to the identity and the argument
-- **2+ args**: Emit a left-fold chain: `t = a op b; t = t op c; ...`
+- **2+ args**: Emit a left-fold chain: `t = a op b# t = t op c# ...`
 - **Immediate optimization**: If an argument is a small constant (fits in
   int8), use the immediate-operand instruction variant (e.g.,
   `ADD_IMMEDIATE`) to avoid loading a constant into a register
@@ -483,7 +483,7 @@ JanetSlot:
 | `CONSTANT` | Value is known at compile time. Not backed by a register. |
 | `NAMED` | Slot has a symbol binding. Register is not freed when slot is freed. |
 | `MUTABLE` | Slot is a `var`. Only mutable slots can be targets of `set`. |
-| `REF` | Indirect reference through a 1-element array. Reads emit `GET_INDEX 0`; writes emit `PUT_INDEX 0`. |
+| `REF` | Indirect reference through a 1-element array. Reads emit `GET_INDEX 0`# writes emit `PUT_INDEX 0`. |
 | `RETURNED` | A return/tailcall was already emitted for this slot. Prevents double-return. |
 | `SPLICED` | Value should be spliced (pushed as array) during function calls. |
 
@@ -504,7 +504,7 @@ To write:
 2. Emit `PUT_INDEX temp, 0, value_register`
 
 This indirection is what makes global vars mutable across compilation units.
-The ref array is the single source of truth; the entry table in the
+The ref array is the single source of truth# the entry table in the
 environment points to it, and all compiled code accesses through it.
 
 

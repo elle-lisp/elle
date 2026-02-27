@@ -65,6 +65,10 @@ impl Syntax {
                 let sym = symbols.intern("unquote-splicing");
                 crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
             }
+            SyntaxKind::Splice(inner) => {
+                let sym = symbols.intern("splice");
+                crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
+            }
             // Only reached during macro expansion. The value is a syntax object
             // that will be processed by from_value() after VM evaluation.
             SyntaxKind::SyntaxLiteral(v) => *v,

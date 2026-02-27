@@ -1,13 +1,13 @@
-; Module Loading and Organization Example
-;
-; This example demonstrates Elle's module system:
-; - import-file: Import module from file
-; - add-module-path: Add to module search path
-; - Module organization patterns
-; - Importing functions from modules
-; - Package system integration
-; - File-based module integration
-; - Assertions verifying module loading works
+# Module Loading and Organization Example
+#
+# This example demonstrates Elle's module system:
+# - import-file: Import module from file
+# - add-module-path: Add to module search path
+# - Module organization patterns
+# - Importing functions from modules
+# - Package system integration
+# - File-based module integration
+# - Assertions verifying module loading works
 
 (import-file "./examples/assertions.lisp")
 
@@ -23,9 +23,9 @@
 
 (display "✓ Module paths added successfully\n")
 
-; ========================================
-; 2. Importing modules from files
-; ========================================
+# ========================================
+# 2. Importing modules from files
+# ========================================
 (display "\n=== 2. Importing Modules from Files ===\n")
 
 (display "Importing test module:\n")
@@ -35,9 +35,9 @@
 
 (display "✓ Module import successful\n")
 
-; ========================================
-; 3. Idempotent module loading
-; ========================================
+# ========================================
+# 3. Idempotent module loading
+# ========================================
 (display "\n=== 3. Idempotent Module Loading ===\n")
 
 (display "Loading the same module twice:\n")
@@ -50,14 +50,14 @@
 
 (display "✓ Idempotent loading works\n")
 
-; ========================================
-; 4. Module organization: Utilities
-; ========================================
+# ========================================
+# 4. Module organization: Utilities
+# ========================================
 (display "\n=== 4. Module Organization: Utilities ===\n")
 
 (display "Organizing code into utility modules:\n")
 
-; Define utility functions that would normally be in a module
+# Define utility functions that would normally be in a module
 (def string-utils (fn ()
   (display "String utilities module loaded\n")))
 
@@ -73,14 +73,14 @@
 
 (display "✓ Utility modules organized\n")
 
-; ========================================
-; 5. Module composition
-; ========================================
+# ========================================
+# 5. Module composition
+# ========================================
 (display "\n=== 5. Module Composition ===\n")
 
 (display "Composing functionality from multiple modules:\n")
 
-; Simulate importing and using functions from different modules
+# Simulate importing and using functions from different modules
 (def length-util (fn (s)
   (length s)))
 
@@ -108,14 +108,14 @@
 
 (display "✓ Module composition works\n")
 
-; ========================================
-; 6. Module namespacing
-; ========================================
+# ========================================
+# 6. Module namespacing
+# ========================================
 (display "\n=== 6. Module Namespacing ===\n")
 
 (display "Creating namespaced modules:\n")
 
-; Simulate module namespaces
+# Simulate module namespaces
 (def string-module (fn ()
   (fn (op)
     (cond
@@ -138,14 +138,14 @@
 
 (display "✓ Module namespacing works\n")
 
-; ========================================
-; 7. Module dependencies
-; ========================================
+# ========================================
+# 7. Module dependencies
+# ========================================
 (display "\n=== 7. Module Dependencies ===\n")
 
 (display "Managing module dependencies:\n")
 
-; Simulate module with dependencies
+# Simulate module with dependencies
 (def module-a (fn ()
   (display "Module A loaded\n")
   (fn (x) (+ x 1))))
@@ -169,14 +169,14 @@
 
 (display "✓ Module dependencies work\n")
 
-; ========================================
-; 8. Module re-export
-; ========================================
+# ========================================
+# 8. Module re-export
+# ========================================
 (display "\n=== 8. Module Re-export ===\n")
 
 (display "Re-exporting functions from modules:\n")
 
-; Simulate module re-export
+# Simulate module re-export
 (def base-module (fn ()
   (fn (op)
     (cond
@@ -207,9 +207,9 @@
 
 (display "✓ Module re-export works\n")
 
-; ========================================
-; 9. Module initialization
-; ========================================
+# ========================================
+# 9. Module initialization
+# ========================================
 (display "\n=== 9. Module Initialization ===\n")
 
 (display "Module initialization patterns:\n")
@@ -240,9 +240,9 @@
 
 (display "✓ Module initialization works\n")
 
-; ========================================
-; 10. Module testing
-; ========================================
+# ========================================
+# 10. Module testing
+# ========================================
 (display "\n=== 10. Module Testing ===\n")
 
 (display "Testing module functionality:\n")
@@ -269,9 +269,9 @@
 
 (display "✓ Module testing works\n")
 
-; ========================================
-; 11. Module loading summary
-; ========================================
+# ========================================
+# 11. Module loading summary
+# ========================================
 (display "\n=== Module Loading Summary ===\n")
 
 (display "Features demonstrated:\n")
@@ -301,26 +301,26 @@
 (display "========================================\n")
 (display "\n")
 
-; ========================================
-; File-Based Modules Integration
-; ========================================
+# ========================================
+# File-Based Modules Integration
+# ========================================
 (display "=== File-Based Modules Demo ===\n")
 
-; Test 1: Verify the file was loaded successfully
+# Test 1: Verify the file was loaded successfully
 (display "Test 1: Module Import Success\n")
 (display "  Successfully imported test-modules/test.lisp\n")
 
-; Test 2: Add a module search path
+# Test 2: Add a module search path
 (display "Test 2: Adding Module Search Paths\n")
 (add-module-path "test-modules")
 (display "  Added 'test-modules' to module search path\n")
 
-; Test 3: Import the same file twice (idempotent)
+# Test 3: Import the same file twice (idempotent)
 (display "Test 3: Idempotent Loading\n")
 (import-file "test-modules/test.lisp")
 (display "  Successfully imported the same file twice (idempotent)\n")
 
-; Test 4: Demonstrate basic arithmetic with imported modules loaded
+# Test 4: Demonstrate basic arithmetic with imported modules loaded
 (display "Test 4: Arithmetic Operations\n")
 (display "  5 + 3 = ")
 (var sum-result (+ 5 3))
@@ -331,7 +331,7 @@
 (display mult-result)
 (newline)
 
-; Verify arithmetic
+# Verify arithmetic
 (assert-eq sum-result 8 "5 + 3 should equal 8")
 (assert-eq mult-result 20 "10 * 2 should equal 20")
 

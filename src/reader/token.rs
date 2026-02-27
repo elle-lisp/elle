@@ -81,6 +81,7 @@ pub enum Token<'a> {
     Quasiquote,
     Unquote,
     UnquoteSplicing,
+    Splice,
     ListSugar, // @ for list sugar
     Symbol(&'a str),
     Keyword(&'a str),
@@ -104,6 +105,7 @@ pub enum OwnedToken {
     Quasiquote,
     Unquote,
     UnquoteSplicing,
+    Splice,
     ListSugar,
     Symbol(String),
     Keyword(String),
@@ -127,6 +129,7 @@ impl<'a> From<Token<'a>> for OwnedToken {
             Token::Quasiquote => OwnedToken::Quasiquote,
             Token::Unquote => OwnedToken::Unquote,
             Token::UnquoteSplicing => OwnedToken::UnquoteSplicing,
+            Token::Splice => OwnedToken::Splice,
             Token::ListSugar => OwnedToken::ListSugar,
             Token::Symbol(s) => OwnedToken::Symbol(s.to_string()),
             Token::Keyword(s) => OwnedToken::Keyword(s.to_string()),

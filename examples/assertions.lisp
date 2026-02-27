@@ -1,26 +1,26 @@
-;; Elle Assertions Library
-;;
-;; Shared assertion helpers for all examples. Load this file with:
-;;   (import-file "./examples/assertions.lisp")
-;;
-;; Functions:
-;;   - assert-eq(actual, expected, msg)
-;;     Assert that actual equals expected (using = for numbers, eq? for symbols)
-;;   - assert-equal(actual, expected, msg)
-;;     Alias for assert-eq
-;;   - assert-true(val, msg)
-;;     Assert that val is true
-;;   - assert-false(val, msg)
-;;     Assert that val is false
-;;   - assert-list-eq(actual, expected, msg)
-;;     Assert that two lists are equal (same length and elements)
-;;   - assert-not-nil(val, msg)
-;;     Assert that val is not nil
-;;   - assert-string-eq(actual, expected, msg)
-;;     Assert that two strings are equal
-;;
-;; All assertions crash with exit code 1 on failure, making examples
-;; act as contracts for the implementation.
+## Elle Assertions Library
+##
+## Shared assertion helpers for all examples. Load this file with:
+##   (import-file "./examples/assertions.lisp")
+##
+## Functions:
+##   - assert-eq(actual, expected, msg)
+##     Assert that actual equals expected (using = for numbers, eq? for symbols)
+##   - assert-equal(actual, expected, msg)
+##     Alias for assert-eq
+##   - assert-true(val, msg)
+##     Assert that val is true
+##   - assert-false(val, msg)
+##     Assert that val is false
+##   - assert-list-eq(actual, expected, msg)
+##     Assert that two lists are equal (same length and elements)
+##   - assert-not-nil(val, msg)
+##     Assert that val is not nil
+##   - assert-string-eq(actual, expected, msg)
+##     Assert that two strings are equal
+##
+## All assertions crash with exit code 1 on failure, making examples
+## act as contracts for the implementation.
 
 (def assert-eq (fn (actual expected msg)
   "Assert that actual equals expected (using = for numbers, eq? for symbols)"
@@ -51,9 +51,9 @@
 (def assert-list-eq (fn (actual expected msg)
   "Assert that two lists are equal (same length and elements)"
   (if (= (length actual) (length expected))
-      ; Check each element - use a simple loop approach
-      ; NOTE: letrec is required here because check-all calls itself recursively.
-      ; A plain let would leave check-all unbound in its own body.
+      # Check each element - use a simple loop approach
+      # NOTE: letrec is required here because check-all calls itself recursively.
+      # A plain let would leave check-all unbound in its own body.
       (letrec ((check-all (fn (index)
         (if (>= index (length actual))
             true
@@ -83,10 +83,10 @@
         (display "\n")
         (exit 1)))))
 
-;; Alias for assert-eq (some examples use assert-equal)
+## Alias for assert-eq (some examples use assert-equal)
 (var assert-equal assert-eq)
 
-;; Assert that a value is not nil
+## Assert that a value is not nil
 (def assert-not-nil (fn (val msg)
   "Assert that val is not nil"
   (if (not (eq? val nil))
@@ -99,7 +99,7 @@
         (display "\n")
         (exit 1)))))
 
-;; Assert that two strings are equal
+## Assert that two strings are equal
 (def assert-string-eq (fn (actual expected msg)
   "Assert that two strings are equal"
   (if (= actual expected)

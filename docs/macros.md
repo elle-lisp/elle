@@ -17,7 +17,7 @@ list operations, recursion — everything.
   `(if ,test ,body nil))
 
 (my-when (> x 0) (print "positive"))
-;; Expands to: (if (> x 0) (print "positive") nil)
+;# Expands to: (if (> x 0) (print "positive") nil)
 ```
 
 ### What works
@@ -134,7 +134,7 @@ when arguments pass through `to_value()` → VM execution → `from_value()`.
 Macro arguments use hybrid wrapping: atoms (nil, bool, int, float, string,
 keyword) are wrapped via `Quote` to preserve runtime semantics. Symbols
 and compound forms are wrapped via `SyntaxLiteral(Value::syntax(arg))` to
-preserve scope sets. This avoids the problem where wrapping `#f` in a
+preserve scope sets. This avoids the problem where wrapping `false` in a
 syntax object makes it truthy (syntax objects are heap-allocated).
 
 ### Cross-form macro visibility
@@ -269,7 +269,7 @@ Features that are now possible with VM-based macros:
 
 ## Resolved Questions
 
-These were open during design; now answered by the implementation:
+These were open during design# now answered by the implementation:
 
 1. **Argument quoting.** `Quote(Box::new(arg.clone()))` works. The
    Analyzer handles `quote` by converting to a Value via `to_value()`.
@@ -296,7 +296,7 @@ macros that intentionally introduce bindings visible at the call site.
   `(let ((,(datum->syntax test 'it) ,test))
      (if ,(datum->syntax test 'it) ,then ,else)))
 
-(aif (+ 1 2) (+ it 10) 0)  ;; → 13
+(aif (+ 1 2) (+ it 10) 0)  ;# → 13
 ```
 
 If `context` is a syntax object, its scope set and span are copied.

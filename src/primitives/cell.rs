@@ -113,7 +113,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Create a mutable cell containing a value.",
         params: &["value"],
         category: "cell",
-        example: "(box 42) ;=> #<cell>",
+        example: "(box 42) #=> #<cell>",
         aliases: &[],
     },
     PrimitiveDef {
@@ -124,7 +124,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Extract the value from a cell.",
         params: &["cell"],
         category: "cell",
-        example: "(unbox (box 42)) ;=> 42",
+        example: "(unbox (box 42)) #=> 42",
         aliases: &[],
     },
     PrimitiveDef {
@@ -135,7 +135,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Modify the value in a cell and return the new value.",
         params: &["cell", "value"],
         category: "cell",
-        example: "(let ((c (box 1))) (rebox c 2) (unbox c)) ;=> 2",
+        example: "(let ((c (box 1))) (rebox c 2) (unbox c)) #=> 2",
         aliases: &[],
     },
     PrimitiveDef {
@@ -146,7 +146,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if a value is a box.",
         params: &["value"],
         category: "cell",
-        example: "(box? (box 1)) ;=> true\n(box? 42) ;=> false",
+        example: "(box? (box 1)) #=> true\n(box? 42) #=> false",
         aliases: &[],
     },
 ];

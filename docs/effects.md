@@ -42,11 +42,11 @@ Key insights from Janet:
 
 - **Declarations at instantiation.** The signal mask lives on the fiber, set
   at creation time. The *caller* decides what to handle, not the function.
-  Functions are colorless; fibers are colored.
+  Functions are colorless# fibers are colored.
 
 - **Composition over special forms.** `try`, `catch`, `finally`,
    `generate` — all macros over `fiber/new` + `resume` + `fiber/status` +
-   `propagate`. One runtime primitive; the language provides sugar.
+   `propagate`. One runtime primitive# the language provides sugar.
 
 Janet's limitation: signals are a single integer (one thing happened), and
 there's no static tracking of effects. You can't look at a function and know
@@ -122,7 +122,7 @@ programming.
 
 **Fiber**: An execution context with its own stack, status, signal mask, and
 dynamic bindings. The runtime representation that makes all control flow
-patterns possible. A fiber is a *thing*; patterns like coroutines, generators,
+patterns possible. A fiber is a *thing*# patterns like coroutines, generators,
 and green threads are *ways to use it*.
 
 **Signal**: A value emitted by a fiber to its parent. Classified by type
@@ -137,7 +137,7 @@ effect bit, but effects describe *possibility* while signals describe *events*.
 
 **Handler**: Code that catches a specific signal type and provides a response.
 In Elle, a handler is a fiber with the appropriate mask bit set. Catching is
-determined by the mask; handling is whatever code runs after the resume
+determined by the mask# handling is whatever code runs after the resume
 returns. Surface syntax: `catch` in a `try` block.
 
 **Signal mask**: A bitfield on a fiber indicating which signal types it catches
@@ -173,7 +173,7 @@ This means:
 - The programmer decides, at fiber creation time, what to intercept
 
 This is algebraic effects without the type-theoretic baggage. The mechanism
-is Janet's signals; the static analysis is Koka's effect tracking; the
+is Janet's signals# the static analysis is Koka's effect tracking# the
 programmer interface is "create a fiber with a mask."
 
 
@@ -375,7 +375,7 @@ independently for non-unwinding recovery.
 
 ```
 Fiber {
-    stack: SmallVec<[Value; 256]>           -- operand stack
+    stack: SmallVec<[Value# 256]>           -- operand stack
     frames: Vec<Frame>                       -- call frames (closure + ip + base)
     status: FiberStatus                      -- New/Alive/Suspended/Dead/Error
     mask: SignalBits                          -- which signals parent catches
@@ -535,66 +535,66 @@ The compiler's effect information guides JIT decisions:
 ### Fiber Primitives
 
 ```lisp
-;; === Creation and control ===
+;# === Creation and control ===
 
-;; Create a fiber from a closure with a signal mask
+;# Create a fiber from a closure with a signal mask
 (fiber/new fn mask) → fiber
 
-;; Resume a fiber, delivering a value
+;# Resume a fiber, delivering a value
 (fiber/resume fiber value) → signal-bits
 
-;; Emit a signal from the current fiber (suspends it)
+;# Emit a signal from the current fiber (suspends it)
 (fiber/signal bits value) → (suspends)
 
-;; === Introspection ===
+;# === Introspection ===
 
-;; Lifecycle status
-(fiber/status fiber) → keyword  ; :new :alive :suspended :dead :error
+;# Lifecycle status
+(fiber/status fiber) → keyword  # :new :alive :suspended :dead :error
 
-;; Signal payload from last signal or return value
+;# Signal payload from last signal or return value
 (fiber/value fiber) → value
 
-;; Signal bits from last signal
+;# Signal bits from last signal
 (fiber/bits fiber) → int
 
-;; Capability mask (set at creation, immutable)
+;# Capability mask (set at creation, immutable)
 (fiber/mask fiber) → int
 
-;; === Chain traversal ===
+;# === Chain traversal ===
 
-;; Parent fiber (nil at root)
+;# Parent fiber (nil at root)
 (fiber/parent fiber) → fiber | nil
 
-;; Most recently resumed child fiber (nil if none)
+;# Most recently resumed child fiber (nil if none)
 (fiber/child fiber) → fiber | nil
 
-;; === Internals (for debugging/tooling) ===
+;# === Internals (for debugging/tooling) ===
 
-;; The closure this fiber wraps
+;# The closure this fiber wraps
 (fiber/closure fiber) → closure
 
-;; The operand stack (for debugging)
+;# The operand stack (for debugging)
 (fiber/stack fiber) → array
 
-;; Dynamic bindings (fiber-scoped state)
+;# Dynamic bindings (fiber-scoped state)
 (fiber/env fiber) → table | nil
 ```
 
 ### Sugar and Aliases
 
 ```lisp
-;; try/catch/finally
+;# try/catch/finally
 (try body
   (catch e handler)
   (finally cleanup))
 
-;; yield
+;# yield
 (yield value) → (fiber/signal :yield value)
 
-;; throw
+;# throw
 (throw value) → (fiber/signal :error value)
 
-;; Thin aliases
+;# Thin aliases
 (coro/new fn) → (fiber/new fn :yield)
 (coro/resume co val) → (fiber/resume co val)
 (coro/status co) → (fiber/status co)
@@ -604,15 +604,15 @@ The compiler's effect information guides JIT decisions:
 
 ```lisp
 (def (pure-add x y)
-  (declare (effects))           ;; no effects — pure
+  (declare (effects))           ;# no effects — pure
   (+ x y))
 
 (def (may-fail x)
-  (declare (effects :raises))   ;; may raise, nothing else
+  (declare (effects :raises))   ;# may raise, nothing else
   (/ 1 x))
 
 (def (callback-must-be-pure f xs)
-  (declare (param-effects f ())) ;; f must have no effects
+  (declare (param-effects f ())) ;# f must have no effects
   (map f xs))
 ```
 
@@ -693,7 +693,7 @@ don't resume. No special syntax or VM support is needed.
 ### Example
 
 ```lisp
-;; The callee: signals with available recovery options
+;# The callee: signals with available recovery options
 (def (safe-divide a b)
   (if (= b 0)
     (fiber/signal :error
@@ -701,12 +701,12 @@ don't resume. No special syntax or VM support is needed.
              :options [:use-value :return-zero]))
     (/ a b)))
 
-;; The handler: catches the signal, picks a recovery option
+;# The handler: catches the signal, picks a recovery option
 (def (compute)
   (let ((f (fiber/new (fn () (safe-divide 10 0)) :error)))
     (let ((result (fiber/resume f nil)))
       (if (= (fiber/status f) :suspended)
-        ;; Child is suspended — we can resume it with a recovery choice
+        ;# Child is suspended — we can resume it with a recovery choice
         (fiber/resume f (table :option :use-value :value 1))
         result))))
 ```

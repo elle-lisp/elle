@@ -30,7 +30,7 @@ const RESERVED_WORDS: &[&str] = &[
     "force",
     "call-with-current-continuation",
     "call/cc",
-    "apply",
+    "splice",
     "eval",
     "load",
     "require",

@@ -1,11 +1,11 @@
-; Clock and Stopwatch Benchmarks
-;
-; Measures the overhead of each clock primitive and the stopwatch
-; coroutine. Run with: cargo run --release -- examples/benchmarks.lisp
+# Clock and Stopwatch Benchmarks
+#
+# Measures the overhead of each clock primitive and the stopwatch
+# coroutine. Run with: cargo run --release -- examples/benchmarks.lisp
 
 (import-file "./examples/assertions.lisp")
 
-; ── helpers ──────────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────
 
 (var bench-iterations 1000)
 
@@ -25,7 +25,7 @@
         (display " ns/call\n")
         ns-per))))
 
-; ── clock primitives ─────────────────────────────────────────────────
+# ── clock primitives ─────────────────────────────────────────────────
 
 (display "=== Clock primitive overhead ===\n")
 
@@ -38,7 +38,7 @@
 (run-bench "clock/cpu      " bench-iterations
   (fn () (clock/cpu)))
 
-; ── clock + subtract ─────────────────────────────────────────────────
+# ── clock + subtract ─────────────────────────────────────────────────
 
 (display "\n=== Clock read + subtract ===\n")
 
@@ -50,7 +50,7 @@
   (run-bench "cpu - base      " bench-iterations
     (fn () (- (clock/cpu) base))))
 
-; ── stopwatch (coroutine) ────────────────────────────────────────────
+# ── stopwatch (coroutine) ────────────────────────────────────────────
 
 (display "\n=== Stopwatch (coro/resume) ===\n")
 
@@ -59,14 +59,14 @@
   (run-bench "stopwatch sample" bench-iterations
     (fn () (coro/resume sw))))
 
-; ── time/elapsed ─────────────────────────────────────────────────────
+# ── time/elapsed ─────────────────────────────────────────────────────
 
 (display "\n=== time/elapsed ===\n")
 
 (run-bench "time/elapsed    " bench-iterations
   (fn () (time/elapsed (fn () 42))))
 
-; ── summary ──────────────────────────────────────────────────────────
+# ── summary ──────────────────────────────────────────────────────────
 
 (display "\n=== Notes ===\n")
 (display "  clock/monotonic uses vDSO (no syscall)\n")

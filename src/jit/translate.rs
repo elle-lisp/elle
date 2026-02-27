@@ -602,6 +602,20 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::Eval { .. } => {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
             }
+            LirInstr::ArrayExtend { .. } => {
+                return Err(JitError::UnsupportedInstruction("ArrayExtend".to_string()));
+            }
+            LirInstr::ArrayPush { .. } => {
+                return Err(JitError::UnsupportedInstruction("ArrayPush".to_string()));
+            }
+            LirInstr::CallArray { .. } => {
+                return Err(JitError::UnsupportedInstruction("CallArray".to_string()));
+            }
+            LirInstr::TailCallArray { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "TailCallArray".to_string(),
+                ));
+            }
         }
         Ok(false)
     }

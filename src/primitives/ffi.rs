@@ -1133,7 +1133,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Get the size of a C type in bytes.",
         params: &["type"],
         category: "ffi",
-        example: "(ffi/size :i32) ;=> 4",
+        example: "(ffi/size :i32) #=> 4",
         aliases: &[],
     },
     PrimitiveDef {
@@ -1144,7 +1144,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Get the alignment of a C type in bytes.",
         params: &["type"],
         category: "ffi",
-        example: "(ffi/align :double) ;=> 8",
+        example: "(ffi/align :double) #=> 8",
         aliases: &[],
     },
     PrimitiveDef {

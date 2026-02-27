@@ -243,7 +243,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is nil.",
         params: &["value"],
         category: "predicate",
-        example: "(nil? nil) ;=> true\n(nil? 42) ;=> false",
+        example: "(nil? nil) #=> true\n(nil? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -254,7 +254,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a pair (cons cell).",
         params: &["value"],
         category: "predicate",
-        example: "(pair? (cons 1 2)) ;=> true\n(pair? 42) ;=> false",
+        example: "(pair? (cons 1 2)) #=> true\n(pair? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -265,7 +265,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a list (empty list or cons cell).",
         params: &["value"],
         category: "predicate",
-        example: "(list? (list 1 2)) ;=> true\n(list? 42) ;=> false",
+        example: "(list? (list 1 2)) #=> true\n(list? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -276,7 +276,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a number.",
         params: &["value"],
         category: "predicate",
-        example: "(number? 42) ;=> true\n(number? \"hello\") ;=> false",
+        example: "(number? 42) #=> true\n(number? \"hello\") #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -287,7 +287,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a symbol.",
         params: &["value"],
         category: "predicate",
-        example: "(symbol? 'foo) ;=> true\n(symbol? 42) ;=> false",
+        example: "(symbol? 'foo) #=> true\n(symbol? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -298,7 +298,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a string.",
         params: &["value"],
         category: "predicate",
-        example: "(string? \"hello\") ;=> true\n(string? 42) ;=> false",
+        example: "(string? \"hello\") #=> true\n(string? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -309,7 +309,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a boolean.",
         params: &["value"],
         category: "predicate",
-        example: "(boolean? true) ;=> true\n(boolean? 42) ;=> false",
+        example: "(boolean? true) #=> true\n(boolean? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -320,7 +320,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a keyword.",
         params: &["value"],
         category: "predicate",
-        example: "(keyword? :foo) ;=> true\n(keyword? 42) ;=> false",
+        example: "(keyword? :foo) #=> true\n(keyword? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -331,7 +331,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Get the type of a value as a keyword.",
         params: &["value"],
         category: "predicate",
-        example: "(type 42) ;=> :integer\n(type \"hello\") ;=> :string",
+        example: "(type 42) #=> :integer\n(type \"hello\") #=> :string",
         aliases: &["type-of"],
     },
     PrimitiveDef {
@@ -342,7 +342,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a raw C pointer.",
         params: &["value"],
         category: "predicate",
-        example: "(pointer? ptr) ;=> true\n(pointer? 42) ;=> false",
+        example: "(pointer? ptr) #=> true\n(pointer? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -353,7 +353,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is an array (mutable indexed sequence).",
         params: &["value"],
         category: "predicate",
-        example: "(array? @[1 2 3]) ;=> true\n(array? [1 2 3]) ;=> false",
+        example: "(array? @[1 2 3]) #=> true\n(array? [1 2 3]) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -364,7 +364,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a tuple (immutable indexed sequence).",
         params: &["value"],
         category: "predicate",
-        example: "(tuple? [1 2 3]) ;=> true\n(tuple? @[1 2 3]) ;=> false",
+        example: "(tuple? [1 2 3]) #=> true\n(tuple? @[1 2 3]) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -375,7 +375,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a table (mutable key-value map).",
         params: &["value"],
         category: "predicate",
-        example: "(table? @{:a 1}) ;=> true\n(table? {:a 1}) ;=> false",
+        example: "(table? @{:a 1}) #=> true\n(table? {:a 1}) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -386,7 +386,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a struct (immutable key-value map).",
         params: &["value"],
         category: "predicate",
-        example: "(struct? {:a 1}) ;=> true\n(struct? @{:a 1}) ;=> false",
+        example: "(struct? {:a 1}) #=> true\n(struct? @{:a 1}) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -397,7 +397,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if value is a buffer (mutable byte sequence).",
         params: &["value"],
         category: "predicate",
-        example: "(buffer? @\"hello\") ;=> true\n(buffer? \"hello\") ;=> false",
+        example: "(buffer? @\"hello\") #=> true\n(buffer? \"hello\") #=> false",
         aliases: &[],
     },
 ];

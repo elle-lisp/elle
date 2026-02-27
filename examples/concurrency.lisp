@@ -1,26 +1,26 @@
 #!/usr/bin/env elle
-;;; Concurrency with spawn and join
-;;;
-;;; This example demonstrates the spawn and join primitives for concurrent
-;;; execution in Elle. The spawn primitive creates a new thread that executes
-;;; a closure, and join waits for the thread to complete and returns its result.
-;;;
-;;; Key concepts:
-;;; 1. spawn takes a closure and executes it in a new thread
-;;; 2. The closure can capture immutable values from the parent scope
-;;; 3. join blocks until the thread completes and returns the result
-;;; 4. Closures that capture mutable values (tables) cannot be spawned
+### Concurrency with spawn and join
+###
+### This example demonstrates the spawn and join primitives for concurrent
+### execution in Elle. The spawn primitive creates a new thread that executes
+### a closure, and join waits for the thread to complete and returns its result.
+###
+### Key concepts:
+### 1. spawn takes a closure and executes it in a new thread
+### 2. The closure can capture immutable values from the parent scope
+### 3. join blocks until the thread completes and returns the result
+### 4. Closures that capture mutable values (tables) cannot be spawned
 
 (import-file "./examples/assertions.lisp")
 
-;; Note: concurrency.lisp uses assert-equal and assert-true which are
-;; defined in assertions.lisp. We need to adapt the calls to use the
-;; standard assertion interface.
+## Note: concurrency.lisp uses assert-equal and assert-true which are
+## defined in assertions.lisp. We need to adapt the calls to use the
+## standard assertion interface.
 
 (display "=== Elle Concurrency Example: spawn and join ===")
 (newline)
 
-;;; Example 1: Simple computation in a thread
+### Example 1: Simple computation in a thread
 (display "Example 1: Simple computation in a thread")
 (newline)
 
@@ -32,7 +32,7 @@
       (newline)
       (assert-equal result 30 "Example 1: spawn/join computes 10+20 = 30"))))
 
-;;; Example 2: Multiple threads computing in parallel
+### Example 2: Multiple threads computing in parallel
 (display "Example 2: Multiple threads computing in parallel")
 (newline)
 
@@ -53,7 +53,7 @@
     (assert-equal r2 20 "Example 2: thread 2 computes 4*5 = 20")
     (assert-equal r3 42 "Example 2: thread 3 computes 6*7 = 42")))
 
-;;; Example 3: Capturing immutable values
+### Example 3: Capturing immutable values
 (display "Example 3: Capturing immutable values")
 (newline)
 
@@ -67,7 +67,7 @@
       (assert-true (string-contains? result "Alice") "Example 3: result contains 'Alice'")
       (assert-true (string-contains? result "30") "Example 3: result contains '30'"))))
 
-;;; Example 4: Capturing vectors
+### Example 4: Capturing vectors
 (display "Example 4: Capturing vectors")
 (newline)
 
@@ -81,7 +81,7 @@
       (newline)
       (assert-equal result 15 "Example 4: sum of 1+2+3+4+5 = 15"))))
 
-;;; Example 5: Closure with conditional logic
+### Example 5: Closure with conditional logic
 (display "Example 5: Closure with conditional logic")
 (newline)
 
@@ -95,7 +95,7 @@
       (newline)
       (assert-equal result "threshold is high" "Example 5: conditional returns 'threshold is high'"))))
 
-;;; Example 6: Closure returning a value
+### Example 6: Closure returning a value
 (display "Example 6: Closure returning a value")
 (newline)
 
@@ -108,7 +108,7 @@
       (newline)
       (assert-equal result 21 "Example 6: 7*3 = 21"))))
 
-;;; Example 7: Spawning closures with different capture patterns
+### Example 7: Spawning closures with different capture patterns
 (display "Example 7: Spawning closures with different capture patterns")
 (newline)
 
@@ -126,7 +126,7 @@
       (assert-equal r1 100 "Example 7: captured value = 100")
       (assert-equal r2 150 "Example 7: computed value = 100+50 = 150"))))
 
-;;; Example 8: Using time/sleep with threads
+### Example 8: Using time/sleep with threads
 (display "Example 8: Using time/sleep with threads")
 (newline)
 
@@ -146,7 +146,7 @@
     (newline)
     (assert-equal result 42 "Example 8: thread with time/sleep returns 42")))
 
-;;; Example 9: Current thread ID
+### Example 9: Current thread ID
 (display "Example 9: Current thread ID")
 (newline)
 
@@ -162,7 +162,7 @@
       (newline)
       (assert-true (not (= main-id spawned-id)) "Example 9: spawned thread has different ID"))))
 
-;;; Example 10: Complex computation with multiple captures
+### Example 10: Complex computation with multiple captures
 (display "Example 10: Complex computation with multiple captures")
 (newline)
 

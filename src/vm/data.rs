@@ -339,3 +339,92 @@ pub fn handle_table_get_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize, con
     // Not found or wrong type → nil
     vm.fiber.stack.push(Value::NIL);
 }
+
+/// Extend an array with all elements from an indexed source (array or tuple).
+/// Stack: \[array, source\] → \[extended_array\]
+/// Used by splice: builds the args array incrementally.
+pub fn handle_array_extend(vm: &mut VM) {
+    let source = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on ArrayExtend");
+    let array = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on ArrayExtend");
+
+    // Get the source elements
+    let source_elems: Vec<Value> = if let Some(arr) = source.as_array() {
+        arr.borrow().to_vec()
+    } else if let Some(tup) = source.as_tuple() {
+        tup.to_vec()
+    } else {
+        vm.fiber.signal = Some((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "splice: expected array or tuple, got {}",
+                    source.type_name()
+                ),
+            ),
+        ));
+        vm.fiber.stack.push(Value::NIL);
+        return;
+    };
+
+    // Get the target array and extend it
+    if let Some(arr) = array.as_array() {
+        let mut vec = arr.borrow().to_vec();
+        vec.extend(source_elems);
+        vm.fiber.stack.push(Value::array(vec));
+    } else {
+        vm.fiber.signal = Some((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "splice: expected array as accumulator, got {}",
+                    array.type_name()
+                ),
+            ),
+        ));
+        vm.fiber.stack.push(Value::NIL);
+    }
+}
+
+/// Push a single value onto an array.
+/// Stack: \[array, value\] → \[extended_array\]
+/// Used by splice: adds non-spliced args to the args array.
+pub fn handle_array_push(vm: &mut VM) {
+    let value = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on ArrayPush");
+    let array = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on ArrayPush");
+
+    if let Some(arr) = array.as_array() {
+        let mut vec = arr.borrow().to_vec();
+        vec.push(value);
+        vm.fiber.stack.push(Value::array(vec));
+    } else {
+        vm.fiber.signal = Some((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "splice: expected array as accumulator, got {}",
+                    array.type_name()
+                ),
+            ),
+        ));
+        vm.fiber.stack.push(Value::NIL);
+    }
+}

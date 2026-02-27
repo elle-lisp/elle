@@ -1,9 +1,9 @@
-; JIT Benchmark - Simple If Expression Heavy Workload
-;
-; This focuses on operations that CAN be JIT compiled:
-; - Literals
-; - If expressions  
-; - Begin sequences
+# JIT Benchmark - Simple If Expression Heavy Workload
+#
+# This focuses on operations that CAN be JIT compiled:
+# - Literals
+# - If expressions  
+# - Begin sequences
 
 (var if-loop
   (fn (n)

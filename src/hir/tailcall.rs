@@ -56,7 +56,7 @@ fn mark(hir: &mut Hir, in_tail: bool) {
             // Function and arguments are NOT in tail position
             mark(func, false);
             for arg in args {
-                mark(arg, false);
+                mark(&mut arg.expr, false);
             }
         }
 
@@ -237,7 +237,7 @@ mod tests {
                 calls.push(*is_tail);
                 collect_calls(func, calls);
                 for arg in args {
-                    collect_calls(arg, calls);
+                    collect_calls(&arg.expr, calls);
                 }
             }
             HirKind::Lambda { body, .. } => collect_calls(body, calls),

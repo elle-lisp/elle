@@ -248,7 +248,7 @@ fn test_location_map_has_correct_line_numbers() {
 
     let mut symbols = SymbolTable::new();
     // Single expression with nested structure
-    let source = "(if #t\n  (+ 1 2)\n  (- 3 4))";
+    let source = "(if true\n  (+ 1 2)\n  (- 3 4))";
 
     let result = compile(source, &mut symbols);
     assert!(result.is_ok(), "Compilation failed: {:?}", result.err());

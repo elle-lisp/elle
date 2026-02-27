@@ -186,7 +186,7 @@ impl HirSymbolExtractor {
             HirKind::Call { func, args, .. } => {
                 self.walk(func, index, symbols);
                 for arg in args {
-                    self.walk(arg, index, symbols);
+                    self.walk(&arg.expr, index, symbols);
                 }
             }
 

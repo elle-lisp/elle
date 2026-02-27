@@ -65,7 +65,7 @@ See `examples/destructuring.lisp` for comprehensive examples.
 
 ```lisp
 (defn add (x y) (+ x y))
-; equivalent to: (def add (fn (x y) (+ x y)))
+# equivalent to: (def add (fn (x y) (+ x y)))
 ```
 
 The old `(def (f x) body)` shorthand has been removed in favor of `defn`.
@@ -94,7 +94,7 @@ Elle distinguishes between `nil` (absence of value) and `()` (empty list). They 
 
 | Value | Truthy? | Notes |
 |-------|---------|-------|
-| `#f` | ✗ No | Boolean false |
+| `false` | ✗ No | Boolean false |
 | `nil` | ✗ No | Absence of value |
 | `()` | ✓ Yes | Empty list (distinct from nil) |
 | `0` | ✓ Yes | Zero is truthy |
@@ -102,7 +102,7 @@ Elle distinguishes between `nil` (absence of value) and `()` (empty list). They 
 | `[]` | ✓ Yes | Empty array is truthy |
 | All other values | ✓ Yes | Default |
 
-**Only `#f` and `nil` are falsy.** Everything else, including the empty list, is truthy.
+**Only `false` and `nil` are falsy.** Everything else, including the empty list, is truthy.
 
 ### Predicate Behavior
 
@@ -110,22 +110,22 @@ This is the critical distinction. Each predicate behaves differently:
 
 | Expression | Result | Notes |
 |------------|--------|-------|
-| `(nil? nil)` | `#t` | Only nil is nil |
-| `(nil? ())` | `#f` | Empty list is NOT nil |
+| `(nil? nil)` | `true` | Only nil is nil |
+| `(nil? ())` | `false` | Empty list is NOT nil |
 | `(empty? nil)` | error | Nil is not a container |
-| `(empty? ())` | `#t` | Empty list is empty |
-| `(list? ())` | `#t` | Empty list is a list |
-| `(list? nil)` | `#f` | Nil is not a list |
-| `(pair? ())` | `#f` | Empty list is not a pair |
-| `(pair? nil)` | `#f` | Nil is not a pair |
+| `(empty? ())` | `true` | Empty list is empty |
+| `(list? ())` | `true` | Empty list is a list |
+| `(list? nil)` | `false` | Nil is not a list |
+| `(pair? ())` | `false` | Empty list is not a pair |
+| `(pair? nil)` | `false` | Nil is not a pair |
 
 ### Equality
 
 `nil` and `()` are **not equal**:
 
 ```lisp
-(= nil ())   ; ⟹ #f
-(eq? nil ()) ; ⟹ #f
+(= nil ())   # ⟹ false
+(eq? nil ()) # ⟹ false
 ```
 
 ### List Construction
@@ -134,12 +134,12 @@ Lists terminate with `EMPTY_LIST`, not `NIL`:
 
 ```lisp
 (list 1 2 3)
-; = cons(1, cons(2, cons(3, EMPTY_LIST)))
-; NOT cons(1, cons(2, cons(3, NIL)))
+# = cons(1, cons(2, cons(3, EMPTY_LIST)))
+# NOT cons(1, cons(2, cons(3, NIL)))
 
-(first (list 1 2 3))  ; ⟹ 1
-(rest (list 1 2 3))   ; ⟹ (2 3)
-(rest (rest (rest (list 1 2 3))))  ; ⟹ ()
+(first (list 1 2 3))  # ⟹ 1
+(rest (list 1 2 3))   # ⟹ (2 3)
+(rest (rest (rest (list 1 2 3))))  # ⟹ ()
 ```
 
 ### Migration Guidance
@@ -162,30 +162,30 @@ When walking a list, use `(empty? lst)` to check for termination, **not** `(nil?
     (cons (f (first lst)) (my-map f (rest lst)))))
 ```
 
-The distinction matters because `(nil? ())` returns `#f`, so the wrong version will try to call `(first ())` and `(rest ())` on an empty list, causing an error or infinite loop.
+The distinction matters because `(nil? ())` returns `false`, so the wrong version will try to call `(first ())` and `(rest ())` on an empty list, causing an error or infinite loop.
 
 ### Examples
 
 ```lisp
-; Empty list is truthy
+# Empty list is truthy
 (if () "truthy" "falsy")  ⟹ "truthy"
 
-; Only #f is falsy among booleans
-(if #f "truthy" "falsy")  ⟹ "falsy"
+# Only false is falsy among booleans
+(if false "truthy" "falsy")  ⟹ "falsy"
 
-; nil is FALSY (represents absence/undefined)
+# nil is FALSY (represents absence/undefined)
 (if nil "truthy" "falsy") ⟹ "falsy"
 
-; Use nil? to check for nil specifically
+# Use nil? to check for nil specifically
 (if (nil? x) "is nil" "not nil")
 
-; Use empty? to check for empty collections
+# Use empty? to check for empty collections
 (if (empty? x) "is empty" "not empty")
 
-; Proper list termination
-(rest (list 1))  ; ⟹ ()
-(nil? (rest (list 1)))  ; ⟹ #f (it's not nil!)
-(empty? (rest (list 1)))  ; ⟹ #t (it's empty)
+# Proper list termination
+(rest (list 1))  # ⟹ ()
+(nil? (rest (list 1)))  # ⟹ false (it's not nil!)
+(empty? (rest (list 1)))  # ⟹ true (it's empty)
 ```
 
 See `docs/semantics.md` for the authoritative specification.
@@ -197,11 +197,11 @@ See `docs/semantics.md` for the authoritative specification.
 The `fn` keyword is now the preferred way to create anonymous functions:
 
 ```lisp
-; New style (preferred)
+# New style (preferred)
 (def add (fn (a b) (+ a b)))
 (map (fn (x) (* x 2)) '(1 2 3))
 
-; Old style (still works as alias)
+# Old style (still works as alias)
 (var add (lambda (a b) (+ a b)))
 ```
 
@@ -324,14 +324,14 @@ This brings Elle into better alignment with:
 If you have existing Elle code:
 
 ```lisp
-; Old code
+# Old code
 (read-file "data.txt")
 (write-file "output.txt" data)
 (has? table "key")
 (remainder 10 3)
 (def (my-bool? x) (boolean? x))
 
-; Updated code
+# Updated code
 (slurp "data.txt")
 (spit "output.txt" data)
 (has-key? table "key")
@@ -348,22 +348,22 @@ If you have existing Elle code:
 File I/O was renamed for idiom consistency with Clojure/Janet:
 
 ```lisp
-; Read entire file (old: read-file)
+# Read entire file (old: read-file)
 (var content (slurp "path/to/file.txt"))
 
-; Write to file - overwrites (old: write-file)
+# Write to file - overwrites (old: write-file)
 (spit "output.txt" content)
 
-; Append to file (unchanged)
+# Append to file (unchanged)
 (append-file "log.txt" "New log entry\n")
 ```
 
 ### File Information
 
 ```lisp
-(file-exists? "path.txt")        ⟹ #t
-(file? "path.txt")               ⟹ #t
-(directory? "path/")             ⟹ #t
+(file-exists? "path.txt")        ⟹ true
+(file? "path.txt")               ⟹ true
+(directory? "path/")             ⟹ true
 (file-size "path.txt")           ⟹ 1024
 ```
 
@@ -385,7 +385,7 @@ File I/O was renamed for idiom consistency with Clojure/Janet:
 (absolute-path "relative.txt")       ⟹ "/full/path/to/relative.txt"
 (join-path "dir1" "dir2" "file.txt") ⟹ "dir1/dir2/file.txt"
 (current-directory)                  ⟹ "/home/user"
-(change-directory "/tmp")            ; Switch working directory
+(change-directory "/tmp")            # Switch working directory
 ```
 
 ### File Manipulation
@@ -460,9 +460,9 @@ Call a function with arguments from a list:
 
 ```lisp
 (length "hello")           ⟹ 5
-(string-contains? "hello" "ell")  ⟹ #t
-(string-starts-with? "hello" "he")⟹ #t
-(string-ends-with? "hello" "lo")  ⟹ #t
+(string-contains? "hello" "ell")  ⟹ true
+(string-starts-with? "hello" "he")⟹ true
+(string-ends-with? "hello" "lo")  ⟹ true
 (string-index "hello" "ll")       ⟹ 2
 (char-at "hello" 0)               ⟹ "h"
 ```
@@ -496,9 +496,9 @@ Call a function with arguments from a list:
 ```lisp
 (var t (table "x" 10 "y" 20))
 (get t "x")          ⟹ 10
-(put t "z" 30)       ; Modifies t
-(del t "x")          ; Removes "x" from t
-(has-key? t "x")     ⟹ #f (now deleted)
+(put t "z" 30)       # Modifies t
+(del t "x")          # Removes "x" from t
+(has-key? t "x")     ⟹ false (now deleted)
 (keys t)             ⟹ ("y" "z")
 (values t)           ⟹ (20 30)
 (length t)     ⟹ 2
@@ -509,9 +509,9 @@ Call a function with arguments from a list:
 ```lisp
 (var s (struct "a" 1 "b" 2))
 (struct-get s "a")          ⟹ 1
-(var s2 (struct-put s "c" 3))  ; Returns new struct
-(struct-del s2 "b")         ; Returns new struct without "b"
-(struct-has? s2 "c")        ⟹ #t
+(var s2 (struct-put s "c" 3))  # Returns new struct
+(struct-del s2 "b")         # Returns new struct without "b"
+(struct-has? s2 "c")        ⟹ true
 (struct-keys s)             ⟹ ("a" "b")
 (struct-values s)           ⟹ (1 2)
 (length s)           ⟹ 2
@@ -545,15 +545,15 @@ Call a function with arguments from a list:
 ## JSON Operations
 
 ```lisp
-; Parse JSON string to table
+# Parse JSON string to table
 (var data (json-parse "{\"x\": 42, \"y\": \"hello\"}"))
 (get data "x") ⟹ 42
 
-; Serialize table to JSON
+# Serialize table to JSON
 (json-serialize (table "x" 42 "y" "hello"))
 ⟹ "{\"x\":42,\"y\":\"hello\"}"
 
-; Pretty-print JSON
+# Pretty-print JSON
 (json-serialize-pretty (table "x" 42 "y" "hello"))
 ⟹ "{\n  \"x\": 42,\n  \"y\": \"hello\"\n}"
 ```
@@ -563,20 +563,20 @@ Call a function with arguments from a list:
 ## Concurrency
 
 ```lisp
-; Create and run a thread
+# Create and run a thread
 (spawn (fn ()
   (display "Running in thread")
   (newline)))
 
-; Create and wait for result
+# Create and wait for result
 (var t (spawn (fn () (+ 2 2))))
 (join t)  ⟹ 4
 
-; Sleep current thread
-(time/sleep 1)      ; Sleep 1 second
-(time/sleep 0.5)    ; Sleep 500ms
+# Sleep current thread
+(time/sleep 1)      # Sleep 1 second
+(time/sleep 0.5)    # Sleep 500ms
 
-; Get current thread ID
+# Get current thread ID
 (current-thread-id) ⟹ "ThreadId(1)"
 ```
 
@@ -589,12 +589,12 @@ Call a function with arguments from a list:
 All type predicates end with `?`:
 
 ```lisp
-(nil? nil)          ⟹ #t
-(boolean? #t)       ⟹ #t
-(number? 42)        ⟹ #t
-(symbol? 'x)        ⟹ #t
-(string? "hello")   ⟹ #t
-(pair? (list 1 2))  ⟹ #t
+(nil? nil)          ⟹ true
+(boolean? true)       ⟹ true
+(number? 42)        ⟹ true
+(symbol? 'x)        ⟹ true
+(string? "hello")   ⟹ true
+(pair? (list 1 2))  ⟹ true
 ```
 
 ### Type Name
@@ -605,7 +605,7 @@ Get the type name as a keyword:
 (type-of 42)     ⟹ :integer
 (type-of 3.14)   ⟹ :float
 (type-of "hello")⟹ :string
-(type-of #t)     ⟹ :boolean
+(type-of true)     ⟹ :boolean
 (type-of 'x)     ⟹ :symbol
 (type-of (list)) ⟹ :list
 ```
@@ -615,9 +615,9 @@ Get the type name as a keyword:
 ## Debugging
 
 ```lisp
-(debug-print 42)              ; Prints: [DEBUG] 42
-(trace "label" (+ 1 2))       ; Prints: [TRACE] label: 3, returns 3
-(memory-usage)                 ; Returns (rss-bytes virtual-bytes)
+(debug-print 42)              # Prints: [DEBUG] 42
+(trace "label" (+ 1 2))       # Prints: [TRACE] label: 3, returns 3
+(memory-usage)                 # Returns (rss-bytes virtual-bytes)
 ```
 
 ---
@@ -625,13 +625,13 @@ Get the type name as a keyword:
 ## Module System
 
 ```lisp
-; Load an external module
+# Load an external module
 (import-file "lib/helpers.elle")
 
-; Add custom search paths
+# Add custom search paths
 (add-module-path "/opt/elle-libs")
 
-; Get package info
+# Get package info
 (package-version) ⟹ "0.3.0"
 (package-info)    ⟹ ("Elle" "0.3.0" "description...")
 ```

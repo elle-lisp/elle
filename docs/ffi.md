@@ -11,22 +11,22 @@ This document describes the implemented system.
 ## Quick Start
 
 ```lisp
-;; Load a library
-(def libc (ffi/native nil))              ; current process (dlopen(NULL))
-(def libm (ffi/native "libm.so.6"))      ; or a specific .so
+;# Load a library
+(def libc (ffi/native nil))              # current process (dlopen(NULL))
+(def libm (ffi/native "libm.so.6"))      # or a specific .so
 
-;; Look up a symbol
+;# Look up a symbol
 (def sqrt-ptr (ffi/lookup libm "sqrt"))
 
-;; Create a signature: return type, [arg types]
+;# Create a signature: return type, [arg types]
 (def sqrt-sig (ffi/signature :double [:double]))
 
-;; Call it
-(ffi/call sqrt-ptr sqrt-sig 2.0)         ; => 1.4142135623730951
+;# Call it
+(ffi/call sqrt-ptr sqrt-sig 2.0)         # => 1.4142135623730951
 
-;; Or use the convenience macro
+;# Or use the convenience macro
 (ffi/defbind sqrt libm "sqrt" :double [:double])
-(sqrt 2.0)                               ; => 1.4142135623730951
+(sqrt 2.0)                               # => 1.4142135623730951
 ```
 
 
@@ -39,7 +39,7 @@ C types are described by keywords at the Elle level. The `TypeDesc` enum in
 
 | Keyword | C type | Size (bytes) | Notes |
 |---------|--------|-------------|-------|
-| `:void` | `void` | — | Return type only; not valid for arguments |
+| `:void` | `void` | — | Return type only# not valid for arguments |
 | `:bool` | `_Bool` (as `int`) | 4 | Truthy/falsy conversion |
 | `:i8` | `int8_t` | 1 | |
 | `:u8` | `uint8_t` | 1 | |
@@ -62,16 +62,16 @@ C types are described by keywords at the Elle level. The `TypeDesc` enum in
 | `:size` | `size_t` | platform | 8 bytes on 64-bit |
 | `:ssize` | `ptrdiff_t` | platform | 8 bytes on 64-bit |
 | `:ptr` | `void *` | platform | Maps to `Value::pointer()` or nil for NULL |
-| `:string` | `const char *` | platform | Elle string copied to CString; interior nulls are an error |
+| `:string` | `const char *` | platform | Elle string copied to CString# interior nulls are an error |
 
 ### Type introspection
 
 ```lisp
-(ffi/size :i32)     ; => 4
-(ffi/size :double)  ; => 8
-(ffi/size :void)    ; => nil
-(ffi/align :double) ; => 8
-(ffi/align :ptr)    ; => 8  (on 64-bit)
+(ffi/size :i32)     # => 4
+(ffi/size :double)  # => 8
+(ffi/size :void)    # => nil
+(ffi/align :double) # => 8
+(ffi/align :ptr)    # => 8  (on 64-bit)
 ```
 
 
@@ -84,15 +84,15 @@ Fields are positional (unnamed) and follow C struct layout rules: alignment
 padding between fields, tail padding to the struct's alignment.
 
 ```lisp
-;; struct { int32_t x; double y; }
+;# struct { int32_t x# double y# }
 (def point-type (ffi/struct [:i32 :double]))
 
-(ffi/size point-type)   ; => 16  (4 + 4 padding + 8)
-(ffi/align point-type)  ; => 8
+(ffi/size point-type)   # => 16  (4 + 4 padding + 8)
+(ffi/align point-type)  # => 8
 
-;; Nested structs
-(def inner (ffi/struct [:i8 :i32]))      ; 8 bytes (1 + 3 padding + 4)
-(def outer (ffi/struct [:i64 inner]))    ; 16 bytes
+;# Nested structs
+(def inner (ffi/struct [:i8 :i32]))      # 8 bytes (1 + 3 padding + 4)
+(def outer (ffi/struct [:i64 inner]))    # 16 bytes
 ```
 
 Struct values are represented as Elle arrays. When marshalling to C, the
@@ -101,12 +101,12 @@ field offsets. When reading from C, the buffer is read back into an Elle
 array.
 
 ```lisp
-;; Write a struct to memory
+;# Write a struct to memory
 (def buf (ffi/malloc (ffi/size point-type)))
 (ffi/write buf point-type [42 1.5])
 
-;; Read it back
-(ffi/read buf point-type)  ; => [42 1.5]
+;# Read it back
+(ffi/read buf point-type)  # => [42 1.5]
 (ffi/free buf)
 ```
 
@@ -120,11 +120,11 @@ Constraints:
 `ffi/array` creates a fixed-size array type descriptor.
 
 ```lisp
-;; int32_t[10]
+;# int32_t[10]
 (def arr-type (ffi/array :i32 10))
 
-(ffi/size arr-type)   ; => 40
-(ffi/align arr-type)  ; => 4
+(ffi/size arr-type)   # => 40
+(ffi/align arr-type)  # => 4
 ```
 
 Array values are also represented as Elle arrays. Count must be positive
@@ -138,11 +138,11 @@ argument types. Created by `ffi/signature` and stored as a first-class
 Elle value (`HeapObject::FFISignature`).
 
 ```lisp
-;; Non-variadic: (return-type [arg-types...])
+;# Non-variadic: (return-type [arg-types...])
 (def sig (ffi/signature :int [:int :int]))
 
-;; Variadic: (return-type [all-arg-types...] fixed-count)
-;; For printf(const char *, ...): 1 fixed arg, rest variadic
+;# Variadic: (return-type [all-arg-types...] fixed-count)
+;# For printf(const char *, ...): 1 fixed arg, rest variadic
 (def printf-sig (ffi/signature :int [:ptr :int] 1))
 ```
 
@@ -169,7 +169,7 @@ The number of arguments must match the signature's argument count exactly.
 (def abs-ptr (ffi/lookup libc "abs"))
 (def abs-sig (ffi/signature :int [:int]))
 
-(ffi/call abs-ptr abs-sig -42)  ; => 42
+(ffi/call abs-ptr abs-sig -42)  # => 42
 ```
 
 ### Argument marshalling
@@ -182,7 +182,7 @@ Each Elle value is converted to C-typed storage based on the corresponding
 - **Floats**: `:float` and `:double` accept both int and float values
 - **Booleans**: Truthy → 1, falsy → 0 (as `c_int`)
 - **Pointers**: `Value::pointer(addr)` or `nil` (→ NULL)
-- **Strings**: Copied to a `CString`; interior null bytes are an error
+- **Strings**: Copied to a `CString`# interior null bytes are an error
 - **Structs/arrays**: Elle array → aligned buffer with field-by-field marshalling
 
 ### Return value conversion
@@ -202,19 +202,19 @@ C return values are converted back to Elle values:
 Manual memory management for C interop:
 
 ```lisp
-(def ptr (ffi/malloc 100))       ; allocate 100 bytes
-(ffi/write ptr :i32 42)          ; write an i32
-(ffi/read ptr :i32)              ; => 42
-(ffi/free ptr)                   ; free the memory
+(def ptr (ffi/malloc 100))       # allocate 100 bytes
+(ffi/write ptr :i32 42)          # write an i32
+(ffi/read ptr :i32)              # => 42
+(ffi/free ptr)                   # free the memory
 ```
 
 | Primitive | Signature | Purpose |
 |-----------|-----------|---------|
 | `ffi/malloc` | `(size) → ptr` | Allocate C memory (via libc `malloc`) |
-| `ffi/free` | `(ptr) → nil` | Free C memory (via libc `free`); nil is a no-op |
+| `ffi/free` | `(ptr) → nil` | Free C memory (via libc `free`)# nil is a no-op |
 | `ffi/read` | `(ptr type) → value` | Read a typed value from C memory |
 | `ffi/write` | `(ptr type value) → nil` | Write a typed value to C memory |
-| `ffi/string` | `(ptr [max-len]) → string\|nil` | Read a null-terminated C string; nil ptr → nil |
+| `ffi/string` | `(ptr [max-len]) → string\|nil` | Read a null-terminated C string# nil ptr → nil |
 
 `ffi/string` reads a null-terminated UTF-8 string from a pointer. With an
 optional second argument, it reads at most that many bytes (stopping at the
@@ -223,9 +223,9 @@ an error for non-UTF-8 data.
 
 ```lisp
 (def ptr (ffi/malloc 16))
-;; ... write "hello\0" to ptr ...
-(ffi/string ptr)      ; => "hello"
-(ffi/string ptr 3)    ; => "hel"
+;# ... write "hello\0" to ptr ...
+(ffi/string ptr)      # => "hello"
+(ffi/string ptr 3)    # => "hel"
 (ffi/free ptr)
 ```
 
@@ -244,9 +244,9 @@ functions to be passed to C APIs that expect function pointer arguments
     (- va vb))))
 
 (def cb-ptr (ffi/callback cmp-sig cmp-fn))
-;; cb-ptr is now a C function pointer that can be passed to qsort
+;# cb-ptr is now a C function pointer that can be passed to qsort
 
-;; When done:
+;# When done:
 (ffi/callback-free cb-ptr)
 ```
 
@@ -266,8 +266,8 @@ functions to be passed to C APIs that expect function pointer arguments
 ### Arity validation
 
 `ffi/callback` validates that the closure's arity matches the signature's
-argument count. Exact arity must match; `AtLeast(n)` requires
-`sig.args.len() >= n`; `Range(min, max)` requires the count to be in range.
+argument count. Exact arity must match# `AtLeast(n)` requires
+`sig.args.len() >= n`# `Range(min, max)` requires the count to be in range.
 
 ### Limitations
 
@@ -295,16 +295,16 @@ binding. It looks up the symbol, creates a signature, and defines a
 wrapper function — all at definition time.
 
 ```lisp
-;; Usage: (ffi/defbind name lib "c-name" return-type [arg-types...])
+;# Usage: (ffi/defbind name lib "c-name" return-type [arg-types...])
 
 (def libc (ffi/native nil))
 (ffi/defbind abs libc "abs" :int [:int])
 (ffi/defbind sqrt libm "sqrt" :double [:double])
 (ffi/defbind strlen libc "strlen" :size [:string])
 
-(abs -42)       ; => 42
-(sqrt 2.0)      ; => 1.4142135623730951
-(strlen "hello") ; => 5
+(abs -42)       # => 42
+(sqrt 2.0)      # => 1.4142135623730951
+(strlen "hello") # => 5
 ```
 
 ### Expansion
@@ -373,14 +373,14 @@ All FFI primitives return `(SignalBits, Value)`. Errors are signaled via
 | `ffi-error` | `ffi/native` | Library not found or load failure |
 | `ffi-error` | `ffi/lookup` | Symbol not found in library |
 | `ffi-error` | `ffi/call` | Argument count mismatch, marshalling failure |
-| `ffi-error` | `ffi/read` | Cannot read void; null pointer |
-| `ffi-error` | `ffi/write` | Cannot write void; null pointer |
+| `ffi-error` | `ffi/read` | Cannot read void# null pointer |
+| `ffi-error` | `ffi/write` | Cannot write void# null pointer |
 | `ffi-error` | `ffi/string` | Not valid UTF-8 |
-| `ffi-error` | `ffi/callback` | Variadic signature; no VM context |
+| `ffi-error` | `ffi/callback` | Variadic signature# no VM context |
 | `ffi-error` | `ffi/callback-free` | No callback at address |
 | `argument-error` | `ffi/malloc` | Size not positive |
-| `argument-error` | `ffi/struct` | Empty struct; void field |
-| `argument-error` | `ffi/array` | Non-positive count; void element |
+| `argument-error` | `ffi/struct` | Empty struct# void field |
+| `argument-error` | `ffi/array` | Non-positive count# void element |
 | `argument-error` | `ffi/signature` | `fixed_args` out of range |
 
 Integer arguments are range-checked: passing 256 as `:i8` signals an
@@ -416,7 +416,7 @@ computes C-compatible field layout:
 3. **Nested structs**: Alignment of a struct is the max alignment of its
    fields. Nested structs are laid out recursively.
 
-Example: `struct { int8_t a; int32_t b; }`
+Example: `struct { int8_t a# int32_t b# }`
 - Field `a` at offset 0 (size 1, align 1)
 - 3 bytes padding
 - Field `b` at offset 4 (size 4, align 4)

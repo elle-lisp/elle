@@ -45,12 +45,12 @@ get information about it. All are `NativeFn`. Primitives that need VM access use
 
 | Primitive | Signature | Returns | Notes |
 |-----------|-----------|---------|-------|
-| `jit?` | `(jit? value)` | `#t` or `#f` | True if value is a closure with JIT-compiled native code |
-| `pure?` | `(pure? value)` | `#t` or `#f` | True if value is a closure with `Effect::Pure` |
-| `coro?` | `(coro? value)` | `#t` or `#f` | True if value is a closure with `Effect::Yields` |
-| `global?` | `(global? sym)` | `#t` or `#f` | **Not yet implemented.** True if symbol is bound as a global. Requires VM access (SIG_RESUME). |
-| `mutates-params?` | `(mutates-params? value)` | `#t` or `#f` | True if value is a closure whose body mutates any of its own parameters (i.e., `cell_params_mask != 0`) |
-| `closure?` | `(closure? value)` | `#t` or `#f` | True if value is a closure (bytecode, not native/vm-aware) |
+| `jit?` | `(jit? value)` | `true` or `false` | True if value is a closure with JIT-compiled native code |
+| `pure?` | `(pure? value)` | `true` or `false` | True if value is a closure with `Effect::Pure` |
+| `coro?` | `(coro? value)` | `true` or `false` | True if value is a closure with `Effect::Yields` |
+| `global?` | `(global? sym)` | `true` or `false` | **Not yet implemented.** True if symbol is bound as a global. Requires VM access (SIG_RESUME). |
+| `mutates-params?` | `(mutates-params? value)` | `true` or `false` | True if value is a closure whose body mutates any of its own parameters (i.e., `cell_params_mask != 0`) |
+| `closure?` | `(closure? value)` | `true` or `false` | True if value is a closure (bytecode, not native/vm-aware) |
 
 Implementation: each is a simple predicate that examines the `Value` and,
 for closures, reads fields on the `Closure` struct.
@@ -91,7 +91,7 @@ unchanged (for `jit`) or signal an error (for `jit!`).
 
 | Primitive | Signature | Returns | Notes |
 |-----------|-----------|---------|-------|
-| `raises?` | `(raises? value)` | `#t` or `#f` | Returns `#t` if the closure may raise an exception, `#f` if it is guaranteed not to. Returns `#f` for non-closures. |
+| `raises?` | `(raises? value)` | `true` or `false` | Returns `true` if the closure may raise an exception, `false` if it is guaranteed not to. Returns `false` for non-closures. |
 
 This is a boolean query. When we add specific exception type tracking in the
 future (§4.6), the return type will change to a list of exception type
@@ -151,9 +151,9 @@ seconds elapsed since the stopwatch was created:
 
 ```lisp
 (var sw (time/stopwatch))
-(coro/resume sw)   ; => 0.000234
-;; ... do work ...
-(coro/resume sw)   ; => 1.532100  (cumulative, not delta)
+(coro/resume sw)   # => 0.000234
+;# ... do work ...
+(coro/resume sw)   # => 1.532100  (cumulative, not delta)
 ```
 
 Implementation (in `src/primitives/time_def.rs`):
@@ -162,7 +162,7 @@ Implementation (in `src/primitives/time_def.rs`):
 (def time/stopwatch (fn ()
   (coro/new (fn ()
     (let ((start (clock/monotonic)))
-      (while #t
+      (while true
         (yield (- (clock/monotonic) start))))))))
 ```
 
@@ -170,8 +170,8 @@ Implementation (in `src/primitives/time_def.rs`):
 
 ```lisp
 (var result (time/elapsed (fn () (heavy-computation))))
-(first result)          ; => computation result
-(first (rest result))   ; => elapsed seconds
+(first result)          # => computation result
+(first (rest result))   # => elapsed seconds
 ```
 
 For hot-path timing where coroutine overhead matters, subtract two
@@ -325,12 +325,12 @@ with `may_raise = false` (optimistic) and iterate until stable.
 ### 4.5 Runtime query
 
 `(raises? value)` reads `closure.effect.may_raise()` (checks `SIG_ERROR`
-in the effect's signal bits). Returns `#t` if the closure may raise, `#f`
+in the effect's signal bits). Returns `true` if the closure may raise, `false`
 otherwise.
 
 When we add specific exception type tracking (§4.6), the return type will
 change to a list of exception type keywords (`:error`, `:type-error`,
-`:division-by-zero`, etc.) for closures that may raise, and `#f` for those
+`:division-by-zero`, etc.) for closures that may raise, and `false` for those
 that don't.
 
 ### 4.6 Future: specific exception types
@@ -457,7 +457,7 @@ Not yet created. Blocked on defmacro gensym expansion fix (§3).
 | `src/primitives/debug.rs` | **Done** | `debug-print`, `trace`, `memory-usage`. `profile` removed. |
 | `src/primitives/time.rs` | **Done** | Clock primitives (`clock/monotonic`, `clock/realtime`, `clock/cpu`) and `time/sleep`. |
 | `src/primitives/time_def.rs` | **Done** | Elle definitions for `time/stopwatch` and `time/elapsed`. |
-| `src/primitives/registration.rs` | **Done** | `Effect` parameter on `register_fn`; all primitives registered with effects. |
+| `src/primitives/registration.rs` | **Done** | `Effect` parameter on `register_fn`# all primitives registered with effects. |
 | `src/effects/mod.rs` | **Done** | `Effect` restructured as `{ bits: SignalBits, propagates: u32 }` (not the `YieldBehavior` + `may_raise` design originally proposed). |
 | `src/effects/primitives.rs` | **Still exists** | Should be deleted once analyzer uses the registration-time effects map. |
 | `lib/bench.lisp` | **Not created** | Blocked on defmacro gensym expansion fix. |

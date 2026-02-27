@@ -263,7 +263,7 @@ mod jit_tests {
             r#"(begin
                 (defn helper (x) (/ 10 x))
                 (defn f (x) (+ (helper x) 1))
-                ; Call f enough times to make it hot, then call with 0
+                # Call f enough times to make it hot, then call with 0
                 (f 1) (f 2) (f 3) (f 4) (f 5)
                 (f 6) (f 7) (f 8) (f 9) (f 10)
                 (let ((fib (fiber/new (fn () (f 0)) 1)))
@@ -285,14 +285,14 @@ mod jit_tests {
             r#"(begin
                 (defn helper (x) (/ 10 x))
                 (defn f (x)
-                  ; Call helper, then add 1000 to result
-                  ; If exception propagation is broken, this would execute
-                  ; with result=NIL and return 1001 (or crash)
+                  # Call helper, then add 1000 to result
+                  # If exception propagation is broken, this would execute
+                  # with result=NIL and return 1001 (or crash)
                   (+ (helper x) 1000))
-                ; Warm up f
+                # Warm up f
                 (f 1) (f 2) (f 5) (f 10) (f 1)
                 (f 2) (f 5) (f 10) (f 1) (f 2)
-                ; Now trigger exception
+                # Now trigger exception
                 (let ((fib (fiber/new (fn () (f 0)) 1)))
                   (fiber/resume fib)
                   (if (= (fiber/bits fib) 1) -42 0)))"#,
@@ -311,10 +311,10 @@ mod jit_tests {
                 (defn inner (x) (/ 100 x))
                 (defn middle (x) (+ (inner x) 10))
                 (defn outer (x) (* (middle x) 2))
-                ; Warm up all functions
+                # Warm up all functions
                 (outer 1) (outer 2) (outer 4) (outer 5) (outer 10)
                 (outer 1) (outer 2) (outer 4) (outer 5) (outer 10)
-                ; Trigger exception deep in the call chain
+                # Trigger exception deep in the call chain
                 (let ((fib (fiber/new (fn () (outer 0)) 1)))
                   (fiber/resume fib)
                   (if (= (fiber/bits fib) 1) -999 0)))"#,
@@ -420,11 +420,11 @@ mod jit_tests {
                   (var f (fiber/new (fn () x) 0))
                   (fiber/resume f)
                   (fiber/value f))
-                ; Warm up pure-add (should get JIT-compiled)
+                # Warm up pure-add (should get JIT-compiled)
                 (defn loop (n acc)
                   (if (= n 0) acc (loop (- n 1) (pure-add acc 1))))
                 (var sum (loop 20 0))
-                ; Now use fibers (interpreter path)
+                # Now use fibers (interpreter path)
                 (var fval (use-fiber sum))
                 fval)"#,
         );

@@ -189,34 +189,34 @@ See `docs/types.md` for the complete type system reference.
 
 ### `even?` (Even Predicate)
 
-**Semantics**: Returns `#t` if the number is even, `#f` otherwise.
+**Semantics**: Returns `true` if the number is even, `false` otherwise.
 
 **Usage**:
 ```lisp
 (even? 4)
-⟹ #t
+⟹ true
 
 (even? 7)
-⟹ #f
+⟹ false
 
 (even? 0)
-⟹ #t
+⟹ true
 ```
 
 ### `odd?` (Odd Predicate)
 
-**Semantics**: Returns `#t` if the number is odd, `#f` otherwise.
+**Semantics**: Returns `true` if the number is odd, `false` otherwise.
 
 **Usage**:
 ```lisp
 (odd? 5)
-⟹ #t
+⟹ true
 
 (odd? 4)
-⟹ #f
+⟹ false
 
 (odd? 1)
-⟹ #t
+⟹ true
 ```
 
 ---
@@ -230,16 +230,16 @@ See `docs/types.md` for the complete type system reference.
 **Usage**:
 ```lisp
 (= 5 5)
-⟹ #t
+⟹ true
 
 (= 5 5 5)
-⟹ #t
+⟹ true
 
 (= 5 6)
-⟹ #f
+⟹ false
 
 (= 10 10.0)
-⟹ #t
+⟹ true
 ```
 
 ### `<` (Less Than)
@@ -249,16 +249,16 @@ See `docs/types.md` for the complete type system reference.
 **Usage**:
 ```lisp
 (< 1 2)
-⟹ #t
+⟹ true
 
 (< 5 5)
-⟹ #f
+⟹ false
 
 (< 10 5)
-⟹ #f
+⟹ false
 
 (< 1 3)
-⟹ #t
+⟹ true
 ```
 
 ### `>` (Greater Than)
@@ -268,16 +268,16 @@ See `docs/types.md` for the complete type system reference.
 **Usage**:
 ```lisp
 (> 3 2)
-⟹ #t
+⟹ true
 
 (> 5 5)
-⟹ #f
+⟹ false
 
 (> 10 20)
-⟹ #f
+⟹ false
 
 (> 20 10)
-⟹ #t
+⟹ true
 ```
 
 ### `<=` (Less Than or Equal)
@@ -287,16 +287,16 @@ See `docs/types.md` for the complete type system reference.
 **Usage**:
 ```lisp
 (<= 1 2)
-⟹ #t
+⟹ true
 
 (<= 5 5)
-⟹ #t
+⟹ true
 
 (<= 10 5)
-⟹ #f
+⟹ false
 
 (<= 5 5)
-⟹ #t
+⟹ true
 ```
 
 ### `>=` (Greater Than or Equal)
@@ -306,16 +306,16 @@ See `docs/types.md` for the complete type system reference.
 **Usage**:
 ```lisp
 (>= 3 2)
-⟹ #t
+⟹ true
 
 (>= 5 5)
-⟹ #t
+⟹ true
 
 (>= 1 5)
-⟹ #f
+⟹ false
 
 (>= 10 5)
-⟹ #t
+⟹ true
 ```
 
 ---
@@ -324,21 +324,21 @@ See `docs/types.md` for the complete type system reference.
 
 ### `not` (Logical Not)
 
-**Semantics**: Returns `#t` if argument is falsy, `#f` if truthy.
+**Semantics**: Returns `true` if argument is falsy, `false` if truthy.
 
 **Usage**:
 ```lisp
-(not #f)
-⟹ #t
+(not false)
+⟹ true
 
-(not #t)
-⟹ #f
+(not true)
+⟹ false
 
 (not 0)
-⟹ #f
+⟹ false
 
 (not nil)
-⟹ #t
+⟹ true
 ```
 
 ### `and` (Logical And)
@@ -347,20 +347,20 @@ See `docs/types.md` for the complete type system reference.
 
 **Usage**:
 ```lisp
-(and #t #t #t)
-⟹ #t
+(and true true true)
+⟹ true
 
-(and #t #f #t)
-⟹ #f
+(and true false true)
+⟹ false
 
 (and 1 2 3)
 ⟹ 3
 
-(and #f 2 3)
-⟹ #f
+(and false 2 3)
+⟹ false
 
 (and)
-⟹ #t
+⟹ true
 ```
 
 ### `or` (Logical Or)
@@ -369,36 +369,36 @@ See `docs/types.md` for the complete type system reference.
 
 **Usage**:
 ```lisp
-(or #f #f #t)
-⟹ #t
+(or false false true)
+⟹ true
 
-(or #f 2 3)
+(or false 2 3)
 ⟹ 2
 
-(or #f #f #f)
-⟹ #f
+(or false false false)
+⟹ false
 
 (or)
-⟹ #f
+⟹ false
 ```
 
 ### `xor` (Logical Xor)
 
-**Semantics**: Returns `#t` if odd number of arguments are truthy, `#f` otherwise.
+**Semantics**: Returns `true` if odd number of arguments are truthy, `false` otherwise.
 
 **Usage**:
 ```lisp
-(xor #t #f)
-⟹ #t
+(xor true false)
+⟹ true
 
-(xor #t #t)
-⟹ #f
+(xor true true)
+⟹ false
 
-(xor #t #f #t)
-⟹ #t
+(xor true false true)
+⟹ true
 
-(xor #f #f)
-⟹ #f
+(xor false false)
+⟹ false
 ```
 
 ---
@@ -471,8 +471,8 @@ See `docs/types.md` for the complete type system reference.
 (list 'a 'b 'c)
 ⟹ (a b c)
 
-(list 1 "hello" #t)
-⟹ (1 "hello" #t)
+(list 1 "hello" true)
+⟹ (1 "hello" true)
 ```
 
 ### `length` (List Length)
@@ -740,50 +740,50 @@ See `docs/types.md` for the complete type system reference.
 
 ### `string-contains?` (Contains Substring)
 
-**Semantics**: Returns `#t` if the first string contains the second string as a substring, `#f` otherwise.
+**Semantics**: Returns `true` if the first string contains the second string as a substring, `false` otherwise.
 
 **Usage**:
 ```lisp
 (string-contains? "hello world" "world")
-⟹ #t
+⟹ true
 
 (string-contains? "hello" "xyz")
-⟹ #f
+⟹ false
 
 (string-contains? "hello" "")
-⟹ #t
+⟹ true
 ```
 
 ### `string-starts-with?` (Starts With Prefix)
 
-**Semantics**: Returns `#t` if the string starts with the given prefix, `#f` otherwise.
+**Semantics**: Returns `true` if the string starts with the given prefix, `false` otherwise.
 
 **Usage**:
 ```lisp
 (string-starts-with? "hello" "hel")
-⟹ #t
+⟹ true
 
 (string-starts-with? "hello" "world")
-⟹ #f
+⟹ false
 
 (string-starts-with? "test" "")
-⟹ #t
+⟹ true
 ```
 
 ### `string-ends-with?` (Ends With Suffix)
 
-**Semantics**: Returns `#t` if the string ends with the given suffix, `#f` otherwise.
+**Semantics**: Returns `true` if the string ends with the given suffix, `false` otherwise.
 
 **Usage**:
 ```lisp
 (string-ends-with? "hello" "llo")
-⟹ #t
+⟹ true
 
 (string-ends-with? "hello" "world")
-⟹ #f
+⟹ false
 
 (string-ends-with? "test" "")
-⟹ #t
+⟹ true
 ```
 
 ### `string-join` (Join Strings)
@@ -846,91 +846,91 @@ See `docs/types.md` for the complete type system reference.
 
 ### `nil?` (Is Nil)
 
-**Semantics**: Returns `#t` if value is nil.
+**Semantics**: Returns `true` if value is nil.
 
 **Usage**:
 ```lisp
 (nil? nil)
-⟹ #t
+⟹ true
 
 (nil? (list))
-⟹ #f
+⟹ false
 
 (nil? 0)
-⟹ #f
+⟹ false
 
-(nil? #f)
-⟹ #f
+(nil? false)
+⟹ false
 ```
 
 ### `number?` (Is Number)
 
-**Semantics**: Returns `#t` if value is a number (int or float).
+**Semantics**: Returns `true` if value is a number (int or float).
 
 **Usage**:
 ```lisp
 (number? 5)
-⟹ #t
+⟹ true
 
 (number? 3.14)
-⟹ #t
+⟹ true
 
 (number? "5")
-⟹ #f
+⟹ false
 
-(number? #t)
-⟹ #f
+(number? true)
+⟹ false
 ```
 
 ### `string?` (Is String)
 
-**Semantics**: Returns `#t` if value is a string.
+**Semantics**: Returns `true` if value is a string.
 
 **Usage**:
 ```lisp
 (string? "hello")
-⟹ #t
+⟹ true
 
 (string? 42)
-⟹ #f
+⟹ false
 
 (string? 'symbol)
-⟹ #f
+⟹ false
 ```
 
 ### `symbol?` (Is Symbol)
 
-**Semantics**: Returns `#t` if value is a symbol.
+**Semantics**: Returns `true` if value is a symbol.
 
 **Usage**:
 ```lisp
 (symbol? 'x)
-⟹ #t
+⟹ true
 
 (symbol? "x")
-⟹ #f
+⟹ false
 
 (symbol? 42)
-⟹ #f
+⟹ false
 ```
 
 ### `pair?` (Is List/Pair)
 
-**Semantics**: Returns `#t` if value is a list or cons cell.
+**Semantics**: Returns `true` if value is a list or cons cell.
 
 **Usage**:
 ```lisp
 (pair? (list 1 2))
-⟹ #t
+⟹ true
 
 (pair? (cons 1 2))
-⟹ #t
+⟹ true
 
 (pair? nil)
-⟹ #f
+⟹ false
 
 (pair? 5)
-⟹ #f
+⟹ false
 ```
 
 ---
@@ -1222,21 +1222,21 @@ Tables are mutable hash maps. Keys and values can be any type.
 (var t (table 1 "a" 2 "b"))
 (del t 1)
 (has-key? t 1)
-⟹ #f
+⟹ false
 ```
 
 ### `has-key?` (Has Key)
 
-**Semantics**: Returns `#t` if key exists in table.
+**Semantics**: Returns `true` if key exists in table.
 
 **Usage**:
 ```lisp
 (var t (table "x" 10))
 (has-key? t "x")
-⟹ #t
+⟹ true
 
 (has-key? t "y")
-⟹ #f
+⟹ false
 ```
 
 ### `keys` (Get All Keys)
@@ -1316,21 +1316,21 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 (var s (struct "a" 1 "b" 2))
 (var s2 (struct-del s "a"))
 (struct-has? s2 "a")
-⟹ #f
+⟹ false
 ```
 
 ### `struct-has?` (Has Key)
 
-**Semantics**: Returns `#t` if key exists.
+**Semantics**: Returns `true` if key exists.
 
 **Usage**:
 ```lisp
 (var s (struct "name" "Alice"))
 (struct-has? s "name")
-⟹ #t
+⟹ true
 
 (struct-has? s "age")
-⟹ #f
+⟹ false
 ```
 
 ### `struct-keys` (Get All Keys)
@@ -1531,7 +1531,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 ```lisp
 (spit "output.txt" "File content")
 (file-exists? "output.txt")
-⟹ #t
+⟹ true
 ```
 
 ### `append-file` (Append to File)
@@ -1546,43 +1546,43 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 ### `file-exists?` (Check File Exists)
 
-**Semantics**: Returns `#t` if file exists.
+**Semantics**: Returns `true` if file exists.
 
 **Usage**:
 ```lisp
 (spit "temp.txt" "data")
 (file-exists? "temp.txt")
-⟹ #t
+⟹ true
 
 (file-exists? "nonexistent.txt")
-⟹ #f
+⟹ false
 ```
 
 ### `file?` (Is File)
 
-**Semantics**: Returns `#t` if path is a regular file.
+**Semantics**: Returns `true` if path is a regular file.
 
 **Usage**:
 ```lisp
 (write-file "test.txt" "content")
 (file? "test.txt")
-⟹ #t
+⟹ true
 
 (file? ".")
-⟹ #f
+⟹ false
 ```
 
 ### `directory?` (Is Directory)
 
-**Semantics**: Returns `#t` if path is a directory.
+**Semantics**: Returns `true` if path is a directory.
 
 **Usage**:
 ```lisp
 (directory? ".")
-⟹ #t
+⟹ true
 
 (directory? "/nonexistent")
-⟹ #f
+⟹ false
 ```
 
 ### `delete-file` (Delete File)
@@ -1594,7 +1594,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 (write-file "delete_me.txt" "temp")
 (delete-file "delete_me.txt")
 (file-exists? "delete_me.txt")
-⟹ #f
+⟹ false
 ```
 
 ### `create-directory` (Create Directory)
@@ -1605,7 +1605,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 ```lisp
 (create-directory "newdir")
 (directory? "newdir")
-⟹ #t
+⟹ true
 ```
 
 ### `create-directory-all` (Create Directory Tree)
@@ -1616,7 +1616,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 ```lisp
 (create-directory-all "a/b/c")
 (directory? "a/b/c")
-⟹ #t
+⟹ true
 ```
 
 ### `delete-directory` (Delete Directory)
@@ -1628,7 +1628,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 (create-directory "toremove")
 (delete-directory "toremove")
 (directory? "toremove")
-⟹ #f
+⟹ false
 ```
 
 ### `file-size` (Get File Size)
@@ -1753,7 +1753,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 (write-file "old.txt" "content")
 (rename-file "old.txt" "new.txt")
 (file-exists? "new.txt")
-⟹ #t
+⟹ true
 ```
 
 ### `copy-file` (Copy File)
@@ -1765,7 +1765,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 (write-file "original.txt" "data")
 (copy-file "original.txt" "copy.txt")
 (file-exists? "copy.txt")
-⟹ #t
+⟹ true
 ```
 
 ### `read-lines` (Read File Lines)
@@ -1829,7 +1829,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 (let ((t1 (clock/monotonic)))
   (time/sleep 0.1)
   (- (clock/monotonic) t1))
-⟹ 0.100... ; approximately 0.1 seconds
+⟹ 0.100... # approximately 0.1 seconds
 ```
 
 ### `clock/realtime` (Wall Clock)
@@ -1848,9 +1848,9 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 **Usage**:
 ```lisp
-(time/sleep 1)       ; sleep 1 second
-(time/sleep 0.5)     ; sleep 500 milliseconds
-(time/sleep 0.001)   ; sleep 1 millisecond
+(time/sleep 1)       # sleep 1 second
+(time/sleep 0.5)     # sleep 500 milliseconds
+(time/sleep 0.001)   # sleep 1 millisecond
 ```
 
 ### `time/elapsed` (Measure Elapsed Time)
@@ -1895,7 +1895,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 (display "Hello")
 (display 42)
 (display (list 1 2 3))
-; Output: Hello42(1 2 3)
+# Output: Hello42(1 2 3)
 ```
 
 ### `newline` (Print Newline)
@@ -1908,9 +1908,9 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 (newline)
 (display "Line 2")
 (newline)
-; Output:
-; Line 1
-; Line 2
+# Output:
+# Line 1
+# Line 2
 ```
 
 ### `debug-print` (Debug Output)
@@ -1920,7 +1920,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 **Usage**:
 ```lisp
 (debug-print "value" 42)
-; Output: value: 42 (type: int)
+# Output: value: 42 (type: int)
 ```
 
 ### `trace` (Trace Value)
@@ -1930,11 +1930,11 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 **Usage**:
 ```lisp
 (trace "x" 42)
-; Prints: [TRACE] x: 42
+# Prints: [TRACE] x: 42
 ⟹ 42
 
 (trace "result" (+ 1 2))
-; Prints: [TRACE] result: 3
+# Prints: [TRACE] result: 3
 ⟹ 3
 ```
 
@@ -1974,7 +1974,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 ⟹ :foo
 
 (= (string->keyword "bar") (string->keyword "bar"))
-⟹ #t
+⟹ true
 ```
 
 ### `call-count` (Closure Call Count)
@@ -1991,15 +1991,15 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 
 ### `global?` (Global Binding Check)
 
-**Semantics**: Returns `#t` if a symbol is bound as a global, `#f` otherwise.
+**Semantics**: Returns `true` if a symbol is bound as a global, `false` otherwise.
 
 **Usage**:
 ```lisp
 (global? '+)
-⟹ #t
+⟹ true
 
 (global? 'nonexistent)
-⟹ #f
+⟹ false
 ```
 
 ---
@@ -2013,7 +2013,7 @@ Structs are immutable hash maps. Similar to tables but cannot be modified.
 **Usage**:
 ```lisp
 (load-library "libc")
-; Loads C standard library
+# Loads C standard library
 ```
 
 ### `call-c-function` (Call C Function)
@@ -2062,7 +2062,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 
 **Type Mapping**:
 - JSON `null` → Elle `nil`
-- JSON `true` / `false` → Elle `#t` / `#f`
+- JSON `true` / `false` → Elle `true` / `false`
 - JSON integer → Elle `Int`
 - JSON float → Elle `Float`
 - JSON string → Elle `String`
@@ -2081,7 +2081,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 ⟹ nil
 
 (json-parse "true")
-⟹ #t
+⟹ true
 
 (json-parse "42")
 ⟹ 42
@@ -2098,13 +2098,13 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 (json-parse "{\"name\": \"Alice\", \"age\": 30}")
 ⟹ #<table String("age")=30 String("name")="Alice">
 
-; Access parsed object fields
+# Access parsed object fields
 (var user (json-parse "{\"name\": \"Bob\", \"active\": true}"))
 (get user "name")
 ⟹ "Bob"
 
 (get user "active")
-⟹ #t
+⟹ true
 ```
 
 **Errors**:
@@ -2120,7 +2120,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 
 **Type Mapping**:
 - Elle `nil` → JSON `null`
-- Elle `#t` / `#f` → JSON `true` / `false`
+- Elle `true` / `false` → JSON `true` / `false`
 - Elle `Int` → JSON number
 - Elle `Float` → JSON number (always includes decimal point)
 - Elle `String` → JSON string with proper escaping
@@ -2134,7 +2134,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 (json-serialize nil)
 ⟹ "null"
 
-(json-serialize #t)
+(json-serialize true)
 ⟹ "true"
 
 (json-serialize 42)
@@ -2181,7 +2181,7 @@ JSON parsing and serialization for working with JSON data. All JSON primitives a
 (var user (table))
 (put user "name" "Alice")
 (put user "age" 30)
-(put user "active" #t)
+(put user "active" true)
 
 (json-serialize-pretty user)
 ⟹ "{
@@ -2216,15 +2216,15 @@ Parse JSON, modify, and serialize back:
 (var original "{\"product\": \"Widget\", \"price\": 19.99}")
 (var parsed (json-parse original))
 
-; Modify the parsed data
+# Modify the parsed data
 (put parsed "price" 24.99)
 (put parsed "discount" 0.1)
 
-; Serialize back to JSON
+# Serialize back to JSON
 (json-serialize parsed)
 ⟹ "{\"discount\":0.1,\"price\":24.99,\"product\":\"Widget\"}"
 
-; Pretty print for readability
+# Pretty print for readability
 (json-serialize-pretty parsed)
 ⟹ "{
   \"discount\": 0.1,
@@ -2243,8 +2243,8 @@ Parse JSON, modify, and serialize back:
 
 **Usage**:
 ```lisp
-(halt)         ; halt, return nil
-(halt value)   ; halt, return value
+(halt)         # halt, return nil
+(halt value)   # halt, return value
 ```
 
 **Examples**:
@@ -2267,7 +2267,7 @@ Parse JSON, modify, and serialize back:
 **Usage**:
 ```lisp
 (import-file "utils.lisp")
-; Loads definitions from utils.lisp
+# Loads definitions from utils.lisp
 ```
 
 ### `add-module-path` (Add Module Search Path)
@@ -2278,7 +2278,7 @@ Parse JSON, modify, and serialize back:
 ```lisp
 (add-module-path "lib")
 (import-file "mymodule")
-; Searches for mymodule in lib/
+# Searches for mymodule in lib/
 ```
 
 ### `package-version` (Get Package Version)
@@ -2307,21 +2307,21 @@ Parse JSON, modify, and serialize back:
 
 **Usage**:
 ```lisp
-(expand-macro '(when #t (display "yes")))
-⟹ (if #t (begin (display "yes")))
+(expand-macro '(when true (display "yes")))
+⟹ (if true (begin (display "yes")))
 ```
 
 ### `macro?` (Is Macro)
 
-**Semantics**: Returns `#t` if value is a macro.
+**Semantics**: Returns `true` if value is a macro.
 
 **Usage**:
 ```lisp
 (macro? when)
-⟹ #t
+⟹ true
 
 (macro? +)
-⟹ #f
+⟹ false
 ```
 
 ## Condition System
@@ -2346,7 +2346,7 @@ The condition system provides sophisticated error handling beyond simple excepti
   (message "Network error")
   (url "")
   (status-code 0)
-  (retry #f))
+  (retry false))
 ```
 
 ### `define-handler` (Register Condition Handler)
@@ -2431,13 +2431,13 @@ Validation Error: Invalid email format
 ### Example: Input Validation System
 
 ```lisp
-; Define validation conditions
+# Define validation conditions
 (var-condition :field-error
   (message "Field validation failed")
   (field "unknown")
   (constraint "unknown"))
 
-; Register multiple handlers
+# Register multiple handlers
 (var-handler :field-error
   (lambda (c)
     (display "ERROR: ")
@@ -2452,7 +2452,7 @@ Validation Error: Invalid email format
     (display (condition-get c 'constraint'))
     (newline)))
 
-; Validation function
+# Validation function
 (def (validate-email email)
   (unless (string-contains? email "@")
     (signal :field-error
@@ -2460,7 +2460,7 @@ Validation Error: Invalid email format
       :field "email"
       :constraint "valid email format")))
 
-; Use it
+# Use it
 (validate-email "bad-email")
 ```
 
@@ -2474,20 +2474,20 @@ ERROR: email - Must contain @
 
 ## Notes on Semantics
 
-- **Truthiness**: In Elle, `#f` (false) and `nil` are falsy; all other values including the empty list `()` are truthy.
+- **Truthiness**: In Elle, `false` (false) and `nil` are falsy# all other values including the empty list `()` are truthy.
 - **List Semantics**: Lists are represented as cons cells terminated by `()` (the empty list). Note that `nil` and `()` are distinct values:
   - `nil` - Represents absence of value, used for "no result" or undefined. It is **falsy**.
   - `()` - The empty list. It is a valid list value and is **truthy**.
-- **Numeric Types**: Operations work with both integers and floats; results may be promoted to float.
+- **Numeric Types**: Operations work with both integers and floats# results may be promoted to float.
 - **Error Handling**: Primitives return `Result<Value, String>` errors caught by the VM.
-- **Mutability**: Tables and vectors are mutable; structs and lists are immutable.
+- **Mutability**: Tables and vectors are mutable# structs and lists are immutable.
 
 ---
 
 ## Known Limitations
 
 - **Higher-Order Functions**: Currying and function factories have issues with environment capture (Issues #77, #78)
-- **Macro System**: Limited macro support; gensym for hygiene not fully implemented
-- **FFI**: FFI operations require careful type handling; not all C types fully supported
+- **Macro System**: Limited macro support# gensym for hygiene not fully implemented
+- **FFI**: FFI operations require careful type handling# not all C types fully supported
 
 See the main README for more information and examples.

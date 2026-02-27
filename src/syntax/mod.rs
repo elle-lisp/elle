@@ -90,7 +90,8 @@ impl Syntax {
             }
             SyntaxKind::Quasiquote(inner)
             | SyntaxKind::Unquote(inner)
-            | SyntaxKind::UnquoteSplicing(inner) => {
+            | SyntaxKind::UnquoteSplicing(inner)
+            | SyntaxKind::Splice(inner) => {
                 inner.set_scopes_recursive(scopes);
             }
             // Atoms don't have children to recurse into
@@ -147,6 +148,7 @@ impl Syntax {
             SyntaxKind::Quasiquote(_) => "quasiquote",
             SyntaxKind::Unquote(_) => "unquote",
             SyntaxKind::UnquoteSplicing(_) => "unquote-splicing",
+            SyntaxKind::Splice(_) => "splice",
             SyntaxKind::SyntaxLiteral(_) => "syntax-literal",
         }
     }
@@ -179,6 +181,9 @@ pub enum SyntaxKind {
     Quasiquote(Box<Syntax>),
     Unquote(Box<Syntax>),
     UnquoteSplicing(Box<Syntax>),
+    /// Splice form: `;expr` or `(splice expr)`. Marks a value for
+    /// array-spreading at call sites and data constructors.
+    Splice(Box<Syntax>),
 
     /// Internal: pre-computed Value literal for macro argument passing.
     /// Never produced by the reader. The analyzer handles this by producing
@@ -372,7 +377,7 @@ mod tests {
         let span = Span::new(0, 5, 1, 1);
         let inner = Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone());
         let syntax = Syntax::new(SyntaxKind::UnquoteSplicing(Box::new(inner)), span);
-        assert_eq!(syntax.to_string(), ",@x");
+        assert_eq!(syntax.to_string(), ",;x");
     }
 
     #[test]

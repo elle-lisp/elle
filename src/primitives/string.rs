@@ -588,7 +588,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert string to uppercase.",
         params: &["s"],
         category: "string",
-        example: "(string/upcase \"hello\") ;=> \"HELLO\"",
+        example: "(string/upcase \"hello\") #=> \"HELLO\"",
         aliases: &["string-upcase"],
     },
     PrimitiveDef {
@@ -599,7 +599,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert string to lowercase.",
         params: &["s"],
         category: "string",
-        example: "(string/downcase \"HELLO\") ;=> \"hello\"",
+        example: "(string/downcase \"HELLO\") #=> \"hello\"",
         aliases: &["string-downcase"],
     },
     PrimitiveDef {
@@ -610,7 +610,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Extract substring from start to end (exclusive). End defaults to string length.",
         params: &["s", "start", "end"],
         category: "string",
-        example: "(string/slice \"hello\" 1 4) ;=> \"ell\"",
+        example: "(string/slice \"hello\" 1 4) #=> \"ell\"",
         aliases: &["substring"],
     },
     PrimitiveDef {
@@ -621,7 +621,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Find index of first occurrence of substring. Returns nil if not found.",
         params: &["s", "substr"],
         category: "string",
-        example: "(string/index \"hello\" \"l\") ;=> 2",
+        example: "(string/index \"hello\" \"l\") #=> 2",
         aliases: &["string-index"],
     },
     PrimitiveDef {
@@ -632,7 +632,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Get character at index as a single-character string.",
         params: &["s", "idx"],
         category: "string",
-        example: "(string/char-at \"hello\" 1) ;=> \"e\"",
+        example: "(string/char-at \"hello\" 1) #=> \"e\"",
         aliases: &["char-at"],
     },
     PrimitiveDef {
@@ -643,7 +643,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Split string by delimiter, returning a list of substrings.",
         params: &["s", "delim"],
         category: "string",
-        example: "(string/split \"a,b,c\" \",\") ;=> (\"a\" \"b\" \"c\")",
+        example: "(string/split \"a,b,c\" \",\") #=> (\"a\" \"b\" \"c\")",
         aliases: &["string-split"],
     },
     PrimitiveDef {
@@ -654,7 +654,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Replace all occurrences of old substring with new.",
         params: &["s", "old", "new"],
         category: "string",
-        example: "(string/replace \"hello\" \"l\" \"L\") ;=> \"heLLo\"",
+        example: "(string/replace \"hello\" \"l\" \"L\") #=> \"heLLo\"",
         aliases: &["string-replace"],
     },
     PrimitiveDef {
@@ -665,7 +665,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Remove leading and trailing whitespace.",
         params: &["s"],
         category: "string",
-        example: "(string/trim \"  hello  \") ;=> \"hello\"",
+        example: "(string/trim \"  hello  \") #=> \"hello\"",
         aliases: &["string-trim"],
     },
     PrimitiveDef {
@@ -676,7 +676,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if string contains substring.",
         params: &["s", "substr"],
         category: "string",
-        example: "(string/contains? \"hello\" \"ell\") ;=> true",
+        example: "(string/contains? \"hello\" \"ell\") #=> true",
         aliases: &["string-contains?"],
     },
     PrimitiveDef {
@@ -687,7 +687,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if string starts with prefix.",
         params: &["s", "prefix"],
         category: "string",
-        example: "(string/starts-with? \"hello\" \"he\") ;=> true",
+        example: "(string/starts-with? \"hello\" \"he\") #=> true",
         aliases: &["string-starts-with?"],
     },
     PrimitiveDef {
@@ -698,7 +698,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Check if string ends with suffix.",
         params: &["s", "suffix"],
         category: "string",
-        example: "(string/ends-with? \"hello\" \"lo\") ;=> true",
+        example: "(string/ends-with? \"hello\" \"lo\") #=> true",
         aliases: &["string-ends-with?"],
     },
     PrimitiveDef {
@@ -709,7 +709,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Join list of strings with separator.",
         params: &["lst", "sep"],
         category: "string",
-        example: "(string/join (list \"a\" \"b\" \"c\") \",\") ;=> \"a,b,c\"",
+        example: "(string/join (list \"a\" \"b\" \"c\") \",\") #=> \"a,b,c\"",
         aliases: &["string-join"],
     },
 ];

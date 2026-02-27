@@ -30,6 +30,13 @@ impl Hir {
     }
 }
 
+/// A function call argument, which may be spliced (spread).
+#[derive(Debug, Clone)]
+pub struct CallArg {
+    pub expr: Hir,
+    pub spliced: bool,
+}
+
 /// Unique identifier for a named/anonymous block, used by `break` to target
 /// the correct block at compile time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -116,7 +123,7 @@ pub enum HirKind {
     /// Function call
     Call {
         func: Box<Hir>,
-        args: Vec<Hir>,
+        args: Vec<CallArg>,
         is_tail: bool,
     },
 

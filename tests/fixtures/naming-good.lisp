@@ -1,4 +1,4 @@
-; Good naming conventions
+# Good naming conventions
 
 (var square 42)
 (var my-variable 10)
