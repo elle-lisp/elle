@@ -89,6 +89,12 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::Eval => {
                 // No operands — pops 2 from stack, pushes 1
             }
+            Instruction::ArrayExtend | Instruction::ArrayPush => {
+                // No operands
+            }
+            Instruction::CallArray | Instruction::TailCallArray => {
+                // No operands (arg count is dynamic, determined by array length)
+            }
             _ => {}
         }
 

@@ -6,7 +6,7 @@ use super::token::{SourceLoc, Token, TokenWithLoc};
 fn is_delimiter(c: char) -> bool {
     matches!(
         c,
-        '(' | ')' | '[' | ']' | '{' | '}' | '\'' | '`' | ',' | ':' | '@'
+        '(' | ')' | '[' | ']' | '{' | '}' | '\'' | '`' | ',' | ':' | '@' | ';'
     )
 }
 
@@ -103,7 +103,7 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.current() {
             if c.is_whitespace() {
                 self.advance();
-            } else if c == ';' {
+            } else if c == '#' {
                 // Skip comment until newline
                 while let Some(c) = self.advance() {
                     if c == '\n' {
@@ -273,7 +273,7 @@ impl<'a> Lexer<'a> {
             }
             Some(',') => {
                 self.advance();
-                if self.current() == Some('@') {
+                if self.current() == Some(';') {
                     self.advance();
                     Ok(Some(TokenWithLoc {
                         token: Token::UnquoteSplicing,
@@ -287,6 +287,14 @@ impl<'a> Lexer<'a> {
                         len: self.pos - start_pos,
                     }))
                 }
+            }
+            Some(';') => {
+                self.advance();
+                Ok(Some(TokenWithLoc {
+                    token: Token::Splice,
+                    loc,
+                    len: self.pos - start_pos,
+                }))
             }
             Some('@') => {
                 self.advance();
@@ -346,28 +354,7 @@ impl<'a> Lexer<'a> {
                     Ok(Some(TokenWithLoc { token, loc, len }))
                 }
             }
-            Some('#') => {
-                self.advance();
-                match self.current() {
-                    Some('t') => {
-                        self.advance();
-                        Ok(Some(TokenWithLoc {
-                            token: Token::Bool(true),
-                            loc,
-                            len: self.pos - start_pos,
-                        }))
-                    }
-                    Some('f') => {
-                        self.advance();
-                        Ok(Some(TokenWithLoc {
-                            token: Token::Bool(false),
-                            loc,
-                            len: self.pos - start_pos,
-                        }))
-                    }
-                    _ => Err("Invalid # syntax".to_string()),
-                }
-            }
+
             Some(_) => {
                 let (start, end) = self.read_symbol();
                 let sym = self.slice(start, end);
@@ -424,16 +411,6 @@ mod tests {
     #[test]
     fn false_word_lexes_as_bool() {
         assert!(matches!(lex_single("false"), Token::Bool(false)));
-    }
-
-    #[test]
-    fn hash_t_lexes_as_bool() {
-        assert!(matches!(lex_single("#t"), Token::Bool(true)));
-    }
-
-    #[test]
-    fn hash_f_lexes_as_bool() {
-        assert!(matches!(lex_single("#f"), Token::Bool(false)));
     }
 
     #[test]

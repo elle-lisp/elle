@@ -12,7 +12,7 @@ This document describes the implemented system.
 
 ```rust
 pub struct Fiber {
-    pub stack: SmallVec<[Value; 256]>,       // operand stack
+    pub stack: SmallVec<[Value# 256]>,       // operand stack
     pub frames: Vec<Frame>,                   // call frames (closure + ip + base)
     pub status: FiberStatus,                  // New, Alive, Suspended, Dead, Error
     pub mask: SignalBits,                     // which signals parent catches from this fiber
@@ -94,14 +94,14 @@ Set at creation time, immutable after. The **caller** decides what to
 handle, not the callee.
 
 ```lisp
-;; Create a fiber that catches errors from its closure
-(fiber/new my-fn 1)  ; mask = SIG_ERROR
+;# Create a fiber that catches errors from its closure
+(fiber/new my-fn 1)  # mask = SIG_ERROR
 
-;; Create a fiber that catches yields
-(fiber/new my-fn 2)  ; mask = SIG_YIELD
+;# Create a fiber that catches yields
+(fiber/new my-fn 2)  # mask = SIG_YIELD
 
-;; Create a fiber that catches both
-(fiber/new my-fn 3)  ; mask = SIG_ERROR | SIG_YIELD
+;# Create a fiber that catches both
+(fiber/new my-fn 3)  # mask = SIG_ERROR | SIG_YIELD
 ```
 
 
@@ -198,7 +198,7 @@ pub struct VM {
 The VM owns the currently executing fiber directly — no `Rc`/`RefCell`
 overhead in the hot path. Suspended fibers are wrapped in `FiberHandle`
 when stored as values. On resume, the child is swapped in via
-`FiberHandle::take()`; on suspend, swapped out via `FiberHandle::put()`.
+`FiberHandle::take()`# on suspend, swapped out via `FiberHandle::put()`.
 
 
 ## Parent/Child Chain
@@ -220,7 +220,7 @@ also suspends. The entire chain from signaler to eventual handler freezes.
 Each fiber in the chain is suspended and inspectable.
 
 Walk `fiber/child` to find the originating fiber. The originator's
-`fiber/value` has the payload; intermediaries store `(bits, NIL)`.
+`fiber/value` has the payload# intermediaries store `(bits, NIL)`.
 
 
 ## Fiber Primitives
@@ -228,7 +228,7 @@ Walk `fiber/child` to find the originating fiber. The originator's
 | Primitive | Signature | Purpose |
 |-----------|-----------|---------|
 | `fiber/new` | `(fn mask) → fiber` | Create fiber from closure with signal mask |
-| `fiber/resume` | `(fiber value) → value` | Resume fiber, delivering a value; returns signal value |
+| `fiber/resume` | `(fiber value) → value` | Resume fiber, delivering a value# returns signal value |
 | `fiber/signal` | `(bits value) → (suspends)` | Emit signal from current fiber |
 | `fiber/status` | `(fiber) → keyword` | `:new`, `:alive`, `:suspended`, `:dead`, `:error` |
 | `fiber/value` | `(fiber) → value` | Signal payload or return value |
@@ -253,10 +253,10 @@ yields:
 
 ```lisp
 (def gen (fiber/new (fn () (yield 1) (yield 2) (yield 3)) 2))
-(fiber/resume gen nil)  ; → SIG_YIELD, (fiber/value gen) → 1
-(fiber/resume gen nil)  ; → SIG_YIELD, (fiber/value gen) → 2
-(fiber/resume gen nil)  ; → SIG_YIELD, (fiber/value gen) → 3
-(fiber/resume gen nil)  ; → SIG_OK, (fiber/value gen) → nil
+(fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 1
+(fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 2
+(fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 3
+(fiber/resume gen nil)  # → SIG_OK, (fiber/value gen) → nil
 ```
 
 Legacy coroutine primitives (`coro/new`, `coro/resume`,
@@ -266,7 +266,7 @@ Legacy coroutine primitives (`coro/new`, `coro/resume`,
 ## Error Handling
 
 Errors are values: `[:keyword "message"]` tuples. `error_val(kind, msg)`
-constructs them; `format_error(value)` extracts human-readable text.
+constructs them# `format_error(value)` extracts human-readable text.
 
 There is no `Condition` type, no exception hierarchy, no `handler-case`.
 Error handling is signal handling:
@@ -296,7 +296,7 @@ An uncaught `SIG_ERROR` at the root fiber is terminal by convention.
 
 Closures carry an `Effect` with signal bits describing what they might emit.
 The fiber's mask determines which signals are caught. The effect system is
-compile-time; signals are runtime. Same bitfield, different timing.
+compile-time# signals are runtime. Same bitfield, different timing.
 
 See `docs/effects.md` for the effect system design.
 

@@ -1,4 +1,4 @@
-// Integration tests for boolean literals (true/false and legacy #t/#f)
+// Integration tests for boolean literals (true/false)
 use crate::common::eval_source;
 use elle::Value;
 
@@ -10,16 +10,6 @@ fn test_true_literal() {
 #[test]
 fn test_false_literal() {
     assert_eq!(eval_source("false").unwrap(), Value::FALSE);
-}
-
-#[test]
-fn test_true_equals_hash_t() {
-    assert_eq!(eval_source("(= true #t)").unwrap(), Value::TRUE);
-}
-
-#[test]
-fn test_false_equals_hash_f() {
-    assert_eq!(eval_source("(= false #f)").unwrap(), Value::TRUE);
 }
 
 #[test]
@@ -40,14 +30,6 @@ fn test_boolean_predicate_true() {
 #[test]
 fn test_boolean_predicate_false() {
     assert_eq!(eval_source("(boolean? false)").unwrap(), Value::TRUE);
-}
-
-#[test]
-fn test_match_true_with_hash_t_pattern() {
-    assert_eq!(
-        eval_source(r#"(match true (#t "yes") (#f "no"))"#).unwrap(),
-        Value::string("yes"),
-    );
 }
 
 #[test]
@@ -75,11 +57,6 @@ fn test_quoted_true_is_boolean() {
 #[test]
 fn test_read_true() {
     assert_eq!(eval_source(r#"(read "true")"#).unwrap(), Value::TRUE);
-}
-
-#[test]
-fn test_read_hash_t() {
-    assert_eq!(eval_source(r##"(read "#t")"##).unwrap(), Value::TRUE);
 }
 
 #[test]

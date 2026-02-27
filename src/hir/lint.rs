@@ -126,18 +126,21 @@ impl HirLinter {
             HirKind::Call { func, args, .. } => {
                 self.check(func, symbols);
                 for arg in args {
-                    self.check(arg, symbols);
+                    self.check(&arg.expr, symbols);
                 }
-                // Check arity if calling a known global
-                if let HirKind::Var(binding) = &func.kind {
-                    if binding.is_global() {
-                        rules::check_call_arity(
-                            binding.name(),
-                            args.len(),
-                            &loc,
-                            symbols,
-                            &mut self.diagnostics,
-                        );
+                // Check arity if calling a known global (skip if any spliced args)
+                let has_splice = args.iter().any(|a| a.spliced);
+                if !has_splice {
+                    if let HirKind::Var(binding) = &func.kind {
+                        if binding.is_global() {
+                            rules::check_call_arity(
+                                binding.name(),
+                                args.len(),
+                                &loc,
+                                symbols,
+                                &mut self.diagnostics,
+                            );
+                        }
                     }
                 }
             }

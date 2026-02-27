@@ -543,7 +543,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["name"],
         category: "meta",
         example:
-            "(struct-get (vm/primitive-meta \"cons\") \"doc\") ;=> \"Construct a cons cell...\"",
+            "(struct-get (vm/primitive-meta \"cons\") \"doc\") #=> \"Construct a cons cell...\"",
         aliases: &["primitive-meta"],
     },
 ];

@@ -1,24 +1,24 @@
-; Coroutines Example - Comprehensive Test Suite
-;
-; This example exercises all coroutine functionality in Elle:
-; - coro/new: Create a coroutine from a closure
-; - coro/resume: Resume execution, optionally passing a value
-; - coro/status: Get current state (created/running/suspended/done/error)
-; - coro/done?: Check if coroutine has completed
-; - coro/value: Get the last yielded/returned value
-; - coro?: Type predicate
-; - yield: Suspend execution and return a value
-; - Generator patterns
-; - Nested coroutines
-; - Interleaving coroutines
-; - Practical use cases
+# Coroutines Example - Comprehensive Test Suite
+#
+# This example exercises all coroutine functionality in Elle:
+# - coro/new: Create a coroutine from a closure
+# - coro/resume: Resume execution, optionally passing a value
+# - coro/status: Get current state (created/running/suspended/done/error)
+# - coro/done?: Check if coroutine has completed
+# - coro/value: Get the last yielded/returned value
+# - coro?: Type predicate
+# - yield: Suspend execution and return a value
+# - Generator patterns
+# - Nested coroutines
+# - Interleaving coroutines
+# - Practical use cases
 
 (import-file "./examples/assertions.lisp")
 
 
-; ========================================
-; 1. Basic coroutine creation and yield
-; ========================================
+# ========================================
+# 1. Basic coroutine creation and yield
+# ========================================
 (display "=== 1. Basic Coroutine Creation ===\n")
 
 (def simple-gen (fn () (yield 42)))
@@ -33,9 +33,9 @@
 (assert-true (coro/done? co) "coro/done? returns true after completion")
 (display "✓ Basic coroutine creation and yield\n")
 
-; ========================================
-; 2. Multiple yields
-; ========================================
+# ========================================
+# 2. Multiple yields
+# ========================================
 (display "\n=== 2. Multiple Yields ===\n")
 
 (def multi-gen (fn ()
@@ -50,9 +50,9 @@
 (assert-eq (coro/status co-multi) :suspended "Suspended after final yield")
 (display "✓ Multiple yields work correctly\n")
 
-; ========================================
-; 3. Coroutine with closure captures (Issue #258)
-; ========================================
+# ========================================
+# 3. Coroutine with closure captures (Issue #258)
+# ========================================
 (display "\n=== 3. Closure Captures ===\n")
 
 (def make-counter (fn (start)
@@ -72,9 +72,9 @@
 (assert-eq (coro/resume co-200) 202 "Counter 200 third")
 (display "✓ Closure captures preserved across yields\n")
 
-; ========================================
-; 4. Interleaved coroutines (Issue #259)
-; ========================================
+# ========================================
+# 4. Interleaved coroutines (Issue #259)
+# ========================================
 (display "\n=== 4. Interleaved Coroutines ===\n")
 
 (def gen-a (fn () (yield 1) (yield 2) (yield 3)))
@@ -82,7 +82,7 @@
 (var co-a (coro/new gen-a))
 (var co-b (coro/new gen-b))
 
-; Interleave resumes
+# Interleave resumes
 (assert-eq (coro/resume co-a) 1 "A first")
 (assert-eq (coro/resume co-b) 10 "B first")
 (assert-eq (coro/status co-a) :suspended "A suspended")
@@ -93,9 +93,9 @@
 (assert-eq (coro/resume co-b) 30 "B third")
 (display "✓ Interleaved coroutines maintain independent state\n")
 
-; ========================================
-; 5. Quoted symbols in yield (Issue #260 - FIXED)
-; ========================================
+# ========================================
+# 5. Quoted symbols in yield (Issue #260 - FIXED)
+# ========================================
 (display "\n=== 5. Quoted Symbols ===\n")
 
 (def symbol-gen (fn ()
@@ -115,9 +115,9 @@
 (assert-true (list? lst) "Yielded list is a list")
 (display "✓ Quoted symbols and lists yield correctly\n")
 
-; ========================================
-; 6. Coroutine value tracking
-; ========================================
+# ========================================
+# 6. Coroutine value tracking
+# ========================================
 (display "\n=== 6. Coroutine Value ===\n")
 
 (def val-gen (fn () (yield 10) (yield 20)))
@@ -129,9 +129,9 @@
 (assert-eq (coro/value co-val) 20 "Value after second yield")
 (display "✓ coro/value tracks yielded/returned values\n")
 
-; ========================================
-; 7. Yield with expressions
-; ========================================
+# ========================================
+# 7. Yield with expressions
+# ========================================
 (display "\n=== 7. Yield with Expressions ===\n")
 
 (def expr-gen (fn ()
@@ -145,9 +145,9 @@
 (assert-eq (coro/resume co-expr) 100 "Conditional expression")
 (display "✓ Expressions evaluated before yield\n")
 
-; ========================================
-; 8. Nested coroutines
-; ========================================
+# ========================================
+# 8. Nested coroutines
+# ========================================
 (display "\n=== 8. Nested Coroutines ===\n")
 
 (def inner-gen (fn () (yield 100) (yield 200)))
@@ -161,14 +161,14 @@
 (assert-eq (coro/resume co-outer) 200 "Nested inner second")
 (display "✓ Nested coroutines work correctly\n")
 
-; ========================================
-; 9. Coroutine with local state
-; ========================================
+# ========================================
+# 9. Coroutine with local state
+# ========================================
 (display "\n=== 9. Local State ===\n")
 
-; Note: Local state preservation across yields is a complex feature
-; that requires careful handling of the execution environment.
-; This test documents the current behavior.
+# Note: Local state preservation across yields is a complex feature
+# that requires careful handling of the execution environment.
+# This test documents the current behavior.
 (def stateful-gen (fn ()
   (yield 10)
   (yield 20)
@@ -180,9 +180,9 @@
 (assert-eq (coro/resume co-state) 30 "Third yield")
 (display "✓ Coroutine state management works\n")
 
-; ========================================
-; 10. Generator pattern (counting)
-; ========================================
+# ========================================
+# 10. Generator pattern (counting)
+# ========================================
 (display "\n=== 10. Generator Pattern ===\n")
 
 (def count-gen (fn ()
@@ -200,9 +200,9 @@
 (assert-eq (coro/resume counter) 4 "Count 4")
 (display "✓ Generator pattern works\n")
 
-; ========================================
-; 11. Fibonacci sequence
-; ========================================
+# ========================================
+# 11. Fibonacci sequence
+# ========================================
 (display "\n=== 11. Fibonacci Sequence ===\n")
 
 (def fib-gen (fn ()
@@ -224,9 +224,9 @@
 (assert-eq (coro/resume fibs) 8 "Fib 6")
 (display "✓ Fibonacci sequence works\n")
 
-; ========================================
-; 12. Type predicate
-; ========================================
+# ========================================
+# 12. Type predicate
+# ========================================
 (display "\n=== 12. Type Predicate ===\n")
 
 (var test-co (coro/new (fn () (yield 1))))
@@ -236,9 +236,9 @@
 (assert-false (coro? '()) "Empty list is not a coroutine")
 (display "✓ coro? predicate works\n")
 
-; ========================================
-; Summary
-; ========================================
+# ========================================
+# Summary
+# ========================================
 (display "\n")
 (display "========================================\n")
 (display "All coroutine tests passed!\n")
@@ -280,13 +280,13 @@
 (display "========================================\n")
 (display "\n")
 
-; ========================================
-; ADVANCED COROUTINE FEATURES
-; ========================================
+# ========================================
+# ADVANCED COROUTINE FEATURES
+# ========================================
 
-; ========================================
-; 13. Generator pattern: Range generator
-; ========================================
+# ========================================
+# 13. Generator pattern: Range generator
+# ========================================
 (display "\n=== 14. Generator Pattern: Range ===\n")
 
 (def simple-range-gen (fn ()
@@ -315,9 +315,9 @@
 
 (display "✓ Range generator pattern works\n")
 
-; ========================================
-; 15. Generator pattern: Extended Fibonacci
-; ========================================
+# ========================================
+# 15. Generator pattern: Extended Fibonacci
+# ========================================
 (display "\n=== 15. Generator Pattern: Extended Fibonacci ===\n")
 
 (def fib-gen-extended (fn ()
@@ -355,9 +355,9 @@
 
 (display "✓ Fibonacci generator pattern works\n")
 
-; ========================================
-; 16. Nested coroutines (advanced)
-; ========================================
+# ========================================
+# 16. Nested coroutines (advanced)
+# ========================================
 (display "\n=== 16. Nested Coroutines (Advanced) ===\n")
 
 (def inner-nested-gen (fn ()
@@ -389,9 +389,9 @@
 
 (display "✓ Nested coroutines work correctly\n")
 
-; ========================================
-; 17. Interleaving coroutines (advanced)
-; ========================================
+# ========================================
+# 17. Interleaving coroutines (advanced)
+# ========================================
 (display "\n=== 17. Interleaving Coroutines (Advanced) ===\n")
 
 (def gen-a-adv (fn ()
@@ -431,9 +431,9 @@
 
 (display "✓ Interleaving coroutines works\n")
 
-; ========================================
-; 18. Coroutine with state (advanced)
-; ========================================
+# ========================================
+# 18. Coroutine with state (advanced)
+# ========================================
 (display "\n=== 18. Coroutine with State (Advanced) ===\n")
 
 (def stateful-gen-adv (fn ()
@@ -465,9 +465,9 @@
 
 (display "✓ Coroutine state tracking works\n")
 
-; ========================================
-; 19. Multiple coroutines from same generator
-; ========================================
+# ========================================
+# 19. Multiple coroutines from same generator
+# ========================================
 (display "\n=== 19. Multiple Coroutines from Same Generator ===\n")
 
 (def shared-gen-adv (fn ()
@@ -503,9 +503,9 @@
 
 (display "✓ Multiple independent coroutines work\n")
 
-; ========================================
-; 20. Coroutine completion detection (advanced)
-; ========================================
+# ========================================
+# 20. Coroutine completion detection (advanced)
+# ========================================
 (display "\n=== 20. Coroutine Completion Detection (Advanced) ===\n")
 
 (def short-gen-adv (fn ()
@@ -538,9 +538,9 @@
 
 (display "✓ Coroutine completion detection works\n")
 
-; ========================================
-; 21. Generator pattern: Counting (advanced)
-; ========================================
+# ========================================
+# 21. Generator pattern: Counting (advanced)
+# ========================================
 (display "\n=== 21. Generator Pattern: Counting (Advanced) ===\n")
 
 (def count-gen-adv (fn ()
@@ -569,9 +569,9 @@
 
 (display "✓ Counting generator works\n")
 
-; ========================================
-; 22. Generator pattern: Alphabet
-; ========================================
+# ========================================
+# 22. Generator pattern: Alphabet
+# ========================================
 (display "\n=== 22. Generator Pattern: Alphabet ===\n")
 
 (def alpha-gen (fn ()

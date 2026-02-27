@@ -37,11 +37,11 @@ The else branch is optional:
   "5 is greater")
 ⟹ "10 is greater"
 
-(if #t
+(if true
   (display "This prints"))
 ⟹ nil (else branch omitted, returns nil)
 
-(if #f
+(if false
   "not shown"
   "shown")
 ⟹ "shown"
@@ -56,7 +56,7 @@ The else branch is optional:
   (condition1 expression1)
   (condition2 expression2)
   ...
-  (#t fallback-expression))
+  (true fallback-expression))
 ```
 
 **Examples:**
@@ -67,17 +67,17 @@ The else branch is optional:
   ((> x 20) "x is large")
   ((> x 10) "x is medium")
   ((> x 5)  "x is small")
-  (#t       "x is tiny"))
+  (true       "x is tiny"))
 ⟹ "x is medium"
 ```
 
-The final `(#t ...)` clause acts as a catch-all (equivalent to `else`):
+The final `(true ...)` clause acts as a catch-all (equivalent to `else`):
 
 ```lisp
 (cond
   ((number? x) "It's a number")
   ((string? x) "It's a string")
-  (#t          "It's something else"))
+  (true          "It's something else"))
 ```
 
 
@@ -127,21 +127,21 @@ result ⟹ 30
 **Examples:**
 
 ```lisp
-; Simple block with scope isolation
+# Simple block with scope isolation
 (var x 100)
 (block
-  (var x 50)  ; Local to block, shadows outer x
-  (display x))  ; Prints: 50
-(display x)     ; Prints: 100
+  (var x 50)  # Local to block, shadows outer x
+  (display x))  # Prints: 50
+(display x)     # Prints: 100
 
-; Named block with break for early exit
+# Named block with break for early exit
 (var result (block :search
   (for item (list 1 2 3 4 5)
     (if (= item 3)
       (break :search "found it")))
   "not found"))
 
-result  ; ⟹ "found it"
+result  # ⟹ "found it"
 ```
 
 ---
@@ -183,24 +183,24 @@ While Elle emphasizes functional iteration, it also provides imperative loop con
 (forever body...)
 ```
 
-`forever` is syntactic sugar for `(while #t ...)`. It's useful for event loops or server loops that run until explicitly stopped.
+`forever` is syntactic sugar for `(while true ...)`. It's useful for event loops or server loops that run until explicitly stopped.
 
 **Examples:**
 
 ```lisp
-; Simple infinite loop (would need break to exit)
+# Simple infinite loop (would need break to exit)
 (forever
   (display "Running...")
   (newline))
 
-; Event loop pattern
-(var running #t)
+# Event loop pattern
+(var running true)
 (forever
   (process-event)
   (if (not running)
     (break)))
 
-; Multiple statements in body
+# Multiple statements in body
 (forever
   (display "Tick")
   (newline)
@@ -279,12 +279,12 @@ Elle emphasizes functional iteration patterns for processing collections. Use hi
 Process data through multiple transformations:
 
 ```lisp
-; Double all even numbers
+# Double all even numbers
 (map (fn (x) (* x 2))
   (filter even? (list 1 2 3 4 5 6)))
 ⟹ (4 8 12)
 
-; Sum of squares of positive numbers
+# Sum of squares of positive numbers
 (fold (fn (acc x) (+ acc (* x x)))
   0
   (filter (fn (x) (> x 0)) (list -2 3 -1 4 -5)))
@@ -403,7 +403,7 @@ The data parameter can be any value (typically a table with context):
   (table
     "code" 500
     "query" "SELECT * FROM users"
-    "retry" #t)))
+    "retry" true)))
 ```
 
 Use `throw` to raise an exception:
@@ -578,13 +578,13 @@ Access condition fields with `condition-get`:
 ### Practical Example: Input Validation
 
 ```lisp
-; Define validation error condition
+# Define validation error condition
 (var-condition :validation-error
   (message "Validation failed")
   (field "unknown")
   (constraint "unknown"))
 
-; Register handlers
+# Register handlers
 (var-handler :validation-error
   (fn (c)
     (display "VALIDATION ERROR: ")
@@ -600,7 +600,7 @@ Access condition fields with `condition-get`:
     (display ")")
     (newline)))
 
-; Validation function
+# Validation function
 (def (validate-email email)
   (unless (string-contains? email "@")
     (signal :validation-error
@@ -608,7 +608,7 @@ Access condition fields with `condition-get`:
       :field "email"
       :constraint "must contain @")))
 
-; Use it
+# Use it
 (validate-email "invalid-email")
 ```
 
@@ -627,14 +627,14 @@ VALIDATION ERROR: email - Missing @ symbol
 Instead of nested `if`:
 
 ```lisp
-; Good
+# Good
 (cond
   ((nil? x) "empty")
   ((> x 0) "positive")
   ((< x 0) "negative")
-  (#t "zero"))
+  (true "zero"))
 
-; Avoid
+# Avoid
 (if (nil? x)
   "empty"
   (if (> x 0)
@@ -649,12 +649,12 @@ Instead of nested `if`:
 Prefer `map`, `filter`, and `fold` for processing collections:
 
 ```lisp
-; Good: Clear intent, composable
+# Good: Clear intent, composable
 (var doubled (map (fn (x) (* x 2)) (list 1 2 3)))
 (var evens (filter even? (list 1 2 3 4 5 6)))
 (var sum (fold (fn (acc x) (+ acc x)) 0 (list 1 2 3)))
 
-; Less idiomatic: Manual recursion (still valid)
+# Less idiomatic: Manual recursion (still valid)
 (def (sum-list lst)
   (if (nil? lst)
     0
@@ -666,12 +666,12 @@ Prefer `map`, `filter`, and `fold` for processing collections:
 Use exceptions for truly exceptional cases, conditions for expected error scenarios:
 
 ```lisp
-; Good: Expected validation error
+# Good: Expected validation error
 (var-condition :invalid-input
   (message "Input validation failed")
   (field "unknown"))
 
-; Less good: Using exceptions for validation
+# Less good: Using exceptions for validation
 (throw (exception "Input validation failed" nil))
 ```
 
@@ -690,7 +690,7 @@ If you open resources, ensure cleanup code runs:
 ### 5. Separate Concerns with catch-condition
 
 ```lisp
-; Good: Handle specific conditions
+# Good: Handle specific conditions
 (catch-condition :network-error
   (fetch-data)
   (fn (c)
@@ -701,13 +701,13 @@ If you open resources, ensure cleanup code runs:
   (fn (c)
     (prompt-user-to-fix (condition-get c 'field))))
 
-; Less good: Generic exception handling
+# Less good: Generic exception handling
 (try
   (begin
     (fetch-data)
     (validate-input))
   (catch (e)
-    ; Now we have to parse the error ourselves
+    # Now we have to parse the error ourselves
     ...))
 ```
 
@@ -716,7 +716,7 @@ If you open resources, ensure cleanup code runs:
 Chain functional operations for clarity:
 
 ```lisp
-; Get square of all positive even numbers
+# Get square of all positive even numbers
 (map (fn (x) (* x x))
   (filter even?
     (filter (fn (x) (> x 0))
@@ -736,7 +736,7 @@ Chain functional operations for clarity:
 | `block` | Sequence expressions (with scope) | Last expression value |
 | `break` | Exit block early with value | Block's return value |
 | `while` | Conditional loop | nil |
-| `forever` | Infinite loop (syntactic sugar for `while #t`) | nil |
+| `forever` | Infinite loop (syntactic sugar for `while true`) | nil |
 | `map` | Transform each element | New list with transformed elements |
 | `filter` | Select matching elements | New list with selected elements |
 | `fold` | Accumulate a result | Final accumulated value |

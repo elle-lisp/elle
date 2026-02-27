@@ -1443,7 +1443,7 @@ proptest! {
                    (var doubled (* x 2))
                    (+ acc doubled))))
                
-                ;; This should work but fails due to name collision
+                ## This should work but fails due to name collision
                 (def fold-acc (fn (f acc lst)
                   (if (empty? lst)
                     acc

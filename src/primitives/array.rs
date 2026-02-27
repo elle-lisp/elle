@@ -427,7 +427,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Create an immutable tuple from arguments.",
         params: &[],
         category: "array",
-        example: "(tuple 1 2 3) ;=> [1 2 3]",
+        example: "(tuple 1 2 3) #=> [1 2 3]",
         aliases: &[],
     },
     PrimitiveDef {
@@ -438,7 +438,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Create a mutable array from arguments.",
         params: &[],
         category: "array",
-        example: "(array 1 2 3) ;=> @[1 2 3]",
+        example: "(array 1 2 3) #=> @[1 2 3]",
         aliases: &[],
     },
     PrimitiveDef {
@@ -449,7 +449,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Create array of n elements, all set to fill value.",
         params: &["n", "fill"],
         category: "array",
-        example: "(array/new 3 0) ;=> [0 0 0]",
+        example: "(array/new 3 0) #=> [0 0 0]",
         aliases: &[],
     },
     PrimitiveDef {
@@ -460,7 +460,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Append element to end of array. Mutates in place, returns the same array.",
         params: &["arr", "val"],
         category: "array",
-        example: "(push @[1 2] 3) ;=> @[1 2 3]",
+        example: "(push @[1 2] 3) #=> @[1 2 3]",
         aliases: &[],
     },
     PrimitiveDef {
@@ -471,7 +471,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Remove and return last element from array. Mutates in place.",
         params: &["arr"],
         category: "array",
-        example: "(pop @[1 2 3]) ;=> 3",
+        example: "(pop @[1 2 3]) #=> 3",
         aliases: &[],
     },
     PrimitiveDef {
@@ -482,7 +482,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Remove and return last n elements from array as a new array. Mutates original.",
         params: &["arr", "n"],
         category: "array",
-        example: "(popn @[1 2 3 4] 2) ;=> @[3 4]",
+        example: "(popn @[1 2 3 4] 2) #=> @[3 4]",
         aliases: &[],
     },
     PrimitiveDef {
@@ -493,7 +493,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Insert element at index in array. Mutates in place, returns the same array.",
         params: &["arr", "idx", "val"],
         category: "array",
-        example: "(insert @[1 3] 1 2) ;=> @[1 2 3]",
+        example: "(insert @[1 3] 1 2) #=> @[1 2 3]",
         aliases: &[],
     },
     PrimitiveDef {
@@ -504,7 +504,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Remove element(s) at index from array. Mutates in place, returns the same array.",
         params: &["arr", "idx", "count"],
         category: "array",
-        example: "(remove @[1 2 3] 1) ;=> @[1 3]",
+        example: "(remove @[1 2 3] 1) #=> @[1 3]",
         aliases: &[],
     },
 ];

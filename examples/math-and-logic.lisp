@@ -1,10 +1,10 @@
-; Math and Logic Operations - Comprehensive guide covering arithmetic, math functions, predicates, and logical operations
+# Math and Logic Operations - Comprehensive guide covering arithmetic, math functions, predicates, and logical operations
 
 (import-file "./examples/assertions.lisp")
 
-;; ============================================================================
-;; SECTION 1: Basic Arithmetic Operations
-;; ============================================================================
+## ============================================================================
+## SECTION 1: Basic Arithmetic Operations
+## ============================================================================
 
 (display "=== Basic Arithmetic ===\n")
 
@@ -35,9 +35,9 @@
 
 (newline)
 
-;; ============================================================================
-;; SECTION 2: Arithmetic Module Examples
-;; ============================================================================
+## ============================================================================
+## SECTION 2: Arithmetic Module Examples
+## ============================================================================
 
 (display "=== Arithmetic Module (Built-in) ===\n")
 
@@ -90,9 +90,9 @@
 (display "✓ Arithmetic Module functions verified")
 (newline)
 
-;; ============================================================================
-;; SECTION 3: Math Module Functions
-;; ============================================================================
+## ============================================================================
+## SECTION 3: Math Module Functions
+## ============================================================================
 
 (display "\n=== Math Module Functions ===\n")
 
@@ -128,9 +128,9 @@
 
 (newline)
 
-;; ============================================================================
-;; SECTION 4: Trigonometric Functions
-;; ============================================================================
+## ============================================================================
+## SECTION 4: Trigonometric Functions
+## ============================================================================
 
 (display "=== Trigonometric Functions ===\n")
 
@@ -154,9 +154,9 @@
 
 (newline)
 
-;; ============================================================================
-;; SECTION 5: Rounding Functions
-;; ============================================================================
+## ============================================================================
+## SECTION 5: Rounding Functions
+## ============================================================================
 
 (display "=== Rounding Functions ===\n")
 
@@ -174,9 +174,9 @@
 
 (newline)
 
-;; ============================================================================
-;; SECTION 6: Mathematical Constants
-;; ============================================================================
+## ============================================================================
+## SECTION 6: Mathematical Constants
+## ============================================================================
 
 (display "=== Mathematical Constants ===\n")
 
@@ -192,9 +192,9 @@
 
 (newline)
 
-;; ============================================================================
-;; SECTION 7: Power Calculations
-;; ============================================================================
+## ============================================================================
+## SECTION 7: Power Calculations
+## ============================================================================
 
 (display "=== Power Calculations ===\n")
 
@@ -212,80 +212,80 @@
 
 (newline)
 
-;; ============================================================================
-;; SECTION 8: Arithmetic Predicates - even? and odd?
-;; ============================================================================
+## ============================================================================
+## SECTION 8: Arithmetic Predicates - even? and odd?
+## ============================================================================
 
 (display "=== Arithmetic Predicates ===\n")
 
 (display "=== even? Predicate ===\n")
 
-; Test positive even numbers
+# Test positive even numbers
 (assert-true (even? 0) "0 is even")
 (assert-true (even? 2) "2 is even")
 (assert-true (even? 4) "4 is even")
 (assert-true (even? 100) "100 is even")
 
-; Test positive odd numbers
+# Test positive odd numbers
 (assert-false (even? 1) "1 is not even")
 (assert-false (even? 3) "3 is not even")
 (assert-false (even? 99) "99 is not even")
 
-; Test negative even numbers
+# Test negative even numbers
 (assert-true (even? -2) "-2 is even")
 (assert-true (even? -100) "-100 is even")
 
-; Test negative odd numbers
+# Test negative odd numbers
 (assert-false (even? -1) "-1 is not even")
 (assert-false (even? -99) "-99 is not even")
 
 (display "✓ even? works correctly\n")
 
-; === odd? Predicate ===
+# === odd? Predicate ===
 (display "\n=== odd? Predicate ===\n")
 
-; Test positive odd numbers
+# Test positive odd numbers
 (assert-true (odd? 1) "1 is odd")
 (assert-true (odd? 3) "3 is odd")
 (assert-true (odd? 99) "99 is odd")
 
-; Test positive even numbers
+# Test positive even numbers
 (assert-false (odd? 0) "0 is not odd")
 (assert-false (odd? 2) "2 is not odd")
 (assert-false (odd? 100) "100 is not odd")
 
-; Test negative odd numbers
+# Test negative odd numbers
 (assert-true (odd? -1) "-1 is odd")
 (assert-true (odd? -99) "-99 is odd")
 
-; Test negative even numbers
+# Test negative even numbers
 (assert-false (odd? -2) "-2 is not odd")
 (assert-false (odd? -100) "-100 is not odd")
 
 (display "✓ odd? works correctly\n")
 
-; === Edge Cases ===
+# === Edge Cases ===
 (display "\n=== Edge Cases ===\n")
 
-; Zero is even
+# Zero is even
 (assert-true (even? 0) "0 is even")
 (assert-false (odd? 0) "0 is not odd")
 (display "✓ Zero is even\n")
 
-; Large numbers
+# Large numbers
 (assert-true (even? 1000000) "1000000 is even")
 (assert-true (odd? 1000001) "1000001 is odd")
 (display "✓ Large numbers work\n")
 
-; Negative numbers
+# Negative numbers
 (assert-true (even? -1000) "-1000 is even")
 (assert-true (odd? -1001) "-1001 is odd")
 (display "✓ Negative numbers work\n")
 
-; === Practical Examples ===
+# === Practical Examples ===
 (display "\n=== Practical Examples ===\n")
 
-; Filter even numbers from a list
+# Filter even numbers from a list
 (def filter-even (fn (lst)
   (if (empty? lst)
       '()
@@ -302,7 +302,7 @@
 (assert-eq (first (rest evens)) 4 "second even is 4")
 (display "✓ filter-even works\n")
 
-; Filter odd numbers from a list
+# Filter odd numbers from a list
 (def filter-odd (fn (lst)
   (if (empty? lst)
       '()
@@ -318,10 +318,10 @@
 (assert-eq (first (rest odds)) 3 "second odd is 3")
 (display "✓ filter-odd works\n")
 
-; === Counting Predicates ===
+# === Counting Predicates ===
 (display "\n=== Counting Predicates ===\n")
 
-; Count even numbers
+# Count even numbers
 (def count-even (fn (lst)
   (if (empty? lst)
       0
@@ -336,7 +336,7 @@
 (assert-eq even-count 5 "there are 5 even numbers in 1-10")
 (display "✓ count-even works\n")
 
-; Count odd numbers
+# Count odd numbers
 (def count-odd (fn (lst)
   (if (empty? lst)
       0
@@ -351,10 +351,10 @@
 (assert-eq odd-count 5 "there are 5 odd numbers in 1-10")
 (display "✓ count-odd works\n")
 
-; === Alternating Pattern ===
+# === Alternating Pattern ===
 (display "\n=== Alternating Pattern ===\n")
 
-; Check if list alternates between even and odd
+# Check if list alternates between even and odd
 (def alternates? (fn (lst)
   (if (empty? lst)
       true
@@ -375,10 +375,10 @@
 (assert-false (alternates? not-alternating) "1 3 5 7 does not alternate")
 (display "✓ alternates? works\n")
 
-; === Sum of Even/Odd ===
+# === Sum of Even/Odd ===
 (display "\n=== Sum of Even/Odd ===\n")
 
-; Sum of even numbers
+# Sum of even numbers
 (def sum-even (fn (lst)
   (if (empty? lst)
       0
@@ -393,7 +393,7 @@
 (assert-eq even-sum 30 "sum of 2+4+6+8+10 = 30")
 (display "✓ sum-even works\n")
 
-; Sum of odd numbers
+# Sum of odd numbers
 (def sum-odd (fn (lst)
   (if (empty? lst)
       0
@@ -408,13 +408,13 @@
 (assert-eq odd-sum 25 "sum of 1+3+5+7+9 = 25")
 (display "✓ sum-odd works\n")
 
-;; ============================================================================
-;; SECTION 9: Logical Operations
-;; ============================================================================
+## ============================================================================
+## SECTION 9: Logical Operations
+## ============================================================================
 
 (display "\n=== Logical Operations ===\n")
 
-; === NOT Operation ===
+# === NOT Operation ===
 (display "\n=== NOT Operation ===\n")
 
 (assert-true (not false) "not false = #t")
@@ -423,10 +423,10 @@
 (assert-false (not "hello") "not \"hello\" = false (non-false is truthy)")
 (assert-false (not '()) "not () = false (empty list is truthy)")
 
-; === Test 0 Truthiness ===
+# === Test 0 Truthiness ===
 (display "\n=== Test 0 Truthiness ===\n")
 
-; Test that 0 is truthy in Elle
+# Test that 0 is truthy in Elle
 (assert-true (if 0 true false) "0 is truthy")
 (assert-false (not 0) "not 0 = false (0 is truthy)")
 
@@ -438,25 +438,25 @@
 (display (not false))
 (newline)
 
-; === AND Operation ===
+# === AND Operation ===
 (display "\n=== AND Operation ===\n")
 
-; AND with two arguments - returns last value if all truthy, else first falsy
+# AND with two arguments - returns last value if all truthy, else first falsy
 (assert-eq (and true true) true "and true true = #t")
 (assert-eq (and true false) false "and true false = #f")
 (assert-eq (and false true) false "and false true = #f")
 (assert-eq (and false false) false "and false false = #f")
 
-; AND with multiple arguments - returns last value if all truthy
+# AND with multiple arguments - returns last value if all truthy
 (assert-eq (and true true true) true "and true true true = #t")
 (assert-eq (and true true false) false "and true true false = #f")
 (assert-eq (and false true true) false "and false true true = #f")
 
-; AND with numbers - returns last value (all args are evaluated)
+# AND with numbers - returns last value (all args are evaluated)
 (assert-eq (and 1 2 3) 3 "and 1 2 3 = 3 (last value)")
 (assert-eq (and 1 0 3) 3 "and 1 0 3 = 3 (last value, all evaluated)")
 
-; AND with no arguments
+# AND with no arguments
 (assert-true (and) "and with no args = #t")
 
 (display "Truth table for AND:\n")
@@ -473,26 +473,26 @@
 (display (and false false))
 (newline)
 
-; === OR Operation ===
+# === OR Operation ===
 (display "\n=== OR Operation ===\n")
 
-; OR with two arguments - returns first truthy value or last value
+# OR with two arguments - returns first truthy value or last value
 (assert-eq (or true true) true "or true true = #t")
 (assert-eq (or true false) true "or true false = #t")
 (assert-eq (or false true) true "or false true = #t")
 (assert-eq (or false false) false "or false false = #f")
 
-; OR with multiple arguments - returns first truthy or last value
+# OR with multiple arguments - returns first truthy or last value
 (assert-eq (or false false true) true "or false false true = #t")
 (assert-eq (or false false false) false "or false false false = #f")
 (assert-eq (or false true false) true "or false true false = #t")
 
-; OR with numbers - returns first truthy value (0 is truthy)
+# OR with numbers - returns first truthy value (0 is truthy)
 (assert-eq (or 0 1) 0 "or 0 1 = 0 (0 is truthy, returns first)")
 (assert-eq (or false 1) 1 "or false 1 = 1 (first truthy)")
 (assert-eq (or false false) false "or false false = #f")
 
-; OR with no arguments
+# OR with no arguments
 (assert-false (or) "or with no args = #f")
 
 (display "Truth table for OR:\n")
@@ -509,25 +509,25 @@
 (display (or false false))
 (newline)
 
-; === XOR Operation ===
+# === XOR Operation ===
 (display "\n=== XOR Operation ===\n")
 
-; XOR with two arguments (true if odd number of truthy values)
+# XOR with two arguments (true if odd number of truthy values)
 (assert-false (xor true true) "xor true true = false (even number of truthy)")
 (assert-true (xor true false) "xor true false = true (odd number of truthy)")
 (assert-true (xor false true) "xor false true = true (odd number of truthy)")
 (assert-false (xor false false) "xor false false = false (even number of truthy)")
 
-; XOR with multiple arguments
+# XOR with multiple arguments
 (assert-true (xor true true true) "xor true true true = true (odd number of truthy)")
 (assert-false (xor true true true true) "xor true true true true = false (even number of truthy)")
 (assert-true (xor true false false) "xor true false false = true (odd number of truthy)")
 (assert-false (xor false false false) "xor false false false = false (even number of truthy)")
 
-; XOR with no arguments
+# XOR with no arguments
 (assert-false (xor) "xor with no args = #f")
 
-; XOR with single argument
+# XOR with single argument
 (assert-true (xor true) "xor true = #t")
 (assert-false (xor false) "xor false = #f")
 
@@ -545,19 +545,19 @@
 (display (xor false false))
 (newline)
 
-; === Note on Evaluation ===
+# === Note on Evaluation ===
 (display "\n=== Note on Evaluation ===\n")
 
-; In Elle, and/or are primitives that evaluate all arguments
-; They don't short-circuit like in some other Lisps
-; Use if/cond for short-circuit behavior
+# In Elle, and/or are primitives that evaluate all arguments
+# They don't short-circuit like in some other Lisps
+# Use if/cond for short-circuit behavior
 
 (display "✓ and/or evaluate all arguments\n")
 
-; === Practical Examples ===
+# === Practical Examples ===
 (display "\n=== Practical Examples ===\n")
 
-; Check if number is in range
+# Check if number is in range
 (def in-range? (fn (x min max)
   (if (and (>= x min) (<= x max)) true false)))
 
@@ -565,7 +565,7 @@
 (assert-false (in-range? 15 0 10) "15 is not in range [0, 10]")
 (display "✓ in-range? works\n")
 
-; Check if value is valid (not nil and not false)
+# Check if value is valid (not nil and not false)
 (def valid? (fn (x)
   (if (and (not (nil? x)) (not (eq? x false))) true false)))
 
@@ -575,7 +575,7 @@
 (assert-false (valid? false) "false is not valid")
 (display "✓ valid? works\n")
 
-; Check if value is positive or zero
+# Check if value is positive or zero
 (def non-negative? (fn (x)
   (if (or (> x 0) (= x 0)) true false)))
 
@@ -584,10 +584,10 @@
 (assert-false (non-negative? -5) "-5 is not non-negative")
 (display "✓ non-negative? works\n")
 
-; === Combining Logical Operations ===
+# === Combining Logical Operations ===
 (display "\n=== Combining Logical Operations ===\n")
 
-; Complex condition: (a AND b) OR (NOT c)
+# Complex condition: (a AND b) OR (NOT c)
 (def complex-check (fn (a b c)
   (if (or (and a b) (not c)) true false)))
 
@@ -596,10 +596,10 @@
 (assert-false (complex-check false false true) "(false AND false) OR (NOT true) = #f")
 (display "✓ Complex logical expressions work\n")
 
-; === Predicate Combinations ===
+# === Predicate Combinations ===
 (display "\n=== Predicate Combinations ===\n")
 
-; Check if number is even and positive
+# Check if number is even and positive
 (def even-positive? (fn (x)
   (and (even? x) (> x 0))))
 
@@ -608,7 +608,7 @@
 (assert-false (even-positive? 3) "3 is positive but not even")
 (display "✓ even-positive? works\n")
 
-; Check if number is odd and negative
+# Check if number is odd and negative
 (def odd-negative? (fn (x)
   (and (odd? x) (< x 0))))
 
@@ -617,9 +617,9 @@
 (assert-false (odd-negative? -2) "-2 is negative but not odd")
 (display "✓ odd-negative? works\n")
 
-;; ============================================================================
-;; SUMMARY
-;; ============================================================================
+## ============================================================================
+## SUMMARY
+## ============================================================================
 
 (display "\n=== All Math and Logic Operations Verified ===\n")
 (display "✓ Basic arithmetic (+, -, *, /, mod)\n")

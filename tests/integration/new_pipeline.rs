@@ -313,7 +313,7 @@ fn test_whitespace_only() {
 #[test]
 fn test_comment_only() {
     let mut symbols = SymbolTable::new();
-    let result = compile("; this is a comment", &mut symbols);
+    let result = compile("# this is a comment", &mut symbols);
     assert!(result.is_err());
 }
 
@@ -454,7 +454,7 @@ fn test_unquote_splicing() {
     // Unquote-splicing is an advanced meta-programming feature
     // The new pipeline may not support it yet
     let mut symbols = SymbolTable::new();
-    let result = compile("`(1 ,@x 3)", &mut symbols);
+    let result = compile("`(1 ,;x 3)", &mut symbols);
     // Accept either success or failure - this is an advanced feature
     let _ = result;
 }

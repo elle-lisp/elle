@@ -1,7 +1,8 @@
 //! Call analysis and effect tracking
 
 use super::*;
-use crate::syntax::Syntax;
+use crate::hir::expr::CallArg;
+use crate::syntax::{Syntax, SyntaxKind};
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_call(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
@@ -9,24 +10,31 @@ impl<'a> Analyzer<'a> {
         let mut effect = func.effect;
 
         let mut args = Vec::new();
+        let mut has_splice = false;
         for arg in &items[1..] {
-            let hir = self.analyze_expr(arg)?;
+            let (inner, spliced) = Self::unwrap_splice(arg);
+            let hir = self.analyze_expr(inner)?;
             effect = effect.combine(hir.effect);
-            args.push(hir);
+            if spliced {
+                has_splice = true;
+            }
+            args.push(CallArg { expr: hir, spliced });
         }
 
-        // Compile-time arity checking
-        if let Some(arity) = self.get_callee_arity(&func) {
-            let arg_count = args.len();
-            if !arity.matches(arg_count) {
-                return Err(format!(
-                    "{}: arity error: {} expects {} argument{}, got {}",
-                    span,
-                    self.callee_name(&func),
-                    arity,
-                    if arity == Arity::Exact(1) { "" } else { "s" },
-                    arg_count,
-                ));
+        // Compile-time arity checking — skip when splice makes count unknown
+        if !has_splice {
+            if let Some(arity) = self.get_callee_arity(&func) {
+                let arg_count = args.len();
+                if !arity.matches(arg_count) {
+                    return Err(format!(
+                        "{}: arity error: {} expects {} argument{}, got {}",
+                        span,
+                        self.callee_name(&func),
+                        arity,
+                        if arity == Arity::Exact(1) { "" } else { "s" },
+                        arg_count,
+                    ));
+                }
             }
         }
 
@@ -36,10 +44,11 @@ impl<'a> Analyzer<'a> {
 
         // Track effect sources for polymorphic inference BEFORE resolving
         // This handles the case where we call a polymorphic function with a parameter
-        self.track_effect_source_with_args(&func, &raw_callee_effect, &args);
+        let arg_exprs: Vec<&Hir> = args.iter().map(|a| &a.expr).collect();
+        self.track_effect_source_with_args(&func, &raw_callee_effect, &arg_exprs);
 
         // Now resolve the polymorphic effect
-        let callee_effect = self.resolve_polymorphic_effect(&raw_callee_effect, &args);
+        let callee_effect = self.resolve_polymorphic_effect(&raw_callee_effect, &arg_exprs);
 
         effect = effect.combine(callee_effect);
 
@@ -52,6 +61,22 @@ impl<'a> Analyzer<'a> {
             span,
             effect,
         ))
+    }
+
+    /// Check if a syntax node is a splice form (`;expr` or `(splice expr)`).
+    /// Returns the inner expression and whether it was spliced.
+    pub(crate) fn unwrap_splice(syntax: &Syntax) -> (&Syntax, bool) {
+        match &syntax.kind {
+            SyntaxKind::Splice(inner) => (inner, true),
+            SyntaxKind::List(items) if items.len() == 2 => {
+                if items[0].as_symbol() == Some("splice") {
+                    (&items[1], true)
+                } else {
+                    (syntax, false)
+                }
+            }
+            _ => (syntax, false),
+        }
     }
 
     /// Get the callee's known arity, if available.
@@ -134,7 +159,7 @@ impl<'a> Analyzer<'a> {
         &mut self,
         func: &Hir,
         raw_effect: &Effect,
-        args: &[Hir],
+        args: &[&Hir],
     ) {
         // Case 1: Direct call to a parameter
         if let HirKind::Var(binding) = &func.kind {
@@ -176,12 +201,12 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Resolve a polymorphic effect by examining the arguments at the specified indices.
-    pub(crate) fn resolve_polymorphic_effect(&self, effect: &Effect, args: &[Hir]) -> Effect {
+    pub(crate) fn resolve_polymorphic_effect(&self, effect: &Effect, args: &[&Hir]) -> Effect {
         if effect.is_polymorphic() {
             let mut resolved = Effect::none();
             for param_idx in effect.propagated_params() {
                 if param_idx < args.len() {
-                    resolved = resolved.combine(self.resolve_arg_effect(&args[param_idx]));
+                    resolved = resolved.combine(self.resolve_arg_effect(args[param_idx]));
                 } else {
                     // Parameter index out of bounds - conservatively Yields
                     return Effect::yields();

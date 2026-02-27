@@ -179,6 +179,17 @@ Things that look wrong but aren't:
   `@{...}` matches tables (`IsTable`). In destructuring (`def`/`let`/`fn`),
   no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle both mutable and
   immutable types.
+- `;expr` is the splice reader macro (Janet-style). It marks a value for
+  array-spreading at call sites and data constructors. `(splice expr)` is the
+  long form. `;` is a delimiter, so `a;b` is three tokens. `,;` is
+  unquote-splicing (inside quasiquote), not comma + splice. Splice only works
+  on arrays and tuples (indexed types). Structs and tables reject splice at
+  compile time (key-value semantics). When a call has spliced args, the lowerer
+  builds an args array (`MakeArray` → `ArrayExtend`/`ArrayPush` → `CallArray`)
+  instead of the normal `Call` instruction. Arity checking is disabled for
+  spliced calls.
+- `#` is the comment character (not `;`). `true`/`false` are the boolean
+  literals (not `#t`/`#f`).
 - `begin` and `block` are distinct forms. `begin` sequences expressions
   without creating a scope (bindings leak into the enclosing scope). `block`
   sequences expressions within a new lexical scope (bindings are contained).

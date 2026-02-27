@@ -338,7 +338,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert number to string.",
         params: &["n"],
         category: "conversion",
-        example: "(number->string 42) ;=> \"42\"",
+        example: "(number->string 42) #=> \"42\"",
         aliases: &[],
     },
     PrimitiveDef {
@@ -349,7 +349,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Parse string as integer.",
         params: &["s"],
         category: "conversion",
-        example: "(string->integer \"42\") ;=> 42",
+        example: "(string->integer \"42\") #=> 42",
         aliases: &["string->int"],
     },
     PrimitiveDef {
@@ -360,7 +360,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Parse string as floating-point number.",
         params: &["s"],
         category: "conversion",
-        example: "(string->float \"3.14\") ;=> 3.14",
+        example: "(string->float \"3.14\") #=> 3.14",
         aliases: &[],
     },
     PrimitiveDef {
@@ -371,7 +371,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert any value to its string representation.",
         params: &["x"],
         category: "conversion",
-        example: "(any->string 42) ;=> \"42\"\n(any->string true) ;=> \"true\"",
+        example: "(any->string 42) #=> \"42\"\n(any->string true) #=> \"true\"",
         aliases: &[],
     },
     PrimitiveDef {
@@ -382,7 +382,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert symbol to string (without quote).",
         params: &["sym"],
         category: "conversion",
-        example: "(symbol->string 'foo) ;=> \"foo\"",
+        example: "(symbol->string 'foo) #=> \"foo\"",
         aliases: &[],
     },
     PrimitiveDef {
@@ -393,7 +393,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert keyword to string (without colon prefix).",
         params: &["kw"],
         category: "conversion",
-        example: "(keyword->string :foo) ;=> \"foo\"",
+        example: "(keyword->string :foo) #=> \"foo\"",
         aliases: &[],
     },
     PrimitiveDef {
@@ -404,7 +404,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert value to integer. Accepts int, float, or string.",
         params: &["x"],
         category: "conversion",
-        example: "(integer 3.7) ;=> 3\n(integer \"42\") ;=> 42",
+        example: "(integer 3.7) #=> 3\n(integer \"42\") #=> 42",
         aliases: &["int"],
     },
     PrimitiveDef {
@@ -415,7 +415,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert value to float. Accepts int, float, or string.",
         params: &["x"],
         category: "conversion",
-        example: "(float 42) ;=> 42.0\n(float \"3.14\") ;=> 3.14",
+        example: "(float 42) #=> 42.0\n(float \"3.14\") #=> 3.14",
         aliases: &[],
     },
     PrimitiveDef {
@@ -426,7 +426,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Convert value to string representation.",
         params: &["x"],
         category: "conversion",
-        example: "(string 42) ;=> \"42\"\n(string (list 1 2)) ;=> \"(1 2)\"",
+        example: "(string 42) #=> \"42\"\n(string (list 1 2)) #=> \"(1 2)\"",
         aliases: &[],
     },
 ];

@@ -1,8 +1,8 @@
-;; Control Flow in Elle Lisp
-;; Comprehensive guide covering:
-;; - Conditionals (if, cond)
-;; - Loops (for/each, while, forever)
-;; - Pattern matching (match with binding)
+## Control Flow in Elle Lisp
+## Comprehensive guide covering:
+## - Conditionals (if, cond)
+## - Loops (for/each, while, forever)
+## - Pattern matching (match with binding)
 
 (import-file "./examples/assertions.lisp")
 
@@ -10,16 +10,16 @@
 (newline)
 (newline)
 
-; ============================================================================
-; PART 1: Conditionals - cond
-; ============================================================================
+# ============================================================================
+# PART 1: Conditionals - cond
+# ============================================================================
 
 (display "PART 1: Conditionals - cond")
 (newline)
 (newline)
 
-; cond evaluates multiple conditions in order
-; Returns the value of the first true branch
+# cond evaluates multiple conditions in order
+# Returns the value of the first true branch
 
 (display "Example 1: Grade assignment with cond")
 (newline)
@@ -31,7 +31,7 @@
   ((>= score 90) "A")
   ((>= score 80) "B")
   ((>= score 70) "C")
-  (true "F")))  ; Default case
+  (true "F")))  # Default case
 (display "Grade for 85: ")
 (display grade)
 (newline)
@@ -74,17 +74,17 @@
 
 (newline)
 
-; ============================================================================
-; PART 2: Loops - while, forever
-; ============================================================================
+# ============================================================================
+# PART 2: Loops - while, forever
+# ============================================================================
 
 (display "PART 2: Loops - Iteration Patterns")
 (newline)
 (newline)
 
-; ============================================================================
-; Part 2a: Forever Loops (Infinite Loops)
-; ============================================================================
+# ============================================================================
+# Part 2a: Forever Loops (Infinite Loops)
+# ============================================================================
 
 (display "Part 2a: Forever Loops")
 (newline)
@@ -110,19 +110,19 @@
 (newline)
 (newline)
 
-; Part 2a Assertions
+# Part 2a Assertions
 (assert-eq counter 0 "counter initialized to 0")
 (newline)
 
-; ============================================================================
-; PART 3: Pattern Matching - match with binding
-; ============================================================================
+# ============================================================================
+# PART 3: Pattern Matching - match with binding
+# ============================================================================
 
 (display "PART 3: Pattern Matching - match with binding")
 (newline)
 (newline)
 
-;; Example 1: Basic literal matching
+## Example 1: Basic literal matching
 (display "Example 3-1: Basic literal matching")
 (newline)
 (display "---")
@@ -136,7 +136,7 @@
 (assert-eq result1 "the answer" "Match literal 42")
 (newline)
 
-;; Example 2: String matching
+## Example 2: String matching
 (display "Example 3-2: String matching")
 (newline)
 (display "---")
@@ -149,7 +149,7 @@
 (assert-eq result2 "greeting" "Match string 'hello'")
 (newline)
 
-;; Example 3: Wildcard pattern
+## Example 3: Wildcard pattern
 (display "Example 3-3: Wildcard pattern")
 (newline)
 (display "---")
@@ -162,7 +162,7 @@
 (assert-eq result3 "something else" "Wildcard matches 100")
 (newline)
 
-;; Example 4: Nil pattern
+## Example 4: Nil pattern
 (display "Example 3-4: Nil pattern")
 (newline)
 (display "---")
@@ -175,7 +175,7 @@
 (assert-eq result4 "it's nil" "Match nil")
 (newline)
 
-;; Example 5: List matching
+## Example 5: List matching
 (display "Example 3-5: List matching")
 (newline)
 (display "---")
@@ -188,7 +188,7 @@
 (assert-eq result5 "exact match" "Match list (1 2 3)")
 (newline)
 
-;; Example 6: Empty list
+## Example 6: Empty list
 (display "Example 3-6: Empty list")
 (newline)
 (display "---")
@@ -201,7 +201,7 @@
 (assert-eq result6 "empty list" "Match empty list")
 (newline)
 
-;; Example 7: Nested lists
+## Example 7: Nested lists
 (display "Example 3-7: Nested lists")
 (newline)
 (display "---")
@@ -214,7 +214,7 @@
 (assert-eq result7 "matched nested" "Match nested lists")
 (newline)
 
-;; Example 8: Match with computed result
+## Example 8: Match with computed result
 (display "Example 3-8: Match with computed result")
 (newline)
 (display "---")
@@ -228,7 +228,7 @@
 (assert-eq result8 200 "Match 100 and compute (+ 100 100)")
 (newline)
 
-;; Example 9: Multiple patterns
+## Example 9: Multiple patterns
 (display "Example 3-9: Multiple patterns")
 (newline)
 (display "---")
@@ -242,7 +242,7 @@
 (assert-eq result9 "foo" "Match string 'foo'")
 (newline)
 
-;; Example 10: Complex list pattern
+## Example 10: Complex list pattern
 (display "Example 3-10: Complex list pattern")
 (newline)
 (display "---")
@@ -255,9 +255,9 @@
 (assert-eq result10 "name Alice age 30" "Match complex list pattern")
 (newline)
 
-; ============================================================================
-; Summary
-; ============================================================================
+# ============================================================================
+# Summary
+# ============================================================================
 
 (display "=== Summary ===")
 (newline)

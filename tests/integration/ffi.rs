@@ -305,15 +305,15 @@ fn test_ffi_call_snprintf() {
         (def self (ffi/native nil))
         (def snprintf-ptr (ffi/lookup self "snprintf"))
 
-        ; Allocate output buffer
+        # Allocate output buffer
         (def buf (ffi/malloc 64))
 
-        ; Call snprintf with format "num: %d" and arg 42
-        ; 4 total args (buf, size, fmt, 42), 3 are fixed
+        # Call snprintf with format "num: %d" and arg 42
+        # 4 total args (buf, size, fmt, 42), 3 are fixed
         (def sig (ffi/signature :int @[:ptr :size :string :int] 3))
         (def written (ffi/call snprintf-ptr sig buf 64 "num: %d" 42))
 
-        ; Read the result string from buffer
+        # Read the result string from buffer
         (def result-str (ffi/string buf))
         (ffi/free buf)
         result-str
@@ -344,9 +344,9 @@ fn test_ffi_string_from_buffer() {
     let result = eval_source(
         r#"
         (def buf (ffi/malloc 16))
-        (ffi/write buf :i8 104)   ; 'h'
-        (ffi/write (+ buf 1) :i8 105) ; 'i' -- pointer arithmetic via +
-        (ffi/write (+ buf 2) :i8 0)   ; null terminator
+        (ffi/write buf :i8 104)   # 'h'
+        (ffi/write (+ buf 1) :i8 105) # 'i' -- pointer arithmetic via +
+        (ffi/write (+ buf 2) :i8 0)   # null terminator
         (def s (ffi/string buf))
         (ffi/free buf)
         s
@@ -766,7 +766,7 @@ fn test_ffi_callback_with_closure_capture() {
          (def libc (ffi/native nil))
          (def qsort-ptr (ffi/lookup libc "qsort"))
          (def compar-sig (ffi/signature :int @[:ptr :ptr]))
-         ;; Capture `direction` — 1 for ascending, -1 for descending
+         ## Capture `direction` — 1 for ascending, -1 for descending
          (def direction 1)
          (def compar (ffi/callback compar-sig
            (fn (a b)

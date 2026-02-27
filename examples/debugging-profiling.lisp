@@ -1,17 +1,17 @@
-; Debugging and Profiling Primitives Example
-;
-; This example demonstrates Elle's debugging and profiling capabilities:
-; - debug-print: Debug output
-; - trace: Trace function execution
-; - Profiling patterns
-; - Identifying performance characteristics
-; - Assertions verifying tools work
+# Debugging and Profiling Primitives Example
+#
+# This example demonstrates Elle's debugging and profiling capabilities:
+# - debug-print: Debug output
+# - trace: Trace function execution
+# - Profiling patterns
+# - Identifying performance characteristics
+# - Assertions verifying tools work
 
 (import-file "./examples/assertions.lisp")
 
-; ========================================
-; 1. debug-print: Debug output
-; ========================================
+# ========================================
+# 1. debug-print: Debug output
+# ========================================
 (display "=== 1. debug-print: Debug Output ===\n")
 
 (display "Using debug-print for debugging:\n")
@@ -22,9 +22,9 @@
 
 (display "✓ debug-print works\n")
 
-; ========================================
-; 2. trace: Trace function execution
-; ========================================
+# ========================================
+# 2. trace: Trace function execution
+# ========================================
 (display "\n=== 2. trace: Trace Function Execution ===\n")
 
 (def add (fn (a b)
@@ -52,9 +52,9 @@
 
 (display "✓ trace works\n")
 
-; ========================================
-; 3. Profiling pattern: Simple timing
-; ========================================
+# ========================================
+# 3. Profiling pattern: Simple timing
+# ========================================
 (display "\n=== 3. Profiling Pattern: Simple Timing ===\n")
 
 (def fibonacci (fn (n)
@@ -73,9 +73,9 @@
 
 (display "✓ Fibonacci computation works\n")
 
-; ========================================
-; 4. Profiling pattern: Function call counting
-; ========================================
+# ========================================
+# 4. Profiling pattern: Function call counting
+# ========================================
 (display "\n=== 4. Profiling Pattern: Call Counting ===\n")
 
 (var call-count 0)
@@ -99,9 +99,9 @@
 
 (display "✓ Call counting pattern works\n")
 
-; ========================================
-; 5. Profiling pattern: Execution tracking
-; ========================================
+# ========================================
+# 5. Profiling pattern: Execution tracking
+# ========================================
 (display "\n=== 5. Profiling Pattern: Execution Tracking ===\n")
 
 (var execution-log (list))
@@ -125,9 +125,9 @@
 
 (display "✓ Execution tracking pattern works\n")
 
-; ========================================
-; 6. Profiling pattern: Performance comparison
-; ========================================
+# ========================================
+# 6. Profiling pattern: Performance comparison
+# ========================================
 (display "\n=== 6. Profiling Pattern: Performance Comparison ===\n")
 
 (def simple-sum (fn (n)
@@ -154,9 +154,9 @@
 
 (display "✓ Performance comparison pattern works\n")
 
-; ========================================
-; 7. Debug output with values
-; ========================================
+# ========================================
+# 7. Debug output with values
+# ========================================
 (display "\n=== 7. Debug Output with Values ===\n")
 
 (def debug-add (fn (a b)
@@ -178,9 +178,9 @@
 
 (display "✓ Debug output with values works\n")
 
-; ========================================
-; 8. Trace with nested calls
-; ========================================
+# ========================================
+# 8. Trace with nested calls
+# ========================================
 (display "\n=== 8. Trace with Nested Calls ===\n")
 
 (def inner-fn (fn (x)
@@ -201,9 +201,9 @@
 
 (display "✓ Nested function tracing works\n")
 
-; ========================================
-; 9. Profiling pattern: Error tracking
-; ========================================
+# ========================================
+# 9. Profiling pattern: Error tracking
+# ========================================
 (display "\n=== 9. Profiling Pattern: Error Tracking ===\n")
 
 (var error-count 0)
@@ -233,9 +233,9 @@
 
 (display "✓ Error tracking pattern works\n")
 
-; ========================================
-; 10. Profiling pattern: Resource usage
-; ========================================
+# ========================================
+# 10. Profiling pattern: Resource usage
+# ========================================
 (display "\n=== 10. Profiling Pattern: Resource Usage ===\n")
 
 (def list-size-tracker (fn (lst)
@@ -259,9 +259,9 @@
 
 (display "✓ Resource usage tracking works\n")
 
-; ========================================
-; 11. Debugging and profiling summary
-; ========================================
+# ========================================
+# 11. Debugging and profiling summary
+# ========================================
 (display "\n=== Debugging and Profiling Summary ===\n")
 
 (display "Features demonstrated:\n")

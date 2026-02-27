@@ -1,17 +1,17 @@
-; Type System in Elle
-;
-; This example demonstrates Elle's type system:
-; - type-of: Get the type of any value
-; - Type predicates: number?, symbol?, string?, list?, array?, table?, closure?, coro?
-; - Type conversions: string, number, symbol
-; - Type checking patterns
-; - Assertions verifying type operations
+# Type System in Elle
+#
+# This example demonstrates Elle's type system:
+# - type-of: Get the type of any value
+# - Type predicates: number?, symbol?, string?, list?, array?, table?, closure?, coro?
+# - Type conversions: string, number, symbol
+# - Type checking patterns
+# - Assertions verifying type operations
 
 (import-file "./examples/assertions.lisp")
 
 (display "=== Keywords ===\n")
 
-; Basic keyword creation and display
+# Basic keyword creation and display
 (display "Basic keywords: ")
 (display :name)
 (display " ")
@@ -20,44 +20,44 @@
 (display :status)
 (newline)
 
-; Keywords have a type
+# Keywords have a type
 (display "Type of :keyword-name: ")
 (display (type-of :keyword-name))
 (newline)
 
-; Keyword equality
+# Keyword equality
 (assert-true (= :foo :foo) "keyword equality: :foo = :foo")
 (assert-false (= :foo :bar) "keyword inequality: :foo ≠ :bar")
 (assert-true (= :name :name) "keyword equality: :name = :name")
 
-; Keywords in lists - useful for building data structures
+# Keywords in lists - useful for building data structures
 (var person '(:name :John :age :30 :city :NYC))
 (assert-eq (first person) :name "first element of person list is :name")
 
-; Keywords in arrays
+# Keywords in arrays
 (var options [1 :option-a 2 :option-b 3])
 (assert-eq (get options 1) :option-a "second element of options array is :option-a")
 
-; Building configuration with keywords
+# Building configuration with keywords
 (var settings (list :debug true :host "localhost" :port 8080))
 (assert-eq (first settings) :debug "first element of settings is :debug")
 
-; Keywords as data structure labels
+# Keywords as data structure labels
 (var colors (list :red 255 :green 128 :blue 64))
 (assert-eq (first colors) :red "first element of colors is :red")
 
-; Keywords are distinct from symbols
+# Keywords are distinct from symbols
 (assert-false (= :name 'name) "keyword :name is not equal to symbol 'name")
 
 (display "✓ Keywords verified\n")
 
-;; ============================================================================
-;; SECTION 2: Symbols
-;; ============================================================================
+## ============================================================================
+## SECTION 2: Symbols
+## ============================================================================
 
 (display "\n=== Symbols ===\n")
 
-; Basic symbol creation with quote
+# Basic symbol creation with quote
 (display "Basic symbols: ")
 (display 'name)
 (display " ")
@@ -66,36 +66,36 @@
 (display 'status)
 (newline)
 
-; Symbols have a type
+# Symbols have a type
 (display "Type of 'symbol-name: ")
 (display (type-of 'symbol-name))
 (newline)
 
-; Symbol equality
+# Symbol equality
 (assert-true (eq? 'foo 'foo) "symbol equality: 'foo eq? 'foo")
 (assert-false (eq? 'foo 'bar) "symbol inequality: 'foo not eq? 'bar")
 (assert-true (eq? 'name 'name) "symbol equality: 'name eq? 'name")
 
-; Symbols in lists
+# Symbols in lists
 (var vars '(x y z))
 (assert-eq (first vars) 'x "first element of vars list is 'x")
 
-; Symbols in arrays
+# Symbols in arrays
 (var ops (array 'add 'subtract 'multiply))
 (assert-eq (get ops 0) 'add "first element of ops array is 'add")
 
-; Symbols are distinct from keywords
+# Symbols are distinct from keywords
 (assert-false (eq? 'name :name) "symbol 'name is not eq? to keyword :name")
 
 (display "✓ Symbols verified\n")
 
-;; ============================================================================
-;; SECTION 3: Numbers (Integers and Floats)
-;; ============================================================================
+## ============================================================================
+## SECTION 3: Numbers (Integers and Floats)
+## ============================================================================
 
 (display "\n=== Numbers ===\n")
 
-; Integers
+# Integers
 (display "Integers: ")
 (display 42)
 (display " ")
@@ -104,7 +104,7 @@
 (display 0)
 (newline)
 
-; Floats
+# Floats
 (display "Floats: ")
 (display 3.14)
 (display " ")
@@ -113,7 +113,7 @@
 (display 0.0)
 (newline)
 
-; Number type
+# Number type
 (display "Type of 42: ")
 (display (type-of 42))
 (newline)
@@ -122,32 +122,32 @@
 (display (type-of 3.14))
 (newline)
 
-; Number equality
+# Number equality
 (assert-true (= 42 42) "integer equality: 42 = 42")
 (assert-false (= 42 43) "integer inequality: 42 ≠ 43")
 (assert-true (= 3.14 3.14) "float equality: 3.14 = 3.14")
 
-; Numbers in lists
+# Numbers in lists
 (var nums (list 1 2 3 4 5))
 (assert-eq (first nums) 1 "first element of nums list is 1")
 
-; Numbers in arrays
+# Numbers in arrays
 (var values [10 20 30 40 50])
 (assert-eq (get values 0) 10 "first element of values array is 10")
 
-; Arithmetic with numbers
+# Arithmetic with numbers
 (assert-eq (+ 10 5) 15 "arithmetic: 10 + 5 = 15")
 (assert-eq (* 3 4) 12 "arithmetic: 3 * 4 = 12")
 
 (display "✓ Numbers verified\n")
 
-;; ============================================================================
-;; SECTION 4: Strings
-;; ============================================================================
+## ============================================================================
+## SECTION 4: Strings
+## ============================================================================
 
 (display "\n=== Strings ===\n")
 
-; Basic string creation
+# Basic string creation
 (display "Strings: ")
 (display "hello")
 (display " ")
@@ -156,52 +156,52 @@
 (display "")
 (newline)
 
-; String type
+# String type
 (display "Type of \"hello\": ")
 (display (type-of "hello"))
 (newline)
 
-; String equality
+# String equality
 (assert-true (= "hello" "hello") "string equality: \"hello\" = \"hello\"")
 (assert-false (= "hello" "world") "string inequality: \"hello\" ≠ \"world\"")
 
-; String length
+# String length
 (display "Length of \"hello\": ")
 (display (length "hello"))
 (newline)
 (assert-eq (length "hello") 5 "length of \"hello\" is 5")
 
-; Empty string
+# Empty string
 (assert-eq (length "") 0 "length of empty string is 0")
 
-; Strings in lists
+# Strings in lists
 (var words (list "apple" "banana" "cherry"))
 (assert-eq (first words) "apple" "first element of words list is \"apple\"")
 
-; Strings in arrays
+# Strings in arrays
 (var messages ["hello" "world" "!"])
 (assert-eq (get messages 0) "hello" "first element of messages array is \"hello\"")
 
-; String concatenation
+# String concatenation
 (var greeting (append "Hello, " "World!"))
 (assert-eq greeting "Hello, World!" "string concatenation works")
 
 (display "✓ Strings verified\n")
 
-;; ============================================================================
-;; SECTION 5: Booleans
-;; ============================================================================
+## ============================================================================
+## SECTION 5: Booleans
+## ============================================================================
 
 (display "\n=== Booleans ===\n")
 
-; Boolean values
+# Boolean values
 (display "Booleans: ")
 (display true)
 (display " ")
 (display false)
 (newline)
 
-; Boolean type
+# Boolean type
 (display "Type of #t: ")
 (display (type-of true))
 (newline)
@@ -210,76 +210,76 @@
 (display (type-of false))
 (newline)
 
-; Boolean equality
+# Boolean equality
 (assert-true (= true true) "boolean equality: true = #t")
 (assert-true (= false false) "boolean equality: false = #f")
 (assert-false (= true false) "boolean inequality: true ≠ #f")
 
-; Booleans in lists
+# Booleans in lists
 (var flags (list true false true))
 (assert-eq (first flags) true "first element of flags list is #t")
 
-; Booleans in arrays
+# Booleans in arrays
 (var states [true false true false])
 (assert-eq (get states 0) true "first element of states array is #t")
 
-; Boolean predicates
+# Boolean predicates
 (assert-true (boolean? true) "boolean? returns true for #t")
 (assert-true (boolean? false) "boolean? returns true for #f")
 (assert-false (boolean? 42) "boolean? returns false for 42")
 
 (display "✓ Booleans verified\n")
 
-;; ============================================================================
-;; SECTION 6: Nil
-;; ============================================================================
+## ============================================================================
+## SECTION 6: Nil
+## ============================================================================
 
 (display "\n=== Nil ===\n")
 
-; Nil value
+# Nil value
 (display "Nil: ")
 (display nil)
 (newline)
 
-; Nil type
+# Nil type
 (display "Type of nil: ")
 (display (type-of nil))
 (newline)
 
-; Nil equality
+# Nil equality
 (assert-true (= nil nil) "nil equality: nil = nil")
 
-; Nil in lists
+# Nil in lists
 (var maybe-values (list 1 nil 3))
 (assert-eq (first (rest maybe-values)) nil "second element of maybe-values list is nil")
 
-; Nil in arrays
+# Nil in arrays
 (var optional [10 nil 30])
 (assert-eq (get optional 1) nil "second element of optional array is nil")
 
-; Nil predicates
+# Nil predicates
 (assert-true (nil? nil) "nil? returns true for nil")
 (assert-false (nil? 42) "nil? returns false for 42")
 (assert-false (nil? false) "nil? returns false for #f")
 
-; Empty list is not nil in Elle
+# Empty list is not nil in Elle
 (assert-false (nil? '()) "nil? returns false for empty list")
 
 (display "✓ Nil verified\n")
 
-;; ============================================================================
-;; SECTION 7: Mixed Atoms in Collections
-;; ============================================================================
+## ============================================================================
+## SECTION 7: Mixed Atoms in Collections
+## ============================================================================
 
 (display "\n=== Mixed Atoms in Collections ===\n")
 
-; Mixed list
+# Mixed list
 (var mixed-list (list :key 'symbol 42 "string" true nil))
 (assert-eq (first mixed-list) :key "first element is keyword")
 (assert-eq (first (rest mixed-list)) 'symbol "second element is symbol")
 (assert-eq (first (rest (rest mixed-list))) 42 "third element is number")
 
-; Mixed array
+# Mixed array
 (var mixed-arr (array :id 'user 123 "Alice" true))
 (assert-eq (get mixed-arr 0) :id "first element is keyword")
 (assert-eq (get mixed-arr 1) 'user "second element is symbol")
@@ -287,9 +287,9 @@
 
 (display "✓ Mixed atoms verified\n")
 
-;; ============================================================================
-;; SECTION 8: Type Predicates - nil?, pair?, list?
-;; ============================================================================
+## ============================================================================
+## SECTION 8: Type Predicates - nil?, pair?, list?
+## ============================================================================
 
 (display "\n=== Type Predicates: nil?, pair?, list? ===\n")
 
@@ -311,9 +311,9 @@
 
 (display "✓ nil?, pair?, list? verified\n")
 
-;; ============================================================================
-;; SECTION 9: Type Predicates - number?, symbol?, string?, boolean?
-;; ============================================================================
+## ============================================================================
+## SECTION 9: Type Predicates - number?, symbol?, string?, boolean?
+## ============================================================================
 
 (display "\n=== Type Predicates: number?, symbol?, string?, boolean? ===\n")
 
@@ -347,13 +347,13 @@
 
 (display "✓ number?, symbol?, string?, boolean? verified\n")
 
-;; ============================================================================
-;; SECTION 10: Type Predicates - All Atoms
-;; ============================================================================
+## ============================================================================
+## SECTION 10: Type Predicates - All Atoms
+## ============================================================================
 
 (display "\n=== Type Checking All Atoms ===\n")
 
-; Type predicates
+# Type predicates
 (assert-true (symbol? 'name) "symbol? works for symbols")
 (assert-false (symbol? :name) "symbol? returns false for keywords")
 
@@ -371,13 +371,13 @@
 
 (display "✓ Type checking verified\n")
 
-;; ============================================================================
-;; SECTION 11: Type Predicate Summary
-;; ============================================================================
+## ============================================================================
+## SECTION 11: Type Predicate Summary
+## ============================================================================
 
 (display "\n=== Type Predicate Summary ===\n")
 
-; Create test values
+# Create test values
 (var test-nil '())
 (var test-pair (cons 1 2))
 (var test-list (list 1 2 3))
@@ -387,7 +387,7 @@
 (var test-bool true)
 (var test-array (array 1 2 3))
 
-; Display type information
+# Display type information
 (display "nil: ")
 (display test-nil)
 (display " -> nil?=")
@@ -440,25 +440,25 @@
 (display (list? test-array))
 (newline)
 
-;; ============================================================================
-;; SECTION 12: Type Predicate Combinations
-;; ============================================================================
+## ============================================================================
+## SECTION 12: Type Predicate Combinations
+## ============================================================================
 
 (display "\n=== Type Predicate Combinations ===\n")
 
-; A list is also a pair (except empty list)
+# A list is also a pair (except empty list)
 (assert-true (pair? (list 1 2 3)) "non-empty list is a pair")
 (assert-false (pair? '()) "empty list is not a pair")
 
-; A number is not a string
+# A number is not a string
 (assert-false (string? 42) "number is not a string")
 (assert-false (number? "42") "string is not a number")
 
-; A symbol is not a string
+# A symbol is not a string
 (assert-false (string? 'hello) "symbol is not a string")
 (assert-false (symbol? "hello") "string is not a symbol")
 
-; Boolean values are distinct
+# Boolean values are distinct
 (assert-true (boolean? true) "true is boolean")
 (assert-true (boolean? false) "false is boolean")
 (assert-false (= true 1) "true is not equal to 1")
@@ -466,13 +466,13 @@
 
 (display "✓ Type predicate combinations verified\n")
 
-;; ============================================================================
-;; SECTION 13: Arrays
-;; ============================================================================
+## ============================================================================
+## SECTION 13: Arrays
+## ============================================================================
 
 (display "\n=== Arrays ===\n")
 
-; Arrays are a distinct type from lists
+# Arrays are a distinct type from lists
 (var test-arr (array 1 2 3))
 (display "Array: ")
 (display test-arr)
@@ -480,18 +480,18 @@
 (assert-false (list? test-arr) "array is not a list")
 (display "✓ arrays are distinct from lists\n")
 
-; ========================================
-; TYPE CONVERSION SECTION
-; ========================================
+# ========================================
+# TYPE CONVERSION SECTION
+# ========================================
 
 (display "\n")
 (display "========================================\n")
 (display "TYPE CONVERSION PRIMITIVES\n")
 (display "========================================\n")
 
-; ========================================
-; 1. int: Convert to integer
-; ========================================
+# ========================================
+# 1. int: Convert to integer
+# ========================================
 (display "\n=== 1. int: Convert to Integer ===\n")
 
 (display "Converting various types to int:\n")
@@ -519,9 +519,9 @@
 
 (display "✓ int conversion works\n")
 
-; ========================================
-; 2. float: Convert to float
-; ========================================
+# ========================================
+# 2. float: Convert to float
+# ========================================
 (display "\n=== 2. float: Convert to Float ===\n")
 
 (display "Converting various types to float:\n")
@@ -544,9 +544,9 @@
 
 (display "✓ float conversion works\n")
 
-; ========================================
-; 3. string: Convert to string
-; ========================================
+# ========================================
+# 3. string: Convert to string
+# ========================================
 (display "\n=== 3. string: Convert to String ===\n")
 
 (display "Converting various types to string:\n")
@@ -574,9 +574,9 @@
 
 (display "✓ string conversion works\n")
 
-; ========================================
-; 4. string->int: Parse string to int
-; ========================================
+# ========================================
+# 4. string->int: Parse string to int
+# ========================================
 (display "\n=== 4. string->int: Parse String to Int ===\n")
 
 (display "Parsing strings to integers:\n")
@@ -599,9 +599,9 @@
 
 (display "✓ string->int parsing works\n")
 
-; ========================================
-; 5. string->float: Parse string to float
-; ========================================
+# ========================================
+# 5. string->float: Parse string to float
+# ========================================
 (display "\n=== 5. string->float: Parse String to Float ===\n")
 
 (display "Parsing strings to floats:\n")
@@ -624,9 +624,9 @@
 
 (display "✓ string->float parsing works\n")
 
-; ========================================
-; 6. number->string: Convert number to string
-; ========================================
+# ========================================
+# 6. number->string: Convert number to string
+# ========================================
 (display "\n=== 6. number->string: Convert Number to String ===\n")
 
 (display "Converting numbers to strings:\n")
@@ -649,9 +649,9 @@
 
 (display "✓ number->string conversion works\n")
 
-; ========================================
-; 7. symbol->string: Convert symbol to string
-; ========================================
+# ========================================
+# 7. symbol->string: Convert symbol to string
+# ========================================
 (display "\n=== 7. symbol->string: Convert Symbol to String ===\n")
 
 (display "Converting symbols to strings:\n")
@@ -674,9 +674,9 @@
 
 (display "✓ symbol->string conversion works\n")
 
-; ========================================
-; 8. any->string: Convert any value to string
-; ========================================
+# ========================================
+# 8. any->string: Convert any value to string
+# ========================================
 (display "\n=== 8. any->string: Convert Any Value to String ===\n")
 
 (display "Converting any type to string:\n")
@@ -714,14 +714,14 @@
 
 (display "✓ any->string conversion works\n")
 
-; ========================================
-; 9. Round-trip conversions
-; ========================================
+# ========================================
+# 9. Round-trip conversions
+# ========================================
 (display "\n=== 9. Round-Trip Conversions ===\n")
 
 (display "Testing round-trip conversions:\n")
 
-; Number -> String -> Number
+# Number -> String -> Number
 (display "  42 -> string -> int: ")
 (var num1 42)
 (var str1 (number->string num1))
@@ -730,7 +730,7 @@
 (newline)
 (assert-eq num1-back num1 "Round-trip: number -> string -> int")
 
-; Float -> String -> Float
+# Float -> String -> Float
 (display "  3.14 -> string -> float: ")
 (var num2 3.14)
 (var str2 (number->string num2))
@@ -739,7 +739,7 @@
 (newline)
 (assert-eq num2-back num2 "Round-trip: float -> string -> float")
 
-; Symbol -> String -> Symbol (via gensym)
+# Symbol -> String -> Symbol (via gensym)
 (display "  'hello -> string: ")
 (var sym 'hello)
 (var sym-str (symbol->string sym))
@@ -749,14 +749,14 @@
 
 (display "✓ Round-trip conversions work\n")
 
-; ========================================
-; 10. Type conversion chains
-; ========================================
+# ========================================
+# 10. Type conversion chains
+# ========================================
 (display "\n=== 10. Type Conversion Chains ===\n")
 
 (display "Chaining conversions:\n")
 
-; int -> float -> string -> int
+# int -> float -> string -> int
 (display "  int(42) -> float -> string -> int: ")
 (var chain1 (int 42))
 (var chain2 (float chain1))
@@ -766,7 +766,7 @@
 (newline)
 (assert-eq chain4 42 "Conversion chain: int -> float -> string -> int")
 
-; string -> int -> float -> string
+# string -> int -> float -> string
 (display "  string->int(\"100\") -> float -> string: ")
 (var chain5 (string->int "100"))
 (var chain6 (float chain5))
@@ -777,9 +777,9 @@
 
 (display "✓ Type conversion chains work\n")
 
-; ========================================
-; Summary
-; ========================================
+# ========================================
+# Summary
+# ========================================
 
 
 (display "=== All Atom Types Verified ===\n")
@@ -826,34 +826,34 @@
 (display "========================================\n")
 (display "\n")
 
-;; ============================================================================
-;; SECTION 14: Mutable Storage - Boxes
-;; ============================================================================
+## ============================================================================
+## SECTION 14: Mutable Storage - Boxes
+## ============================================================================
 
 (display "=== Mutable Storage: Boxes ===\n")
 
-; === Box Creation ===
+# === Box Creation ===
 (display "\n=== Box Creation ===\n")
 
-; Create a box with initial value
+# Create a box with initial value
 (var my-box (box 42))
 (display "Created box with value 42: ")
 (display my-box)
 (newline)
 
-; Verify it's a box
+# Verify it's a box
 (assert-true (box? my-box) "box creates a box")
 
-; === Unbox (Get Value) ===
+# === Unbox (Get Value) ===
 (display "\n=== Unbox (Get Value) ===\n")
 
-; Get value from box
+# Get value from box
 (display "Value in box: ")
 (display (unbox my-box))
 (newline)
 (assert-eq (unbox my-box) 42 "unbox returns the stored value")
 
-; Create boxes with different types
+# Create boxes with different types
 (var string-box (box "hello"))
 (var symbol-box (box 'symbol))
 (var list-box (box (list 1 2 3)))
@@ -864,34 +864,34 @@
 
 (display "✓ unbox works with different types\n")
 
-; === Box Mutation (rebox) ===
+# === Box Mutation (rebox) ===
 (display "\n=== Box Mutation (rebox) ===\n")
 
-; Create a mutable box
+# Create a mutable box
 (var counter (box 0))
 (display "Initial counter value: ")
 (display (unbox counter))
 (newline)
 (assert-eq (unbox counter) 0 "counter starts at 0")
 
-; Increment counter
+# Increment counter
 (rebox counter 1)
 (display "After rebox to 1: ")
 (display (unbox counter))
 (newline)
 (assert-eq (unbox counter) 1 "rebox updates the value")
 
-; Increment again
+# Increment again
 (rebox counter 2)
 (assert-eq (unbox counter) 2 "rebox can update multiple times")
 
-; Set to different type
+# Set to different type
 (rebox counter "changed")
 (assert-eq (unbox counter) "changed" "rebox can change type")
 
 (display "✓ rebox works correctly\n")
 
-; === box? Predicate ===
+# === box? Predicate ===
 (display "\n=== box? Predicate ===\n")
 
 (assert-true (box? (box 42)) "box? returns true for box")
@@ -903,16 +903,16 @@
 
 (display "✓ box? works correctly\n")
 
-; === Boxes vs Immutable Structures ===
+# === Boxes vs Immutable Structures ===
 (display "\n=== Boxes vs Immutable Structures ===\n")
 
-; Lists are immutable
+# Lists are immutable
 (var my-list (list 1 2 3))
 (display "Original list: ")
 (display my-list)
 (newline)
 
-; cons creates a new list, doesn't modify original
+# cons creates a new list, doesn't modify original
 (var new-list (cons 0 my-list))
 (display "After cons 0: ")
 (display new-list)
@@ -922,13 +922,13 @@
 (newline)
 (assert-eq (first my-list) 1 "original list is unchanged")
 
-; Boxes are mutable
+# Boxes are mutable
 (var my-box-list (box (list 1 2 3)))
 (display "\nOriginal box contents: ")
 (display (unbox my-box-list))
 (newline)
 
-; rebox modifies the box
+# rebox modifies the box
 (rebox my-box-list (cons 0 (unbox my-box-list)))
 (display "After rebox with cons: ")
 (display (unbox my-box-list))
@@ -937,17 +937,17 @@
 
 (display "✓ Boxes are mutable, lists are immutable\n")
 
-; === Use Case: Mutable State ===
+# === Use Case: Mutable State ===
 (display "\n=== Use Case: Mutable State ===\n")
 
-; Create a simple state holder with numbers
+# Create a simple state holder with numbers
 (var state (box (list)))
 
 (display "Initial state: ")
 (display (unbox state))
 (newline)
 
-; Add items to state
+# Add items to state
 (rebox state (cons 100 (unbox state)))
 (display "After adding 100: ")
 (display (unbox state))
@@ -1018,22 +1018,22 @@
 (display "  - Conversion chains enable flexible type handling\n")
 (display "  - Boxes provide mutable storage in functional language\n")
 
-;; ============================================================================
-;; SECTION 15: Truthiness Semantics
-;; ============================================================================
+## ============================================================================
+## SECTION 15: Truthiness Semantics
+## ============================================================================
 
 (display "\n=== Truthiness Semantics ===\n")
 
-; In Elle, only nil and false are falsy. Everything else is truthy.
-; This is different from languages like C where 0, "", [], etc. are falsy.
+# In Elle, only nil and false are falsy. Everything else is truthy.
+# This is different from languages like C where 0, "", [], etc. are falsy.
 
 (display "\n=== Falsy Values ===\n")
 
-; nil is falsy
+# nil is falsy
 (assert-false (if nil true false) "nil is falsy in if")
 (display "nil is falsy\n")
 
-; false is falsy
+# false is falsy
 (assert-false (if false true false) "false is falsy in if")
 (display "false is falsy\n")
 
@@ -1041,51 +1041,51 @@
 
 (display "\n=== Truthy Values ===\n")
 
-; true is truthy
+# true is truthy
 (assert-true (if true true false) "true is truthy in if")
 (display "true is truthy\n")
 
-; Zero is truthy (unlike C)
+# Zero is truthy (unlike C)
 (assert-true (if 0 true false) "0 is truthy in if")
 (display "0 is truthy (not falsy like C)\n")
 
-; Negative numbers are truthy
+# Negative numbers are truthy
 (assert-true (if -1 true false) "-1 is truthy in if")
 (display "-1 is truthy\n")
 
-; Floats are truthy
+# Floats are truthy
 (assert-true (if 3.14 true false) "3.14 is truthy in if")
 (display "3.14 is truthy\n")
 
-; Empty string is truthy (unlike C)
+# Empty string is truthy (unlike C)
 (assert-true (if "" true false) "empty string is truthy in if")
 (display "empty string is truthy (not falsy like C)\n")
 
-; Empty list is truthy (unlike C)
+# Empty list is truthy (unlike C)
 (assert-true (if '() true false) "empty list is truthy in if")
 (display "empty list is truthy (not falsy like C)\n")
 
-; Empty array is truthy (unlike C)
+# Empty array is truthy (unlike C)
 (assert-true (if [] true false) "empty array is truthy in if")
 (display "empty array is truthy (not falsy like C)\n")
 
-; Non-empty string is truthy
+# Non-empty string is truthy
 (assert-true (if "hello" true false) "non-empty string is truthy in if")
 (display "non-empty string is truthy\n")
 
-; Non-empty list is truthy
+# Non-empty list is truthy
 (assert-true (if '(a b c) true false) "non-empty list is truthy in if")
 (display "non-empty list is truthy\n")
 
-; Non-empty array is truthy
+# Non-empty array is truthy
 (assert-true (if [1 2 3] true false) "non-empty array is truthy in if")
 (display "non-empty array is truthy\n")
 
-; Symbols are truthy
+# Symbols are truthy
 (assert-true (if 'symbol true false) "symbol is truthy in if")
 (display "symbol is truthy\n")
 
-; Keywords are truthy
+# Keywords are truthy
 (assert-true (if :keyword true false) "keyword is truthy in if")
 (display "keyword is truthy\n")
 
@@ -1093,7 +1093,7 @@
 
 (display "\n=== Truthiness in Conditionals ===\n")
 
-; Using truthiness in cond
+# Using truthiness in cond
 (var test-value 0)
 (var result (cond
   ((nil? test-value) "is nil")
@@ -1103,13 +1103,13 @@
 (assert-eq result "is truthy" "0 is truthy in cond")
 (display "0 evaluates to truthy in cond\n")
 
-; Using truthiness in and/or
+# Using truthiness in and/or
 (assert-eq (and 1 2 3) 3 "and returns last value if all truthy")
 (assert-eq (and 1 nil 3) nil "and returns first falsy value")
 (assert-eq (and 1 false 3) false "and returns first falsy value")
 (display "and returns last truthy or first falsy\n")
 
-; Using truthiness in or
+# Using truthiness in or
 (assert-eq (or nil false "hello") "hello" "or returns first truthy value")
 (assert-eq (or nil false) false "or returns last value if all falsy")
 (display "or returns first truthy or last value\n")

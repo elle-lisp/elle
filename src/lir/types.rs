@@ -242,6 +242,19 @@ pub enum LirInstr {
     /// Runtime eval: compile and execute a datum.
     /// Pops env and expr from stack, compiles and executes, pushes result.
     Eval { dst: Reg, expr: Reg, env: Reg },
+
+    // === Splice Support ===
+    /// Extend an array with all elements of an indexed type (array or tuple).
+    /// Used by splice path: builds the args array incrementally.
+    ArrayExtend { dst: Reg, array: Reg, source: Reg },
+    /// Append a single value to an array.
+    /// Used by splice path: adds non-spliced args to the args array.
+    ArrayPush { dst: Reg, array: Reg, value: Reg },
+    /// Call a function with elements of an array as arguments.
+    /// The array is unpacked into individual arguments at runtime.
+    CallArray { dst: Reg, func: Reg, args: Reg },
+    /// Tail call with elements of an array as arguments.
+    TailCallArray { func: Reg, args: Reg },
 }
 
 /// Binary operations

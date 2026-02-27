@@ -41,7 +41,7 @@ Expander (with &mut SymbolTable, &mut VM)
     ├─► compile & eval macro body in VM via pipeline::eval_syntax()
     ├─► convert result Value back to Syntax via from_value()
     ├─► add expansion scope
-    ├─► handle macro? (check registry, return #t/#f literal)
+     ├─► handle macro? (check registry, return true/false literal)
     ├─► handle expand-macro (expand quoted form, wrap in quote)
     ├─► resolve module:name to flat primitives
     └─► recurse on result (with depth limit of 200)
@@ -78,7 +78,7 @@ Analyzer (hir)
 
 5. **macro? and expand-macro are compile-time.** Both are handled by the
    Expander during expansion, not as runtime primitives. `macro?` checks
-   the macro registry and returns a literal `#t` or `#f`. `expand-macro`
+    the macro registry and returns a literal `true` or `false`. `expand-macro`
    expands a quoted form and wraps the result in quote.
 
 6. **Macro bodies are VM-evaluated.** Macro arguments are quoted and passed
@@ -115,7 +115,7 @@ round-trip during macro expansion. The Analyzer handles it by producing
 
 **Hybrid argument wrapping:** Atoms (nil, bool, int, float, string,
 keyword) are wrapped via `Quote` to preserve runtime semantics (e.g.,
-`#f` stays falsy). Symbols and compound forms are wrapped via
+`false` stays falsy). Symbols and compound forms are wrapped via
 `SyntaxLiteral(Value::syntax(arg))` to preserve scope sets.
 
 ### Hygiene escape hatch: `datum->syntax`

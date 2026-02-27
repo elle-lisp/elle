@@ -1,39 +1,39 @@
-; Tables and Structs Example
+# Tables and Structs Example
 
 (import-file "./examples/assertions.lisp")
 
 (display "=== Testing Tables (Mutable Hash Maps) ===")
 (newline)
 
-; Test 1: Create and type-check empty table
+# Test 1: Create and type-check empty table
 (let ((t (table)))
   (display "Created empty table, type is: ")
   (display (type-of t))
   (newline)
   (assert-true (= (type-of t) (type-of (table))) "Empty table has correct type"))
 
-; Test 2: Create table with numeric keys
+# Test 2: Create table with numeric keys
 (let ((t (table 1 "value1" 2 "value2")))
   (display "Created table with integer keys, length: ")
   (display (length t))
   (newline)
   (assert-eq (length t) 2 "Table with 2 keys has length 2"))
 
-; Test 3: Get values from table
+# Test 3: Get values from table
 (let ((t (table 42 "answer")))
   (display "Retrieved value from table: ")
   (display (get t 42))
   (newline)
   (assert-eq (get t 42) "answer" "Get returns correct value"))
 
-; Test 4: Get with default
+# Test 4: Get with default
 (let ((t (table 1 "exists")))
   (display "Non-existent key with default: ")
   (display (get t 999 "not-found"))
   (newline)
   (assert-eq (get t 999 "not-found") "not-found" "Get with default returns default for missing key"))
 
-; Test 5: Has? predicate
+# Test 5: Has? predicate
 (let ((t (table 5 "five")))
   (display "Table has key 5? ")
   (display (has-key? t 5))
@@ -44,7 +44,7 @@
   (newline)
   (assert-false (has-key? t 10) "has-key? returns false for missing key"))
 
-; Test 6: Put and verify
+# Test 6: Put and verify
 (let ((t (table)))
   (put t 100 "hundred")
   (display "After put, has key? ")
@@ -52,7 +52,7 @@
   (newline)
   (assert-true (has-key? t 100) "put adds key to table"))
 
-; Test 7: Del and verify
+# Test 7: Del and verify
 (let ((t (table 7 "seven" 8 "eight")))
   (del t 7)
   (display "After delete, has key 7? ")
@@ -60,7 +60,7 @@
   (newline)
   (assert-false (has-key? t 7) "del removes key from table"))
 
-; Test 8: Table inspection
+# Test 8: Table inspection
 (let ((t (table 1 "one" 2 "two" 3 "three")))
   (display "Table length: ")
   (display (length t))
@@ -71,35 +71,35 @@
 (display "=== Testing Structs (Immutable Hash Maps) ===")
 (newline)
 
-; Test 9: Create and type-check empty struct
+# Test 9: Create and type-check empty struct
 (let ((s (struct)))
   (display "Created empty struct, type is: ")
   (display (type-of s))
   (newline)
   (assert-true (= (type-of s) (type-of (struct))) "Empty struct has correct type"))
 
-; Test 10: Create struct with numeric keys
+# Test 10: Create struct with numeric keys
 (let ((s (struct 10 "ten" 20 "twenty")))
   (display "Created struct with integer keys, length: ")
   (display (length s))
   (newline)
   (assert-eq (length s) 2 "Struct with 2 keys has length 2"))
 
-; Test 11: Get values from struct
+# Test 11: Get values from struct
 (let ((s (struct 99 "ninetymine")))
   (display "Retrieved value from struct: ")
   (display (get s 99))
   (newline)
   (assert-eq (get s 99) "ninetymine" "get returns correct value"))
 
-; Test 12: Get with default
+# Test 12: Get with default
 (let ((s (struct 3 "three")))
   (display "Non-existent key with default: ")
   (display (get s 777 "default-val"))
   (newline)
   (assert-eq (get s 777 "default-val") "default-val" "get with default returns default for missing key"))
 
-; Test 13: has-key? predicate
+# Test 13: has-key? predicate
 (let ((s (struct 2 "two")))
   (display "Struct has key 2? ")
   (display (has-key? s 2))
@@ -110,7 +110,7 @@
   (newline)
   (assert-false (has-key? s 3) "has-key? returns false for missing key"))
 
-; Test 14: Struct inspection
+# Test 14: Struct inspection
 (let ((s (struct 11 "eleven" 22 "twentytwo")))
   (display "Struct length: ")
   (display (length s))
@@ -121,14 +121,14 @@
 (display "=== Testing Struct Sugar Syntax ===")
 (newline)
 
-; Test 15: Basic struct with integer keys
+# Test 15: Basic struct with integer keys
 (var data1 {1 "one" 2 "two" 3 "three"})
 (display "Created struct with sugar: ")
 (display data1)
 (newline)
 (assert-eq (length data1) 3 "Struct sugar creates struct with 3 keys")
 
-; Test 16: Access struct values
+# Test 16: Access struct values
 (display "Get value for key 1: ")
 (display (get data1 1))
 (newline)
@@ -139,7 +139,7 @@
 (newline)
 (assert-eq (get data1 2) "two" "Struct sugar value for key 2 is 'two'")
 
-; Test 17: Check struct has key
+# Test 17: Check struct has key
 (display "Struct has key 2? ")
 (display (has-key? data1 2))
 (newline)
@@ -150,13 +150,13 @@
 (newline)
 (assert-false (has-key? data1 10) "Struct sugar doesn't have key 10")
 
-; Test 18: Get struct length
+# Test 18: Get struct length
 (display "Struct length: ")
 (display (length data1))
 (newline)
 (assert-eq (length data1) 3 "Struct sugar length is 3")
 
-; Test 19: Empty struct
+# Test 19: Empty struct
 (var empty-struct {})
 (display (newline))
 (display "Empty struct: ")
@@ -174,7 +174,7 @@
 (newline)
 (assert-eq (length empty-struct) 0 "Empty struct length is 0")
 
-; Test 20: Struct with mixed value types
+# Test 20: Struct with mixed value types
 (var mixed {1 42 2 3.14 3 "text" 4 true})
 (display (newline))
 (display "Struct with mixed types: ")
@@ -192,12 +192,12 @@
 (newline)
 (assert-eq (get mixed 3) "text" "Mixed struct value for key 3 is 'text'")
 
-; ========== TABLE SUGAR SYNTAX ==========
+# ========== TABLE SUGAR SYNTAX ==========
 (display (newline))
 (display "=== Testing Table Sugar Syntax ===")
 (newline)
 
-; Test 21: Basic table with integer keys
+# Test 21: Basic table with integer keys
 (var table1 @{1 "first" 2 "second" 3 "third"})
 (display "Created table with sugar: ")
 (display table1)
@@ -214,7 +214,7 @@
 (newline)
 (assert-eq (get table1 2) "second" "Table sugar value for key 2 is 'second'")
 
-; Test 22: Check table has key
+# Test 22: Check table has key
 (display "Table has key 3? ")
 (display (has-key? table1 3))
 (newline)
@@ -225,13 +225,13 @@
 (newline)
 (assert-false (has-key? table1 10) "Table sugar doesn't have key 10")
 
-; Test 23: Get table length
+# Test 23: Get table length
 (display "Table length: ")
 (display (length table1))
 (newline)
 (assert-eq (length table1) 3 "Table sugar length is 3")
 
-; Test 24: Empty table
+# Test 24: Empty table
 (var empty-table @{})
 (display (newline))
 (display "Empty table: ")
@@ -249,7 +249,7 @@
 (newline)
 (assert-eq (length empty-table) 0 "Empty table length is 0")
 
-; Test 25: Table mutability
+# Test 25: Table mutability
 (display (newline))
 (display "Table mutability test:")
 (newline)
@@ -260,7 +260,7 @@
 (assert-eq (get table1 10) "new-key" "Table put adds new key")
 (assert-eq (length table1) 4 "Table length increased to 4")
 
-; ========== COMPARISON ==========
+# ========== COMPARISON ==========
 (display (newline))
 (display "=== Struct vs Table ===")
 (newline)
@@ -288,12 +288,12 @@
 (newline)
 (assert-eq (get t 100) "table" "Table sugar value is 'table'")
 
-; ========== EQUIVALENCE ==========
+# ========== EQUIVALENCE ==========
 (display (newline))
 (display "=== Sugar vs Explicit Calls ===")
 (newline)
 
-; Test 26: These should be equivalent
+# Test 26: These should be equivalent
 (var s1 {1 "a" 2 "b"})
 (var s2 (struct 1 "a" 2 "b"))
 
@@ -310,7 +310,7 @@
 (newline)
 (assert-true (= s1 s2) "Struct sugar equals explicit struct call")
 
-; Test 27: Same for tables
+# Test 27: Same for tables
 (var t1 @{1 "a" 2 "b"})
 (var t2 (table 1 "a" 2 "b"))
 
@@ -328,12 +328,12 @@
 (newline)
 (assert-true (and (= (get t1 1) (get t2 1)) (= (get t1 2) (get t2 2))) "Table sugar and explicit table have same contents")
 
-; ========== NESTING ==========
+# ========== NESTING ==========
 (display (newline))
 (display "=== Nested Structures ===")
 (newline)
 
-; Test 28: Nested struct with list values
+# Test 28: Nested struct with list values
 (var nested {1 (list 10 20 30) 2 (list "a" "b" "c")})
 (display "Struct with list values: ")
 (display nested)
@@ -347,7 +347,7 @@
 (assert-eq (length first-list) 3 "First list has 3 elements")
 (assert-eq (get first-list 0) 10 "First list first element is 10")
 
-; Test 29: Table with nested table
+# Test 29: Table with nested table
 (var outer @{1 @{10 "inner"}})
 (display (newline))
 (display "Table with nested table: ")
@@ -362,11 +362,11 @@
 (assert-true (= (type-of inner-table) (type-of (table))) "Nested value is a table")
 (assert-eq (get inner-table 10) "inner" "Inner table value is 'inner'")
 
-; All tests completed successfully
+# All tests completed successfully
 (display (newline))
 (display "=== All Tables and Structs Tests Completed Successfully ===")
 (newline)
 
-;; NOTE: The `length` function is polymorphic and works on all sequence types
-;; (lists, strings, arrays, tables, structs, keywords). See list-operations.lisp,
-;; string-operations.lisp, and array-operations.lisp for examples with other types.
+## NOTE: The `length` function is polymorphic and works on all sequence types
+## (lists, strings, arrays, tables, structs, keywords). See list-operations.lisp,
+## string-operations.lisp, and array-operations.lisp for examples with other types.

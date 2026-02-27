@@ -40,18 +40,18 @@ See `docs/types.md` for the complete type system reference.
 ### Nil and Booleans
 
 ```lisp
-nil          ; The null/empty value
-#t           ; True
-#f           ; False
+nil          # The null/empty value
+true           # True
+false           # False
 ```
 
 Use `nil?` to test for null values and `boolean?` to test for boolean values.
 
 ```lisp
-(nil? nil)       ⟹ #t
-(nil? #f)        ⟹ #f
-(boolean? #t)    ⟹ #t
-(boolean? 42)    ⟹ #f
+(nil? nil)       ⟹ true
+(nil? false)        ⟹ false
+(boolean? true)    ⟹ true
+(boolean? 42)    ⟹ false
 ```
 
 ### Numbers
@@ -59,17 +59,17 @@ Use `nil?` to test for null values and `boolean?` to test for boolean values.
 Elle supports both integers and floating-point numbers:
 
 ```lisp
-42             ; Integer
-3.14           ; Float
--17            ; Negative numbers
-1.5e-3         ; Scientific notation
+42             # Integer
+3.14           # Float
+-17            # Negative numbers
+1.5e-3         # Scientific notation
 ```
 
 Use `number?` to test for numeric values. Use `type-of` to get the type name:
 
 ```lisp
-(number? 42)     ⟹ #t
-(number? "hello")⟹ #f
+(number? 42)     ⟹ true
+(number? "hello")⟹ false
 (type-of 42)     ⟹ :integer
 (type-of 3.14)   ⟹ :float
 ```
@@ -79,8 +79,8 @@ Use `number?` to test for numeric values. Use `type-of` to get the type name:
 Strings are immutable sequences of characters:
 
 ```lisp
-"hello"                    ; String literal
-"line 1\nline 2"          ; Escape sequences: \n, \t, \", \\
+"hello"                    # String literal
+"line 1\nline 2"          # Escape sequences: \n, \t, \", \\
 (length "hello")          ⟹ 5
 (string-append "hello" " " "world") ⟹ "hello world"
 (substring "hello" 1 4)   ⟹ "ell"
@@ -92,7 +92,7 @@ Common string operations:
 (string-upcase "hello")           ⟹ "HELLO"
 (string-downcase "HELLO")         ⟹ "hello"
 (string-trim "  hello  ")         ⟹ "hello"
-(string-contains? "hello" "ell")  ⟹ #t
+(string-contains? "hello" "ell")  ⟹ true
 (string-split "a,b,c" ",")       ⟹ ("a" "b" "c")
 (string-replace "hello" "l" "L")  ⟹ "heLLo"
 ```
@@ -102,10 +102,10 @@ Common string operations:
 Symbols are identifiers used in code:
 
 ```lisp
-'symbol      ; Symbol (quote prevents evaluation)
-:keyword     ; Keyword (self-evaluating)
-(symbol? 'hello)  ⟹ #t
-(symbol? "hello") ⟹ #f
+'symbol      # Symbol (quote prevents evaluation)
+:keyword     # Keyword (self-evaluating)
+(symbol? 'hello)  ⟹ true
+(symbol? "hello") ⟹ false
 ```
 
 ### Lists
@@ -128,8 +128,8 @@ Linked lists are the fundamental collection type in Lisp:
 Arrays are ordered collections optimized for random access:
 
 ```lisp
-[1 2 3]             ; Array literal
-(array 1 2 3)       ; Create array
+[1 2 3]             # Array literal
+(array 1 2 3)       # Create array
 (length [1 2 3]) ⟹ 3
 (array-ref [1 2 3] 1) ⟹ 2
 (array-set! [1 2 3] 0 99) ⟹ [99 2 3]
@@ -140,15 +140,15 @@ Arrays are ordered collections optimized for random access:
 Tables are mutable hash maps:
 
 ```lisp
-(table)                    ; Empty table
-(table "x" 10 "y" 20)     ; Table with entries
-(get tbl "x")             ; Get value by key
-(put tbl "z" 30)          ; Set/update key
-(del tbl "x")             ; Delete key
-(has-key? tbl "x")        ; Check if key exists
-(keys tbl)                ; Get all keys
-(values tbl)              ; Get all values
-(length tbl)              ; Get number of entries
+(table)                    # Empty table
+(table "x" 10 "y" 20)     # Table with entries
+(get tbl "x")             # Get value by key
+(put tbl "z" 30)          # Set/update key
+(del tbl "x")             # Delete key
+(has-key? tbl "x")        # Check if key exists
+(keys tbl)                # Get all keys
+(values tbl)              # Get all values
+(length tbl)              # Get number of entries
 ```
 
 ### Structs
@@ -156,15 +156,15 @@ Tables are mutable hash maps:
 Structs are immutable hash maps:
 
 ```lisp
-(struct)                   ; Empty struct
-(struct "x" 10 "y" 20)    ; Struct with entries
-(struct-get s "x")        ; Get value by key (returns default-val if missing)
-(struct-put s "z" 30)     ; Returns new struct with updated value
-(struct-del s "x")        ; Returns new struct without key
-(struct-has? s "x")       ; Check if key exists
-(struct-keys s)           ; Get all keys
-(struct-values s)         ; Get all values
-(length s)                ; Get number of entries
+(struct)                   # Empty struct
+(struct "x" 10 "y" 20)    # Struct with entries
+(struct-get s "x")        # Get value by key (returns default-val if missing)
+(struct-put s "z" 30)     # Returns new struct with updated value
+(struct-del s "x")        # Returns new struct without key
+(struct-has? s "x")       # Check if key exists
+(struct-keys s)           # Get all keys
+(struct-values s)         # Get all values
+(length s)                # Get number of entries
 ```
 
 ### Type Checking Predicates
@@ -172,13 +172,13 @@ Structs are immutable hash maps:
 Elle provides predicate functions for type testing (all end with `?`):
 
 ```lisp
-(nil? x)          ; Is x nil?
-(boolean? x)      ; Is x a boolean?
-(number? x)       ; Is x a number?
-(symbol? x)       ; Is x a symbol?
-(string? x)       ; Is x a string?
-(pair? x)         ; Is x a cons cell?
-(type-of x)       ; Get type name as keyword
+(nil? x)          # Is x nil?
+(boolean? x)      # Is x a boolean?
+(number? x)       # Is x a number?
+(symbol? x)       # Is x a symbol?
+(string? x)       # Is x a string?
+(pair? x)         # Is x a cons cell?
+(type-of x)       # Get type name as keyword
 ```
 
 ---
@@ -240,7 +240,7 @@ This is different from `let`, where all bindings are in parallel:
 
 ```lisp
 (let ((x 5)
-      (y (* x 2)))  ; x is still unbound here
+      (y (* x 2)))  # x is still unbound here
   (+ x y))
 ⟹ Error: x is unbound
 ```
@@ -322,17 +322,17 @@ y ⟹ 20
 Use `& name` to collect remaining elements:
 
 ```lisp
-; List rest — collects as a list
+# List rest — collects as a list
 (def (head & tail) (list 1 2 3 4))
 head ⟹ 1
 tail ⟹ (2 3 4)
 
-; Array rest — collects as an array
+# Array rest — collects as an array
 (def [first & others] [10 20 30])
 first ⟹ 10
 others ⟹ [20 30]
 
-; Empty rest when all elements consumed
+# Empty rest when all elements consumed
 (def (a b & r) (list 1 2))
 r ⟹ ()
 ```
@@ -358,7 +358,7 @@ Destructuring patterns in parameter lists extract values from arguments:
 (defn add-pair ((a b)) (+ a b))
 (add-pair (list 3 4)) ⟹ 7
 
-; Mix normal and destructured parameters
+# Mix normal and destructured parameters
 (defn weighted-sum (weight (a b))
   (+ (* weight a) (* weight b)))
 (weighted-sum 2 (list 3 4)) ⟹ 14
@@ -366,7 +366,7 @@ Destructuring patterns in parameter lists extract values from arguments:
 
 #### Mutable Destructuring with `var`
 
-`var` creates mutable bindings; `def` creates immutable ones:
+`var` creates mutable bindings# `def` creates immutable ones:
 
 ```lisp
 (var (a b) (list 1 2))
@@ -383,7 +383,7 @@ a ⟹ 100
 
 ```lisp
 (defn add (x y) (+ x y))
-; equivalent to: (def add (fn (x y) (+ x y)))
+# equivalent to: (def add (fn (x y) (+ x y)))
 
 (add 3 4) ⟹ 7
 ```
@@ -412,7 +412,7 @@ counter ⟹ 1
   "5 is greater")
 ⟹ "10 is greater"
 
-(if #f
+(if false
   "this won't print"
   "this will print")
 ⟹ "this will print"
@@ -435,11 +435,11 @@ The else branch is optional:
   ((> x 20) "x is large")
   ((> x 10) "x is medium")
   ((> x 5)  "x is small")
-  (#t       "x is tiny"))
+  (true       "x is tiny"))
 ⟹ "x is medium"
 ```
 
-The final clause `(#t ...)` acts as a catch-all.
+The final clause `(true ...)` acts as a catch-all.
 
 
 
@@ -464,20 +464,20 @@ Inside a function body, `begin` performs a two-pass analysis for mutual recursio
 `block` sequences expressions within a new lexical scope. Bindings defined inside `block` don't leak out. You can optionally name a block and use `break` to exit early with a value.
 
 ```lisp
-; Simple block
+# Simple block
 (block
   (var x 10)
   (display x))
-; x is not accessible here
+# x is not accessible here
 
-; Named block with break
+# Named block with break
 (var result (block :my-block
   (var x 10)
   (if (> x 5)
     (break :my-block "early exit"))
   "normal exit"))
 
-result  ; ⟹ "early exit"
+result  # ⟹ "early exit"
 ```
 
 `break` exits the innermost (or named) block, returning a value. Syntax: `(break)`, `(break val)`, `(break :name)`, `(break :name val)`. `break` is validated at compile time—it must be inside a block and cannot cross function boundaries.
@@ -487,15 +487,15 @@ result  ; ⟹ "early exit"
 Elle uses functional iteration rather than imperative loops. Use higher-order functions to process collections:
 
 ```lisp
-; Process each element
+# Process each element
 (map (fn (x) (* x 2)) (list 1 2 3))
 ⟹ (2 4 6)
 
-; Select matching elements
+# Select matching elements
 (filter (fn (x) (> x 2)) (list 1 2 3 4))
 ⟹ (3 4)
 
-; Accumulate a result
+# Accumulate a result
 (fold (fn (acc x) (+ acc x)) 0 (list 1 2 3 4))
 ⟹ 10
 ```
@@ -553,7 +553,7 @@ Use `exception` to create exception values and `throw` to raise them:
 (var my-error (exception "Invalid input" (table "code" 42)))
 (throw my-error)
 
-; Or throw directly:
+# Or throw directly:
 (throw (exception "Something failed" nil))
 ```
 
@@ -663,13 +663,13 @@ Catch all conditions with a generic handler:
 Functions are defined with `fn` and named with `defn`:
 
 ```lisp
-; Anonymous function
+# Anonymous function
 (fn (x y) (+ x y))
 
-; Named function with defn (preferred)
+# Named function with defn (preferred)
 (defn add (x y) (+ x y))
 
-; Equivalent long form
+# Equivalent long form
 (def add (fn (x y) (+ x y)))
 
 (add 3 4) ⟹ 7
@@ -708,7 +708,7 @@ Functions close over their definition environment:
 ⟹ (2 4 6)
 
 (map (fn (x) (> x 2)) (list 1 2 3 4))
-⟹ (#f #f #t #t)
+⟹ (false false true true)
 ```
 
 #### filter
@@ -757,26 +757,26 @@ Functions close over their definition environment:
 Common list operations:
 
 ```lisp
-; Construction
+# Construction
 (list 1 2 3)           ⟹ (1 2 3)
 (cons 1 (list 2 3))    ⟹ (1 2 3)
 
-; Access
+# Access
 (first (list 1 2 3))   ⟹ 1
 (rest (list 1 2 3))    ⟹ (2 3)
 (nth 1 (list 'a 'b 'c'))⟹ b
 (last (list 1 2 3))    ⟹ 3
 
-; Modification (non-destructive)
+# Modification (non-destructive)
 (append (list 1 2) (list 3 4)) ⟹ (1 2 3 4)
 (reverse (list 1 2 3)) ⟹ (3 2 1)
 (take 2 (list 1 2 3 4)) ⟹ (1 2)
 (drop 2 (list 1 2 3 4)) ⟹ (3 4)
 
-; Querying
+# Querying
 (length (list 1 2 3))  ⟹ 3
-(pair? (list 1 2))     ⟹ #t
-(nil? nil)             ⟹ #t
+(pair? (list 1 2))     ⟹ true
+(nil? nil)             ⟹ true
 ```
 
 ### Working with Tables
@@ -784,20 +784,20 @@ Common list operations:
 Tables are mutable:
 
 ```lisp
-; Creation
+# Creation
 (var t (table))
 (var t2 (table "x" 10 "y" 20))
 
-; Retrieval
+# Retrieval
 (get t2 "x")           ⟹ 10
 (get t2 "z" 99)        ⟹ 99 (with default)
 
-; Modification
-(put t2 "x" 15)        ; Modifies in place
-(del t2 "y")           ; Delete key
+# Modification
+(put t2 "x" 15)        # Modifies in place
+(del t2 "y")           # Delete key
 
-; Querying
-(has-key? t2 "x")      ⟹ #t
+# Querying
+(has-key? t2 "x")      ⟹ true
 (keys t2)              ⟹ ("x" "y")
 (values t2)            ⟹ (15 20)
 (length t2)            ⟹ 2
@@ -808,23 +808,23 @@ Tables are mutable:
 Structs are immutable:
 
 ```lisp
-; Creation
+# Creation
 (var s (struct "a" 1 "b" 2))
 
-; Retrieval (get with optional default)
+# Retrieval (get with optional default)
 (struct-get s "a")        ⟹ 1
 (struct-get s "z" "N/A")  ⟹ "N/A"
 
-; "Modification" (returns new struct)
+# "Modification" (returns new struct)
 (var s2 (struct-put s "c" 3))
 (struct-get s "c")        ⟹ Error: key not found
 (struct-get s2 "c")       ⟹ 3
 
-; Deletion (returns new struct)
+# Deletion (returns new struct)
 (var s3 (struct-del s2 "b"))
-(struct-has? s3 "b")      ⟹ #f
+(struct-has? s3 "b")      ⟹ false
 
-; Querying
+# Querying
 (struct-keys s)           ⟹ ("a" "b")
 (struct-values s)         ⟹ (1 2)
 (length s)                ⟹ 2
@@ -846,8 +846,8 @@ Structs are immutable:
 (abs -5)           ⟹ 5
 (min 3 1 4 1 5)    ⟹ 1
 (max 3 1 4 1 5)    ⟹ 5
-(even? 4)          ⟹ #t
-(odd? 3)           ⟹ #t
+(even? 4)          ⟹ true
+(odd? 3)           ⟹ true
 ```
 
 ### Math Functions
@@ -880,9 +880,9 @@ e                  ⟹ 2.71828...
 (string-split "a,b,c" ",")         ⟹ ("a" "b" "c")
 (string-replace "hello" "l" "L")   ⟹ "heLLo"
 (string-trim "  hello  ")          ⟹ "hello"
-(string-contains? "hello" "ell")   ⟹ #t
-(string-starts-with? "hello" "he") ⟹ #t
-(string-ends-with? "hello" "lo")   ⟹ #t
+(string-contains? "hello" "ell")   ⟹ true
+(string-starts-with? "hello" "he") ⟹ true
+(string-ends-with? "hello" "lo")   ⟹ true
 (string-join (list "a" "b" "c") "-") ⟹ "a-b-c"
 (int "42")                         ⟹ 42
 (float "3.14")                     ⟹ 3.14
@@ -893,28 +893,28 @@ e                  ⟹ 2.71828...
 ### File I/O
 
 ```lisp
-(slurp "path/to/file.txt")         ; Read entire file as string
-(spit "path/to/file.txt" "content"); Write to file (overwrites)
-(append-file "path/to/file.txt" "\nmore") ; Append to file
-(file-exists? "path/to/file.txt")  ; Check if file exists
-(file? "path/to/file.txt")         ; Check if it's a regular file
-(directory? "path/to/dir")         ; Check if it's a directory
-(file-size "path/to/file.txt")     ; Get file size in bytes
-(delete-file "path/to/file.txt")   ; Delete file
-(delete-directory "path/to/dir")   ; Delete empty directory
-(create-directory "path/to/dir")   ; Create single directory
-(create-directory-all "path/to/deeply/nested/dir") ; Create with parents
-(list-directory "path/to/dir")     ; List directory contents
-(read-lines "path/to/file.txt")    ; Read file as list of lines
+(slurp "path/to/file.txt")         # Read entire file as string
+(spit "path/to/file.txt" "content")# Write to file (overwrites)
+(append-file "path/to/file.txt" "\nmore") # Append to file
+(file-exists? "path/to/file.txt")  # Check if file exists
+(file? "path/to/file.txt")         # Check if it's a regular file
+(directory? "path/to/dir")         # Check if it's a directory
+(file-size "path/to/file.txt")     # Get file size in bytes
+(delete-file "path/to/file.txt")   # Delete file
+(delete-directory "path/to/dir")   # Delete empty directory
+(create-directory "path/to/dir")   # Create single directory
+(create-directory-all "path/to/deeply/nested/dir") # Create with parents
+(list-directory "path/to/dir")     # List directory contents
+(read-lines "path/to/file.txt")    # Read file as list of lines
 (file-name "/path/to/file.txt")    ⟹ "file.txt"
 (file-extension "/path/to/file.txt") ⟹ ".txt"
 (parent-directory "/path/to/file.txt") ⟹ "/path/to"
-(current-directory)                ; Get working directory
-(change-directory "path")          ; Change working directory
-(absolute-path "file.txt")         ; Get absolute path
+(current-directory)                # Get working directory
+(change-directory "path")          # Change working directory
+(absolute-path "file.txt")         # Get absolute path
 (join-path "dir1" "dir2" "file.txt") ⟹ "dir1/dir2/file.txt"
-(copy-file "src.txt" "dst.txt")    ; Copy file
-(rename-file "old.txt" "new.txt")  ; Rename/move file
+(copy-file "src.txt" "dst.txt")    # Copy file
+(rename-file "old.txt" "new.txt")  # Rename/move file
 ```
 
 ### JSON Operations
@@ -943,15 +943,15 @@ e                  ⟹ 2.71828...
 
 ```lisp
 (spawn (fn () (display "Hello from thread") (newline)))
-; Creates a new thread and runs the function
+# Creates a new thread and runs the function
 
 (var t (spawn (fn () (+ 2 2))))
-(join t)          ; Wait for thread to complete, returns its result
+(join t)          # Wait for thread to complete, returns its result
 
-(time/sleep 1)         ; Sleep for 1 second
-(time/sleep 0.5)       ; Sleep for 500 milliseconds
+(time/sleep 1)         # Sleep for 1 second
+(time/sleep 0.5)       # Sleep for 500 milliseconds
 
-(current-thread-id) ; Get ID of current thread
+(current-thread-id) # Get ID of current thread
 ```
 
 ---
@@ -963,10 +963,10 @@ e                  ⟹ 2.71828...
 Quote prevents evaluation:
 
 ```lisp
-'(+ 1 2)       ⟹ (+ 1 2)    ; Not evaluated
-(+ 1 2)        ⟹ 3          ; Evaluated
+'(+ 1 2)       ⟹ (+ 1 2)    # Not evaluated
+(+ 1 2)        ⟹ 3          # Evaluated
 
-'(a b c)       ⟹ (a b c)    ; Symbols, not evaluated
+'(a b c)       ⟹ (a b c)    # Symbols, not evaluated
 ```
 
 Quasiquote allows selective evaluation with unquote:
@@ -1014,7 +1014,7 @@ Load external files as modules:
 ```lisp
 (import-file "lib/helpers.elle")
 
-; Add custom search paths:
+# Add custom search paths:
 (add-module-path "/opt/elle-libs")
 ```
 
@@ -1053,11 +1053,11 @@ Each closure has its own captured variables:
 Prefer `let` and `let*` over global definitions for local work:
 
 ```lisp
-; Good
+# Good
 (let ((x 10) (y 20))
   (+ x y))
 
-; Avoid when possible
+# Avoid when possible
 (var x 10)
 (var y 20)
 (+ x y)
@@ -1068,10 +1068,10 @@ Prefer `let` and `let*` over global definitions for local work:
 Use `struct` instead of `table` when you don't need mutation:
 
 ```lisp
-; Better for functional style
+# Better for functional style
 (var-constant user (struct "id" 1 "name" "Alice"))
 
-; Use table only when mutation is needed
+# Use table only when mutation is needed
 (var cache (table))
 (put cache "key" "value")
 ```
@@ -1081,10 +1081,10 @@ Use `struct` instead of `table` when you don't need mutation:
 Use `map`, `filter`, and `fold` for clear data transformations:
 
 ```lisp
-; Clear intent
+# Clear intent
 (map (fn (x) (+ x 1)) (list 1 2 3))
 
-; More concise with existing functions
+# More concise with existing functions
 (map abs (list -1 -2 -3))
 ```
 

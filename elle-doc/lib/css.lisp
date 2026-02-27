@@ -1,4 +1,4 @@
-;; CSS stylesheet generation
+## CSS stylesheet generation
 
 (var generate-css
   (fn ()

@@ -61,6 +61,69 @@ impl VM {
         }
         args.reverse();
 
+        self.call_inner(func, args, bytecode, constants, closure_env, ip)
+    }
+
+    /// Handle the CallArray instruction.
+    ///
+    /// Like Call, but instead of reading arg_count from bytecode and popping
+    /// individual args, pops an args array and uses its elements as arguments.
+    /// Used by splice: the lowerer builds an args array, then CallArray
+    /// calls the function with those args.
+    ///
+    /// Stack: \[func, args_array\] → \[result\]
+    pub(super) fn handle_call_array(
+        &mut self,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
+    ) -> Option<SignalBits> {
+        let args_val = self
+            .fiber
+            .stack
+            .pop()
+            .expect("VM bug: Stack underflow on CallArray");
+        let func = self
+            .fiber
+            .stack
+            .pop()
+            .expect("VM bug: Stack underflow on CallArray");
+
+        // Extract args from the array
+        let args: Vec<Value> = if let Some(arr) = args_val.as_array() {
+            arr.borrow().to_vec()
+        } else if let Some(tup) = args_val.as_tuple() {
+            tup.to_vec()
+        } else {
+            set_error(
+                &mut self.fiber,
+                "type-error",
+                format!(
+                    "splice: expected array or tuple for args, got {}",
+                    args_val.type_name()
+                ),
+            );
+            self.fiber.stack.push(Value::NIL);
+            return None;
+        };
+
+        self.call_inner(func, args, bytecode, constants, closure_env, ip)
+    }
+
+    /// Shared Call/CallArray logic after argument extraction.
+    ///
+    /// Dispatches native functions, executes closures with environment setup,
+    /// handles yield-through-calls and JIT compilation.
+    fn call_inner(
+        &mut self,
+        func: Value,
+        args: Vec<Value>,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
+    ) -> Option<SignalBits> {
         if let Some(f) = func.as_native_fn() {
             let (bits, value) = f(args.as_slice());
             return self.handle_primitive_signal(bits, value, bytecode, constants, closure_env, ip);
@@ -181,6 +244,57 @@ impl VM {
         }
         args.reverse();
 
+        self.tail_call_inner(func, args)
+    }
+
+    /// Handle the TailCallArray instruction.
+    ///
+    /// Like TailCall, but pops an args array instead of individual args.
+    /// Stack: \[func, args_array\] → (sets up pending tail call)
+    pub(super) fn handle_tail_call_array(
+        &mut self,
+        ip: &mut usize,
+        bytecode: &[u8],
+    ) -> Option<SignalBits> {
+        // Suppress unused warnings — these params match the dispatch signature
+        let _ = (ip, bytecode);
+
+        let args_val = self
+            .fiber
+            .stack
+            .pop()
+            .expect("VM bug: Stack underflow on TailCallArray");
+        let func = self
+            .fiber
+            .stack
+            .pop()
+            .expect("VM bug: Stack underflow on TailCallArray");
+
+        // Extract args from the array
+        let args: Vec<Value> = if let Some(arr) = args_val.as_array() {
+            arr.borrow().to_vec()
+        } else if let Some(tup) = args_val.as_tuple() {
+            tup.to_vec()
+        } else {
+            set_error(
+                &mut self.fiber,
+                "type-error",
+                format!(
+                    "splice: expected array or tuple for args, got {}",
+                    args_val.type_name()
+                ),
+            );
+            return Some(SIG_ERROR);
+        };
+
+        self.tail_call_inner(func, args)
+    }
+
+    /// Shared TailCall/TailCallArray logic after argument extraction.
+    ///
+    /// Dispatches native functions via tail signal handler, sets up pending
+    /// tail call for closures with environment building.
+    fn tail_call_inner(&mut self, func: Value, args: Vec<Value>) -> Option<SignalBits> {
         if let Some(f) = func.as_native_fn() {
             let (bits, value) = f(&args);
             return Some(self.handle_primitive_signal_tail(bits, value));
@@ -194,56 +308,7 @@ impl VM {
             }
 
             // Build proper environment using cached vector
-            self.tail_call_env_cache.clear();
-            let needed = closure.env_capacity();
-            if self.tail_call_env_cache.capacity() < needed {
-                self.tail_call_env_cache
-                    .reserve(needed - self.tail_call_env_cache.len());
-            }
-            self.tail_call_env_cache
-                .extend((*closure.env).iter().cloned());
-
-            // Add parameters, handling variadic rest collection
-            match closure.arity {
-                crate::value::Arity::AtLeast(n) => {
-                    for (i, arg) in args[..n].iter().enumerate() {
-                        if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-                            self.tail_call_env_cache.push(Value::local_cell(*arg));
-                        } else {
-                            self.tail_call_env_cache.push(*arg);
-                        }
-                    }
-                    let rest = Self::args_to_list(&args[n..]);
-                    let rest_idx = n;
-                    if rest_idx < 64 && (closure.cell_params_mask & (1 << rest_idx)) != 0 {
-                        self.tail_call_env_cache.push(Value::local_cell(rest));
-                    } else {
-                        self.tail_call_env_cache.push(rest);
-                    }
-                }
-                _ => {
-                    for (i, arg) in args.iter().enumerate() {
-                        if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-                            self.tail_call_env_cache.push(Value::local_cell(*arg));
-                        } else {
-                            self.tail_call_env_cache.push(*arg);
-                        }
-                    }
-                }
-            }
-
-            // Calculate and add locally-defined variables
-            let num_param_slots = match closure.arity {
-                crate::value::Arity::Exact(n) => n,
-                crate::value::Arity::AtLeast(n) => n + 1,
-                crate::value::Arity::Range(min, _) => min,
-            };
-            let num_locally_defined = closure.num_locals.saturating_sub(num_param_slots);
-
-            for _ in 0..num_locally_defined {
-                self.tail_call_env_cache.push(Value::local_cell(Value::NIL));
-            }
-
+            Self::populate_env(&mut self.tail_call_env_cache, closure, &args);
             let new_env_rc = Rc::new(self.tail_call_env_cache.clone());
 
             // Store the tail call information (Rc clones, not data copies)
@@ -527,58 +592,63 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> Rc<Vec<Value>> {
-        self.env_cache.clear();
-        let needed = closure.env_capacity();
-        if self.env_cache.capacity() < needed {
-            self.env_cache.reserve(needed - self.env_cache.len());
-        }
-        self.env_cache.extend((*closure.env).iter().cloned());
+        Self::populate_env(&mut self.env_cache, closure, args);
+        Rc::new(self.env_cache.clone())
+    }
 
+    /// Populate an environment buffer with captures, arguments, and local slots.
+    ///
+    /// Shared by `build_closure_env` (which uses `env_cache`) and
+    /// `tail_call_inner` (which uses `tail_call_env_cache`). The two caches
+    /// can't alias — a tail call may occur inside a closure call that is
+    /// still using `env_cache`.
+    fn populate_env(buf: &mut Vec<Value>, closure: &crate::value::Closure, args: &[Value]) {
+        buf.clear();
+        let needed = closure.env_capacity();
+        if buf.capacity() < needed {
+            buf.reserve(needed - buf.len());
+        }
+        buf.extend((*closure.env).iter().cloned());
+
+        // Add parameters, handling variadic rest collection
         match closure.arity {
             crate::value::Arity::AtLeast(n) => {
-                // Variadic: first n args are fixed params, rest collected into a list
                 for (i, arg) in args[..n].iter().enumerate() {
                     if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-                        self.env_cache.push(Value::local_cell(*arg));
+                        buf.push(Value::local_cell(*arg));
                     } else {
-                        self.env_cache.push(*arg);
+                        buf.push(*arg);
                     }
                 }
-                // Collect remaining args into a list for the rest slot
                 let rest = Self::args_to_list(&args[n..]);
-                let rest_idx = n; // rest param is at index n in the param list
+                let rest_idx = n;
                 if rest_idx < 64 && (closure.cell_params_mask & (1 << rest_idx)) != 0 {
-                    self.env_cache.push(Value::local_cell(rest));
+                    buf.push(Value::local_cell(rest));
                 } else {
-                    self.env_cache.push(rest);
+                    buf.push(rest);
                 }
             }
             _ => {
-                // Fixed arity: all args are direct params
                 for (i, arg) in args.iter().enumerate() {
                     if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-                        self.env_cache.push(Value::local_cell(*arg));
+                        buf.push(Value::local_cell(*arg));
                     } else {
-                        self.env_cache.push(*arg);
+                        buf.push(*arg);
                     }
                 }
             }
         }
 
-        // Calculate number of locally-defined variables
+        // Add empty LocalCells for locally-defined variables
         let num_param_slots = match closure.arity {
             crate::value::Arity::Exact(n) => n,
-            crate::value::Arity::AtLeast(n) => n + 1, // fixed + rest slot
+            crate::value::Arity::AtLeast(n) => n + 1,
             crate::value::Arity::Range(min, _) => min,
         };
         let num_locally_defined = closure.num_locals.saturating_sub(num_param_slots);
-
-        // Add empty LocalCells for locally-defined variables
         for _ in 0..num_locally_defined {
-            self.env_cache.push(Value::local_cell(Value::NIL));
+            buf.push(Value::local_cell(Value::NIL));
         }
-
-        Rc::new(self.env_cache.clone())
     }
 
     /// Collect values into an Elle list (cons chain terminated by EMPTY_LIST).

@@ -390,7 +390,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Human-readable output without quotes on strings.",
         params: &["vals"],
         category: "io",
-        example: "(display \"hello\") ;=> hello",
+        example: "(display \"hello\") #=> hello",
         aliases: &[],
     },
     PrimitiveDef {
@@ -401,7 +401,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Human-readable output with trailing newline.",
         params: &["vals"],
         category: "io",
-        example: "(print \"hello\") ;=> hello\\n",
+        example: "(print \"hello\") #=> hello\\n",
         aliases: &[],
     },
     PrimitiveDef {
@@ -412,7 +412,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Write values in readable literal form. Strings are quoted.",
         params: &["vals"],
         category: "io",
-        example: "(write \"hello\") ;=> \"hello\"",
+        example: "(write \"hello\") #=> \"hello\"",
         aliases: &[],
     },
     PrimitiveDef {
@@ -423,7 +423,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Print a newline.",
         params: &[],
         category: "io",
-        example: "(newline) ;=> (prints newline)",
+        example: "(newline) #=> (prints newline)",
         aliases: &[],
     },
     PrimitiveDef {
@@ -445,7 +445,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Return a string describing a value's type and content.",
         params: &["value"],
         category: "io",
-        example: "(describe (list 1 2 3)) ;=> \"<list (3 elements)>\"",
+        example: "(describe (list 1 2 3)) #=> \"<list (3 elements)>\"",
         aliases: &[],
     },
 ];

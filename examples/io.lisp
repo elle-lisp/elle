@@ -1,14 +1,14 @@
 #!/usr/bin/elle
-;; I/O Operations - Comprehensive Demonstration
-;; This example showcases all I/O primitives available in Elle
-;; 
-;; Note: Uses relative paths (./elle_example_*) to work in any environment,
-;; including CI systems.
+## I/O Operations - Comprehensive Demonstration
+## This example showcases all I/O primitives available in Elle
+## 
+## Note: Uses relative paths (./elle_example_*) to work in any environment,
+## including CI systems.
 
 (import-file "./examples/assertions.lisp")
 
 (begin
-  ;; Cleanup from previous runs
+  ## Cleanup from previous runs
   (var cleanup-files (list "./elle_example_basic.txt" "./elle_example_copy.txt" "./elle_example_renamed.txt" "./elle_example_lines.txt" "./elle_example_config.txt"))
   (var cleanup-dirs (list "./elle_example_dir" "./elle_example_data" "./elle_example_archive"))
   
@@ -16,7 +16,7 @@
   (newline)
   (newline)
 
-  ;; Part 1: Basic File Writing and Reading
+  ## Part 1: Basic File Writing and Reading
   (display "Part 1: Basic File Writing and Reading")
   (newline)
   (display "---")
@@ -35,7 +35,7 @@
   (assert-equal content "Hello, Elle!" "I/O: spit/slurp basic read-write")
   (newline)
 
-  ;; Part 2: File Existence Checking
+  ## Part 2: File Existence Checking
   (display "Part 2: File Existence Checking")
   (newline)
   (display "---")
@@ -54,7 +54,7 @@
     (assert-true (not not-exists) "I/O: file-exists? returns false for nonexistent file"))
   (newline)
 
-  ;; Part 3: File Properties and Information
+  ## Part 3: File Properties and Information
   (display "Part 3: File Properties and Information")
   (newline)
   (display "---")
@@ -80,7 +80,7 @@
     (assert-true is-dir "I/O: directory? returns true for directory"))
   (newline)
 
-  ;; Part 4: Appending to Files
+  ## Part 4: Appending to Files
   (display "Part 4: Appending Content to Files")
   (newline)
   (display "---")
@@ -95,7 +95,7 @@
      (assert-true (> (length appended-content) 12) "I/O: appended content is longer"))
   (newline)
 
-  ;; Part 5: File Copying
+  ## Part 5: File Copying
   (display "Part 5: File Copying")
   (newline)
   (display "---")
@@ -113,7 +113,7 @@
     (assert-true copy-exists "I/O: copy-file creates new file"))
   (newline)
 
-  ;; Part 6: File Renaming
+  ## Part 6: File Renaming
   (display "Part 6: File Renaming")
   (newline)
   (display "---")
@@ -136,7 +136,7 @@
     (assert-true new-exists "I/O: rename-file creates new name"))
   (newline)
 
-  ;; Part 7: Path Operations
+  ## Part 7: Path Operations
   (display "Part 7: Path Operations")
   (newline)
   (display "---")
@@ -166,7 +166,7 @@
   (newline)
   (newline)
 
-  ;; Part 8: Directory Operations
+  ## Part 8: Directory Operations
   (display "Part 8: Directory Operations")
   (newline)
   (display "---")
@@ -192,7 +192,7 @@
     (assert-true dir-exists "I/O: create-directory creates directory"))
   (newline)
 
-  ;; Part 9: Reading Files Line by Line
+  ## Part 9: Reading Files Line by Line
   (display "Part 9: Reading Files Line by Line")
   (newline)
   (display "---")
@@ -209,13 +209,13 @@
   (assert-equal (length lines) 3 "I/O: read-lines returns 3 lines")
   (newline)
 
-  ;; Part 10: Directory Listing
+  ## Part 10: Directory Listing
   (display "Part 10: Directory Listing")
   (newline)
   (display "---")
   (newline)
 
-  ;; Create some test files in a directory
+  ## Create some test files in a directory
   (spit (join-path test-dir "file1.txt") "Content 1")
   (spit (join-path test-dir "file2.txt") "Content 2")
   (spit (join-path test-dir "file3.txt") "Content 3")
@@ -228,7 +228,7 @@
     (assert-true (> (length dir-list) 0) "I/O: list-directory returns files"))
   (newline)
 
-  ;; Part 11: Working Directory Operations
+  ## Part 11: Working Directory Operations
   (display "Part 11: Working Directory Operations")
   (newline)
   (display "---")
@@ -241,7 +241,7 @@
      (assert-true (> (length cwd) 0) "I/O: current-directory returns valid path"))
   (newline)
 
-  ;; Part 12: Practical Example - Config File Handling
+  ## Part 12: Practical Example - Config File Handling
   (display "Part 12: Practical Example - Config File Handling")
   (newline)
   (display "---")
@@ -249,12 +249,12 @@
 
   (var config-file "./elle_example_config.txt")
 
-  ;; Write initial config
+  ## Write initial config
   (spit config-file "# Elle Configuration File\nversion=1.0\nauthor=Elle Users\n")
   (display "Created config file")
   (newline)
 
-  ;; Read and display config
+  ## Read and display config
   (display "Current config:")
   (newline)
    (var config-content (slurp config-file))
@@ -262,12 +262,12 @@
    (newline)
    (assert-true (> (length config-content) 0) "I/O: config file has content")
 
-  ;; Append new settings
+  ## Append new settings
   (append-file config-file "debug=true\nverbose=false\n")
   (display "Updated config file")
   (newline)
 
-  ;; Read updated version
+  ## Read updated version
   (display "Updated config:")
   (newline)
    (var updated-config (slurp config-file))
@@ -276,7 +276,7 @@
    (assert-true (> (length updated-config) (length config-content)) "I/O: updated config is longer")
   (newline)
 
-  ;; Part 13: File Organization Example
+  ## Part 13: File Organization Example
   (display "Part 13: File Organization Example")
   (newline)
   (display "---")
@@ -288,7 +288,7 @@
   (create-directory-all data-dir)
   (create-directory-all archive-dir)
 
-  ;; Create some data files
+  ## Create some data files
   (spit (join-path data-dir "data1.txt") "Important data 1")
   (spit (join-path data-dir "data2.txt") "Important data 2")
   (spit (join-path data-dir "data3.txt") "Important data 3")
@@ -297,7 +297,7 @@
   (display data-dir)
   (newline)
 
-  ;; Archive a file (copy to archive directory)
+  ## Archive a file (copy to archive directory)
   (var original (join-path data-dir "data1.txt"))
   (var archived (join-path archive-dir "data1_archived.txt"))
   (copy-file original archived)
@@ -312,7 +312,7 @@
     (assert-true archived-exists "I/O: archived file exists after copy"))
   (newline)
 
-  ;; Part 14: Error Handling and Edge Cases
+  ## Part 14: Error Handling and Edge Cases
   (display "Part 14: Error Handling Considerations")
   (newline)
   (display "---")
@@ -328,7 +328,7 @@
   (newline)
   (newline)
 
-  ;; Part 15: Cleanup
+  ## Part 15: Cleanup
   (display "Part 15: Cleanup Operations")
   (newline)
   (display "---")
@@ -354,7 +354,7 @@
   (display config-file)
   (newline)
 
-  ;; Delete files in test directories
+  ## Delete files in test directories
   (delete-file (join-path data-dir "data1.txt"))
   (delete-file (join-path data-dir "data2.txt"))
   (delete-file (join-path data-dir "data3.txt"))
@@ -371,7 +371,7 @@
   (newline)
   (newline)
 
-  ;; Summary
+  ## Summary
   (display "=== Summary of I/O Functions ===")
   (newline)
   (newline)

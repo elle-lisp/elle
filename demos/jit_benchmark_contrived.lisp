@@ -1,9 +1,9 @@
-; Ultra-Contrived JIT Benchmark - Tail Recursive If Expressions
-; 
-; This ONLY uses operations that are currently JIT-compilable:
-; - Literals
-; - If expressions
-; - Tail recursion (using trampolining with counters)
+# Ultra-Contrived JIT Benchmark - Tail Recursive If Expressions
+# 
+# This ONLY uses operations that are currently JIT-compilable:
+# - Literals
+# - If expressions
+# - Tail recursion (using trampolining with counters)
 
 (var countdown-ifs
   (fn (n result)

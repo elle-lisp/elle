@@ -293,7 +293,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Sum all arguments. Returns 0 for no arguments.",
         params: &["xs"],
         category: "arithmetic",
-        example: "(+) ;=> 0\n(+ 1 2 3) ;=> 6",
+        example: "(+) #=> 0\n(+ 1 2 3) #=> 6",
         aliases: &[],
     },
     PrimitiveDef {
@@ -304,7 +304,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Subtract arguments left-to-right. Single arg negates.",
         params: &["x", "ys"],
         category: "arithmetic",
-        example: "(- 10 3 2) ;=> 5\n(- 5) ;=> -5",
+        example: "(- 10 3 2) #=> 5\n(- 5) #=> -5",
         aliases: &[],
     },
     PrimitiveDef {
@@ -315,7 +315,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Multiply all arguments. Returns 1 for no arguments.",
         params: &["xs"],
         category: "arithmetic",
-        example: "(*) ;=> 1\n(* 2 3 4) ;=> 24",
+        example: "(*) #=> 1\n(* 2 3 4) #=> 24",
         aliases: &[],
     },
     PrimitiveDef {
@@ -326,7 +326,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Divide arguments left-to-right. Single arg takes reciprocal.",
         params: &["x", "ys"],
         category: "arithmetic",
-        example: "(/ 10 2) ;=> 5\n(/ 2) ;=> 0.5",
+        example: "(/ 10 2) #=> 5\n(/ 2) #=> 0.5",
         aliases: &[],
     },
     PrimitiveDef {
@@ -337,7 +337,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Euclidean modulo. Result has same sign as divisor.",
         params: &["a", "b"],
         category: "arithmetic",
-        example: "(mod 17 5) ;=> 2\n(mod -17 5) ;=> 3",
+        example: "(mod 17 5) #=> 2\n(mod -17 5) #=> 3",
         aliases: &[],
     },
     PrimitiveDef {
@@ -348,7 +348,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Truncated remainder. Result has same sign as dividend.",
         params: &["a", "b"],
         category: "arithmetic",
-        example: "(% 17 5) ;=> 2\n(% -17 5) ;=> -2",
+        example: "(% 17 5) #=> 2\n(% -17 5) #=> -2",
         aliases: &[],
     },
     PrimitiveDef {
@@ -359,7 +359,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Truncated remainder. Result has same sign as dividend.",
         params: &["a", "b"],
         category: "arithmetic",
-        example: "(rem 17 5) ;=> 2\n(rem -17 5) ;=> -2",
+        example: "(rem 17 5) #=> 2\n(rem -17 5) #=> -2",
         aliases: &[],
     },
     PrimitiveDef {
@@ -370,7 +370,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Absolute value.",
         params: &["x"],
         category: "arithmetic",
-        example: "(abs -5) ;=> 5\n(abs 3) ;=> 3",
+        example: "(abs -5) #=> 5\n(abs 3) #=> 3",
         aliases: &[],
     },
     PrimitiveDef {
@@ -381,7 +381,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Minimum of all arguments.",
         params: &["xs"],
         category: "arithmetic",
-        example: "(min 3 1 4) ;=> 1",
+        example: "(min 3 1 4) #=> 1",
         aliases: &[],
     },
     PrimitiveDef {
@@ -392,7 +392,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Maximum of all arguments.",
         params: &["xs"],
         category: "arithmetic",
-        example: "(max 3 1 4) ;=> 4",
+        example: "(max 3 1 4) #=> 4",
         aliases: &[],
     },
     PrimitiveDef {
@@ -403,7 +403,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Test if integer is even.",
         params: &["n"],
         category: "arithmetic",
-        example: "(even? 4) ;=> true\n(even? 3) ;=> false",
+        example: "(even? 4) #=> true\n(even? 3) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -414,7 +414,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Test if integer is odd.",
         params: &["n"],
         category: "arithmetic",
-        example: "(odd? 3) ;=> true\n(odd? 4) ;=> false",
+        example: "(odd? 3) #=> true\n(odd? 4) #=> false",
         aliases: &[],
     },
 ];

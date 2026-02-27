@@ -1,9 +1,9 @@
 #!/usr/bin/env elle
-;; JSON parsing and serialization examples
+## JSON parsing and serialization examples
 
 (import-file "./examples/assertions.lisp")
 
-;; Example 1: Parse various JSON types
+## Example 1: Parse various JSON types
 (display "=== Example 1: Parsing JSON ===")
 (newline)
 
@@ -37,7 +37,7 @@
 (newline)
 (assert-eq json-string "hello world" "json-parse string returns correct value")
 
-;; Example 2: Parse arrays
+## Example 2: Parse arrays
 (display "\n=== Example 2: Parsing Arrays ===")
 (newline)
 
@@ -56,7 +56,7 @@
 (assert-eq (length mixed-array) 5 "Mixed array has 5 elements")
 (assert-eq (get mixed-array 1) "two" "Second element is string 'two'")
 
-;; Example 3: Parse objects
+## Example 3: Parse objects
 (display "\n=== Example 3: Parsing Objects ===")
 (newline)
 
@@ -65,7 +65,7 @@
 (display json-obj)
 (newline)
 
-;; Access object fields using get
+## Access object fields using get
 (var name (get json-obj "name"))
 (display "Name from object: ")
 (display name)
@@ -78,7 +78,7 @@
 (newline)
 (assert-eq age 30 "Object field 'age' is 30")
 
-;; Example 4: Nested structures
+## Example 4: Nested structures
 (display "\n=== Example 4: Nested Structures ===")
 (newline)
 
@@ -87,7 +87,7 @@
 (display nested-json)
 (newline)
 
-;; Example 5: Serialize Elle values to JSON
+## Example 5: Serialize Elle values to JSON
 (display "\n=== Example 5: Serializing to JSON ===")
 (newline)
 
@@ -120,11 +120,11 @@
 (newline)
 (assert-eq serialized-string "\"hello\"" "json-serialize string returns quoted string")
 
-;; Example 5b: Elle Booleans vs JSON Booleans
+## Example 5b: Elle Booleans vs JSON Booleans
 (display "\n=== Example 5b: Elle Booleans vs JSON Booleans ===")
 (newline)
 
-;; Test Elle native booleans with JSON operations
+## Test Elle native booleans with JSON operations
 (display "Testing Elle native booleans (#t, false):")
 (newline)
 
@@ -143,7 +143,7 @@
 (newline)
 (assert-eq serialized-elle-false "false" "Elle bool false serializes to JSON 'false'")
 
-;; Test JSON-parsed booleans
+## Test JSON-parsed booleans
 (display "\nTesting JSON-parsed booleans:")
 (newline)
 
@@ -160,7 +160,7 @@
 (newline)
 (assert-true (eq? json-false (json-parse "false")) "JSON-parsed false values are equal")
 
-;; Test round-trip: parse -> serialize
+## Test round-trip: parse -> serialize
 (display "\nTesting round-trip (parse -> serialize):")
 (newline)
 
@@ -176,7 +176,7 @@
 (newline)
 (assert-eq roundtrip-false "false" "JSON false round-trips correctly")
 
-;; Test interoperability: Elle bools and JSON-parsed bools serialize identically
+## Test interoperability: Elle bools and JSON-parsed bools serialize identically
 (display "\nTesting interoperability (Elle bools vs JSON-parsed bools):")
 (newline)
 
@@ -187,7 +187,7 @@
 (newline)
 (assert-eq serialized-mixed-bools "[true,false,false,true]" "Mixed Elle and JSON bools serialize identically")
 
-;; Test that Elle true and JSON-parsed true serialize the same way
+## Test that Elle true and JSON-parsed true serialize the same way
 (var elle-true-serialized (json-serialize true))
 (var json-true-serialized (json-serialize (json-parse "true")))
 (display "Elle true serialized: ")
@@ -198,7 +198,7 @@
 (newline)
 (assert-eq elle-true-serialized json-true-serialized "Elle true and JSON true serialize identically")
 
-;; Test that Elle false and JSON-parsed false serialize the same way
+## Test that Elle false and JSON-parsed false serialize the same way
 (var elle-false-serialized (json-serialize false))
 (var json-false-serialized (json-serialize (json-parse "false")))
 (display "Elle false serialized: ")
@@ -209,7 +209,7 @@
 (newline)
 (assert-eq elle-false-serialized json-false-serialized "Elle false and JSON false serialize identically")
 
-;; Example 6: Serialize lists as arrays
+## Example 6: Serialize lists as arrays
 (display "\n=== Example 6: Serializing Lists ===")
 (newline)
 
@@ -227,7 +227,7 @@
 (newline)
 (assert-eq serialized-mixed "[1,\"two\",true,null,3.14]" "json-serialize mixed list returns correct JSON")
 
-;; Example 7: Serialize tables as objects
+## Example 7: Serialize tables as objects
 (display "\n=== Example 7: Serializing Tables ===")
 (newline)
 
@@ -241,7 +241,7 @@
 (display serialized-table)
 (newline)
 
-;; Example 8: Pretty-printing JSON
+## Example 8: Pretty-printing JSON
 (display "\n=== Example 8: Pretty-Printing JSON ===")
 (newline)
 
@@ -251,7 +251,7 @@
 (display pretty-json)
 (newline)
 
-;; Example 9: Round-trip (parse -> modify -> serialize)
+## Example 9: Round-trip (parse -> modify -> serialize)
 (display "\n=== Example 9: Round-trip Transformation ===")
 (newline)
 
@@ -265,7 +265,7 @@
 (display parsed)
 (newline)
 
-;; Modify the parsed data
+## Modify the parsed data
 (put parsed "price" 24.99)
 (put parsed "discount" 0.1)
 
@@ -274,14 +274,14 @@
 (display modified-json)
 (newline)
 
-;; Pretty print the modified data
+## Pretty print the modified data
 (var pretty-modified (json-serialize-pretty parsed))
 (display "Pretty-printed modified:")
 (newline)
 (display pretty-modified)
 (newline)
 
-;; Example 10: Building a config object
+## Example 10: Building a config object
 (display "\n=== Example 10: Building a Config Object ===")
 (newline)
 
@@ -303,7 +303,7 @@
 (display config-json)
 (newline)
 
-;; Example 11: Working with arrays of objects
+## Example 11: Working with arrays of objects
 (display "\n=== Example 11: Arrays of Objects ===")
 (newline)
 

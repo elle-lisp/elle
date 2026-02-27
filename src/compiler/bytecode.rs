@@ -179,6 +179,19 @@ pub enum Instruction {
 
     /// Runtime eval: pop expr and env from stack, compile+execute, push result.
     Eval,
+
+    /// Extend array with elements of another indexed type (for splice).
+    /// Pops source, pops array, pushes extended array.
+    ArrayExtend,
+    /// Push a single value onto an array (for splice).
+    /// Pops value, pops array, pushes array with value appended.
+    ArrayPush,
+    /// Call function with elements of an array as arguments (for splice).
+    /// Pops args array, pops function, calls function with array elements.
+    CallArray,
+    /// Tail call with elements of an array as arguments (for splice).
+    /// Pops args array, pops function, tail calls with array elements.
+    TailCallArray,
 }
 
 /// Inline cache entry for function lookups

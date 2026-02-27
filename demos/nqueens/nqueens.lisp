@@ -1,7 +1,7 @@
-; N-Queens Problem Solver in Elle
-;
-; This implementation solves the N-Queens problem using recursive backtracking.
-; Tests Elle's handling of recursion, list operations, and result accumulation.
+# N-Queens Problem Solver in Elle
+#
+# This implementation solves the N-Queens problem using recursive backtracking.
+# Tests Elle's handling of recursion, list operations, and result accumulation.
 
 (var check-safe-helper
   (fn (col remaining row-offset)
@@ -25,14 +25,14 @@
     (if (= col n)
       (list)
       (if (safe? col queens)
-        ; This column is safe - place queen here
+        # This column is safe - place queen here
         (let ((new-queens (cons col queens)))
-          ; Recurse to place remaining queens
-          ; solve-helper returns a list of solutions from that subtree
-          ; append combines solutions from this branch with remaining branches
+          # Recurse to place remaining queens
+          # solve-helper returns a list of solutions from that subtree
+          # append combines solutions from this branch with remaining branches
           (append (solve-helper n (+ row 1) new-queens)
                   (try-cols-helper n (+ col 1) queens row)))
-        ; Column not safe, try next column
+        # Column not safe, try next column
         (try-cols-helper n (+ col 1) queens row)))))
 
 (var solve-helper
@@ -41,9 +41,9 @@
      Base case (row == n): All queens placed -> one solution found
      Recursive case: Try each column, recurse, accumulate solutions"
     (if (= row n)
-      ; BASE CASE: successfully placed all n queens
+      # BASE CASE: successfully placed all n queens
       (list (reverse queens))
-      ; RECURSIVE CASE: try each column in current row
+      # RECURSIVE CASE: try each column in current row
       (try-cols-helper n 0 queens row))))
 
 (var solve-nqueens
