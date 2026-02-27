@@ -46,7 +46,7 @@
 ;; disbit - bytecode disassembly
 (var disasm-result (disbit add))
 (assert-true (> (length disasm-result) 0) "disbit returns non-empty array")
-(assert-true (string? (array-ref disasm-result 0)) "disbit elements are strings")
+(assert-true (string? (get disasm-result 0)) "disbit elements are strings")
 (display "  ✓ disbit\n")
 
 ;; disjit - Cranelift IR (may be nil if no LIR stored)
@@ -54,7 +54,7 @@
 ;; disjit returns nil or an array of strings
 (assert-true (or (nil? jit-result)
                  (and (> (length jit-result) 0)
-                      (string? (array-ref jit-result 0))))
+                      (string? (get jit-result 0))))
              "disjit returns nil or array of strings")
 (display "  ✓ disjit\n")
 

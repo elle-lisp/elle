@@ -46,15 +46,15 @@
 (display json-array)
 (newline)
 (assert-eq (length json-array) 5 "Array has 5 elements")
-(assert-eq (nth 0 json-array) 1 "First array element is 1")
-(assert-eq (nth 4 json-array) 5 "Last array element is 5")
+(assert-eq (get json-array 0) 1 "First array element is 1")
+(assert-eq (get json-array 4) 5 "Last array element is 5")
 
 (var mixed-array (json-parse "[1, \"two\", true, null, 3.14]"))
 (display "Mixed array: ")
 (display mixed-array)
 (newline)
 (assert-eq (length mixed-array) 5 "Mixed array has 5 elements")
-(assert-eq (nth 1 mixed-array) "two" "Second element is string 'two'")
+(assert-eq (get mixed-array 1) "two" "Second element is string 'two'")
 
 ;; Example 3: Parse objects
 (display "\n=== Example 3: Parsing Objects ===")

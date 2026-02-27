@@ -326,9 +326,9 @@ and skips exempt nodes. `set_scopes_recursive` (called by
    slow. Mitigation: cache compiled bytecode per MacroDef. The body
    doesn't change between calls — only the argument bindings do.
 
-2. **Interaction between `set!` and scope-aware lookup.** `set!` goes
+2. **Interaction between `set` and scope-aware lookup.** `set` goes
    through the Analyzer's `lookup()`. With scope-aware resolution, a
-   macro that uses `set!` on a call-site variable must have the right
+   macro that uses `set` on a call-site variable must have the right
    scope set for the reference to resolve. This works naturally because
    call-site arguments keep their original scopes via syntax objects.
-   The `swap` macro's `set!` on call-site variables is tested and works.
+   The `swap` macro's `set` on call-site variables is tested and works.

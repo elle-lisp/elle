@@ -70,7 +70,7 @@ proptest! {
     #[test]
     fn append_preserves_content(a in "[a-zA-Z]{0,15}", b in "[a-zA-Z]{0,15}") {
         let code = format!(
-            "(string/append \"{}\" \"{}\")",
+            "(append \"{}\" \"{}\")",
             a, b
         );
         let result = eval_source(&code).unwrap();
@@ -81,12 +81,12 @@ proptest! {
 
     #[test]
     fn append_empty_is_identity(s in "[a-zA-Z0-9]{0,20}") {
-        let code = format!("(string/append \"{}\" \"\")", s);
+        let code = format!("(append \"{}\" \"\")", s);
         let result = eval_source(&code).unwrap();
         prop_assert_eq!(result.as_string().unwrap(), s.as_str(),
             "appending empty string changed {:?}", s);
 
-        let code = format!("(string/append \"\" \"{}\")", s);
+        let code = format!("(append \"\" \"{}\")", s);
         let result = eval_source(&code).unwrap();
         prop_assert_eq!(result.as_string().unwrap(), s.as_str(),
             "prepending empty string changed {:?}", s);
@@ -99,10 +99,10 @@ proptest! {
         c in "[a-z]{0,8}",
     ) {
         let r1 = eval_source(&format!(
-            "(string/append (string/append \"{}\" \"{}\") \"{}\")", a, b, c
+            "(append (append \"{}\" \"{}\") \"{}\")", a, b, c
         )).unwrap();
         let r2 = eval_source(&format!(
-            "(string/append \"{}\" (string/append \"{}\" \"{}\"))", a, b, c
+            "(append \"{}\" (append \"{}\" \"{}\"))", a, b, c
         )).unwrap();
         prop_assert_eq!(r1, r2, "append not associative");
     }
@@ -462,7 +462,7 @@ proptest! {
         let a_esc = escape_for_elle(&a);
         let b_esc = escape_for_elle(&b);
         let code = format!(
-            "(string/append \"{}\" \"{}\")",
+            "(append \"{}\" \"{}\")",
             a_esc, b_esc
         );
         if let Ok(result) = eval_source(&code) {
@@ -490,7 +490,7 @@ proptest! {
     #[test]
     fn empty_string_operations(_dummy in 0..1i32) {
         // append empty strings
-        let r2 = eval_source("(string/append \"\" \"\")").unwrap();
+        let r2 = eval_source("(append \"\" \"\")").unwrap();
         prop_assert_eq!(r2.as_string().unwrap(), "");
 
         // upcase empty string

@@ -158,7 +158,7 @@ mod jit_tests {
         let code = r#"(begin
             (var counter 0)
             (defn inc! ()
-              (set! counter (+ counter 1))
+              (set counter (+ counter 1))
               counter)
             (defn loop (n)
               (if (= n 0) counter (begin (inc!) (loop (- n 1)))))
@@ -178,7 +178,7 @@ mod jit_tests {
               (if (= n 0)
                   results
                   (begin
-                    (set! results (cons (fib 10) results))
+                    (set results (cons (fib 10) results))
                     (collect (- n 1)))))
             (collect 15))"#;
         let result = eval_source(code).unwrap();

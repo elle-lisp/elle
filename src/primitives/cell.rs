@@ -9,7 +9,7 @@ use crate::value::{error_val, Value};
 ///
 /// (box value) -> cell
 ///
-/// Creates a mutable cell that can be modified with box-set!
+/// Creates a mutable cell that can be modified with rebox
 pub fn prim_box(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -56,16 +56,16 @@ pub fn prim_unbox(args: &[Value]) -> (SignalBits, Value) {
 
 /// Modify the value in a cell
 ///
-/// (box-set! cell value) -> value
+/// (rebox cell value) -> value
 ///
 /// Sets the cell to contain the new value and returns the new value
-pub fn prim_box_set(args: &[Value]) -> (SignalBits, Value) {
+pub fn prim_rebox(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("box-set!: expected 2 arguments, got {}", args.len()),
+                format!("rebox: expected 2 arguments, got {}", args.len()),
             ),
         );
     }
@@ -79,7 +79,7 @@ pub fn prim_box_set(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("box-set!: expected cell, got {}", args[0].type_name()),
+                format!("rebox: expected cell, got {}", args[0].type_name()),
             ),
         )
     }
@@ -128,14 +128,14 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "box-set!",
-        func: prim_box_set,
+        name: "rebox",
+        func: prim_rebox,
         effect: Effect::none(),
         arity: Arity::Exact(2),
-        doc: "Modify the value in a cell.",
+        doc: "Modify the value in a cell and return the new value.",
         params: &["cell", "value"],
         category: "cell",
-        example: "(let ((c (box 1))) (box-set! c 2) (unbox c)) ;=> 2",
+        example: "(let ((c (box 1))) (rebox c 2) (unbox c)) ;=> 2",
         aliases: &[],
     },
     PrimitiveDef {

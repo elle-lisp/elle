@@ -76,7 +76,11 @@ impl Syntax {
         self.scopes = scopes.to_vec();
         self.scope_exempt = true;
         match &mut self.kind {
-            SyntaxKind::List(items) | SyntaxKind::Array(items) | SyntaxKind::Table(items) => {
+            SyntaxKind::List(items)
+            | SyntaxKind::Tuple(items)
+            | SyntaxKind::Array(items)
+            | SyntaxKind::Struct(items)
+            | SyntaxKind::Table(items) => {
                 for item in items {
                     item.set_scopes_recursive(scopes);
                 }
@@ -135,7 +139,9 @@ impl Syntax {
             SyntaxKind::Keyword(_) => "keyword",
             SyntaxKind::String(_) => "string",
             SyntaxKind::List(_) => "list",
+            SyntaxKind::Tuple(_) => "tuple",
             SyntaxKind::Array(_) => "array",
+            SyntaxKind::Struct(_) => "struct",
             SyntaxKind::Table(_) => "table",
             SyntaxKind::Quote(_) => "quote",
             SyntaxKind::Quasiquote(_) => "quasiquote",
@@ -159,9 +165,13 @@ pub enum SyntaxKind {
 
     // Compounds
     List(Vec<Syntax>),
+    /// Bracket-delimited immutable tuple: `[...]`
+    Tuple(Vec<Syntax>),
+    /// Bracket-delimited mutable array: `@[...]`
     Array(Vec<Syntax>),
-    /// Brace-delimited content: `{...}`. In expression position, desugars to
-    /// a struct literal. In destructuring position, destructures by keyword key.
+    /// Brace-delimited immutable struct: `{...}`
+    Struct(Vec<Syntax>),
+    /// Brace-delimited mutable table: `@{...}`
     Table(Vec<Syntax>),
 
     // Quote forms - preserved as structure for macro handling
@@ -312,6 +322,17 @@ mod tests {
     }
 
     #[test]
+    fn test_display_tuple() {
+        let span = Span::new(0, 10, 1, 1);
+        let items = vec![
+            Syntax::new(SyntaxKind::Int(1), span.clone()),
+            Syntax::new(SyntaxKind::Int(2), span.clone()),
+        ];
+        let syntax = Syntax::new(SyntaxKind::Tuple(items), span);
+        assert_eq!(syntax.to_string(), "[1 2]");
+    }
+
+    #[test]
     fn test_display_array() {
         let span = Span::new(0, 10, 1, 1);
         let items = vec![
@@ -319,7 +340,7 @@ mod tests {
             Syntax::new(SyntaxKind::Int(2), span.clone()),
         ];
         let syntax = Syntax::new(SyntaxKind::Array(items), span);
-        assert_eq!(syntax.to_string(), "[1 2]");
+        assert_eq!(syntax.to_string(), "@[1 2]");
     }
 
     #[test]
@@ -398,6 +419,24 @@ mod tests {
     }
 
     #[test]
+    fn test_expander_expand_tuple() {
+        let mut expander = Expander::new();
+        let mut symbols = crate::symbol::SymbolTable::new();
+        let mut vm = crate::vm::VM::new();
+        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
+        let span = Span::new(0, 10, 1, 1);
+        let items = vec![
+            Syntax::new(SyntaxKind::Int(1), span.clone()),
+            Syntax::new(SyntaxKind::Int(2), span.clone()),
+        ];
+        let syntax = Syntax::new(SyntaxKind::Tuple(items), span);
+        let result = expander.expand(syntax, &mut symbols, &mut vm);
+        assert!(result.is_ok());
+        let expanded = result.unwrap();
+        assert_eq!(expanded.to_string(), "[1 2]");
+    }
+
+    #[test]
     fn test_expander_expand_array() {
         let mut expander = Expander::new();
         let mut symbols = crate::symbol::SymbolTable::new();
@@ -412,7 +451,7 @@ mod tests {
         let result = expander.expand(syntax, &mut symbols, &mut vm);
         assert!(result.is_ok());
         let expanded = result.unwrap();
-        assert_eq!(expanded.to_string(), "[1 2]");
+        assert_eq!(expanded.to_string(), "@[1 2]");
     }
 
     #[test]

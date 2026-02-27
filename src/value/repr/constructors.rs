@@ -212,6 +212,14 @@ impl Value {
         alloc(HeapObject::Tuple(elements))
     }
 
+    /// Create a mutable buffer value.
+    #[inline]
+    pub fn buffer(bytes: Vec<u8>) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
+        use std::cell::RefCell;
+        alloc(HeapObject::Buffer(RefCell::new(bytes)))
+    }
+
     /// Create a fiber value.
     #[inline]
     pub fn fiber(f: crate::value::fiber::Fiber) -> Self {

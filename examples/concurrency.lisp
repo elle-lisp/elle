@@ -60,7 +60,7 @@
 (let ((name "Alice")
       (age 30))
   (let ((handle (spawn (fn () 
-                         (string-append "Hello, " name "! You are " (string age) " years old.")))))
+                         (-> "Hello, " (append name) (append "! You are ") (append (string age)) (append " years old."))))))
     (let ((result (join handle)))
       (display result)
       (newline)

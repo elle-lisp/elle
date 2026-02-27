@@ -10,7 +10,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let params_syntax = items[1].as_list().ok_or_else(|| {
-            if matches!(items[1].kind, SyntaxKind::Array(_)) {
+            if matches!(items[1].kind, SyntaxKind::Tuple(_) | SyntaxKind::Array(_)) {
                 format!(
                     "{}: lambda parameters must use parentheses (params...), \
                      not brackets [...]",

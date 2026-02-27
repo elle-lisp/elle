@@ -39,7 +39,7 @@ boxing so mutations are visible across closure boundaries:
 
 ```lisp
 (let ((counter 0))
-  (def inc (fn () (set! counter (+ counter 1))))
+  (def inc (fn () (set counter (+ counter 1))))
   (inc)
   counter)  ; Should be 1, not 0
 ```

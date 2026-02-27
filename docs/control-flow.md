@@ -106,8 +106,8 @@ The final `(#t ...)` clause acts as a catch-all (equivalent to `else`):
 ⟹ 4 (returns value of last expression)
 
 (var result (begin
-  (set! x 10)
-  (set! y 20)
+  (set x 10)
+  (set y 20)
   (+ x y)))
 result ⟹ 30
 ```
@@ -166,12 +166,12 @@ While Elle emphasizes functional iteration, it also provides imperative loop con
   (begin
     (display counter)
     (newline)
-    (set! counter (+ counter 1))))
+    (set counter (+ counter 1))))
 ⟹ nil (prints 0 1 2 3 4)
 
 (var x 100)
 (while (> x 0)
-  (set! x (/ x 2)))
+  (set x (/ x 2)))
 ⟹ nil (x becomes 0 after repeated halving)
 ```
 

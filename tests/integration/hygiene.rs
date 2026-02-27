@@ -16,7 +16,7 @@ fn test_macro_no_capture() {
     // The macro's `tmp` must not shadow the caller's `tmp`.
     let code = r#"
         (defmacro my-swap (a b)
-          `(let ((tmp ,a)) (set! ,a ,b) (set! ,b tmp)))
+          `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
 
         (let ((tmp 10) (x 1) (y 2))
           (my-swap x y)
@@ -148,7 +148,7 @@ fn test_swap_actually_swaps() {
     // Verify the swap macro actually swaps values, not just that it's hygienic.
     let code = r#"
         (defmacro my-swap (a b)
-          `(let ((tmp ,a)) (set! ,a ,b) (set! ,b tmp)))
+          `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
 
         (let ((x 1) (y 2))
           (my-swap x y)
@@ -166,7 +166,7 @@ fn test_swap_with_same_named_tmp() {
     // The real hygiene test: swap when caller has a variable named `tmp`.
     let code = r#"
         (defmacro my-swap (a b)
-          `(let ((tmp ,a)) (set! ,a ,b) (set! ,b tmp)))
+          `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
 
         (let ((tmp 100) (x 1) (y 2))
           (my-swap x y)

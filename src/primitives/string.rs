@@ -5,27 +5,39 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
-/// Append multiple strings
-pub fn prim_string_append(args: &[Value]) -> (SignalBits, Value) {
-    let mut result = String::new();
-    for arg in args {
-        match arg.as_string() {
-            Some(s) => result.push_str(s),
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("string-append: expected string, got {}", arg.type_name()),
-                    ),
-                )
-            }
+/// Extract text content from a string or buffer value.
+/// Returns (text, is_buffer). For buffers, validates UTF-8.
+fn as_text(val: &Value, prim_name: &str) -> Result<(String, bool), (SignalBits, Value)> {
+    if let Some(s) = val.as_string() {
+        Ok((s.to_string(), false))
+    } else if let Some(buf_ref) = val.as_buffer() {
+        let borrowed = buf_ref.borrow();
+        match String::from_utf8(borrowed.clone()) {
+            Ok(s) => Ok((s, true)),
+            Err(e) => Err((
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("{}: buffer contains invalid UTF-8: {}", prim_name, e),
+                ),
+            )),
         }
+    } else {
+        Err((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "{}: expected string or buffer, got {}",
+                    prim_name,
+                    val.type_name()
+                ),
+            ),
+        ))
     }
-    (SIG_OK, Value::string(result))
 }
 
-/// Convert string to uppercase
+/// Convert string or buffer to uppercase
 pub fn prim_string_upcase(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -36,22 +48,19 @@ pub fn prim_string_upcase(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_string() {
-        Some(s) => (SIG_OK, Value::string(s.to_uppercase())),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "string-upcase: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        ),
+    let (s, is_buffer) = match as_text(&args[0], "string-upcase") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let upper = s.to_uppercase();
+    if is_buffer {
+        (SIG_OK, Value::buffer(upper.into_bytes()))
+    } else {
+        (SIG_OK, Value::string(upper))
     }
 }
 
-/// Convert string to lowercase
+/// Convert string or buffer to lowercase
 pub fn prim_string_downcase(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -62,22 +71,19 @@ pub fn prim_string_downcase(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_string() {
-        Some(s) => (SIG_OK, Value::string(s.to_lowercase())),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "string-downcase: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        ),
+    let (s, is_buffer) = match as_text(&args[0], "string-downcase") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let lower = s.to_lowercase();
+    if is_buffer {
+        (SIG_OK, Value::buffer(lower.into_bytes()))
+    } else {
+        (SIG_OK, Value::string(lower))
     }
 }
 
-/// Get a substring
+/// Get a substring from a string or buffer
 pub fn prim_substring(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 || args.len() > 3 {
         return (
@@ -89,18 +95,11 @@ pub fn prim_substring(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let s = match args[0].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("substring: expected string, got {}", args[0].type_name()),
-                ),
-            )
-        }
+    let (s, _is_buffer) = match as_text(&args[0], "substring") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
+    let s = s.as_str();
 
     let start = match args[1].as_int() {
         Some(n) => n as usize,
@@ -146,7 +145,7 @@ pub fn prim_substring(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::string(&s[byte_start..byte_end]))
 }
 
-/// Find the index of a character
+/// Find the index of a character in a string or buffer
 pub fn prim_string_index(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -158,17 +157,9 @@ pub fn prim_string_index(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let haystack = match args[0].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("string-index: expected string, got {}", args[0].type_name()),
-                ),
-            )
-        }
+    let (haystack, _is_buffer) = match as_text(&args[0], "string-index") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
 
     let needle = match args[1].as_string() {
@@ -202,7 +193,7 @@ pub fn prim_string_index(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Get a character at an index
+/// Get a character at an index from a string or buffer
 pub fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -214,17 +205,9 @@ pub fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let s = match args[0].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("char-at: expected string, got {}", args[0].type_name()),
-                ),
-            )
-        }
+    let (s, _is_buffer) = match as_text(&args[0], "char-at") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
 
     let index = match args[1].as_int() {
@@ -269,7 +252,7 @@ pub fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Split string on delimiter
+/// Split string or buffer on delimiter
 pub fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -281,17 +264,9 @@ pub fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let s = match args[0].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("string-split: expected string, got {}", args[0].type_name()),
-                ),
-            )
-        }
+    let (s, _is_buffer) = match as_text(&args[0], "string-split") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
 
     let delimiter = match args[1].as_string() {
@@ -322,7 +297,7 @@ pub fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, crate::value::list(parts))
 }
 
-/// Replace all occurrences of old with new
+/// Replace all occurrences of old with new in a string or buffer
 pub fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 3 {
         return (
@@ -334,20 +309,9 @@ pub fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let s = match args[0].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "string-replace: expected string, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+    let (s, is_buffer) = match as_text(&args[0], "string-replace") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
 
     let old = match args[1].as_string() {
@@ -392,10 +356,15 @@ pub fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    (SIG_OK, Value::string(s.replace(old, new)))
+    let replaced = s.replace(old, new);
+    if is_buffer {
+        (SIG_OK, Value::buffer(replaced.into_bytes()))
+    } else {
+        (SIG_OK, Value::string(replaced))
+    }
 }
 
-/// Trim leading and trailing whitespace
+/// Trim leading and trailing whitespace from a string or buffer
 pub fn prim_string_trim(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -407,19 +376,19 @@ pub fn prim_string_trim(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    match args[0].as_string() {
-        Some(s) => (SIG_OK, Value::string(s.trim())),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("string-trim: expected string, got {}", args[0].type_name()),
-            ),
-        ),
+    let (s, is_buffer) = match as_text(&args[0], "string-trim") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let trimmed = s.trim().to_string();
+    if is_buffer {
+        (SIG_OK, Value::buffer(trimmed.into_bytes()))
+    } else {
+        (SIG_OK, Value::string(trimmed))
     }
 }
 
-/// Check if string contains substring
+/// Check if string or buffer contains substring
 pub fn prim_string_contains(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -431,20 +400,9 @@ pub fn prim_string_contains(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let haystack = match args[0].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "string-contains?: expected string, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+    let (haystack, _is_buffer) = match as_text(&args[0], "string-contains?") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
 
     let needle = match args[1].as_string() {
@@ -473,7 +431,7 @@ pub fn prim_string_contains(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Check if string starts with prefix
+/// Check if string or buffer starts with prefix
 pub fn prim_string_starts_with(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -488,20 +446,9 @@ pub fn prim_string_starts_with(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let s = match args[0].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "string-starts-with?: expected string, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+    let (s, _is_buffer) = match as_text(&args[0], "string-starts-with?") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
 
     let prefix = match args[1].as_string() {
@@ -530,7 +477,7 @@ pub fn prim_string_starts_with(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Check if string ends with suffix
+/// Check if string or buffer ends with suffix
 pub fn prim_string_ends_with(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -545,20 +492,9 @@ pub fn prim_string_ends_with(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let s = match args[0].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "string-ends-with?: expected string, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+    let (s, _is_buffer) = match as_text(&args[0], "string-ends-with?") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
 
     let suffix = match args[1].as_string() {
@@ -644,17 +580,6 @@ pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
 
 /// Declarative primitive definitions for string module.
 pub const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "string/append",
-        func: prim_string_append,
-        effect: Effect::none(),
-        arity: Arity::AtLeast(0),
-        doc: "Concatenate all string arguments.",
-        params: &["strs"],
-        category: "string",
-        example: "(string/append \"hello\" \" \" \"world\") ;=> \"hello world\"",
-        aliases: &["string-append"],
-    },
     PrimitiveDef {
         name: "string/upcase",
         func: prim_string_upcase,

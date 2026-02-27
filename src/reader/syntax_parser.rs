@@ -227,7 +227,7 @@ impl SyntaxReader {
             match self.current() {
                 None => {
                     return Err(format!(
-                        "{}: unterminated array (missing closing bracket)",
+                        "{}: unterminated tuple (missing closing bracket)",
                         start_loc.position()
                     ));
                 }
@@ -235,7 +235,7 @@ impl SyntaxReader {
                     let end_loc = self.current_location();
                     self.advance();
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
-                    return Ok(Syntax::new(SyntaxKind::Array(elements), span));
+                    return Ok(Syntax::new(SyntaxKind::Tuple(elements), span));
                 }
                 _ => elements.push(self.read()?),
             }
@@ -259,7 +259,7 @@ impl SyntaxReader {
                     self.advance();
 
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
-                    return Ok(Syntax::new(SyntaxKind::Table(elements), span));
+                    return Ok(Syntax::new(SyntaxKind::Struct(elements), span));
                 }
                 _ => elements.push(self.read()?),
             }
@@ -271,7 +271,7 @@ impl SyntaxReader {
 
         match self.current() {
             Some(OwnedToken::LeftBracket) => {
-                // @[...] is sugar for (list ...)
+                // @[...] produces an array literal
                 self.advance(); // skip [
                 let mut elements = Vec::new();
 
@@ -279,7 +279,7 @@ impl SyntaxReader {
                     match self.current() {
                         None => {
                             return Err(format!(
-                                "{}: unterminated list literal",
+                                "{}: unterminated array literal",
                                 start_loc.position()
                             ));
                         }
@@ -287,22 +287,15 @@ impl SyntaxReader {
                             let end_loc = self.current_location();
                             self.advance();
 
-                            // Prepend 'list' symbol
-                            let list_sym = Syntax::new(
-                                SyntaxKind::Symbol("list".to_string()),
-                                self.source_loc_to_span(start_loc, start_loc.col + 1),
-                            );
-                            elements.insert(0, list_sym);
-
                             let span = self.merge_spans(start_loc, &end_loc, &elements);
-                            return Ok(Syntax::new(SyntaxKind::List(elements), span));
+                            return Ok(Syntax::new(SyntaxKind::Array(elements), span));
                         }
                         _ => elements.push(self.read()?),
                     }
                 }
             }
             Some(OwnedToken::LeftBrace) => {
-                // @{...} is sugar for (table ...)
+                // @{...} produces a table literal
                 self.advance(); // skip {
                 let mut elements = Vec::new();
 
@@ -318,22 +311,28 @@ impl SyntaxReader {
                             let end_loc = self.current_location();
                             self.advance();
 
-                            // Prepend 'table' symbol
-                            let table_sym = Syntax::new(
-                                SyntaxKind::Symbol("table".to_string()),
-                                self.source_loc_to_span(start_loc, start_loc.col + 1),
-                            );
-                            elements.insert(0, table_sym);
-
                             let span = self.merge_spans(start_loc, &end_loc, &elements);
-                            return Ok(Syntax::new(SyntaxKind::List(elements), span));
+                            return Ok(Syntax::new(SyntaxKind::Table(elements), span));
                         }
                         _ => elements.push(self.read()?),
                     }
                 }
             }
+            Some(OwnedToken::String(s)) => {
+                // @"..." is sugar for (string->buffer "...")
+                let string_val = s.clone();
+                let len = self.current_length();
+                self.advance(); // skip the string token
+                let span = self.source_loc_to_span(start_loc, start_loc.col + len + 1);
+                let sym = Syntax::new(
+                    SyntaxKind::Symbol("string->buffer".to_string()),
+                    span.clone(),
+                );
+                let str_lit = Syntax::new(SyntaxKind::String(string_val), span.clone());
+                Ok(Syntax::new(SyntaxKind::List(vec![sym, str_lit]), span))
+            }
             _ => Err(format!(
-                "{}: @ must be followed by [...] or {{...}}",
+                "{}: @ must be followed by [...], {{...}}, or \"...\"",
                 start_loc.position()
             )),
         }
@@ -483,14 +482,34 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_empty_array() {
+    fn test_parse_empty_tuple() {
         let result = lex_and_parse("[]").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Tuple(ref items) if items.is_empty()));
+    }
+
+    #[test]
+    fn test_parse_simple_tuple() {
+        let result = lex_and_parse("[1 2 3]").unwrap();
+        match result.kind {
+            SyntaxKind::Tuple(ref items) => {
+                assert_eq!(items.len(), 3);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
+                assert!(matches!(items[2].kind, SyntaxKind::Int(3)));
+            }
+            _ => panic!("Expected tuple"),
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_array() {
+        let result = lex_and_parse("@[]").unwrap();
         assert!(matches!(result.kind, SyntaxKind::Array(ref items) if items.is_empty()));
     }
 
     #[test]
     fn test_parse_simple_array() {
-        let result = lex_and_parse("[1 2 3]").unwrap();
+        let result = lex_and_parse("@[1 2 3]").unwrap();
         match result.kind {
             SyntaxKind::Array(ref items) => {
                 assert_eq!(items.len(), 3);
@@ -525,8 +544,22 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_list_with_array() {
+    fn test_parse_list_with_tuple() {
         let result = lex_and_parse("(1 [2 3] 4)").unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 3);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[1].kind, SyntaxKind::Tuple(_)));
+                assert!(matches!(items[2].kind, SyntaxKind::Int(4)));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
+    fn test_parse_list_with_array() {
+        let result = lex_and_parse("(1 @[2 3] 4)").unwrap();
         match result.kind {
             SyntaxKind::List(ref items) => {
                 assert_eq!(items.len(), 3);
@@ -594,19 +627,49 @@ mod tests {
         }
     }
 
-    // Sugar forms
+    // Struct/Table forms
     #[test]
-    fn test_parse_list_sugar() {
+    fn test_parse_struct() {
+        let result = lex_and_parse("{:a 1 :b 2}").unwrap();
+        match result.kind {
+            SyntaxKind::Struct(ref items) => {
+                assert_eq!(items.len(), 4); // 2 keyword-value pairs
+                assert!(matches!(items[0].kind, SyntaxKind::Keyword(ref k) if k == "a"));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[2].kind, SyntaxKind::Keyword(ref k) if k == "b"));
+                assert!(matches!(items[3].kind, SyntaxKind::Int(2)));
+            }
+            _ => panic!("Expected struct"),
+        }
+    }
+
+    #[test]
+    fn test_parse_table() {
+        let result = lex_and_parse("@{:a 1 :b 2}").unwrap();
+        match result.kind {
+            SyntaxKind::Table(ref items) => {
+                assert_eq!(items.len(), 4); // 2 keyword-value pairs
+                assert!(matches!(items[0].kind, SyntaxKind::Keyword(ref k) if k == "a"));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[2].kind, SyntaxKind::Keyword(ref k) if k == "b"));
+                assert!(matches!(items[3].kind, SyntaxKind::Int(2)));
+            }
+            _ => panic!("Expected table"),
+        }
+    }
+
+    // Old sugar forms tests (for backwards compatibility check)
+    #[test]
+    fn test_parse_array_sugar() {
         let result = lex_and_parse("@[1 2 3]").unwrap();
         match result.kind {
-            SyntaxKind::List(ref items) => {
-                assert_eq!(items.len(), 4); // list symbol + 3 elements
-                assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "list"));
-                assert!(matches!(items[1].kind, SyntaxKind::Int(1)));
-                assert!(matches!(items[2].kind, SyntaxKind::Int(2)));
-                assert!(matches!(items[3].kind, SyntaxKind::Int(3)));
+            SyntaxKind::Array(ref items) => {
+                assert_eq!(items.len(), 3);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
+                assert!(matches!(items[2].kind, SyntaxKind::Int(3)));
             }
-            _ => panic!("Expected list"),
+            _ => panic!("Expected array"),
         }
     }
 
@@ -614,23 +677,14 @@ mod tests {
     fn test_parse_table_sugar() {
         let result = lex_and_parse("@{:a 1 :b 2}").unwrap();
         match result.kind {
-            SyntaxKind::List(ref items) => {
-                assert_eq!(items.len(), 5); // table symbol + 4 elements
-                assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "table"));
-            }
-            _ => panic!("Expected list"),
-        }
-    }
-
-    #[test]
-    fn test_parse_struct() {
-        let result = lex_and_parse("{:a 1 :b 2}").unwrap();
-        match result.kind {
             SyntaxKind::Table(ref items) => {
-                assert_eq!(items.len(), 4); // :a 1 :b 2
-                assert!(matches!(items[0].kind, SyntaxKind::Keyword(ref s) if s == "a"));
+                assert_eq!(items.len(), 4); // 2 keyword-value pairs
+                assert!(matches!(items[0].kind, SyntaxKind::Keyword(ref k) if k == "a"));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[2].kind, SyntaxKind::Keyword(ref k) if k == "b"));
+                assert!(matches!(items[3].kind, SyntaxKind::Int(2)));
             }
-            _ => panic!("Expected Table, got {:?}", result.kind),
+            _ => panic!("Expected table"),
         }
     }
 
@@ -646,7 +700,7 @@ mod tests {
     fn test_unclosed_bracket() {
         let result = lex_and_parse("[1 2 3");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unterminated array"));
+        assert!(result.unwrap_err().contains("unterminated tuple"));
     }
 
     #[test]
@@ -677,6 +731,36 @@ mod tests {
         let result = lex_and_parse("}");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unexpected closing brace"));
+    }
+
+    #[test]
+    fn test_parse_buffer_literal() {
+        let result = lex_and_parse(r#"@"hello""#).unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 2);
+                assert!(
+                    matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "string->buffer")
+                );
+                assert!(matches!(items[1].kind, SyntaxKind::String(ref s) if s == "hello"));
+            }
+            _ => panic!("Expected list (string->buffer \"hello\")"),
+        }
+    }
+
+    #[test]
+    fn test_parse_buffer_literal_empty() {
+        let result = lex_and_parse(r#"@"""#).unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 2);
+                assert!(
+                    matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "string->buffer")
+                );
+                assert!(matches!(items[1].kind, SyntaxKind::String(ref s) if s.is_empty()));
+            }
+            _ => panic!("Expected list (string->buffer \"\")"),
+        }
     }
 
     #[test]
@@ -735,7 +819,7 @@ mod tests {
         assert!(matches!(result[0].kind, SyntaxKind::Int(42)));
         assert!(matches!(result[1].kind, SyntaxKind::Symbol(_)));
         assert!(matches!(result[2].kind, SyntaxKind::List(_)));
-        assert!(matches!(result[3].kind, SyntaxKind::Array(_)));
+        assert!(matches!(result[3].kind, SyntaxKind::Tuple(_)));
     }
 
     #[test]

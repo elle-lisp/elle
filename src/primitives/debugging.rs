@@ -421,7 +421,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Returns true if closure mutates any parameters",
         params: &["value"],
         category: "fn",
-        example: "(fn/mutates-params? (fn (x) (set! x 1)))",
+        example: "(fn/mutates-params? (fn (x) (set x 1)))",
         aliases: &["mutates-params?"],
     },
     PrimitiveDef {

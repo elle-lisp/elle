@@ -96,7 +96,7 @@
              {
                "type": "code",
                "language": "lisp",
-               "text": "[1 2 3]             ; Array literal\n(array 1 2 3)       ; Create array\n(nth arr 0)         ; Access by index\n(length arr)        ; Get length"
+               "text": "[1 2 3]             ; Array literal\n(array 1 2 3)       ; Create array\n(get arr 0)         ; Access by index\n(length arr)        ; Get length"
              }
            ]
          },

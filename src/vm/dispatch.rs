@@ -235,8 +235,14 @@ impl VM {
                 Instruction::IsPair => {
                     types::handle_is_pair(self);
                 }
+                Instruction::IsTuple => {
+                    types::handle_is_tuple(self);
+                }
                 Instruction::IsArray => {
                     types::handle_is_array(self);
+                }
+                Instruction::IsStruct => {
+                    types::handle_is_struct(self);
                 }
                 Instruction::IsTable => {
                     types::handle_is_table(self);

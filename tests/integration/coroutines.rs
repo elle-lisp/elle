@@ -254,7 +254,7 @@ fn test_yield_star() {
           (begin
             (coro/resume main nil)
             (when (not (coro/done? main))
-              (set! results (append results (list (coro/value main)))))))
+              (set results (append results (list (coro/value main)))))))
         results
         "#,
     );
@@ -296,7 +296,7 @@ fn test_coroutine_as_iterator() {
         r#"
         (var results (list))
         (each x (make-coroutine (fn () (yield 1) (yield 2)))
-          (set! results (cons x results)))
+          (set results (cons x results)))
         results
         "#,
     );
@@ -395,7 +395,7 @@ fn test_coroutine_captures_mutable_state() {
         r#"
         (let ((counter (box 0)))
           (var co (make-coroutine (fn ()
-            (box-set! counter (+ (unbox counter) 1))
+            (rebox counter (+ (unbox counter) 1))
             (yield (unbox counter)))))
           (coro/resume co))
         "#,

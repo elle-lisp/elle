@@ -132,7 +132,7 @@ fn test_let_star_with_lambda_capture() {
 fn test_set_on_let_bound_capture() {
     let code = r#"
         (let ((x 0))
-          (let ((inc (fn () (begin (set! x (+ x 1)) x))))
+          (let ((inc (fn () (begin (set x (+ x 1)) x))))
             (begin (inc) (inc) (inc))))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(3));
@@ -144,7 +144,7 @@ fn test_set_on_locally_defined_capture() {
         ((fn ()
            (begin
              (var counter 0)
-             (def inc (fn () (begin (set! counter (+ counter 1)) counter)))
+             (def inc (fn () (begin (set counter (+ counter 1)) counter)))
              (begin (inc) (inc) (inc)))))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(3));
@@ -154,7 +154,7 @@ fn test_set_on_locally_defined_capture() {
 fn test_multiple_closures_share_mutable_capture() {
     let code = r#"
         (let ((x 0))
-          (let ((inc (fn () (set! x (+ x 1))))
+          (let ((inc (fn () (set x (+ x 1))))
                 (get (fn () x)))
             (begin (inc) (inc) (get))))
     "#;
@@ -166,7 +166,7 @@ fn test_nested_mutable_captures() {
     let code = r#"
         (let ((x 0))
           (let ((f (fn () (let ((y 0))
-                            (fn () (begin (set! x (+ x 1)) (set! y (+ y 1)) (+ x y)))))))
+                            (fn () (begin (set x (+ x 1)) (set y (+ y 1)) (+ x y)))))))
             (let ((g (f)))
               (begin (g) (g) (g)))))
     "#;
@@ -179,7 +179,7 @@ fn test_nested_mutable_captures() {
 fn test_mutable_capture_across_lambda_levels() {
     let code = r#"
         (let ((counter 0))
-          (let ((f (fn () (fn () (begin (set! counter (+ counter 1)) counter)))))
+          (let ((f (fn () (fn () (begin (set counter (+ counter 1)) counter)))))
             (let ((g (f)))
               (begin (g) (g) (g)))))
     "#;
@@ -190,8 +190,8 @@ fn test_mutable_capture_across_lambda_levels() {
 fn test_multiple_mutable_captures() {
     let code = r#"
         (let ((x 0) (y 0))
-          (let ((inc-x (fn () (set! x (+ x 1))))
-                (inc-y (fn () (set! y (+ y 1))))
+          (let ((inc-x (fn () (set x (+ x 1))))
+                (inc-y (fn () (set y (+ y 1))))
                 (sum (fn () (+ x y))))
             (begin (inc-x) (inc-y) (inc-x) (sum))))
     "#;
@@ -241,7 +241,7 @@ fn test_coroutine_captures_multiple_levels() {
 fn test_coroutine_with_mutable_capture() {
     let code = r#"
         (let ((counter 0))
-          (let ((gen (fn () (begin (set! counter (+ counter 1)) (yield counter)))))
+          (let ((gen (fn () (begin (set counter (+ counter 1)) (yield counter)))))
             (let ((co (make-coroutine gen)))
               (coro/resume co))))
     "#;
@@ -323,7 +323,7 @@ fn test_capture_in_conditional() {
 fn test_capture_in_loop_body() {
     let code = r#"
         (let ((x 0))
-          (let ((f (fn () (begin (set! x (+ x 1)) x))))
+          (let ((f (fn () (begin (set x (+ x 1)) x))))
             (begin (f) (f) (f) x)))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(3));
@@ -476,7 +476,7 @@ fn test_multiple_closures_sharing_mutable_state_via_define() {
            (begin
              (var value initial)
              (def getter (fn () value))
-             (def setter (fn (new-val) (set! value new-val)))
+             (def setter (fn (new-val) (set value new-val)))
              (setter 42)
              (getter))) 0)
     "#;
@@ -584,4 +584,61 @@ fn test_closure_let_with_string_operations() {
             (checker msg)))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::bool(true));
+}
+
+// ============================================================================
+// SECTION 10: `set` form (without the `!`)
+// ============================================================================
+
+#[test]
+fn test_set_basic() {
+    // Basic set without the ! suffix
+    let code = r#"
+        (let ((x 0))
+          (begin (set x 10) x))
+    "#;
+    assert_eq!(eval_source(code).unwrap(), Value::int(10));
+}
+
+#[test]
+fn test_set_in_closure() {
+    // set in a closure capturing a mutable variable
+    let code = r#"
+        (let ((x 0))
+          (let ((inc (fn () (begin (set x (+ x 1)) x))))
+            (begin (inc) (inc) (inc))))
+    "#;
+    assert_eq!(eval_source(code).unwrap(), Value::int(3));
+}
+
+#[test]
+fn test_set_multiple_times() {
+    // Multiple set calls on the same variable
+    let code = r#"
+        (let ((x 5))
+          (begin (set x 10) (set x 20) (set x 30) x))
+    "#;
+    assert_eq!(eval_source(code).unwrap(), Value::int(30));
+}
+
+#[test]
+fn test_set_with_expression() {
+    // set with a complex expression
+    let code = r#"
+        (let ((x 5))
+          (begin (set x (+ x 10)) x))
+    "#;
+    assert_eq!(eval_source(code).unwrap(), Value::int(15));
+}
+
+#[test]
+fn test_set_shared_capture() {
+    // Multiple closures sharing a mutable capture via set
+    let code = r#"
+        (let ((x 0))
+          (let ((inc (fn () (set x (+ x 1))))
+                (get (fn () x)))
+            (begin (inc) (inc) (get))))
+    "#;
+    assert_eq!(eval_source(code).unwrap(), Value::int(2));
 }

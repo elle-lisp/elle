@@ -1754,7 +1754,7 @@ fn test_jit_batch_global_mutation_known_limitation() {
         (helper 10)
         (helper 10)
         ;; Mutate the global
-        (set! helper (fn (n) "replaced"))
+        (set helper (fn (n) "replaced"))
         ;; Call again — may use old or new function depending on JIT state.
         ;; The key invariant: this must not crash.
         (helper 5))"#,

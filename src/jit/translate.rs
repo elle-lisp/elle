@@ -579,8 +579,14 @@ impl<'a> FunctionTranslator<'a> {
                     "ArraySliceFrom".to_string(),
                 ));
             }
+            LirInstr::IsTuple { .. } => {
+                return Err(JitError::UnsupportedInstruction("IsTuple".to_string()));
+            }
             LirInstr::IsArray { .. } => {
                 return Err(JitError::UnsupportedInstruction("IsArray".to_string()));
+            }
+            LirInstr::IsStruct { .. } => {
+                return Err(JitError::UnsupportedInstruction("IsStruct".to_string()));
             }
             LirInstr::IsTable { .. } => {
                 return Err(JitError::UnsupportedInstruction("IsTable".to_string()));

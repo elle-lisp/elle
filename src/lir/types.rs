@@ -187,9 +187,13 @@ pub enum LirInstr {
     IsNil { dst: Reg, src: Reg },
     /// Check if value is a pair
     IsPair { dst: Reg, src: Reg },
+    /// Check if value is a tuple (for pattern matching)
+    IsTuple { dst: Reg, src: Reg },
     /// Check if value is an array (for pattern matching)
     IsArray { dst: Reg, src: Reg },
-    /// Check if value is a table or struct (for pattern matching)
+    /// Check if value is a struct (for pattern matching)
+    IsStruct { dst: Reg, src: Reg },
+    /// Check if value is a table (for pattern matching)
     IsTable { dst: Reg, src: Reg },
     /// Get array length (for pattern matching)
     ArrayLen { dst: Reg, src: Reg },

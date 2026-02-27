@@ -437,9 +437,9 @@ proptest! {
     fn array_length_correct(len in 0usize..10) {
         let elements: Vec<String> = (0..len).map(|i| i.to_string()).collect();
         let expr = if elements.is_empty() {
-            "(length [])".to_string()
+            "(length @[])".to_string()
         } else {
-            format!("(length [{}])", elements.join(" "))
+            format!("(length @[{}])", elements.join(" "))
         };
         let result = eval_source(&expr);
 
@@ -449,7 +449,7 @@ proptest! {
 
     #[test]
     fn array_ref_first(a in -100i64..100, b in -100i64..100) {
-        let expr = format!("(array-ref [{} {}] 0)", a, b);
+        let expr = format!("(get @[{} {}] 0)", a, b);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -535,7 +535,7 @@ proptest! {
 
         // Sum all elements
         let expr = format!(
-            "(let ((sum 0)) (begin (each x (list {}) (set! sum (+ sum x))) sum))",
+            "(let ((sum 0)) (begin (each x (list {}) (set sum (+ sum x))) sum))",
             list_str
         );
         let result = eval_source(&expr);
@@ -548,7 +548,7 @@ proptest! {
     #[test]
     fn each_empty_list_no_iteration(a in -100i64..100) {
         // Each over empty list should not execute body, return nil
-        let expr = format!("(let ((x {})) (begin (each y (list) (set! x 999)) x))", a);
+        let expr = format!("(let ((x {})) (begin (each y (list) (set x 999)) x))", a);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -567,7 +567,7 @@ proptest! {
     fn closure_mutation_persists(_start in 0i64..100, increments in 1usize..5) {
         // Counter closure that mutates captured variable
         let mut expr = String::from(
-            "(let ((counter (let ((n 0)) (fn () (begin (set! n (+ n 1)) n)))))"
+            "(let ((counter (let ((n 0)) (fn () (begin (set n (+ n 1)) n)))))"
         );
 
         // Call counter multiple times
@@ -585,8 +585,8 @@ proptest! {
     fn independent_closures_have_separate_state(a in 1i64..50, b in 1i64..50) {
         // Two independent closures with separate captured state
         let expr = format!(
-            "(let ((c1 (let ((n {})) (fn () (begin (set! n (+ n 1)) n))))
-                   (c2 (let ((m {})) (fn () (begin (set! m (+ m 1)) m)))))
+            "(let ((c1 (let ((n {})) (fn () (begin (set n (+ n 1)) n))))
+                   (c2 (let ((m {})) (fn () (begin (set m (+ m 1)) m)))))
                 (begin (c1) (c1) (c2) (list (c1) (c2))))",
             a, b
         );
@@ -607,7 +607,7 @@ proptest! {
         }
         let expr = format!(
             "(let ((n {}))
-               (let ((inc (fn () (begin (set! n (+ n 1)) n))))
+               (let ((inc (fn () (begin (set n (+ n 1)) n))))
                  (begin {})))",
             start, calls
         );
@@ -621,7 +621,7 @@ proptest! {
     fn counter_factory_single(start in 0i64..100) {
         // Single counter from factory
         let expr = format!(
-            "(let ((make-counter (fn (n) (fn () (begin (set! n (+ n 1)) n)))))
+            "(let ((make-counter (fn (n) (fn () (begin (set n (+ n 1)) n)))))
                (let ((c (make-counter {})))
                  (begin (c) (c) (c))))",
             start
@@ -640,7 +640,7 @@ proptest! {
         // c2 called once: b+1
         // Final call: c1 at a+3, c2 at b+2
         let expr = format!(
-            "(let ((make-counter (fn (n) (fn () (begin (set! n (+ n 1)) n)))))
+            "(let ((make-counter (fn (n) (fn () (begin (set n (+ n 1)) n)))))
                (let ((c1 (make-counter {})) (c2 (make-counter {})))
                  (begin 
                    (c1) (c1)
@@ -658,7 +658,7 @@ proptest! {
     fn closure_mutates_outer_scope(outer in 0i64..100, delta in 1i64..10) {
         let expr = format!(
             "(let ((x {}))
-               (let ((add (fn () (set! x (+ x {})))))
+               (let ((add (fn () (set x (+ x {})))))
                  (begin (add) (add) x)))",
             outer, delta
         );
@@ -673,8 +673,8 @@ proptest! {
         // Multiple closures over same variable should share state
         let expr = format!(
             "(let ((n {}))
-               (let ((inc (fn () (begin (set! n (+ n 1)) n)))
-                     (dec (fn () (begin (set! n (- n 1)) n)))
+               (let ((inc (fn () (begin (set n (+ n 1)) n)))
+                     (dec (fn () (begin (set n (- n 1)) n)))
                      (get (fn () n)))
                  (begin (inc) (inc) (dec) (get))))",
             init
@@ -691,7 +691,7 @@ proptest! {
         let expr = format!(
             "(let ((x {}))
                (let ((outer (fn (y)
-                              (begin (set! x (+ x y)) x))))
+                              (begin (set x (+ x y)) x))))
                  (begin (outer {}) (outer {}))))",
             a, b, b
         );
@@ -706,7 +706,7 @@ proptest! {
         // Closure captures function parameter and mutates it
         let expr = format!(
             "(let ((make-mutator (fn (n)
-                                   (fn () (begin (set! n (+ n {})) n)))))
+                                   (fn () (begin (set n (+ n {})) n)))))
                (let ((m (make-mutator {})))
                  (begin (m) (m) (m))))",
             delta, param
@@ -726,7 +726,7 @@ proptest! {
         }
         let expr = format!(
             "(let ((total {}))
-               (let ((add (fn (x) (begin (set! total (+ total x)) total))))
+               (let ((add (fn (x) (begin (set total (+ total x)) total))))
                  (begin {})))",
             init, calls
         );
@@ -815,7 +815,7 @@ proptest! {
     fn begin_with_side_effects(a in -100i64..100, b in -100i64..100) {
         // Side effect: set! followed by read
         let expr = format!(
-            "(let ((x {})) (begin (set! x {}) x))",
+            "(let ((x {})) (begin (set x {}) x))",
             a, b
         );
         let result = eval_source(&expr);
@@ -1376,8 +1376,8 @@ proptest! {
             "(fold (fn (acc x)
                      (begin
                        (var num-str (number->string x))
-                       (var wrapped (string-append \"[\" num-str \"]\"))
-                       (string-append acc wrapped)))
+                        (var wrapped (append (append \"[\" num-str) \"]\"))
+                        (append acc wrapped)))
                    \"\"
                    (list {} {}))",
             a, b
@@ -1642,7 +1642,7 @@ proptest! {
         }
         let expr = format!(
             "(let ((n 0))
-               (letrec ((inc (fn () (begin (set! n (+ n 1)) n)))
+               (letrec ((inc (fn () (begin (set n (+ n 1)) n)))
                         (get (fn () n)))
                  (begin {} (get))))",
             calls

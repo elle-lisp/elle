@@ -29,13 +29,23 @@ pub enum HirPattern {
         rest: Option<Box<HirPattern>>,
     },
 
-    /// Match an array pattern with optional rest
+    /// Match a tuple [...] pattern with optional rest (emits IsTuple guard)
+    Tuple {
+        elements: Vec<HirPattern>,
+        rest: Option<Box<HirPattern>>,
+    },
+
+    /// Match an array @[...] pattern with optional rest (emits IsArray guard)
     Array {
         elements: Vec<HirPattern>,
         rest: Option<Box<HirPattern>>,
     },
 
-    /// Match a table/struct by keyword keys
+    /// Match a struct {...} by keyword keys (emits IsStruct guard)
+    /// Each entry is (keyword_name, pattern_for_value)
+    Struct { entries: Vec<(String, HirPattern)> },
+
+    /// Match a table @{...} by keyword keys (emits IsTable guard)
     /// Each entry is (keyword_name, pattern_for_value)
     Table { entries: Vec<(String, HirPattern)> },
 }
@@ -87,7 +97,9 @@ impl HirPattern {
                 head.collect_bindings(out);
                 tail.collect_bindings(out);
             }
-            HirPattern::List { elements, rest } | HirPattern::Array { elements, rest } => {
+            HirPattern::List { elements, rest }
+            | HirPattern::Tuple { elements, rest }
+            | HirPattern::Array { elements, rest } => {
                 for p in elements {
                     p.collect_bindings(out);
                 }
@@ -95,7 +107,7 @@ impl HirPattern {
                     r.collect_bindings(out);
                 }
             }
-            HirPattern::Table { entries } => {
+            HirPattern::Struct { entries } | HirPattern::Table { entries } => {
                 for (_, pattern) in entries {
                     pattern.collect_bindings(out);
                 }

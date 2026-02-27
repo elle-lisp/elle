@@ -25,8 +25,8 @@ fn init_list_module(vm: &mut VM, symbols: &mut SymbolTable) {
     let mut list_exports = HashMap::new();
 
     let functions = vec![
-        "length", "empty?", "append", "reverse", "map", "filter", "fold", "nth", "last", "butlast",
-        "take", "drop", "list", "cons", "first", "rest",
+        "length", "empty?", "append", "concat", "reverse", "map", "filter", "fold", "last",
+        "butlast", "take", "drop", "list", "cons", "first", "rest",
     ];
 
     let mut exports = Vec::new();
@@ -50,7 +50,6 @@ fn init_string_module(vm: &mut VM, symbols: &mut SymbolTable) {
     let mut string_exports = HashMap::new();
 
     let functions = vec![
-        "string-append",
         "string-upcase",
         "string-downcase",
         "substring",

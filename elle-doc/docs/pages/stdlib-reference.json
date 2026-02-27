@@ -68,7 +68,7 @@
             ["(cons x lst)", "Prepend element to list"],
             ["(first lst)", "Get first element"],
             ["(rest lst)", "Get rest of list"],
-            ["(nth lst i)", "Get element at index"],
+            ["(get collection i)", "Get element at index"],
             ["(length lst)", "Get list length"],
             ["(append lst1 lst2)", "Concatenate lists"],
             ["(reverse lst)", "Reverse a list"],
@@ -85,7 +85,7 @@
           "type": "table",
           "headers": ["Function", "Description"],
           "rows": [
-            ["(string-append s1 s2 ...)", "Concatenate strings"],
+            ["(append s1 s2)", "Concatenate strings"],
             ["(string-length s)", "Get string length"],
             ["(substring s start end)", "Extract substring"],
             ["(string-split s delim)", "Split string on delimiter"],
@@ -159,7 +159,7 @@
            "headers": ["Function", "Description"],
            "rows": [
              ["(array a b ...)", "Create an array"],
-             ["(nth arr i)", "Get element at index"],
+             ["(get arr i)", "Get element at index"],
              ["(length arr)", "Get array length"],
              ["(array-append a1 a2)", "Concatenate arrays"],
              ["(array-reverse a)", "Reverse an array"]

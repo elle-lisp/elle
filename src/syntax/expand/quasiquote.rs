@@ -139,10 +139,18 @@ impl Expander {
                 segments.push(self.make_list(list_call, span.clone()));
             }
 
-            // Build (append seg1 seg2 ...)
-            let mut append_call = vec![self.make_symbol("append", span.clone())];
-            append_call.extend(segments);
-            Ok(self.make_list(append_call, span.clone()))
+            // Build nested binary append calls: (append seg1 (append seg2 (append seg3 ...)))
+            // append is now binary, so we need to nest the calls
+            let mut result = segments.pop().unwrap_or(
+                self.make_list(vec![self.make_symbol("list", span.clone())], span.clone()),
+            );
+            while let Some(seg) = segments.pop() {
+                result = self.make_list(
+                    vec![self.make_symbol("append", span.clone()), seg, result],
+                    span.clone(),
+                );
+            }
+            Ok(result)
         } else {
             // Simple case - just use list
             let mut list_call = vec![self.make_symbol("list", span.clone())];

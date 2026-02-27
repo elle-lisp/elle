@@ -146,7 +146,7 @@
 (newline)
 
 ;; Example 3c: Concatenate strings
-(def concat (fn (a b) (string-append a b)))
+(def concat (fn (a b) (append a b)))
 (var words (list "Hello" " " "World" "!"))
 (var concatenated (my-fold concat "" words))
 (display "Concatenate strings: ")

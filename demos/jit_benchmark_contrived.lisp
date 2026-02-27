@@ -25,6 +25,6 @@
 (display "Running: ")
 
 (let ((result (countdown-ifs 100000 0)))
-  (display (string-append "\nDone! Counted: " (number->string result) "\n")))
+  (display (-> "\nDone! Counted: " (append (number->string result)) (append "\n"))))
 
 (display "\n=== Benchmark Complete ===\n")

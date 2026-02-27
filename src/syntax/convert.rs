@@ -27,14 +27,25 @@ impl Syntax {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 crate::value::list(values)
             }
+            SyntaxKind::Tuple(items) => {
+                let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
+                Value::tuple(values)
+            }
             SyntaxKind::Array(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 Value::array(values)
             }
-            SyntaxKind::Table(items) => {
+            SyntaxKind::Struct(items) => {
                 // Convert to (struct k1 v1 k2 v2 ...) list
                 let struct_sym = symbols.intern("struct");
                 let mut values = vec![Value::symbol(struct_sym.0)];
+                values.extend(items.iter().map(|item| item.to_value(symbols)));
+                crate::value::list(values)
+            }
+            SyntaxKind::Table(items) => {
+                // Convert to (table k1 v1 k2 v2 ...) list
+                let table_sym = symbols.intern("table");
+                let mut values = vec![Value::symbol(table_sym.0)];
                 values.extend(items.iter().map(|item| item.to_value(symbols)));
                 crate::value::list(values)
             }
@@ -100,6 +111,12 @@ impl Syntax {
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
             SyntaxKind::List(syntaxes?)
+        } else if let Some(elems) = value.as_tuple() {
+            let syntaxes: Result<Vec<Syntax>, String> = elems
+                .iter()
+                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .collect();
+            SyntaxKind::Tuple(syntaxes?)
         } else if let Some(vec_ref) = value.as_array() {
             let items = vec_ref.borrow().clone();
             let syntaxes: Result<Vec<Syntax>, String> = items
@@ -107,6 +124,19 @@ impl Syntax {
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
             SyntaxKind::Array(syntaxes?)
+        } else if let Some(struct_ref) = value.as_struct() {
+            let syntaxes: Result<Vec<Syntax>, String> = struct_ref
+                .iter()
+                .flat_map(|(_, v)| vec![Syntax::from_value(v, symbols, span.clone())])
+                .collect();
+            SyntaxKind::Struct(syntaxes?)
+        } else if let Some(table_ref) = value.as_table() {
+            let items = table_ref.borrow().clone();
+            let syntaxes: Result<Vec<Syntax>, String> = items
+                .iter()
+                .flat_map(|(_, v)| vec![Syntax::from_value(v, symbols, span.clone())])
+                .collect();
+            SyntaxKind::Table(syntaxes?)
         } else {
             return Err(format!("Cannot convert {:?} to Syntax", value));
         };
@@ -223,6 +253,24 @@ mod tests {
                 assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
             }
             other => panic!("expected List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_tuple() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(
+            SyntaxKind::Tuple(vec![Syntax::new(SyntaxKind::Int(1), test_span())]),
+            test_span(),
+        );
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        match result.kind {
+            SyntaxKind::Tuple(items) => {
+                assert_eq!(items.len(), 1);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+            }
+            other => panic!("expected Tuple, got {:?}", other),
         }
     }
 

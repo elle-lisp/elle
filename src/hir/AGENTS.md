@@ -131,7 +131,7 @@ HIR (bindings are inline — no separate HashMap)
 | `mod.rs` | 25 | Re-exports |
 | `analyze/mod.rs` | ~560 | `Analyzer` struct, `ScopedBinding`, scope-aware resolution |
 | `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
-| `analyze/binding.rs` | ~425 | Binding forms: `let`, `letrec`, `def`/`var`, `set!` |
+| `analyze/binding.rs` | ~425 | Binding forms: `let`, `letrec`, `def`/`var`, `set` |
 | `analyze/destructure.rs` | ~215 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
 | `analyze/lambda.rs` | ~160 | Lambda/fn analysis with captures, params, effects |
 | `analyze/special.rs` | ~180 | Special forms: `match`, `yield`, `module` |

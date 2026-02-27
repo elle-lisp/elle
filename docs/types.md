@@ -41,12 +41,12 @@ error tuples, and `[kind msg]` must destructure them.
 
 | Feature | Status |
 |---------|--------|
-| `[...]` → tuple | ❌ Currently creates array. Must change to tuple. |
-| `@[...]` → array | ❌ Currently creates list. Must change to array. |
+| `[...]` → tuple | ✅ Correct |
+| `@[...]` → array | ✅ Correct |
 | `{...}` → struct | ✅ Correct |
 | `@{...}` → table | ✅ Correct |
 | `"..."` → string | ✅ Correct |
-| `@"..."` → buffer | ❌ Buffer type does not exist yet |
+| `@"..."` → buffer | ✅ Desugars to `(string->buffer "...")` |
 
 ---
 
@@ -223,13 +223,20 @@ Strings are interned — equality is O(1).
 Mutable byte sequence. The mutable counterpart of string.
 
 ```lisp
-@"hello"        ; literal (not yet implemented)
-(buffer? x)     ; predicate (not yet implemented)
+@"hello"        ; literal (desugars to (string->buffer "hello"))
+(buffer? x)     ; predicate
+(buffer 72 101)  ; constructor from bytes
+(string->buffer "hello")  ; from string (UTF-8 bytes)
+(buffer->string buf)      ; to string (UTF-8)
+(get buf 0)     ; byte at index (as integer)
+(put buf 0 88)  ; set byte at index
+(push buf 33)   ; append byte
+(pop buf)       ; remove and return last byte
+(length buf)    ; byte count
+(empty? buf)    ; empty check
+(append b1 b2)  ; mutate b1 by extending with b2
+(concat b1 b2)  ; return new buffer
 ```
-
-**Status**: Buffer type does not exist yet. When implemented, it should be
-`HeapObject::Buffer(RefCell<Vec<u8>>)` with primitives for indexed byte
-access, mutation, and conversion to/from string.
 
 ---
 

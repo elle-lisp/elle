@@ -164,6 +164,76 @@ pub fn prim_is_pointer(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
+/// Check if value is an array (mutable indexed sequence)
+pub fn prim_is_array(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("array?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].as_array().is_some()))
+}
+
+/// Check if value is a tuple (immutable indexed sequence)
+pub fn prim_is_tuple(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("tuple?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].as_tuple().is_some()))
+}
+
+/// Check if value is a table (mutable key-value map)
+pub fn prim_is_table(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("table?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].as_table().is_some()))
+}
+
+/// Check if value is a buffer (mutable byte sequence)
+pub fn prim_is_buffer(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("buffer?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].is_buffer()))
+}
+
+/// Check if value is a struct (immutable key-value map)
+pub fn prim_is_struct(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("struct?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].as_struct().is_some()))
+}
+
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "nil?",
@@ -273,6 +343,61 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["value"],
         category: "predicate",
         example: "(pointer? ptr) ;=> true\n(pointer? 42) ;=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "array?",
+        func: prim_is_array,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is an array (mutable indexed sequence).",
+        params: &["value"],
+        category: "predicate",
+        example: "(array? @[1 2 3]) ;=> true\n(array? [1 2 3]) ;=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "tuple?",
+        func: prim_is_tuple,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a tuple (immutable indexed sequence).",
+        params: &["value"],
+        category: "predicate",
+        example: "(tuple? [1 2 3]) ;=> true\n(tuple? @[1 2 3]) ;=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "table?",
+        func: prim_is_table,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a table (mutable key-value map).",
+        params: &["value"],
+        category: "predicate",
+        example: "(table? @{:a 1}) ;=> true\n(table? {:a 1}) ;=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "struct?",
+        func: prim_is_struct,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a struct (immutable key-value map).",
+        params: &["value"],
+        category: "predicate",
+        example: "(struct? {:a 1}) ;=> true\n(struct? @{:a 1}) ;=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "buffer?",
+        func: prim_is_buffer,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a buffer (mutable byte sequence).",
+        params: &["value"],
+        category: "predicate",
+        example: "(buffer? @\"hello\") ;=> true\n(buffer? \"hello\") ;=> false",
         aliases: &[],
     },
 ];

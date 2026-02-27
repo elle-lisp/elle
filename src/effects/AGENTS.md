@@ -62,7 +62,7 @@ When analyzing a call:
 
 - Effects are tracked within a single compilation unit
 - Cross-unit effect tracking is not implemented
-- `set!` invalidates effect tracking for the mutated binding
+- `set` invalidates effect tracking for the mutated binding
 - Mutual recursion in `letrec` may have incomplete effect information
 
 ## Dependents
@@ -98,7 +98,7 @@ Used across the pipeline and the runtime:
    set means parameter i's effects flow through. Higher-order functions like
    `map`, `filter`, `fold` use this. `propagated_params()` iterates the set bits.
 
-4. **set! invalidates tracking.** When a binding is mutated via `set!`, its
+4. **set invalidates tracking.** When a binding is mutated via `set`, its
    effect becomes uncertain and is removed from `effect_env`.
 
 5. **Effect is Copy.** No allocation, no cloning needed. `const fn` constructors.

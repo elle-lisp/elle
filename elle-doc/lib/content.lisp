@@ -6,17 +6,16 @@
 (var render-paragraph
   (fn (block)
     (let ((text (get block "text")))
-      (string-append "<p>" (format-inline text) "</p>"))))
+      (-> "<p>" (append (format-inline text)) (append "</p>")))))
 
 ;; Render a code block
 (var render-code
   (fn (block)
     (let ((text (get block "text"))
           (language (get block "language")))
-      (string-append 
-        "<pre><code class=\"language-" (html-escape language) "\">"
-        (html-escape text)
-        "</code></pre>"))))
+      (-> "<pre><code class=\"language-" (append (html-escape language)) (append "\">")
+        (append (html-escape text))
+        (append "</code></pre>")))))
 
 ;; Render a list block
 (var render-list
@@ -28,19 +27,18 @@
       (let ((rendered-items
               (fold
                 (fn (acc item)
-                  (string-append acc "<li>" (format-inline item) "</li>"))
+                  (-> acc (append "<li>") (append (format-inline item)) (append "</li>")))
                 ""
                 items)))
-        (string-append 
-          "<" tag ">"
-          rendered-items
-          "</" tag ">"))))))
+        (-> "<" (append tag) (append ">")
+          (append rendered-items)
+          (append "</") (append tag) (append ">"))))))
 
 ;; Render a blockquote block
 (var render-blockquote
   (fn (block)
     (let ((text (get block "text")))
-      (string-append "<blockquote>" (format-inline text) "</blockquote>"))))
+      (-> "<blockquote>" (append (format-inline text)) (append "</blockquote>")))))
 
 ;; Render a table block
 (var render-table
@@ -52,7 +50,7 @@
       (let ((rendered-headers
               (fold
                 (fn (acc header)
-                  (string-append acc "<th>" (html-escape header) "</th>"))
+                  (-> acc (append "<th>") (append (html-escape header)) (append "</th>")))
                 ""
                 headers)))
         
@@ -61,7 +59,7 @@
           (fn (cells)
             (fold
               (fn (acc cell)
-                (string-append acc "<td>" (html-escape cell) "</td>"))
+                (-> acc (append "<td>") (append (html-escape cell)) (append "</td>")))
               ""
               cells)))
         
@@ -69,26 +67,24 @@
         (let ((rendered-rows
                 (fold
                   (fn (acc row)
-                    (string-append acc "<tr>" (render-row-cells row) "</tr>"))
+                    (-> acc (append "<tr>") (append (render-row-cells row)) (append "</tr>")))
                   ""
                   rows)))
           
-          (string-append 
-            "<table><thead><tr>"
-            rendered-headers
-            "</tr></thead><tbody>"
-            rendered-rows
-            "</tbody></table>"))))))
+          (-> "<table><thead><tr>"
+            (append rendered-headers)
+            (append "</tr></thead><tbody>")
+            (append rendered-rows)
+            (append "</tbody></table>"))))))
 
 ;; Render a note/callout block
 (var render-note
   (fn (block)
     (let ((text (get block "text"))
           (kind (get block "kind")))
-      (string-append 
-        "<div class=\"note note-" (html-escape kind) "\">"
-        (format-inline text)
-        "</div>"))))
+      (-> "<div class=\"note note-" (append (html-escape kind)) (append "\">")
+        (append (format-inline text))
+        (append "</div>")))))
 
 ;; Main dispatcher
 (var render-block
@@ -114,19 +110,18 @@
       (let ((rendered-content
               (fold
                 (fn (acc block)
-                  (string-append acc (render-block block)))
+                  (append acc (render-block block)))
                 ""
                 content)))
         
-        (string-append 
-          "<h" level-str ">" (html-escape heading) "</h" level-str ">"
-          rendered-content)))))
+        (-> "<h" (append level-str) (append ">") (append (html-escape heading)) (append "</h") (append level-str) (append ">")
+          (append rendered-content))))))
 
 ;; Render all sections using fold
 (var render-sections
   (fn (sections)
     (fold
       (fn (acc section)
-        (string-append acc (render-section section)))
+        (append acc (render-section section)))
       ""
       sections)))

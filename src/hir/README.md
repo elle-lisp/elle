@@ -16,7 +16,7 @@ different Bindings). Identity is pointer equality (bit-pattern comparison).
 scope, HIR records what's captured and how to access it (directly from parent's
 locals, transitively through parent's captures, or from globals).
 
-**Mutation Tracking**: Variables modified with `set!` are marked as mutated
+**Mutation Tracking**: Variables modified with `set` are marked as mutated
 via `binding.mark_mutated()`. Combined with capture information, this
 determines which variables need cell boxing for correct semantics.
 

@@ -36,19 +36,19 @@ fn test_ffi_align_double() {
 #[test]
 fn test_ffi_signature_creation() {
     // Signature is an opaque value — just check it's not an error
-    let result = eval_source("(ffi/signature :int [:int])");
+    let result = eval_source("(ffi/signature :int @[:int])");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_ffi_signature_void_no_args() {
-    let result = eval_source("(ffi/signature :void [])");
+    let result = eval_source("(ffi/signature :void @[])");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_ffi_signature_bad_type() {
-    let result = eval_source("(ffi/signature :bad [:int])");
+    let result = eval_source("(ffi/signature :bad @[:int])");
     assert!(result.is_err());
 }
 
@@ -193,7 +193,7 @@ fn test_ffi_call_abs() {
         r#"
         (def libc (ffi/native nil))
         (def abs-ptr (ffi/lookup libc "abs"))
-        (def abs-sig (ffi/signature :int [:int]))
+        (def abs-sig (ffi/signature :int @[:int]))
         (ffi/call abs-ptr abs-sig -42)
     "#,
     );
@@ -207,7 +207,7 @@ fn test_ffi_call_strlen() {
         r#"
         (def libc (ffi/native nil))
         (def strlen-ptr (ffi/lookup libc "strlen"))
-        (def strlen-sig (ffi/signature :size [:string]))
+        (def strlen-sig (ffi/signature :size @[:string]))
         (ffi/call strlen-ptr strlen-sig "hello")
     "#,
     );
@@ -221,7 +221,7 @@ fn test_ffi_call_sqrt() {
         r#"
         (def libm (ffi/native nil))
         (def sqrt-ptr (ffi/lookup libm "sqrt"))
-        (def sqrt-sig (ffi/signature :double [:double]))
+        (def sqrt-sig (ffi/signature :double @[:double]))
         (def result (ffi/call sqrt-ptr sqrt-sig 4.0))
         (= result 2.0)
     "#,
@@ -239,7 +239,7 @@ fn test_ffi_native_self() {
         r#"
         (def self (ffi/native nil))
         (def strlen-ptr (ffi/lookup self "strlen"))
-        (def strlen-sig (ffi/signature :size [:string]))
+        (def strlen-sig (ffi/signature :size @[:string]))
         (ffi/call strlen-ptr strlen-sig "world")
     "#,
     );
@@ -253,7 +253,7 @@ fn test_ffi_native_self_abs() {
         r#"
         (def self (ffi/native nil))
         (def abs-ptr (ffi/lookup self "abs"))
-        (def abs-sig (ffi/signature :int [:int]))
+        (def abs-sig (ffi/signature :int @[:int]))
         (ffi/call abs-ptr abs-sig -99)
     "#,
     );
@@ -272,7 +272,7 @@ fn test_ffi_native_missing_library() {
 fn test_ffi_call_nil_pointer() {
     let result = eval_source(
         r#"
-        (def sig (ffi/signature :void []))
+        (def sig (ffi/signature :void @[]))
         (ffi/call nil sig)
     "#,
     );
@@ -284,7 +284,7 @@ fn test_ffi_call_wrong_arg_count() {
     // Signature says 1 arg, we pass 0
     let result = eval_source(
         r#"
-        (def sig (ffi/signature :int [:int]))
+        (def sig (ffi/signature :int @[:int]))
         (def ptr (ffi/malloc 1))
         (ffi/call ptr sig)
     "#,
@@ -310,7 +310,7 @@ fn test_ffi_call_snprintf() {
 
         ; Call snprintf with format "num: %d" and arg 42
         ; 4 total args (buf, size, fmt, 42), 3 are fixed
-        (def sig (ffi/signature :int [:ptr :size :string :int] 3))
+        (def sig (ffi/signature :int @[:ptr :size :string :int] 3))
         (def written (ffi/call snprintf-ptr sig buf 64 "num: %d" 42))
 
         ; Read the result string from buffer
@@ -326,14 +326,14 @@ fn test_ffi_call_snprintf() {
 #[test]
 fn test_ffi_variadic_signature_creation() {
     // Variadic signature with 3 fixed args
-    let result = eval_source("(ffi/signature :int [:ptr :size :string :int] 3)");
+    let result = eval_source("(ffi/signature :int @[:ptr :size :string :int] 3)");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_ffi_variadic_fixed_args_out_of_range() {
     // fixed_args > number of arg types
-    let result = eval_source("(ffi/signature :int [:int] 5)");
+    let result = eval_source("(ffi/signature :int @[:int] 5)");
     assert!(result.is_err());
 }
 
@@ -375,20 +375,20 @@ fn test_ffi_string_nil() {
 
 #[test]
 fn test_ffi_struct_creation() {
-    let result = eval_source("(ffi/struct [:i32 :double :ptr])");
+    let result = eval_source("(ffi/struct @[:i32 :double :ptr])");
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_ffi_struct_size() {
     // struct { i32, double } — i32 at 0, double at 8, total 16
-    let result = eval_source("(ffi/size (ffi/struct [:i32 :double]))");
+    let result = eval_source("(ffi/size (ffi/struct @[:i32 :double]))");
     assert_eq!(result.unwrap(), Value::int(16));
 }
 
 #[test]
 fn test_ffi_struct_align() {
-    let result = eval_source("(ffi/align (ffi/struct [:i8 :double]))");
+    let result = eval_source("(ffi/align (ffi/struct @[:i8 :double]))");
     assert_eq!(result.unwrap(), Value::int(8));
 }
 
@@ -396,9 +396,9 @@ fn test_ffi_struct_align() {
 fn test_ffi_struct_read_write_roundtrip() {
     let result = eval_source(
         r#"
-        (def st (ffi/struct [:i32 :double]))
+        (def st (ffi/struct @[:i32 :double]))
         (def buf (ffi/malloc (ffi/size st)))
-        (ffi/write buf st [42 3.14])
+        (ffi/write buf st @[42 3.14])
         (def vals (ffi/read buf st))
         (ffi/free buf)
         vals
@@ -416,10 +416,10 @@ fn test_ffi_struct_read_write_roundtrip() {
 fn test_ffi_struct_nested_read_write() {
     let result = eval_source(
         r#"
-        (def inner (ffi/struct [:i8 :i32]))
-        (def outer (ffi/struct [:i64 inner]))
+        (def inner (ffi/struct @[:i8 :i32]))
+        (def outer (ffi/struct @[:i64 inner]))
         (def buf (ffi/malloc (ffi/size outer)))
-        (ffi/write buf outer [999 [7 42]])
+        (ffi/write buf outer @[999 @[7 42]])
         (def vals (ffi/read buf outer))
         (ffi/free buf)
         vals
@@ -453,7 +453,7 @@ fn test_ffi_array_read_write_roundtrip() {
         r#"
         (def at (ffi/array :i32 3))
         (def buf (ffi/malloc (ffi/size at)))
-        (ffi/write buf at [10 20 30])
+        (ffi/write buf at @[10 20 30])
         (def vals (ffi/read buf at))
         (ffi/free buf)
         vals
@@ -471,9 +471,9 @@ fn test_ffi_array_read_write_roundtrip() {
 fn test_ffi_struct_wrong_field_count() {
     let result = eval_source(
         r#"
-        (def st (ffi/struct [:i32 :double]))
+        (def st (ffi/struct @[:i32 :double]))
         (def buf (ffi/malloc (ffi/size st)))
-        (ffi/write buf st [42])
+        (ffi/write buf st @[42])
         (ffi/free buf)
     "#,
     );
@@ -482,7 +482,7 @@ fn test_ffi_struct_wrong_field_count() {
 
 #[test]
 fn test_ffi_struct_empty_rejected() {
-    let result = eval_source("(ffi/struct [])");
+    let result = eval_source("(ffi/struct @[])");
     assert!(result.is_err());
 }
 
@@ -496,8 +496,8 @@ fn test_ffi_array_zero_rejected() {
 fn test_ffi_signature_with_struct_type() {
     let result = eval_source(
         r#"
-        (def st (ffi/struct [:i32 :double]))
-        (ffi/signature st [:ptr])
+        (def st (ffi/struct @[:i32 :double]))
+        (ffi/signature st @[:ptr])
     "#,
     );
     assert!(result.is_ok());
@@ -507,8 +507,8 @@ fn test_ffi_signature_with_struct_type() {
 fn test_ffi_signature_with_struct_arg() {
     let result = eval_source(
         r#"
-        (def st (ffi/struct [:i32 :double]))
-        (ffi/signature :void [st])
+        (def st (ffi/struct @[:i32 :double]))
+        (ffi/signature :void @[st])
     "#,
     );
     assert!(result.is_ok());
@@ -518,9 +518,9 @@ fn test_ffi_signature_with_struct_arg() {
 fn test_ffi_struct_with_all_numeric_types() {
     let result = eval_source(
         r#"
-        (def st (ffi/struct [:i8 :u8 :i16 :u16 :i32 :u32 :i64 :u64 :float :double]))
+        (def st (ffi/struct @[:i8 :u8 :i16 :u16 :i32 :u32 :i64 :u64 :float :double]))
         (def buf (ffi/malloc (ffi/size st)))
-        (ffi/write buf st [-1 255 -1000 60000 -100000 3000000000 -999999999 999999999 1.5 2.5])
+        (ffi/write buf st @[-1 255 -1000 60000 -100000 3000000000 -999999999 999999999 1.5 2.5])
         (def vals (ffi/read buf st))
         (ffi/free buf)
         vals
@@ -548,7 +548,7 @@ fn test_ffi_callback_creation() {
     // Create a callback and verify it returns a pointer
     let result = eval_source(
         r#"
-        (def sig (ffi/signature :int [:ptr :ptr]))
+        (def sig (ffi/signature :int @[:ptr :ptr]))
         (def cb (ffi/callback sig (fn (a b) 0)))
         (def is-ptr (not (nil? cb)))
         (ffi/callback-free cb)
@@ -570,7 +570,7 @@ fn test_ffi_callback_wrong_type() {
     // Passing a non-closure should error
     let result = eval_source(
         r#"
-        (def sig (ffi/signature :int [:ptr :ptr]))
+        (def sig (ffi/signature :int @[:ptr :ptr]))
         (ffi/callback sig 42)
     "#,
     );
@@ -582,7 +582,7 @@ fn test_ffi_callback_arity_mismatch() {
     // Closure arity doesn't match signature arg count
     let result = eval_source(
         r#"
-        (def sig (ffi/signature :int [:ptr :ptr]))
+        (def sig (ffi/signature :int @[:ptr :ptr]))
         (ffi/callback sig (fn (a) 0))
     "#,
     );
@@ -594,7 +594,7 @@ fn test_ffi_callback_variadic_rejected() {
     // Variadic signatures are not supported for callbacks
     let result = eval_source(
         r#"
-        (def sig (ffi/signature :int [:ptr :int] 1))
+        (def sig (ffi/signature :int @[:ptr :int] 1))
         (ffi/callback sig (fn (a b) 0))
     "#,
     );
@@ -617,13 +617,13 @@ fn test_ffi_callback_qsort() {
         r#"
         (def libc (ffi/native nil))
         (def qsort-ptr (ffi/lookup libc "qsort"))
-        (def compar-sig (ffi/signature :int [:ptr :ptr]))
+        (def compar-sig (ffi/signature :int @[:ptr :ptr]))
         (def compar (ffi/callback compar-sig
           (fn (a b)
             (- (ffi/read a :i32) (ffi/read b :i32)))))
-        (def qsort-sig (ffi/signature :void [:ptr :size :size :ptr]))
+        (def qsort-sig (ffi/signature :void @[:ptr :size :size :ptr]))
         (def arr (ffi/malloc 20))
-        (ffi/write arr (ffi/array :i32 5) [5 3 1 4 2])
+        (ffi/write arr (ffi/array :i32 5) @[5 3 1 4 2])
         (ffi/call qsort-ptr qsort-sig arr 5 4 compar)
         (def sorted (ffi/read arr (ffi/array :i32 5)))
         (ffi/free arr)
@@ -649,13 +649,13 @@ fn test_ffi_callback_qsort_descending() {
         r#"
         (def libc (ffi/native nil))
         (def qsort-ptr (ffi/lookup libc "qsort"))
-        (def compar-sig (ffi/signature :int [:ptr :ptr]))
+        (def compar-sig (ffi/signature :int @[:ptr :ptr]))
         (def compar (ffi/callback compar-sig
           (fn (a b)
             (- (ffi/read b :i32) (ffi/read a :i32)))))
-        (def qsort-sig (ffi/signature :void [:ptr :size :size :ptr]))
+        (def qsort-sig (ffi/signature :void @[:ptr :size :size :ptr]))
         (def arr (ffi/malloc 20))
-        (ffi/write arr (ffi/array :i32 5) [10 30 20 50 40])
+        (ffi/write arr (ffi/array :i32 5) @[10 30 20 50 40])
         (ffi/call qsort-ptr qsort-sig arr 5 4 compar)
         (def sorted (ffi/read arr (ffi/array :i32 5)))
         (ffi/free arr)
@@ -681,13 +681,13 @@ fn test_ffi_callback_qsort_already_sorted() {
         r#"
         (def libc (ffi/native nil))
         (def qsort-ptr (ffi/lookup libc "qsort"))
-        (def compar-sig (ffi/signature :int [:ptr :ptr]))
+        (def compar-sig (ffi/signature :int @[:ptr :ptr]))
         (def compar (ffi/callback compar-sig
           (fn (a b)
             (- (ffi/read a :i32) (ffi/read b :i32)))))
-        (def qsort-sig (ffi/signature :void [:ptr :size :size :ptr]))
+        (def qsort-sig (ffi/signature :void @[:ptr :size :size :ptr]))
         (def arr (ffi/malloc 12))
-        (ffi/write arr (ffi/array :i32 3) [1 2 3])
+        (ffi/write arr (ffi/array :i32 3) @[1 2 3])
         (ffi/call qsort-ptr qsort-sig arr 3 4 compar)
         (def sorted (ffi/read arr (ffi/array :i32 3)))
         (ffi/free arr)
@@ -710,13 +710,13 @@ fn test_ffi_callback_qsort_single_element() {
         r#"
         (def libc (ffi/native nil))
         (def qsort-ptr (ffi/lookup libc "qsort"))
-        (def compar-sig (ffi/signature :int [:ptr :ptr]))
+        (def compar-sig (ffi/signature :int @[:ptr :ptr]))
         (def compar (ffi/callback compar-sig
           (fn (a b)
             (- (ffi/read a :i32) (ffi/read b :i32)))))
-        (def qsort-sig (ffi/signature :void [:ptr :size :size :ptr]))
+        (def qsort-sig (ffi/signature :void @[:ptr :size :size :ptr]))
         (def arr (ffi/malloc 4))
-        (ffi/write arr (ffi/array :i32 1) [42])
+        (ffi/write arr (ffi/array :i32 1) @[42])
         (ffi/call qsort-ptr qsort-sig arr 1 4 compar)
         (def sorted (ffi/read arr (ffi/array :i32 1)))
         (ffi/free arr)
@@ -737,13 +737,13 @@ fn test_ffi_callback_qsort_two_elements() {
         r#"
         (def libc (ffi/native nil))
         (def qsort-ptr (ffi/lookup libc "qsort"))
-        (def compar-sig (ffi/signature :int [:ptr :ptr]))
+        (def compar-sig (ffi/signature :int @[:ptr :ptr]))
         (def compar (ffi/callback compar-sig
           (fn (a b)
             (- (ffi/read a :i32) (ffi/read b :i32)))))
-        (def qsort-sig (ffi/signature :void [:ptr :size :size :ptr]))
+        (def qsort-sig (ffi/signature :void @[:ptr :size :size :ptr]))
         (def arr (ffi/malloc 8))
-        (ffi/write arr (ffi/array :i32 2) [2 1])
+        (ffi/write arr (ffi/array :i32 2) @[2 1])
         (ffi/call qsort-ptr qsort-sig arr 2 4 compar)
         (def sorted (ffi/read arr (ffi/array :i32 2)))
         (ffi/free arr)
@@ -765,15 +765,15 @@ fn test_ffi_callback_with_closure_capture() {
         r#"
          (def libc (ffi/native nil))
          (def qsort-ptr (ffi/lookup libc "qsort"))
-         (def compar-sig (ffi/signature :int [:ptr :ptr]))
+         (def compar-sig (ffi/signature :int @[:ptr :ptr]))
          ;; Capture `direction` — 1 for ascending, -1 for descending
          (def direction 1)
          (def compar (ffi/callback compar-sig
            (fn (a b)
              (* direction (- (ffi/read a :i32) (ffi/read b :i32))))))
-         (def qsort-sig (ffi/signature :void [:ptr :size :size :ptr]))
+         (def qsort-sig (ffi/signature :void @[:ptr :size :size :ptr]))
          (def arr (ffi/malloc 12))
-         (ffi/write arr (ffi/array :i32 3) [3 1 2])
+         (ffi/write arr (ffi/array :i32 3) @[3 1 2])
          (ffi/call qsort-ptr qsort-sig arr 3 4 compar)
          (def sorted (ffi/read arr (ffi/array :i32 3)))
          (ffi/free arr)
@@ -797,7 +797,7 @@ fn test_ffi_defbind_abs() {
     let result = eval_source(
         r#"
         (def libc (ffi/native nil))
-        (ffi/defbind abs libc "abs" :int [:int])
+        (ffi/defbind abs libc "abs" :int @[:int])
         (abs -42)
     "#,
     );
@@ -810,7 +810,7 @@ fn test_ffi_defbind_sqrt() {
     let result = eval_source(
         r#"
         (def libc (ffi/native nil))
-        (ffi/defbind sqrt libc "sqrt" :double [:double])
+        (ffi/defbind sqrt libc "sqrt" :double @[:double])
         (= (sqrt 144.0) 12.0)
     "#,
     );
@@ -823,7 +823,7 @@ fn test_ffi_defbind_strlen() {
     let result = eval_source(
         r#"
         (def libc (ffi/native nil))
-        (ffi/defbind strlen libc "strlen" :size [:string])
+        (ffi/defbind strlen libc "strlen" :size @[:string])
         (strlen "hello")
     "#,
     );
@@ -836,9 +836,9 @@ fn test_ffi_defbind_multiple() {
     let result = eval_source(
         r#"
         (def libc (ffi/native nil))
-        (ffi/defbind abs libc "abs" :int [:int])
-        (ffi/defbind strlen libc "strlen" :size [:string])
-        [(abs -99) (strlen "world")]
+        (ffi/defbind abs libc "abs" :int @[:int])
+        (ffi/defbind strlen libc "strlen" :size @[:string])
+        @[(abs -99) (strlen "world")]
     "#,
     );
     let v = result.unwrap();
@@ -854,7 +854,7 @@ fn test_ffi_defbind_zero_args() {
     let result = eval_source(
         r#"
         (def libc (ffi/native nil))
-        (ffi/defbind getpid libc "getpid" :int [])
+        (ffi/defbind getpid libc "getpid" :int @[])
         (def pid (getpid))
         (> pid 0)
     "#,

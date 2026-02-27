@@ -37,7 +37,7 @@
 ;; Convert markdown links [text](url) to HTML anchor tags
 ;; NOTE: Disabled for now due to compiler bug with define in nested contexts
 (def format-links-rec (fn (remaining result)
-  (string-append result remaining)))
+  (append result remaining)))
 
 (def format-links (fn (text)
   (format-links-rec text "")))
@@ -53,8 +53,8 @@
           ;; Avoid variable definitions in fn to work around compiler bug
           (list
             (if (first (rest state))
-              (string-append (first state) "<" tag ">" part "</" tag ">")
-              (string-append (first state) part))
+              (-> (first state) (append "<") (append tag) (append ">") (append part) (append "</") (append tag) (append ">"))
+               (append (first state) part))
             (not (first (rest state)))))
         (list "" false)
         parts))))
@@ -389,66 +389,62 @@ tbody tr:nth-child(even) {
 ;; Render a paragraph block
 (var render-paragraph
   (fn (block)
-    (string-append "<p>" (format-inline (get block "text")) "</p>")))
+    (-> "<p>" (append (format-inline (get block "text"))) (append "</p>"))))
 
 ;; Render a code block
 (var render-code
   (fn (block)
-    (string-append 
-      "<pre><code class=\"language-" (html-escape (get block "language")) "\">"
-      (html-escape (get block "text"))
-      "</code></pre>")))
+    (-> "<pre><code class=\"language-" (append (html-escape (get block "language"))) (append "\">")
+      (append (html-escape (get block "text")))
+      (append "</code></pre>"))))
 
 ;; Render a list block using fold
 ;; NOTE: We call format-inline directly without storing in a variable
 ;; to work around a compiler bug with variable definitions in fold closures
 (var render-list
   (fn (block)
-    (string-append 
-      "<" (if (get block "ordered") "ol" "ul") ">"
-      (fold
+    (-> "<" (append (if (get block "ordered") "ol" "ul")) (append ">")
+      (append (fold
         (fn (acc item)
-          (string-append acc "<li>" (format-inline item) "</li>"))
+          (-> acc (append "<li>") (append (format-inline item)) (append "</li>")))
         ""
-        (get block "items"))
-      "</" (if (get block "ordered") "ol" "ul") ">")))
+        (get block "items")))
+      (append "</") (append (if (get block "ordered") "ol" "ul")) (append ">"))))
 
 ;; Render a blockquote block
 (var render-blockquote
   (fn (block)
-    (string-append "<blockquote>" (format-inline (get block "text")) "</blockquote>")))
+    (-> "<blockquote>" (append (format-inline (get block "text"))) (append "</blockquote>"))))
 
 ;; Render a table block using fold
 (var render-table
   (fn (block)
-    (string-append 
-      "<table><thead><tr>"
-      (fold
+    (-> "<table><thead><tr>"
+      (append (fold
         (fn (acc header)
-          (string-append acc "<th>" (html-escape header) "</th>"))
+          (-> acc (append "<th>") (append (html-escape header)) (append "</th>")))
         ""
-        (get block "headers"))
-      "</tr></thead><tbody>"
-      (fold
+        (get block "headers")))
+      (append "</tr></thead><tbody>")
+      (append (fold
         (fn (acc row)
-          (string-append acc "<tr>"
-            (fold
+          (-> acc (append "<tr>")
+            (append (fold
               (fn (acc2 cell)
-                (string-append acc2 "<td>" (html-escape cell) "</td>"))
+                (-> acc2 (append "<td>") (append (html-escape cell)) (append "</td>")))
               ""
-              row)
-            "</tr>"))
+              row))
+            (append "</tr>")))
         ""
-        (get block "rows"))
-      "</tbody></table>")))
+        (get block "rows")))
+      (append "</tbody></table>"))))
 
 ;; Render a note/callout block
 (var render-note
   (fn (block)
-    (string-append 
-      "<div class=\"note note-" (html-escape (get block "kind")) "\">"
-      (format-inline (get block "text"))
-      "</div>")))
+    (-> "<div class=\"note note-" (append (html-escape (get block "kind"))) (append "\">")
+      (append (format-inline (get block "text")))
+      (append "</div>"))))
 
 ;; Main dispatcher
 (var render-block
@@ -468,26 +464,24 @@ tbody tr:nth-child(even) {
   (fn (blocks result)
     (fold
       (fn (acc block)
-        (string-append acc (render-block block)))
+        (append acc (render-block block)))
       result
       blocks)))
 
 ;; Render a heading block (nested heading within content)
 (var render-heading
   (fn (block)
-    (string-append 
-      "<h" (number->string (get block "level")) ">" 
-      (render-blocks-in-section (get block "content") "") 
-      "</h" (number->string (get block "level")) ">")))
+    (-> "<h" (append (number->string (get block "level"))) (append ">")
+      (append (render-blocks-in-section (get block "content") ""))
+      (append "</h") (append (number->string (get block "level"))) (append ">"))))
 
 ;; Render a section with heading and content blocks
 (var render-section
   (fn (section)
-    (string-append 
-      "<h" (number->string (get section "level")) ">" 
-      (html-escape (get section "heading")) 
-      "</h" (number->string (get section "level")) ">"
-      (render-blocks-in-section (get section "content") ""))))
+    (-> "<h" (append (number->string (get section "level"))) (append ">")
+      (append (html-escape (get section "heading")))
+      (append "</h") (append (number->string (get section "level"))) (append ">")
+      (append (render-blocks-in-section (get section "content") "")))))
 
 ;; Render all sections using fold
 ;; NOTE: We call render-section directly without storing in a variable
@@ -496,7 +490,7 @@ tbody tr:nth-child(even) {
   (fn (sections)
     (fold
       (fn (acc section)
-        (string-append acc (render-section section)))
+        (append acc (render-section section)))
       ""
       sections)))
 
@@ -509,10 +503,9 @@ tbody tr:nth-child(even) {
   (fn (items current-slug result)
     (fold
       (fn (acc item)
-        (string-append acc 
-          "<li><a href=\"" (get item "slug") ".html\" class=\"nav-link" 
-          (if (string-contains? (get item "slug") current-slug) " active" "") 
-          "\">" (get item "title") "</a></li>"))
+        (-> acc (append "<li><a href=\"") (append (get item "slug")) (append ".html\" class=\"nav-link")
+          (append (if (string-contains? (get item "slug") current-slug) " active" ""))
+          (append "\">") (append (get item "title")) (append "</a></li>")))
       result
       items)))
 
@@ -524,29 +517,28 @@ tbody tr:nth-child(even) {
 ;; Generate the full HTML page
 (var generate-page
   (fn (site page nav css body)
-    (string-append
-      "<!DOCTYPE html>\n"
-      "<html lang=\"en\">\n"
-      "<head>\n"
-      "  <meta charset=\"UTF-8\">\n"
-      "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-      "  <title>" (get page "title") " - " (get site "title") "</title>\n"
-      "  <meta name=\"description\" content=\"" (get page "description") "\">\n"
-      "  <link rel=\"stylesheet\" href=\"style.css\">\n"
-      "</head>\n"
-      "<body>\n"
-      "  <nav class=\"sidebar\">\n"
-      "    <div class=\"site-title\">" (get site "title") "</div>\n"
-      "    <ul>\n"
-      (generate-nav (get site "nav") (get page "slug"))
-      "    </ul>\n"
-      "  </nav>\n"
-      "  <main class=\"content\">\n"
-      "    <h1>" (get page "title") "</h1>\n"
-      body
-      "  </main>\n"
-      "</body>\n"
-      "</html>\n")))
+    (-> "<!DOCTYPE html>\n"
+      (append "<html lang=\"en\">\n")
+      (append "<head>\n")
+      (append "  <meta charset=\"UTF-8\">\n")
+      (append "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+      (append "  <title>") (append (get page "title")) (append " - ") (append (get site "title")) (append "</title>\n")
+      (append "  <meta name=\"description\" content=\"") (append (get page "description")) (append "\">\n")
+      (append "  <link rel=\"stylesheet\" href=\"style.css\">\n")
+      (append "</head>\n")
+      (append "<body>\n")
+      (append "  <nav class=\"sidebar\">\n")
+      (append "    <div class=\"site-title\">") (append (get site "title")) (append "</div>\n")
+      (append "    <ul>\n")
+      (append (generate-nav (get site "nav") (get page "slug")))
+      (append "    </ul>\n")
+      (append "  </nav>\n")
+      (append "  <main class=\"content\">\n")
+      (append "    <h1>") (append (get page "title")) (append "</h1>\n")
+      (append body)
+      (append "  </main>\n")
+      (append "</body>\n")
+      (append "</html>\n"))))
 
 ;; ============================================================================
 ;; Standard library reference generator (from runtime primitive metadata)
@@ -583,8 +575,9 @@ tbody tr:nth-child(even) {
     (let* ((name (get meta :name))
            (params (get meta :params)))
       (if (empty? params)
-        (string-append "(" name ")")
-        (string-append "(" name " " (string-join params " ") ")")))))
+        (-> "(" (append name) (append ")"))
+        (-> "(" (append name) (append " ") (append (string-join params " ")) (append ")"))))))
+
 
 ;; Build the description string, including aliases if any
 (var build-description
@@ -593,7 +586,7 @@ tbody tr:nth-child(even) {
            (aliases (get meta :aliases)))
       (if (empty? aliases)
         doc
-        (string-append doc " (alias: " (string-join aliases ", ") ")")))))
+        (-> doc (append " (alias: ") (append (string-join aliases ", ")) (append ")"))))))
 
 ;; Group primitives by category, skipping aliases.
 ;; Returns a table mapping category-name → list of metadata structs.
@@ -701,7 +694,7 @@ tbody tr:nth-child(even) {
         (var rest-nav-items (rest current-nav-items))
         (var slug (get nav-item "slug"))
         (var title (get nav-item "title"))
-        (var page-file (join-path docs-dir (string-append "pages/" slug ".json")))
+        (var page-file (join-path docs-dir (-> "pages/" (append slug) (append ".json"))))
         
         (display "Generating: ")
         (display slug)
@@ -732,7 +725,7 @@ tbody tr:nth-child(even) {
         (var full-html (generate-page site-config page-data all-nav-items css-content body-html))
         
         ;; Write HTML file
-        (var output-file (join-path output-dir (string-append slug ".html")))
+        (var output-file (join-path output-dir (append slug ".html")))
         (spit output-file full-html)
         
         ;; Process next page
