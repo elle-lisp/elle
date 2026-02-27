@@ -85,7 +85,15 @@ pub fn get_completions(
         // Type checking
         ("type", SymbolKind::Builtin, "Get type of value"),
         // String operations
-        ("string-append", SymbolKind::Builtin, "Append strings"),
+        ("append", SymbolKind::Builtin, "Append collections"),
+        (
+            "concat",
+            SymbolKind::Builtin,
+            "Concatenate collections (non-mutating)",
+        ),
+        ("rebox", SymbolKind::Builtin, "Set cell value"),
+        ("push", SymbolKind::Builtin, "Push element onto array"),
+        ("pop", SymbolKind::Builtin, "Pop element from array"),
     ];
 
     for (name, kind, doc) in builtins {

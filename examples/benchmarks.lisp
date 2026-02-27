@@ -15,7 +15,7 @@
     (while (< i n)
       (begin
         (thunk)
-        (set! i (+ i 1))))
+        (set i (+ i 1))))
     (let ((elapsed (- (clock/monotonic) t0)))
       (let ((ns-per (/ (* elapsed 1000000000) n)))
         (display "  ")

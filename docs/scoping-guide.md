@@ -69,7 +69,7 @@ While and for loops create their own scope for loop variables.
 (while (< counter 3)
   (begin
     (display counter)
-    (set! counter (+ counter 1))))
+    (set counter (+ counter 1))))
 
 ; counter exists globally and is modified
 ; The loop body has loop scope
@@ -150,23 +150,23 @@ But can be confusing with poor naming:
 
 ## Variable Modification (set!)
 
-The `set!` operator modifies existing variables:
+The `set` operator modifies existing variables:
 
 ```lisp
 (var counter 0)
 
 (lambda ()
-  (set! counter (+ counter 1))  ; Modifies global counter
+  (set counter (+ counter 1))  ; Modifies global counter
   counter)
 ```
 
-`set!` searches the scope chain to find where a variable is defined:
+`set` searches the scope chain to find where a variable is defined:
 
 ```lisp
 (var outer-var 100)
 
 (lambda ()
-  (set! outer-var 200)  ; Modifies outer-var in global scope
+  (set outer-var 200)  ; Modifies outer-var in global scope
 )
 ```
 
@@ -236,7 +236,7 @@ Use a global or let-bound accumulator with loops:
 ```lisp
 (let ((sum 0))
   (for item (list 1 2 3 4 5)
-    (set! sum (+ sum item)))
+    (set sum (+ sum item)))
   sum)  ; Returns 15
 ```
 
@@ -299,7 +299,7 @@ Inner functions access outer scope:
 ; Process results outside loop with global accumulator
 (let ((sum 0))
   (for i (list 1 2 3)
-    (set! sum (+ sum i)))
+    (set sum (+ sum i)))
   (display sum))
 ```
 

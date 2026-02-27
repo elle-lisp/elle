@@ -29,7 +29,31 @@ impl<'a> Analyzer<'a> {
                 }
             }
 
-            // Array literal - call array primitive
+            // Tuple literal [...] - call tuple primitive
+            SyntaxKind::Tuple(items) => {
+                let mut args = Vec::new();
+                let mut effect = Effect::none();
+                for item in items {
+                    let hir = self.analyze_expr(item)?;
+                    effect = effect.combine(hir.effect);
+                    args.push(hir);
+                }
+                // Look up the 'tuple' primitive and call it with the elements
+                let sym = self.symbols.intern("tuple");
+                let binding = Binding::new(sym, BindingScope::Global);
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                Ok(Hir::new(
+                    HirKind::Call {
+                        func: Box::new(func),
+                        args,
+                        is_tail: false,
+                    },
+                    span,
+                    effect,
+                ))
+            }
+
+            // Array literal @[...] - call array primitive
             SyntaxKind::Array(items) => {
                 let mut args = Vec::new();
                 let mut effect = Effect::none();
@@ -53,8 +77,8 @@ impl<'a> Analyzer<'a> {
                 ))
             }
 
-            // Table literal {k1 v1 k2 v2} - desugar to (struct k1 v1 k2 v2)
-            SyntaxKind::Table(items) => {
+            // Struct literal {...} - call struct primitive
+            SyntaxKind::Struct(items) => {
                 let mut args = Vec::new();
                 let mut effect = Effect::none();
                 for item in items {
@@ -63,6 +87,29 @@ impl<'a> Analyzer<'a> {
                     args.push(hir);
                 }
                 let sym = self.symbols.intern("struct");
+                let binding = Binding::new(sym, BindingScope::Global);
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                Ok(Hir::new(
+                    HirKind::Call {
+                        func: Box::new(func),
+                        args,
+                        is_tail: false,
+                    },
+                    span,
+                    effect,
+                ))
+            }
+
+            // Table literal @{...} - call table primitive
+            SyntaxKind::Table(items) => {
+                let mut args = Vec::new();
+                let mut effect = Effect::none();
+                for item in items {
+                    let hir = self.analyze_expr(item)?;
+                    effect = effect.combine(hir.effect);
+                    args.push(hir);
+                }
+                let sym = self.symbols.intern("table");
                 let binding = Binding::new(sym, BindingScope::Global);
                 let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
                 Ok(Hir::new(
@@ -111,7 +158,7 @@ impl<'a> Analyzer<'a> {
                         "break" => return self.analyze_break(&items[1..], span),
                         "var" => return self.analyze_define(items, span),
                         "def" => return self.analyze_const(items, span),
-                        "set!" => return self.analyze_set(items, span),
+                        "set" => return self.analyze_set(items, span),
                         "while" => return self.analyze_while(items, span),
                         "each" => return self.analyze_for(items, span),
                         "and" => return self.analyze_and(&items[1..], span),
@@ -505,7 +552,7 @@ impl<'a> Analyzer<'a> {
 
         for clause in &items[1..] {
             let parts = clause.as_list().ok_or_else(|| {
-                if matches!(clause.kind, SyntaxKind::Array(_)) {
+                if matches!(clause.kind, SyntaxKind::Tuple(_) | SyntaxKind::Array(_)) {
                     format!(
                         "{}: cond clause must use parentheses (test body...), \
                          not brackets [...]",

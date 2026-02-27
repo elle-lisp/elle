@@ -127,7 +127,7 @@ fn break_in_loop() {
                  (while true
                    (begin
                      (if (= i 5) (break :done i) nil)
-                     (set! i (+ i 1))))))"),
+                     (set i (+ i 1))))))"),
         Value::int(5)
     );
 }
@@ -232,7 +232,7 @@ fn break_in_while() {
                (while true
                  (begin
                    (if (= i 5) (break :while i) nil)
-                   (set! i (+ i 1)))))"),
+                   (set i (+ i 1)))))"),
         Value::int(5)
     );
 }
@@ -246,7 +246,7 @@ fn break_in_while_unnamed() {
                (while true
                  (begin
                    (if (= i 3) (break nil) nil)
-                   (set! i (+ i 1)))))"),
+                   (set i (+ i 1)))))"),
         Value::NIL
     );
 }
@@ -258,7 +258,7 @@ fn while_without_break() {
         run("(begin
                (var i 0)
                (while (< i 3)
-                 (set! i (+ i 1))))"),
+                 (set i (+ i 1))))"),
         Value::NIL
     );
 }

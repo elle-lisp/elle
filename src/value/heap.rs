@@ -53,6 +53,7 @@ pub enum HeapTag {
     FFISignature = 18,
     FFIType = 19,
     ManagedPointer = 20,
+    Buffer = 21,
 }
 
 /// All heap-allocated value types.
@@ -81,6 +82,9 @@ pub enum HeapObject {
 
     /// Immutable tuple (fixed-length sequence)
     Tuple(Vec<Value>),
+
+    /// Mutable buffer (byte sequence)
+    Buffer(RefCell<Vec<u8>>),
 
     /// Mutable cell for captured variables.
     /// The boolean distinguishes compiler-created cells (true, auto-unwrapped
@@ -204,6 +208,7 @@ impl HeapObject {
             HeapObject::Struct(_) => HeapTag::Struct,
             HeapObject::Closure(_) => HeapTag::Closure,
             HeapObject::Tuple(_) => HeapTag::Tuple,
+            HeapObject::Buffer(_) => HeapTag::Buffer,
             HeapObject::Cell(_, _) => HeapTag::Cell,
             HeapObject::Float(_) => HeapTag::Float,
             HeapObject::NativeFn(_) => HeapTag::NativeFn,
@@ -228,6 +233,7 @@ impl HeapObject {
             HeapObject::Struct(_) => "struct",
             HeapObject::Closure(_) => "closure",
             HeapObject::Tuple(_) => "tuple",
+            HeapObject::Buffer(_) => "buffer",
             HeapObject::Cell(_, _) => "cell",
             HeapObject::Float(_) => "float",
             HeapObject::NativeFn(_) => "native-function",
@@ -267,6 +273,13 @@ impl std::fmt::Debug for HeapObject {
                     write!(f, "{:?}", v)?;
                 }
                 write!(f, "]")
+            }
+            HeapObject::Buffer(v) => {
+                if let Ok(borrowed) = v.try_borrow() {
+                    write!(f, "@\"{}\"", String::from_utf8_lossy(&borrowed))
+                } else {
+                    write!(f, "@\"<borrowed>\"")
+                }
             }
             HeapObject::Cell(_, _) => write!(f, "<cell>"),
             HeapObject::Float(n) => write!(f, "{}", n),

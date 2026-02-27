@@ -92,3 +92,6 @@ mod lsp {
 mod compliance {
     include!("compliance.rs");
 }
+mod buffer {
+    include!("buffer.rs");
+}

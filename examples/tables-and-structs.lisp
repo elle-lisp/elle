@@ -345,7 +345,7 @@
 (newline)
 (var first-list (get nested 1))
 (assert-eq (length first-list) 3 "First list has 3 elements")
-(assert-eq (nth 0 first-list) 10 "First list first element is 10")
+(assert-eq (get first-list 0) 10 "First list first element is 10")
 
 ; Test 29: Table with nested table
 (var outer @{1 @{10 "inner"}})

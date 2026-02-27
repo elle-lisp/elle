@@ -168,7 +168,7 @@ pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
         "length" => "Get list length: (length list)",
         "append" => "Append lists: (append list1 list2)",
         "reverse" => "Reverse a list: (reverse list)",
-        "nth" => "Get nth element: (nth list index)",
+        "concat" => "Concatenate collections (non-mutating): (concat coll1 coll2)",
         "last" => "Get last element: (last list)",
         "take" => "Take first n elements: (take list n)",
         "drop" => "Drop first n elements: (drop list n)",
@@ -191,7 +191,7 @@ pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
         // String operations
         "string-upcase" => "Convert to uppercase: (string-upcase s)",
         "string-downcase" => "Convert to lowercase: (string-downcase s)",
-        "string-append" => "Append strings: (string-append s1 s2)",
+        "string/append" => "Append strings: (string/append s1 s2)",
         "substring" => "Extract substring: (substring s start end)",
         "string-index" => "Find character index: (string-index s char)",
         "char-at" => "Get character at index: (char-at s index)",

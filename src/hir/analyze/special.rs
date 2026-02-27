@@ -36,7 +36,7 @@ impl<'a> Analyzer<'a> {
 
         for arm in &items[2..] {
             let parts = arm.as_list().ok_or_else(|| {
-                if matches!(arm.kind, SyntaxKind::Array(_)) {
+                if matches!(arm.kind, SyntaxKind::Tuple(_) | SyntaxKind::Array(_)) {
                     format!(
                         "{}: match arm must use parentheses (pattern body), \
                          not brackets [...]",
@@ -127,7 +127,22 @@ impl<'a> Analyzer<'a> {
                     rest,
                 })
             }
+            SyntaxKind::Tuple(items) => {
+                // Tuple pattern [...] - matches tuples (immutable)
+                let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
+                let elements: Result<Vec<_>, _> =
+                    fixed.iter().map(|p| self.analyze_pattern(p)).collect();
+                let rest = match rest_syntax {
+                    Some(r) => Some(Box::new(self.analyze_pattern(r)?)),
+                    None => None,
+                };
+                Ok(HirPattern::Tuple {
+                    elements: elements?,
+                    rest,
+                })
+            }
             SyntaxKind::Array(items) => {
+                // Array pattern @[...] - matches arrays (mutable)
                 let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
                 let elements: Result<Vec<_>, _> =
                     fixed.iter().map(|p| self.analyze_pattern(p)).collect();
@@ -140,8 +155,32 @@ impl<'a> Analyzer<'a> {
                     rest,
                 })
             }
+            SyntaxKind::Struct(items) => {
+                // Struct pattern {...} - matches structs (immutable)
+                if items.len() % 2 != 0 {
+                    return Err(format!(
+                        "{}: struct pattern requires keyword-pattern pairs",
+                        syntax.span
+                    ));
+                }
+                let mut entries = Vec::new();
+                for pair in items.chunks(2) {
+                    let key_name = match &pair[0].kind {
+                        SyntaxKind::Keyword(k) => k.clone(),
+                        _ => {
+                            return Err(format!(
+                                "{}: struct pattern key must be a keyword, got {}",
+                                syntax.span, pair[0]
+                            ))
+                        }
+                    };
+                    let pattern = self.analyze_pattern(&pair[1])?;
+                    entries.push((key_name, pattern));
+                }
+                Ok(HirPattern::Struct { entries })
+            }
             SyntaxKind::Table(items) => {
-                // Table pattern: {:key1 pat1 :key2 pat2}
+                // Table pattern @{...} - matches tables (mutable)
                 if items.len() % 2 != 0 {
                     return Err(format!(
                         "{}: table pattern requires keyword-pattern pairs",

@@ -198,10 +198,10 @@ x ⟹ 42
 message ⟹ "Hello, Elle!"
 ```
 
-Once defined, you can modify a variable with `set!`:
+Once defined, you can modify a variable with `set`:
 
 ```lisp
-(set! x 100)
+(set x 100)
 x ⟹ 100
 ```
 
@@ -370,11 +370,11 @@ Destructuring patterns in parameter lists extract values from arguments:
 
 ```lisp
 (var (a b) (list 1 2))
-(set! a 100)
+(set a 100)
 a ⟹ 100
 
 (def (x y) (list 1 2))
-(set! x 10) ⟹ Error: immutable binding
+(set x 10) ⟹ Error: immutable binding
 ```
 
 ### defn - Named Function Shorthand
@@ -390,11 +390,11 @@ a ⟹ 100
 
 ### set! - Mutation
 
-`set!` updates an existing binding:
+`set` updates an existing binding:
 
 ```lisp
 (var counter 0)
-(set! counter (+ counter 1))
+(set counter (+ counter 1))
 counter ⟹ 1
 ```
 
@@ -1026,7 +1026,7 @@ Functions capture their definition environment:
 (defn make-counter ()
   (var count 0)
   (fn ()
-    (set! count (+ count 1))
+    (set count (+ count 1))
     count))
 
 (var c1 (make-counter))

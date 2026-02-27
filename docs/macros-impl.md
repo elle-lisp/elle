@@ -160,7 +160,7 @@ Core hygiene tests:
 Capture interaction tests:
 - `test_macro_closure_captures_callsite`: macro-generated closure captures
   a call-site variable correctly
-- `test_set_through_macro`: `set!` on call-site variable works in macro
+- `test_set_through_macro`: `set` on call-site variable works in macro
 - `test_nested_closure_macro`: nested macro expansions generating closures
 
 Counterfactual: remove scope stamping, verify capture occurs

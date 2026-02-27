@@ -98,10 +98,16 @@ impl Reader {
                 } else if self.current() == Some(&OwnedToken::LeftBrace) {
                     // Handle @{...} for table sugar
                     self.read_table(symbols)
+                } else if let Some(OwnedToken::String(s)) = self.current().cloned() {
+                    // @"..." is sugar for (string->buffer "...")
+                    self.advance();
+                    let sb_sym = Value::symbol(symbols.intern("string->buffer").0);
+                    let str_val = Value::string(s.as_str());
+                    Ok(Value::cons(sb_sym, Value::cons(str_val, Value::EMPTY_LIST)))
                 } else {
                     let loc = self.current_location();
                     Err(format!(
-                        "{}: @ must be followed by [...] or {{...}}",
+                        "{}: @ must be followed by [...], {{...}}, or \"...\"",
                         loc.position()
                     ))
                 }

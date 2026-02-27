@@ -106,12 +106,12 @@
 (newline)
 (newline)
 
-(display "Example 1b-6: Get nth element (0-indexed)")
+(display "Example 1b-6: Get element by index (0-indexed)")
 (newline)
 (display "List: (a b c d e)")
 (newline)
 (display "Element at index 2: ")
-(display (nth 2 (list 'a 'b 'c 'd 'e)))
+(display (get (list 'a 'b 'c 'd 'e) 2))
 (newline)
 (newline)
 
@@ -439,31 +439,31 @@
 (assert-eq (length empty-arr) 0 "empty array has length 0")
 (newline)
 
-; === Array Access (array-ref) ===
-(display "Part 2c: Array Access (array-ref)")
+; === Array Access (get) ===
+(display "Part 2c: Array Access (get)")
 (newline)
 
 ; Access first element (index 0)
 (display "Element at index 0: ")
-(display (array-ref my-array 0))
+(display (get my-array 0))
 (newline)
-(assert-eq (array-ref my-array 0) 10 "array-ref index 0 returns first element")
+(assert-eq (get my-array 0) 10 "get index 0 returns first element")
 
 ; Access middle element
 (display "Element at index 2: ")
-(display (array-ref my-array 2))
+(display (get my-array 2))
 (newline)
-(assert-eq (array-ref my-array 2) 30 "array-ref index 2 returns middle element")
+(assert-eq (get my-array 2) 30 "get index 2 returns middle element")
 
 ; Access last element
 (display "Element at index 4: ")
-(display (array-ref my-array 4))
+(display (get my-array 4))
 (newline)
-(assert-eq (array-ref my-array 4) 50 "array-ref index 4 returns last element")
+(assert-eq (get my-array 4) 50 "get index 4 returns last element")
 (newline)
 
-; === Array Mutation (array-set!) ===
-(display "Part 2d: Array Mutation (array-set!)")
+; === Array Mutation (put) ===
+(display "Part 2d: Array Mutation (put)")
 (newline)
 
 ; Create a mutable array
@@ -472,26 +472,26 @@
 (display mutable-arr)
 (newline)
 
-; Modify first element - array-set! returns a new array
-(var mutable-arr (array-set! mutable-arr 0 100))
+; Modify first element - put returns a new array
+(var mutable-arr (put mutable-arr 0 100))
 (display "After setting index 0 to 100: ")
 (display mutable-arr)
 (newline)
-(assert-eq (array-ref mutable-arr 0) 100 "array-set! returns new array with modified element")
+(assert-eq (get mutable-arr 0) 100 "put returns new array with modified element")
 
 ; Modify middle element
-(var mutable-arr (array-set! mutable-arr 2 300))
+(var mutable-arr (put mutable-arr 2 300))
 (display "After setting index 2 to 300: ")
 (display mutable-arr)
 (newline)
-(assert-eq (array-ref mutable-arr 2) 300 "array-set! modifies element at index 2")
+(assert-eq (get mutable-arr 2) 300 "put modifies element at index 2")
 
 ; Modify last element
-(var mutable-arr (array-set! mutable-arr 4 500))
+(var mutable-arr (put mutable-arr 4 500))
 (display "After setting index 4 to 500: ")
 (display mutable-arr)
 (newline)
-(assert-eq (array-ref mutable-arr 4) 500 "array-set! modifies element at index 4")
+(assert-eq (get mutable-arr 4) 500 "put modifies element at index 4")
 (newline)
 
 ; === Arrays vs Lists ===
@@ -523,24 +523,24 @@
 (newline)
 (assert-eq (length my-arr-2) 5 "array length works")
 
-; Lists use first/rest, arrays use array-ref
+; Lists use first/rest, arrays use get
 (display "List first element: ")
 (display (first my-list-2))
 (newline)
 (assert-eq (first my-list-2) 1 "list first element")
 
 (display "Array first element: ")
-(display (array-ref my-arr-2 0))
+(display (get my-arr-2 0))
 (newline)
-(assert-eq (array-ref my-arr-2 0) 1 "array first element")
+(assert-eq (get my-arr-2 0) 1 "array first element")
 
 ; Arrays are mutable, lists are immutable
 (var test-list (list 10 20 30))
 (var test-arr (array 10 20 30))
 
-; Modify array - array-set! returns a new array
-(var test-arr (array-set! test-arr 1 200))
-(assert-eq (array-ref test-arr 1) 200 "array mutation works")
+; Modify array - put returns a new array
+(var test-arr (put test-arr 1 200))
+(assert-eq (get test-arr 1) 200 "array mutation works")
 
 ; Lists are immutable - cons creates new list
 (var modified-list (cons 5 test-list))
@@ -558,9 +558,9 @@
 (display mixed-arr)
 (newline)
 
-(assert-eq (array-ref mixed-arr 0) 42 "array stores numbers")
-(assert-eq (array-ref mixed-arr 1) "hello" "array stores strings")
-(assert-eq (array-ref mixed-arr 2) 'symbol "array stores symbols")
+(assert-eq (get mixed-arr 0) 42 "array stores numbers")
+(assert-eq (get mixed-arr 1) "hello" "array stores strings")
+(assert-eq (get mixed-arr 2) 'symbol "array stores symbols")
 (newline)
 
 ; ============================================================================
@@ -596,7 +596,7 @@
 (newline)
 (display "Lists and Arrays in Elle:")
 (newline)
-(display "1. List operations - cons, first/rest, length, reverse, take/drop, nth/last, append")
+(display "1. List operations - cons, first/rest, length, reverse, take/drop, get/last, append")
 (newline)
 (display "2. List construction - Building lists with cons and list function")
 (newline)
@@ -604,9 +604,9 @@
 (newline)
 (display "4. Array creation - Creating arrays with array function")
 (newline)
-(display "5. Array access - Using array-ref to access elements")
+(display "5. Array access - Using get to access elements")
 (newline)
-(display "6. Array mutation - Using array-set! to modify elements")
+(display "6. Array mutation - Using put to modify elements")
 (newline)
 (display "7. Polymorphic operations - length works on both lists and arrays")
 (newline)

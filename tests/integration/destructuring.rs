@@ -142,7 +142,7 @@ fn test_def_nested_array_in_list() {
 
 #[test]
 fn test_def_destructured_bindings_are_immutable() {
-    let result = eval_source("(begin (def (a b) (list 1 2)) (set! a 10))");
+    let result = eval_source("(begin (def (a b) (list 1 2)) (set a 10))");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("immutable"));
 }
@@ -164,7 +164,7 @@ fn test_var_list_basic() {
 #[test]
 fn test_var_destructured_bindings_are_mutable() {
     assert_eq!(
-        eval_source("(begin (var (a b) (list 1 2)) (set! a 10) a)").unwrap(),
+        eval_source("(begin (var (a b) (list 1 2)) (set a 10) a)").unwrap(),
         Value::int(10)
     );
 }
@@ -492,11 +492,11 @@ fn test_rest_array_basic() {
     );
     // r should be [2 3]
     assert_eq!(
-        eval_source("(begin (def [a & r] [1 2 3]) (array-ref r 0))").unwrap(),
+        eval_source("(begin (def [a & r] [1 2 3]) (get r 0))").unwrap(),
         Value::int(2)
     );
     assert_eq!(
-        eval_source("(begin (def [a & r] [1 2 3]) (array-ref r 1))").unwrap(),
+        eval_source("(begin (def [a & r] [1 2 3]) (get r 1))").unwrap(),
         Value::int(3)
     );
 }
@@ -512,7 +512,7 @@ fn test_rest_array_empty_rest() {
 #[test]
 fn test_rest_array_in_let() {
     assert_eq!(
-        eval_source("(let (([a & r] [10 20 30])) (+ a (array-ref r 0)))").unwrap(),
+        eval_source("(let (([a & r] [10 20 30])) (+ a (get r 0)))").unwrap(),
         Value::int(30)
     );
 }
@@ -531,7 +531,7 @@ fn test_wildcard_with_rest() {
 #[test]
 fn test_wildcard_and_rest_array() {
     assert_eq!(
-        eval_source("(begin (def [_ & r] [10 20 30]) (array-ref r 0))").unwrap(),
+        eval_source("(begin (def [_ & r] [10 20 30]) (get r 0))").unwrap(),
         Value::int(20)
     );
 }
@@ -918,14 +918,59 @@ fn test_let_destructure_tuple_first() {
 }
 
 #[test]
+fn test_match_tuple_pattern_matches_tuple() {
+    // match [a b] should match tuples (immutable)
+    let result = eval_source("(match [1 2] ([a b] (+ a b)) (_ :no-match))").unwrap();
+    assert_eq!(result.as_int(), Some(3));
+}
+
+#[test]
+fn test_match_tuple_pattern_does_not_match_array() {
+    // match [a b] should NOT match arrays (mutable)
+    let result = eval_source("(match @[1 2] ([a b] (+ a b)) (_ :no-match))").unwrap();
+    assert_eq!(result, Value::keyword("no-match"));
+}
+
+#[test]
+fn test_match_array_pattern_matches_array() {
+    // match @[a b] should match arrays (mutable)
+    let result = eval_source("(match @[1 2] (@[a b] (+ a b)) (_ :no-match))").unwrap();
+    assert_eq!(result.as_int(), Some(3));
+}
+
+#[test]
 fn test_match_array_pattern_does_not_match_tuple() {
-    // match [a b] should NOT match tuples — only arrays
-    let src = format!(
-        "(match {} ([a b] :matched) (_ :fell-through))",
-        make_error_tuple()
-    );
-    let result = eval_source(&src);
-    assert_eq!(result.unwrap(), Value::keyword("fell-through"));
+    // match @[a b] should NOT match tuples (immutable)
+    let result = eval_source("(match [1 2] (@[a b] (+ a b)) (_ :no-match))").unwrap();
+    assert_eq!(result, Value::keyword("no-match"));
+}
+
+#[test]
+fn test_match_struct_pattern_matches_struct() {
+    // match {:a x} should match structs (immutable)
+    let result = eval_source("(match {:a 1} ({:a x} x) (_ :no-match))").unwrap();
+    assert_eq!(result.as_int(), Some(1));
+}
+
+#[test]
+fn test_match_struct_pattern_does_not_match_table() {
+    // match {:a x} should NOT match tables (mutable)
+    let result = eval_source("(match @{:a 1} ({:a x} x) (_ :no-match))").unwrap();
+    assert_eq!(result, Value::keyword("no-match"));
+}
+
+#[test]
+fn test_match_table_pattern_matches_table() {
+    // match @{:a x} should match tables (mutable)
+    let result = eval_source("(match @{:a 1} (@{:a x} x) (_ :no-match))").unwrap();
+    assert_eq!(result.as_int(), Some(1));
+}
+
+#[test]
+fn test_match_table_pattern_does_not_match_struct() {
+    // match @{:a x} should NOT match structs (immutable)
+    let result = eval_source("(match {:a 1} (@{:a x} x) (_ :no-match))").unwrap();
+    assert_eq!(result, Value::keyword("no-match"));
 }
 
 #[test]

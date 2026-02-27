@@ -170,13 +170,15 @@ Things that look wrong but aren't:
   bare delimiters are immutable, `@`-prefixed are mutable. `{:key val ...}` →
   struct (immutable). `@{:key val}` → table (mutable). `[1 2 3]` → tuple
   (immutable). `@[1 2 3]` → array (mutable). `"hello"` → string (immutable).
-  `@"hello"` → buffer (mutable, not yet implemented). **Caution**: the Rust
-  enum names in the reader/analyzer predate this split and are misleading.
-  `SyntaxKind::Table` actually produces a struct. `SyntaxKind::Array`
-  **currently** produces an array but should produce a tuple. `@{...}` and
-  `@[...]` desugar to `SyntaxKind::List` with `table` or `list` prepended
-  (the `@[...]` case should change to `array`). In destructuring position,
-  `{...}` produces `HirPattern::Table` and `[...]` produces `HirPattern::Array`.
+  `@"hello"` → buffer (mutable). `SyntaxKind::Tuple` represents `[...]`,
+  `SyntaxKind::Array` represents `@[...]`, `SyntaxKind::Struct` represents
+  `{...}`, `SyntaxKind::Table` represents `@{...}`. The reader produces all
+  four directly (no desugaring to List with prepended symbols). `@"..."` desugars
+  to `(string->buffer "...")`. In `match`, `[...]` matches tuples (`IsTuple`),
+  `@[...]` matches arrays (`IsArray`), `{...}` matches structs (`IsStruct`),
+  `@{...}` matches tables (`IsTable`). In destructuring (`def`/`let`/`fn`),
+  no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle both mutable and
+  immutable types.
 - `begin` and `block` are distinct forms. `begin` sequences expressions
   without creating a scope (bindings leak into the enclosing scope). `block`
   sequences expressions within a new lexical scope (bindings are contained).

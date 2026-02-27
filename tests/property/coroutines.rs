@@ -87,7 +87,7 @@ proptest! {
         // Total: n+1 resumes for n yields
         let mut yield_exprs = String::new();
         for _ in 0..n {
-            yield_exprs.push_str("(set! acc (+ acc (yield acc))) ");
+            yield_exprs.push_str("(set acc (+ acc (yield acc))) ");
         }
 
         // Build resume calls: first one starts, then n-1 with values, then final
@@ -165,7 +165,7 @@ proptest! {
                         (while (< i {})
                             (begin
                                 (yield i)
-                                (set! i (+ i 1))))
+                                (set i (+ i 1))))
                         i)))
                 (var co (make-coroutine gen))
                 (list {}))"#,
@@ -203,16 +203,16 @@ proptest! {
                 (def gen (fn () {} 999))
                 (var co (make-coroutine gen))
                 (var states (list))
-                (set! states (cons (keyword->string (coro/status co)) states))
+                (set states (cons (keyword->string (coro/status co)) states))
                 {}
-                (set! states (cons (keyword->string (coro/status co)) states))
+                (set states (cons (keyword->string (coro/status co)) states))
                 (coro/resume co)
-                (set! states (cons (keyword->string (coro/status co)) states))
+                (set states (cons (keyword->string (coro/status co)) states))
                 states)"#,
             yields.join(" "),
             (0..num_yields).map(|_| {
                 r#"(coro/resume co)
-                   (set! states (cons (keyword->string (coro/status co)) states))"#.to_string()
+                   (set states (cons (keyword->string (coro/status co)) states))"#.to_string()
             }).collect::<Vec<_>>().join(" ")
         );
 
@@ -273,8 +273,8 @@ proptest! {
             start2,
             // Interleave resumes: co1, co2, co1, co2, ...
             (0..=num_yields).flat_map(|_| vec![
-                "(set! results (cons (coro/resume co1) results))".to_string(),
-                "(set! results (cons (coro/resume co2) results))".to_string(),
+                "(set results (cons (coro/resume co1) results))".to_string(),
+                "(set results (cons (coro/resume co2) results))".to_string(),
             ]).collect::<Vec<_>>().join(" ")
         );
 
@@ -460,9 +460,9 @@ fn mutable_local_preserved_across_resume() {
         (begin
             (def gen (fn ()
                 (let ((x 0))
-                    (set! x 10)
+                    (set x 10)
                     (yield x)
-                    (set! x (+ x 5))
+                    (set x (+ x 5))
                     (yield x)
                     x)))
             (var co (make-coroutine gen))

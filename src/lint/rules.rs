@@ -124,7 +124,7 @@ pub fn builtin_arity(name: &str) -> Option<usize> {
         "length" => Some(1),
         "append" => Some(2),
         "reverse" => Some(1),
-        "nth" => Some(2),
+        "concat" => Some(2),
         "last" => Some(1),
         "take" | "drop" => Some(2),
         // Math functions
@@ -135,7 +135,7 @@ pub fn builtin_arity(name: &str) -> Option<usize> {
         "min" | "max" => Some(2),
         // String operations
         "string-upcase" | "string-downcase" => Some(1),
-        "string-append" => Some(2),
+        "string/append" => Some(2),
         "substring" => Some(3),
         "string-index" => Some(2),
         "char-at" => Some(2),

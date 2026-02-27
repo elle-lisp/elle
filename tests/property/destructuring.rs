@@ -251,11 +251,11 @@ proptest! {
         prop_assert_eq!(result.unwrap(), Value::int(x + 100));
     }
 
-    /// Property: match mutable table works same as struct
+    /// Property: match mutable table works with @{} pattern
     #[test]
     fn match_mutable_table(x in -1000i64..1000) {
         let code = format!(
-            "(match @{{:val {}}} ({{:val v}} v) (_ :fail))",
+            "(match @{{:val {}}} (@{{:val v}} v) (_ :fail))",
             x
         );
         let result = eval_source(&code);

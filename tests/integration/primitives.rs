@@ -123,7 +123,10 @@ fn test_string_from_float() {
 #[test]
 fn test_string_from_bool() {
     assert_eq!(eval_source("(string true)").unwrap(), Value::string("true"));
-    assert_eq!(eval_source("(string false)").unwrap(), Value::string("false"));
+    assert_eq!(
+        eval_source("(string false)").unwrap(),
+        Value::string("false")
+    );
 }
 
 #[test]
@@ -140,7 +143,7 @@ fn test_string_from_list() {
 
 #[test]
 fn test_string_from_array() {
-    let result = eval_source("(string [1 2 3])").unwrap();
+    let result = eval_source("(string @[1 2 3])").unwrap();
     let s = result.as_string().expect("should be a string");
     assert_eq!(s, "[1, 2, 3]");
 }
@@ -439,4 +442,82 @@ fn test_join_path_alias() {
         eval_source("(join-path \"a\" \"b\")").unwrap(),
         eval_source("(file/join \"a\" \"b\")").unwrap()
     );
+}
+
+// === Type predicates for collections ===
+
+#[test]
+fn test_array_predicate_true() {
+    assert_eq!(eval_source("(array? @[1 2 3])").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_array_predicate_false_tuple() {
+    assert_eq!(eval_source("(array? [1 2 3])").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_array_predicate_false_other() {
+    assert_eq!(eval_source("(array? 42)").unwrap(), Value::FALSE);
+    assert_eq!(eval_source("(array? \"hello\")").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_tuple_predicate_true() {
+    assert_eq!(eval_source("(tuple? [1 2 3])").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_tuple_predicate_false_array() {
+    assert_eq!(eval_source("(tuple? @[1 2 3])").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_tuple_predicate_false_other() {
+    assert_eq!(eval_source("(tuple? 42)").unwrap(), Value::FALSE);
+    assert_eq!(eval_source("(tuple? \"hello\")").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_table_predicate_true() {
+    assert_eq!(eval_source("(table? @{:a 1 :b 2})").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_table_predicate_false_struct() {
+    assert_eq!(eval_source("(table? {:a 1 :b 2})").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_table_predicate_false_other() {
+    assert_eq!(eval_source("(table? 42)").unwrap(), Value::FALSE);
+    assert_eq!(eval_source("(table? \"hello\")").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_struct_predicate_true() {
+    assert_eq!(eval_source("(struct? {:a 1 :b 2})").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_struct_predicate_false_table() {
+    assert_eq!(eval_source("(struct? @{:a 1 :b 2})").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_struct_predicate_false_other() {
+    assert_eq!(eval_source("(struct? 42)").unwrap(), Value::FALSE);
+    assert_eq!(eval_source("(struct? \"hello\")").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_empty_predicate_tuple() {
+    assert_eq!(eval_source("(empty? [])").unwrap(), Value::TRUE);
+    assert_eq!(eval_source("(empty? [1])").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_empty_predicate_array() {
+    assert_eq!(eval_source("(empty? @[])").unwrap(), Value::TRUE);
+    assert_eq!(eval_source("(empty? @[1])").unwrap(), Value::FALSE);
 }

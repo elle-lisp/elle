@@ -202,7 +202,7 @@
 (newline)
 (display "  - char-at, string-index")
 (newline)
-(display "  - string-append, number->string")
+(display "  - append, number->string")
 (newline)
 
 (display "\nModule examples:")

@@ -98,7 +98,7 @@ Analyzer uses scope-set subset matching to prevent accidental capture:
 
 ```lisp
 (defmacro swap (a b)
-  `(let ((tmp ,a)) (set! ,a ,b) (set! ,b tmp)))
+  `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
 
 (let ((tmp 10) (x 1) (y 2))
   (swap x y)

@@ -86,23 +86,24 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 
 | Module | Contains |
 |--------|----------|
-| `arithmetic.rs` | `+`, `-`, `*`, `/`, `mod` |
+| `arithmetic.rs` | `+`, `-`, `*`, `/`, `mod`, `rem`, `abs`, `min`, `max`, `pow`, `sqrt`, `sin`, `cos`, `tan`, `log`, `exp`, `floor`, `ceil`, `round`, `even?`, `odd?`, `pi`, `e` |
 | `comparison.rs` | `=`, `<`, `>`, `<=`, `>=` |
-| `logic.rs` | `not`, `and`, `or` (functions, not special forms) |
-| `list.rs` | `cons`, `car`, `cdr`, `list`, `length`, `append` |
-| `array.rs` | `array`, `array-ref`, `array-set!`, `array-length` |
-| `string.rs` | `string-length`, `string-append`, `substring` |
-| `table.rs` | `table`, `table-get`, `table-set!` |
-| `structs.rs` | `struct`, `struct-get` |
-| `file_io.rs` | `read-file`, `write-file`, `file-exists?` |
-| `display.rs` | `print`, `println`, `display` |
-| `type_check.rs` | `nil?`, `pair?`, `number?`, `string?`, etc. |
+| `logic.rs` | `not` |
+| `list.rs` | `cons`, `first`, `rest`, `list`, `length`, `empty?`, `append`, `concat`, `reverse`, `last`, `butlast`, `take`, `drop` |
+| `array.rs` | `tuple`, `array`, `array/new`, `push`, `pop`, `popn`, `insert`, `remove` |
+| `buffer.rs` | `buffer`, `string->buffer`, `buffer->string` |
+| `string.rs` | `string/upcase`, `string/downcase`, `string/slice`, `string/index`, `string/char-at`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
+| `table.rs` | `table`, `get`, `put`, `del`, `keys`, `values`, `has-key?` |
+| `structs.rs` | `struct` |
+| `file_io.rs` | `slurp`, `spit`, `file-exists?`, `join-path` |
+| `display.rs` | `print`, `println`, `display`, `newline` |
+| `type_check.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `tuple?`, `table?`, `struct?`, `buffer?`, `box?`, `type-of`, `eq?`, `equal?` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
 | `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro/>iterator` |
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value`, `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
-| `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` (metaprogramming) |
+| `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` |
 | `debugging.rs` | `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`, `raises?`, `arity`, `captures`, `bytecode-size`, `call-count`, `doc`, `global?`, `string->keyword`, `disbit`, `disjit`, `vm/list-primitives`, `vm/primitive-meta` |
 | `debug.rs` | `debug-print`, `trace`, `memory-usage` |
 | `process.rs` | `exit`, `halt` |

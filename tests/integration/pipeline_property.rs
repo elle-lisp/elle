@@ -23,7 +23,7 @@ proptest! {
     ) {
         // Use polymorphic `length` instead of `string-length`
         let expr = format!(
-            "(= (length (string-append \"{}\" \"{}\")) (+ (length \"{}\") (length \"{}\")))",
+            "(= (length (append \"{}\" \"{}\")) (+ (length \"{}\") (length \"{}\")))",
             a, b, a, b
         );
         let result = eval_source(&expr);
@@ -242,7 +242,7 @@ proptest! {
 
     #[test]
     fn match_variable_binding_string(s in "[a-z]{1,10}") {
-        let expr = format!("(match \"{}\" (x (string-append x \"!\")))", s);
+        let expr = format!("(match \"{}\" (x (append x \"!\")))", s);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -370,9 +370,9 @@ proptest! {
     }
 
     #[test]
-    fn nth_returns_correct_element(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
-        // (nth 0 (list a b c)) = a
-        let expr = format!("(nth 0 (list {} {} {}))", a, b, c);
+    fn first_returns_correct_element(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
+        // (first (list a b c)) = a
+        let expr = format!("(first (list {} {} {}))", a, b, c);
         let result = eval_source(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -459,11 +459,11 @@ proptest! {
     fn box_set_then_unbox(a in -100i64..100, b in -100i64..100) {
         // Create box with a, set to b, unbox should give b
         let expr = format!(
-            "(let ((b (box {}))) (begin (box-set! b {}) (unbox b)))",
+            "(let ((b (box {}))) (begin (rebox b {}) (unbox b)))",
             a, b
         );
         let result = eval_source(&expr);
-        prop_assert!(result.is_ok(), "box-set! failed for a={}, b={}: {:?}", a, b, result);
+        prop_assert!(result.is_ok(), "rebox failed for a={}, b={}: {:?}", a, b, result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
     }
 
@@ -493,8 +493,8 @@ proptest! {
                (var make-pair
                  (fn ()
                    (let ((b (box 0)))
-                     (list (fn () (begin (box-set! b (+ (unbox b) 1)) (unbox b)))
-                           (fn () (unbox b))))))
+                      (list (fn () (begin (rebox b (+ (unbox b) 1)) (unbox b)))
+                            (fn () (unbox b))))))
                (var p (make-pair))
                (var inc (first p))
                (var get (first (rest p)))
@@ -518,13 +518,13 @@ proptest! {
 
     #[test]
     fn box_multiple_sets(a in -50i64..50, b in -50i64..50, c in -50i64..50) {
-        // Multiple box-set! calls, last one wins
+        // Multiple rebox calls, last one wins
         let expr = format!(
-            "(let ((b (box 0))) (begin (box-set! b {}) (box-set! b {}) (box-set! b {}) (unbox b)))",
+            "(let ((b (box 0))) (begin (rebox b {}) (rebox b {}) (rebox b {}) (unbox b)))",
             a, b, c
         );
         let result = eval_source(&expr);
-        prop_assert!(result.is_ok(), "multiple box-set! failed: {:?}", result);
+        prop_assert!(result.is_ok(), "multiple rebox failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(c));
     }
 }

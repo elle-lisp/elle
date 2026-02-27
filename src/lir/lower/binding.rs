@@ -359,6 +359,74 @@ impl Lowerer {
                 }
                 Ok(())
             }
+            HirPattern::Tuple { elements, rest } => {
+                // Tuples are immutable indexed sequences, like arrays
+                let mut current = value_reg;
+                let need_rest = rest.is_some();
+                for (i, element) in elements.iter().enumerate() {
+                    let is_last = i == elements.len() - 1 && !need_rest;
+                    let src = if is_last {
+                        // Last element, no rest: consume the tuple directly
+                        current
+                    } else {
+                        // Not last (or has rest): dup the tuple
+                        let dup = self.fresh_reg();
+                        self.emit(LirInstr::Dup {
+                            dst: dup,
+                            src: current,
+                        });
+                        let src = current;
+                        current = dup;
+                        src
+                    };
+                    let elem = self.fresh_reg();
+                    self.emit(LirInstr::ArrayRefOrNil {
+                        dst: elem,
+                        src,
+                        index: i as u16,
+                    });
+                    self.lower_destructure(element, elem)?;
+                }
+                // Bind the remaining tuple slice to the rest pattern.
+                if let Some(rest_pat) = rest {
+                    let slice = self.fresh_reg();
+                    self.emit(LirInstr::ArraySliceFrom {
+                        dst: slice,
+                        src: current,
+                        index: elements.len() as u16,
+                    });
+                    self.lower_destructure(rest_pat, slice)?;
+                }
+                Ok(())
+            }
+            HirPattern::Struct { entries } => {
+                // Structs are immutable key-value maps, like tables
+                for (i, (key_name, sub_pattern)) in entries.iter().enumerate() {
+                    let is_last = i == entries.len() - 1;
+                    let src = if is_last {
+                        // Last entry: consume the struct directly
+                        value_reg
+                    } else {
+                        // Not last: dup the struct
+                        let dup = self.fresh_reg();
+                        self.emit(LirInstr::Dup {
+                            dst: dup,
+                            src: value_reg,
+                        });
+                        let src = value_reg;
+                        value_reg = dup;
+                        src
+                    };
+                    let elem = self.fresh_reg();
+                    self.emit(LirInstr::TableGetOrNil {
+                        dst: elem,
+                        src,
+                        key: LirConst::Keyword(key_name.clone()),
+                    });
+                    self.lower_destructure(sub_pattern, elem)?;
+                }
+                Ok(())
+            }
             HirPattern::Table { entries } => {
                 for (i, (key_name, sub_pattern)) in entries.iter().enumerate() {
                     let is_last = i == entries.len() - 1;

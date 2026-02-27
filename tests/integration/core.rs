@@ -325,7 +325,7 @@ fn test_length() {
 
 #[test]
 fn test_append() {
-    let result = eval_source("(append (list 1 2) (list 3 4) (list 5))").unwrap();
+    let result = eval_source("(append (append (list 1 2) (list 3 4)) (list 5))").unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(
         vec,
@@ -390,7 +390,7 @@ fn test_string_length() {
 
 #[test]
 fn test_string_append() {
-    if let Some(s) = eval_source("(string-append \"hello\" \" \" \"world\")")
+    if let Some(s) = eval_source("(append (append \"hello\" \" \") \"world\")")
         .unwrap()
         .as_string()
     {
@@ -423,19 +423,10 @@ fn test_string_case() {
 
 // List utilities
 #[test]
-fn test_nth() {
-    assert_eq!(
-        eval_source("(nth 0 (list 10 20 30))").unwrap(),
-        Value::int(10)
-    );
-    assert_eq!(
-        eval_source("(nth 1 (list 10 20 30))").unwrap(),
-        Value::int(20)
-    );
-    assert_eq!(
-        eval_source("(nth 2 (list 10 20 30))").unwrap(),
-        Value::int(30)
-    );
+fn test_get_indexed() {
+    assert_eq!(eval_source("(get [10 20 30] 0)").unwrap(), Value::int(10));
+    assert_eq!(eval_source("(get [10 20 30] 1)").unwrap(), Value::int(20));
+    assert_eq!(eval_source("(get [10 20 30] 2)").unwrap(), Value::int(30));
 }
 
 #[test]
@@ -717,27 +708,24 @@ fn test_array_length() {
 }
 
 #[test]
-fn test_array_ref() {
+fn test_array_get() {
     assert_eq!(
-        eval_source("(array-ref (array 10 20 30) 0)").unwrap(),
+        eval_source("(get (array 10 20 30) 0)").unwrap(),
         Value::int(10)
     );
     assert_eq!(
-        eval_source("(array-ref (array 10 20 30) 1)").unwrap(),
+        eval_source("(get (array 10 20 30) 1)").unwrap(),
         Value::int(20)
     );
     assert_eq!(
-        eval_source("(array-ref (array 10 20 30) 2)").unwrap(),
+        eval_source("(get (array 10 20 30) 2)").unwrap(),
         Value::int(30)
     );
 }
 
 #[test]
-fn test_array_set() {
-    if let Some(vec_ref) = eval_source("(array-set! (array 1 2 3) 1 99)")
-        .unwrap()
-        .as_array()
-    {
+fn test_array_put() {
+    if let Some(vec_ref) = eval_source("(put (array 1 2 3) 1 99)").unwrap().as_array() {
         let v = vec_ref.borrow();
         assert_eq!(v[0], Value::int(1));
         assert_eq!(v[1], Value::int(99));
@@ -747,10 +735,7 @@ fn test_array_set() {
     }
 
     // Set at beginning
-    if let Some(vec_ref) = eval_source("(array-set! (array 1 2 3) 0 100)")
-        .unwrap()
-        .as_array()
-    {
+    if let Some(vec_ref) = eval_source("(put (array 1 2 3) 0 100)").unwrap().as_array() {
         let v = vec_ref.borrow();
         assert_eq!(v[0], Value::int(100))
     } else {
@@ -758,10 +743,7 @@ fn test_array_set() {
     }
 
     // Set at end
-    if let Some(vec_ref) = eval_source("(array-set! (array 1 2 3) 2 200)")
-        .unwrap()
-        .as_array()
-    {
+    if let Some(vec_ref) = eval_source("(put (array 1 2 3) 2 200)").unwrap().as_array() {
         let v = vec_ref.borrow();
         assert_eq!(v[2], Value::int(200))
     } else {

@@ -163,9 +163,13 @@ pub enum Instruction {
     /// Operand: u16 index (immediate)
     ArraySliceFrom,
 
+    /// Type check: is value a tuple?
+    IsTuple,
     /// Type check: is value an array?
     IsArray,
-    /// Type check: is value a table or struct?
+    /// Type check: is value a struct?
+    IsStruct,
+    /// Type check: is value a table?
     IsTable,
     /// Get array length as integer
     ArrayLen,

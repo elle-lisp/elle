@@ -97,7 +97,7 @@
 ; Tuple rest collects remaining into array
 (def [tf & trest] (tuple :a :b :c))
 (assert-eq tf :a "tuple rest: first")
-(assert-eq (array-ref trest 0) :b "tuple rest: rest[0]")
+(assert-eq (get trest 0) :b "tuple rest: rest[0]")
 (display "  (def [tf & trest] (tuple :a :b :c)) => tf=")
 (display tf) (display " trest=") (display trest)
 (newline)
@@ -149,9 +149,9 @@
 
 (var (va vb) (list 1 2))
 (assert-eq va 1 "var destructure first")
-(set! va 100)
+(set va 100)
 (assert-eq va 100 "var destructure mutated")
-(display "  (var (va vb) (list 1 2)) then (set! va 100) => va=")
+(display "  (var (va vb) (list 1 2)) then (set va 100) => va=")
 (display va) (display " vb=") (display vb)
 (newline)
 (newline)
@@ -302,8 +302,8 @@
 ; Array rest collects into a sub-array
 (def [ax & ar] [10 20 30])
 (assert-eq ax 10 "array rest: first")
-(assert-eq (array-ref ar 0) 20 "array rest: rest[0]")
-(assert-eq (array-ref ar 1) 30 "array rest: rest[1]")
+(assert-eq (get ar 0) 20 "array rest: rest[0]")
+(assert-eq (get ar 1) 30 "array rest: rest[1]")
 (display "  (def [ax & ar] [10 20 30]) => ax=")
 (display ax) (display " ar=") (display ar)
 (newline)

@@ -25,7 +25,7 @@ fn setup() -> (SymbolTable, VM) {
 /// The code:
 ///   (begin
 ///     (var f (fn () 42))      ; f is Pure, stored in effect_env
-///     (set! f (fn () (yield 1))) ; set! removes f from effect_env
+///     (set f (fn () (yield 1))) ; set! removes f from effect_env
 ///     (f))                       ; f is now unknown global → defaults to Yields
 ///
 /// Result: Effect::yields() (conservative, since we don't know f's effect after set!)
@@ -33,7 +33,7 @@ fn setup() -> (SymbolTable, VM) {
 fn test_unsound_effect_after_set() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (var f (fn () 42)) (set! f (fn () (yield 1))) (f))",
+        "(begin (var f (fn () 42)) (set f (fn () (yield 1))) (f))",
         &mut symbols,
         &mut vm,
     )

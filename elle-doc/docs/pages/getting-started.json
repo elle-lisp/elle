@@ -94,7 +94,7 @@
         {
           "type": "code",
           "language": "lisp",
-          "text": ";; A simple greeting program\n(define name \"World\")\n(define greeting (string-append \"Hello, \" name \"!\"))\n(display greeting)\n(newline)"
+          "text": ";; A simple greeting program\n(define name \"World\")\n(define greeting (-> \"Hello, \" (append name) (append \"!\")))\n(display greeting)\n(newline)"
         },
         {
           "type": "paragraph",

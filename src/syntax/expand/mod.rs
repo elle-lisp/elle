@@ -132,8 +132,14 @@ impl Expander {
                 // Not a macro call - expand children recursively
                 self.expand_list(items, syntax.span, syntax.scopes, symbols, vm)
             }
+            SyntaxKind::Tuple(items) => {
+                self.expand_tuple(items, syntax.span, syntax.scopes, symbols, vm)
+            }
             SyntaxKind::Array(items) => {
                 self.expand_array(items, syntax.span, syntax.scopes, symbols, vm)
+            }
+            SyntaxKind::Struct(items) => {
+                self.expand_struct(items, syntax.span, syntax.scopes, symbols, vm)
             }
             SyntaxKind::Table(items) => {
                 self.expand_table(items, syntax.span, syntax.scopes, symbols, vm)
@@ -168,7 +174,7 @@ impl Expander {
 
         // Get parameter list
         let params_syntax = items[2].as_list().ok_or_else(|| {
-            if matches!(items[2].kind, SyntaxKind::Array(_)) {
+            if matches!(items[2].kind, SyntaxKind::Tuple(_) | SyntaxKind::Array(_)) {
                 format!(
                     "{}: macro parameters must use parentheses (params...), \
                      not brackets [...]",
@@ -245,7 +251,19 @@ impl Expander {
                     .map(|item| self.add_scope_recursive(item, scope))
                     .collect(),
             ),
+            SyntaxKind::Tuple(items) => SyntaxKind::Tuple(
+                items
+                    .into_iter()
+                    .map(|item| self.add_scope_recursive(item, scope))
+                    .collect(),
+            ),
             SyntaxKind::Array(items) => SyntaxKind::Array(
+                items
+                    .into_iter()
+                    .map(|item| self.add_scope_recursive(item, scope))
+                    .collect(),
+            ),
+            SyntaxKind::Struct(items) => SyntaxKind::Struct(
                 items
                     .into_iter()
                     .map(|item| self.add_scope_recursive(item, scope))
@@ -298,6 +316,25 @@ impl Expander {
         ))
     }
 
+    fn expand_tuple(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+        scopes: Vec<ScopeId>,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Syntax, String> {
+        let expanded: Result<Vec<Syntax>, String> = items
+            .iter()
+            .map(|item| self.expand(item.clone(), symbols, vm))
+            .collect();
+        Ok(Syntax::with_scopes(
+            SyntaxKind::Tuple(expanded?),
+            span,
+            scopes,
+        ))
+    }
+
     fn expand_array(
         &mut self,
         items: &[Syntax],
@@ -312,6 +349,25 @@ impl Expander {
             .collect();
         Ok(Syntax::with_scopes(
             SyntaxKind::Array(expanded?),
+            span,
+            scopes,
+        ))
+    }
+
+    fn expand_struct(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+        scopes: Vec<ScopeId>,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Syntax, String> {
+        let expanded: Result<Vec<Syntax>, String> = items
+            .iter()
+            .map(|item| self.expand(item.clone(), symbols, vm))
+            .collect();
+        Ok(Syntax::with_scopes(
+            SyntaxKind::Struct(expanded?),
             span,
             scopes,
         ))

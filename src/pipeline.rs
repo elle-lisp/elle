@@ -889,7 +889,7 @@ mod tests {
     fn test_eval_while_with_mutation() {
         let (mut symbols, mut vm) = setup();
         let result = eval(
-            "(begin (var x 0) (while (< x 5) (set! x (+ x 1))) x)",
+            "(begin (var x 0) (while (< x 5) (set x (+ x 1))) x)",
             &mut symbols,
             &mut vm,
         );
@@ -966,7 +966,7 @@ mod tests {
     #[test]
     fn test_eval_define_then_set() {
         let (mut symbols, mut vm) = setup();
-        let result = eval("(begin (var x 10) (set! x 42) x)", &mut symbols, &mut vm);
+        let result = eval("(begin (var x 10) (set x 42) x)", &mut symbols, &mut vm);
         assert_eq!(result.unwrap(), crate::value::Value::int(42));
     }
 
@@ -976,7 +976,7 @@ mod tests {
         let result = eval(
             "(begin 
                (var counter 0)
-               (def inc (fn () (set! counter (+ counter 1))))
+               (def inc (fn () (set counter (+ counter 1))))
                (inc)
                (inc)
                counter)",
@@ -1427,7 +1427,7 @@ mod tests {
     #[test]
     fn test_const_set_error() {
         let (mut symbols, _) = setup();
-        let result = compile("(begin (def x 42) (set! x 99))", &mut symbols);
+        let result = compile("(begin (def x 42) (set x 99))", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
     }
@@ -1446,7 +1446,7 @@ mod tests {
     #[test]
     fn test_const_function_set_error() {
         let (mut symbols, _) = setup();
-        let result = compile("(begin (defn f (x) x) (set! f 99))", &mut symbols);
+        let result = compile("(begin (defn f (x) x) (set f 99))", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
     }
@@ -1454,7 +1454,7 @@ mod tests {
     #[test]
     fn test_const_cross_form_set_error() {
         let (mut symbols, _) = setup();
-        let result = compile_all("(def x 42)\n(set! x 99)", &mut symbols);
+        let result = compile_all("(def x 42)\n(set x 99)", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
     }
@@ -1480,7 +1480,7 @@ mod tests {
     #[test]
     fn test_const_in_function_set_error() {
         let (mut symbols, _) = setup();
-        let result = compile("((fn () (def x 42) (set! x 99)))", &mut symbols);
+        let result = compile("((fn () (def x 42) (set x 99)))", &mut symbols);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("immutable"));
     }

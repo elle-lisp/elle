@@ -113,10 +113,9 @@ fn test_protect_success() {
     let result = eval_source("(protect 42)");
     assert!(result.is_ok());
     let val = result.unwrap();
-    let arr = val.as_array().unwrap();
-    let borrowed = arr.borrow();
-    assert_eq!(borrowed[0], Value::bool(true));
-    assert_eq!(borrowed[1], Value::int(42));
+    let elems = val.as_tuple().unwrap();
+    assert_eq!(elems[0], Value::bool(true));
+    assert_eq!(elems[1], Value::int(42));
 }
 
 #[test]
@@ -124,11 +123,10 @@ fn test_protect_failure() {
     let result = eval_source("(protect (/ 1 0))");
     assert!(result.is_ok());
     let val = result.unwrap();
-    let arr = val.as_array().unwrap();
-    let borrowed = arr.borrow();
-    assert_eq!(borrowed[0], Value::bool(false));
-    // borrowed[1] is the error value — just check it exists
-    assert!(!borrowed[1].is_nil() || borrowed[1].is_nil()); // always true, just access it
+    let elems = val.as_tuple().unwrap();
+    assert_eq!(elems[0], Value::bool(false));
+    // elems[1] is the error value — just check it exists
+    assert!(!elems[1].is_nil() || elems[1].is_nil()); // always true, just access it
 }
 
 // ============================================================================
@@ -138,7 +136,7 @@ fn test_protect_failure() {
 #[test]
 fn test_defer_runs_cleanup() {
     assert_eq!(
-        eval_source("(begin (var cleaned false) (defer (set! cleaned true) 42) cleaned)").unwrap(),
+        eval_source("(begin (var cleaned false) (defer (set cleaned true) 42) cleaned)").unwrap(),
         Value::bool(true)
     );
 }
@@ -146,7 +144,7 @@ fn test_defer_runs_cleanup() {
 #[test]
 fn test_defer_returns_body_value() {
     assert_eq!(
-        eval_source("(begin (var x 0) (defer (set! x 1) 42))").unwrap(),
+        eval_source("(begin (var x 0) (defer (set x 1) 42))").unwrap(),
         Value::int(42)
     );
 }
@@ -156,7 +154,7 @@ fn test_defer_runs_cleanup_on_error() {
     // Cleanup should run even when body errors
     assert_eq!(
         eval_source(
-            "(begin (var cleaned false) (try (defer (set! cleaned true) (/ 1 0)) (catch e cleaned)))"
+            "(begin (var cleaned false) (try (defer (set cleaned true) (/ 1 0)) (catch e cleaned)))"
         )
         .unwrap(),
         Value::bool(true)
@@ -190,7 +188,7 @@ fn test_with_cleanup_runs() {
             r#"(begin
                 (var cleaned false)
                 (defn make () :resource)
-                (defn cleanup (r) (set! cleaned true))
+                (defn cleanup (r) (set cleaned true))
                 (with r (make) cleanup
                   42)
                 cleaned)"#
@@ -253,7 +251,7 @@ fn test_defer_hygiene_no_capture() {
             r#"(begin
                 (var cleaned false)
                 (let ((f 99))
-                  (defer (set! cleaned true) (+ f 1))))"#
+                  (defer (set cleaned true) (+ f 1))))"#
         )
         .unwrap(),
         Value::int(100)

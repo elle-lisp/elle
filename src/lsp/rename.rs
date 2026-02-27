@@ -20,7 +20,7 @@ const RESERVED_WORDS: &[&str] = &[
     "let*",
     "letrec",
     "begin",
-    "set!",
+    "set",
     "do",
     "case",
     "and",

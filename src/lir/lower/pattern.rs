@@ -298,8 +298,152 @@ impl Lowerer {
 
                 Ok(())
             }
+            HirPattern::Tuple { elements, rest } => {
+                // Tuple [...] pattern matching for `match`.
+                // Check if value is a tuple, then use ArrayRefOrNil for each element.
+                let temp_slot = if self.in_lambda {
+                    self.num_captures + self.current_func.num_locals
+                } else {
+                    self.current_func.num_locals
+                };
+                self.current_func.num_locals += 1;
+
+                if self.in_lambda {
+                    self.emit(LirInstr::StoreCapture {
+                        index: temp_slot,
+                        src: value_reg,
+                    });
+                } else {
+                    self.emit(LirInstr::StoreLocal {
+                        slot: temp_slot,
+                        src: value_reg,
+                    });
+                }
+
+                // Step 2: Check if value is a tuple
+                let is_tuple_reg = self.fresh_reg();
+                self.emit(LirInstr::IsTuple {
+                    dst: is_tuple_reg,
+                    src: value_reg,
+                });
+
+                let type_ok_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
+                    cond: is_tuple_reg,
+                    then_label: type_ok_label,
+                    else_label: fail_label,
+                });
+                self.finish_block();
+                self.current_block = BasicBlock::new(type_ok_label);
+
+                // Step 3: Check tuple length
+                // Reload from temp slot
+                let reloaded_for_len = self.fresh_reg();
+                if self.in_lambda {
+                    self.emit(LirInstr::LoadCapture {
+                        dst: reloaded_for_len,
+                        index: temp_slot,
+                    });
+                } else {
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded_for_len,
+                        slot: temp_slot,
+                    });
+                }
+
+                let len_reg = self.fresh_reg();
+                self.emit(LirInstr::ArrayLen {
+                    dst: len_reg,
+                    src: reloaded_for_len,
+                });
+
+                let expected_len = self.emit_const(LirConst::Int(elements.len() as i64))?;
+                let len_ok_reg = self.fresh_reg();
+
+                if rest.is_some() {
+                    // With & rest: length must be >= number of fixed elements
+                    self.emit(LirInstr::Compare {
+                        dst: len_ok_reg,
+                        op: CmpOp::Ge,
+                        lhs: len_reg,
+                        rhs: expected_len,
+                    });
+                } else {
+                    // Without rest: length must be exactly equal
+                    self.emit(LirInstr::Compare {
+                        dst: len_ok_reg,
+                        op: CmpOp::Eq,
+                        lhs: len_reg,
+                        rhs: expected_len,
+                    });
+                }
+
+                let len_ok_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
+                    cond: len_ok_reg,
+                    then_label: len_ok_label,
+                    else_label: fail_label,
+                });
+                self.finish_block();
+                self.current_block = BasicBlock::new(len_ok_label);
+
+                // Step 4: Match each element using ArrayRefOrNil
+                for (i, element_pat) in elements.iter().enumerate() {
+                    // Reload the tuple from temp slot for each element
+                    let reloaded = self.fresh_reg();
+                    if self.in_lambda {
+                        self.emit(LirInstr::LoadCapture {
+                            dst: reloaded,
+                            index: temp_slot,
+                        });
+                    } else {
+                        self.emit(LirInstr::LoadLocal {
+                            dst: reloaded,
+                            slot: temp_slot,
+                        });
+                    }
+
+                    let elem_reg = self.fresh_reg();
+                    self.emit(LirInstr::ArrayRefOrNil {
+                        dst: elem_reg,
+                        src: reloaded,
+                        index: i as u16,
+                    });
+
+                    // Recursively match the element
+                    self.lower_pattern_match(element_pat, elem_reg, fail_label)?;
+                }
+
+                // Step 5: Handle & rest
+                if let Some(rest_pat) = rest {
+                    let reloaded = self.fresh_reg();
+                    if self.in_lambda {
+                        self.emit(LirInstr::LoadCapture {
+                            dst: reloaded,
+                            index: temp_slot,
+                        });
+                    } else {
+                        self.emit(LirInstr::LoadLocal {
+                            dst: reloaded,
+                            slot: temp_slot,
+                        });
+                    }
+
+                    let slice_reg = self.fresh_reg();
+                    self.emit(LirInstr::ArraySliceFrom {
+                        dst: slice_reg,
+                        src: reloaded,
+                        index: elements.len() as u16,
+                    });
+
+                    self.lower_pattern_match(rest_pat, slice_reg, fail_label)?;
+                }
+
+                Ok(())
+            }
             HirPattern::Array { elements, rest } => {
-                // Step 1: Store value to temp slot (same pattern as Cons)
+                // Array @[...] pattern matching for `match`.
+                // Check if value is an array, then use ArrayRefOrNil for each element.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -440,10 +584,9 @@ impl Lowerer {
 
                 Ok(())
             }
-            HirPattern::Table { entries } => {
-                // Table/struct pattern matching for `match`.
-                // First check that the value IS a table or struct (type guard),
-                // then use TableGetOrNil for each key with silent-nil semantics.
+            HirPattern::Struct { entries } => {
+                // Struct {...} pattern matching for `match`.
+                // Check if value is a struct, then use TableGetOrNil for each key.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -463,7 +606,71 @@ impl Lowerer {
                     });
                 }
 
-                // Type guard: reject non-table/struct values
+                // Type guard: reject non-struct values
+                let is_struct_reg = self.fresh_reg();
+                self.emit(LirInstr::IsStruct {
+                    dst: is_struct_reg,
+                    src: value_reg,
+                });
+
+                let continue_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
+                    cond: is_struct_reg,
+                    then_label: continue_label,
+                    else_label: fail_label,
+                });
+                self.finish_block();
+                self.current_block = BasicBlock::new(continue_label);
+
+                for (key_name, sub_pattern) in entries {
+                    let reloaded = self.fresh_reg();
+                    if self.in_lambda {
+                        self.emit(LirInstr::LoadCapture {
+                            dst: reloaded,
+                            index: temp_slot,
+                        });
+                    } else {
+                        self.emit(LirInstr::LoadLocal {
+                            dst: reloaded,
+                            slot: temp_slot,
+                        });
+                    }
+
+                    let elem_reg = self.fresh_reg();
+                    self.emit(LirInstr::TableGetOrNil {
+                        dst: elem_reg,
+                        src: reloaded,
+                        key: LirConst::Keyword(key_name.clone()),
+                    });
+
+                    self.lower_pattern_match(sub_pattern, elem_reg, fail_label)?;
+                }
+
+                Ok(())
+            }
+            HirPattern::Table { entries } => {
+                // Table @{...} pattern matching for `match`.
+                // Check if value is a table, then use TableGetOrNil for each key.
+                let temp_slot = if self.in_lambda {
+                    self.num_captures + self.current_func.num_locals
+                } else {
+                    self.current_func.num_locals
+                };
+                self.current_func.num_locals += 1;
+
+                if self.in_lambda {
+                    self.emit(LirInstr::StoreCapture {
+                        index: temp_slot,
+                        src: value_reg,
+                    });
+                } else {
+                    self.emit(LirInstr::StoreLocal {
+                        slot: temp_slot,
+                        src: value_reg,
+                    });
+                }
+
+                // Type guard: reject non-table values
                 let is_table_reg = self.fresh_reg();
                 self.emit(LirInstr::IsTable {
                     dst: is_table_reg,

@@ -34,7 +34,13 @@ fn kind_eq(a: &SyntaxKind, b: &SyntaxKind) -> bool {
         (SyntaxKind::List(a), SyntaxKind::List(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
         }
+        (SyntaxKind::Tuple(a), SyntaxKind::Tuple(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
+        }
         (SyntaxKind::Array(a), SyntaxKind::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
+        }
+        (SyntaxKind::Struct(a), SyntaxKind::Struct(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
         }
         (SyntaxKind::Table(a), SyntaxKind::Table(b)) => {
@@ -88,9 +94,12 @@ fn arb_source_depth(depth: u32) -> BoxedStrategy<String> {
             // Lists
             3 => prop::collection::vec(inner.clone(), 0..=4)
                 .prop_map(|items| format!("({})", items.join(" "))),
-            // Arrays
+            // Tuples
             2 => prop::collection::vec(arb_source_depth(depth - 1), 0..=4)
                 .prop_map(|items| format!("[{}]", items.join(" "))),
+            // Arrays
+            1 => prop::collection::vec(arb_source_depth(depth - 1), 0..=4)
+                .prop_map(|items| format!("@[{}]", items.join(" "))),
             // Quote
             1 => arb_source_depth(depth - 1)
                 .prop_map(|s| format!("'{}", s)),
@@ -241,7 +250,7 @@ proptest! {
 
     #[test]
     fn empty_array_roundtrip(_dummy in 0..1i32) {
-        let parsed = read_syntax("[]").unwrap();
+        let parsed = read_syntax("@[]").unwrap();
         let displayed = format!("{}", parsed);
         let reparsed = read_syntax(&displayed).unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed));
@@ -290,7 +299,7 @@ proptest! {
         elems in prop::collection::vec(-100i64..100, 0..=8)
     ) {
         let inner = elems.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
-        let source = format!("[{}]", inner);
+        let source = format!("@[{}]", inner);
         let parsed = read_syntax(&source).unwrap();
         let displayed = format!("{}", parsed);
         let reparsed = read_syntax(&displayed).unwrap();
@@ -309,7 +318,7 @@ proptest! {
             .map(|(k, v)| format!(":{} {}", k, v))
             .collect::<Vec<_>>()
             .join(" ");
-        let source = format!("{{{}}}", inner);
+        let source = format!("@{{{}}}", inner);
         let parsed = read_syntax(&source).unwrap();
         let displayed = format!("{}", parsed);
         let reparsed = read_syntax(&displayed).unwrap();

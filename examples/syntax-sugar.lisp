@@ -199,7 +199,7 @@
     (newline)
     (while should-continue
       (begin
-        (set! count (+ count 1))
+        (set count (+ count 1))
         (display "  count = ")
         (display count)
         (newline)
@@ -207,7 +207,7 @@
           (begin
             (display "  Exiting loop")
             (newline)
-            (set! should-continue false)))))
+            (set should-continue false)))))
     (display "Counter after loop: ")
     (display count)
     (newline)
@@ -224,15 +224,15 @@
     (newline)
     (while keep-looping
       (begin
-        (set! x (+ x 1))
-        (set! y (+ y 2))
+        (set x (+ x 1))
+        (set y (+ y 2))
         (display "  x = ")
         (display x)
         (display ", y = ")
         (display y)
         (newline)
         (if (>= x 2)
-          (set! keep-looping false))))
+          (set keep-looping false))))
     (display "Final: x = ")
     (display x)
     (display ", y = ")
@@ -251,9 +251,9 @@
     (var loop-active true)
     (while loop-active
       (begin
-        (set! result-forever (+ result-forever 1))
+        (set result-forever (+ result-forever 1))
         (if (= result-forever 5)
-          (set! loop-active false))))
+          (set loop-active false))))
     (display "Result from forever simulation: ")
     (display result-forever)
     (newline)

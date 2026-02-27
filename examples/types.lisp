@@ -36,7 +36,7 @@
 
 ; Keywords in arrays
 (var options [1 :option-a 2 :option-b 3])
-(assert-eq (array-ref options 1) :option-a "second element of options array is :option-a")
+(assert-eq (get options 1) :option-a "second element of options array is :option-a")
 
 ; Building configuration with keywords
 (var settings (list :debug true :host "localhost" :port 8080))
@@ -82,7 +82,7 @@
 
 ; Symbols in arrays
 (var ops (array 'add 'subtract 'multiply))
-(assert-eq (array-ref ops 0) 'add "first element of ops array is 'add")
+(assert-eq (get ops 0) 'add "first element of ops array is 'add")
 
 ; Symbols are distinct from keywords
 (assert-false (eq? 'name :name) "symbol 'name is not eq? to keyword :name")
@@ -133,7 +133,7 @@
 
 ; Numbers in arrays
 (var values [10 20 30 40 50])
-(assert-eq (array-ref values 0) 10 "first element of values array is 10")
+(assert-eq (get values 0) 10 "first element of values array is 10")
 
 ; Arithmetic with numbers
 (assert-eq (+ 10 5) 15 "arithmetic: 10 + 5 = 15")
@@ -180,10 +180,10 @@
 
 ; Strings in arrays
 (var messages ["hello" "world" "!"])
-(assert-eq (array-ref messages 0) "hello" "first element of messages array is \"hello\"")
+(assert-eq (get messages 0) "hello" "first element of messages array is \"hello\"")
 
 ; String concatenation
-(var greeting (string-append "Hello, " "World!"))
+(var greeting (append "Hello, " "World!"))
 (assert-eq greeting "Hello, World!" "string concatenation works")
 
 (display "✓ Strings verified\n")
@@ -221,7 +221,7 @@
 
 ; Booleans in arrays
 (var states [true false true false])
-(assert-eq (array-ref states 0) true "first element of states array is #t")
+(assert-eq (get states 0) true "first element of states array is #t")
 
 ; Boolean predicates
 (assert-true (boolean? true) "boolean? returns true for #t")
@@ -255,7 +255,7 @@
 
 ; Nil in arrays
 (var optional [10 nil 30])
-(assert-eq (array-ref optional 1) nil "second element of optional array is nil")
+(assert-eq (get optional 1) nil "second element of optional array is nil")
 
 ; Nil predicates
 (assert-true (nil? nil) "nil? returns true for nil")
@@ -281,9 +281,9 @@
 
 ; Mixed array
 (var mixed-arr (array :id 'user 123 "Alice" true))
-(assert-eq (array-ref mixed-arr 0) :id "first element is keyword")
-(assert-eq (array-ref mixed-arr 1) 'user "second element is symbol")
-(assert-eq (array-ref mixed-arr 2) 123 "third element is number")
+(assert-eq (get mixed-arr 0) :id "first element is keyword")
+(assert-eq (get mixed-arr 1) 'user "second element is symbol")
+(assert-eq (get mixed-arr 2) 123 "third element is number")
 
 (display "✓ Mixed atoms verified\n")
 
@@ -864,8 +864,8 @@
 
 (display "✓ unbox works with different types\n")
 
-; === Box Mutation (box-set!) ===
-(display "\n=== Box Mutation (box-set!) ===\n")
+; === Box Mutation (rebox) ===
+(display "\n=== Box Mutation (rebox) ===\n")
 
 ; Create a mutable box
 (var counter (box 0))
@@ -875,21 +875,21 @@
 (assert-eq (unbox counter) 0 "counter starts at 0")
 
 ; Increment counter
-(box-set! counter 1)
-(display "After box-set! to 1: ")
+(rebox counter 1)
+(display "After rebox to 1: ")
 (display (unbox counter))
 (newline)
-(assert-eq (unbox counter) 1 "box-set! updates the value")
+(assert-eq (unbox counter) 1 "rebox updates the value")
 
 ; Increment again
-(box-set! counter 2)
-(assert-eq (unbox counter) 2 "box-set! can update multiple times")
+(rebox counter 2)
+(assert-eq (unbox counter) 2 "rebox can update multiple times")
 
 ; Set to different type
-(box-set! counter "changed")
-(assert-eq (unbox counter) "changed" "box-set! can change type")
+(rebox counter "changed")
+(assert-eq (unbox counter) "changed" "rebox can change type")
 
-(display "✓ box-set! works correctly\n")
+(display "✓ rebox works correctly\n")
 
 ; === box? Predicate ===
 (display "\n=== box? Predicate ===\n")
@@ -928,9 +928,9 @@
 (display (unbox my-box-list))
 (newline)
 
-; box-set! modifies the box
-(box-set! my-box-list (cons 0 (unbox my-box-list)))
-(display "After box-set! with cons: ")
+; rebox modifies the box
+(rebox my-box-list (cons 0 (unbox my-box-list)))
+(display "After rebox with cons: ")
 (display (unbox my-box-list))
 (newline)
 (assert-eq (first (unbox my-box-list)) 0 "box contents changed")
@@ -948,12 +948,12 @@
 (newline)
 
 ; Add items to state
-(box-set! state (cons 100 (unbox state)))
+(rebox state (cons 100 (unbox state)))
 (display "After adding 100: ")
 (display (unbox state))
 (newline)
 
-(box-set! state (cons 200 (unbox state)))
+(rebox state (cons 200 (unbox state)))
 (display "After adding 200: ")
 (display (unbox state))
 (newline)
@@ -1001,7 +1001,7 @@
 (display "\nMutable Storage (Boxes):\n")
 (display "  ✓ box - Create mutable box\n")
 (display "  ✓ unbox - Extract value from box\n")
-(display "  ✓ box-set! - Mutate box contents\n")
+(display "  ✓ rebox - Mutate box contents\n")
 (display "  ✓ box? - Type predicate for boxes\n")
 (display "  ✓ Boxes vs immutable structures\n")
 (display "  ✓ Counter closure pattern\n")
@@ -1127,7 +1127,7 @@
 
 (display "✓ Truthiness semantics verified\n")
 
-(display "  - box-set! enables stateful closures\n")
+(display "  - rebox enables stateful closures\n")
 (display "  - Lists remain immutable; boxes are mutable\n")
 
 (display "\n")

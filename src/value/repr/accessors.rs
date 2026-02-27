@@ -166,6 +166,13 @@ impl Value {
         self.heap_tag() == Some(HeapTag::Fiber)
     }
 
+    /// Check if this is a buffer.
+    #[inline]
+    pub fn is_buffer(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::Buffer)
+    }
+
     /// Check if this is a syntax object.
     #[inline]
     pub fn is_syntax(&self) -> bool {
@@ -339,6 +346,19 @@ impl Value {
     #[inline]
     pub fn is_tuple(&self) -> bool {
         self.as_tuple().is_some()
+    }
+
+    /// Extract as buffer if this is a buffer.
+    #[inline]
+    pub fn as_buffer(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::Buffer(b) => Some(b),
+            _ => None,
+        }
     }
 
     /// Extract as thread handle if this is a thread handle.

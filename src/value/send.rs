@@ -42,6 +42,9 @@ pub enum SendValue {
     /// Deep copy of tuples (immutable fixed-length sequences)
     Tuple(Vec<SendValue>),
 
+    /// Deep copy of buffers (mutable byte sequences)
+    Buffer(Vec<u8>),
+
     /// Deep copy of mutable cells (if contents are sendable)
     /// The bool indicates if it's a local cell (auto-unwrapped) or user cell
     Cell(Box<SendValue>, bool),
@@ -119,6 +122,14 @@ impl SendValue {
                 let copied: Result<Vec<SendValue>, String> =
                     elems.iter().map(|v| SendValue::from_value(*v)).collect();
                 Ok(SendValue::Tuple(copied?))
+            }
+
+            // Buffers - deep copy the bytes
+            HeapObject::Buffer(buf_ref) => {
+                let borrowed = buf_ref
+                    .try_borrow()
+                    .map_err(|_| "Cannot borrow buffer for sending".to_string())?;
+                Ok(SendValue::Buffer(borrowed.clone()))
             }
 
             // Cells - deep copy the contents if sendable
@@ -199,6 +210,7 @@ impl SendValue {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
                 alloc(HeapObject::Tuple(values))
             }
+            SendValue::Buffer(bytes) => alloc(HeapObject::Buffer(std::cell::RefCell::new(bytes))),
             SendValue::Cell(contents, is_local) => {
                 let val = contents.into_value();
                 // Preserve the cell type (local vs user) across thread boundary

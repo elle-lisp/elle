@@ -471,7 +471,7 @@
     (display "Counter: ")
     (display counter)
     (newline)
-    (set! counter (+ counter 1))))
+    (set counter (+ counter 1))))
 
 (display "After loop, counter is: ")
 (display counter)
@@ -499,7 +499,7 @@
 ;; Closures can capture variables from their defining scope
 (def make-counter (fn (start)
   (fn ()
-    (set! start (+ start 1))
+    (set start (+ start 1))
     start)))
 
 (display "PART 10: Closures and Captured Variables")
@@ -575,7 +575,7 @@
       (display "In loop: counter = ")
       (display counter)
       (newline)
-      (set! counter (+ counter 1))))
+      (set counter (+ counter 1))))
   
   (display "After loop: counter = ")
   (display counter)
@@ -606,12 +606,12 @@
           (display "  Inner j = ")
           (display j)
           (newline)
-          (set! j (+ j 1))))
+          (set j (+ j 1))))
       
       (display "After inner loop, j is local to inner loop")
       (newline)
       
-      (set! i (+ i 1))))
+      (set i (+ i 1))))
   
   (display "After all loops: i = ")
   (display i)
@@ -667,8 +667,8 @@
       (display temp)
       (newline)
       
-      (set! a b)
-      (set! b temp)))
+      (set a b)
+      (set b temp)))
   
   (display "GCD result: ")
   (display a)
@@ -773,7 +773,7 @@
 (var count 0)
 
 (fn ()
-  (set! count (+ count 1))  ; Modifies global!
+  (set count (+ count 1))  ; Modifies global!
   count)
 
 ;; To fix, use a parameter:

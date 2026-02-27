@@ -161,8 +161,12 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
                 ),
             )
         }
+    } else if let Some(buf_ref) = args[0].as_buffer() {
+        (SIG_OK, Value::int(buf_ref.borrow().len() as i64))
     } else if let Some(s) = args[0].as_string() {
         (SIG_OK, Value::int(s.chars().count() as i64))
+    } else if let Some(elems) = args[0].as_tuple() {
+        (SIG_OK, Value::int(elems.len() as i64))
     } else if args[0].is_array() {
         let vec = match args[0].as_array() {
             Some(v) => v,
@@ -213,7 +217,7 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         (SIG_OK, Value::int(name.chars().count() as i64))
     } else {
         (SIG_ERROR, error_val("type-error", format!(
-            "length: expected collection type (list, string, array, table, struct, symbol, or keyword), got {}",
+            "length: expected collection type (list, string, array, tuple, table, struct, symbol, or keyword), got {}",
             args[0].type_name()
         )))
     }
@@ -237,7 +241,7 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                "empty?: expected collection type (list, string, array, table, or struct), got nil"
+                "empty?: expected collection type (list, string, array, buffer, table, struct, or tuple), got nil"
                     .to_string(),
             ),
         );
@@ -252,7 +256,7 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "empty?: expected collection type (list, string, array, table, or struct), got {}",
+                        "empty?: expected collection type (list, string, array, buffer, table, struct, or tuple), got {}",
                         args[0].type_name()
                     ),
                 ),
@@ -262,6 +266,8 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
         true
     } else if args[0].is_cons() {
         false
+    } else if let Some(buf_ref) = args[0].as_buffer() {
+        buf_ref.borrow().is_empty()
     } else if let Some(s) = args[0].as_string() {
         s.is_empty()
     } else if args[0].is_array() {
@@ -275,6 +281,17 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         vec.borrow().is_empty()
+    } else if args[0].is_tuple() {
+        let elems = match args[0].as_tuple() {
+            Some(e) => e,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val("error", "empty?: failed to get tuple".to_string()),
+                )
+            }
+        };
+        elems.is_empty()
     } else if args[0].is_table() {
         let table = match args[0].as_table() {
             Some(t) => t,
@@ -303,7 +320,7 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "type-error",
                 format!(
-                "empty?: expected collection type (list, string, array, table, or struct), got {}",
+                "empty?: expected collection type (list, string, array, buffer, table, struct, or tuple), got {}",
                 args[0].type_name()
             ),
             ),
@@ -314,16 +331,288 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Append multiple lists
+/// Polymorphic append - works on arrays, tuples, and strings
+/// For arrays: mutates first arg in place, returns it
+/// For tuples: returns new tuple
+/// For strings: returns new string
+/// `(append collection1 collection2)`
 pub fn prim_append(args: &[Value]) -> (SignalBits, Value) {
-    let mut result = Vec::new();
-    for arg in args {
-        let vec = match arg.list_to_vec() {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("append: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    // Buffer (mutable) - mutate in place
+    if let Some(buf_ref) = args[0].as_buffer() {
+        if let Some(other_buf_ref) = args[1].as_buffer() {
+            let other_borrowed = other_buf_ref.borrow();
+            let mut borrowed = buf_ref.borrow_mut();
+            borrowed.extend(other_borrowed.iter());
+            drop(borrowed);
+            return (SIG_OK, args[0]); // Return the mutated buffer
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "append: both arguments must be same type, got buffer and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // Array (mutable) - mutate in place
+    if let Some(vec_ref) = args[0].as_array() {
+        if let Some(other_vec_ref) = args[1].as_array() {
+            let other_borrowed = other_vec_ref.borrow();
+            let mut borrowed = vec_ref.borrow_mut();
+            borrowed.extend(other_borrowed.iter().cloned());
+            drop(borrowed);
+            return (SIG_OK, args[0]); // Return the mutated array
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "append: both arguments must be same type, got array and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // Tuple (immutable) - return new tuple
+    if let Some(elems) = args[0].as_tuple() {
+        if let Some(other_elems) = args[1].as_tuple() {
+            let mut result = elems.to_vec();
+            result.extend(other_elems.iter().cloned());
+            return (SIG_OK, Value::tuple(result));
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "append: both arguments must be same type, got tuple and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // String (immutable) - return new string
+    if let Some(s) = args[0].as_string() {
+        if let Some(other_s) = args[1].as_string() {
+            let mut result = s.to_string();
+            result.push_str(other_s);
+            return (SIG_OK, Value::string(result.as_str()));
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "append: both arguments must be same type, got string and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // List (or syntax list — used during macro expansion)
+    if args[0].is_cons() || args[0].is_empty_list() || args[0].as_syntax().is_some() {
+        // list_to_vec handles both cons lists and syntax lists
+        let mut first = match args[0].list_to_vec() {
             Ok(v) => v,
             Err(e) => return (SIG_ERROR, error_val("type-error", format!("append: {}", e))),
         };
-        result.extend(vec);
+        let second = match args[1].list_to_vec() {
+            Ok(v) => v,
+            Err(_) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "append: both arguments must be same type, got list and {}",
+                            args[1].type_name()
+                        ),
+                    ),
+                )
+            }
+        };
+        first.extend(second);
+        // Rebuild as a proper list
+        let mut result = Value::EMPTY_LIST;
+        for val in first.into_iter().rev() {
+            result = Value::cons(val, result);
+        }
+        return (SIG_OK, result);
     }
-    (SIG_OK, list(result))
+
+    // Unsupported type
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "append: expected collection (list, array, tuple, or string), got {}",
+                args[0].type_name()
+            ),
+        ),
+    )
+}
+
+/// Polymorphic concat - always returns new value, never mutates
+/// Works on arrays, tuples, and strings
+/// `(concat collection1 collection2)`
+pub fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("concat: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    // Buffer - return new buffer
+    if let Some(buf_ref) = args[0].as_buffer() {
+        if let Some(other_buf_ref) = args[1].as_buffer() {
+            let borrowed = buf_ref.borrow();
+            let other_borrowed = other_buf_ref.borrow();
+            let mut result = borrowed.clone();
+            result.extend(other_borrowed.iter());
+            return (SIG_OK, Value::buffer(result));
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "concat: both arguments must be same type, got buffer and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // Array - return new array
+    if let Some(vec_ref) = args[0].as_array() {
+        if let Some(other_vec_ref) = args[1].as_array() {
+            let borrowed = vec_ref.borrow();
+            let other_borrowed = other_vec_ref.borrow();
+            let mut result = borrowed.clone();
+            result.extend(other_borrowed.iter().cloned());
+            return (SIG_OK, Value::array(result));
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "concat: both arguments must be same type, got array and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // Tuple - return new tuple
+    if let Some(elems) = args[0].as_tuple() {
+        if let Some(other_elems) = args[1].as_tuple() {
+            let mut result = elems.to_vec();
+            result.extend(other_elems.iter().cloned());
+            return (SIG_OK, Value::tuple(result));
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "concat: both arguments must be same type, got tuple and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // String - return new string
+    if let Some(s) = args[0].as_string() {
+        if let Some(other_s) = args[1].as_string() {
+            let mut result = s.to_string();
+            result.push_str(other_s);
+            return (SIG_OK, Value::string(result.as_str()));
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "concat: both arguments must be same type, got string and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // List (cons-based) - return new list
+    if args[0].is_cons() || args[0].is_empty_list() {
+        let mut first = match args[0].list_to_vec() {
+            Ok(v) => v,
+            Err(e) => return (SIG_ERROR, error_val("type-error", format!("concat: {}", e))),
+        };
+        let second = match args[1].list_to_vec() {
+            Ok(v) => v,
+            Err(_) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "concat: both arguments must be same type, got list and {}",
+                            args[1].type_name()
+                        ),
+                    ),
+                )
+            }
+        };
+        first.extend(second);
+        let mut result = Value::EMPTY_LIST;
+        for val in first.into_iter().rev() {
+            result = Value::cons(val, result);
+        }
+        return (SIG_OK, result);
+    }
+
+    // Unsupported type
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "concat: expected collection (list, array, tuple, string, or buffer), got {}",
+                args[0].type_name()
+            ),
+        ),
+    )
 }
 
 /// Reverse a list
@@ -348,126 +637,6 @@ pub fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
     };
     vec.reverse();
     (SIG_OK, list(vec))
-}
-
-/// Get the nth element of a collection (list, array, or string)
-pub fn prim_nth(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("nth: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let index = match args[0].as_int() {
-        Some(n) => {
-            if n < 0 {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "error",
-                        format!("nth: index {} out of bounds (negative index)", n),
-                    ),
-                );
-            }
-            n as usize
-        }
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("nth: expected integer index, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
-
-    let collection = args[1];
-
-    // Dispatch on collection type
-    if collection.is_cons() || collection.is_empty_list() || collection.is_nil() {
-        // List: walk the list directly without converting to vec
-        let mut current = collection;
-        let mut current_index = 0;
-
-        loop {
-            if current.is_nil() || current.is_empty_list() {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "error",
-                        format!(
-                            "nth: index {} out of bounds (length {})",
-                            index, current_index
-                        ),
-                    ),
-                );
-            }
-
-            if let Some(cons) = current.as_cons() {
-                if current_index == index {
-                    return (SIG_OK, cons.first);
-                }
-                current = cons.rest;
-                current_index += 1;
-            } else {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "error",
-                        format!(
-                            "nth: index {} out of bounds (length {})",
-                            index, current_index
-                        ),
-                    ),
-                );
-            }
-        }
-    } else if let Some(array) = collection.as_array() {
-        // Array: use as_array() and index
-        let arr = array.borrow();
-        match arr.get(index) {
-            Some(v) => (SIG_OK, *v),
-            None => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("nth: index {} out of bounds (length {})", index, arr.len()),
-                ),
-            ),
-        }
-    } else if let Some(s) = collection.as_string() {
-        // String: use chars().nth() and return as 1-char string
-        match s.chars().nth(index) {
-            Some(ch) => (SIG_OK, Value::string(ch.to_string())),
-            None => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!(
-                        "nth: index {} out of bounds (length {})",
-                        index,
-                        s.chars().count()
-                    ),
-                ),
-            ),
-        }
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "nth: expected list, array, or string, got {}",
-                    collection.type_name()
-                ),
-            ),
-        )
-    }
 }
 
 /// Get the last element of a list
@@ -667,11 +836,22 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "append",
         func: prim_append,
         effect: Effect::none(),
-        arity: Arity::AtLeast(0),
-        doc: "Append multiple lists into a single list",
-        params: &["lists"],
+        arity: Arity::Exact(2),
+        doc: "Append two collections. For arrays: mutates first arg, returns it. For tuples/strings: returns new value.",
+        params: &["collection1", "collection2"],
         category: "list",
-        example: "(append (list 1 2) (list 3 4))",
+        example: "(append @[1 2] @[3 4])",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "concat",
+        func: prim_concat,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Concatenate two collections, always returns new value, never mutates.",
+        params: &["collection1", "collection2"],
+        category: "list",
+        example: "(concat @[1 2] @[3 4])",
         aliases: &[],
     },
     PrimitiveDef {
@@ -685,17 +865,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(reverse (list 1 2 3))",
         aliases: &[],
     },
-    PrimitiveDef {
-        name: "nth",
-        func: prim_nth,
-        effect: Effect::none(),
-        arity: Arity::Exact(2),
-        doc: "Get the nth element of a collection (list, array, or string) (0-indexed)",
-        params: &["index", "collection"],
-        category: "list",
-        example: "(nth 1 (list 10 20 30))",
-        aliases: &[],
-    },
+
     PrimitiveDef {
         name: "last",
         func: prim_last,

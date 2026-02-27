@@ -30,7 +30,7 @@ impl<'a> Analyzer<'a> {
         Vec::new()
     }
 
-    /// Recursively extract all symbol names from a syntax pattern (list or array).
+    /// Recursively extract all symbol names from a syntax pattern (list, tuple, array, struct, or table).
     fn extract_pattern_names<'s>(syntax: &'s Syntax, out: &mut Vec<(&'s str, &'s [ScopeId])>) {
         match &syntax.kind {
             SyntaxKind::Symbol(name) if name == "_" || name == "&" => {
@@ -39,13 +39,13 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Symbol(name) => {
                 out.push((name.as_str(), syntax.scopes.as_slice()));
             }
-            SyntaxKind::List(items) | SyntaxKind::Array(items) => {
+            SyntaxKind::List(items) | SyntaxKind::Tuple(items) | SyntaxKind::Array(items) => {
                 for item in items {
                     Self::extract_pattern_names(item, out);
                 }
             }
-            SyntaxKind::Table(items) => {
-                // Table patterns are alternating keyword/pattern pairs;
+            SyntaxKind::Struct(items) | SyntaxKind::Table(items) => {
+                // Struct/table patterns are alternating keyword/pattern pairs;
                 // only extract names from the value patterns (odd indices)
                 for item in items.iter().skip(1).step_by(2) {
                     Self::extract_pattern_names(item, out);
@@ -55,11 +55,15 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// Check if a syntax node is a destructuring pattern (list, array, or table).
+    /// Check if a syntax node is a destructuring pattern (list, tuple, array, struct, or table).
     pub(super) fn is_destructure_pattern(syntax: &Syntax) -> bool {
         matches!(
             &syntax.kind,
-            SyntaxKind::List(_) | SyntaxKind::Array(_) | SyntaxKind::Table(_)
+            SyntaxKind::List(_)
+                | SyntaxKind::Tuple(_)
+                | SyntaxKind::Array(_)
+                | SyntaxKind::Struct(_)
+                | SyntaxKind::Table(_)
         )
     }
 
@@ -165,7 +169,9 @@ impl<'a> Analyzer<'a> {
                 };
                 Ok(HirPattern::List { elements, rest })
             }
-            SyntaxKind::Array(items) => {
+            SyntaxKind::Tuple(items) | SyntaxKind::Array(items) => {
+                // Both [...] and @[...] destructure the same way in binding forms
+                // (no type guard — ArrayRefOrNil handles both)
                 let (fixed, rest_syntax) = Self::split_rest_pattern(items, span)?;
                 let mut elements = Vec::new();
                 for item in fixed {
@@ -177,13 +183,14 @@ impl<'a> Analyzer<'a> {
                     )),
                     None => None,
                 };
-                Ok(HirPattern::Array { elements, rest })
+                Ok(HirPattern::Tuple { elements, rest })
             }
-            SyntaxKind::Table(items) => {
-                // Table destructuring: {:key1 pat1 :key2 pat2 ...}
+            SyntaxKind::Struct(items) | SyntaxKind::Table(items) => {
+                // Both {...} and @{...} destructure the same way in binding forms
+                // (no type guard — TableGetOrNil handles both)
                 if items.len() % 2 != 0 {
                     return Err(format!(
-                        "{}: table destructuring requires keyword-pattern pairs",
+                        "{}: struct/table destructuring requires keyword-pattern pairs",
                         span
                     ));
                 }
@@ -193,7 +200,7 @@ impl<'a> Analyzer<'a> {
                         SyntaxKind::Keyword(k) => k.clone(),
                         _ => {
                             return Err(format!(
-                                "{}: table destructuring key must be a keyword, got {}",
+                                "{}: struct/table destructuring key must be a keyword, got {}",
                                 span, pair[0]
                             ))
                         }
@@ -202,10 +209,10 @@ impl<'a> Analyzer<'a> {
                         self.analyze_destructure_pattern(&pair[1], scope, immutable, span)?;
                     entries.push((key_name, pattern));
                 }
-                Ok(HirPattern::Table { entries })
+                Ok(HirPattern::Struct { entries })
             }
             _ => Err(format!(
-                "{}: destructuring pattern element must be a symbol, list, array, or table",
+                "{}: destructuring pattern element must be a symbol, list, tuple, array, struct, or table",
                 span
             )),
         }

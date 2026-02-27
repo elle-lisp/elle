@@ -40,8 +40,8 @@ fn clock_monotonic_never_decreases() {
               (i 0))
           (while (< i 100)
             (begin
-              (set! times (cons (clock/monotonic) times))
-              (set! i (+ i 1))))
+              (set times (cons (clock/monotonic) times))
+              (set i (+ i 1))))
           times)
     "#;
 
@@ -122,8 +122,8 @@ fn clock_realtime_multiple_reads_are_monotonic() {
               (i 0))
           (while (< i 50)
             (begin
-              (set! times (cons (clock/realtime) times))
-              (set! i (+ i 1))))
+              (set times (cons (clock/realtime) times))
+              (set i (+ i 1))))
           times)
     "#;
 

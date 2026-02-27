@@ -81,12 +81,12 @@
 (var call-count 0)
 
 (def counted-add (fn (a b)
-  (set! call-count (+ call-count 1))
+  (set call-count (+ call-count 1))
   (+ a b)))
 
 (display "Counting function calls:\n")
 
-(set! call-count 0)
+(set call-count 0)
 (counted-add 1 2)
 (counted-add 3 4)
 (counted-add 5 6)
@@ -107,12 +107,12 @@
 (var execution-log (list))
 
 (def logged-multiply (fn (a b)
-  (set! execution-log (append execution-log (list (list 'multiply a b))))
+  (set execution-log (append execution-log (list (list 'multiply a b))))
   (* a b)))
 
 (display "Tracking function executions:\n")
 
-(set! execution-log (list))
+(set execution-log (list))
 (logged-multiply 2 3)
 (logged-multiply 4 5)
 (logged-multiply 6 7)
@@ -141,8 +141,8 @@
   (fn ()
     (if (< i n)
       (begin
-        (set! result (+ result i))
-        (set! i (+ i 1)))))))
+        (set result (+ result i))
+        (set i (+ i 1)))))))
 
 (display "Comparing sum implementations:\n")
 
@@ -161,10 +161,10 @@
 
 (def debug-add (fn (a b)
   (debug-print "Adding two numbers")
-  (debug-print (string-append "a = " (number->string a)))
-  (debug-print (string-append "b = " (number->string b)))
+  (debug-print (append "a = " (number->string a)))
+  (debug-print (append "b = " (number->string b)))
   (let ((result (+ a b)))
-    (debug-print (string-append "result = " (number->string result)))
+    (debug-print (append "result = " (number->string result)))
     result)))
 
 (display "Debug output with values:\n")
@@ -211,14 +211,14 @@
 (def safe-divide (fn (a b)
   (if (= b 0)
     (begin
-      (set! error-count (+ error-count 1))
+      (set error-count (+ error-count 1))
       (debug-print "Division by zero error")
       0)
     (/ a b))))
 
 (display "Tracking errors:\n")
 
-(set! error-count 0)
+(set error-count 0)
 (safe-divide 10 2)
 (safe-divide 20 4)
 (safe-divide 30 0)
@@ -240,7 +240,7 @@
 
 (def list-size-tracker (fn (lst)
   (let ((size (length lst)))
-    (debug-print (string-append "List size: " (number->string size)))
+    (debug-print (append "List size: " (number->string size)))
     size)))
 
 (display "Tracking resource usage:\n")

@@ -237,12 +237,12 @@ fn test_effect_polymorphic_with_yielding_arg_unknown_global() {
 #[test]
 fn test_effect_set_invalidation() {
     // (var f (fn () 42))
-    // (set! f (fn () (yield 1)))
+    // (set f (fn () (yield 1)))
     // After set!, effect tracking for f is invalidated
     // Calling f should be Yields (sound: we can't prove it's pure)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (var f (fn () 42)) (set! f (fn () (yield 1))) (f))",
+        "(begin (var f (fn () 42)) (set f (fn () (yield 1))) (f))",
         &mut symbols,
         &mut vm,
     )
@@ -441,7 +441,7 @@ fn test_effect_unknown_global_is_yields() {
     // we must assume it may yield (since it could be redefined via set!)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (var f (fn () 42)) (set! f (fn () (yield 1))) (f))",
+        "(begin (var f (fn () 42)) (set f (fn () (yield 1))) (f))",
         &mut symbols,
         &mut vm,
     )

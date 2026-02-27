@@ -73,7 +73,7 @@ impl fmt::Display for Value {
         // Array
         if let Some(vec_ref) = self.as_array() {
             let vec = vec_ref.borrow();
-            write!(f, "[")?;
+            write!(f, "@[")?;
             for (i, v) in vec.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
@@ -86,7 +86,7 @@ impl fmt::Display for Value {
         // Table
         if let Some(table_ref) = self.as_table() {
             let table = table_ref.borrow();
-            write!(f, "{{")?;
+            write!(f, "@{{")?;
             let mut first = true;
             for (k, v) in table.iter() {
                 if !first {
@@ -147,6 +147,25 @@ impl fmt::Display for Value {
         // Binding
         if self.is_binding() {
             return write!(f, "#<binding>");
+        }
+
+        // Buffer
+        if let Some(buf_ref) = self.as_buffer() {
+            let borrowed = buf_ref.borrow();
+            write!(f, "@\"")?;
+            // Display as UTF-8 where valid, escape otherwise
+            for &byte in borrowed.iter() {
+                if byte == b'"' {
+                    write!(f, "\\\"")?;
+                } else if byte == b'\\' {
+                    write!(f, "\\\\")?;
+                } else if (0x20..0x7f).contains(&byte) {
+                    write!(f, "{}", byte as char)?;
+                } else {
+                    write!(f, "\\x{:02x}", byte)?;
+                }
+            }
+            return write!(f, "\"");
         }
 
         // Tuple
@@ -235,7 +254,7 @@ impl fmt::Debug for Value {
         // Array
         if let Some(vec_ref) = self.as_array() {
             let vec = vec_ref.borrow();
-            write!(f, "[")?;
+            write!(f, "@[")?;
             for (i, v) in vec.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
@@ -243,6 +262,23 @@ impl fmt::Debug for Value {
                 write!(f, "{:?}", v)?;
             }
             return write!(f, "]");
+        }
+        // Buffer
+        if let Some(buf_ref) = self.as_buffer() {
+            let borrowed = buf_ref.borrow();
+            write!(f, "@\"")?;
+            for &byte in borrowed.iter() {
+                if byte == b'"' {
+                    write!(f, "\\\"")?;
+                } else if byte == b'\\' {
+                    write!(f, "\\\\")?;
+                } else if (0x20..0x7f).contains(&byte) {
+                    write!(f, "{}", byte as char)?;
+                } else {
+                    write!(f, "\\x{:02x}", byte)?;
+                }
+            }
+            return write!(f, "\"");
         }
         // Everything else — delegate to Display
         write!(f, "{}", self)
