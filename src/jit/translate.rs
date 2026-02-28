@@ -76,8 +76,9 @@ impl<'a> FunctionTranslator<'a> {
         }
     }
 
-    /// Initialize locally-defined variables to LocalCell(NIL)
-    /// These are let-bindings inside the function body that need cell wrapping.
+    /// Initialize locally-defined variables.
+    /// Variables that need cells (captured or mutated) get LocalCell(NIL).
+    /// Variables that don't need cells get NIL directly, avoiding heap allocation.
     pub(crate) fn init_locally_defined_vars(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -85,13 +86,18 @@ impl<'a> FunctionTranslator<'a> {
     ) -> Result<(), JitError> {
         use crate::value::Value;
 
-        // Create NIL constant
         let nil_bits = builder.ins().iconst(I64, Value::NIL.to_bits() as i64);
+        let cell_locals_mask = self.lir.cell_locals_mask;
 
-        // For each locally-defined variable, create a LocalCell(NIL) and store it
         for i in 0..num_locally_defined {
-            let cell = self.call_helper_unary(builder, self.helpers.make_cell, nil_bits)?;
-            builder.def_var(var(self.local_var_base + i), cell);
+            if i < 64 && (cell_locals_mask & (1 << i)) != 0 {
+                // This local needs a cell (captured or mutated)
+                let cell = self.call_helper_unary(builder, self.helpers.make_cell, nil_bits)?;
+                builder.def_var(var(self.local_var_base + i), cell);
+            } else {
+                // No cell needed — store value directly
+                builder.def_var(var(self.local_var_base + i), nil_bits);
+            }
         }
 
         Ok(())
@@ -164,13 +170,19 @@ impl<'a> FunctionTranslator<'a> {
                     builder.def_var(var(dst.0), val);
                 } else {
                     // Locally-defined variable - use Cranelift variable
-                    // These are initialized to LocalCell(NIL) at function entry
                     let local_index = *index - num_captures - arity;
-                    let cell_val = builder.use_var(var(self.local_var_base + local_index as u32));
-                    // LoadCapture auto-unwraps LocalCells, so call load_cell
-                    let result =
-                        self.call_helper_unary(builder, self.helpers.load_cell, cell_val)?;
-                    builder.def_var(var(dst.0), result);
+                    let local_val = builder.use_var(var(self.local_var_base + local_index as u32));
+                    if (local_index as u32) < 64
+                        && (self.lir.cell_locals_mask & (1 << local_index)) != 0
+                    {
+                        // Cell-wrapped: auto-unwrap via load_cell
+                        let result =
+                            self.call_helper_unary(builder, self.helpers.load_cell, local_val)?;
+                        builder.def_var(var(dst.0), result);
+                    } else {
+                        // Direct value: no cell indirection
+                        builder.def_var(var(dst.0), local_val);
+                    }
                 }
             }
 
@@ -331,11 +343,24 @@ impl<'a> FunctionTranslator<'a> {
                         val,
                     )?;
                 } else {
-                    // Locally-defined variable: store into the cell in the Cranelift variable
+                    // Locally-defined variable
                     let local_index = *index - num_captures - arity;
-                    let cell_val = builder.use_var(var(self.local_var_base + local_index as u32));
-                    let _result =
-                        self.call_helper_binary(builder, self.helpers.store_cell, cell_val, val)?;
+                    if (local_index as u32) < 64
+                        && (self.lir.cell_locals_mask & (1 << local_index)) != 0
+                    {
+                        // Cell-wrapped: store into the cell
+                        let cell_val =
+                            builder.use_var(var(self.local_var_base + local_index as u32));
+                        let _result = self.call_helper_binary(
+                            builder,
+                            self.helpers.store_cell,
+                            cell_val,
+                            val,
+                        )?;
+                    } else {
+                        // Direct value: just update the Cranelift variable
+                        builder.def_var(var(self.local_var_base + local_index as u32), val);
+                    }
                 }
             }
 

@@ -26,7 +26,7 @@ bytecode. Error messages include file:line:col information.
 | Reader → Expander | `Syntax` | `kind: SyntaxKind`, `span: Span`, `scopes: Vec<ScopeId>`, `scope_exempt: bool` |
 | Expander → Analyzer | `Syntax` (expanded) | Same shape; macros resolved, scopes stamped |
 | Analyzer → Lowerer | `Hir` (via `AnalysisResult`) | `kind: HirKind`, `span: Span`, `effect: Effect` |
-| Lowerer → Emitter | `LirFunction` | `blocks: Vec<BasicBlock>`, `constants: Vec<LirConst>`, `arity: Arity`, `effect: Effect`, `num_locals: u16`, `num_captures: u16`, `cell_params_mask: u64`, `entry: Label`, `num_regs: u32`, `name: Option<String>` |
+| Lowerer → Emitter | `LirFunction` | `blocks: Vec<BasicBlock>`, `constants: Vec<LirConst>`, `arity: Arity`, `effect: Effect`, `num_locals: u16`, `num_captures: u16`, `cell_params_mask: u64`, `cell_locals_mask: u64`, `entry: Label`, `num_regs: u32`, `name: Option<String>` |
 | Emitter → VM | `Bytecode` | `instructions: Vec<u8>`, `constants: Vec<Value>`, `location_map: LocationMap`, `symbol_names: HashMap<u32, String>`, `inline_caches: HashMap<usize, CacheEntry>` |
 | VM → caller | `Value` | NaN-boxed 8-byte runtime value |
 
@@ -37,7 +37,8 @@ bytecode. Error messages include file:line:col information.
 | Source spans | `Span` on each node | `Span` on each `Hir` | `SpannedInstr` / `SpannedTerminator` | `LocationMap` (`HashMap<usize, SourceLoc>`) | `Closure.location_map` |
 | Effects | — | `Effect` on each `Hir` | `LirFunction.effect` | — | `Closure.effect` |
 | Arity | — | `Lambda.params.len()` | `LirFunction.arity` | — | `Closure.arity` |
-| Cell mask | — | `Binding.needs_cell()` | `LirFunction.cell_params_mask` | — | `Closure.cell_params_mask` |
+| Cell mask (params) | — | `Binding.needs_cell()` | `LirFunction.cell_params_mask` | — | `Closure.cell_params_mask` |
+| Cell mask (locals) | — | `Binding.needs_cell()` | `LirFunction.cell_locals_mask` | — | JIT only (not on `Closure`) |
 
 **What is transformed at each boundary:**
 
