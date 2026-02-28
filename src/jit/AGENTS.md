@@ -46,6 +46,17 @@ If equal, it updates the arg variables and jumps to the loop header instead
 of calling `elle_jit_tail_call`. This turns self-recursive tail calls into
 native loops.
 
+## JIT Phases
+
+The JIT was built incrementally:
+
+| Phase | Scope |
+|-------|-------|
+| Phase 1 | Constants, arithmetic, comparison, variables, terminators. Capture-free functions only. |
+| Phase 2 | Closures with captures: `LoadCapture`, `LoadCaptureRaw`, `StoreCapture`. |
+| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), cells (`MakeCell`, `LoadCell`, `StoreCell`), globals (`LoadGlobal`, `StoreGlobal`), function calls (`Call`, `TailCall`). VM pointer parameter replaced `globals` pointer. |
+| Phase 4 | Self-tail-call optimization, JIT-to-JIT calling, batch compilation, `ValueConst`. |
+
 ## Phase 4 Scope (Current)
 
 Supported instructions:
@@ -68,11 +79,11 @@ Unsupported (returns JitError::UnsupportedInstruction):
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | ~70 | Public API, `JitError` type |
-| `compiler.rs` | ~500 | `JitCompiler`, `RuntimeHelpers`, compilation entry point |
-| `translate.rs` | ~630 | `FunctionTranslator`, LIR instruction translation |
-| `runtime.rs` | ~420 | Arithmetic, comparison, type-checking helpers |
-| `dispatch.rs` | ~530 | Data structure, cell, global, function call helpers (incl. JIT-to-JIT) |
-| `code.rs` | ~80 | `JitCode` wrapper type |
+| `compiler.rs` | ~910 | `JitCompiler`, `RuntimeHelpers`, compilation entry point |
+| `translate.rs` | ~940 | `FunctionTranslator`, LIR instruction translation |
+| `runtime.rs` | ~460 | Arithmetic, comparison, type-checking helpers |
+| `dispatch.rs` | ~640 | Data structure, cell, global, function call helpers (incl. JIT-to-JIT) |
+| `code.rs` | ~100 | `JitCode` wrapper type |
 | `group.rs` | ~590 | Compilation group discovery for batch JIT (no Cranelift dependency) |
 
 ## Runtime Helpers

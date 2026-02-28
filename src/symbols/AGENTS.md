@@ -5,9 +5,8 @@ Pipeline-agnostic symbol index types for IDE features.
 ## Responsibility
 
 Define the data types used by IDE features (hover, completion, go-to-definition,
-find-references, rename). The actual extraction logic lives in `hir/symbols.rs`
-(new pipeline) and `compiler/symbol_index.rs` (legacy); this module provides
-the shared types.
+find-references, rename). The actual extraction logic lives in `hir/symbols.rs`;
+this module provides the shared types.
 
 ## Interface
 
@@ -25,7 +24,6 @@ the shared types.
 
 - `hir/symbols.rs` — HIR-based symbol extraction builds SymbolIndex
 - `lsp/` — all IDE features query SymbolIndex
-- `compiler/symbol_index.rs` — re-export
 
 ## Files
 

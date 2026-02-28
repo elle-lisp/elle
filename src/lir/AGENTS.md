@@ -159,6 +159,7 @@ No new bytecode instructions — break compiles to existing Move + Jump.
 |------|-------|---------|
 | `mod.rs` | 20 | Re-exports |
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
+| `intrinsics.rs` | ~55 | `IntrinsicOp` enum, maps primitive SymbolIds to specialized LIR instructions (BinOp, CmpOp, UnaryOp) |
 | `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point |
 | `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
 | `lower/binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
