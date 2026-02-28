@@ -272,6 +272,27 @@ No errors are silently swallowed.
    function dispatch cast `*const u64` to `*const Value` (and vice versa)
    without copying. If `Value`'s representation changes, these casts break.
 
+## Cell Optimization for Locally-Defined Variables
+
+The JIT uses `LirFunction.cell_locals_mask` to avoid unnecessary `LocalCell`
+heap allocations. In the VM interpreter, every locally-defined variable inside
+a lambda gets a `LocalCell(NIL)` at function entry (because `StoreUpvalue`
+requires cell indirection to write through `Rc<Vec<Value>>`). In JIT code,
+locally-defined variables are Cranelift variables (CPU registers/stack), so
+cell wrapping is only needed when `binding.needs_cell()` is true (captured by
+nested closure or mutated via `set!`).
+
+The optimization applies to three code paths in `translate.rs`:
+
+1. **`init_locally_defined_vars`**: Only calls `elle_jit_make_cell` when the
+   bit is set in `cell_locals_mask`; others get NIL directly.
+2. **`LoadCapture` for locals**: Skips `load_cell` unwrapping when bit not set.
+3. **`StoreCapture` for locals**: Skips `store_cell` when bit not set, uses
+   `def_var` directly.
+
+Impact: 3.2x speedup on N-Queens N=12 (4.4s → 1.38s), 30x reduction in
+kernel time (2.4s → 80ms) from eliminated allocation pressure.
+
 ## Future Phases
 
 - Phase 5:

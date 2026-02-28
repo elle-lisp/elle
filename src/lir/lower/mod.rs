@@ -113,6 +113,13 @@ impl Lowerer {
         // num_locals tracks params + locally_defined (NOT captures)
         // But binding_to_slot needs the actual index in the environment
         let slot = if self.in_lambda {
+            // Track which locally-defined variables need cells.
+            // Local index = num_locals - arity_params (0-based within locally-defined vars).
+            let arity_params = self.current_func.arity.fixed_params() as u16;
+            let local_index = self.current_func.num_locals - arity_params;
+            if binding.needs_cell() && local_index < 64 {
+                self.current_func.cell_locals_mask |= 1 << local_index;
+            }
             self.num_captures + self.current_func.num_locals
         } else {
             self.current_func.num_locals

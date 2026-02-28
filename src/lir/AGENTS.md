@@ -99,7 +99,15 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 5. **`cell_params_mask` is set for mutable parameters.** Bit i set means
    parameter i needs cell wrapping at call time.
 
-6. **Yield is a block terminator, not an instruction.** `Terminator::Yield`
+6. **`cell_locals_mask` is set for locals that need cells.** Bit i set means
+   locally-defined variable i (0-indexed from the first local after params)
+   needs cell wrapping because it's captured by a nested closure or mutated
+   via `set!`. The JIT uses this to skip `LocalCell` heap allocation for
+   non-captured, non-mutated `let` bindings. The VM interpreter does not
+   use this mask (it cell-wraps all locals unconditionally). Both masks
+   are limited to 64 entries (`u64`).
+
+7. **Yield is a block terminator, not an instruction.** `Terminator::Yield`
    splits the block: the current block ends with yield, and a new resume block
    begins. The resume block starts with `LoadResumeValue` to capture the value
    passed to `coro/resume`.

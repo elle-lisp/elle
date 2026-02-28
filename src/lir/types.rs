@@ -47,6 +47,11 @@ pub struct LirFunction {
     /// Bitmask indicating which parameters need to be wrapped in cells
     /// Bit i is set if parameter i needs a cell (for mutable parameters)
     pub cell_params_mask: u64,
+    /// Bitmask indicating which locally-defined variables need cells.
+    /// Bit i is set if locally-defined variable i needs a cell (captured or mutated).
+    /// Variables without the bit set are stored directly without cell wrapping,
+    /// avoiding heap allocation on every function call.
+    pub cell_locals_mask: u64,
     /// Effect of this function (Pure, Yields, or Polymorphic)
     pub effect: Effect,
 }
@@ -63,6 +68,7 @@ impl LirFunction {
             num_locals: 0,
             num_captures: 0,
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             effect: Effect::none(),
         }
     }
