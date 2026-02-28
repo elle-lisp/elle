@@ -21,7 +21,7 @@ Runtime value representation using NaN-boxing.
 | `closure.rs` | `Closure` struct with bytecode, env, and `location_map` |
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`, `SignalBits` |
 | `error.rs` | `error_val()` and `format_error()` helpers for error tuples |
-| `ffi.rs` | `LibHandle`, `CHandle` for C interop |
+| `ffi.rs` | `LibHandle` for C interop |
 | `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle`, `BindingInner`, `BindingScope` |
 | `send.rs` | `SendValue` wrapper for thread-safe transfer |
 | `display.rs` | `Display` implementation for values |
@@ -31,7 +31,7 @@ Runtime value representation using NaN-boxing.
 
 | Type | Location | Purpose |
 |------|----------|---------|
-| `Value` | `repr.rs` | NaN-boxed 8-byte value (Copy) |
+| `Value` | `repr/mod.rs` | NaN-boxed 8-byte value (Copy) |
 | `Closure` | `closure.rs` | Bytecode + env + arity + effect + location_map |
 | `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
@@ -128,7 +128,7 @@ variants directly.
 | `closure.rs` | ~70 | Closure struct |
 | `fiber.rs` | ~515 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
 | `error.rs` | ~50 | error_val() and format_error() helpers |
-| `ffi.rs` | ~50 | LibHandle, CHandle |
+| `ffi.rs` | ~22 | LibHandle |
 | `heap.rs` | ~320 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope |
 | `send.rs` | ~150 | SendValue for thread transfer |
 | `display.rs` | ~100 | Display formatting |

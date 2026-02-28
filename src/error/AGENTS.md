@@ -41,11 +41,11 @@ LError::runtime_error(...).with_trace(TraceSource::Vm(frames))
 
 ## Dependents
 
-Everything. 34 files import from this module. Key consumers:
-- `primitives/*` - all return `LResult<Value>`
-- `value.rs` - accessor methods return `LResult`
+Everything. Key consumers:
 - `vm/` - execution errors with traces
 - `compiler/` - uses `LocationMap` for bytecode→source mapping
+- `value/types.rs` - `TableKey::from_value()` returns `LResult`
+- `pipeline.rs` - compilation errors
 
 ## Invariants
 

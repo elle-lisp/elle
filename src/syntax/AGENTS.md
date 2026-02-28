@@ -142,7 +142,6 @@ resolves at the call site. Used for anaphoric macros:
 | `expand/mod.rs` | ~280 | `Expander` struct, context, entry point |
 | `expand/macro_expand.rs` | ~80 | VM-based macro expansion via `eval_syntax` |
 | `expand/quasiquote.rs` | ~200 | Quasiquote-to-code conversion |
-| `expand/threading.rs` | ~150 | Threading macros (`->`, `->>`) |
 | `expand/introspection.rs` | ~100 | `macro?`, `expand-macro` |
 | `expand/qualified.rs` | ~100 | Module-qualified name resolution |
 | `expand/tests.rs` | ~537 | Expansion tests |

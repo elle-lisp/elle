@@ -212,6 +212,7 @@ Key methods:
 | `comparison.rs` | ~100 | Eq, Lt, Gt, Le, Ge |
 | `types.rs` | ~50 | IsNil, IsEmptyList, IsPair, Not |
 | `data.rs` | ~100 | Cons, Car, Cdr, MakeVector |
+| `literals.rs` | ~18 | Nil, EmptyList, True, False literal handlers |
 | `eval.rs` | ~180 | Runtime eval: compile+execute datum, env wrapping |
 | `scope/` | ~200 | Runtime scope stack (legacy) |
 

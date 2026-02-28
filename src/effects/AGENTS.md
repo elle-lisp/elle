@@ -82,7 +82,6 @@ Used across the pipeline and the runtime:
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | ~350 | `Effect` struct, constructors, predicates, Display, combine, tests |
-| `primitives.rs` | ~5 | Empty — primitive effects now live in each module's PRIMITIVES table |
 
 ## Invariants
 
