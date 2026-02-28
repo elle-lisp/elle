@@ -66,14 +66,14 @@ fn test_string_to_buffer() {
 fn test_buffer_to_string() {
     let result = eval_source(r#"(buffer->string @"hello")"#).unwrap();
     assert!(result.is_string());
-    assert_eq!(result.as_string().unwrap(), "hello");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "hello");
 }
 
 #[test]
 fn test_buffer_to_string_empty() {
     let result = eval_source(r#"(buffer->string @"")"#).unwrap();
     assert!(result.is_string());
-    assert_eq!(result.as_string().unwrap(), "");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "");
 }
 
 #[test]
@@ -92,19 +92,19 @@ fn test_buffer_predicate_false() {
 fn test_buffer_get() {
     // Buffer get returns character as string, not byte
     let result = eval_source(r#"(get @"hello" 0)"#).unwrap();
-    assert_eq!(result.as_string().unwrap(), "h");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "h");
 }
 
 #[test]
 fn test_buffer_get_middle() {
     let result = eval_source(r#"(get @"hello" 2)"#).unwrap();
-    assert_eq!(result.as_string().unwrap(), "l");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "l");
 }
 
 #[test]
 fn test_buffer_get_last() {
     let result = eval_source(r#"(get @"hello" 4)"#).unwrap();
-    assert_eq!(result.as_string().unwrap(), "o");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "o");
 }
 
 #[test]
@@ -199,13 +199,13 @@ fn test_buffer_concat() {
 #[test]
 fn test_buffer_roundtrip() {
     let result = eval_source(r#"(buffer->string (string->buffer "hello"))"#).unwrap();
-    assert_eq!(result.as_string().unwrap(), "hello");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "hello");
 }
 
 #[test]
 fn test_buffer_literal_roundtrip() {
     let result = eval_source(r#"(buffer->string @"hello")"#).unwrap();
-    assert_eq!(result.as_string().unwrap(), "hello");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "hello");
 }
 
 #[test]
@@ -278,14 +278,14 @@ fn test_buffer_put_empty_errors() {
 fn test_buffer_get_unicode() {
     // Buffer with UTF-8 multi-byte character
     let result = eval_source(r#"(get @"café" 3)"#).unwrap();
-    assert_eq!(result.as_string().unwrap(), "é");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "é");
 }
 
 #[test]
 fn test_buffer_get_unicode_index() {
     // Character indexing, not byte indexing
     let result = eval_source(r#"(get @"café" 0)"#).unwrap();
-    assert_eq!(result.as_string().unwrap(), "c");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "c");
 }
 
 // ============================================================================
@@ -343,7 +343,7 @@ fn test_buffer_index_not_found() {
 #[test]
 fn test_buffer_substring() {
     let result = eval_source(r#"(substring @"hello" 1 4)"#).unwrap();
-    assert_eq!(result.as_string().unwrap(), "ell");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "ell");
 }
 
 #[test]
@@ -375,9 +375,9 @@ fn test_buffer_split() {
     let result = eval_source(r#"(string/split @"a,b,c" ",")"#).unwrap();
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0].as_string().unwrap(), "a");
-    assert_eq!(vec[1].as_string().unwrap(), "b");
-    assert_eq!(vec[2].as_string().unwrap(), "c");
+    assert_eq!(vec[0].with_string(|s| s.to_string()).unwrap(), "a");
+    assert_eq!(vec[1].with_string(|s| s.to_string()).unwrap(), "b");
+    assert_eq!(vec[2].with_string(|s| s.to_string()).unwrap(), "c");
 }
 
 #[test]
@@ -391,7 +391,7 @@ fn test_buffer_replace() {
 #[test]
 fn test_buffer_char_at() {
     let result = eval_source(r#"(string/char-at @"hello" 1)"#).unwrap();
-    assert_eq!(result.as_string().unwrap(), "e");
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "e");
 }
 
 // ============================================================================

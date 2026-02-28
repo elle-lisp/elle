@@ -16,20 +16,20 @@ pub fn prim_absolute_path(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::canonicalize(path) {
-            Ok(abs_path) => (
-                SIG_OK,
-                Value::string(abs_path.to_string_lossy().into_owned()),
+    if let Some(result) = args[0].with_string(|path| match std::fs::canonicalize(path) {
+        Ok(abs_path) => (
+            SIG_OK,
+            Value::string(abs_path.to_string_lossy().into_owned()),
+        ),
+        Err(e) => (
+            SIG_ERROR,
+            error_val(
+                "error",
+                format!("absolute-path: failed to resolve '{}': {}", path, e),
             ),
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("absolute-path: failed to resolve '{}': {}", path, e),
-                ),
-            ),
-        }
+        ),
+    }) {
+        result
     } else {
         (
             SIG_ERROR,
@@ -69,17 +69,17 @@ pub fn prim_change_directory(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::env::set_current_dir(path) {
-            Ok(_) => (SIG_OK, Value::TRUE),
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("change-directory: failed to change to '{}': {}", path, e),
-                ),
+    if let Some(result) = args[0].with_string(|path| match std::env::set_current_dir(path) {
+        Ok(_) => (SIG_OK, Value::TRUE),
+        Err(e) => (
+            SIG_ERROR,
+            error_val(
+                "error",
+                format!("change-directory: failed to change to '{}': {}", path, e),
             ),
-        }
+        ),
+    }) {
+        result
     } else {
         (
             SIG_ERROR,
@@ -108,7 +108,7 @@ pub fn prim_join_path(args: &[Value]) -> (SignalBits, Value) {
 
     let mut path = std::path::PathBuf::new();
     for arg in args {
-        if let Some(s) = arg.as_string() {
+        if let Some(s) = arg.with_string(|s| s.to_string()) {
             path.push(s);
         } else {
             return (
@@ -135,12 +135,14 @@ pub fn prim_file_extension(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path_str) = args[0].as_string() {
+    if let Some(result) = args[0].with_string(|path_str| {
         let path = std::path::Path::new(path_str);
         match path.extension() {
             Some(ext) => (SIG_OK, Value::string(ext.to_string_lossy().into_owned())),
             None => (SIG_OK, Value::NIL),
         }
+    }) {
+        result
     } else {
         (
             SIG_ERROR,
@@ -166,12 +168,14 @@ pub fn prim_file_name(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path_str) = args[0].as_string() {
+    if let Some(result) = args[0].with_string(|path_str| {
         let path = std::path::Path::new(path_str);
         match path.file_name() {
             Some(name) => (SIG_OK, Value::string(name.to_string_lossy().into_owned())),
             None => (SIG_OK, Value::NIL),
         }
+    }) {
+        result
     } else {
         (
             SIG_ERROR,
@@ -194,12 +198,14 @@ pub fn prim_parent_directory(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path_str) = args[0].as_string() {
+    if let Some(result) = args[0].with_string(|path_str| {
         let path = std::path::Path::new(path_str);
         match path.parent() {
             Some(parent) => (SIG_OK, Value::string(parent.to_string_lossy().into_owned())),
             None => (SIG_OK, Value::NIL),
         }
+    }) {
+        result
     } else {
         (
             SIG_ERROR,

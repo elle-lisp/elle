@@ -90,6 +90,12 @@ impl PartialEq for Value {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
+                // Bytes comparison (compare contents)
+                (HeapObject::Bytes(b1), HeapObject::Bytes(b2)) => b1 == b2,
+
+                // Blob comparison (compare contents)
+                (HeapObject::Blob(b1), HeapObject::Blob(b2)) => *b1.borrow() == *b2.borrow(),
+
                 // Different types are not equal
                 _ => false,
             }

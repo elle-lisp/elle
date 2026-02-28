@@ -1,15 +1,9 @@
 // CLI dispatch tests for --lint and --lsp switches
 
-use std::path::Path;
 use std::process::Command;
 
-fn get_elle_binary() -> String {
-    let debug_path = "target/debug/elle";
-    if Path::new(debug_path).exists() {
-        debug_path.to_string()
-    } else {
-        "target/debug/elle".to_string()
-    }
+fn get_elle_binary() -> &'static str {
+    env!("CARGO_BIN_EXE_elle")
 }
 
 #[test]

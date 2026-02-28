@@ -63,8 +63,8 @@ proptest! {
     fn string_from_int_matches_format(n in -10000i64..=10000) {
         let source = format!("(string {})", n);
         let result = eval_source(&source).unwrap();
-        let s = result.as_string().expect("should be string");
-        prop_assert_eq!(s, &n.to_string());
+        let s = result.with_string(|s| s.to_string()).expect("should be string");
+        prop_assert_eq!(s, n.to_string());
     }
 }
 
@@ -75,7 +75,7 @@ proptest! {
     fn string_from_bool_is_correct(b in prop::bool::ANY) {
         let source = if b { "(string true)" } else { "(string false)" };
         let result = eval_source(source).unwrap();
-        let s = result.as_string().expect("should be string");
+        let s = result.with_string(|s| s.to_string()).expect("should be string");
         let expected = if b { "true" } else { "false" };
         prop_assert_eq!(s, expected);
     }
@@ -126,7 +126,9 @@ fn any_to_string_nil() {
 #[test]
 fn any_to_string_list() {
     let result = eval_source("(any->string (list 1 2))").unwrap();
-    let s = result.as_string().expect("should be string");
+    let s = result
+        .with_string(|s| s.to_string())
+        .expect("should be string");
     assert!(s.contains("1"));
     assert!(s.contains("2"));
 }

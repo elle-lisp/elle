@@ -134,8 +134,8 @@ impl VM {
         // Accept keyword or string as operation identifier.
         let op_name: String = if let Some(name) = cons.first.as_keyword_name() {
             name.to_string()
-        } else if let Some(s) = cons.first.as_string() {
-            s.to_string()
+        } else if let Some(s) = cons.first.with_string(|s| s.to_string()) {
+            s
         } else {
             return (
                 SIG_ERROR,
@@ -164,8 +164,8 @@ impl VM {
                 }
             }
             "doc" => {
-                let name = if let Some(s) = arg.as_string() {
-                    s.to_string()
+                let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
+                    s
                 } else if let Some(s) = arg.as_keyword_name() {
                     s.to_string()
                 } else {
@@ -191,7 +191,7 @@ impl VM {
                 } else if let Some(k) = arg.as_keyword_name() {
                     Some(k.to_string())
                 } else {
-                    arg.as_string().map(|s| s.to_string())
+                    arg.with_string(|s| s.to_string())
                 };
 
                 let mut names: Vec<&String> = if let Some(ref cat) = category_filter {
@@ -209,8 +209,8 @@ impl VM {
                 (SIG_OK, crate::value::list(values))
             }
             "primitive-meta" => {
-                let name = if let Some(s) = arg.as_string() {
-                    s.to_string()
+                let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
+                    s
                 } else if let Some(s) = arg.as_keyword_name() {
                     s.to_string()
                 } else {

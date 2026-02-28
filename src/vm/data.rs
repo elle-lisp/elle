@@ -307,8 +307,8 @@ pub fn handle_table_get_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize, con
     // Convert the constant to a TableKey for lookup
     let key = if let Some(name) = key_value.as_keyword_name() {
         TableKey::Keyword(name.to_string())
-    } else if let Some(s) = key_value.as_string() {
-        TableKey::String(s.to_string())
+    } else if let Some(s) = key_value.with_string(|s| s.to_string()) {
+        TableKey::String(s)
     } else if let Some(i) = key_value.as_int() {
         TableKey::Int(i)
     } else if let Some(id) = key_value.as_symbol() {

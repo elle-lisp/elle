@@ -115,22 +115,21 @@ pub fn prim_ffi_native(args: &[Value]) -> (SignalBits, Value) {
         };
     }
 
-    let path = match args[0].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "ffi/native: expected string or nil, got {}",
-                        args[0].type_name()
-                    ),
+    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
+        s
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "ffi/native: expected string or nil, got {}",
+                    args[0].type_name()
                 ),
-            )
-        }
+            ),
+        );
     };
-    match vm.ffi_mut().load_library(path) {
+    match vm.ffi_mut().load_library(&path) {
         Ok(id) => (SIG_OK, Value::lib_handle(id)),
         Err(e) => (
             SIG_ERROR,
@@ -163,17 +162,16 @@ pub fn prim_ffi_lookup(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    let sym_name = match args[1].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("ffi/lookup: expected string, got {}", args[1].type_name()),
-                ),
-            )
-        }
+    let sym_name = if let Some(s) = args[1].with_string(|s| s.to_string()) {
+        s
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("ffi/lookup: expected string, got {}", args[1].type_name()),
+            ),
+        );
     };
     let vm_ptr = match crate::context::get_vm_context() {
         Some(ptr) => ptr,
@@ -197,7 +195,7 @@ pub fn prim_ffi_lookup(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    match lib.get_symbol(sym_name) {
+    match lib.get_symbol(&sym_name) {
         Ok(ptr) => (SIG_OK, Value::pointer(ptr as usize)),
         Err(e) => (
             SIG_ERROR,
@@ -1447,12 +1445,12 @@ mod tests {
         }
         let result = prim_ffi_string(&[ptr]);
         assert_eq!(result.0, SIG_OK);
-        assert_eq!(result.1.as_string(), Some("hello"));
+        assert_eq!(result.1.with_string(|s| s == "hello"), Some(true));
 
         // Also test with max-len
         let result2 = prim_ffi_string(&[ptr, Value::int(3)]);
         assert_eq!(result2.0, SIG_OK);
-        assert_eq!(result2.1.as_string(), Some("hel"));
+        assert_eq!(result2.1.with_string(|s| s == "hel"), Some(true));
 
         prim_ffi_free(&[ptr]);
     }

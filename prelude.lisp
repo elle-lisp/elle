@@ -131,3 +131,46 @@
           (fn ,params
              (ffi/call ,ptr-sym ,sig-sym ,;call-args))))))
 
+## each - iterate over a sequence
+## Dispatches on type: lists use first/rest, indexed types use get/length,
+## strings use char-at/length.
+## (each x coll body...) or (each x in coll body...)
+(defmacro each (var iter-or-in & forms)
+  (let* ((has-in (and (not (empty? forms))
+                      (not (empty? (rest forms)))
+                      (= (syntax->datum iter-or-in) 'in)))
+         (iter (if has-in (first forms) iter-or-in))
+         (body (if has-in (rest forms) forms))
+         (g-iter (gensym))
+         (g-idx (gensym))
+         (g-len (gensym))
+         (g-cur (gensym)))
+    `(let ((,g-iter ,iter))
+       (cond
+         ((empty? ,g-iter) nil)
+         ((pair? ,g-iter)
+          (let* ((,g-cur ,g-iter))
+            (while (pair? ,g-cur)
+              (begin
+                (let ((,var (first ,g-cur)))
+                  ,;body)
+                (set ,g-cur (rest ,g-cur))))))
+         ((or (array? ,g-iter) (tuple? ,g-iter) (bytes? ,g-iter) (blob? ,g-iter))
+          (let* ((,g-len (length ,g-iter))
+                 (,g-idx 0))
+            (while (< ,g-idx ,g-len)
+              (begin
+                (let ((,var (get ,g-iter ,g-idx)))
+                  ,;body)
+                (set ,g-idx (+ ,g-idx 1))))))
+         ((or (string? ,g-iter) (buffer? ,g-iter))
+          (let* ((,g-len (length ,g-iter))
+                 (,g-idx 0))
+            (while (< ,g-idx ,g-len)
+              (begin
+                (let ((,var (string/char-at ,g-iter ,g-idx)))
+                  ,;body)
+                (set ,g-idx (+ ,g-idx 1))))))
+         (true (error :type-error "each: not a sequence"))))))
+
+

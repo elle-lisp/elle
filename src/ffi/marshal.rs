@@ -272,13 +272,13 @@ impl MarshalledArg {
             }
 
             TypeDesc::Str => {
-                let s = value.as_string().ok_or_else(|| {
+                let s = value.with_string(|s| s.to_string()).ok_or_else(|| {
                     LError::ffi_type_error(
                         "string",
                         format!("expected string, got {}", value.type_name()),
                     )
                 })?;
-                let cstring = CString::new(s)
+                let cstring = CString::new(s.as_str())
                     .map_err(|_| LError::ffi_type_error("string", "contains interior null byte"))?;
                 let ptr = cstring.as_ptr();
                 ArgStorage::Str(cstring, ptr)
@@ -514,13 +514,13 @@ pub(crate) fn write_value_to_buffer(
         TypeDesc::Str => {
             // Create a CString, write its pointer into the buffer, and
             // return a MarshalledArg that owns the CString.
-            let s = value.as_string().ok_or_else(|| {
+            let s = value.with_string(|s| s.to_string()).ok_or_else(|| {
                 LError::ffi_type_error(
                     "string",
                     format!("expected string, got {}", value.type_name()),
                 )
             })?;
-            let cstring = CString::new(s)
+            let cstring = CString::new(s.as_str())
                 .map_err(|_| LError::ffi_type_error("string", "contains interior null byte"))?;
             let cstr_ptr = cstring.as_ptr();
             unsafe { *(ptr as *mut *const std::ffi::c_char) = cstr_ptr };

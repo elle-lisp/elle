@@ -63,12 +63,15 @@ fn flat_repr(val: Value, depth: usize) -> String {
         return n.to_string();
     }
 
-    if let Some(s) = val.as_string() {
+    if let Some(r) = val.with_string(|s| {
         // Truncate long strings at 60 chars with ...
         if s.len() > 60 {
-            return format!("\"{}...\"", &s[..60]);
+            format!("\"{}...\"", &s[..60])
+        } else {
+            format!("\"{}\"", s)
         }
-        return format!("\"{}\"", s);
+    }) {
+        return r;
     }
 
     if let Some(_id) = val.as_symbol() {
@@ -175,7 +178,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
     }
 
     // Strings: can't break, just return flat
-    if val.as_string().is_some() {
+    if val.is_string() {
         return flat;
     }
 
@@ -297,16 +300,15 @@ pub fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::string(format!("<float {}>", n)));
     }
 
-    if let Some(s) = val.as_string() {
+    if let Some(r) = val.with_string(|s| {
         let display = if s.len() > 20 {
             format!("\"{}...\"", &s[..20])
         } else {
             format!("\"{}\"", s)
         };
-        return (
-            SIG_OK,
-            Value::string(format!("<string {} ({} chars)>", display, s.len())),
-        );
+        Value::string(format!("<string {} ({} chars)>", display, s.len()))
+    }) {
+        return (SIG_OK, r);
     }
 
     if let Some(_id) = val.as_symbol() {

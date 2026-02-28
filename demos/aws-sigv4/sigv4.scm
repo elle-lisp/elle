@@ -22,7 +22,7 @@
 
 ;; Convert integer to hex string with padding
 (defn to-hex-string (num width)
-  (let ((hex-digits "0123456789abcdef"))
+  (let ((hex-digits "0123456789ABCDEF"))
     (let loop ((n num) (result '()) (w width))
       (if (= w 0)
         (apply string-append (map string result))

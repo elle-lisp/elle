@@ -16,14 +16,16 @@ pub fn prim_slurp(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::read_to_string(path) {
-            Ok(content) => (SIG_OK, Value::string(content)),
-            Err(e) => (
-                SIG_ERROR,
-                error_val("error", format!("slurp: failed to read '{}': {}", path, e)),
-            ),
-        }
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::read_to_string(path) {
+                Ok(content) => (SIG_OK, Value::string(content)),
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val("error", format!("slurp: failed to read '{}': {}", path, e)),
+                ),
+            })
+            .unwrap()
     } else {
         (
             SIG_ERROR,
@@ -47,7 +49,7 @@ pub fn prim_spit(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let path = if let Some(s) = args[0].as_string() {
+    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -59,7 +61,7 @@ pub fn prim_spit(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let content = if let Some(s) = args[1].as_string() {
+    let content = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -71,7 +73,7 @@ pub fn prim_spit(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    match std::fs::write(path, content) {
+    match std::fs::write(&path, &content) {
         Ok(_) => (SIG_OK, Value::TRUE),
         Err(e) => (
             SIG_ERROR,
@@ -92,7 +94,7 @@ pub fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let path = if let Some(s) = args[0].as_string() {
+    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -104,7 +106,7 @@ pub fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let content = if let Some(s) = args[1].as_string() {
+    let content = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -119,7 +121,7 @@ pub fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
     use std::fs::OpenOptions;
     use std::io::Write;
 
-    let mut file = match OpenOptions::new().create(true).append(true).open(path) {
+    let mut file = match OpenOptions::new().create(true).append(true).open(&path) {
         Ok(f) => f,
         Err(e) => {
             return (
@@ -155,8 +157,10 @@ pub fn prim_file_exists(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        (SIG_OK, Value::bool(std::path::Path::new(path).exists()))
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| (SIG_OK, Value::bool(std::path::Path::new(path).exists())))
+            .unwrap()
     } else {
         (
             SIG_ERROR,
@@ -179,11 +183,13 @@ pub fn prim_is_directory(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::metadata(path) {
-            Ok(metadata) => (SIG_OK, Value::bool(metadata.is_dir())),
-            Err(_) => (SIG_OK, Value::FALSE),
-        }
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::metadata(path) {
+                Ok(metadata) => (SIG_OK, Value::bool(metadata.is_dir())),
+                Err(_) => (SIG_OK, Value::FALSE),
+            })
+            .unwrap()
     } else {
         (
             SIG_ERROR,
@@ -206,11 +212,13 @@ pub fn prim_is_file(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::metadata(path) {
-            Ok(metadata) => (SIG_OK, Value::bool(metadata.is_file())),
-            Err(_) => (SIG_OK, Value::FALSE),
-        }
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::metadata(path) {
+                Ok(metadata) => (SIG_OK, Value::bool(metadata.is_file())),
+                Err(_) => (SIG_OK, Value::FALSE),
+            })
+            .unwrap()
     } else {
         (
             SIG_ERROR,
@@ -233,17 +241,19 @@ pub fn prim_delete_file(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::remove_file(path) {
-            Ok(_) => (SIG_OK, Value::TRUE),
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("delete-file: failed to delete '{}': {}", path, e),
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::remove_file(path) {
+                Ok(_) => (SIG_OK, Value::TRUE),
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("delete-file: failed to delete '{}': {}", path, e),
+                    ),
                 ),
-            ),
-        }
+            })
+            .unwrap()
     } else {
         (
             SIG_ERROR,
@@ -266,17 +276,19 @@ pub fn prim_delete_directory(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::remove_dir(path) {
-            Ok(_) => (SIG_OK, Value::TRUE),
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("delete-directory: failed to delete '{}': {}", path, e),
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::remove_dir(path) {
+                Ok(_) => (SIG_OK, Value::TRUE),
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("delete-directory: failed to delete '{}': {}", path, e),
+                    ),
                 ),
-            ),
-        }
+            })
+            .unwrap()
     } else {
         (
             SIG_ERROR,
@@ -302,17 +314,19 @@ pub fn prim_create_directory(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::create_dir(path) {
-            Ok(_) => (SIG_OK, Value::TRUE),
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("create-directory: failed to create '{}': {}", path, e),
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::create_dir(path) {
+                Ok(_) => (SIG_OK, Value::TRUE),
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("create-directory: failed to create '{}': {}", path, e),
+                    ),
                 ),
-            ),
-        }
+            })
+            .unwrap()
     } else {
         (
             SIG_ERROR,
@@ -341,17 +355,19 @@ pub fn prim_create_directory_all(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::create_dir_all(path) {
-            Ok(_) => (SIG_OK, Value::TRUE),
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("create-directory-all: failed to create '{}': {}", path, e),
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::create_dir_all(path) {
+                Ok(_) => (SIG_OK, Value::TRUE),
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("create-directory-all: failed to create '{}': {}", path, e),
+                    ),
                 ),
-            ),
-        }
+            })
+            .unwrap()
     } else {
         (
             SIG_ERROR,
@@ -378,7 +394,7 @@ pub fn prim_rename_file(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let old_path = if let Some(s) = args[0].as_string() {
+    let old_path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -390,7 +406,7 @@ pub fn prim_rename_file(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let new_path = if let Some(s) = args[1].as_string() {
+    let new_path = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -402,7 +418,7 @@ pub fn prim_rename_file(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    match std::fs::rename(old_path, new_path) {
+    match std::fs::rename(&old_path, &new_path) {
         Ok(_) => (SIG_OK, Value::TRUE),
         Err(e) => (
             SIG_ERROR,
@@ -426,7 +442,7 @@ pub fn prim_copy_file(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let src = if let Some(s) = args[0].as_string() {
+    let src = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -438,7 +454,7 @@ pub fn prim_copy_file(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let dst = if let Some(s) = args[1].as_string() {
+    let dst = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -450,7 +466,7 @@ pub fn prim_copy_file(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    match std::fs::copy(src, dst) {
+    match std::fs::copy(&src, &dst) {
         Ok(_) => (SIG_OK, Value::TRUE),
         Err(e) => (
             SIG_ERROR,
@@ -473,17 +489,19 @@ pub fn prim_file_size(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::metadata(path) {
-            Ok(metadata) => (SIG_OK, Value::int(metadata.len() as i64)),
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("file-size: failed to get size of '{}': {}", path, e),
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::metadata(path) {
+                Ok(metadata) => (SIG_OK, Value::int(metadata.len() as i64)),
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("file-size: failed to get size of '{}': {}", path, e),
+                    ),
                 ),
-            ),
-        }
+            })
+            .unwrap()
     } else {
         (
             SIG_ERROR,
@@ -506,40 +524,10 @@ pub fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::read_dir(path) {
-            Ok(entries) => {
-                let mut items = Vec::new();
-                for entry in entries {
-                    match entry {
-                        Ok(entry) => {
-                            if let Ok(name) = entry.file_name().into_string() {
-                                items.push(Value::string(name));
-                            }
-                        }
-                        Err(e) => {
-                            return (
-                                SIG_ERROR,
-                                error_val(
-                                    "error",
-                                    format!("list-directory: error reading '{}': {}", path, e),
-                                ),
-                            );
-                        }
-                    }
-                }
-                (SIG_OK, crate::value::list(items))
-            }
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("list-directory: failed to read '{}': {}", path, e),
-                ),
-            ),
-        }
+    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
+        s
     } else {
-        (
+        return (
             SIG_ERROR,
             error_val(
                 "type-error",
@@ -548,7 +536,39 @@ pub fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
                     args[0].type_name()
                 ),
             ),
-        )
+        );
+    };
+
+    match std::fs::read_dir(&path) {
+        Ok(entries) => {
+            let mut items = Vec::new();
+            for entry in entries {
+                match entry {
+                    Ok(entry) => {
+                        if let Ok(name) = entry.file_name().into_string() {
+                            items.push(Value::string(name));
+                        }
+                    }
+                    Err(e) => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "error",
+                                format!("list-directory: error reading '{}': {}", path, e),
+                            ),
+                        );
+                    }
+                }
+            }
+            (SIG_OK, crate::value::list(items))
+        }
+        Err(e) => (
+            SIG_ERROR,
+            error_val(
+                "error",
+                format!("list-directory: failed to read '{}': {}", path, e),
+            ),
+        ),
     }
 }
 
@@ -563,23 +583,25 @@ pub fn prim_read_lines(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(path) = args[0].as_string() {
-        match std::fs::read_to_string(path) {
-            Ok(content) => {
-                let lines: Vec<Value> = content
-                    .lines()
-                    .map(|line| Value::string(line.to_string()))
-                    .collect();
-                (SIG_OK, crate::value::list(lines))
-            }
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("read-lines: failed to read '{}': {}", path, e),
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::read_to_string(path) {
+                Ok(content) => {
+                    let lines: Vec<Value> = content
+                        .lines()
+                        .map(|line| Value::string(line.to_string()))
+                        .collect();
+                    (SIG_OK, crate::value::list(lines))
+                }
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("read-lines: failed to read '{}': {}", path, e),
+                    ),
                 ),
-            ),
-        }
+            })
+            .unwrap()
     } else {
         (
             SIG_ERROR,

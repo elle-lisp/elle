@@ -206,7 +206,7 @@ pub fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if args[0].as_string().is_none() && args[0].as_keyword_name().is_none() {
+    if !args[0].is_string() && args[0].as_keyword_name().is_none() {
         return (
             SIG_ERROR,
             error_val(
@@ -234,8 +234,8 @@ pub fn prim_string_to_keyword(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(name) = args[0].as_string() {
-        (SIG_OK, Value::keyword(name))
+    if let Some(kw) = args[0].with_string(Value::keyword) {
+        (SIG_OK, kw)
     } else {
         (
             SIG_ERROR,

@@ -84,13 +84,17 @@ fn format_value(
         return format!(":{}", name);
     }
 
+    // SSO or heap string
+    if value.is_string() {
+        return value
+            .with_string(|s| format!("\"{}\"", s.escape_default()))
+            .unwrap();
+    }
+
     // Handle heap values
     if let Some(_ptr) = value.as_heap_ptr() {
         let obj = unsafe { deref(*value) };
         match obj {
-            HeapObject::String(s) => {
-                return format!("\"{}\"", s.escape_default());
-            }
             HeapObject::Array(v) => {
                 if let Ok(elements) = v.try_borrow() {
                     if elements.is_empty() {
@@ -135,12 +139,15 @@ fn format_value(
             HeapObject::FFISignature(_, _) => return "<ffi-signature>".to_string(),
             HeapObject::FFIType(_) => return "<ffi-type>".to_string(),
             HeapObject::Buffer(_) => return "@\"...\"".to_string(),
+            HeapObject::Bytes(_) => return "#bytes[...]".to_string(),
+            HeapObject::Blob(_) => return "#blob[...]".to_string(),
             HeapObject::ManagedPointer(cell) => {
                 return match cell.get() {
                     Some(addr) => format!("<pointer 0x{:x}>", addr),
                     None => "<freed-pointer>".to_string(),
                 }
             }
+            HeapObject::String(s) => return format!("\"{}\"", s.escape_default()),
         }
     }
 

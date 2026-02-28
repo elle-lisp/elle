@@ -4,12 +4,29 @@ use crate::vm::VM;
 
 /// Define map, filter, and fold as Lisp functions that support closures
 pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
-    // Define map: (fn (f lst) (if (empty? lst) () (cons (f (first lst)) (map f (rest lst)))))
+    // Define map: polymorphic across all sequence types
+    // Indexed types and strings are checked before pair/empty to avoid
+    // calling empty? on types that don't support it (bytes, blob).
     let map_code = r#"
-        (def map (fn (f lst)
-          (if (empty? lst)
-            ()
-            (cons (f (first lst)) (map f (rest lst))))))
+        (def map (fn (f coll)
+          (cond
+            ((or (array? coll) (tuple? coll) (bytes? coll) (blob? coll))
+             (letrec ((loop (fn (i acc)
+                              (if (>= i (length coll))
+                                (reverse acc)
+                                (loop (+ i 1) (cons (f (get coll i)) acc))))))
+               (loop 0 ())))
+            ((or (string? coll) (buffer? coll))
+             (letrec ((loop (fn (i acc)
+                              (if (>= i (length coll))
+                                (reverse acc)
+                                (loop (+ i 1) (cons (f (string/char-at coll i)) acc))))))
+               (loop 0 ())))
+            ((or (pair? coll) (empty? coll))
+             (if (empty? coll)
+               ()
+               (cons (f (first coll)) (map f (rest coll)))))
+            (true (error :type-error "map: not a sequence")))))
     "#;
 
     // Define filter

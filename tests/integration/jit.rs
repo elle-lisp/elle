@@ -1621,7 +1621,7 @@ fn test_jit_mutual_recursion_deep() {
         let mut v = Vec::new();
         let mut cur = list;
         while let Some(cons) = cur.as_cons() {
-            v.push(cons.first.as_string().unwrap().to_string());
+            v.push(cons.first.with_string(|s| s.to_string()).unwrap());
             cur = cons.rest;
         }
         v
@@ -1713,7 +1713,7 @@ fn test_jit_mutual_recursion_three_way() {
         let mut v = Vec::new();
         let mut cur = list;
         while let Some(cons) = cur.as_cons() {
-            v.push(cons.first.as_string().unwrap().to_string());
+            v.push(cons.first.with_string(|s| s.to_string()).unwrap());
             cur = cons.rest;
         }
         v
@@ -1768,9 +1768,5 @@ fn test_jit_batch_global_mutation_known_limitation() {
     );
     // We accept either result — the point is no crash, no corruption
     let val = result.unwrap();
-    assert!(
-        val.as_string().is_some(),
-        "Expected a string result, got: {:?}",
-        val
-    );
+    assert!(val.is_string(), "Expected a string result, got: {:?}", val);
 }

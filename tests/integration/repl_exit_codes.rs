@@ -4,18 +4,10 @@
 // occur during piped input execution.
 
 use std::io::Write;
-use std::path::Path;
 use std::process::{Command, Stdio};
 
-fn get_elle_binary() -> String {
-    // Try to find the built elle binary
-    let debug_path = "target/debug/elle";
-    if Path::new(debug_path).exists() {
-        debug_path.to_string()
-    } else {
-        // Fallback to looking in common paths
-        "target/debug/elle".to_string()
-    }
+fn get_elle_binary() -> &'static str {
+    env!("CARGO_BIN_EXE_elle")
 }
 
 #[test]
@@ -23,7 +15,7 @@ fn test_repl_piped_input_parse_error_exit_code() {
     // Test that piping parse errors to the REPL results in exit code 1
     let elle_bin = get_elle_binary();
 
-    let mut child = Command::new(&elle_bin)
+    let mut child = Command::new(elle_bin)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -62,7 +54,7 @@ fn test_repl_piped_input_successful_exit_code() {
     // Test that piping valid input to the REPL results in exit code 0
     let elle_bin = get_elle_binary();
 
-    let mut child = Command::new(&elle_bin)
+    let mut child = Command::new(elle_bin)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -93,7 +85,7 @@ fn test_repl_piped_input_multiple_errors_exit_code() {
     // Test that piping multiple invalid expressions results in exit code 1
     let elle_bin = get_elle_binary();
 
-    let mut child = Command::new(&elle_bin)
+    let mut child = Command::new(elle_bin)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

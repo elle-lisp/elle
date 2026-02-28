@@ -361,8 +361,8 @@ impl JsonParser {
             }
 
             let key_value = self.parse_string()?;
-            let key = match key_value.as_string() {
-                Some(s) => TableKey::String(s.to_string()),
+            let key = match key_value.with_string(|s| s.to_string()) {
+                Some(s) => TableKey::String(s),
                 _ => unreachable!(),
             };
 

@@ -22,8 +22,8 @@ static GENSYM_COUNTER: AtomicU32 = AtomicU32::new(0);
 pub fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
     let prefix = if args.is_empty() {
         "G".to_string()
-    } else if let Some(s) = args[0].as_string() {
-        s.to_string()
+    } else if let Some(s) = args[0].with_string(|s| s.to_string()) {
+        s
     } else if let Some(id) = args[0].as_symbol() {
         format!("G{}", id)
     } else {

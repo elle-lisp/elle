@@ -265,7 +265,7 @@ proptest! {
     fn string_roundtrip(s in "[a-zA-Z0-9_ ]{0,50}") {
         let v = Value::string(s.clone());
         prop_assert!(v.is_string());
-        prop_assert_eq!(v.as_string(), Some(s.as_str()));
+        prop_assert_eq!(v.with_string(|s| s.to_string()), Some(s.clone()));
     }
 
     // =========================================================================

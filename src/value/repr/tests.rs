@@ -97,7 +97,57 @@ fn test_bool_constructor() {
 fn test_string_constructor() {
     let v = Value::string("hello");
     assert!(v.is_string());
-    assert_eq!(v.as_string(), Some("hello"));
+    assert_eq!(v.with_string(|s| s.to_string()), Some("hello".to_string()));
+}
+
+#[test]
+fn test_sso_short_string() {
+    let v = Value::string("hi");
+    assert!(v.is_string());
+    assert!(!v.is_heap()); // SSO, not heap
+    assert_eq!(v.with_string(|s| s.to_string()), Some("hi".to_string()));
+}
+
+#[test]
+fn test_sso_empty_string() {
+    let v = Value::string("");
+    assert!(v.is_string());
+    assert!(!v.is_heap());
+    assert_eq!(v.with_string(|s| s.to_string()), Some(String::new()));
+}
+
+#[test]
+fn test_sso_six_byte_string() {
+    let v = Value::string("abcdef");
+    assert!(v.is_string());
+    assert!(!v.is_heap());
+    assert_eq!(v.with_string(|s| s.to_string()), Some("abcdef".to_string()));
+}
+
+#[test]
+fn test_heap_seven_byte_string() {
+    let v = Value::string("abcdefg");
+    assert!(v.is_string());
+    assert!(v.is_heap()); // Too long for SSO
+    assert_eq!(
+        v.with_string(|s| s.to_string()),
+        Some("abcdefg".to_string())
+    );
+}
+
+#[test]
+fn test_sso_equality() {
+    let a = Value::string("hi");
+    let b = Value::string("hi");
+    assert_eq!(a, b);
+    assert_eq!(a.to_bits(), b.to_bits()); // Same bit pattern
+}
+
+#[test]
+fn test_sso_nul_byte_falls_back_to_heap() {
+    let v = Value::string("a\0b");
+    assert!(v.is_string());
+    assert!(v.is_heap()); // Contains NUL, falls back to heap
 }
 
 #[test]

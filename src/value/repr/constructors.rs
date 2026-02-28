@@ -1,8 +1,8 @@
 //! Value constructors for immediate and heap-allocated types.
 
 use super::{
-    Value, INT_MAX, INT_MIN, PAYLOAD_MASK, QNAN, QNAN_MASK, TAG_CPOINTER, TAG_INT, TAG_KEYWORD,
-    TAG_NAN, TAG_POINTER, TAG_SYMBOL,
+    Value, INT_MAX, INT_MIN, PAYLOAD_MASK, PTRVAL_CPOINTER_BIT, PTRVAL_PAYLOAD_MASK, QNAN,
+    QNAN_MASK, TAG_INT, TAG_NAN, TAG_POINTER, TAG_PTRVAL, TAG_TRUTHY, TRUTHY_SYMBOL_BIT,
 };
 
 impl Value {
@@ -49,7 +49,7 @@ impl Value {
     /// Create a symbol value from a SymbolId.
     #[inline]
     pub fn symbol(id: u32) -> Self {
-        Value(TAG_SYMBOL | (id as u64))
+        Value(TAG_TRUTHY | TRUTHY_SYMBOL_BIT | (id as u64))
     }
 
     /// Create a keyword value from a name string.
@@ -59,11 +59,11 @@ impl Value {
         use crate::value::intern::intern_string;
         let ptr = intern_string(name) as *const ();
         let addr = ptr as u64;
-        debug_assert!(
-            addr & !PAYLOAD_MASK == 0,
-            "Keyword pointer exceeds 48-bit address space"
+        assert!(
+            addr & !PTRVAL_PAYLOAD_MASK == 0,
+            "Keyword pointer exceeds 47-bit address space"
         );
-        Value(TAG_KEYWORD | addr)
+        Value(TAG_PTRVAL | addr)
     }
 
     /// Create a boolean value.
@@ -86,11 +86,11 @@ impl Value {
             return Self::NIL;
         }
         let addr_u64 = addr as u64;
-        debug_assert!(
-            addr_u64 & !PAYLOAD_MASK == 0,
-            "C pointer exceeds 48-bit address space"
+        assert!(
+            addr_u64 & !PTRVAL_PAYLOAD_MASK == 0,
+            "C pointer exceeds 47-bit address space"
         );
-        Value(TAG_CPOINTER | (addr_u64 & PAYLOAD_MASK))
+        Value(TAG_PTRVAL | PTRVAL_CPOINTER_BIT | (addr_u64 & PTRVAL_PAYLOAD_MASK))
     }
 
     /// Create an empty list value.
@@ -119,12 +119,45 @@ impl Value {
     // =========================================================================
 
     /// Create a string value.
+    /// Strings ≤6 UTF-8 bytes (without NUL) are stored inline (SSO).
+    /// Strings >6 bytes or containing NUL are heap-interned.
     #[inline]
     pub fn string(s: impl Into<Box<str>>) -> Self {
-        use crate::value::intern::intern_string;
         let boxed: Box<str> = s.into();
-        let ptr = intern_string(&boxed) as *const ();
-        Self::from_heap_ptr(ptr)
+        let bytes = boxed.as_bytes();
+        if bytes.len() <= 6 && !bytes.contains(&0) {
+            // Pack into SSO: TAG_SSO | bytes in little-endian order
+            let mut bits: u64 = 0;
+            for (i, &b) in bytes.iter().enumerate() {
+                bits |= (b as u64) << (i * 8);
+            }
+            Value(super::TAG_SSO | bits)
+        } else {
+            use crate::value::intern::intern_string;
+            let ptr = intern_string(&boxed) as *const ();
+            Self::from_heap_ptr(ptr)
+        }
+    }
+
+    /// Create a heap string without interning. Used by `SendValue::into_value()`
+    /// to avoid thread-local interner issues when reconstructing values on
+    /// a different thread.
+    #[inline]
+    pub fn string_no_intern(s: impl Into<Box<str>>) -> Self {
+        let boxed: Box<str> = s.into();
+        let bytes = boxed.as_bytes();
+        if bytes.len() <= 6 && !bytes.contains(&0) {
+            // SSO path — no interning, thread-safe
+            let mut bits: u64 = 0;
+            for (i, &b) in bytes.iter().enumerate() {
+                bits |= (b as u64) << (i * 8);
+            }
+            Value(super::TAG_SSO | bits)
+        } else {
+            // Heap alloc without interning
+            use crate::value::heap::{alloc, HeapObject};
+            alloc(HeapObject::String(boxed))
+        }
     }
 
     /// Create a cons cell.
@@ -218,6 +251,21 @@ impl Value {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
         alloc(HeapObject::Buffer(RefCell::new(bytes)))
+    }
+
+    /// Create an immutable bytes value.
+    #[inline]
+    pub fn bytes(data: Vec<u8>) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
+        alloc(HeapObject::Bytes(data))
+    }
+
+    /// Create a mutable blob value.
+    #[inline]
+    pub fn blob(data: Vec<u8>) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
+        use std::cell::RefCell;
+        alloc(HeapObject::Blob(RefCell::new(data)))
     }
 
     /// Create a fiber value.

@@ -38,8 +38,12 @@ pub fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if let Some(s) = args[0].as_string() {
-        eprintln!("[TRACE] {}: {:?}", s, args[1]);
+    if args[0]
+        .with_string(|s| {
+            eprintln!("[TRACE] {}: {:?}", s, args[1]);
+        })
+        .is_some()
+    {
         (SIG_OK, args[1])
     } else if let Some(sym_id) = args[0].as_symbol() {
         let name = crate::context::resolve_symbol_name(sym_id)

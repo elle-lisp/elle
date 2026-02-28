@@ -223,8 +223,8 @@ proptest! {
         let mut states = Vec::new();
         let mut current = &result.unwrap();
         while let Some(cons) = current.as_cons() {
-            if let Some(s) = cons.first.as_string() {
-                states.push(s.to_string());
+            if let Some(s) = cons.first.with_string(|s| s.to_string()) {
+                states.push(s);
             }
             current = &cons.rest;
         }
@@ -534,8 +534,8 @@ proptest! {
 
             // Second element should be "suspended" (not "done")
             if let Some(cons2) = cons.rest.as_cons() {
-                if let Some(status) = cons2.first.as_string() {
-                    prop_assert_eq!(status, "suspended",
+                if let Some(status) = cons2.first.with_string(|s| s.to_string()) {
+                    prop_assert_eq!(&status, "suspended",
                         "After yield, status should be 'suspended', got '{}'", status);
                 }
             }

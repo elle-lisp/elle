@@ -96,8 +96,8 @@ impl TableKey {
             Ok(TableKey::Symbol(SymbolId(id)))
         } else if let Some(name) = val.as_keyword_name() {
             Ok(TableKey::Keyword(name.to_string()))
-        } else if let Some(s) = val.as_string() {
-            Ok(TableKey::String(s.to_string()))
+        } else if let Some(s) = val.with_string(|s| s.to_string()) {
+            Ok(TableKey::String(s))
         } else {
             Err(LError::type_mismatch("table key", val.type_name()))
         }

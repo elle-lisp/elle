@@ -1,6 +1,9 @@
 //! Value accessors for extracting typed data from Values.
 
-use super::{Value, PAYLOAD_MASK, TAG_FALSE, TAG_NAN, TAG_NAN_MASK, TAG_TRUE};
+use super::{
+    Value, PAYLOAD_MASK, PTRVAL_PAYLOAD_MASK, SYMBOL_ID_MASK, TAG_FALSE, TAG_NAN, TAG_NAN_MASK,
+    TAG_TRUE,
+};
 
 impl Value {
     // =========================================================================
@@ -66,7 +69,7 @@ impl Value {
     #[inline]
     pub fn as_symbol(&self) -> Option<u32> {
         if self.is_symbol() {
-            Some((self.0 & PAYLOAD_MASK) as u32)
+            Some((self.0 & SYMBOL_ID_MASK) as u32)
         } else {
             None
         }
@@ -76,7 +79,7 @@ impl Value {
     #[inline]
     pub fn as_pointer(&self) -> Option<usize> {
         if self.is_pointer() {
-            Some((self.0 & PAYLOAD_MASK) as usize)
+            Some((self.0 & PTRVAL_PAYLOAD_MASK) as usize)
         } else {
             None
         }
@@ -86,7 +89,7 @@ impl Value {
     #[inline]
     pub fn as_keyword_name(&self) -> Option<&str> {
         if self.is_keyword() {
-            let ptr = (self.0 & PAYLOAD_MASK) as *const crate::value::heap::HeapObject;
+            let ptr = (self.0 & PTRVAL_PAYLOAD_MASK) as *const crate::value::heap::HeapObject;
             match unsafe { &*ptr } {
                 crate::value::heap::HeapObject::String(s) => Some(s),
                 _ => None,
@@ -110,11 +113,11 @@ impl Value {
     // Heap Type Predicates
     // =========================================================================
 
-    /// Check if this is a string.
+    /// Check if this is a string (SSO or heap).
     #[inline]
     pub fn is_string(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::String)
+        (self.0 & super::TAG_SSO_MASK) == super::TAG_SSO || self.heap_tag() == Some(HeapTag::String)
     }
 
     /// Check if this is a cons cell.
@@ -173,6 +176,20 @@ impl Value {
         self.heap_tag() == Some(HeapTag::Buffer)
     }
 
+    /// Check if this is a bytes value.
+    #[inline]
+    pub fn is_bytes(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::Bytes)
+    }
+
+    /// Check if this is a blob value.
+    #[inline]
+    pub fn is_blob(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::Blob)
+    }
+
     /// Check if this is a syntax object.
     #[inline]
     pub fn is_syntax(&self) -> bool {
@@ -210,16 +227,30 @@ impl Value {
     // Heap Value Extractors
     // =========================================================================
 
-    /// Extract as string if this is a string.
+    /// Access string contents via closure. Works for both SSO and heap strings.
+    /// Returns None if this is not a string.
     #[inline]
-    pub fn as_string(&self) -> Option<&str> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::String(s) => Some(s),
-            _ => None,
+    pub fn with_string<R>(&self, f: impl FnOnce(&str) -> R) -> Option<R> {
+        if (self.0 & super::TAG_SSO_MASK) == super::TAG_SSO {
+            let payload = self.0 & super::PAYLOAD_MASK;
+            let mut buf = [0u8; 6];
+            for (i, byte) in buf.iter_mut().enumerate() {
+                *byte = ((payload >> (i * 8)) & 0xFF) as u8;
+            }
+            // Find length: first zero byte, or 6 if all non-zero
+            let len = buf.iter().position(|&b| b == 0).unwrap_or(6);
+            // SAFETY: Value::string() only creates SSO from valid UTF-8
+            let s = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+            Some(f(s))
+        } else {
+            use crate::value::heap::{deref, HeapObject};
+            if !self.is_heap() {
+                return None;
+            }
+            match unsafe { deref(*self) } {
+                HeapObject::String(s) => Some(f(s)),
+                _ => None,
+            }
         }
     }
 
@@ -361,6 +392,32 @@ impl Value {
         }
     }
 
+    /// Extract as bytes if this is a bytes value.
+    #[inline]
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::Bytes(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    /// Extract as blob if this is a blob value.
+    #[inline]
+    pub fn as_blob(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::Blob(b) => Some(b),
+            _ => None,
+        }
+    }
+
     /// Extract as thread handle if this is a thread handle.
     #[inline]
     pub fn as_thread_handle(&self) -> Option<&crate::value::heap::ThreadHandle> {
@@ -413,6 +470,8 @@ impl Value {
             "integer"
         } else if self.is_float() {
             "float"
+        } else if (self.0 & super::TAG_SSO_MASK) == super::TAG_SSO {
+            "string"
         } else if self.is_symbol() {
             "symbol"
         } else if self.is_keyword() {

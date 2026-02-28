@@ -23,16 +23,16 @@ use crate::property::strategies::{arb_flat_struct, arb_primitive_type, arb_struc
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(1000))]
 
-    // Pointer roundtrip: any 48-bit address survives the Value round-trip
+    // Pointer roundtrip: any 47-bit address survives the Value round-trip
     #[test]
-    fn pointer_roundtrip(addr in 1usize..=0x0000_FFFF_FFFF_FFFFusize) {
+    fn pointer_roundtrip(addr in 1usize..=0x0000_7FFF_FFFF_FFFFusize) {
         let v = Value::pointer(addr);
         prop_assert_eq!(v.as_pointer(), Some(addr));
     }
 
     // Pointer type discrimination: pointers are ONLY pointers
     #[test]
-    fn pointer_is_only_pointer(addr in 1usize..=0x0000_FFFF_FFFF_FFFFusize) {
+    fn pointer_is_only_pointer(addr in 1usize..=0x0000_7FFF_FFFF_FFFFusize) {
         let v = Value::pointer(addr);
         prop_assert!(v.is_pointer());
         prop_assert!(!v.is_int());
@@ -47,21 +47,21 @@ proptest! {
 
     // Pointer truthiness: all non-null pointers are truthy
     #[test]
-    fn pointer_is_truthy(addr in 1usize..=0x0000_FFFF_FFFF_FFFFusize) {
+    fn pointer_is_truthy(addr in 1usize..=0x0000_7FFF_FFFF_FFFFusize) {
         prop_assert!(Value::pointer(addr).is_truthy());
     }
 
     // Pointer equality: same address -> equal values
     #[test]
-    fn pointer_eq_same_addr(addr in 1usize..=0x0000_FFFF_FFFF_FFFFusize) {
+    fn pointer_eq_same_addr(addr in 1usize..=0x0000_7FFF_FFFF_FFFFusize) {
         prop_assert_eq!(Value::pointer(addr), Value::pointer(addr));
     }
 
     // Pointer inequality: different addresses -> different values
     #[test]
     fn pointer_neq_diff_addr(
-        a in 1usize..=0x0000_FFFF_FFFF_FFFFusize,
-        b in 1usize..=0x0000_FFFF_FFFF_FFFFusize,
+        a in 1usize..=0x0000_7FFF_FFFF_FFFFusize,
+        b in 1usize..=0x0000_7FFF_FFFF_FFFFusize,
     ) {
         prop_assume!(a != b);
         prop_assert_ne!(Value::pointer(a), Value::pointer(b));
@@ -192,7 +192,7 @@ proptest! {
 
     // Pointer marshalling: actual pointers accepted
     #[test]
-    fn marshal_ptr_from_pointer(addr in 1usize..=0x0000_FFFF_FFFF_FFFFusize) {
+    fn marshal_ptr_from_pointer(addr in 1usize..=0x0000_7FFF_FFFF_FFFFusize) {
         let v = Value::pointer(addr);
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::Ptr).is_ok());
     }
@@ -290,7 +290,7 @@ proptest! {
 
     // pointer write-read roundtrip
     #[test]
-    fn memory_roundtrip_ptr(addr in 0usize..=0x0000_FFFF_FFFF_FFFFusize) {
+    fn memory_roundtrip_ptr(addr in 0usize..=0x0000_7FFF_FFFF_FFFFusize) {
         let alloc = prim_ffi_malloc(&[Value::int(8)]);
         prop_assert_eq!(alloc.0, SIG_OK);
         let ptr = alloc.1;

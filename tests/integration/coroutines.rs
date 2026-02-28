@@ -289,9 +289,9 @@ fn test_yield_star_simple() {
 
 #[test]
 fn test_coroutine_as_iterator() {
-    // (each x (make-coroutine (fn () (yield 1) (yield 2)))
-    //   (display x))
-    // Should iterate over yielded values
+    // each only supports lists, arrays, tuples, bytes, blobs, strings, buffers.
+    // Coroutines are not a sequence type — each rejects them with a type error.
+    // Iterator protocol for coroutines would need explicit conversion first.
     let result = eval_source(
         r#"
         (var results (list))
@@ -300,8 +300,7 @@ fn test_coroutine_as_iterator() {
         results
         "#,
     );
-    // This test documents the expected behavior for iterator protocol
-    assert!(result.is_ok());
+    assert!(result.is_err());
 }
 
 #[test]

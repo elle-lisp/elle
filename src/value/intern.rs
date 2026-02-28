@@ -222,7 +222,10 @@ mod tests {
     #[test]
     fn test_value_string_content_extraction() {
         let v = Value::string("hello world");
-        assert_eq!(v.as_string(), Some("hello world"));
+        assert_eq!(
+            v.with_string(|s| s.to_string()),
+            Some("hello world".to_string())
+        );
     }
 
     #[test]

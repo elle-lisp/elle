@@ -149,7 +149,7 @@ pub fn arb_value_for_type(desc: &TypeDesc) -> BoxedStrategy<Value> {
         TypeDesc::Double => prop::num::f64::NORMAL.prop_map(Value::float).boxed(),
         TypeDesc::Ptr => prop_oneof![
             1 => Just(Value::NIL),
-            3 => (1usize..=0x0000_FFFF_FFFF_FFFFusize).prop_map(Value::pointer),
+            3 => (1usize..=0x0000_7FFF_FFFF_FFFFusize).prop_map(Value::pointer),
         ]
         .boxed(),
         TypeDesc::Struct(sd) => {

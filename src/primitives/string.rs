@@ -8,8 +8,8 @@ use crate::value::{error_val, Value};
 /// Extract text content from a string or buffer value.
 /// Returns (text, is_buffer). For buffers, validates UTF-8.
 fn as_text(val: &Value, prim_name: &str) -> Result<(String, bool), (SignalBits, Value)> {
-    if let Some(s) = val.as_string() {
-        Ok((s.to_string(), false))
+    if let Some(s) = val.with_string(|s| s.to_string()) {
+        Ok((s, false))
     } else if let Some(buf_ref) = val.as_buffer() {
         let borrowed = buf_ref.borrow();
         match String::from_utf8(borrowed.clone()) {
@@ -162,29 +162,31 @@ pub fn prim_string_index(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
 
-    let needle = match args[1].as_string() {
-        Some(s) => {
-            let chars: Vec<char> = s.chars().collect();
-            if chars.len() != 1 {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "error",
-                        "string-index: requires a single character as second argument".to_string(),
-                    ),
-                );
-            }
-            chars[0]
-        }
-        None => {
-            return (
+    let needle = if let Some(r) = args[1].with_string(|s| {
+        let chars: Vec<char> = s.chars().collect();
+        if chars.len() != 1 {
+            return Err((
                 SIG_ERROR,
                 error_val(
-                    "type-error",
-                    format!("string-index: expected string, got {}", args[1].type_name()),
+                    "error",
+                    "string-index: requires a single character as second argument".to_string(),
                 ),
-            )
+            ));
         }
+        Ok(chars[0])
+    }) {
+        match r {
+            Ok(c) => c,
+            Err(e) => return e,
+        }
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("string-index: expected string, got {}", args[1].type_name()),
+            ),
+        );
     };
 
     match haystack.chars().position(|ch| ch == needle) {
@@ -269,17 +271,16 @@ pub fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
 
-    let delimiter = match args[1].as_string() {
-        Some(d) => d,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("string-split: expected string, got {}", args[1].type_name()),
-                ),
-            )
-        }
+    let delimiter = if let Some(d) = args[1].with_string(|s| s.to_string()) {
+        d
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("string-split: expected string, got {}", args[1].type_name()),
+            ),
+        );
     };
 
     if delimiter.is_empty() {
@@ -292,7 +293,7 @@ pub fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let parts: Vec<Value> = s.split(delimiter).map(Value::string).collect();
+    let parts: Vec<Value> = s.split(&delimiter).map(Value::string).collect();
 
     (SIG_OK, crate::value::list(parts))
 }
@@ -314,20 +315,19 @@ pub fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
 
-    let old = match args[1].as_string() {
-        Some(o) => o,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "string-replace: expected string, got {}",
-                        args[1].type_name()
-                    ),
+    let old = if let Some(o) = args[1].with_string(|s| s.to_string()) {
+        o
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "string-replace: expected string, got {}",
+                    args[1].type_name()
                 ),
-            )
-        }
+            ),
+        );
     };
 
     if old.is_empty() {
@@ -340,23 +340,22 @@ pub fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let new = match args[2].as_string() {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "string-replace: expected string, got {}",
-                        args[2].type_name()
-                    ),
+    let new = if let Some(n) = args[2].with_string(|s| s.to_string()) {
+        n
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "string-replace: expected string, got {}",
+                    args[2].type_name()
                 ),
-            )
-        }
+            ),
+        );
     };
 
-    let replaced = s.replace(old, new);
+    let replaced = s.replace(&*old, &new);
     if is_buffer {
         (SIG_OK, Value::buffer(replaced.into_bytes()))
     } else {
@@ -405,25 +404,24 @@ pub fn prim_string_contains(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
 
-    let needle = match args[1].as_string() {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "string-contains?: expected string, got {}",
-                        args[1].type_name()
-                    ),
+    let needle = if let Some(n) = args[1].with_string(|s| s.to_string()) {
+        n
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "string-contains?: expected string, got {}",
+                    args[1].type_name()
                 ),
-            )
-        }
+            ),
+        );
     };
 
     (
         SIG_OK,
-        if haystack.contains(needle) {
+        if haystack.contains(&*needle) {
             Value::TRUE
         } else {
             Value::FALSE
@@ -451,25 +449,24 @@ pub fn prim_string_starts_with(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
 
-    let prefix = match args[1].as_string() {
-        Some(p) => p,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "string-starts-with?: expected string, got {}",
-                        args[1].type_name()
-                    ),
+    let prefix = if let Some(p) = args[1].with_string(|s| s.to_string()) {
+        p
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "string-starts-with?: expected string, got {}",
+                    args[1].type_name()
                 ),
-            )
-        }
+            ),
+        );
     };
 
     (
         SIG_OK,
-        if s.starts_with(prefix) {
+        if s.starts_with(&*prefix) {
             Value::TRUE
         } else {
             Value::FALSE
@@ -497,25 +494,24 @@ pub fn prim_string_ends_with(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
 
-    let suffix = match args[1].as_string() {
-        Some(suf) => suf,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "string-ends-with?: expected string, got {}",
-                        args[1].type_name()
-                    ),
+    let suffix = if let Some(suf) = args[1].with_string(|s| s.to_string()) {
+        suf
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "string-ends-with?: expected string, got {}",
+                    args[1].type_name()
                 ),
-            )
-        }
+            ),
+        );
     };
 
     (
         SIG_OK,
-        if s.ends_with(suffix) {
+        if s.ends_with(&*suffix) {
             Value::TRUE
         } else {
             Value::FALSE
@@ -536,17 +532,16 @@ pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
     }
 
     let list = &args[0];
-    let separator = match args[1].as_string() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("string-join: expected string, got {}", args[1].type_name()),
-                ),
-            )
-        }
+    let separator = if let Some(s) = args[1].with_string(|s| s.to_string()) {
+        s
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("string-join: expected string, got {}", args[1].type_name()),
+            ),
+        );
     };
 
     let vec = match list.list_to_vec() {
@@ -561,8 +556,8 @@ pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
     let mut strings = Vec::new();
 
     for val in vec {
-        match val.as_string() {
-            Some(s) => strings.push(s.to_string()),
+        match val.with_string(|s| s.to_string()) {
+            Some(s) => strings.push(s),
             None => {
                 return (
                     SIG_ERROR,
@@ -575,7 +570,57 @@ pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
-    (SIG_OK, Value::string(strings.join(separator)))
+    (SIG_OK, Value::string(strings.join(&separator)))
+}
+
+/// Percent-encode a string per RFC 3986.
+/// Unreserved characters (A-Z, a-z, 0-9, '-', '.', '_', '~') pass through.
+/// All others are percent-encoded as %XX with uppercase hex.
+pub fn prim_uri_encode(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("uri-encode: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    if args[0].is_string() {
+        return args[0]
+            .with_string(|s| {
+                let mut encoded = String::with_capacity(s.len());
+                for byte in s.as_bytes() {
+                    match byte {
+                        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                            encoded.push(*byte as char);
+                        }
+                        _ => {
+                            encoded.push('%');
+                            encoded.push(
+                                char::from_digit((*byte >> 4) as u32, 16)
+                                    .unwrap()
+                                    .to_ascii_uppercase(),
+                            );
+                            encoded.push(
+                                char::from_digit((*byte & 0x0f) as u32, 16)
+                                    .unwrap()
+                                    .to_ascii_uppercase(),
+                            );
+                        }
+                    }
+                }
+                (SIG_OK, Value::string(encoded.as_str()))
+            })
+            .unwrap();
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("uri-encode: expected string, got {}", args[0].type_name()),
+        ),
+    )
 }
 
 /// Declarative primitive definitions for string module.
@@ -711,5 +756,16 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/join (list \"a\" \"b\" \"c\") \",\") #=> \"a,b,c\"",
         aliases: &["string-join"],
+    },
+    PrimitiveDef {
+        name: "uri-encode",
+        func: prim_uri_encode,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Percent-encode a string per RFC 3986.",
+        params: &["str"],
+        category: "string",
+        example: "(uri-encode \"hello world\") ;=> \"hello%20world\"",
+        aliases: &[],
     },
 ];
