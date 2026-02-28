@@ -72,9 +72,6 @@ impl Lowerer {
             } => self.lower_cond(clauses, else_branch),
 
             HirKind::Match { value, arms } => self.lower_match(value, arms),
-            HirKind::Module { body, .. } => self.lower_expr(body),
-            HirKind::Import { .. } => self.emit_const(LirConst::Nil),
-            HirKind::ModuleRef { .. } => self.emit_const(LirConst::Nil),
             HirKind::Eval { expr, env } => self.lower_eval(expr, env),
         }
     }

@@ -134,7 +134,7 @@ HIR (bindings are inline — no separate HashMap)
 | `analyze/binding.rs` | ~425 | Binding forms: `let`, `letrec`, `def`/`var`, `set` |
 | `analyze/destructure.rs` | ~215 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
 | `analyze/lambda.rs` | ~160 | Lambda/fn analysis with captures, params, effects |
-| `analyze/special.rs` | ~180 | Special forms: `match`, `yield`, `module` |
+| `analyze/special.rs` | ~210 | Special forms: `match`, `yield` |
 | `analyze/call.rs` | ~200 | Call analysis and effect tracking |
 | `expr.rs` | ~180 | `Hir`, `HirKind` |
 | `binding.rs` | ~110 | `Binding(Value)` newtype, `CaptureInfo`, `CaptureKind` |

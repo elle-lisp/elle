@@ -4,7 +4,7 @@ use super::binding::{Binding, CaptureInfo};
 use super::pattern::HirPattern;
 use crate::effects::Effect;
 use crate::syntax::Span;
-use crate::value::{SymbolId, Value};
+use crate::value::Value;
 
 /// HIR expression with source location and effect
 #[derive(Debug, Clone)]
@@ -179,23 +179,6 @@ pub enum HirKind {
     Destructure {
         pattern: HirPattern,
         value: Box<Hir>,
-    },
-
-    // === Module System ===
-    Module {
-        name: SymbolId,
-        exports: Vec<SymbolId>,
-        body: Box<Hir>,
-    },
-
-    Import {
-        module: SymbolId,
-    },
-
-    /// Module-qualified reference
-    ModuleRef {
-        module: SymbolId,
-        name: SymbolId,
     },
 
     /// Runtime eval: compile and execute a datum.

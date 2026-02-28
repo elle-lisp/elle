@@ -208,12 +208,6 @@ impl HirLinter {
             }
 
             HirKind::Quote(_) => {}
-
-            HirKind::Module { body, .. } => {
-                self.check(body, symbols);
-            }
-
-            HirKind::Import { .. } | HirKind::ModuleRef { .. } => {}
         }
     }
 }

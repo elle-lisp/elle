@@ -2,13 +2,6 @@ use crate::value::SymbolId;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
-/// Module definition
-#[derive(Debug, Clone)]
-pub struct ModuleDef {
-    pub name: SymbolId,
-    pub exports: Vec<SymbolId>,
-}
-
 /// Symbol interning table for fast symbol comparison
 ///
 /// Uses `Rc<str>` for symbol names to avoid duplication:
@@ -19,8 +12,6 @@ pub struct ModuleDef {
 pub struct SymbolTable {
     map: FxHashMap<Rc<str>, SymbolId>,
     names: Vec<Rc<str>>,
-    modules: FxHashMap<SymbolId, Rc<ModuleDef>>,
-    current_module: Option<SymbolId>,
 }
 
 impl SymbolTable {
@@ -28,8 +19,6 @@ impl SymbolTable {
         SymbolTable {
             map: FxHashMap::default(),
             names: Vec::new(),
-            modules: FxHashMap::default(),
-            current_module: None,
         }
     }
 
@@ -57,32 +46,6 @@ impl SymbolTable {
     /// Check if a symbol exists
     pub fn get(&self, name: &str) -> Option<SymbolId> {
         self.map.get(name).copied()
-    }
-
-    /// Define a module
-    pub fn define_module(&mut self, module_def: ModuleDef) {
-        let id = module_def.name;
-        self.modules.insert(id, Rc::new(module_def));
-    }
-
-    /// Get a module definition by symbol ID
-    pub fn get_module(&self, id: SymbolId) -> Option<Rc<ModuleDef>> {
-        self.modules.get(&id).cloned()
-    }
-
-    /// Check if a symbol is a module
-    pub fn is_module(&self, id: SymbolId) -> bool {
-        self.modules.contains_key(&id)
-    }
-
-    /// Set the current module
-    pub fn set_current_module(&mut self, module: Option<SymbolId>) {
-        self.current_module = module;
-    }
-
-    /// Get the current module
-    pub fn current_module(&self) -> Option<SymbolId> {
-        self.current_module
     }
 
     /// Extract all symbol ID → name mappings.

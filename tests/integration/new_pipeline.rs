@@ -278,18 +278,6 @@ fn test_nested_lets_and_lambdas() {
     ));
 }
 
-// ============ Module Tests ============
-
-#[test]
-fn test_module_simple() {
-    assert!(compiles("(module foo 42)"));
-}
-
-#[test]
-fn test_import() {
-    assert!(compiles("(import foo)"));
-}
-
 // ============ Macro Tests (if macros defined) ============
 
 // Note: Macro tests would require defining macros first

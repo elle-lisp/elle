@@ -203,8 +203,7 @@ impl<'a> Analyzer<'a> {
                         "match" => return self.analyze_match(items, span),
                         "cond" => return self.analyze_cond(items, span),
                         "eval" => return self.analyze_eval(items, span),
-                        "module" => return self.analyze_module(items, span),
-                        "import" => return self.analyze_import(items, span),
+
                         // (doc <symbol>) → (doc "<symbol-name>")
                         // Rewrites the symbol arg to a string so bare symbols
                         // like (doc if) work without quoting.

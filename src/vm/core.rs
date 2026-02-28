@@ -31,8 +31,6 @@ pub struct VM {
     /// Global variable bindings (shared across all fibers)
     pub globals: Vec<Value>,
     pub ffi: FFISubsystem,
-    pub modules: HashMap<String, HashMap<u32, Value>>,
-    pub current_module: Option<String>,
     pub loaded_modules: HashSet<String>,
     pub module_search_paths: Vec<PathBuf>,
     pub scope_stack: ScopeStack,
@@ -87,8 +85,6 @@ impl VM {
             current_fiber_value: None,  // root fiber has no Value
             globals: vec![Value::UNDEFINED; 256],
             ffi: FFISubsystem::new(),
-            modules: HashMap::new(),
-            current_module: None,
             loaded_modules: HashSet::new(),
             module_search_paths: vec![PathBuf::from(".")],
             scope_stack: ScopeStack::new(),
@@ -150,33 +146,6 @@ impl VM {
             .get(&bytecode_ptr)
             .copied()
             .unwrap_or(0)
-    }
-
-    /// Define a module with exported symbols
-    pub fn define_module(&mut self, name: String, exports: HashMap<u32, Value>) {
-        self.modules.insert(name, exports);
-    }
-
-    /// Get a symbol from a module
-    pub fn get_module_symbol(&self, module: &str, sym_id: u32) -> Option<&Value> {
-        self.modules.get(module).and_then(|m| m.get(&sym_id))
-    }
-
-    /// Import a module (make it available)
-    pub fn import_module(&mut self, name: String) {
-        if self.modules.contains_key(&name) {
-            // Module is now available for module:symbol references
-        }
-    }
-
-    /// Set current module context
-    pub fn set_current_module(&mut self, module: Option<String>) {
-        self.current_module = module;
-    }
-
-    /// Get current module context
-    pub fn current_module(&self) -> Option<&str> {
-        self.current_module.as_deref()
     }
 
     /// Add a module search path
