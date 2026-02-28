@@ -1,5 +1,5 @@
 [workspace]
-members = ["."]
+members = [".", "plugins/regex"]
 resolver = "2"
 
 [package]

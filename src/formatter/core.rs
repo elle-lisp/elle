@@ -147,6 +147,7 @@ fn format_value(
                     None => "<freed-pointer>".to_string(),
                 }
             }
+            HeapObject::External(ext) => return format!("#<{}>", ext.type_name),
             HeapObject::String(s) => return format!("\"{}\"", s.escape_default()),
         }
     }

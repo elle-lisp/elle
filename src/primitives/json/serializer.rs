@@ -132,6 +132,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             HeapTag::Buffer => Err("Cannot serialize buffers to JSON".to_string()),
             HeapTag::Bytes => Err("Cannot serialize bytes to JSON".to_string()),
             HeapTag::Blob => Err("Cannot serialize blobs to JSON".to_string()),
+            HeapTag::External => Err("Cannot serialize external objects to JSON".to_string()),
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())
@@ -294,6 +295,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             HeapTag::Buffer => Err("Cannot serialize buffers to JSON".to_string()),
             HeapTag::Bytes => Err("Cannot serialize bytes to JSON".to_string()),
             HeapTag::Blob => Err("Cannot serialize blobs to JSON".to_string()),
+            HeapTag::External => Err("Cannot serialize external objects to JSON".to_string()),
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())

@@ -450,6 +450,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "elle-regex"
+version = "1.0.0"
+dependencies = [
+ "elle",
+ "regex",
+]
+
+[[package]]
 name = "endian-type"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

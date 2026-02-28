@@ -101,3 +101,6 @@ mod splice {
 mod bytes {
     include!("bytes.rs");
 }
+mod regex {
+    include!("regex.rs");
+}

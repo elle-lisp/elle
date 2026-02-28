@@ -90,6 +90,11 @@ impl PartialEq for Value {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
+                // External object comparison (by identity — same heap object)
+                (HeapObject::External(_), HeapObject::External(_)) => {
+                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
+                }
+
                 // Bytes comparison (compare contents)
                 (HeapObject::Bytes(b1), HeapObject::Bytes(b2)) => b1 == b2,
 

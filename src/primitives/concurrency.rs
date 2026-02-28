@@ -117,6 +117,9 @@ fn is_value_sendable(value: &Value) -> bool {
 
         // Managed pointers are not sendable (Cell is not thread-safe)
         HeapObject::ManagedPointer(_) => false,
+
+        // External objects are not sendable (contain Rc<dyn Any>)
+        HeapObject::External(_) => false,
     }
 }
 

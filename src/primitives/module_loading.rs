@@ -69,7 +69,17 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             }
         };
 
-        // Read and compile the file
+        let symbols = &mut *symbols_ptr;
+
+        // Plugin loading for .so files
+        if path.ends_with(".so") {
+            return match crate::plugin::load_plugin(&path, vm, symbols) {
+                Ok(()) => (SIG_OK, Value::bool(true)),
+                Err(e) => (SIG_ERROR, error_val("error", format!("import-file: {}", e))),
+            };
+        }
+
+        // Elle source file loading
         let contents = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(e) => {
@@ -83,8 +93,6 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             }
         };
 
-        // Compile all forms using the new pipeline
-        let symbols = &mut *symbols_ptr;
         let results = match crate::pipeline::compile_all(&contents, symbols) {
             Ok(r) => r,
             Err(e) => {
@@ -98,20 +106,23 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             }
         };
 
-        // Execute each compiled form sequentially
+        let mut last_value = Value::NIL;
         for result in &results {
-            if let Err(e) = vm.execute(&result.bytecode) {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "error",
-                        format!("import-file: runtime error in {}: {}", path, e),
-                    ),
-                );
+            match vm.execute(&result.bytecode) {
+                Ok(v) => last_value = v,
+                Err(e) => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "error",
+                            format!("import-file: runtime error in {}: {}", path, e),
+                        ),
+                    );
+                }
             }
         }
 
-        (SIG_OK, Value::bool(true))
+        (SIG_OK, last_value)
     }
 }
 
@@ -176,7 +187,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["path"],
         category: "module",
         example: "(module/import \"lib/utils.elle\")",
-        aliases: &["import-file"],
+        aliases: &["import-file", "import"],
     },
     PrimitiveDef {
         name: "module/add-path",

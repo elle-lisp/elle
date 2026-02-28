@@ -45,6 +45,7 @@ pub mod lint;
 pub mod lir;
 pub mod lsp;
 pub mod pipeline;
+pub mod plugin;
 pub mod primitives;
 pub mod reader;
 pub mod repl;

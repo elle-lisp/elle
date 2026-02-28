@@ -75,6 +75,7 @@ bytecode. Error messages include file:line:col information.
 | `ffi` | C interop via libloading/bindgen |
 | `jit` | JIT compilation via Cranelift for non-suspending functions |
 | `formatter` | Code formatting for Elle source |
+| `plugin` | Dynamic plugin loading for Rust cdylib primitives |
 | `pipeline` | Compilation entry points (`compile`, `analyze`, `eval`). See [`docs/pipeline.md`](docs/pipeline.md) |
 | `error` | `LocationMap` for bytecode offset → source location mapping |
 
@@ -86,6 +87,7 @@ representation. Create values via methods like `Value::int()`, `Value::cons()`,
 - `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>`
 - `Cell` / `LocalCell` - mutable cells for captured variables
 - `Fiber` - independent execution context with stack, frames, and signal mask
+- `External` - opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
 
 All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 `SendValue` wrapper exists for thread-safety when needed.
@@ -108,6 +110,8 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 | `benches/` | Criterion and IAI benchmarks |
 | `docs/` | Design documents and guides |
 | `demos/` | Comparison implementations |
+| `plugins/` | Dynamically-loaded plugin crates (cdylib) |
+| `site/` | Generated documentation site |
 
 ## Verification
 
@@ -238,6 +242,14 @@ Things that look wrong but aren't:
   `block` supports an optional keyword name and `break` for early exit:
   `(block :name body...)` / `(break :name value)`. `break` is validated at
   compile time — it must be inside a block and cannot cross function boundaries.
+- `ExternalObject` uses `Rc<dyn Any>` despite the general preference for typed values.
+  This is intentional — plugins are dynamically loaded and the core compiler cannot
+  know their types at compile time. The `type_name` field provides Elle-side identity,
+  and `downcast_ref` is used only within the plugin that created the type.
+- `import` is now an alias for the `import-file` primitive (was previously an
+  Elle-level function using `eval`/`read-all`/`slurp`). It returns the last
+  expression's value for `.lisp` files, and `true` for `.so` plugins. The
+  `import-file` primitive handles both Elle source files and plugin `.so` files.
 
 ## Conventions
 

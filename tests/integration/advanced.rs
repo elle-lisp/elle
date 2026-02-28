@@ -490,12 +490,11 @@ fn test_sleep_in_arithmetic_context() {
 }
 
 #[test]
-fn test_import_file_returns_bool() {
-    // import-file should return a bool (true) when file is found
-    assert_eq!(
-        eval_source("(import-file \"test-modules/test.lisp\")").unwrap(),
-        Value::bool(true)
-    );
+fn test_import_file_returns_last_value() {
+    // import-file returns the last expression's value from the loaded file
+    let result = eval_source("(import-file \"test-modules/test.lisp\")").unwrap();
+    // test.lisp ends with (var test-list (list 1 2 3)), so last value is (1 2 3)
+    assert!(result.is_list(), "expected list, got {:?}", result);
 }
 
 #[test]
@@ -528,15 +527,19 @@ fn test_import_multiple_files_sequentially() {
 
 #[test]
 fn test_import_same_file_twice_idempotent() {
-    // Loading the same file twice should succeed both times (idempotent)
-    let result1 = eval_source("(import-file \"test-modules/test.lisp\")");
-    assert!(result1.is_ok());
-    assert_eq!(result1.unwrap(), Value::bool(true));
-
-    // Second load of same file
-    let result2 = eval_source("(import-file \"test-modules/test.lisp\")");
-    assert!(result2.is_ok());
-    assert_eq!(result2.unwrap(), Value::bool(true));
+    // Within a single VM, loading the same file twice is idempotent:
+    // first load returns the last value, second returns true (already loaded)
+    let result = eval_source(
+        "(def r1 (import-file \"test-modules/test.lisp\"))
+         (def r2 (import-file \"test-modules/test.lisp\"))
+         (list (list? r1) (= r2 true))",
+    );
+    assert!(result.is_ok());
+    // r1 is a list (last value from file), r2 is true (already loaded)
+    assert_eq!(
+        result.unwrap(),
+        elle::list([Value::bool(true), Value::bool(true)])
+    );
 }
 
 #[test]
