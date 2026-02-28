@@ -1,8 +1,10 @@
 //! Hover information support for LSP
 
+use crate::primitives::def::Doc;
 use crate::symbol::SymbolTable;
-use crate::symbols::{get_primitive_documentation, SymbolIndex, SymbolKind};
+use crate::symbols::{SymbolIndex, SymbolKind};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 /// Find hoverable information at a given position
 pub fn find_hover_info(
@@ -10,6 +12,7 @@ pub fn find_hover_info(
     character: u32,
     symbol_index: &SymbolIndex,
     symbol_table: &SymbolTable,
+    docs: &HashMap<String, Doc>,
 ) -> Option<Value> {
     // LSP uses 0-based line numbers but SourceLoc uses 1-based
     let target_line = line as usize + 1;
@@ -53,9 +56,10 @@ pub fn find_hover_info(
             let doc = if let Some(def) = symbol_index.definitions.get(&sym_id) {
                 def.documentation
                     .as_deref()
-                    .or_else(|| get_primitive_documentation(name))
+                    .map(|d| d.to_string())
+                    .or_else(|| docs.get(name).map(|d| d.format()))
             } else {
-                get_primitive_documentation(name)
+                docs.get(name).map(|d| d.format())
             };
 
             if let Some(doc_str) = doc {
@@ -98,8 +102,9 @@ mod tests {
     fn test_hover_info_returns_none_for_empty_index() {
         let index = SymbolIndex::new();
         let symbol_table = crate::SymbolTable::new();
+        let docs = HashMap::new();
 
-        let hover = find_hover_info(0, 0, &index, &symbol_table);
+        let hover = find_hover_info(0, 0, &index, &symbol_table, &docs);
         assert!(hover.is_none());
     }
 }

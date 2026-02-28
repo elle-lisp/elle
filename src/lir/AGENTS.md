@@ -19,7 +19,7 @@ Does NOT:
 
 | Type | Purpose |
 |------|---------|
-| `LirFunction` | Compilation unit: blocks, constants, metadata |
+| `LirFunction` | Compilation unit: blocks, constants, metadata, docstring |
 | `BasicBlock` | Instructions + terminator |
 | `LirInstr` | Individual operation |
 | `SpannedInstr` | `LirInstr` + `Span` for source tracking |
@@ -84,33 +84,37 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 ## Invariants
 
 1. **Each register assigned exactly once.** SSA form. If you see a register
-   used before definition, lowering is broken.
+    used before definition, lowering is broken.
 
 2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, `Yield`,
-   or `Unreachable`. No fall-through.
+    or `Unreachable`. No fall-through.
 
 3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with
-   "unknown binding," the HIR→LIR mapping is incomplete. The key is `Binding`
-   (hashed by `Value::to_bits()`), the value is `u16` slot index.
+    "unknown binding," the HIR→LIR mapping is incomplete. The key is `Binding`
+    (hashed by `Value::to_bits()`), the value is `u16` slot index.
 
 4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies,
-   captures and parameters are upvalues; they use LoadCapture, not LoadLocal.
+    captures and parameters are upvalues; they use LoadCapture, not LoadLocal.
 
 5. **`cell_params_mask` is set for mutable parameters.** Bit i set means
-   parameter i needs cell wrapping at call time.
+    parameter i needs cell wrapping at call time.
 
 6. **`cell_locals_mask` is set for locals that need cells.** Bit i set means
-   locally-defined variable i (0-indexed from the first local after params)
-   needs cell wrapping because it's captured by a nested closure or mutated
-   via `set!`. The JIT uses this to skip `LocalCell` heap allocation for
-   non-captured, non-mutated `let` bindings. The VM interpreter does not
-   use this mask (it cell-wraps all locals unconditionally). Both masks
-   are limited to 64 entries (`u64`).
+    locally-defined variable i (0-indexed from the first local after params)
+    needs cell wrapping because it's captured by a nested closure or mutated
+    via `set!`. The JIT uses this to skip `LocalCell` heap allocation for
+    non-captured, non-mutated `let` bindings. The VM interpreter does not
+    use this mask (it cell-wraps all locals unconditionally). Both masks
+    are limited to 64 entries (`u64`).
 
 7. **Yield is a block terminator, not an instruction.** `Terminator::Yield`
-   splits the block: the current block ends with yield, and a new resume block
-   begins. The resume block starts with `LoadResumeValue` to capture the value
-   passed to `coro/resume`.
+    splits the block: the current block ends with yield, and a new resume block
+    begins. The resume block starts with `LoadResumeValue` to capture the value
+    passed to `coro/resume`.
+
+8. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from
+    `HirKind::Lambda.doc` during lowering. The emitter preserves it into
+    `Closure.doc` without encoding it in bytecode.
 
 ## Key instructions
 

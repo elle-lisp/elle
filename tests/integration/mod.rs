@@ -104,3 +104,6 @@ mod bytes {
 mod regex {
     include!("regex.rs");
 }
+mod docstrings {
+    include!("docstrings.rs");
+}

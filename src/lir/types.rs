@@ -2,7 +2,7 @@
 
 use crate::effects::Effect;
 use crate::syntax::Span;
-use crate::value::{Arity, SymbolId};
+use crate::value::{Arity, SymbolId, Value};
 
 /// Virtual register
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -54,6 +54,8 @@ pub struct LirFunction {
     pub cell_locals_mask: u64,
     /// Effect of this function (Pure, Yields, or Polymorphic)
     pub effect: Effect,
+    /// Optional docstring from the source lambda
+    pub doc: Option<Value>,
 }
 
 impl LirFunction {
@@ -70,6 +72,7 @@ impl LirFunction {
             cell_params_mask: 0,
             cell_locals_mask: 0,
             effect: Effect::none(),
+            doc: None,
         }
     }
 }

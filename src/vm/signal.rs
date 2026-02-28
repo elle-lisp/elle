@@ -174,7 +174,16 @@ impl VM {
                         error_val("type-error", "doc: expected string or keyword".to_string()),
                     );
                 };
-                if let Some(doc) = self.docs.get(&name) {
+                // First, check if the named global is a closure with a doc field
+                let user_doc = unsafe { crate::context::get_symbol_table() }
+                    .and_then(|st_ptr| unsafe { (*st_ptr).get(&name) })
+                    .and_then(|sym_id| self.get_global(sym_id.0))
+                    .and_then(|val| val.as_closure().cloned())
+                    .and_then(|closure| closure.doc)
+                    .and_then(|doc_val| doc_val.with_string(|s| s.to_string()));
+                if let Some(doc_str) = user_doc {
+                    (SIG_OK, Value::string(doc_str))
+                } else if let Some(doc) = self.docs.get(&name) {
                     (SIG_OK, Value::string(doc.format()))
                 } else {
                     (

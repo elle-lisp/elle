@@ -5,6 +5,7 @@
 
 use crate::hir::{extract_symbols_from_hir, HirLinter};
 use crate::lint::diagnostics::{Diagnostic, Severity};
+use crate::primitives::def::Doc;
 use crate::symbol::SymbolTable;
 use crate::symbols::SymbolIndex;
 use crate::{analyze_all, init_stdlib, register_primitives, VM};
@@ -125,6 +126,11 @@ impl CompilerState {
     /// Get symbol table
     pub fn symbol_table(&self) -> &SymbolTable {
         &self.symbol_table
+    }
+
+    /// Get the VM's documentation map
+    pub fn docs(&self) -> &std::collections::HashMap<String, Doc> {
+        &self.vm.docs
     }
 
     /// Get all open documents

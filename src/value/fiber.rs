@@ -322,6 +322,7 @@ mod tests {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         })
     }
 

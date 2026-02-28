@@ -435,6 +435,7 @@ mod tests {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         })
     }
 
@@ -526,6 +527,7 @@ mod tests {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         });
         let args = vec![Value::int(42)];
         let env = build_callback_env(&closure, &args);

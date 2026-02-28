@@ -6,6 +6,7 @@ use crate::value::Arity;
 
 impl Lowerer {
     /// Lower a lambda expression (creates closure with captures)
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn lower_lambda_expr(
         &mut self,
         params: &[Binding],
@@ -14,6 +15,7 @@ impl Lowerer {
         body: &Hir,
         num_locals: u16,
         inferred_effect: &crate::effects::Effect,
+        doc: Option<crate::value::Value>,
     ) -> Result<Reg, String> {
         // Collect capture registers
         let mut capture_regs = Vec::new();
@@ -97,6 +99,7 @@ impl Lowerer {
             body,
             num_locals,
             *inferred_effect,
+            doc,
         )?;
 
         // Create closure with the nested function
@@ -110,6 +113,7 @@ impl Lowerer {
     }
 
     /// Lower a lambda body to a separate LirFunction
+    #[allow(clippy::too_many_arguments)]
     fn lower_lambda_body(
         &mut self,
         params: &[Binding],
@@ -118,6 +122,7 @@ impl Lowerer {
         body: &Hir,
         _num_locals: u16,
         inferred_effect: crate::effects::Effect,
+        doc: Option<crate::value::Value>,
     ) -> Result<LirFunction, String> {
         // Compute arity: if variadic, fixed params = total - 1 (rest slot)
         let arity = if rest_param.is_some() {
@@ -146,6 +151,7 @@ impl Lowerer {
         self.current_func.num_captures = captures.len() as u16;
         self.in_lambda = true;
         self.num_captures = captures.len() as u16;
+        self.current_func.doc = doc;
 
         // In a closure, the environment is laid out as:
         // [captured_vars..., parameters..., locally_defined_cells...]

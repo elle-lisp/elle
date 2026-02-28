@@ -247,6 +247,7 @@ mod tests {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: Some(Rc::new(lir)),
+            doc: None,
         };
         Value::closure(closure)
     }
@@ -451,6 +452,7 @@ mod tests {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         };
 
         let mut globals = vec![Value::NIL; 10];

@@ -64,22 +64,24 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 1. **`Value` is `Copy`.** All 8 bytes fit in a register. Heap data is `Rc`.
 
 2. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST`
-   is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
+    is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
 3. **Two cell types exist.** `Cell` (user-created via `box`, explicit deref)
-   and `LocalCell` (compiler-created for mutable captures, auto-unwrapped).
-   Distinguished by a bool flag on `HeapObject::Cell`.
+    and `LocalCell` (compiler-created for mutable captures, auto-unwrapped).
+    Distinguished by a bool flag on `HeapObject::Cell`.
 
-4. **`Closure` has `location_map`.** The `location_map: Rc<LocationMap>` field
-   maps bytecode offsets to source locations for error reporting.
+4. **`Closure` has `location_map` and `doc`.** The `location_map: Rc<LocationMap>`
+    field maps bytecode offsets to source locations for error reporting. The
+    `doc: Option<Value>` field carries the docstring extracted from the function
+    body, threaded from HIR through LIR.
 
 5. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
-   transfer between threads, cloning `Rc` contents as needed.
+    transfer between threads, cloning `Rc` contents as needed.
 
 6. **`SuspendedFrame` replaces both `SavedContext` and `ContinuationFrame`.**
-   A single type captures everything needed to resume: bytecode (`Rc<Vec<u8>>`),
-   constants (`Rc<Vec<Value>>`), env (`Rc<Vec<Value>>`), IP, and operand stack.
-   Signal suspension has an empty stack; yield suspension captures the stack.
+    A single type captures everything needed to resume: bytecode (`Rc<Vec<u8>>`),
+    constants (`Rc<Vec<Value>>`), env (`Rc<Vec<Value>>`), IP, and operand stack.
+    Signal suspension has an empty stack; yield suspension captures the stack.
 
 ## Value encoding
 

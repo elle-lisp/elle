@@ -16,10 +16,6 @@ this module provides the shared types.
 | `SymbolDef` | Definition info: name, kind, location, arity, docs |
 | `SymbolKind` | `Function`, `Variable`, `Builtin`, `Macro`, `Module` |
 
-| Function | Purpose |
-|----------|---------|
-| `get_primitive_documentation` | Returns doc strings for built-in functions |
-
 ## Dependents
 
 - `hir/symbols.rs` — HIR-based symbol extraction builds SymbolIndex
@@ -29,4 +25,4 @@ this module provides the shared types.
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | ~200 | All types and the primitive documentation function |
+| `mod.rs` | ~175 | Symbol index types (SymbolIndex, SymbolDef, SymbolKind) |
