@@ -74,7 +74,7 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
         // Plugin loading for .so files
         if path.ends_with(".so") {
             return match crate::plugin::load_plugin(&path, vm, symbols) {
-                Ok(()) => (SIG_OK, Value::bool(true)),
+                Ok(value) => (SIG_OK, value),
                 Err(e) => (SIG_ERROR, error_val("error", format!("import-file: {}", e))),
             };
         }

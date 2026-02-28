@@ -15,10 +15,17 @@ use std::collections::BTreeMap;
 ///
 /// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
 /// `PluginContext` reference. Only safe when called from `load_plugin`.
-pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) {
+pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
+    let mut fields = BTreeMap::new();
     for def in PRIMITIVES {
         ctx.register(def);
+        let short_name = def.name.strip_prefix("regex/").unwrap_or(def.name);
+        fields.insert(
+            TableKey::Keyword(short_name.into()),
+            Value::native_fn(def.func),
+        );
     }
+    Value::struct_from(fields)
 }
 
 // ---------------------------------------------------------------------------

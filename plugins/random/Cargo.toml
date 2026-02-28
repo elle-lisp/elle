@@ -1,0 +1,11 @@
+[package]
+name = "elle-random"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle = { path = "../.." }
+fastrand = "2.3"

@@ -194,6 +194,12 @@ jobs:
           https://disruptek.github.io/elle/api/elle/ffi/
           https://disruptek.github.io/elle/api/elle/compiler/
           EOF
+      - name: Fetch benchmark data
+        run: |
+          git fetch origin gh-pages --depth=1 || true
+          mkdir -p site/dev/bench
+          git show origin/gh-pages:dev/bench/data.js > site/dev/bench/data.js 2>/dev/null || echo '{}' > site/dev/bench/data.js
+          git show origin/gh-pages:dev/bench/index.html > site/dev/bench/index.html 2>/dev/null || true
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
         with:
@@ -236,6 +242,8 @@ jobs:
     name: Benchmarks
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'performance')
+    permissions:
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -251,6 +259,20 @@ jobs:
             | tee output.txt
         env:
           RAYON_NUM_THREADS: 1
+      - name: Post benchmark comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo '## Benchmark Results'
+            echo ''
+            echo '```'
+            cat output.txt
+            echo '```'
+            echo ''
+            echo "_Commit: ${{ github.event.pull_request.head.sha }}_"
+          } > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -259,7 +281,6 @@ jobs:
           output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
           alert-threshold: '120%'
-          comment-on-alert: true
           fail-on-alert: true
           auto-push: false
 
@@ -267,7 +288,6 @@ jobs:
     name: Publish Benchmarks
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    continue-on-error: true
     permissions:
       contents: write
     steps:
@@ -296,6 +316,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           benchmark-data-dir-path: dev/bench
+          gh-pages-branch: gh-pages
 
   # Weekly toolchain compatibility check
   toolchain-check:
