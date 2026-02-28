@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "plugins/regex"]
+members = [".", "plugins/regex", "plugins/mermaid", "plugins/crypto", "plugins/sqlite", "plugins/random", "plugins/sugiyama", "plugins/fdg", "plugins/dagre"]
 resolver = "2"
 
 [package]
@@ -15,8 +15,6 @@ libffi = "5.1"
 rustyline = "14"
 libc = "0.2"
 serde_json = "1.0"
-sha2 = "0.10"
-hmac = "0.12"
 
 # JIT compilation
 cranelift-codegen = "0.116"

@@ -41,7 +41,7 @@ impl PluginContext {
 /// ABI safety. The `PluginContext` argument is a Rust type — the plugin
 /// must be compiled with the same Rust compiler version and the same
 /// `elle` crate version. Version skew will crash.
-pub type PluginInitFn = unsafe extern "C" fn(ctx: &mut PluginContext);
+pub type PluginInitFn = unsafe extern "C" fn(ctx: &mut PluginContext) -> Value;
 
 /// Load a plugin `.so` and register its primitives.
 ///
@@ -51,7 +51,7 @@ pub type PluginInitFn = unsafe extern "C" fn(ctx: &mut PluginContext);
 /// The caller is responsible for deduplication (e.g., via `is_module_loaded`).
 /// Calling this twice with the same path will register primitives twice and
 /// leak a second library handle.
-pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
+pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<Value, String> {
     // Load the shared library
     let lib = unsafe { libloading::Library::new(path) }
         .map_err(|e| format!("failed to load plugin '{}': {}", path, e))?;
@@ -62,7 +62,7 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result
 
     // Call init to collect primitive definitions
     let mut ctx = PluginContext::new();
-    unsafe { init_fn(&mut ctx) };
+    let return_value = unsafe { init_fn(&mut ctx) };
 
     // Register collected primitives into the VM's globals and docs.
     //
@@ -98,5 +98,5 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result
     // Leak the library handle — never unload plugins
     std::mem::forget(lib);
 
-    Ok(())
+    Ok(return_value)
 }

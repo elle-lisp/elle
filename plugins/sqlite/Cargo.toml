@@ -1,0 +1,11 @@
+[package]
+name = "elle-sqlite"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle = { path = "../.." }
+rusqlite = { version = "0.38", features = ["bundled"] }

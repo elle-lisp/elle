@@ -1,0 +1,12 @@
+[package]
+name = "elle-crypto"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle = { path = "../.." }
+sha2 = "0.10"
+hmac = "0.12"

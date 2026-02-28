@@ -1,0 +1,12 @@
+[package]
+name = "elle-dagre"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle = { path = "../.." }
+dagre-rs = "0.1"
+petgraph = "0.8"

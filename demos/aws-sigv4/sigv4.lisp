@@ -4,6 +4,9 @@
 ## Exercises: string manipulation, bytes type, crypto primitives,
 ## uri-encode, higher-order functions, recursive patterns.
 
+## Load the crypto plugin (sha256, hmac-sha256)
+(import-file "target/debug/libelle_crypto.so")
+
 ## ============================================================================
 ## DateTime Functions
 ## ============================================================================

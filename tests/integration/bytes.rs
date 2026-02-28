@@ -4,6 +4,17 @@
 
 use crate::common::eval_source;
 
+/// Path to the compiled crypto plugin shared object.
+fn crypto_plugin_path() -> String {
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    format!("{}/target/debug/libelle_crypto.so", manifest)
+}
+
+/// Returns true if the crypto plugin .so exists on disk.
+fn crypto_plugin_available() -> bool {
+    std::path::Path::new(&crypto_plugin_path()).exists()
+}
+
 #[test]
 fn test_bytes_constructor() {
     let result = eval_source("(bytes 72 101 108 108 111)").unwrap();
@@ -138,8 +149,16 @@ fn test_blob_get_oob() {
 
 #[test]
 fn test_sha256_empty_string() {
+    if !crypto_plugin_available() {
+        eprintln!("SKIP: crypto plugin not built (run `cargo build -p elle-crypto`)");
+        return;
+    }
     // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-    let result = eval_source(r#"(bytes->hex (crypto/sha256 ""))"#).unwrap();
+    let result = eval_source(&format!(
+        r#"(import-file "{}") (bytes->hex (crypto/sha256 ""))"#,
+        crypto_plugin_path()
+    ))
+    .unwrap();
     assert!(result.is_string());
     assert_eq!(
         result.with_string(|s| s.to_string()).unwrap(),
@@ -149,8 +168,16 @@ fn test_sha256_empty_string() {
 
 #[test]
 fn test_sha256_hello() {
+    if !crypto_plugin_available() {
+        eprintln!("SKIP: crypto plugin not built (run `cargo build -p elle-crypto`)");
+        return;
+    }
     // SHA-256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
-    let result = eval_source(r#"(bytes->hex (crypto/sha256 "hello"))"#).unwrap();
+    let result = eval_source(&format!(
+        r#"(import-file "{}") (bytes->hex (crypto/sha256 "hello"))"#,
+        crypto_plugin_path()
+    ))
+    .unwrap();
     assert!(result.is_string());
     assert_eq!(
         result.with_string(|s| s.to_string()).unwrap(),
@@ -160,7 +187,15 @@ fn test_sha256_hello() {
 
 #[test]
 fn test_hmac_sha256() {
-    let result = eval_source(r#"(bytes->hex (crypto/hmac-sha256 "key" "message"))"#).unwrap();
+    if !crypto_plugin_available() {
+        eprintln!("SKIP: crypto plugin not built (run `cargo build -p elle-crypto`)");
+        return;
+    }
+    let result = eval_source(&format!(
+        r#"(import-file "{}") (bytes->hex (crypto/hmac-sha256 "key" "message"))"#,
+        crypto_plugin_path()
+    ))
+    .unwrap();
     assert!(result.is_string());
     // Just verify it produces a 64-character hex string (32 bytes)
     let hex = result.with_string(|s| s.to_string()).unwrap();
@@ -193,6 +228,10 @@ fn test_uri_encode_special() {
 
 #[test]
 fn test_sigv4_demo_runs() {
+    if !crypto_plugin_available() {
+        eprintln!("SKIP: crypto plugin not built (run `cargo build -p elle-crypto`)");
+        return;
+    }
     // Run the demo and verify it completes without error
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
         .arg("demos/aws-sigv4/sigv4.lisp")
