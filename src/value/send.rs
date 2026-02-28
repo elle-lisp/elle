@@ -180,6 +180,9 @@ impl SendValue {
             // Unsafe: managed pointers (lifecycle state is not thread-safe with Cell)
             HeapObject::ManagedPointer(_) => Err("Cannot send managed pointer".to_string()),
 
+            // Unsafe: external objects (contain Rc<dyn Any>, not thread-safe)
+            HeapObject::External(_) => Err("Cannot send external object".to_string()),
+
             // FFI type descriptors are pure data — safe to send
             HeapObject::FFIType(desc) => Ok(SendValue::FFIType(desc.clone())),
 

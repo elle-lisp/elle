@@ -1,5 +1,7 @@
 //! Value constructors for immediate and heap-allocated types.
 
+use std::any::Any;
+
 use super::{
     Value, INT_MAX, INT_MIN, PAYLOAD_MASK, PTRVAL_CPOINTER_BIT, PTRVAL_PAYLOAD_MASK, QNAN,
     QNAN_MASK, TAG_INT, TAG_NAN, TAG_POINTER, TAG_PTRVAL, TAG_TRUTHY, TRUTHY_SYMBOL_BIT,
@@ -333,6 +335,17 @@ impl Value {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::Cell;
         alloc(HeapObject::ManagedPointer(Cell::new(Some(addr))))
+    }
+
+    /// Create an external object value (for plugin-provided types).
+    #[inline]
+    pub fn external<T: Any + 'static>(type_name: &'static str, data: T) -> Self {
+        use crate::value::heap::{alloc, ExternalObject, HeapObject};
+        use std::rc::Rc;
+        alloc(HeapObject::External(ExternalObject {
+            type_name,
+            data: Rc::new(data),
+        }))
     }
 
     /// Create a binding value (compile-time only).

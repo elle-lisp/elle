@@ -3,6 +3,7 @@
 //! All non-immediate values (strings, cons cells, vectors, closures, etc.)
 //! are stored on the heap and accessed through `HeapObject`.
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -56,6 +57,7 @@ pub enum HeapTag {
     Buffer = 21,
     Bytes = 22,
     Blob = 23,
+    External = 24,
 }
 
 /// All heap-allocated value types.
@@ -138,6 +140,10 @@ pub enum HeapObject {
     /// Managed FFI pointer with lifecycle tracking.
     /// `Some(addr)` = live, `None` = freed. Only for ffi/malloc'd memory.
     ManagedPointer(std::cell::Cell<Option<usize>>),
+
+    /// Opaque external object from a plugin.
+    /// Holds an arbitrary Rust value with a type name for Elle-side identity.
+    External(ExternalObject),
 }
 
 /// Internal binding metadata, heap-allocated behind the Value pointer.
@@ -204,6 +210,13 @@ impl PartialEq for ThreadHandle {
     }
 }
 
+/// Opaque external object for plugin-provided types.
+/// Holds a type name (for Elle-side identity) and an arbitrary Rust value.
+pub struct ExternalObject {
+    pub type_name: &'static str,
+    pub data: Rc<dyn Any>,
+}
+
 impl HeapObject {
     /// Get the type tag for this heap object.
     #[inline]
@@ -230,6 +243,7 @@ impl HeapObject {
             HeapObject::FFISignature(_, _) => HeapTag::FFISignature,
             HeapObject::FFIType(_) => HeapTag::FFIType,
             HeapObject::ManagedPointer(_) => HeapTag::ManagedPointer,
+            HeapObject::External(_) => HeapTag::External,
         }
     }
 
@@ -257,6 +271,7 @@ impl HeapObject {
             HeapObject::FFISignature(_, _) => "ffi-signature",
             HeapObject::FFIType(_) => "ffi-type",
             HeapObject::ManagedPointer(_) => "pointer",
+            HeapObject::External(ext) => ext.type_name,
         }
     }
 }
@@ -334,6 +349,7 @@ impl std::fmt::Debug for HeapObject {
                 Some(addr) => write!(f, "<managed-pointer 0x{:x}>", addr),
                 None => write!(f, "<freed-pointer>"),
             },
+            HeapObject::External(ext) => write!(f, "#<{}>", ext.type_name),
         }
     }
 }

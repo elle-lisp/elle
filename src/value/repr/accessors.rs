@@ -1,5 +1,7 @@
 //! Value accessors for extracting typed data from Values.
 
+use std::any::Any;
+
 use super::{
     Value, PAYLOAD_MASK, PTRVAL_PAYLOAD_MASK, SYMBOL_ID_MASK, TAG_FALSE, TAG_NAN, TAG_NAN_MASK,
     TAG_TRUE,
@@ -568,6 +570,34 @@ impl Value {
         match unsafe { deref(*self) } {
             HeapObject::ManagedPointer(cell) => Some(cell),
             _ => None,
+        }
+    }
+
+    /// Try to extract an external object's data as a specific Rust type.
+    pub fn as_external<T: Any + 'static>(&self) -> Option<&T> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        unsafe {
+            match deref(*self) {
+                HeapObject::External(ext) => ext.data.downcast_ref::<T>(),
+                _ => None,
+            }
+        }
+    }
+
+    /// Get the type name of an external object, if this value is one.
+    pub fn external_type_name(&self) -> Option<&'static str> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        unsafe {
+            match deref(*self) {
+                HeapObject::External(ext) => Some(ext.type_name),
+                _ => None,
+            }
         }
     }
 
