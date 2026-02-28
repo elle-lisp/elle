@@ -24,7 +24,7 @@ pub fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let json_str = if let Some(s) = args[0].as_string() {
+    let json_str = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -36,7 +36,7 @@ pub fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let mut parser = JsonParser::new(json_str);
+    let mut parser = JsonParser::new(&json_str);
     match parser.parse() {
         Ok(v) => (SIG_OK, v),
         Err(e) => (SIG_ERROR, error_val("error", e)),
@@ -513,7 +513,7 @@ mod tests {
     fn test_parse_surrogate_pair() {
         // Emoji 😀 is U+1F600, encoded as surrogate pair \uD83D\uDE00
         let mut parser = JsonParser::new("\"\\uD83D\\uDE00\"");
-        if let Some(s) = parser.parse().unwrap().as_string() {
+        if let Some(s) = parser.parse().unwrap().with_string(|s| s.to_string()) {
             assert_eq!(s, "😀");
         } else {
             panic!("Expected string");

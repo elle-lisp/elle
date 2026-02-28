@@ -189,7 +189,7 @@ impl<'a> Analyzer<'a> {
                         "def" => return self.analyze_const(items, span),
                         "set" => return self.analyze_set(items, span),
                         "while" => return self.analyze_while(items, span),
-                        "each" => return self.analyze_for(items, span),
+
                         "and" => return self.analyze_and(&items[1..], span),
                         "or" => return self.analyze_or(&items[1..], span),
                         "quote" => {
@@ -462,53 +462,6 @@ impl<'a> Analyzer<'a> {
                 name: Some("while".to_string()),
                 block_id,
                 body: vec![while_node],
-            },
-            span,
-            effect,
-        ))
-    }
-
-    pub(crate) fn analyze_for(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        // (each var iter body) or (each var in iter body)
-        if items.len() < 4 {
-            return Err(format!(
-                "{}: each requires variable, iterator, and body",
-                span
-            ));
-        }
-
-        let var_name = items[1]
-            .as_symbol()
-            .ok_or_else(|| format!("{}: each variable must be a symbol", span))?;
-
-        // Check for optional 'in' keyword
-        let (iter_idx, body_idx) = if items.len() == 5 {
-            if items[2].as_symbol() == Some("in") {
-                (3, 4)
-            } else {
-                return Err(format!(
-                    "{}: each syntax is (each var iter body) or (each var in iter body)",
-                    span
-                ));
-            }
-        } else {
-            (2, 3)
-        };
-
-        let iter = self.analyze_expr(&items[iter_idx])?;
-
-        self.push_scope(false);
-        let var_id = self.bind(var_name, items[1].scopes.as_slice(), BindingScope::Local);
-        let body = self.analyze_expr(&items[body_idx])?;
-        self.pop_scope();
-
-        let effect = iter.effect.combine(body.effect);
-
-        Ok(Hir::new(
-            HirKind::For {
-                var: var_id,
-                iter: Box::new(iter),
-                body: Box::new(body),
             },
             span,
             effect,

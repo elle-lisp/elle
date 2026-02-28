@@ -101,12 +101,41 @@ pub fn prim_push(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]);
     }
 
+    if let Some(blob_ref) = args[0].as_blob() {
+        let byte = match args[1].as_int() {
+            Some(n) if (0..=255).contains(&n) => n as u8,
+            Some(n) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("push: byte value out of range 0-255: {}", n),
+                    ),
+                )
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "push: blob value must be integer, got {}",
+                            args[1].type_name()
+                        ),
+                    ),
+                )
+            }
+        };
+        blob_ref.borrow_mut().push(byte);
+        return (SIG_OK, args[0]);
+    }
+
     (
         SIG_ERROR,
         error_val(
             "type-error",
             format!(
-                "push: expected array or buffer, got {}",
+                "push: expected array, buffer, or blob, got {}",
                 args[0].type_name()
             ),
         ),
@@ -159,11 +188,28 @@ pub fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
+    if let Some(blob_ref) = args[0].as_blob() {
+        let mut blob = blob_ref.borrow_mut();
+        match blob.pop() {
+            Some(byte) => {
+                drop(blob);
+                return (SIG_OK, Value::int(byte as i64));
+            }
+            None => {
+                drop(blob);
+                return (SIG_ERROR, error_val("error", "pop: empty blob".to_string()));
+            }
+        }
+    }
+
     (
         SIG_ERROR,
         error_val(
             "type-error",
-            format!("pop: expected array or buffer, got {}", args[0].type_name()),
+            format!(
+                "pop: expected array, buffer, or blob, got {}",
+                args[0].type_name()
+            ),
         ),
     )
 }

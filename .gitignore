@@ -10,3 +10,6 @@ perf.data.old
 
 # Issue workflow scratch dirs
 issue-*/
+
+# OpenCode agents
+.opencode/

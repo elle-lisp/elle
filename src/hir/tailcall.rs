@@ -21,7 +21,7 @@
 //! - Arguments to calls
 //! - Function position of calls
 //! - Value expressions in bindings
-//! - Loop bodies (`while`, `for`)
+//! - Loop bodies (`while`)
 //! - `throw` value, `yield` value
 //! - Match scrutinee and guards
 
@@ -140,12 +140,6 @@ fn mark(hir: &mut Hir, in_tail: bool) {
         // While: loop bodies are never in tail position
         HirKind::While { cond, body } => {
             mark(cond, false);
-            mark(body, false);
-        }
-
-        // For: loop bodies are never in tail position
-        HirKind::For { iter, body, .. } => {
-            mark(iter, false);
             mark(body, false);
         }
 
@@ -277,10 +271,6 @@ mod tests {
             }
             HirKind::While { cond, body } => {
                 collect_calls(cond, calls);
-                collect_calls(body, calls);
-            }
-            HirKind::For { iter, body, .. } => {
-                collect_calls(iter, calls);
                 collect_calls(body, calls);
             }
             HirKind::Set { value, .. }

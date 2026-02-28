@@ -18,99 +18,100 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if let Some(path) = args[0].as_string() {
-        // Get VM context for file loading
-        let vm_ptr = match crate::context::get_vm_context() {
+    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
+        s
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("import-file: expected string, got {}", args[0].type_name()),
+            ),
+        );
+    };
+
+    // Get VM context for file loading
+    let vm_ptr = match crate::context::get_vm_context() {
+        Some(ptr) => ptr,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    "import-file: VM context not initialized".to_string(),
+                ),
+            );
+        }
+    };
+
+    unsafe {
+        let vm = &mut *vm_ptr;
+
+        // Check for circular dependencies
+        if vm.is_module_loaded(&path) {
+            return (SIG_OK, Value::bool(true));
+        }
+
+        // Mark as loaded to prevent circular dependency
+        vm.mark_module_loaded(path.clone());
+
+        // Get the caller's symbol table context
+        let symbols_ptr = match crate::context::get_symbol_table() {
             Some(ptr) => ptr,
             None => {
                 return (
                     SIG_ERROR,
                     error_val(
                         "error",
-                        "import-file: VM context not initialized".to_string(),
+                        "import-file: symbol table context not initialized".to_string(),
                     ),
                 );
             }
         };
 
-        unsafe {
-            let vm = &mut *vm_ptr;
-
-            // Check for circular dependencies
-            if vm.is_module_loaded(path) {
-                return (SIG_OK, Value::bool(true));
+        // Read and compile the file
+        let contents = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("import-file: failed to read '{}': {}", path, e),
+                    ),
+                );
             }
+        };
 
-            // Mark as loaded to prevent circular dependency
-            vm.mark_module_loaded(path.to_string());
-
-            // Get the caller's symbol table context
-            let symbols_ptr = match crate::context::get_symbol_table() {
-                Some(ptr) => ptr,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            "import-file: symbol table context not initialized".to_string(),
-                        ),
-                    );
-                }
-            };
-
-            // Read and compile the file
-            let path_str = path;
-            let contents = match std::fs::read_to_string(path_str) {
-                Ok(c) => c,
-                Err(e) => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            format!("import-file: failed to read '{}': {}", path_str, e),
-                        ),
-                    );
-                }
-            };
-
-            // Compile all forms using the new pipeline
-            let symbols = &mut *symbols_ptr;
-            let results = match crate::pipeline::compile_all(&contents, symbols) {
-                Ok(r) => r,
-                Err(e) => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            format!("import-file: compilation error in {}: {}", path_str, e),
-                        ),
-                    );
-                }
-            };
-
-            // Execute each compiled form sequentially
-            for result in &results {
-                if let Err(e) = vm.execute(&result.bytecode) {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            format!("import-file: runtime error in {}: {}", path_str, e),
-                        ),
-                    );
-                }
+        // Compile all forms using the new pipeline
+        let symbols = &mut *symbols_ptr;
+        let results = match crate::pipeline::compile_all(&contents, symbols) {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("import-file: compilation error in {}: {}", path, e),
+                    ),
+                );
             }
+        };
 
-            (SIG_OK, Value::bool(true))
+        // Execute each compiled form sequentially
+        for result in &results {
+            if let Err(e) = vm.execute(&result.bytecode) {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("import-file: runtime error in {}: {}", path, e),
+                    ),
+                );
+            }
         }
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("import-file: expected string, got {}", args[0].type_name()),
-            ),
-        )
+
+        (SIG_OK, Value::bool(true))
     }
 }
 
@@ -128,28 +129,10 @@ pub fn prim_add_module_path(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if let Some(path) = args[0].as_string() {
-        // Get VM context
-        let vm_ptr = match crate::context::get_vm_context() {
-            Some(ptr) => ptr,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "error",
-                        "add-module-path: VM context not initialized".to_string(),
-                    ),
-                );
-            }
-        };
-
-        unsafe {
-            let vm = &mut *vm_ptr;
-            vm.add_module_search_path(std::path::PathBuf::from(path));
-            (SIG_OK, Value::NIL)
-        }
+    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
+        s
     } else {
-        (
+        return (
             SIG_ERROR,
             error_val(
                 "type-error",
@@ -158,7 +141,27 @@ pub fn prim_add_module_path(args: &[Value]) -> (SignalBits, Value) {
                     args[0].type_name()
                 ),
             ),
-        )
+        );
+    };
+
+    // Get VM context
+    let vm_ptr = match crate::context::get_vm_context() {
+        Some(ptr) => ptr,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    "add-module-path: VM context not initialized".to_string(),
+                ),
+            );
+        }
+    };
+
+    unsafe {
+        let vm = &mut *vm_ptr;
+        vm.add_module_search_path(std::path::PathBuf::from(path));
+        (SIG_OK, Value::NIL)
     }
 }
 

@@ -20,8 +20,8 @@ pub fn prim_to_int(args: &[Value]) -> (SignalBits, Value) {
         Some(n) => (SIG_OK, Value::int(n)),
         None => match args[0].as_float() {
             Some(f) => (SIG_OK, Value::int(f as i64)),
-            None => match args[0].as_string() {
-                Some(s) => match s.parse::<i64>() {
+            None => {
+                if let Some(result) = args[0].with_string(|s| match s.parse::<i64>() {
                     Ok(n) => (SIG_OK, Value::int(n)),
                     Err(_) => (
                         SIG_ERROR,
@@ -30,18 +30,21 @@ pub fn prim_to_int(args: &[Value]) -> (SignalBits, Value) {
                             "to-int: cannot parse string as integer".to_string(),
                         ),
                     ),
-                },
-                None => (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "to-int: expected integer, float, or string, got {}",
-                            args[0].type_name()
+                }) {
+                    result
+                } else {
+                    (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "to-int: expected integer, float, or string, got {}",
+                                args[0].type_name()
+                            ),
                         ),
-                    ),
-                ),
-            },
+                    )
+                }
+            }
         },
     }
 }
@@ -61,8 +64,8 @@ pub fn prim_to_float(args: &[Value]) -> (SignalBits, Value) {
         Some(n) => (SIG_OK, Value::float(n as f64)),
         None => match args[0].as_float() {
             Some(f) => (SIG_OK, Value::float(f)),
-            None => match args[0].as_string() {
-                Some(s) => match s.parse::<f64>() {
+            None => {
+                if let Some(result) = args[0].with_string(|s| match s.parse::<f64>() {
                     Ok(f) => (SIG_OK, Value::float(f)),
                     Err(_) => (
                         SIG_ERROR,
@@ -71,18 +74,21 @@ pub fn prim_to_float(args: &[Value]) -> (SignalBits, Value) {
                             "to-float: cannot parse string as float".to_string(),
                         ),
                     ),
-                },
-                None => (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "to-float: expected integer, float, or string, got {}",
-                            args[0].type_name()
+                }) {
+                    result
+                } else {
+                    (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "to-float: expected integer, float, or string, got {}",
+                                args[0].type_name()
+                            ),
                         ),
-                    ),
-                ),
-            },
+                    )
+                }
+            }
         },
     }
 }
@@ -102,8 +108,8 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
     let val = args[0];
 
     // Handle immediate types
-    if let Some(s) = val.as_string() {
-        return (SIG_OK, Value::string(s));
+    if val.is_string() {
+        return (SIG_OK, val);
     }
 
     if let Some(n) = val.as_int() {
@@ -165,17 +171,16 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
             if sig != SIG_OK {
                 return (sig, result);
             }
-            match result.as_string() {
-                Some(s) => formatted_items.push(s.to_string()),
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            "to-string: failed to convert list item".to_string(),
-                        ),
-                    )
-                }
+            if let Some(s) = result.with_string(|s| s.to_string()) {
+                formatted_items.push(s);
+            } else {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        "to-string: failed to convert list item".to_string(),
+                    ),
+                );
             }
         }
 
@@ -192,17 +197,16 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
             if sig != SIG_OK {
                 return (sig, result);
             }
-            match result.as_string() {
-                Some(s) => formatted_items.push(s.to_string()),
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            "to-string: failed to convert array item".to_string(),
-                        ),
-                    )
-                }
+            if let Some(s) = result.with_string(|s| s.to_string()) {
+                formatted_items.push(s);
+            } else {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        "to-string: failed to convert array item".to_string(),
+                    ),
+                );
             }
         }
 

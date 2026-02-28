@@ -54,6 +54,8 @@ pub enum HeapTag {
     FFIType = 19,
     ManagedPointer = 20,
     Buffer = 21,
+    Bytes = 22,
+    Blob = 23,
 }
 
 /// All heap-allocated value types.
@@ -85,6 +87,12 @@ pub enum HeapObject {
 
     /// Mutable buffer (byte sequence)
     Buffer(RefCell<Vec<u8>>),
+
+    /// Immutable byte sequence (binary data)
+    Bytes(Vec<u8>),
+
+    /// Mutable byte sequence (binary data workspace)
+    Blob(RefCell<Vec<u8>>),
 
     /// Mutable cell for captured variables.
     /// The boolean distinguishes compiler-created cells (true, auto-unwrapped
@@ -209,6 +217,8 @@ impl HeapObject {
             HeapObject::Closure(_) => HeapTag::Closure,
             HeapObject::Tuple(_) => HeapTag::Tuple,
             HeapObject::Buffer(_) => HeapTag::Buffer,
+            HeapObject::Bytes(_) => HeapTag::Bytes,
+            HeapObject::Blob(_) => HeapTag::Blob,
             HeapObject::Cell(_, _) => HeapTag::Cell,
             HeapObject::Float(_) => HeapTag::Float,
             HeapObject::NativeFn(_) => HeapTag::NativeFn,
@@ -234,6 +244,8 @@ impl HeapObject {
             HeapObject::Closure(_) => "closure",
             HeapObject::Tuple(_) => "tuple",
             HeapObject::Buffer(_) => "buffer",
+            HeapObject::Bytes(_) => "bytes",
+            HeapObject::Blob(_) => "blob",
             HeapObject::Cell(_, _) => "cell",
             HeapObject::Float(_) => "float",
             HeapObject::NativeFn(_) => "native-function",
@@ -279,6 +291,30 @@ impl std::fmt::Debug for HeapObject {
                     write!(f, "@\"{}\"", String::from_utf8_lossy(&borrowed))
                 } else {
                     write!(f, "@\"<borrowed>\"")
+                }
+            }
+            HeapObject::Bytes(b) => {
+                write!(f, "#bytes[")?;
+                for (i, byte) in b.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{:02x}", byte)?;
+                }
+                write!(f, "]")
+            }
+            HeapObject::Blob(b) => {
+                if let Ok(borrowed) = b.try_borrow() {
+                    write!(f, "#blob[")?;
+                    for (i, byte) in borrowed.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, " ")?;
+                        }
+                        write!(f, "{:02x}", byte)?;
+                    }
+                    write!(f, "]")
+                } else {
+                    write!(f, "#blob[<borrowed>]")
                 }
             }
             HeapObject::Cell(_, _) => write!(f, "<cell>"),

@@ -20,18 +20,18 @@ pub fn format_error(value: Value) -> String {
     // Tuple error: [:kind "msg"]
     if let Some(elems) = value.as_tuple() {
         if elems.len() == 2 {
-            if let Some(msg) = elems[1].as_string() {
+            if let Some(msg) = elems[1].with_string(|s| s.to_string()) {
                 if let Some(name) = elems[0].as_keyword_name() {
                     return format!("{}: {}", name, msg);
                 }
-                return msg.to_string();
+                return msg;
             }
         }
     }
 
     // Plain string error
-    if let Some(s) = value.as_string() {
-        return s.to_string();
+    if let Some(s) = value.with_string(|s| s.to_string()) {
+        return s;
     }
 
     // Fallback: display the value

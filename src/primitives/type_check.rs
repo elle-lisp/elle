@@ -99,7 +99,7 @@ pub fn prim_is_string(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].as_string().is_some()))
+    (SIG_OK, Value::bool(args[0].is_string()))
 }
 
 /// Check if value is a boolean
@@ -218,6 +218,34 @@ pub fn prim_is_buffer(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     (SIG_OK, Value::bool(args[0].is_buffer()))
+}
+
+/// Check if value is bytes (immutable binary data)
+pub fn prim_is_bytes(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("bytes?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].is_bytes()))
+}
+
+/// Check if value is a blob (mutable binary data)
+pub fn prim_is_blob(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("blob?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].is_blob()))
 }
 
 /// Check if value is a struct (immutable key-value map)
@@ -398,6 +426,28 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["value"],
         category: "predicate",
         example: "(buffer? @\"hello\") #=> true\n(buffer? \"hello\") #=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "bytes?",
+        func: prim_is_bytes,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is bytes (immutable binary data).",
+        params: &["value"],
+        category: "predicate",
+        example: "(bytes? (bytes 1 2 3)) ;=> true",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "blob?",
+        func: prim_is_blob,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a blob (mutable binary data).",
+        params: &["value"],
+        category: "predicate",
+        example: "(blob? (blob 1 2 3)) ;=> true",
         aliases: &[],
     },
 ];

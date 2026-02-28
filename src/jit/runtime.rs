@@ -9,7 +9,7 @@
 //! For data structure operations (cons, car, cdr, vectors), cell operations,
 //! global variable access, and function calls, see the `dispatch` module.
 
-use crate::value::repr::{PAYLOAD_MASK, TAG_FALSE, TAG_INT, TAG_INT_MASK, TAG_NIL};
+use crate::value::repr::{PAYLOAD_MASK, TAG_INT, TAG_INT_MASK, TAG_NIL};
 use crate::value::Value;
 
 // =============================================================================
@@ -289,7 +289,7 @@ pub extern "C" fn elle_jit_is_nil(a: u64) -> u64 {
 /// Check if value is truthy (not nil and not false)
 #[no_mangle]
 pub extern "C" fn elle_jit_is_truthy(a: u64) -> u64 {
-    Value::bool(a != TAG_NIL && a != TAG_FALSE).to_bits()
+    Value::bool((a >> 48) != 0x7FF9).to_bits()
 }
 
 /// Check if value is an integer

@@ -125,8 +125,8 @@ fn value_to_table_key(val: &Value) -> Result<TableKey, Value> {
         Ok(TableKey::Symbol(crate::value::SymbolId(id)))
     } else if let Some(name) = val.as_keyword_name() {
         Ok(TableKey::Keyword(name.to_string()))
-    } else if let Some(s) = val.as_string() {
-        Ok(TableKey::String(s.to_string()))
+    } else if let Some(s) = val.with_string(|s| s.to_string()) {
+        Ok(TableKey::String(s))
     } else {
         Err(error_val(
             "type-error",
@@ -306,8 +306,8 @@ pub fn prim_get(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
-    // String (immutable character sequence)
-    if let Some(s) = args[0].as_string() {
+    // Bytes (immutable binary data — indexed by byte position)
+    if let Some(b) = args[0].as_bytes() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -316,23 +316,90 @@ pub fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "get: string index must be integer, got {}",
+                            "get: bytes index must be integer, got {}",
                             args[1].type_name()
                         ),
                     ),
                 )
             }
         };
-        if index < 0 {
-            return (SIG_OK, default);
+        if index < 0 || index as usize >= b.len() {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("get: index {} out of bounds (length {})", index, b.len()),
+                ),
+            );
         }
-        match s.chars().nth(index as usize) {
-            Some(ch) => {
-                let ch_str = ch.to_string();
-                return (SIG_OK, Value::string(ch_str.as_str()));
+        return (SIG_OK, Value::int(b[index as usize] as i64));
+    }
+
+    // Blob (mutable binary data — indexed by byte position)
+    if let Some(blob_ref) = args[0].as_blob() {
+        let index = match args[1].as_int() {
+            Some(i) => i,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "get: blob index must be integer, got {}",
+                            args[1].type_name()
+                        ),
+                    ),
+                )
             }
-            None => return (SIG_OK, default),
+        };
+        let borrowed = blob_ref.borrow();
+        if index < 0 || index as usize >= borrowed.len() {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!(
+                        "get: index {} out of bounds (length {})",
+                        index,
+                        borrowed.len()
+                    ),
+                ),
+            );
         }
+        return (SIG_OK, Value::int(borrowed[index as usize] as i64));
+    }
+
+    // String (immutable character sequence)
+    if args[0].is_string() {
+        return args[0]
+            .with_string(|s| {
+                let index = match args[1].as_int() {
+                    Some(i) => i,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                format!(
+                                    "get: string index must be integer, got {}",
+                                    args[1].type_name()
+                                ),
+                            ),
+                        )
+                    }
+                };
+                if index < 0 {
+                    return (SIG_OK, default);
+                }
+                match s.chars().nth(index as usize) {
+                    Some(ch) => {
+                        let ch_str = ch.to_string();
+                        (SIG_OK, Value::string(ch_str.as_str()))
+                    }
+                    None => (SIG_OK, default),
+                }
+            })
+            .unwrap();
     }
 
     // Table (mutable keyed collection)
@@ -698,6 +765,61 @@ pub fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]); // Return the mutated buffer
     }
 
+    // Blob (mutable byte sequence) - mutate in place
+    if let Some(blob_ref) = args[0].as_blob() {
+        let index = match args[1].as_int() {
+            Some(i) => i,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "put: blob index must be integer, got {}",
+                            args[1].type_name()
+                        ),
+                    ),
+                )
+            }
+        };
+        let byte = match args[2].as_int() {
+            Some(n) if (0..=255).contains(&n) => n as u8,
+            Some(n) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("put: byte value out of range 0-255: {}", n),
+                    ),
+                )
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "put: blob value must be integer, got {}",
+                            args[2].type_name()
+                        ),
+                    ),
+                )
+            }
+        };
+        let len = blob_ref.borrow().len();
+        if index < 0 || (index as usize) >= len {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("put: index {} out of bounds (length {})", index, len),
+                ),
+            );
+        }
+        blob_ref.borrow_mut()[index as usize] = byte;
+        return (SIG_OK, args[0]);
+    }
+
     // Array (mutable indexed collection) - mutate in place
     if let Some(vec_ref) = args[0].as_array() {
         let index = match args[1].as_int() {
@@ -765,60 +887,64 @@ pub fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // String (immutable character sequence) - return new string
-    if let Some(s) = args[0].as_string() {
-        let index = match args[1].as_int() {
-            Some(i) => i,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "put: string index must be integer, got {}",
-                            args[1].type_name()
+    if args[0].is_string() {
+        return args[0]
+            .with_string(|s| {
+                let index = match args[1].as_int() {
+                    Some(i) => i,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                format!(
+                                    "put: string index must be integer, got {}",
+                                    args[1].type_name()
+                                ),
+                            ),
+                        )
+                    }
+                };
+                let replacement = match args[2].with_string(|r| r.to_string()) {
+                    Some(r) => r,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                format!(
+                                    "put: string value must be string, got {}",
+                                    args[2].type_name()
+                                ),
+                            ),
+                        )
+                    }
+                };
+                let chars: Vec<char> = s.chars().collect();
+                if index < 0 || index as usize >= chars.len() {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "error",
+                            format!(
+                                "put: index {} out of bounds (length {})",
+                                index,
+                                chars.len()
+                            ),
                         ),
-                    ),
-                )
-            }
-        };
-        let replacement = match args[2].as_string() {
-            Some(r) => r,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "put: string value must be string, got {}",
-                            args[2].type_name()
-                        ),
-                    ),
-                )
-            }
-        };
-        let chars: Vec<char> = s.chars().collect();
-        if index < 0 || index as usize >= chars.len() {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!(
-                        "put: index {} out of bounds (length {})",
-                        index,
-                        chars.len()
-                    ),
-                ),
-            );
-        }
-        let mut result = String::new();
-        for (i, ch) in chars.iter().enumerate() {
-            if i == index as usize {
-                result.push_str(replacement);
-            } else {
-                result.push(*ch);
-            }
-        }
-        return (SIG_OK, Value::string(result.as_str()));
+                    );
+                }
+                let mut result = String::new();
+                for (i, ch) in chars.iter().enumerate() {
+                    if i == index as usize {
+                        result.push_str(&replacement);
+                    } else {
+                        result.push(*ch);
+                    }
+                }
+                (SIG_OK, Value::string(result.as_str()))
+            })
+            .unwrap();
     }
 
     // Table (mutable keyed collection) - mutate in place

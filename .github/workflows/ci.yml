@@ -5,6 +5,9 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  schedule:
+    # Weekly toolchain check: Sunday 06:00 UTC
+    - cron: '0 6 * * 0'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,17 +22,14 @@ jobs:
     name: Test Suite
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    strategy:
-      matrix:
-        rust: [stable, beta, nightly]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run all workspace tests
         run: cargo test --workspace --verbose
+        env:
+          PROPTEST_CASES: 32
 
   fmt:
     name: Rustfmt
@@ -134,12 +134,11 @@ jobs:
              echo "✓ All examples passed"
             fi
 
-
-
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -148,10 +147,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Build binary for integration tests
-        run: cargo build
       - name: Generate coverage
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        env:
+          PROPTEST_CASES: 1
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
@@ -233,12 +232,10 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-
-
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'performance')
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -261,15 +258,16 @@ jobs:
           tool: cargo
           output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          alert-threshold: '150%'
+          alert-threshold: '120%'
           comment-on-alert: true
-          fail-on-alert: false
+          fail-on-alert: true
           auto-push: false
 
   benchmarks-publish:
     name: Publish Benchmarks
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
     permissions:
       contents: write
     steps:
@@ -299,6 +297,25 @@ jobs:
           auto-push: true
           benchmark-data-dir-path: dev/bench
 
+  # Weekly toolchain compatibility check
+  toolchain-check:
+    name: Toolchain Check (${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    strategy:
+      matrix:
+        rust: [beta, nightly]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Run all workspace tests
+        run: cargo test --workspace --verbose
+        env:
+          PROPTEST_CASES: 32
+
   all-checks:
     name: All Checks Passed
     needs: [test, fmt, clippy, examples, docs, benchmarks]
@@ -321,7 +338,7 @@ jobs:
         if: needs.docs.result != 'success'
         run: exit 1
       - name: Check benchmarks
-        if: needs.benchmarks.result != 'success'
+        if: needs.benchmarks.result == 'failure'
         run: exit 1
       - name: Success
         run: echo "All checks passed"

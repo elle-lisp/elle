@@ -27,7 +27,7 @@ fn test_add_module_path_integration() {
 fn test_spawn_and_thread_id() {
     // Get current thread ID
     let result = eval_source("(current-thread-id)").unwrap();
-    if let Some(s) = result.as_string() {
+    if let Some(s) = result.with_string(|s| s.to_string()) {
         assert!(!s.is_empty());
         assert!(s.contains("ThreadId"));
     } else {

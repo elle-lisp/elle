@@ -148,13 +148,6 @@ pub enum HirKind {
         body: Box<Hir>,
     },
 
-    /// For/each loop
-    For {
-        var: Binding,
-        iter: Box<Hir>,
-        body: Box<Hir>,
-    },
-
     // === Pattern Matching ===
     Match {
         value: Box<Hir>,

@@ -8,16 +8,14 @@
 //! Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 //!
 //! Floats:    Any f64 that is NOT a quiet NaN (upper 13 bits != 0x7FF8+)
-//! Nil:       0x7FFC_0000_0000_0000 (no payload)
-//! False:     0x7FFC_0000_0000_0001
-//! True:      0x7FFC_0000_0000_0002
-//! EmptyList: 0x7FFC_0000_0000_0003 (no payload)
 //! Int:       0x7FF8_XXXX_XXXX_XXXX where X = 48-bit signed integer (sign-extended)
-//! Symbol:    0x7FF9_0000_XXXX_XXXX where X = 32-bit symbol ID
-//! Keyword:   0x7FFA_XXXX_XXXX_XXXX where X = 48-bit interned string pointer
+//! Falsy:     0x7FF9 — Nil = 0x7FF9_0000_0000_0000, False = 0x7FF9_0000_0000_0001
+//! EmptyList: 0x7FFA_0000_0000_0000 (no payload)
 //! Pointer:   0x7FFB_XXXX_XXXX_XXXX where X = 48-bit heap pointer
-//! CPointer:  0x7FFE_XXXX_XXXX_XXXX where X = 48-bit raw C pointer address
+//! Truthy:    0x7FFC — bit 47=0: singletons (True=0, Undefined=1), bit 47=1: symbol (32-bit ID)
 //! NaN/Inf:   0x7FFD_XXXX_XXXX_XXXX where X = 64-bit float bits (NaN or Infinity)
+//! PtrVal:    0x7FFE — bit 47=0: keyword (47-bit ptr), bit 47=1: cpointer (47-bit ptr)
+//! SSO:       0x7FFF (reserved for short string optimization)
 
 mod accessors;
 mod constructors;
@@ -36,44 +34,54 @@ pub(crate) const QNAN: u64 = 0x7FF8_0000_0000_0000;
 /// Mask to check for quiet NaN (upper 13 bits)
 pub(crate) const QNAN_MASK: u64 = 0xFFF8_0000_0000_0000;
 
-/// Nil value - uses QNAN + 4 in upper 16 bits, no payload needed
-pub const TAG_NIL: u64 = 0x7FFC_0000_0000_0000;
-
-/// False value  
-pub const TAG_FALSE: u64 = 0x7FFC_0000_0000_0001;
-
-/// True value
-pub const TAG_TRUE: u64 = 0x7FFC_0000_0000_0002;
-
-/// Empty list value - uses QNAN + 4 in upper 16 bits, no payload needed
-pub const TAG_EMPTY_LIST: u64 = 0x7FFC_0000_0000_0003;
-
-/// Undefined value - sentinel for uninitialized global slots
-pub const TAG_UNDEFINED: u64 = 0x7FFC_0000_0000_0004;
-
 /// Integer tag - uses QNAN exactly (0x7FF8), payload is 48-bit signed int
 pub const TAG_INT: u64 = 0x7FF8_0000_0000_0000;
 pub(crate) const TAG_INT_MASK: u64 = 0xFFFF_0000_0000_0000;
 
-/// Symbol tag - upper 16 bits = 0x7FF9
-pub const TAG_SYMBOL: u64 = 0x7FF9_0000_0000_0000;
-pub(crate) const TAG_SYMBOL_MASK: u64 = 0xFFFF_0000_0000_0000;
+/// Falsy tag - upper 16 bits = 0x7FF9
+/// Nil = TAG_FALSY | 0, False = TAG_FALSY | 1
+pub const TAG_FALSY: u64 = 0x7FF9_0000_0000_0000;
+#[allow(dead_code)] // used by SSO section
+pub(crate) const TAG_FALSY_MASK: u64 = 0xFFFF_0000_0000_0000;
+pub const TAG_NIL: u64 = 0x7FF9_0000_0000_0000;
+pub const TAG_FALSE: u64 = 0x7FF9_0000_0000_0001;
 
-/// Keyword tag - upper 16 bits = 0x7FFA, payload = 48-bit interned string pointer
-pub const TAG_KEYWORD: u64 = 0x7FFA_0000_0000_0000;
-pub(crate) const TAG_KEYWORD_MASK: u64 = 0xFFFF_0000_0000_0000;
+/// Empty list tag - upper 16 bits = 0x7FFA
+pub const TAG_EMPTY_LIST: u64 = 0x7FFA_0000_0000_0000;
+#[allow(dead_code)] // reserved for future use
+pub(crate) const TAG_EMPTY_LIST_MASK: u64 = 0xFFFF_0000_0000_0000;
 
 /// Heap pointer tag - upper 16 bits = 0x7FFB
 pub const TAG_POINTER: u64 = 0x7FFB_0000_0000_0000;
 pub(crate) const TAG_POINTER_MASK: u64 = 0xFFFF_0000_0000_0000;
 
-/// NaN/Infinity tag - upper 16 bits = 0x7FFD, payload is 64-bit float bits
+/// Truthy + symbol tag - upper 16 bits = 0x7FFC
+/// Bit 47 = 0: singleton (payload 0=true, 1=undefined)
+/// Bit 47 = 1: symbol (bits 0-31 = symbol ID)
+pub const TAG_TRUTHY: u64 = 0x7FFC_0000_0000_0000;
+pub(crate) const TAG_TRUTHY_MASK: u64 = 0xFFFF_0000_0000_0000;
+pub const TAG_TRUE: u64 = 0x7FFC_0000_0000_0000;
+pub const TAG_UNDEFINED: u64 = 0x7FFC_0000_0000_0001;
+pub(crate) const TRUTHY_SYMBOL_BIT: u64 = 1u64 << 47; // bit 47 = symbol sub-tag
+pub(crate) const SYMBOL_ID_MASK: u64 = 0xFFFF_FFFF; // bits 0-31
+
+/// NaN/Infinity tag - upper 16 bits = 0x7FFD
 pub const TAG_NAN: u64 = 0x7FFD_0000_0000_0000;
 pub(crate) const TAG_NAN_MASK: u64 = 0xFFFF_0000_0000_0000;
 
-/// Raw C pointer tag - upper 16 bits = 0x7FFE
-pub const TAG_CPOINTER: u64 = 0x7FFE_0000_0000_0000;
-pub(crate) const TAG_CPOINTER_MASK: u64 = 0xFFFF_0000_0000_0000;
+/// Pointer values tag - upper 16 bits = 0x7FFE
+/// Bit 47 = 0: keyword (bits 0-46 = interned string pointer)
+/// Bit 47 = 1: cpointer (bits 0-46 = raw C pointer address)
+pub const TAG_PTRVAL: u64 = 0x7FFE_0000_0000_0000;
+pub(crate) const TAG_PTRVAL_MASK: u64 = 0xFFFF_0000_0000_0000;
+pub(crate) const PTRVAL_CPOINTER_BIT: u64 = 1u64 << 47; // bit 47 = cpointer sub-tag
+pub(crate) const PTRVAL_PAYLOAD_MASK: u64 = (1u64 << 47) - 1; // bits 0-46
+
+/// SSO (Short String Optimization) tag - upper 16 bits = 0x7FFF
+/// Payload: up to 6 UTF-8 bytes packed into bits 0-47, zero-padded
+pub const TAG_SSO: u64 = 0x7FFF_0000_0000_0000;
+#[allow(dead_code)] // used by SSO section
+pub(crate) const TAG_SSO_MASK: u64 = 0xFFFF_0000_0000_0000;
 
 /// Mask for 48-bit payload extraction
 pub(crate) const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
@@ -165,19 +173,19 @@ impl Value {
     /// Check if this is a symbol.
     #[inline]
     pub fn is_symbol(&self) -> bool {
-        (self.0 & TAG_SYMBOL_MASK) == TAG_SYMBOL
+        (self.0 & TAG_TRUTHY_MASK) == TAG_TRUTHY && (self.0 & TRUTHY_SYMBOL_BIT) != 0
     }
 
     /// Check if this is a keyword.
     #[inline]
     pub fn is_keyword(&self) -> bool {
-        (self.0 & TAG_KEYWORD_MASK) == TAG_KEYWORD
+        (self.0 & TAG_PTRVAL_MASK) == TAG_PTRVAL && (self.0 & PTRVAL_CPOINTER_BIT) == 0
     }
 
     /// Check if this is a raw C pointer.
     #[inline]
     pub fn is_pointer(&self) -> bool {
-        (self.0 & TAG_CPOINTER_MASK) == TAG_CPOINTER
+        (self.0 & TAG_PTRVAL_MASK) == TAG_PTRVAL && (self.0 & PTRVAL_CPOINTER_BIT) != 0
     }
 
     /// Check if this is a heap pointer.
@@ -194,7 +202,7 @@ impl Value {
             !self.is_undefined(),
             "UNDEFINED leaked into truthiness check"
         );
-        self.0 != TAG_FALSE && self.0 != TAG_NIL
+        (self.0 >> 48) != 0x7FF9
     }
 
     /// Get the raw bits (for debugging/serialization).

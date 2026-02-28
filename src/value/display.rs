@@ -55,14 +55,14 @@ impl fmt::Display for Value {
             return write!(f, "<pointer 0x{:x}>", addr);
         }
 
+        // SSO string (not heap)
+        if self.is_string() {
+            return self.with_string(|s| write!(f, "{}", s)).unwrap_or(Ok(()));
+        }
+
         // Handle heap values
         if !self.is_heap() {
             return write!(f, "<unknown:{:#x}>", self.to_bits());
-        }
-
-        // String
-        if let Some(s) = self.as_string() {
-            return write!(f, "{}", s);
         }
 
         // Cons cell (list)
@@ -168,6 +168,31 @@ impl fmt::Display for Value {
             return write!(f, "\"");
         }
 
+        // Bytes (immutable binary data)
+        if let Some(b) = self.as_bytes() {
+            write!(f, "#bytes[")?;
+            for (i, byte) in b.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{:02x}", byte)?;
+            }
+            return write!(f, "]");
+        }
+
+        // Blob (mutable binary data)
+        if let Some(blob_ref) = self.as_blob() {
+            let borrowed = blob_ref.borrow();
+            write!(f, "#blob[")?;
+            for (i, byte) in borrowed.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{:02x}", byte)?;
+            }
+            return write!(f, "]");
+        }
+
         // Tuple
         if let Some(elems) = self.as_tuple() {
             write!(f, "[")?;
@@ -240,12 +265,14 @@ impl fmt::Debug for Value {
         if let Some(addr) = self.as_pointer() {
             return write!(f, "<pointer 0x{:x}>", addr);
         }
+        // SSO string (not heap) — quoted
+        if self.is_string() {
+            return self
+                .with_string(|s| write!(f, "\"{}\"", s))
+                .unwrap_or(Ok(()));
+        }
         if !self.is_heap() {
             return write!(f, "<unknown:{:#x}>", self.to_bits());
-        }
-        // String — quoted
-        if let Some(s) = self.as_string() {
-            return write!(f, "\"{}\"", s);
         }
         // Cons cell — use Debug recursively
         if self.as_cons().is_some() {
@@ -279,6 +306,29 @@ impl fmt::Debug for Value {
                 }
             }
             return write!(f, "\"");
+        }
+        // Bytes (immutable binary data)
+        if let Some(b) = self.as_bytes() {
+            write!(f, "#bytes[")?;
+            for (i, byte) in b.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{:02x}", byte)?;
+            }
+            return write!(f, "]");
+        }
+        // Blob (mutable binary data)
+        if let Some(blob_ref) = self.as_blob() {
+            let borrowed = blob_ref.borrow();
+            write!(f, "#blob[")?;
+            for (i, byte) in borrowed.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{:02x}", byte)?;
+            }
+            return write!(f, "]");
         }
         // Everything else — delegate to Display
         write!(f, "{}", self)

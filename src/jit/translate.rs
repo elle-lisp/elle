@@ -653,12 +653,10 @@ impl<'a> FunctionTranslator<'a> {
                     JitError::InvalidLir(format!("Unknown else target: {:?}", else_label))
                 })?;
 
-                // Check truthiness: value != NIL && value != FALSE
-                let nil = builder.ins().iconst(I64, TAG_NIL as i64);
-                let false_val = builder.ins().iconst(I64, TAG_FALSE as i64);
-                let not_nil = builder.ins().icmp(IntCC::NotEqual, cond_val, nil);
-                let not_false = builder.ins().icmp(IntCC::NotEqual, cond_val, false_val);
-                let is_truthy = builder.ins().band(not_nil, not_false);
+                // Check truthiness: (value >> 48) != 0x7FF9
+                let shifted = builder.ins().ushr_imm(cond_val, 48);
+                let falsy_tag = builder.ins().iconst(I64, 0x7FF9_i64);
+                let is_truthy = builder.ins().icmp(IntCC::NotEqual, shifted, falsy_tag);
 
                 builder
                     .ins()
@@ -913,12 +911,10 @@ impl<'a> FunctionTranslator<'a> {
         // Call has_exception helper
         let has_exc = self.call_helper_unary(builder, self.helpers.has_exception, vm)?;
 
-        // Check truthiness: value != NIL && value != FALSE
-        let nil = builder.ins().iconst(I64, TAG_NIL as i64);
-        let false_val = builder.ins().iconst(I64, TAG_FALSE as i64);
-        let not_nil = builder.ins().icmp(IntCC::NotEqual, has_exc, nil);
-        let not_false = builder.ins().icmp(IntCC::NotEqual, has_exc, false_val);
-        let is_truthy = builder.ins().band(not_nil, not_false);
+        // Check truthiness: (value >> 48) != 0x7FF9
+        let shifted = builder.ins().ushr_imm(has_exc, 48);
+        let falsy_tag = builder.ins().iconst(I64, 0x7FF9_i64);
+        let is_truthy = builder.ins().icmp(IntCC::NotEqual, shifted, falsy_tag);
 
         // Create exception return block and continue block
         let exc_block = builder.create_block();
@@ -930,6 +926,7 @@ impl<'a> FunctionTranslator<'a> {
         // Exception block: return NIL to bail out
         builder.switch_to_block(exc_block);
         builder.seal_block(exc_block);
+        let nil = builder.ins().iconst(I64, TAG_NIL as i64);
         builder.ins().return_(&[nil]);
 
         // Continue block: normal execution continues

@@ -200,12 +200,6 @@ impl HirSymbolExtractor {
                 self.walk(body, index, symbols);
             }
 
-            HirKind::For { var, iter, body } => {
-                self.record_definition(*var, SymbolKind::Variable, &hir.span, index, symbols);
-                self.walk(iter, index, symbols);
-                self.walk(body, index, symbols);
-            }
-
             HirKind::Match { value, arms } => {
                 self.walk(value, index, symbols);
                 for (_, guard, body) in arms {

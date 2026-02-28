@@ -222,7 +222,7 @@ fn test_spawned_closure_with_conditional() {
     );
 
     assert!(result.is_ok(), "Expected successful execution");
-    assert_eq!(result.unwrap().as_string(), Some("big"));
+    assert_eq!(result.unwrap().with_string(|s| s == "big"), Some(true));
 }
 
 // ============================================================================
@@ -256,7 +256,10 @@ fn test_spawned_closure_string_constant() {
     );
 
     assert!(result.is_ok(), "Expected successful execution");
-    assert_eq!(result.unwrap().as_string(), Some("hello from thread"));
+    assert_eq!(
+        result.unwrap().with_string(|s| s == "hello from thread"),
+        Some(true)
+    );
 }
 
 // ============================================================================

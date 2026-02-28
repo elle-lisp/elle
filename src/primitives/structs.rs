@@ -44,8 +44,8 @@ fn value_to_table_key(val: &Value) -> Result<TableKey, Value> {
         Ok(TableKey::Symbol(crate::value::SymbolId(sym_id)))
     } else if let Some(name) = val.as_keyword_name() {
         Ok(TableKey::Keyword(name.to_string()))
-    } else if let Some(s) = val.as_string() {
-        Ok(TableKey::String(s.to_string()))
+    } else if let Some(s) = val.with_string(|s| s.to_string()) {
+        Ok(TableKey::String(s))
     } else {
         Err(error_val(
             "type-error",

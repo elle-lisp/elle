@@ -26,17 +26,16 @@ pub fn prim_read(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let source = match args[0].as_string() {
-        Some(s) => s.to_string(),
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("read: expected string, got {}", args[0].type_name()),
-                ),
-            )
-        }
+    let source = if let Some(s) = args[0].with_string(|s| s.to_string()) {
+        s
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("read: expected string, got {}", args[0].type_name()),
+            ),
+        );
     };
 
     // Parse the first form
@@ -80,17 +79,16 @@ pub fn prim_read_all(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let source = match args[0].as_string() {
-        Some(s) => s.to_string(),
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("read-all: expected string, got {}", args[0].type_name()),
-                ),
-            )
-        }
+    let source = if let Some(s) = args[0].with_string(|s| s.to_string()) {
+        s
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("read-all: expected string, got {}", args[0].type_name()),
+            ),
+        );
     };
 
     let syntaxes = match read_syntax_all(&source) {

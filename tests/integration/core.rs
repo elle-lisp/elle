@@ -392,7 +392,7 @@ fn test_string_length() {
 fn test_string_append() {
     if let Some(s) = eval_source("(append (append \"hello\" \" \") \"world\")")
         .unwrap()
-        .as_string()
+        .with_string(|s| s.to_string())
     {
         assert_eq!(s, "hello world")
     } else {
@@ -404,7 +404,7 @@ fn test_string_append() {
 fn test_string_case() {
     if let Some(s) = eval_source("(string-upcase \"hello\")")
         .unwrap()
-        .as_string()
+        .with_string(|s| s.to_string())
     {
         assert_eq!(s, "HELLO")
     } else {
@@ -413,7 +413,7 @@ fn test_string_case() {
 
     if let Some(s) = eval_source("(string-downcase \"WORLD\")")
         .unwrap()
-        .as_string()
+        .with_string(|s| s.to_string())
     {
         assert_eq!(s, "world")
     } else {
@@ -606,7 +606,7 @@ fn test_floor_ceil_round() {
 fn test_substring() {
     if let Some(s) = eval_source("(substring \"hello\" 1 4)")
         .unwrap()
-        .as_string()
+        .with_string(|s| s.to_string())
     {
         assert_eq!(s, "ell")
     } else {
@@ -614,7 +614,10 @@ fn test_substring() {
     }
 
     // Test with just start index (to end)
-    if let Some(s) = eval_source("(substring \"hello\" 2)").unwrap().as_string() {
+    if let Some(s) = eval_source("(substring \"hello\" 2)")
+        .unwrap()
+        .with_string(|s| s.to_string())
+    {
         assert_eq!(s, "llo")
     } else {
         panic!("Expected string");
@@ -623,7 +626,7 @@ fn test_substring() {
     // Test from start
     if let Some(s) = eval_source("(substring \"hello\" 0 2)")
         .unwrap()
-        .as_string()
+        .with_string(|s| s.to_string())
     {
         assert_eq!(s, "he")
     } else {
@@ -654,19 +657,28 @@ fn test_string_index() {
 
 #[test]
 fn test_char_at() {
-    if let Some(s) = eval_source("(char-at \"hello\" 0)").unwrap().as_string() {
+    if let Some(s) = eval_source("(char-at \"hello\" 0)")
+        .unwrap()
+        .with_string(|s| s.to_string())
+    {
         assert_eq!(s, "h")
     } else {
         panic!("Expected string");
     }
 
-    if let Some(s) = eval_source("(char-at \"hello\" 1)").unwrap().as_string() {
+    if let Some(s) = eval_source("(char-at \"hello\" 1)")
+        .unwrap()
+        .with_string(|s| s.to_string())
+    {
         assert_eq!(s, "e")
     } else {
         panic!("Expected string");
     }
 
-    if let Some(s) = eval_source("(char-at \"hello\" 4)").unwrap().as_string() {
+    if let Some(s) = eval_source("(char-at \"hello\" 4)")
+        .unwrap()
+        .with_string(|s| s.to_string())
+    {
         assert_eq!(s, "o")
     } else {
         panic!("Expected string");
@@ -1214,7 +1226,7 @@ fn test_cond_with_expressions_as_conditions() {
           ((= 2 2) "two-two")
           (else "other"))
     "#;
-    if let Some(s) = eval_source(code).unwrap().as_string() {
+    if let Some(s) = eval_source(code).unwrap().with_string(|s| s.to_string()) {
         assert_eq!(s, "two-two")
     } else {
         panic!("Expected string");
@@ -1267,7 +1279,7 @@ fn test_cond_with_variable_references() {
           ((< x 15) "medium")
           (else "large"))
     "#;
-    if let Some(s) = eval_source(code).unwrap().as_string() {
+    if let Some(s) = eval_source(code).unwrap().with_string(|s| s.to_string()) {
         assert_eq!(s, "medium")
     } else {
         panic!("Expected string");
@@ -1283,7 +1295,7 @@ fn test_cond_respects_clause_order() {
           ((>= 10 3) "second")
           (else "third"))
     "#;
-    if let Some(s) = eval_source(code).unwrap().as_string() {
+    if let Some(s) = eval_source(code).unwrap().with_string(|s| s.to_string()) {
         assert_eq!(s, "first")
     } else {
         panic!("Expected string");

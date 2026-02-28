@@ -117,7 +117,7 @@ fn test_string_from_int() {
 fn test_string_from_float() {
     // Float formatting may vary, just check it's a string
     let result = eval_source("(string 3.14)").unwrap();
-    assert!(result.as_string().is_some());
+    assert!(result.is_string());
 }
 
 #[test]
@@ -137,14 +137,18 @@ fn test_string_from_nil() {
 #[test]
 fn test_string_from_list() {
     let result = eval_source("(string (list 1 2 3))").unwrap();
-    let s = result.as_string().expect("should be a string");
+    let s = result
+        .with_string(|s| s.to_string())
+        .expect("should be a string");
     assert_eq!(s, "(1 2 3)");
 }
 
 #[test]
 fn test_string_from_array() {
     let result = eval_source("(string @[1 2 3])").unwrap();
-    let s = result.as_string().expect("should be a string");
+    let s = result
+        .with_string(|s| s.to_string())
+        .expect("should be a string");
     assert_eq!(s, "[1, 2, 3]");
 }
 
@@ -159,7 +163,7 @@ fn test_number_to_string_int() {
 #[test]
 fn test_number_to_string_float() {
     let result = eval_source("(number->string 3.14)").unwrap();
-    assert!(result.as_string().is_some());
+    assert!(result.is_string());
 }
 
 #[test]
@@ -240,14 +244,18 @@ fn test_symbol_to_string_type_error() {
 #[test]
 fn test_current_directory() {
     let result = eval_source("(file/cwd)").unwrap();
-    let s = result.as_string().expect("should be a string");
+    let s = result
+        .with_string(|s| s.to_string())
+        .expect("should be a string");
     assert!(!s.is_empty());
 }
 
 #[test]
 fn test_join_path() {
     let result = eval_source("(file/join \"a\" \"b\" \"c\")").unwrap();
-    let s = result.as_string().expect("should be a string");
+    let s = result
+        .with_string(|s| s.to_string())
+        .expect("should be a string");
     assert!(s.contains("a"));
     assert!(s.contains("b"));
     assert!(s.contains("c"));
@@ -370,7 +378,9 @@ fn test_float_zero() {
 #[test]
 fn test_string_from_keyword() {
     let result = eval_source("(string :hello)").unwrap();
-    let s = result.as_string().expect("should be string");
+    let s = result
+        .with_string(|s| s.to_string())
+        .expect("should be string");
     assert_eq!(s, ":hello");
 }
 
@@ -378,7 +388,7 @@ fn test_string_from_keyword() {
 fn test_string_from_empty_list() {
     // Empty list should have some string representation
     let result = eval_source("(string (list))").unwrap();
-    assert!(result.as_string().is_some());
+    assert!(result.is_string());
 }
 
 // === Path edge cases ===
@@ -402,7 +412,9 @@ fn test_file_name_trailing_slash() {
 fn test_join_path_absolute() {
     // Joining with an absolute path should replace
     let result = eval_source("(file/join \"a\" \"/b\")").unwrap();
-    let s = result.as_string().expect("should be string");
+    let s = result
+        .with_string(|s| s.to_string())
+        .expect("should be string");
     assert_eq!(s, "/b");
 }
 
@@ -432,7 +444,7 @@ fn test_int_alias() {
 fn test_current_directory_alias() {
     // current-directory is an alias for file/cwd
     let result = eval_source("(current-directory)").unwrap();
-    assert!(result.as_string().is_some());
+    assert!(result.is_string());
 }
 
 #[test]

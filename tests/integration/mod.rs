@@ -98,3 +98,6 @@ mod buffer {
 mod splice {
     include!("splice.rs");
 }
+mod bytes {
+    include!("bytes.rs");
+}

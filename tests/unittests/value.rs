@@ -141,8 +141,8 @@ fn test_array() {
 #[test]
 fn test_string() {
     let s = Value::string("hello");
-    match s.as_string() {
-        Some(str_ref) => assert_eq!(str_ref, "hello"),
+    match s.with_string(|s| s.to_string()) {
+        Some(str_val) => assert_eq!(str_val, "hello"),
         None => panic!("Expected string"),
     }
 }

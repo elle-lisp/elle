@@ -109,6 +109,12 @@ fn is_value_sendable(value: &Value) -> bool {
         // Buffers are sendable if we deep-copy
         HeapObject::Buffer(buf) => buf.try_borrow().is_ok(),
 
+        // Bytes are immutable and sendable
+        HeapObject::Bytes(_) => true,
+
+        // Blobs are sendable if we deep-copy
+        HeapObject::Blob(blob) => blob.try_borrow().is_ok(),
+
         // Managed pointers are not sendable (Cell is not thread-safe)
         HeapObject::ManagedPointer(_) => false,
     }

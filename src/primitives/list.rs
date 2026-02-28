@@ -163,8 +163,13 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         }
     } else if let Some(buf_ref) = args[0].as_buffer() {
         (SIG_OK, Value::int(buf_ref.borrow().len() as i64))
-    } else if let Some(s) = args[0].as_string() {
-        (SIG_OK, Value::int(s.chars().count() as i64))
+    } else if let Some(b) = args[0].as_bytes() {
+        (SIG_OK, Value::int(b.len() as i64))
+    } else if let Some(blob_ref) = args[0].as_blob() {
+        (SIG_OK, Value::int(blob_ref.borrow().len() as i64))
+    } else if let Some(r) = args[0].with_string(|s| (SIG_OK, Value::int(s.chars().count() as i64)))
+    {
+        r
     } else if let Some(elems) = args[0].as_tuple() {
         (SIG_OK, Value::int(elems.len() as i64))
     } else if args[0].is_array() {
@@ -268,8 +273,8 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
         false
     } else if let Some(buf_ref) = args[0].as_buffer() {
         buf_ref.borrow().is_empty()
-    } else if let Some(s) = args[0].as_string() {
-        s.is_empty()
+    } else if let Some(r) = args[0].with_string(|s| s.is_empty()) {
+        r
     } else if args[0].is_array() {
         let vec = match args[0].as_array() {
             Some(v) => v,
@@ -281,6 +286,10 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         vec.borrow().is_empty()
+    } else if let Some(b) = args[0].as_bytes() {
+        b.is_empty()
+    } else if let Some(blob_ref) = args[0].as_blob() {
+        blob_ref.borrow().is_empty()
     } else if args[0].is_tuple() {
         let elems = match args[0].as_tuple() {
             Some(e) => e,
@@ -412,10 +421,12 @@ pub fn prim_append(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // String (immutable) - return new string
-    if let Some(s) = args[0].as_string() {
-        if let Some(other_s) = args[1].as_string() {
-            let mut result = s.to_string();
-            result.push_str(other_s);
+    if args[0].is_string() {
+        if args[1].is_string() {
+            let s = args[0].with_string(|s| s.to_string()).unwrap();
+            let other_s = args[1].with_string(|s| s.to_string()).unwrap();
+            let mut result = s;
+            result.push_str(&other_s);
             return (SIG_OK, Value::string(result.as_str()));
         } else {
             return (
@@ -424,6 +435,48 @@ pub fn prim_append(args: &[Value]) -> (SignalBits, Value) {
                     "type-error",
                     format!(
                         "append: both arguments must be same type, got string and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // Bytes (immutable) - return new bytes
+    if let Some(b) = args[0].as_bytes() {
+        if let Some(other_b) = args[1].as_bytes() {
+            let mut result = b.to_vec();
+            result.extend(other_b);
+            return (SIG_OK, Value::bytes(result));
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "append: both arguments must be same type, got bytes and {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+
+    // Blob (mutable) - mutate in place
+    if let Some(blob_ref) = args[0].as_blob() {
+        if let Some(other_blob_ref) = args[1].as_blob() {
+            let other_borrowed = other_blob_ref.borrow();
+            let mut borrowed = blob_ref.borrow_mut();
+            borrowed.extend(other_borrowed.iter());
+            drop(borrowed);
+            return (SIG_OK, args[0]);
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "append: both arguments must be same type, got blob and {}",
                         args[1].type_name()
                     ),
                 ),
@@ -554,10 +607,12 @@ pub fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // String - return new string
-    if let Some(s) = args[0].as_string() {
-        if let Some(other_s) = args[1].as_string() {
-            let mut result = s.to_string();
-            result.push_str(other_s);
+    if args[0].is_string() {
+        if args[1].is_string() {
+            let s = args[0].with_string(|s| s.to_string()).unwrap();
+            let other_s = args[1].with_string(|s| s.to_string()).unwrap();
+            let mut result = s;
+            result.push_str(&other_s);
             return (SIG_OK, Value::string(result.as_str()));
         } else {
             return (
