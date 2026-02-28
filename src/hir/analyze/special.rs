@@ -1,4 +1,4 @@
-//! Special forms: yield, match, module, import
+//! Special forms: yield, match
 
 use super::*;
 use crate::hir::pattern::{HirPattern, PatternLiteral};
@@ -205,63 +205,5 @@ impl<'a> Analyzer<'a> {
             }
             _ => Err(format!("{}: invalid pattern", syntax.span)),
         }
-    }
-
-    pub(crate) fn analyze_module(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() < 2 {
-            return Err(format!("{}: module requires a name", span));
-        }
-
-        let name = items[1]
-            .as_symbol()
-            .ok_or_else(|| format!("{}: module name must be a symbol", span))?;
-        let name_sym = self.symbols.intern(name);
-
-        let mut exports = Vec::new();
-        let mut body_start = 2;
-
-        // Check for :export clause
-        if items.len() > 2 {
-            if let SyntaxKind::Keyword(kw) = &items[2].kind {
-                if kw == "export" && items.len() > 3 {
-                    let export_list = items[3]
-                        .as_list()
-                        .ok_or_else(|| format!("{}: :export must be followed by a list", span))?;
-                    for exp in export_list {
-                        let exp_name = exp
-                            .as_symbol()
-                            .ok_or_else(|| format!("{}: export must be a symbol", span))?;
-                        exports.push(self.symbols.intern(exp_name));
-                    }
-                    body_start = 4;
-                }
-            }
-        }
-
-        let body = self.analyze_body(&items[body_start..], span.clone())?;
-        let effect = body.effect;
-
-        Ok(Hir::new(
-            HirKind::Module {
-                name: name_sym,
-                exports,
-                body: Box::new(body),
-            },
-            span,
-            effect,
-        ))
-    }
-
-    pub(crate) fn analyze_import(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() != 2 {
-            return Err(format!("{}: import requires a module name", span));
-        }
-
-        let module = items[1]
-            .as_symbol()
-            .ok_or_else(|| format!("{}: import module must be a symbol", span))?;
-        let module_sym = self.symbols.intern(module);
-
-        Ok(Hir::pure(HirKind::Import { module: module_sym }, span))
     }
 }

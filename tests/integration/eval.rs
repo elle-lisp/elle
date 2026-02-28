@@ -367,3 +367,38 @@ fn test_eval_with_try_catch() {
         Value::int(42)
     );
 }
+
+// === import (prelude function) ===
+
+#[test]
+fn test_import_returns_last_value() {
+    let path = std::env::temp_dir().join(format!("test_import_{}.lisp", std::process::id()));
+    let path = path.to_str().unwrap();
+    std::fs::write(
+        path,
+        "(def internal 42)\n{:answer internal :double (* internal 2)}",
+    )
+    .expect("failed to write temp file");
+
+    let answer = eval_source(&format!("(get (import \"{}\") :answer)", path));
+    let double = eval_source(&format!("(get (import \"{}\") :double)", path));
+    let _ = std::fs::remove_file(path);
+
+    assert_eq!(answer.unwrap(), Value::int(42));
+    assert_eq!(double.unwrap(), Value::int(84));
+}
+
+#[test]
+fn test_import_destructuring() {
+    let path = std::env::temp_dir().join(format!("test_import_destr_{}.lisp", std::process::id()));
+    let path = path.to_str().unwrap();
+    std::fs::write(
+        path,
+        "(def internal 42)\n{:answer internal :double (* internal 2)}",
+    )
+    .expect("failed to write temp file");
+
+    let result = eval_source(&format!("(let (({{:answer a}} (import \"{}\"))) a)", path));
+    let _ = std::fs::remove_file(path);
+    assert_eq!(result.unwrap(), Value::int(42));
+}

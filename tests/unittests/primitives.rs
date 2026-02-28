@@ -429,53 +429,6 @@ fn test_gensym_with_prefix() {
     );
 }
 
-#[test]
-fn test_symbol_table_module_support() {
-    use elle::symbol::{ModuleDef, SymbolTable};
-
-    let mut table = SymbolTable::new();
-    let math = table.intern("math");
-    let add = table.intern("add");
-    let sub = table.intern("sub");
-
-    // Define a module
-    let module_def = ModuleDef {
-        name: math,
-        exports: vec![add, sub],
-    };
-
-    table.define_module(module_def);
-
-    // Check module exists
-    assert!(table.is_module(math));
-    assert!(table.get_module(math).is_some());
-
-    // Check exports
-    if let Some(module) = table.get_module(math) {
-        assert_eq!(module.exports.len(), 2);
-        assert!(module.exports.contains(&add));
-        assert!(module.exports.contains(&sub));
-    }
-}
-
-#[test]
-fn test_module_tracking() {
-    use elle::symbol::SymbolTable;
-
-    let mut table = SymbolTable::new();
-    let math = table.intern("math");
-
-    assert_eq!(table.current_module(), None);
-
-    // Set current module
-    table.set_current_module(Some(math));
-    assert_eq!(table.current_module(), Some(math));
-
-    // Clear current module
-    table.set_current_module(None);
-    assert_eq!(table.current_module(), None);
-}
-
 // Standard library tests
 #[test]
 fn test_list_module_functions() {
@@ -1089,67 +1042,6 @@ fn test_package_manager() {
     // Should be (name version description)
     let vec = result.list_to_vec().unwrap();
     assert_eq!(vec.len(), 3);
-}
-
-#[test]
-fn test_stdlib_initialization() {
-    use elle::init_stdlib;
-
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-
-    // Register primitives
-    let _effects = elle::register_primitives(&mut vm, &mut symbols);
-
-    // Initialize stdlib
-    init_stdlib(&mut vm, &mut symbols);
-
-    // Verify modules exist
-    let list_id = symbols.intern("list");
-    let string_id = symbols.intern("string");
-    let math_id = symbols.intern("math");
-
-    assert!(symbols.is_module(list_id));
-    assert!(symbols.is_module(string_id));
-    assert!(symbols.is_module(math_id));
-
-    // Verify some functions are in modules
-    let length_id = symbols.intern("length");
-    assert!(vm.get_module_symbol("list", length_id.0).is_some());
-}
-
-#[test]
-fn test_module_qualified_access() {
-    use elle::init_stdlib;
-
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = elle::register_primitives(&mut vm, &mut symbols);
-    init_stdlib(&mut vm, &mut symbols);
-
-    // Test getting functions from modules
-    let add_sym = symbols.intern("+");
-
-    // Should find + in math module
-    let result = vm.get_module_symbol("math", add_sym.0);
-    assert!(result.is_some());
-
-    // Test string module
-    let length_sym = symbols.intern("length");
-    let result = vm.get_module_symbol("list", length_sym.0);
-    assert!(result.is_some());
-}
-#[test]
-fn test_module_import() {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-
-    // Import a module
-    vm.import_module("list".to_string());
-
-    // Module should still be accessible
-    let length_sym = symbols.intern("length");
-    vm.get_module_symbol("list", length_sym.0);
 }
 
 // Phase 5: Advanced Runtime Features Tests

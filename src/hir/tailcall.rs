@@ -175,11 +175,6 @@ fn mark(hir: &mut Hir, in_tail: bool) {
             mark(env, false);
         }
 
-        // Module: body is not in tail position (top-level)
-        HirKind::Module { body, .. } => {
-            mark(body, false);
-        }
-
         // Leaves: nothing to recurse into
         HirKind::Nil
         | HirKind::EmptyList
@@ -189,9 +184,7 @@ fn mark(hir: &mut Hir, in_tail: bool) {
         | HirKind::String(_)
         | HirKind::Keyword(_)
         | HirKind::Var(_)
-        | HirKind::Quote(_)
-        | HirKind::Import { .. }
-        | HirKind::ModuleRef { .. } => {}
+        | HirKind::Quote(_) => {}
     }
 }
 
@@ -308,7 +301,6 @@ mod tests {
             HirKind::Break { value, .. } => {
                 collect_calls(value, calls);
             }
-            HirKind::Module { body, .. } => collect_calls(body, calls),
             _ => {}
         }
     }

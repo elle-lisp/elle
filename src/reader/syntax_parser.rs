@@ -3,7 +3,6 @@
 //! This parser is symbol-table-free and preserves source spans on every node.
 //! It does NOT:
 //! - Intern symbols (leaves them as strings)
-//! - Expand qualified symbols to (qualified-ref ...)
 //! - Desugar quote forms to lists
 //!
 //! This is a parallel implementation to the existing Value-producing parser.

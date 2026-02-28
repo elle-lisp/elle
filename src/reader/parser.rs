@@ -168,29 +168,9 @@ impl Reader {
                 Ok(Value::NIL)
             }
             OwnedToken::Symbol(s) => {
-                // Check if this is a qualified symbol (e.g., "list:length")
-                let (module_name, symbol_name) = Self::parse_qualified_symbol(s);
-                if !symbol_name.is_empty() {
-                    // This is a qualified symbol - represent as: (qualified-ref module-name symbol-name)
-                    let module_sym = symbols.intern(&module_name).0;
-                    let name_sym = symbols.intern(&symbol_name).0;
-                    let qualified_ref = symbols.intern("qualified-ref").0;
-                    // Build list: (qualified-ref module symbol)
-                    let result = Value::cons(
-                        Value::symbol(qualified_ref),
-                        Value::cons(
-                            Value::symbol(module_sym),
-                            Value::cons(Value::symbol(name_sym), Value::NIL),
-                        ),
-                    );
-                    self.advance();
-                    Ok(result)
-                } else {
-                    // Regular unqualified symbol
-                    let id = symbols.intern(s).0;
-                    self.advance();
-                    Ok(Value::symbol(id))
-                }
+                let id = symbols.intern(s).0;
+                self.advance();
+                Ok(Value::symbol(id))
             }
             OwnedToken::Keyword(s) => {
                 // Keywords are self-evaluating values (interned strings)
@@ -223,19 +203,6 @@ impl Reader {
                 Err(format!("{}: unexpected end of input", loc.position()))
             }
         }
-    }
-
-    /// Parse a module-qualified symbol (e.g., "module:symbol")
-    /// Returns (module_slice, symbol_slice) if qualified, or (symbol_slice, "") if unqualified
-    fn parse_qualified_symbol(sym: &str) -> (String, String) {
-        if let Some(colon_pos) = sym.rfind(':') {
-            let module = sym[..colon_pos].to_string();
-            let name = sym[colon_pos + 1..].to_string();
-            if !module.is_empty() && !name.is_empty() {
-                return (module, name);
-            }
-        }
-        (sym.to_string(), String::new())
     }
 
     fn read_list(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {

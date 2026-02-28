@@ -193,23 +193,13 @@ pub(crate) fn register_builtin_docs(docs: &mut std::collections::HashMap<String,
             aliases: &[],
         },
         Doc {
-            name: "module",
-            doc: "Define a module with exported bindings.",
-            params: &["name", "body..."],
-            arity: Arity::AtLeast(1),
-            effect: Effect::none(),
+            name: "eval",
+            doc: "Compile and execute an expression at runtime. The expression is a quoted datum that goes through the full compilation pipeline (expand, analyze, lower, emit, execute). An optional second argument provides an environment as a table or struct — its key-value pairs become let bindings around the expression.",
+            params: &["expr", "env?"],
+            arity: Arity::Range(1, 2),
+            effect: Effect::yields(),
             category: "special form",
-            example: "(module math (def pi 3.14159) (defn square (x) (* x x)))",
-            aliases: &[],
-        },
-        Doc {
-            name: "import",
-            doc: "Import bindings from a module.",
-            params: &["module-name"],
-            arity: Arity::Exact(1),
-            effect: Effect::none(),
-            category: "special form",
-            example: "(import math)",
+            example: "(eval '(+ 1 2))\n(eval '(+ x y) {:x 10 :y 20})",
             aliases: &[],
         },
         Doc {
@@ -220,6 +210,26 @@ pub(crate) fn register_builtin_docs(docs: &mut std::collections::HashMap<String,
             effect: Effect::none(),
             category: "special form",
             example: "(defmacro my-if (cond then else) `(cond ((,cond) ,then) (true ,else)))",
+            aliases: &[],
+        },
+        Doc {
+            name: "doc",
+            doc: "Display documentation for a named function or special form. Accepts a symbol or string — bare symbols are rewritten to strings by the analyzer.",
+            params: &["name"],
+            arity: Arity::Exact(1),
+            effect: Effect::yields(),
+            category: "special form",
+            example: "(doc map)\n(doc \"map\")",
+            aliases: &[],
+        },
+        Doc {
+            name: "splice",
+            doc: "Mark a value for spreading into a function call or data constructor. The short form is `;expr`. Only works on arrays and tuples. Inside quasiquote, `,;expr` is unquote-splicing.",
+            params: &["expr"],
+            arity: Arity::Exact(1),
+            effect: Effect::none(),
+            category: "special form",
+            example: "(defn f [a b c] (+ a b c))\n(def args @[1 2 3])\n(f ;args)  # => 6",
             aliases: &[],
         },
         // === Prelude macros (syntax sugar) ===
@@ -333,6 +343,16 @@ pub(crate) fn register_builtin_docs(docs: &mut std::collections::HashMap<String,
             example: "(defn gen () (yield* (sub-gen)))",
             aliases: &[],
         },
+        Doc {
+            name: "ffi/defbind",
+            doc: "Define a named wrapper for a C function via FFI. Looks up the symbol, creates a signature, and defines a function that calls it.",
+            params: &["name", "lib-handle", "\"c-name\"", "return-type", "[arg-types...]"],
+            arity: Arity::Exact(5),
+            effect: Effect::none(),
+            category: "syntax sugar",
+            example: "(ffi/defbind abs libc \"abs\" :int [:int])",
+            aliases: &[],
+        },
     ];
 
     for doc in builtins {
@@ -378,10 +398,12 @@ pub fn help_text() -> String {
     }
 
     out.push_str("\nSpecial forms:\n");
-    out.push_str("  if, let, def, var, fn, set!, begin, block, break,\n");
-    out.push_str("  match, while, each, yield, quote, defmacro, module, import\n");
+    out.push_str("  if, let, letrec, fn, def, var, set, begin, block, break,\n");
+    out.push_str("  match, while, each, yield, and, or, quote, cond, eval, defmacro, doc,\n");
+    out.push_str("  splice\n");
     out.push_str("\nSyntax sugar:\n");
-    out.push_str("  defn, let*, ->, ->>, when, unless, try/catch, protect, defer, with\n");
+    out.push_str("  defn, let*, ->, ->>, when, unless, try, protect, defer, with, yield*,\n");
+    out.push_str("  ffi/defbind\n");
     out.push_str("\nREPL commands:\n");
     out.push_str("  (help)         Show this help\n");
     out.push_str("  (doc \"name\")   Show documentation for any named form\n");

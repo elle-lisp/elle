@@ -128,6 +128,6 @@
     `(def ,name
        (let ((,ptr-sym (ffi/lookup ,lib ,cname))
              (,sig-sym (ffi/signature ,ret-type ,arg-types)))
-         (fn ,params
-            (ffi/call ,ptr-sym ,sig-sym ,;call-args))))))
+          (fn ,params
+             (ffi/call ,ptr-sym ,sig-sym ,;call-args))))))
 
