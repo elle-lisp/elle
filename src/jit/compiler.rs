@@ -304,7 +304,11 @@ impl JitCompiler {
     }
 
     /// Compile a LirFunction to native code
-    pub fn compile(mut self, lir: &LirFunction) -> Result<JitCode, JitError> {
+    pub fn compile(
+        mut self,
+        lir: &LirFunction,
+        self_sym: Option<SymbolId>,
+    ) -> Result<JitCode, JitError> {
         // JIT can't handle suspension (yield/debug) — only non-suspending functions
         if lir.effect.may_suspend() {
             return Err(JitError::NotPure);
@@ -320,13 +324,20 @@ impl JitCompiler {
             .declare_function(func_name, Linkage::Local, &sig)
             .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
 
+        // Build a one-entry scc_peers map for direct self-calls
+        let scc_peers = self_sym.map(|sym| {
+            let mut map = HashMap::new();
+            map.insert(sym, func_id);
+            map
+        });
+
         // Create function context
         let mut ctx = self.module.make_context();
         ctx.func.signature = sig;
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        self.translate_function(lir, &mut ctx.func, None)?;
+        self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
 
         // Compile the function
         self.module
@@ -345,7 +356,11 @@ impl JitCompiler {
 
     /// Build Cranelift IR for a LirFunction and return it as lines of text.
     /// Does NOT compile to native code — this is for diagnostic display only.
-    pub fn clif_text(mut self, lir: &LirFunction) -> Result<Vec<String>, JitError> {
+    pub fn clif_text(
+        mut self,
+        lir: &LirFunction,
+        self_sym: Option<SymbolId>,
+    ) -> Result<Vec<String>, JitError> {
         if lir.effect.may_suspend() {
             return Err(JitError::NotPure);
         }
@@ -358,11 +373,18 @@ impl JitCompiler {
             .declare_function(func_name, Linkage::Local, &sig)
             .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
 
+        // Build a one-entry scc_peers map for direct self-calls
+        let scc_peers = self_sym.map(|sym| {
+            let mut map = HashMap::new();
+            map.insert(sym, func_id);
+            map
+        });
+
         let mut ctx = self.module.make_context();
         ctx.func.signature = sig;
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-        self.translate_function(lir, &mut ctx.func, None)?;
+        self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())
@@ -412,7 +434,12 @@ impl JitCompiler {
             ctx.func.signature = sig.clone();
             ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-            self.translate_function(member.lir, &mut ctx.func, Some(&scc_peers))?;
+            self.translate_function(
+                member.lir,
+                &mut ctx.func,
+                Some(&scc_peers),
+                Some(member.sym),
+            )?;
 
             self.module
                 .define_function(func_id, &mut ctx)
@@ -468,12 +495,16 @@ impl JitCompiler {
         lir: &LirFunction,
         func: &mut Function,
         scc_peers: Option<&HashMap<SymbolId, FuncId>>,
+        self_sym: Option<SymbolId>,
     ) -> Result<(), JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
 
         // Create translator context
         let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, lir);
+
+        // Set self_sym for self-call detection in emit_direct_scc_call
+        translator.self_sym = self_sym;
 
         // Set up SCC peer map for direct calls between mutually recursive functions
         if let Some(peers) = scc_peers {
@@ -681,7 +712,7 @@ mod tests {
     fn test_compile_identity() {
         let lir = make_simple_lir();
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let code = compiler.compile(&lir).expect("Failed to compile");
+        let code = compiler.compile(&lir, None).expect("Failed to compile");
 
         // Call the compiled function
         // self_bits = 0 since we're not testing self-tail-calls here
@@ -696,7 +727,7 @@ mod tests {
     fn test_compile_add() {
         let lir = make_add_lir();
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let code = compiler.compile(&lir).expect("Failed to compile");
+        let code = compiler.compile(&lir, None).expect("Failed to compile");
 
         // Call the compiled function
         // self_bits = 0 since we're not testing self-tail-calls here
@@ -716,7 +747,7 @@ mod tests {
         lir.effect = Effect::yields();
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir);
+        let result = compiler.compile(&lir, None);
         assert!(matches!(result, Err(JitError::NotPure)));
     }
 

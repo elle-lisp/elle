@@ -349,7 +349,7 @@ pub fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
             Ok(c) => c,
             Err(_) => return (SIG_OK, Value::NIL),
         };
-        match compiler.clif_text(&lir) {
+        match compiler.clif_text(&lir, None) {
             Ok(lines) => (
                 SIG_OK,
                 Value::array(lines.into_iter().map(Value::string).collect()),
