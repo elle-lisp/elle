@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::syntax::{Syntax, SyntaxKind};
+use crate::value::Value;
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_lambda(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
@@ -84,16 +85,16 @@ impl<'a> Analyzer<'a> {
         self.current_lambda_params = params.clone();
 
         // Analyze body
-        // Skip docstring if present (string literal as first body expression)
+        // Extract docstring if present (string literal as first of multiple body expressions)
         let body_items = &items[2..];
-        let body_start = if body_items.len() > 1 {
-            if matches!(&body_items[0].kind, SyntaxKind::String(_)) {
-                &body_items[1..]
+        let (doc, body_start) = if body_items.len() > 1 {
+            if let SyntaxKind::String(s) = &body_items[0].kind {
+                (Some(Value::string(s.clone())), &body_items[1..])
             } else {
-                body_items
+                (None, body_items)
             }
         } else {
-            body_items
+            (None, body_items)
         };
         let body = self.analyze_body(body_start, span.clone())?;
 
@@ -167,6 +168,7 @@ impl<'a> Analyzer<'a> {
                 body: Box::new(body),
                 num_locals,
                 inferred_effect,
+                doc,
             },
             span,
             Effect::none(),

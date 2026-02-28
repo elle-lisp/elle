@@ -67,6 +67,6 @@ pub use pipeline::{
 pub use primitives::{init_stdlib, register_primitives};
 pub use reader::{read_str, Lexer, Reader};
 pub use symbol::SymbolTable;
-pub use symbols::{get_primitive_documentation, SymbolDef, SymbolIndex, SymbolKind};
+pub use symbols::{SymbolDef, SymbolIndex, SymbolKind};
 pub use value::{list, Value};
 pub use vm::VM;

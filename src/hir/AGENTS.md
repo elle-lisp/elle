@@ -124,6 +124,12 @@ HIR (bindings are inline — no separate HashMap)
     position. The VM handler accesses the symbol table via thread-local
     context and caches the Expander on the VM for reuse.
 
+15. **Docstrings are extracted from leading string literals.**
+    `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer
+    extracts the first string literal in a function body and stores it
+    in `doc`. This field is threaded through LIR into `Closure.doc` and
+    used by the `(doc name)` primitive and LSP hover.
+
 ## Files
 
 | File | Lines | Content |

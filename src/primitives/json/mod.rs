@@ -409,6 +409,7 @@ mod tests {
             location_map: Rc::new(crate::error::LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         });
         assert!(serialize_value(&closure).is_err());
 

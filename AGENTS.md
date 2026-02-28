@@ -26,7 +26,7 @@ bytecode. Error messages include file:line:col information.
 | Reader → Expander | `Syntax` | `kind: SyntaxKind`, `span: Span`, `scopes: Vec<ScopeId>`, `scope_exempt: bool` |
 | Expander → Analyzer | `Syntax` (expanded) | Same shape; macros resolved, scopes stamped |
 | Analyzer → Lowerer | `Hir` (via `AnalysisResult`) | `kind: HirKind`, `span: Span`, `effect: Effect` |
-| Lowerer → Emitter | `LirFunction` | `blocks: Vec<BasicBlock>`, `constants: Vec<LirConst>`, `arity: Arity`, `effect: Effect`, `num_locals: u16`, `num_captures: u16`, `cell_params_mask: u64`, `cell_locals_mask: u64`, `entry: Label`, `num_regs: u32`, `name: Option<String>` |
+| Lowerer → Emitter | `LirFunction` | `blocks: Vec<BasicBlock>`, `constants: Vec<LirConst>`, `arity: Arity`, `effect: Effect`, `num_locals: u16`, `num_captures: u16`, `cell_params_mask: u64`, `cell_locals_mask: u64`, `entry: Label`, `num_regs: u32`, `name: Option<String>`, `doc: Option<Value>` |
 | Emitter → VM | `Bytecode` | `instructions: Vec<u8>`, `constants: Vec<Value>`, `location_map: LocationMap`, `symbol_names: HashMap<u32, String>`, `inline_caches: HashMap<usize, CacheEntry>` |
 | VM → caller | `Value` | NaN-boxed 8-byte runtime value |
 
@@ -39,6 +39,7 @@ bytecode. Error messages include file:line:col information.
 | Arity | — | `Lambda.params.len()` | `LirFunction.arity` | — | `Closure.arity` |
 | Cell mask (params) | — | `Binding.needs_cell()` | `LirFunction.cell_params_mask` | — | `Closure.cell_params_mask` |
 | Cell mask (locals) | — | `Binding.needs_cell()` | `LirFunction.cell_locals_mask` | — | JIT only (not on `Closure`) |
+| Docstring | — | `Lambda.doc` | `LirFunction.doc` | — | `Closure.doc` |
 
 **What is transformed at each boundary:**
 
@@ -64,10 +65,10 @@ bytecode. Error messages include file:line:col information.
 |--------|----------------|
 | `reader` | Lexing and parsing to `Syntax` |
 | `syntax` | Syntax types, macro expansion |
-| `hir` | Binding resolution, capture analysis, effect inference, linting, symbol extraction |
+| `hir` | Binding resolution, capture analysis, effect inference, linting, symbol extraction, docstring extraction |
 | `lir` | SSA form with virtual registers, basic blocks, `SpannedInstr` for source tracking |
 | `compiler` | Bytecode instruction definitions (`bytecode.rs`), debug formatting (`bytecode_debug.rs`) |
-| `vm` | Bytecode execution |
+| `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed) |
 | `effects` | Effect type (`Pure`, `Yields`, `Polymorphic`) |
 | `lint` | Diagnostic types and lint rules (pipeline-agnostic) |
@@ -85,7 +86,7 @@ bytecode. Error messages include file:line:col information.
 `Value` is the runtime representation. It uses NaN-boxing for efficient
 representation. Create values via methods like `Value::int()`, `Value::cons()`,
 `Value::closure()` rather than enum variants. Notable types:
-- `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>`
+- `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>` + `doc: Option<Value>`
 - `Cell` / `LocalCell` - mutable cells for captured variables
 - `Fiber` - independent execution context with stack, frames, and signal mask
 - `External` - opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
@@ -251,6 +252,11 @@ Things that look wrong but aren't:
   Elle-level function using `eval`/`read-all`/`slurp`). It returns the last
   expression's value for `.lisp` files, and `true` for `.so` plugins. The
   `import-file` primitive handles both Elle source files and plugin `.so` files.
+- Docstrings are extracted from leading string literals in function bodies.
+  `HirKind::Lambda` has a `doc: Option<Value>` field, threaded through LIR
+  and into `Closure.doc`. The `(doc name)` primitive checks closure doc fields
+  on globals before falling back to builtin docs. LSP hover shows user-defined
+  docstrings and builtin docs via `vm.docs`.
 
 ## Conventions
 

@@ -1204,6 +1204,7 @@ fn test_spawn_primitive() {
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     });
 
     let result = call_primitive(&spawn, &[closure]);
@@ -1726,6 +1727,7 @@ fn test_json_serialize_errors() {
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     });
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());

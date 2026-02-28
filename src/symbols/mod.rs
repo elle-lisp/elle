@@ -143,90 +143,6 @@ impl Default for SymbolIndex {
     }
 }
 
-/// Hardcoded documentation for built-in primitives
-pub fn get_primitive_documentation(name: &str) -> Option<&'static str> {
-    Some(match name {
-        // Arithmetic
-        "+" => "Add numbers: (+ a b c ...)",
-        "-" => "Subtract numbers: (- a b c ...)",
-        "*" => "Multiply numbers: (* a b c ...)",
-        "/" => "Divide numbers: (/ a b c ...)",
-        "mod" => "Modulo operation: (mod a b)",
-        "remainder" => "Remainder after division: (remainder a b)",
-
-        // Comparison
-        "=" => "Test equality: (= a b)",
-        "<" => "Less than: (< a b)",
-        ">" => "Greater than: (> a b)",
-        "<=" => "Less than or equal: (<= a b)",
-        ">=" => "Greater than or equal: (>= a b)",
-
-        // List operations
-        "cons" => "Construct a list: (cons head tail)",
-        "first" => "Get first element: (first list)",
-        "rest" => "Get rest of list: (rest list)",
-        "length" => "Get list length: (length list)",
-        "append" => "Append lists: (append list1 list2)",
-        "reverse" => "Reverse a list: (reverse list)",
-        "concat" => "Concatenate collections (non-mutating): (concat coll1 coll2)",
-        "last" => "Get last element: (last list)",
-        "take" => "Take first n elements: (take list n)",
-        "drop" => "Drop first n elements: (drop list n)",
-
-        // Math functions
-        "abs" => "Absolute value: (abs x)",
-        "sqrt" => "Square root: (sqrt x)",
-        "sin" => "Sine: (sin x)",
-        "cos" => "Cosine: (cos x)",
-        "tan" => "Tangent: (tan x)",
-        "log" => "Natural logarithm: (log x)",
-        "exp" => "Exponential: (exp x)",
-        "floor" => "Floor: (floor x)",
-        "ceil" => "Ceiling: (ceil x)",
-        "round" => "Round: (round x)",
-        "pow" => "Power: (pow base exponent)",
-        "min" => "Minimum: (min a b)",
-        "max" => "Maximum: (max a b)",
-
-        // String operations
-        "string-upcase" => "Convert to uppercase: (string-upcase s)",
-        "string-downcase" => "Convert to lowercase: (string-downcase s)",
-        "string/append" => "Append strings: (string/append s1 s2)",
-        "substring" => "Extract substring: (substring s start end)",
-        "string-index" => "Find character index: (string-index s char)",
-        "char-at" => "Get character at index: (char-at s index)",
-
-        // Type operations
-        "type-of" => "Get type of value: (type-of x)",
-
-        // Logic
-        "not" => "Logical NOT: (not x)",
-        "if" => "Conditional: (if condition then else)",
-
-        // Array operations
-        "array-ref" => "Get array element: (array-ref v index)",
-        "array-set!" => "Set array element: (array-set! v index value)",
-
-        // I/O
-        "print" => "Print to output: (print x)",
-        "println" => "Print with newline: (println x)",
-
-        // Special forms
-        "var" => "Mutable binding: (var name value)",
-        "def" => "Immutable binding: (def name value)",
-        "quote" => "Quote expression: (quote expr)",
-        "begin" => "Sequential execution: (begin expr1 expr2 ...)",
-        "let" => "Local bindings: (let ((var val) ...) body)",
-        "fn" => "Function definition: (fn (params ...) body)",
-        "match" => "Pattern matching: (match value (pattern body) ...)",
-        "while" => "Loop: (while condition body)",
-        "each" => "Each loop: (each var iterable body) - iterate over a collection",
-        "forever" => "Infinite loop: (forever body...) - syntactic sugar for (while true body...)",
-
-        _ => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,13 +163,6 @@ mod tests {
 
         assert_eq!(def.arity, Some(2));
         assert_eq!(def.documentation, Some("A test variable".to_string()));
-    }
-
-    #[test]
-    fn test_primitive_documentation() {
-        assert!(get_primitive_documentation("+").is_some());
-        assert!(get_primitive_documentation("cons").is_some());
-        assert!(get_primitive_documentation("nonexistent").is_none());
     }
 
     #[test]

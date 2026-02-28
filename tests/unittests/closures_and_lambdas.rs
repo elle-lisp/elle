@@ -37,6 +37,7 @@ fn test_closure_type_identification() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     let value = Value::closure(closure);
 
@@ -63,6 +64,7 @@ fn test_closure_display() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     let value = Value::closure(closure);
     let s = format!("{}", value);
@@ -86,6 +88,7 @@ fn test_closure_clone() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     let value1 = Value::closure(closure.clone());
     let value2 = value1;
@@ -155,6 +158,7 @@ fn test_closure_empty_environment() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert_eq!(closure.env.len(), 0);
 }
@@ -177,6 +181,7 @@ fn test_closure_single_captured_variable() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert_eq!(closure.env.len(), 1);
     assert_eq!(closure.env[0], Value::int(42));
@@ -205,6 +210,7 @@ fn test_closure_multiple_captured_variables() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert_eq!(closure.env.len(), 4);
     assert_eq!(closure.env[0], Value::int(1));
@@ -230,6 +236,7 @@ fn test_closure_environment_sharing() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     let closure2 = Closure {
@@ -246,6 +253,7 @@ fn test_closure_environment_sharing() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     // Both closures share the same environment
@@ -275,6 +283,7 @@ fn test_closure_bytecode_storage() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert_eq!(*closure.bytecode, bytecode);
 }
@@ -297,6 +306,7 @@ fn test_closure_constants_storage() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert_eq!(*closure.constants, constants);
 }
@@ -319,6 +329,7 @@ fn test_closure_num_locals() {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         };
         assert_eq!(closure.num_locals, num_locals);
     }
@@ -344,6 +355,7 @@ fn test_closure_zero_parameters() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert!(closure.arity.matches(0));
     assert!(!closure.arity.matches(1));
@@ -365,6 +377,7 @@ fn test_closure_single_parameter() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert!(closure.arity.matches(1));
 }
@@ -385,6 +398,7 @@ fn test_closure_multiple_parameters() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert!(closure.arity.matches(3));
     assert!(!closure.arity.matches(2));
@@ -407,6 +421,7 @@ fn test_closure_variadic_parameters() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert!(closure.arity.matches(1));
     assert!(closure.arity.matches(2));
@@ -434,6 +449,7 @@ fn test_closures_never_equal() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     });
 
     let closure2 = Value::closure(Closure {
@@ -450,6 +466,7 @@ fn test_closures_never_equal() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     });
 
     // Even though they're structurally identical, they should not be equal
@@ -473,6 +490,7 @@ fn test_same_closure_reference_equality() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     });
 
     let value1 = Value::closure((*closure_rc).clone());
@@ -506,6 +524,7 @@ fn test_closure_with_nested_captured_values() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     assert_eq!(closure.env.len(), 1);
@@ -528,6 +547,7 @@ fn test_closure_with_closure_in_constants() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     });
 
     let outer_closure = Closure {
@@ -544,6 +564,7 @@ fn test_closure_with_closure_in_constants() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     assert_eq!(outer_closure.constants.len(), 1);
@@ -568,6 +589,7 @@ fn test_closure_with_many_upvalues() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     assert_eq!(closure.env.len(), 100);
@@ -595,6 +617,7 @@ fn test_closure_as_method() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     let value = Value::closure(closure);
@@ -624,6 +647,7 @@ fn test_closure_type_check() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     });
 
     assert!(closure.is_closure());
@@ -656,6 +680,7 @@ fn test_closure_environment_isolation() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     let closure2 = Closure {
@@ -672,6 +697,7 @@ fn test_closure_environment_isolation() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     assert_ne!(closure1.env[0], closure2.env[0]);
@@ -695,6 +721,7 @@ fn test_closure_local_variables_count() {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         };
         assert_eq!(closure.num_locals, locals);
     }
@@ -720,6 +747,7 @@ fn test_closure_with_empty_bytecode() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert_eq!(closure.bytecode.len(), 0);
 }
@@ -742,6 +770,7 @@ fn test_closure_with_large_bytecode() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
     assert_eq!(closure.bytecode.len(), 10000);
 }
@@ -766,6 +795,7 @@ fn test_closure_rc_reference_counting() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     // Reference should still be alive
@@ -793,6 +823,7 @@ fn test_closure_debug_format() {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     };
 
     let debug_str = format!("{:?}", closure);

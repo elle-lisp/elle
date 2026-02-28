@@ -1,8 +1,10 @@
 //! Code completion support for LSP
 
+use crate::primitives::def::Doc;
 use crate::symbol::SymbolTable;
-use crate::symbols::{get_primitive_documentation, SymbolIndex, SymbolKind};
+use crate::symbols::{SymbolIndex, SymbolKind};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 /// Get completion items at the given position
 pub fn get_completions(
@@ -11,6 +13,7 @@ pub fn get_completions(
     prefix: &str,
     symbol_index: &SymbolIndex,
     _symbol_table: &SymbolTable,
+    docs: &HashMap<String, Doc>,
 ) -> Vec<Value> {
     let mut items = Vec::new();
 
@@ -110,7 +113,7 @@ pub fn get_completions(
                     .map(|l| l == name)
                     .unwrap_or(false)
             }) {
-                if let Some(full_doc) = get_primitive_documentation(name) {
+                if let Some(full_doc) = docs.get(name).map(|d| d.format()) {
                     items.push(json!({
                         "label": name,
                         "kind": kind_num,
@@ -145,8 +148,9 @@ mod tests {
     fn test_completion_empty() {
         let index = SymbolIndex::new();
         let symbol_table = crate::SymbolTable::new();
+        let docs = HashMap::new();
 
-        let completions = get_completions(0, 0, "", &index, &symbol_table);
+        let completions = get_completions(0, 0, "", &index, &symbol_table, &docs);
         // Should at least have built-in symbols
         assert!(!completions.is_empty());
     }
@@ -155,8 +159,9 @@ mod tests {
     fn test_completion_with_prefix() {
         let index = SymbolIndex::new();
         let symbol_table = crate::SymbolTable::new();
+        let docs = HashMap::new();
 
-        let completions = get_completions(0, 0, "cons", &index, &symbol_table);
+        let completions = get_completions(0, 0, "cons", &index, &symbol_table, &docs);
         assert!(!completions.is_empty());
         // Should include "cons"
         assert!(completions.iter().any(|item| {
@@ -171,8 +176,9 @@ mod tests {
     fn test_completion_no_match() {
         let index = SymbolIndex::new();
         let symbol_table = crate::SymbolTable::new();
+        let docs = HashMap::new();
 
-        let completions = get_completions(0, 0, "xyz123", &index, &symbol_table);
+        let completions = get_completions(0, 0, "xyz123", &index, &symbol_table, &docs);
         assert!(completions.is_empty());
     }
 }

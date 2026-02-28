@@ -70,6 +70,7 @@ fn root_closure() -> Rc<Closure> {
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
         lir_function: None,
+        doc: None,
     })
 }
 

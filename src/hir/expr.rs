@@ -87,6 +87,8 @@ pub enum HirKind {
         /// - inferred_effect may be Polymorphic(i) if the Yields comes solely
         ///   from calling parameter i
         inferred_effect: Effect,
+        /// Optional docstring extracted from the lambda body
+        doc: Option<Value>,
     },
 
     // === Control Flow ===

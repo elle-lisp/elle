@@ -21,13 +21,20 @@ Uses the new pipeline exclusively:
 ```
 Source → analyze_all → HIR + bindings
                            ↓
-                 extract_symbols_from_hir → SymbolIndex
-                 HirLinter → Diagnostics
+                extract_symbols_from_hir → SymbolIndex
+                HirLinter → Diagnostics
 ```
 
 `CompilerState` holds per-document state. On every open/change, it re-analyzes
 the document and rebuilds the `SymbolIndex` and diagnostics. IDE features
 (hover, completion, definition, references, rename) query the `SymbolIndex`.
+
+The LSP hover provider shows:
+- User-defined docstrings from `SymbolDef.documentation` (populated from `HirKind::Lambda.doc`)
+- Builtin docs from `CompilerState::docs()` (accesses `vm.docs` directly)
+
+`get_primitive_documentation()` was removed from `symbols/mod.rs`. The LSP now
+uses `vm.docs` via `CompilerState::docs()` for builtin documentation.
 
 Invoked via `elle --lsp`.
 

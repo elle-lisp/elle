@@ -41,6 +41,8 @@ pub struct Closure {
     /// LIR function for deferred JIT compilation.
     /// Preserved from emission so the JIT can compile hot functions.
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
+    /// Optional docstring from the source lambda
+    pub doc: Option<Value>,
 }
 
 impl Closure {
@@ -75,6 +77,7 @@ impl PartialEq for Closure {
             && self.cell_params_mask == other.cell_params_mask
             && self.symbol_names == other.symbol_names
             && self.location_map == other.location_map
+            && self.doc == other.doc
         // Note: jit_code and lir_function are not compared
         // as they are derived/cached data
     }
@@ -99,6 +102,7 @@ mod tests {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         };
         assert_eq!(closure.effect(), Effect::none());
     }
@@ -119,6 +123,7 @@ mod tests {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         };
         // env_capacity = 2 (captures) + 3 (params) + 2 (locally-defined) = 7
         assert_eq!(closure.env_capacity(), 7);
@@ -137,6 +142,7 @@ mod tests {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         };
         // env_capacity = 1 (captures) + 3 (param slots) + 1 (locally-defined) = 5
         assert_eq!(closure_variadic.env_capacity(), 5);
@@ -155,6 +161,7 @@ mod tests {
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
             lir_function: None,
+            doc: None,
         };
         // env_capacity = 0 (captures) + 1 (min params) + 1 (locally-defined) = 2
         assert_eq!(closure_range.env_capacity(), 2);

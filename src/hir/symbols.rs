@@ -92,7 +92,21 @@ impl HirSymbolExtractor {
                 } else {
                     SymbolKind::Variable
                 };
+                let doc_string = if let HirKind::Lambda {
+                    doc: Some(doc_val), ..
+                } = &value.kind
+                {
+                    doc_val.with_string(|s| s.to_string())
+                } else {
+                    None
+                };
                 self.record_definition(*binding, kind, &hir.span, index, symbols);
+                if let Some(doc_str) = doc_string {
+                    let sym = binding.name();
+                    if let Some(def) = index.definitions.get_mut(&sym) {
+                        def.documentation = Some(doc_str);
+                    }
+                }
                 self.walk(value, index, symbols);
             }
 
@@ -132,6 +146,17 @@ impl HirSymbolExtractor {
                         SymbolKind::Variable
                     };
                     self.record_definition(*binding_id, kind, &hir.span, index, symbols);
+                    if let HirKind::Lambda {
+                        doc: Some(doc_val), ..
+                    } = &init.kind
+                    {
+                        if let Some(doc_str) = doc_val.with_string(|s| s.to_string()) {
+                            let sym = binding_id.name();
+                            if let Some(def) = index.definitions.get_mut(&sym) {
+                                def.documentation = Some(doc_str);
+                            }
+                        }
+                    }
                     self.walk(init, index, symbols);
                 }
                 self.walk(body, index, symbols);
@@ -346,5 +371,54 @@ mod tests {
         let mut sorted_names = names.clone();
         sorted_names.sort();
         assert_eq!(names, sorted_names, "available_symbols should be sorted");
+    }
+
+    #[test]
+    fn test_symbol_def_has_documentation() {
+        let (mut symbols, mut vm) = setup();
+        let result = analyze(
+            r#"(def my-fn (fn (x) "Adds one to x" (+ x 1)))"#,
+            &mut symbols,
+            &mut vm,
+        )
+        .unwrap();
+        let index = extract_symbols_from_hir(&result.hir, &symbols);
+        let def = index
+            .definitions
+            .values()
+            .find(|d| d.name == "my-fn")
+            .expect("Should have definition for my-fn");
+        assert_eq!(def.documentation.as_deref(), Some("Adds one to x"));
+    }
+
+    #[test]
+    fn test_symbol_def_no_documentation_without_docstring() {
+        let (mut symbols, mut vm) = setup();
+        let result = analyze(r#"(def my-fn (fn (x) (+ x 1)))"#, &mut symbols, &mut vm).unwrap();
+        let index = extract_symbols_from_hir(&result.hir, &symbols);
+        let def = index
+            .definitions
+            .values()
+            .find(|d| d.name == "my-fn")
+            .expect("Should have definition for my-fn");
+        assert_eq!(def.documentation, None);
+    }
+
+    #[test]
+    fn test_defn_docstring_populates_symbol_def() {
+        let (mut symbols, mut vm) = setup();
+        let result = analyze(
+            r#"(defn greet (name) "Greets someone by name" (string/append "Hello, " name))"#,
+            &mut symbols,
+            &mut vm,
+        )
+        .unwrap();
+        let index = extract_symbols_from_hir(&result.hir, &symbols);
+        let def = index
+            .definitions
+            .values()
+            .find(|d| d.name == "greet")
+            .expect("Should have definition for greet");
+        assert_eq!(def.documentation.as_deref(), Some("Greets someone by name"));
     }
 }

@@ -27,6 +27,7 @@ impl Lowerer {
                 body,
                 num_locals,
                 inferred_effect,
+                doc,
             } => self.lower_lambda_expr(
                 params,
                 rest_param.as_ref(),
@@ -34,6 +35,7 @@ impl Lowerer {
                 body,
                 *num_locals,
                 inferred_effect,
+                *doc,
             ),
 
             HirKind::If {

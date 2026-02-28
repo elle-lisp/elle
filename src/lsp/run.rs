@@ -294,6 +294,7 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                                     character as u32,
                                     &doc.symbol_index,
                                     compiler_state.symbol_table(),
+                                    compiler_state.docs(),
                                 );
                             }
                         }
@@ -338,6 +339,7 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                                     &prefix,
                                     &doc.symbol_index,
                                     compiler_state.symbol_table(),
+                                    compiler_state.docs(),
                                 );
                             }
                         }

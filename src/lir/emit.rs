@@ -255,6 +255,7 @@ impl Emitter {
                     location_map: Rc::new(nested_bytecode.location_map),
                     jit_code: None,
                     lir_function: Some(Rc::new(func.as_ref().clone())),
+                    doc: func.doc,
                 };
 
                 // Add closure template to constants
