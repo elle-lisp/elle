@@ -61,8 +61,8 @@ The JIT was built incrementally:
 
 Supported instructions:
 - **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`
-- **Arithmetic**: `BinOp` (all via runtime helpers), `UnaryOp` (Neg, Not, BitNot)
-- **Comparison**: `Compare` (all via runtime helpers)
+- **Arithmetic**: `BinOp` (inline integer fast path, extern fallback), `UnaryOp` (Not fully inlined, Neg/BitNot inline integer fast path)
+- **Comparison**: `Compare` (inline integer fast path, extern fallback)
 - **Variables**: `Move`, `Dup`, `LoadLocal`, `StoreLocal`, `LoadCapture`, `LoadCaptureRaw`
 - **Data structures**: `Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`
 - **Cells**: `MakeCell`, `LoadCell`, `StoreCell`, `StoreCapture`
@@ -84,6 +84,7 @@ Unsupported (returns JitError::UnsupportedInstruction):
 | `runtime.rs` | ~460 | Arithmetic, comparison, type-checking helpers |
 | `dispatch.rs` | ~640 | Data structure, cell, global, function call helpers (incl. JIT-to-JIT) |
 | `code.rs` | ~100 | `JitCode` wrapper type |
+| `fastpath.rs` | ~250 | Inline integer fast paths for arithmetic/comparison |
 | `group.rs` | ~590 | Compilation group discovery for batch JIT (no Cranelift dependency) |
 
 ## Runtime Helpers
@@ -136,6 +137,61 @@ Key implementation details:
   has the same number of arguments as the function's arity.
 - **Arg evaluation order**: New arg values are read before any are updated,
   handling cases like `(f b a)` where args are swapped.
+
+## Inline Integer Fast Paths
+
+For each arithmetic (`BinOp`) and comparison (`Compare`) operation, the JIT
+emits a diamond-shaped CFG that checks if both operands are integers and
+performs the operation inline, falling back to the extern runtime helper for
+non-integer operands:
+
+```
+current_block:
+    tag check: both operands have TAG_INT?
+    brif -> fast_block / slow_block
+
+fast_block:
+    extract payloads, native op, re-tag result
+    jump -> merge_block(fast_result)
+
+slow_block:
+    call extern helper (e.g., elle_jit_add)
+    jump -> merge_block(slow_result)
+
+merge_block(phi):
+    result = phi
+```
+
+Special cases:
+- **Div/Rem**: An extra `int_check_block` checks for zero divisor after the
+  tag check. If divisor is zero, falls to `slow_block` (two predecessors).
+- **Eq/Ne**: Use bit equality on the full NaN-boxed value (both have the same
+  TAG_INT prefix, so bit equality is correct for integers).
+- **Ordered comparisons** (Lt/Le/Gt/Ge) and **shifts** (Shl/Shr): Sign-extend
+  the 48-bit payload to 64 bits before the native operation.
+- **Not** (unary): Fully inlined with no slow path. The truthiness check
+  (`ushr 48` then compare against `0x7FF9`) works for all types — only nil and
+  false have the falsy tag. Returns `TAG_TRUE` or `TAG_FALSE` directly.
+- **Neg/BitNot** (unary): Same diamond pattern as binary ops but with a
+  single-operand tag check (`band` with `TAG_INT_MASK`, `icmp eq` against
+  `TAG_INT`). Neg sign-extends the payload, negates, truncates, re-tags.
+  BitNot XORs the payload with `PAYLOAD_MASK` (flips all 48 payload bits),
+  re-tags.
+
+## Direct Self-Calls
+
+Solo-compiled functions with a known SymbolId (i.e., bound to a global) get a
+one-entry `scc_peers` map pointing to themselves. This means self-recursive
+calls emit direct Cranelift calls instead of going through `elle_jit_call`.
+
+Benefits:
+- Eliminates hash lookup in `jit_cache` per self-call
+- Eliminates arity checking (known at compile time)
+- Eliminates dispatch overhead (direct call vs. indirect)
+- Passes correct `self_bits` so the callee's self-tail-call optimization works
+
+When `self_sym` is `None` (anonymous closures), behavior is unchanged — calls
+go through `elle_jit_call` as before.
 
 ## Fiber Integration
 

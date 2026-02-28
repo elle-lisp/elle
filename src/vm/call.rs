@@ -356,18 +356,21 @@ impl VM {
         // If hot, attempt JIT compilation
         if is_hot {
             if let Some(ref lir_func) = closure.lir_function {
+                // Hoist the SymbolId lookup — needed for both batch and solo paths
+                let self_sym = self.find_global_sym_for_bytecode(bytecode_ptr);
+
                 // Try batch compilation first for capture-free functions
                 if lir_func.num_captures == 0 {
                     if let Some(result) =
-                        self.try_batch_jit(lir_func, bytecode_ptr, closure, args, func)
+                        self.try_batch_jit(lir_func, bytecode_ptr, closure, args, func, self_sym)
                     {
                         return Some(result);
                     }
                 }
 
-                // Solo compilation (original path)
+                // Solo compilation — pass self_sym for direct self-calls
                 match JitCompiler::new() {
-                    Ok(compiler) => match compiler.compile(lir_func) {
+                    Ok(compiler) => match compiler.compile(lir_func, self_sym) {
                         Ok(jit_code) => {
                             let jit_code = Rc::new(jit_code);
                             self.jit_cache.insert(bytecode_ptr, jit_code.clone());
@@ -491,17 +494,18 @@ impl VM {
     fn try_batch_jit(
         &mut self,
         lir_func: &Rc<crate::lir::LirFunction>,
-        bytecode_ptr: *const u8,
+        _bytecode_ptr: *const u8,
         closure: &crate::value::Closure,
         args: &[Value],
         func: Value,
+        hot_sym: Option<SymbolId>,
     ) -> Option<Option<SignalBits>> {
         let group = crate::jit::discover_compilation_group(lir_func, &self.globals);
         if group.is_empty() {
             return None;
         }
 
-        let hot_sym = self.find_global_sym_for_bytecode(bytecode_ptr)?;
+        let hot_sym = hot_sym?;
 
         let compiler = match JitCompiler::new() {
             Ok(c) => c,

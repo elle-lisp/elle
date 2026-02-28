@@ -32,6 +32,7 @@
 mod code;
 mod compiler;
 pub(crate) mod dispatch;
+mod fastpath;
 mod group;
 mod runtime;
 mod translate;
