@@ -86,4 +86,4 @@ Syntax / Value tree
 | `lexer.rs` | ~300 | Tokenization |
 | `token.rs` | ~100 | Token types, SourceLoc |
 | `parser.rs` | ~200 | Token → Value parsing |
-| `syntax_parser.rs` | ~200 | Token → Syntax parsing |
+| `syntax.rs` | ~200 | Token → Syntax parsing |

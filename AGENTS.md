@@ -300,7 +300,7 @@ Array, Table, Tuple, Struct, Closure types.
       `SendValue::from_value()` and `SendValue::into_value()` (or return
       error if not sendable)
 - [ ] `src/value/mod.rs` — re-export new types if needed
-- [ ] `src/primitives/type_check.rs` — add `your_type?` predicate function
+- [ ] `src/primitives/types.rs` — add `your_type?` predicate function
       and entry in `PRIMITIVES` array
 - [ ] `src/primitives/registration.rs` — add your module to `ALL_TABLES`
       if you created a new primitives file
@@ -373,7 +373,7 @@ If the form needs new syntax:
 - [ ] `src/syntax/mod.rs` — add variant to `SyntaxKind`, update
       `kind_label()`, `set_scopes_recursive()`
 - [ ] `src/syntax/display.rs` — add display arm
-- [ ] `src/reader/syntax_parser.rs` — add parsing logic
+- [ ] `src/reader/syntax.rs` — add parsing logic
 - [ ] `src/reader/lexer.rs` — add token type if new delimiter needed
 
 If the form needs new bytecode instructions, follow the bytecode
@@ -387,7 +387,7 @@ Reader (source → tokens → syntax):
 - [ ] `src/reader/lexer.rs` — add delimiter handling (e.g., `@[` for
       arrays, `@{` for tables)
 - [ ] `src/reader/token.rs` — add token variant if needed
-- [ ] `src/reader/syntax_parser.rs` — add parsing to `SyntaxKind`
+- [ ] `src/reader/syntax.rs` — add parsing to `SyntaxKind`
 - [ ] `src/reader/parser.rs` — add parsing to `Value` (legacy reader)
 
 Syntax (expansion):

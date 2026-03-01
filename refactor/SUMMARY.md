@@ -137,14 +137,14 @@ the old target — the convention was wrong, not the code.
 |------|------:|------:|----------|
 | `pipeline.rs` | 1,532 | 53K | 74% inline tests — extract to integration tests |
 | `primitives/string.rs` | 1,219 | 35K | Independent functions — split |
-| `primitives/file_io.rs` | 1,047 | 30K | Independent functions — split |
+| `primitives/fileio.rs` | 1,047 | 30K | Independent functions — split |
 | `hir/analyze/binding.rs` | 923 | 36K | Cohesive binding analysis — split by form |
 | `lir/emit.rs` | 903 | 36K | Dispatch table — keep, extract helpers within file |
 | `primitives/fibers.rs` | 890 | 27K | Independent functions — split |
 | `jit/translate.rs` | 780 | 34K | Dispatch table — keep |
 | `primitives/table.rs` | 763 | 23K | Borderline — leave for now |
 | `primitives/list.rs` | 743 | 22K | Borderline — leave for now |
-| `reader/syntax_parser.rs` | 721 | 25K | Parser — keep |
+| `reader/syntax.rs` | 721 | 25K | Parser — keep |
 
 ### Structural issues found
 

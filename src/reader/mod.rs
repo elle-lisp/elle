@@ -1,12 +1,12 @@
 mod lexer;
 mod parser;
-mod syntax_parser;
+mod syntax;
 mod token;
 
 // Re-export public API
 pub use lexer::Lexer;
 pub use parser::Reader;
-pub use syntax_parser::SyntaxReader;
+pub use syntax::SyntaxReader;
 pub use token::{OwnedToken, SourceLoc, Token, TokenWithLoc};
 
 use crate::symbol::SymbolTable;
