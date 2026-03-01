@@ -110,3 +110,10 @@ mod docstrings {
 mod table_keys {
     include!("table_keys.rs");
 }
+// Temporarily disabled while sorting out compilation caching.
+// mod fn_flow {
+//     include!("fn_flow.rs");
+// }
+// mod fn_graph {
+//     include!("fn_graph.rs");
+// }

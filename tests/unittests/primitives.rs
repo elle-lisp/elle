@@ -1779,8 +1779,8 @@ fn eval_full(input: &str) -> Result<Value, elle::error::LError> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     let _effects = register_primitives(&mut vm, &mut symbols);
-    elle::primitives::init_stdlib(&mut vm, &mut symbols);
     elle::context::set_symbol_table(&mut symbols as *mut SymbolTable);
+    elle::primitives::init_stdlib(&mut vm, &mut symbols);
     pipeline_eval(input, &mut symbols, &mut vm).map_err(elle::error::LError::from)
 }
 

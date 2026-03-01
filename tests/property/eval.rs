@@ -1,5 +1,5 @@
 // Property-based tests for the `eval` special form
-use crate::common::eval_source;
+use crate::common::eval_source_bare as eval_source;
 use elle::Value;
 use proptest::prelude::*;
 

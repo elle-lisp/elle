@@ -16,6 +16,7 @@ pub mod docs;
 pub mod ffi;
 pub mod fibers;
 pub mod file_io;
+pub mod graph_def;
 pub mod higher_order_def;
 pub mod json;
 pub mod list;
@@ -39,4 +40,6 @@ pub use def::{PrimitiveDef, PrimitiveMeta};
 pub use docs::help_text;
 pub use list::{clear_length_symbol_table, set_length_symbol_table};
 pub use module_init::init_stdlib;
-pub use registration::{build_primitive_meta, register_primitives};
+pub use registration::{
+    build_primitive_meta, cached_primitive_meta, intern_primitive_names, register_primitives,
+};

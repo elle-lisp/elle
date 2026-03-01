@@ -6,7 +6,7 @@
 // 2. defn function definition syntax
 // 3. List display (no `. ()` in proper lists)
 
-use crate::common::eval_source;
+use crate::common::eval_source_bare as eval_source;
 use elle::Value;
 use proptest::prelude::*;
 

@@ -7,7 +7,9 @@ use crate::effects::Effect;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{AnalysisResult, Analyzer, Hir};
 use crate::lir::{Emitter, Lowerer};
-use crate::primitives::build_primitive_meta;
+use crate::primitives::cached_primitive_meta;
+use crate::primitives::def::PrimitiveMeta;
+use crate::primitives::intern_primitive_names;
 use crate::primitives::register_primitives;
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
@@ -28,6 +30,91 @@ pub struct CompileResult {
 /// Used by linter and LSP which need HIR but not bytecode
 pub struct AnalyzeResult {
     pub hir: Hir,
+}
+
+/// Cached compilation state for pipeline functions.
+///
+/// Eliminates per-call costs of VM creation, primitive registration,
+/// and prelude loading. Thread-local because VM contains Rc values.
+///
+/// # Invariants
+///
+/// - Prelude must be 100% defmacro (no runtime definitions)
+/// - Primitives must be registered before any pipeline function call
+/// - Pipeline functions are not re-entrant (no nested compile/compile_all)
+/// - Primitive registration order is deterministic (ALL_TABLES)
+struct CompilationCache {
+    /// VM with primitives registered. Fiber always reset between uses.
+    vm: VM,
+    /// Expander with prelude loaded. Cloned for each pipeline call.
+    expander: Expander,
+    /// Primitive metadata from register_primitives.
+    meta: PrimitiveMeta,
+}
+
+thread_local! {
+    static COMPILATION_CACHE: std::cell::RefCell<Option<CompilationCache>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Get or initialize the compilation cache, returning a VM with reset fiber,
+/// a cloned Expander, and cloned PrimitiveMeta.
+///
+/// The VM's fiber is always reset before use. The Expander is cloned so that
+/// each pipeline call gets independent expansion state (scope IDs, depth).
+///
+/// # Safety / Lifetime
+///
+/// Returns a raw pointer to the cached VM. The VM lives in a thread-local
+/// RefCell; the borrow is released before this function returns, so the
+/// caller must not call `get_compilation_cache` again while the VM pointer
+/// is live. This is safe because pipeline functions are not re-entrant
+/// (`eval_syntax` receives its own `&mut VM`, not the cache VM).
+fn get_compilation_cache() -> (*mut VM, Expander, PrimitiveMeta) {
+    COMPILATION_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        let c = cache_ref.get_or_insert_with(|| {
+            let mut vm = VM::new();
+            let mut init_symbols = SymbolTable::new();
+            let meta = register_primitives(&mut vm, &mut init_symbols);
+            let mut expander = Expander::new();
+            // Prelude loading needs the VM for macro body evaluation.
+            // The init_symbols is throwaway — prelude is 100% defmacro,
+            // so handle_defmacro doesn't touch SymbolTable.
+            expander
+                .load_prelude(&mut init_symbols, &mut vm)
+                .expect("prelude loading must succeed");
+            CompilationCache { vm, expander, meta }
+        });
+
+        // Always reset fiber before use
+        c.vm.reset_fiber();
+
+        let expander = c.expander.clone();
+        let meta = c.meta.clone();
+        let vm_ptr = &mut c.vm as *mut VM;
+        (vm_ptr, expander, meta)
+    })
+}
+
+/// Get a cloned Expander and PrimitiveMeta from the cache without
+/// borrowing the cached VM. Used by functions that have their own VM
+/// (eval, analyze, analyze_all).
+fn get_cached_expander_and_meta() -> (Expander, PrimitiveMeta) {
+    COMPILATION_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        let c = cache_ref.get_or_insert_with(|| {
+            let mut vm = VM::new();
+            let mut init_symbols = SymbolTable::new();
+            let meta = register_primitives(&mut vm, &mut init_symbols);
+            let mut expander = Expander::new();
+            expander
+                .load_prelude(&mut init_symbols, &mut vm)
+                .expect("prelude loading must succeed");
+            CompilationCache { vm, expander, meta }
+        });
+        (c.expander.clone(), c.meta.clone())
+    })
 }
 
 /// Scan an expanded syntax form for `(var/def name (fn ...))` patterns.
@@ -96,7 +183,7 @@ pub fn eval_syntax(
 ) -> Result<crate::value::Value, String> {
     let expanded = expander.expand(syntax, symbols, vm)?;
 
-    let meta = build_primitive_meta(symbols);
+    let meta = cached_primitive_meta(symbols);
     let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);
@@ -117,15 +204,19 @@ pub fn eval_syntax(
 /// Creates an internal VM for macro expansion. Macro side effects
 /// don't persist beyond compilation.
 pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String> {
+    // Ensure caller's SymbolTable has primitive names interned so that
+    // SymbolIds match the cached PrimitiveMeta.
+    intern_primitive_names(symbols);
+
     // Phase 1: Parse to Syntax
     let syntax = read_syntax(source)?;
 
-    // Phase 2: Macro expansion (internal VM for macro bodies)
-    let mut expander = Expander::new();
-    let mut macro_vm = VM::new();
-    let meta = register_primitives(&mut macro_vm, symbols);
-    expander.load_prelude(symbols, &mut macro_vm)?;
-    let expanded = expander.expand(syntax, symbols, &mut macro_vm)?;
+    // Phase 2: Macro expansion (cached VM for macro bodies)
+    let (macro_vm_ptr, mut expander, meta) = get_compilation_cache();
+    // SAFETY: The cached VM is thread-local and pipeline functions are not
+    // re-entrant. The RefCell borrow was released by get_compilation_cache.
+    let macro_vm = unsafe { &mut *macro_vm_ptr };
+    let expanded = expander.expand(syntax, symbols, macro_vm)?;
 
     // Phase 3: Analyze to HIR with interprocedural effect and arity tracking
     let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
@@ -160,16 +251,21 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
 /// 4. If any effect changed, re-analyze with corrected effects
 /// 5. Repeat until stable (max 10 iterations)
 pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<CompileResult>, String> {
+    // Ensure caller's SymbolTable has primitive names interned so that
+    // SymbolIds match the cached PrimitiveMeta.
+    intern_primitive_names(symbols);
+
     let syntaxes = read_syntax_all(source)?;
-    let mut expander = Expander::new();
-    let mut macro_vm = VM::new();
-    let meta = register_primitives(&mut macro_vm, symbols);
-    expander.load_prelude(symbols, &mut macro_vm)?;
+
+    let (macro_vm_ptr, mut expander, meta) = get_compilation_cache();
+    // SAFETY: The cached VM is thread-local and pipeline functions are not
+    // re-entrant. The RefCell borrow was released by get_compilation_cache.
+    let macro_vm = unsafe { &mut *macro_vm_ptr };
 
     // Expand all forms first (expansion is idempotent)
     let mut expanded_forms = Vec::new();
     for syntax in syntaxes {
-        let expanded = expander.expand(syntax, symbols, &mut macro_vm)?;
+        let expanded = expander.expand(syntax, symbols, macro_vm)?;
         expanded_forms.push(expanded);
     }
 
@@ -270,11 +366,11 @@ pub fn eval(
 ) -> Result<crate::value::Value, String> {
     let syntax = read_syntax(source)?;
 
-    let mut expander = Expander::new();
-    expander.load_prelude(symbols, vm)?;
+    // Get cached expander and meta (uses throwaway cache VM only for init)
+    let (mut expander, meta) = get_cached_expander_and_meta();
+
     let expanded = expander.expand(syntax, symbols, vm)?;
 
-    let meta = build_primitive_meta(symbols);
     let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);
@@ -316,10 +412,10 @@ pub fn analyze(
     vm: &mut VM,
 ) -> Result<AnalyzeResult, String> {
     let syntax = read_syntax(source)?;
-    let mut expander = Expander::new();
-    expander.load_prelude(symbols, vm)?;
+
+    let (mut expander, meta) = get_cached_expander_and_meta();
+
     let expanded = expander.expand(syntax, symbols, vm)?;
-    let meta = build_primitive_meta(symbols);
     let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let analysis = analyzer.analyze(&expanded)?;
     Ok(AnalyzeResult { hir: analysis.hir })
@@ -333,8 +429,8 @@ pub fn analyze_all(
     vm: &mut VM,
 ) -> Result<Vec<AnalyzeResult>, String> {
     let syntaxes = read_syntax_all(source)?;
-    let mut expander = Expander::new();
-    expander.load_prelude(symbols, vm)?;
+
+    let (mut expander, meta) = get_cached_expander_and_meta();
 
     // Expand all forms first
     let mut expanded_forms = Vec::new();
@@ -365,7 +461,6 @@ pub fn analyze_all(
     }
 
     // Fixpoint loop: analyze until effects stabilize
-    let meta = build_primitive_meta(symbols);
     let mut analysis_results: Vec<AnalysisResult> = Vec::new();
     const MAX_ITERATIONS: usize = 10;
 

@@ -3,7 +3,7 @@
 // Covers unicode handling, string operation laws, and edge cases.
 // Existing tests only use [a-z] — these push into multi-byte territory.
 
-use crate::common::eval_source;
+use crate::common::eval_source_bare as eval_source;
 use elle::Value;
 use proptest::prelude::*;
 

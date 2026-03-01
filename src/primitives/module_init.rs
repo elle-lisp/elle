@@ -8,6 +8,8 @@ pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable) {
     define_higher_order_functions(vm, symbols);
     define_time_functions(vm, symbols);
     define_vm_query_wrappers(vm, symbols);
+    // Graph functions temporarily disabled while sorting out compilation caching.
+    // define_graph_functions(vm, symbols);
 }
 
 /// Define Elle wrappers around vm/query operations

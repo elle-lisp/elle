@@ -3,7 +3,7 @@
 // Tests the FiberHandle system, child chain wiring, propagate, and cancel
 // using generated inputs to exercise edge cases that example-based tests miss.
 
-use crate::common::eval_source;
+use crate::common::eval_source_bare as eval_source;
 use elle::Value;
 use proptest::prelude::*;
 

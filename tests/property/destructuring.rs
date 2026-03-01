@@ -8,7 +8,7 @@
 // 5. Table destructuring in fn params equivalent to manual extraction
 // 6. Table in match: type guard rejects non-tables, literal keys filter
 
-use crate::common::eval_source;
+use crate::common::eval_source_bare as eval_source;
 use elle::Value;
 use proptest::prelude::*;
 

@@ -9,7 +9,7 @@
 // 5. Named blocks with break
 // 6. Macro hygiene
 
-use crate::common::eval_source;
+use crate::common::eval_source_bare as eval_source;
 use elle::Value;
 use proptest::prelude::*;
 

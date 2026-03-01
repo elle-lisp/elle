@@ -3,7 +3,7 @@
 // Verifies that the same source code always produces the same result.
 // Catches nondeterminism from HashMap iteration order, uninitialized state, etc.
 
-use crate::common::eval_source;
+use crate::common::eval_source_bare as eval_source;
 use proptest::prelude::*;
 
 proptest! {
