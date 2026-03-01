@@ -69,17 +69,18 @@ impl<'a> Analyzer<'a> {
                     // Track effect and arity for interprocedural analysis
                     if let HirKind::Lambda {
                         params: lambda_params,
+                        num_required,
                         rest_param,
                         inferred_effect,
                         ..
                     } = &value.kind
                     {
                         self.effect_env.insert(binding, *inferred_effect);
-                        let arity = if rest_param.is_some() {
-                            Arity::AtLeast(lambda_params.len() - 1)
-                        } else {
-                            Arity::Exact(lambda_params.len())
-                        };
+                        let arity = Arity::for_lambda(
+                            rest_param.is_some(),
+                            *num_required,
+                            lambda_params.len(),
+                        );
                         self.arity_env.insert(binding, arity);
                     }
                     bindings.push((binding, value));
@@ -190,17 +191,15 @@ impl<'a> Analyzer<'a> {
             // since later bindings haven't been analyzed yet. This is conservative.
             if let HirKind::Lambda {
                 params: lambda_params,
+                num_required,
                 rest_param,
                 inferred_effect,
                 ..
             } = &value.kind
             {
                 self.effect_env.insert(binding_handles[i], *inferred_effect);
-                let arity = if rest_param.is_some() {
-                    Arity::AtLeast(lambda_params.len() - 1)
-                } else {
-                    Arity::Exact(lambda_params.len())
-                };
+                let arity =
+                    Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
                 self.arity_env.insert(binding_handles[i], arity);
             }
             bindings.push((binding_handles[i], value));
@@ -312,17 +311,15 @@ impl<'a> Analyzer<'a> {
             // Update effect_env and arity_env with the actual inferred values
             if let HirKind::Lambda {
                 params: lambda_params,
+                num_required,
                 rest_param,
                 inferred_effect,
                 ..
             } = &value.kind
             {
                 self.effect_env.insert(binding, *inferred_effect);
-                let arity = if rest_param.is_some() {
-                    Arity::AtLeast(lambda_params.len() - 1)
-                } else {
-                    Arity::Exact(lambda_params.len())
-                };
+                let arity =
+                    Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
                 self.arity_env.insert(binding, arity);
             }
 
@@ -365,6 +362,7 @@ impl<'a> Analyzer<'a> {
             // Also record in defined_global_effects/arities for cross-form tracking
             if let HirKind::Lambda {
                 params: lambda_params,
+                num_required,
                 rest_param,
                 inferred_effect,
                 ..
@@ -372,11 +370,8 @@ impl<'a> Analyzer<'a> {
             {
                 self.effect_env.insert(binding, *inferred_effect);
                 self.defined_global_effects.insert(sym, *inferred_effect);
-                let arity = if rest_param.is_some() {
-                    Arity::AtLeast(lambda_params.len() - 1)
-                } else {
-                    Arity::Exact(lambda_params.len())
-                };
+                let arity =
+                    Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
                 self.arity_env.insert(binding, arity);
                 self.defined_global_arities.insert(sym, arity);
             }

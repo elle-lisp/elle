@@ -1164,6 +1164,8 @@ fn test_spawn_primitive() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     });
 
     let result = call_primitive(&spawn, &[closure]);
@@ -1687,6 +1689,8 @@ fn test_json_serialize_errors() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     });
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());

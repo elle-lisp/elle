@@ -43,6 +43,11 @@ pub struct Closure {
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
     /// Optional docstring from the source lambda
     pub doc: Option<Value>,
+    /// How varargs are collected (List or Struct).
+    /// Only meaningful when arity is AtLeast.
+    pub vararg_kind: crate::hir::VarargKind,
+    /// Total number of parameter slots (required + optional + rest if present).
+    pub num_params: usize,
 }
 
 impl Closure {
@@ -55,13 +60,8 @@ impl Closure {
     /// This is: existing captures + parameters + locally-defined variables.
     /// For variadic functions (AtLeast), the rest slot is an extra parameter.
     pub fn env_capacity(&self) -> usize {
-        let num_param_slots = match self.arity {
-            Arity::Exact(n) => n,
-            Arity::AtLeast(n) => n + 1, // fixed params + rest slot
-            Arity::Range(min, _) => min,
-        };
-        let num_locally_defined = self.num_locals.saturating_sub(num_param_slots);
-        self.env.len() + num_param_slots + num_locally_defined
+        let num_locally_defined = self.num_locals.saturating_sub(self.num_params);
+        self.env.len() + self.num_params + num_locally_defined
     }
 }
 
@@ -78,6 +78,8 @@ impl PartialEq for Closure {
             && self.symbol_names == other.symbol_names
             && self.location_map == other.location_map
             && self.doc == other.doc
+            && self.vararg_kind == other.vararg_kind
+            && self.num_params == other.num_params
         // Note: jit_code and lir_function are not compared
         // as they are derived/cached data
     }
@@ -103,6 +105,8 @@ mod tests {
             jit_code: None,
             lir_function: None,
             doc: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            num_params: 0,
         };
         assert_eq!(closure.effect(), Effect::none());
     }
@@ -124,6 +128,8 @@ mod tests {
             jit_code: None,
             lir_function: None,
             doc: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            num_params: 3,
         };
         // env_capacity = 2 (captures) + 3 (params) + 2 (locally-defined) = 7
         assert_eq!(closure.env_capacity(), 7);
@@ -143,6 +149,8 @@ mod tests {
             jit_code: None,
             lir_function: None,
             doc: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            num_params: 3,
         };
         // env_capacity = 1 (captures) + 3 (param slots) + 1 (locally-defined) = 5
         assert_eq!(closure_variadic.env_capacity(), 5);
@@ -152,7 +160,7 @@ mod tests {
             bytecode: Rc::new(vec![]),
             arity: Arity::Range(1, 3),
             env: Rc::new(vec![]), // 0 captures
-            num_locals: 2,        // 1 min param + 1 locally-defined
+            num_locals: 3,        // 3 params (1 required + 2 optional)
             num_captures: 0,
             constants: Rc::new(vec![]),
             effect: Effect::none(),
@@ -162,8 +170,10 @@ mod tests {
             jit_code: None,
             lir_function: None,
             doc: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            num_params: 3,
         };
-        // env_capacity = 0 (captures) + 1 (min params) + 1 (locally-defined) = 2
-        assert_eq!(closure_range.env_capacity(), 2);
+        // env_capacity = 0 (captures) + 3 (params) + 0 (locally-defined) = 3
+        assert_eq!(closure_range.env_capacity(), 3);
     }
 }

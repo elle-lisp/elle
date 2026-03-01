@@ -42,6 +42,19 @@ pub struct CallArg {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub u32);
 
+/// How extra arguments beyond fixed params are collected.
+/// Only meaningful when `rest_param` is `Some`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VarargKind {
+    /// Collect into a list (existing `&` behavior)
+    List,
+    /// Collect into an immutable struct (`&keys`)
+    Struct,
+    /// Collect into an immutable struct (`&named`) with strict key validation.
+    /// Contains the set of valid keyword names.
+    StrictStruct(Vec<String>),
+}
+
 /// HIR expression kinds - fully analyzed forms
 #[derive(Debug, Clone)]
 pub enum HirKind {
@@ -74,9 +87,16 @@ pub enum HirKind {
     /// Lambda expression
     Lambda {
         params: Vec<Binding>,
+        /// Number of required parameters (before &opt).
+        /// When no &opt, equals the count of fixed params
+        /// (params.len() if no rest_param, params.len() - 1 if rest_param).
+        num_required: usize,
         /// If present, this function is variadic: extra args are collected
-        /// into a list and bound to this parameter.
+        /// into a list or struct and bound to this parameter.
         rest_param: Option<Binding>,
+        /// How the rest parameter's args are collected.
+        /// Only meaningful when rest_param is Some.
+        vararg_kind: VarargKind,
         captures: Vec<CaptureInfo>,
         body: Box<Hir>,
         /// Number of local slots needed (params + locals)

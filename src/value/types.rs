@@ -45,6 +45,20 @@ pub enum Arity {
 }
 
 impl Arity {
+    /// Compute the arity for a lambda with the given parameter structure.
+    /// - `has_rest`: whether the function has a rest/keys/named collector
+    /// - `num_required`: number of required parameters (before &opt)
+    /// - `num_params`: total number of parameter slots (required + optional + rest if present)
+    pub fn for_lambda(has_rest: bool, num_required: usize, num_params: usize) -> Self {
+        if has_rest {
+            Arity::AtLeast(num_required)
+        } else if num_required < num_params {
+            Arity::Range(num_required, num_params)
+        } else {
+            Arity::Exact(num_params)
+        }
+    }
+
     pub fn matches(&self, n: usize) -> bool {
         match self {
             Arity::Exact(expected) => n == *expected,

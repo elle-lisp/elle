@@ -997,3 +997,336 @@ fn test_def_tuple_basic() {
         Value::string("division by zero")
     );
 }
+
+// ============================================================
+// &opt optional parameters
+// ============================================================
+
+#[test]
+fn test_opt_basic_provided() {
+    // Optional param receives the argument when provided
+    assert_eq!(
+        eval_source("((fn (a &opt b) b) 1 2)").unwrap(),
+        Value::int(2)
+    );
+}
+
+#[test]
+fn test_opt_basic_missing() {
+    // Optional param defaults to nil when not provided
+    assert_eq!(eval_source("((fn (a &opt b) b) 1)").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_opt_multiple() {
+    assert_eq!(
+        eval_source("((fn (a &opt b c) (list a b c)) 1)").unwrap(),
+        eval_source("(list 1 nil nil)").unwrap()
+    );
+    assert_eq!(
+        eval_source("((fn (a &opt b c) (list a b c)) 1 2)").unwrap(),
+        eval_source("(list 1 2 nil)").unwrap()
+    );
+    assert_eq!(
+        eval_source("((fn (a &opt b c) (list a b c)) 1 2 3)").unwrap(),
+        eval_source("(list 1 2 3)").unwrap()
+    );
+}
+
+#[test]
+fn test_opt_too_many_args() {
+    // More args than required + optional → arity error
+    assert!(eval_source("((fn (a &opt b) a) 1 2 3)").is_err());
+}
+
+#[test]
+fn test_opt_too_few_args() {
+    // Fewer args than required → arity error
+    assert!(eval_source("((fn (a &opt b c) a))").is_err());
+}
+
+#[test]
+fn test_opt_with_rest() {
+    // &opt before & rest
+    assert_eq!(
+        eval_source("((fn (a &opt b & rest) (list a b rest)) 1)").unwrap(),
+        eval_source("(list 1 nil ())").unwrap()
+    );
+    assert_eq!(
+        eval_source("((fn (a &opt b & rest) (list a b rest)) 1 2)").unwrap(),
+        eval_source("(list 1 2 ())").unwrap()
+    );
+    assert_eq!(
+        eval_source("((fn (a &opt b & rest) (list a b rest)) 1 2 3 4)").unwrap(),
+        eval_source("(list 1 2 (list 3 4))").unwrap()
+    );
+}
+
+#[test]
+fn test_opt_defn() {
+    assert_eq!(
+        eval_source("(begin (defn f (a &opt b) (list a b)) (f 1))").unwrap(),
+        eval_source("(list 1 nil)").unwrap()
+    );
+    assert_eq!(
+        eval_source("(begin (defn f (a &opt b) (list a b)) (f 1 2))").unwrap(),
+        eval_source("(list 1 2)").unwrap()
+    );
+}
+
+#[test]
+fn test_opt_compile_time_arity() {
+    // Compile-time arity check for known callees
+    assert!(eval_source("(begin (defn f (a &opt b) a) (f))").is_err());
+    assert!(eval_source("(begin (defn f (a &opt b) a) (f 1 2 3))").is_err());
+}
+
+#[test]
+fn test_opt_no_params_after() {
+    // &opt must be followed by at least one parameter
+    assert!(eval_source("(fn (&opt) 1)").is_err());
+}
+
+#[test]
+fn test_opt_after_rest_error() {
+    // &opt after & is an error
+    assert!(eval_source("(fn (a & rest &opt b) 1)").is_err());
+}
+
+#[test]
+fn test_opt_only() {
+    // All params optional, no required
+    assert_eq!(
+        eval_source("((fn (&opt a b) (list a b)))").unwrap(),
+        eval_source("(list nil nil)").unwrap()
+    );
+    assert_eq!(
+        eval_source("((fn (&opt a b) (list a b)) 1)").unwrap(),
+        eval_source("(list 1 nil)").unwrap()
+    );
+    assert_eq!(
+        eval_source("((fn (&opt a b) (list a b)) 1 2)").unwrap(),
+        eval_source("(list 1 2)").unwrap()
+    );
+}
+
+// ============================================================
+// &keys keyword arguments
+// ============================================================
+
+#[test]
+fn test_keys_basic() {
+    assert_eq!(
+        eval_source("((fn (a &keys opts) opts) 1 :x 10 :y 20)").unwrap(),
+        eval_source("{:x 10 :y 20}").unwrap()
+    );
+}
+
+#[test]
+fn test_keys_empty() {
+    assert_eq!(
+        eval_source("((fn (a &keys opts) opts) 1)").unwrap(),
+        eval_source("{}").unwrap()
+    );
+}
+
+#[test]
+fn test_keys_destructure() {
+    assert_eq!(
+        eval_source("((fn (a &keys {:x x :y y}) (+ x y)) 1 :x 10 :y 20)").unwrap(),
+        Value::int(30)
+    );
+}
+
+#[test]
+fn test_keys_missing_key_destructure() {
+    // Missing key in destructure → nil (silent nil semantics)
+    assert_eq!(
+        eval_source("((fn (a &keys {:x x :y y}) y) 1 :x 10)").unwrap(),
+        Value::NIL
+    );
+}
+
+#[test]
+fn test_keys_with_opt() {
+    assert_eq!(
+        eval_source("((fn (a &opt b &keys opts) (list a b opts)) 1)").unwrap(),
+        eval_source("(list 1 nil {})").unwrap()
+    );
+    assert_eq!(
+        eval_source("((fn (a &opt b &keys opts) (list a b opts)) 1 2)").unwrap(),
+        eval_source("(list 1 2 {})").unwrap()
+    );
+    assert_eq!(
+        eval_source("((fn (a &opt b &keys opts) (list a b opts)) 1 2 :x 10)").unwrap(),
+        eval_source("(list 1 2 {:x 10})").unwrap()
+    );
+}
+
+#[test]
+fn test_keys_odd_args_error() {
+    assert!(eval_source("((fn (a &keys opts) opts) 1 :x 10 :y)").is_err());
+}
+
+#[test]
+fn test_keys_non_keyword_key_error() {
+    assert!(eval_source("((fn (a &keys opts) opts) 1 42 10)").is_err());
+}
+
+#[test]
+fn test_keys_and_rest_exclusive() {
+    assert!(eval_source("(fn (a &keys opts & rest) 1)").is_err());
+    assert!(eval_source("(fn (a & rest &keys opts) 1)").is_err());
+}
+
+#[test]
+fn test_keys_defn() {
+    assert_eq!(
+        eval_source("(begin (defn f (a &keys opts) opts) (f 1 :host \"db\" :port 3306))").unwrap(),
+        eval_source("{:host \"db\" :port 3306}").unwrap()
+    );
+}
+
+// ============================================================
+// &named strict named parameters
+// ============================================================
+
+#[test]
+fn test_named_basic() {
+    assert_eq!(
+        eval_source("((fn (a &named host port) (list host port)) 1 :host \"db\" :port 3306)")
+            .unwrap(),
+        eval_source("(list \"db\" 3306)").unwrap()
+    );
+}
+
+#[test]
+fn test_named_missing_key() {
+    // Missing named param → nil (from struct destructuring)
+    assert_eq!(
+        eval_source("((fn (a &named host port) port) 1 :host \"db\")").unwrap(),
+        Value::NIL
+    );
+}
+
+#[test]
+fn test_named_unknown_key_error() {
+    // Unknown key → runtime error (strict validation)
+    assert!(eval_source("((fn (a &named host) host) 1 :host \"db\" :port 3306)").is_err());
+}
+
+#[test]
+fn test_named_with_opt() {
+    assert_eq!(
+        eval_source("((fn (a &opt b &named host) (list a b host)) 1 :host \"db\")").unwrap(),
+        eval_source("(list 1 nil \"db\")").unwrap()
+    );
+}
+
+#[test]
+fn test_named_defn() {
+    assert_eq!(
+        eval_source(
+            "(begin (defn connect (host &named port) (list host port)) \
+             (connect \"db\" :port 3306))"
+        )
+        .unwrap(),
+        eval_source("(list \"db\" 3306)").unwrap()
+    );
+}
+
+#[test]
+fn test_named_odd_args_error() {
+    assert!(eval_source("((fn (a &named host) host) 1 :host)").is_err());
+}
+
+#[test]
+fn test_named_and_keys_exclusive() {
+    assert!(eval_source("(fn (a &keys opts &named host) 1)").is_err());
+    assert!(eval_source("(fn (a &named host &keys opts) 1)").is_err());
+}
+
+#[test]
+fn test_named_no_params_error() {
+    assert!(eval_source("(fn (a &named) 1)").is_err());
+}
+
+#[test]
+fn test_named_non_symbol_error() {
+    assert!(eval_source("(fn (a &named [x]) 1)").is_err());
+}
+
+// ============================================================
+// Edge case tests
+// ============================================================
+
+#[test]
+fn test_opt_destructuring_pattern() {
+    // &opt with destructuring pattern as optional param
+    assert_eq!(
+        eval_source("((fn (a &opt (b c)) (list a b c)) (list 1 2))").unwrap(),
+        eval_source("(list (list 1 2) nil nil)").unwrap()
+    );
+    assert_eq!(
+        eval_source("((fn (a &opt (b c)) (list a b c)) 1 (list 2 3))").unwrap(),
+        eval_source("(list 1 2 3)").unwrap()
+    );
+}
+
+#[test]
+fn test_keys_mutable_capture() {
+    // &keys param that is set! inside body and captured by nested closure
+    assert_eq!(
+        eval_source(
+            "((fn (&keys opts)
+               (let ((f (fn () opts)))
+                 (f)))
+             :x 10)"
+        )
+        .unwrap(),
+        eval_source("{:x 10}").unwrap()
+    );
+}
+
+#[test]
+fn test_keys_tail_call_error() {
+    // Tail call with bad keyword args should produce error, not crash
+    assert!(eval_source(
+        "(begin
+           (defn f (a &keys opts) opts)
+           (defn g () (f 1 :x))
+           (g))"
+    )
+    .is_err());
+}
+
+#[test]
+fn test_opt_fiber_resume() {
+    // Coroutine with &opt closure — first resume with no args, second with a value
+    // coro/resume passes the value as the result of yield, not the param
+    assert_eq!(
+        eval_source(
+            "(let ((co (coro/new (fn (&opt a) (+ (or a 0) (yield a))))))
+               (coro/resume co)
+               (coro/resume co 42))"
+        )
+        .unwrap(),
+        Value::int(42)
+    );
+    // With an initial arg, the param is bound
+    assert_eq!(
+        eval_source(
+            "(let ((co (coro/new (fn (&opt a) (yield a) a))))
+               (coro/resume co 10)
+               (coro/resume co))"
+        )
+        .unwrap(),
+        Value::int(10)
+    );
+}
+
+#[test]
+fn test_keys_duplicate_keys() {
+    // Duplicate keyword keys → runtime error
+    assert!(eval_source("((fn (a &keys opts) (get opts :x)) 1 :x 10 :x 20)").is_err());
+}
