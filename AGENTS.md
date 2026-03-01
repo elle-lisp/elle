@@ -210,7 +210,8 @@ Things that look wrong but aren't:
   (`Cons`, `List`, `Array`, `Table`) emit type guards (`IsPair`, `IsArray`,
   `IsTable`) that branch to the fail label before extracting elements.
 - `defn`, `let*`, `->`, `->>`, `when`, `unless`, `try`/`catch`, `protect`,
-  `defer`, `with`, and `yield*` are prelude macros defined in
+  `defer`, `with`, `yield*`, `case`, `if-let`, `when-let`, and `forever`
+  are prelude macros defined in
   [`prelude.lisp`](prelude.lisp) (project root), loaded by the Expander
   before user code expansion. The prelude is embedded via `include_str!`
   (in `src/syntax/expand/mod.rs`) and parsed/expanded on each Expander
@@ -228,6 +229,11 @@ Things that look wrong but aren't:
   `@{...}` matches tables (`IsTable`). In destructuring (`def`/`let`/`fn`),
   no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle both mutable and
   immutable types.
+- `[...]` has dual meaning depending on position. In expression position,
+  it's a tuple literal (`SyntaxKind::Tuple`). In structural positions of
+  special forms — lambda params, binding lists, binding pairs, cond clauses,
+  match arms, defmacro params — it's accepted interchangeably with `(...)`.
+  `@[...]` (mutable array) is intentionally rejected in structural positions.
 - `;expr` is the splice reader macro (Janet-style). It marks a value for
   array-spreading at call sites and data constructors. `(splice expr)` is the
   long form. `;` is a delimiter, so `a;b` is three tokens. `,;` is

@@ -427,7 +427,7 @@ impl<'a> Analyzer<'a> {
     }
 
     pub(crate) fn analyze_while(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() != 3 {
+        if items.len() < 3 {
             return Err(format!("{}: while requires condition and body", span));
         }
 
@@ -442,7 +442,19 @@ impl<'a> Analyzer<'a> {
         });
 
         let cond = self.analyze_expr(&items[1])?;
-        let body = self.analyze_expr(&items[2])?;
+        let body = if items.len() == 3 {
+            self.analyze_expr(&items[2])?
+        } else {
+            // Multiple body forms: wrap in implicit begin
+            let mut exprs = Vec::new();
+            let mut effect = Effect::none();
+            for item in &items[2..] {
+                let hir = self.analyze_expr(item)?;
+                effect = effect.combine(hir.effect);
+                exprs.push(hir);
+            }
+            Hir::new(HirKind::Begin(exprs), span.clone(), effect)
+        };
 
         self.block_contexts.pop();
 
@@ -538,17 +550,15 @@ impl<'a> Analyzer<'a> {
         let mut effect = Effect::none();
 
         for clause in &items[1..] {
-            let parts = clause.as_list().ok_or_else(|| {
-                if matches!(clause.kind, SyntaxKind::Tuple(_) | SyntaxKind::Array(_)) {
+            let parts = clause.as_list_or_tuple().ok_or_else(|| {
+                if matches!(clause.kind, SyntaxKind::Array(_)) {
                     format!(
-                        "{}: cond clause must use parentheses (test body...), \
-                         not brackets [...]",
+                        "{}: cond clause must use (...) or [...], not @[...]",
                         clause.span
                     )
                 } else {
                     format!(
-                        "{}: cond clause must be a parenthesized list (test body...), \
-                         got {}",
+                        "{}: cond clause must be a list (...) or [...], got {}",
                         clause.span,
                         clause.kind_label()
                     )
