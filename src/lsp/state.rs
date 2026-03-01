@@ -3,6 +3,7 @@
 //! Manages compilation state for open documents and provides
 //! symbol index for IDE features.
 
+use crate::context::set_symbol_table;
 use crate::hir::{extract_symbols_from_hir, HirLinter};
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::primitives::def::Doc;
@@ -49,6 +50,7 @@ impl CompilerState {
         let mut symbol_table = SymbolTable::new();
         let mut vm = VM::new();
         let _effects = register_primitives(&mut vm, &mut symbol_table);
+        set_symbol_table(&mut symbol_table as *mut SymbolTable);
         init_stdlib(&mut vm, &mut symbol_table);
 
         Self {

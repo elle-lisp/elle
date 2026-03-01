@@ -4,7 +4,7 @@
 // They exercise the yield/resume mechanics, state transitions, and
 // effect threading through the compilation pipeline.
 
-use crate::common::eval_source;
+use crate::common::eval_source_bare as eval_source;
 use elle::Value;
 use proptest::prelude::*;
 

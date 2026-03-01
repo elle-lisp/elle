@@ -371,17 +371,16 @@ fn main() {
     // Register primitive functions (effects map not needed in main)
     let _effects = register_primitives(&mut vm, &mut symbols);
 
+    // Set symbol table context before stdlib init so that macros using
+    // gensym (each, ffi/defbind) work during init_stdlib's eval() calls.
+    set_symbol_table(&mut symbols as *mut SymbolTable);
+    set_length_symbol_table(&mut symbols as *mut SymbolTable);
+
     // Initialize standard library modules
     init_stdlib(&mut vm, &mut symbols);
 
     // Set VM context for FFI primitives
     set_vm_context(&mut vm as *mut VM);
-
-    // Set symbol table context for primitives
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-
-    // Set symbol table context for length primitive
-    set_length_symbol_table(&mut symbols as *mut SymbolTable);
 
     // Check for --help/-h first
     if args.iter().any(|a| a == "--help" || a == "-h") {

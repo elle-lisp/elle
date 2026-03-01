@@ -98,6 +98,25 @@ impl VM {
         }
     }
 
+    /// Reset the VM's fiber and transient state for reuse.
+    ///
+    /// Preserves: globals (primitives), docs, ffi, jit_cache,
+    /// eval_expander, env_cache, tail_call_env_cache.
+    /// Resets: fiber, call state, scope stack, location map,
+    /// loaded modules, closure call counts.
+    pub fn reset_fiber(&mut self) {
+        self.fiber = Fiber::new(root_closure(), 0);
+        self.fiber.status = crate::value::FiberStatus::Alive;
+        self.current_fiber_handle = None;
+        self.current_fiber_value = None;
+        self.pending_tail_call = None;
+        self.current_source_loc = None;
+        self.scope_stack = ScopeStack::new();
+        self.closure_call_counts.clear();
+        self.location_map = LocationMap::new();
+        self.loaded_modules.clear();
+    }
+
     pub fn set_global(&mut self, sym_id: u32, value: Value) {
         let idx = sym_id as usize;
         if idx >= self.globals.len() {

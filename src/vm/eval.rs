@@ -6,7 +6,7 @@
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::Analyzer;
 use crate::lir::{Emitter, Lowerer};
-use crate::primitives::build_primitive_meta;
+use crate::primitives::cached_primitive_meta;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
 use crate::value::heap::TableKey;
@@ -94,7 +94,7 @@ fn eval_inner(
     vm.eval_expander = Some(expander);
 
     // Analyze
-    let meta = build_primitive_meta(symbols);
+    let meta = cached_primitive_meta(symbols);
     let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let mut analysis = analyzer
         .analyze(&expanded)

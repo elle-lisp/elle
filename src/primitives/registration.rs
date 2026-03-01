@@ -107,3 +107,46 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
 
     meta
 }
+
+/// Intern all primitive names (and aliases) into a SymbolTable.
+///
+/// This ensures the SymbolTable has the same SymbolId assignments as
+/// the cached PrimitiveMeta. Must be called before using cached meta
+/// with a SymbolTable that hasn't had `register_primitives` called on it.
+/// Idempotent — safe to call multiple times.
+pub fn intern_primitive_names(symbols: &mut SymbolTable) {
+    for table in ALL_TABLES {
+        for def in *table {
+            symbols.intern(def.name);
+            for alias in def.aliases {
+                symbols.intern(alias);
+            }
+        }
+    }
+}
+
+use std::cell::RefCell;
+
+thread_local! {
+    static PRIMITIVE_META_CACHE: RefCell<Option<PrimitiveMeta>> = const { RefCell::new(None) };
+}
+
+/// Return cached primitive metadata, building it on first call.
+///
+/// The cache is never invalidated — primitive metadata is immutable
+/// within a process lifetime. Callers must have already interned
+/// primitives in their SymbolTable (the cache skips the intern
+/// side-effect on hit).
+pub fn cached_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
+    PRIMITIVE_META_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        match &*cache_ref {
+            Some(meta) => meta.clone(),
+            None => {
+                let meta = build_primitive_meta(symbols);
+                cache_ref.replace(meta.clone());
+                meta
+            }
+        }
+    })
+}

@@ -2,7 +2,7 @@
 //
 // Verifies mathematical laws and int/float promotion rules.
 
-use crate::common::eval_source;
+use crate::common::eval_source_bare as eval_source;
 use elle::Value;
 use proptest::prelude::*;
 

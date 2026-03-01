@@ -6,10 +6,13 @@
 //! - Bytecode and JIT disassembly
 
 use crate::effects::Effect;
+use crate::lir::Terminator;
 use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
+use crate::value::heap::TableKey;
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
+use std::collections::BTreeMap;
 
 // ============================================================================
 // Introspection predicates
@@ -367,6 +370,151 @@ pub fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (fn/flow closure) — return LIR control flow graph as structured data
+///
+/// Returns a struct with keys:
+/// - :name — function name (string or nil)
+/// - :arity — arity as string (e.g., "2", "1+", "2-4")
+/// - :regs — number of virtual registers (int)
+/// - :locals — number of local slots (int)
+/// - :entry — entry block label (int)
+/// - :blocks — tuple of block structs, each with:
+///   - :label — block label (int)
+///   - :instrs — tuple of instruction strings (Debug format)
+///   - :term — terminator string (Debug format)
+///   - :edges — tuple of successor label ints
+///
+/// Returns nil if the closure has no LIR (e.g., native function or LIR discarded).
+/// Errors if argument is not a closure.
+pub fn prim_fn_flow(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("fn/flow: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    if let Some(closure) = args[0].as_closure() {
+        let lir = match &closure.lir_function {
+            Some(lir) => lir,
+            None => return (SIG_OK, Value::NIL),
+        };
+
+        // Build top-level struct
+        let mut fields = BTreeMap::new();
+
+        // :name
+        fields.insert(
+            TableKey::Keyword("name".to_string()),
+            match &lir.name {
+                Some(n) => Value::string(n.as_str()),
+                None => Value::NIL,
+            },
+        );
+
+        // :doc
+        fields.insert(
+            TableKey::Keyword("doc".to_string()),
+            closure.doc.unwrap_or(Value::NIL),
+        );
+
+        // :arity — use Display impl: "2", "1+", "2-4"
+        fields.insert(
+            TableKey::Keyword("arity".to_string()),
+            Value::string(format!("{}", lir.arity)),
+        );
+
+        // :regs
+        fields.insert(
+            TableKey::Keyword("regs".to_string()),
+            Value::int(lir.num_regs as i64),
+        );
+
+        // :locals
+        fields.insert(
+            TableKey::Keyword("locals".to_string()),
+            Value::int(lir.num_locals as i64),
+        );
+
+        // :entry
+        fields.insert(
+            TableKey::Keyword("entry".to_string()),
+            Value::int(lir.entry.0 as i64),
+        );
+
+        // :blocks — tuple of block structs
+        let blocks: Vec<Value> = lir
+            .blocks
+            .iter()
+            .map(|block| {
+                let mut block_fields = BTreeMap::new();
+
+                // :label
+                block_fields.insert(
+                    TableKey::Keyword("label".to_string()),
+                    Value::int(block.label.0 as i64),
+                );
+
+                // :instrs — tuple of Debug-formatted instruction strings
+                let instrs: Vec<Value> = block
+                    .instructions
+                    .iter()
+                    .map(|si| Value::string(format!("{:?}", si.instr)))
+                    .collect();
+                block_fields.insert(
+                    TableKey::Keyword("instrs".to_string()),
+                    Value::tuple(instrs),
+                );
+
+                // :term — Debug-formatted terminator string
+                block_fields.insert(
+                    TableKey::Keyword("term".to_string()),
+                    Value::string(format!("{:?}", block.terminator.terminator)),
+                );
+
+                // :edges — tuple of successor label ints
+                let edges: Vec<Value> = match &block.terminator.terminator {
+                    Terminator::Return(_) | Terminator::Unreachable => vec![],
+                    Terminator::Jump(label) => vec![Value::int(label.0 as i64)],
+                    Terminator::Branch {
+                        then_label,
+                        else_label,
+                        ..
+                    } => {
+                        vec![
+                            Value::int(then_label.0 as i64),
+                            Value::int(else_label.0 as i64),
+                        ]
+                    }
+                    Terminator::Yield { resume_label, .. } => {
+                        vec![Value::int(resume_label.0 as i64)]
+                    }
+                };
+                block_fields.insert(TableKey::Keyword("edges".to_string()), Value::tuple(edges));
+
+                Value::struct_from(block_fields)
+            })
+            .collect();
+
+        fields.insert(
+            TableKey::Keyword("blocks".to_string()),
+            Value::tuple(blocks),
+        );
+
+        (SIG_OK, Value::struct_from(fields))
+    } else {
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                "fn/flow: argument must be a closure".to_string(),
+            ),
+        )
+    }
+}
+
 /// Declarative primitive definitions for debugging operations.
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -522,6 +670,17 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/disasm-jit (fn (x) x))",
         aliases: &["disjit", "fn/disjit"],
+    },
+    PrimitiveDef {
+        name: "fn/flow",
+        func: prim_fn_flow,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Return the LIR control flow graph of a closure as structured data.",
+        params: &["closure"],
+        category: "fn",
+        example: "(fn/flow (fn (x y) (+ x y)))",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "vm/list-primitives",

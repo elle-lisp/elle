@@ -26,6 +26,7 @@ pub struct MacroDef {
 }
 
 /// Hygienic macro expander
+#[derive(Clone)]
 pub struct Expander {
     macros: HashMap<String, MacroDef>,
     next_scope_id: u32,

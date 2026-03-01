@@ -124,6 +124,7 @@ impl Doc {
 /// Returned by `register_primitives` and threaded through the
 /// pipeline to the analyzer. Single source of truth for all
 /// primitive metadata.
+#[derive(Clone)]
 pub struct PrimitiveMeta {
     pub effects: HashMap<SymbolId, Effect>,
     pub arities: HashMap<SymbolId, Arity>,
