@@ -305,21 +305,12 @@ pub fn handle_table_get_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize, con
         .expect("VM bug: Stack underflow on TableGetOrNil");
 
     // Convert the constant to a TableKey for lookup
-    let key = if let Some(name) = key_value.as_keyword_name() {
-        TableKey::Keyword(name.to_string())
-    } else if let Some(s) = key_value.with_string(|s| s.to_string()) {
-        TableKey::String(s)
-    } else if let Some(i) = key_value.as_int() {
-        TableKey::Int(i)
-    } else if let Some(id) = key_value.as_symbol() {
-        TableKey::Symbol(crate::value::SymbolId(id))
-    } else if let Some(b) = key_value.as_bool() {
-        TableKey::Bool(b)
-    } else if key_value.is_nil() {
-        TableKey::Nil
-    } else {
-        vm.fiber.stack.push(Value::NIL);
-        return;
+    let key = match TableKey::from_value(&key_value) {
+        Some(k) => k,
+        None => {
+            vm.fiber.stack.push(Value::NIL);
+            return;
+        }
     };
 
     // Try struct first (immutable, no RefCell borrow)

@@ -107,3 +107,6 @@ mod regex {
 mod docstrings {
     include!("docstrings.rs");
 }
+mod table_keys {
+    include!("table_keys.rs");
+}

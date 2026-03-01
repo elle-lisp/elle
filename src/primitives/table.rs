@@ -102,40 +102,23 @@ pub fn prim_table(args: &[Value]) -> (SignalBits, Value) {
 
     let mut map = BTreeMap::new();
     for i in (0..args.len()).step_by(2) {
-        let key = match value_to_table_key(&args[i]) {
-            Ok(k) => k,
-            Err(e) => return (SIG_ERROR, e),
+        let key = match TableKey::from_value(&args[i]) {
+            Some(k) => k,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("expected hashable value, got {}", args[i].type_name()),
+                    ),
+                )
+            }
         };
         let value = args[i + 1];
         map.insert(key, value);
     }
 
     (SIG_OK, Value::table_from(map))
-}
-
-/// Convert a Value to a TableKey
-fn value_to_table_key(val: &Value) -> Result<TableKey, Value> {
-    if val.is_nil() {
-        Ok(TableKey::Nil)
-    } else if let Some(b) = val.as_bool() {
-        Ok(TableKey::Bool(b))
-    } else if let Some(i) = val.as_int() {
-        Ok(TableKey::Int(i))
-    } else if let Some(id) = val.as_symbol() {
-        Ok(TableKey::Symbol(crate::value::SymbolId(id)))
-    } else if let Some(name) = val.as_keyword_name() {
-        Ok(TableKey::Keyword(name.to_string()))
-    } else if let Some(s) = val.with_string(|s| s.to_string()) {
-        Ok(TableKey::String(s))
-    } else {
-        Err(error_val(
-            "type-error",
-            format!(
-                "expected table key (nil, bool, int, symbol, keyword, or string), got {}",
-                val.type_name()
-            ),
-        ))
-    }
 }
 
 /// Polymorphic del - works on both tables and structs
@@ -153,9 +136,17 @@ pub fn prim_del(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let key = match value_to_table_key(&args[1]) {
-        Ok(k) => k,
-        Err(e) => return (SIG_ERROR, e),
+    let key = match TableKey::from_value(&args[1]) {
+        Some(k) => k,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("expected hashable value, got {}", args[1].type_name()),
+                ),
+            )
+        }
     };
 
     if args[0].is_table() {
@@ -416,9 +407,17 @@ pub fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        let key = match value_to_table_key(&args[1]) {
-            Ok(k) => k,
-            Err(e) => return (SIG_ERROR, e),
+        let key = match TableKey::from_value(&args[1]) {
+            Some(k) => k,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("expected hashable value, got {}", args[1].type_name()),
+                    ),
+                )
+            }
         };
         let borrowed = table.borrow();
         return (SIG_OK, borrowed.get(&key).copied().unwrap_or(default));
@@ -438,9 +437,17 @@ pub fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        let key = match value_to_table_key(&args[1]) {
-            Ok(k) => k,
-            Err(e) => return (SIG_ERROR, e),
+        let key = match TableKey::from_value(&args[1]) {
+            Some(k) => k,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("expected hashable value, got {}", args[1].type_name()),
+                    ),
+                )
+            }
         };
         return (SIG_OK, s.get(&key).copied().unwrap_or(default));
     }
@@ -523,17 +530,7 @@ pub fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let borrowed = table.borrow();
-        let keys: Vec<Value> = borrowed
-            .keys()
-            .map(|k| match k {
-                TableKey::Nil => Value::NIL,
-                TableKey::Bool(b) => Value::bool(*b),
-                TableKey::Int(i) => Value::int(*i),
-                TableKey::Symbol(sid) => Value::symbol(sid.0),
-                TableKey::String(s) => Value::string(s.as_str()),
-                TableKey::Keyword(s) => Value::keyword(s.as_str()),
-            })
-            .collect();
+        let keys: Vec<Value> = borrowed.keys().map(|k| k.to_value()).collect();
         (SIG_OK, crate::value::list(keys))
     } else if args[0].is_struct() {
         let s = match args[0].as_struct() {
@@ -548,17 +545,7 @@ pub fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        let keys: Vec<Value> = s
-            .keys()
-            .map(|k| match k {
-                TableKey::Nil => Value::NIL,
-                TableKey::Bool(b) => Value::bool(*b),
-                TableKey::Int(i) => Value::int(*i),
-                TableKey::Symbol(sid) => Value::symbol(sid.0),
-                TableKey::String(st) => Value::string(st.as_str()),
-                TableKey::Keyword(st) => Value::keyword(st.as_str()),
-            })
-            .collect();
+        let keys: Vec<Value> = s.keys().map(|k| k.to_value()).collect();
         (SIG_OK, crate::value::list(keys))
     } else {
         (
@@ -645,9 +632,17 @@ pub fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let key = match value_to_table_key(&args[1]) {
-        Ok(k) => k,
-        Err(e) => return (SIG_ERROR, e),
+    let key = match TableKey::from_value(&args[1]) {
+        Some(k) => k,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("expected hashable value, got {}", args[1].type_name()),
+                ),
+            )
+        }
     };
 
     if args[0].is_table() {
@@ -948,9 +943,17 @@ pub fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Table (mutable keyed collection) - mutate in place
-    let key = match value_to_table_key(&args[1]) {
-        Ok(k) => k,
-        Err(e) => return (SIG_ERROR, e),
+    let key = match TableKey::from_value(&args[1]) {
+        Some(k) => k,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("expected hashable value, got {}", args[1].type_name()),
+                ),
+            )
+        }
     };
     let value = args[2];
 

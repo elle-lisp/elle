@@ -23,3 +23,6 @@ mod lir_debug {
 mod jit {
     include!("jit.rs");
 }
+mod table_key {
+    include!("table_key.rs");
+}

@@ -118,6 +118,9 @@ impl SendValue {
             HeapObject::Struct(s) => {
                 let mut copied = BTreeMap::new();
                 for (k, v) in s.iter() {
+                    if !k.is_sendable() {
+                        return Err("Cannot send struct with identity keys".to_string());
+                    }
                     copied.insert(k.clone(), SendValue::from_value(*v)?);
                 }
                 Ok(SendValue::Struct(copied))
