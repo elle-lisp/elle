@@ -1144,47 +1144,6 @@ fn test_import_file_circular_dependency_prevention() {
 }
 
 #[test]
-fn test_add_module_path_primitive() {
-    let (vm, mut symbols) = setup();
-    let add_path = get_primitive(&vm, &mut symbols, "add-module-path");
-
-    // Test with valid string argument (without VM context, should fail)
-    let result = call_primitive(&add_path, &[Value::string("./lib")]);
-    assert!(result.is_err(), "Should fail without VM context");
-
-    // Test with invalid argument type
-    let result = call_primitive(&add_path, &[Value::int(42)]);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_add_module_path_with_vm_context() {
-    use elle::{register_primitives, SymbolTable, VM};
-
-    // Set up VM
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-
-    // Set VM context
-    elle::context::set_vm_context(&mut vm as *mut VM);
-
-    let add_path = get_primitive(&vm, &mut symbols, "add-module-path");
-
-    // Test with valid string argument
-    let result = call_primitive(&add_path, &[Value::string("./lib")]);
-    assert!(result.is_ok(), "Should successfully add module path");
-    assert_eq!(result.unwrap(), Value::NIL);
-
-    // Test multiple paths
-    let result = call_primitive(&add_path, &[Value::string("./modules")]);
-    assert!(result.is_ok());
-
-    // Clean up
-    elle::context::clear_vm_context();
-}
-
-#[test]
 fn test_spawn_primitive() {
     let (vm, mut symbols) = setup();
     let spawn = get_primitive(&vm, &mut symbols, "spawn");

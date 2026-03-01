@@ -199,9 +199,6 @@
             ["(write-file path content)", "Write or overwrite file"],
             ["(append-file path content)", "Append to file"],
             ["(read-lines path)", "Read file as list of lines"],
-            ["(file-exists? path)", "Check if file exists"],
-            ["(file? path)", "Check if path is a file"],
-            ["(directory? path)", "Check if path is a directory"],
             ["(file-size path)", "Get file size in bytes"],
             ["(delete-file path)", "Delete a file"],
             ["(copy-file src dest)", "Copy file"],
@@ -209,14 +206,36 @@
             ["(create-directory path)", "Create directory"],
             ["(create-directory-all path)", "Create with parents"],
             ["(delete-directory path)", "Delete empty directory"],
-            ["(list-directory path)", "List directory contents"],
-            ["(current-directory)", "Get working directory"],
-            ["(change-directory path)", "Change working directory"],
-            ["(file-name path)", "Extract filename"],
-            ["(file-extension path)", "Extract file extension"],
-            ["(parent-directory path)", "Get parent directory"],
-            ["(join-path ...parts)", "Join path components"],
-            ["(absolute-path path)", "Get absolute path"]
+            ["(list-directory path)", "List directory contents"]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Path Operations",
+      "level": 2,
+      "content": [
+        {
+          "type": "table",
+          "headers": ["Function", "Description"],
+          "rows": [
+            ["(path/join ...parts)", "Join path components"],
+            ["(path/parent path)", "Get parent directory (nil if none)"],
+            ["(path/filename path)", "Get file name (last component)"],
+            ["(path/stem path)", "Get file stem (without extension)"],
+            ["(path/extension path)", "Get file extension (without dot)"],
+            ["(path/with-extension path ext)", "Replace file extension"],
+            ["(path/normalize path)", "Lexical normalization (resolve . and ..)"],
+            ["(path/absolute path)", "Compute absolute path (no FS access)"],
+            ["(path/canonicalize path)", "Resolve through filesystem (must exist)"],
+            ["(path/relative target base)", "Compute relative path"],
+            ["(path/components path)", "Split into list of components"],
+            ["(path/absolute? path)", "True if path is absolute"],
+            ["(path/relative? path)", "True if path is relative"],
+            ["(path/cwd)", "Get current working directory"],
+            ["(path/exists? path)", "Check if path exists"],
+            ["(path/file? path)", "Check if path is a regular file"],
+            ["(path/dir? path)", "Check if path is a directory"]
           ]
         }
       ]

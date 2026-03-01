@@ -42,3 +42,6 @@ mod convert {
 mod ffi {
     include!("ffi.rs");
 }
+mod path {
+    include!("path.rs");
+}

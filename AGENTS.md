@@ -78,6 +78,7 @@ bytecode. Error messages include file:line:col information.
 | `jit` | JIT compilation via Cranelift for non-suspending functions |
 | `formatter` | Code formatting for Elle source |
 | `plugin` | Dynamic plugin loading for Rust cdylib primitives |
+| `path` | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
 | `pipeline` | Compilation entry points (`compile`, `analyze`, `eval`). See [`docs/pipeline.md`](docs/pipeline.md) |
 | `error` | `LocationMap` for bytecode offset → source location mapping |
 

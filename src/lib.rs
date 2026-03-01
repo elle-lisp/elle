@@ -44,6 +44,7 @@ pub mod jit;
 pub mod lint;
 pub mod lir;
 pub mod lsp;
+pub mod path;
 pub mod pipeline;
 pub mod plugin;
 pub mod primitives;

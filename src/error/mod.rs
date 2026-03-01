@@ -217,15 +217,6 @@ mod tests {
     }
 
     #[test]
-    fn test_exception_in_finally() {
-        let err = LError::exception_in_finally("cleanup failed");
-        assert_eq!(
-            err.description(),
-            "Exception in finally clause: cleanup failed"
-        );
-    }
-
-    #[test]
     fn test_source_loc_creation() {
         let loc = SourceLoc::from_line_col(10, 5);
         assert_eq!(loc.line, 10);

@@ -8,7 +8,6 @@ use crate::value::{
 use crate::vm::scope::ScopeStack;
 use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::jit::JitCode;
@@ -32,7 +31,6 @@ pub struct VM {
     pub globals: Vec<Value>,
     pub ffi: FFISubsystem,
     pub loaded_modules: HashSet<String>,
-    pub module_search_paths: Vec<PathBuf>,
     pub scope_stack: ScopeStack,
     pub closure_call_counts: FxHashMap<*const u8, usize>,
     pub location_map: LocationMap,
@@ -87,7 +85,6 @@ impl VM {
             globals: vec![Value::UNDEFINED; 256],
             ffi: FFISubsystem::new(),
             loaded_modules: HashSet::new(),
-            module_search_paths: vec![PathBuf::from(".")],
             scope_stack: ScopeStack::new(),
             closure_call_counts: FxHashMap::default(),
             location_map: LocationMap::new(),
@@ -147,11 +144,6 @@ impl VM {
             .get(&bytecode_ptr)
             .copied()
             .unwrap_or(0)
-    }
-
-    /// Add a module search path
-    pub fn add_module_search_path(&mut self, path: PathBuf) {
-        self.module_search_paths.push(path);
     }
 
     /// Check if module is already loaded

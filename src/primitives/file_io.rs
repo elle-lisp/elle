@@ -146,90 +146,6 @@ pub fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Check if a file exists
-pub fn prim_file_exists(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("file-exists?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if args[0].is_string() {
-        args[0]
-            .with_string(|path| (SIG_OK, Value::bool(std::path::Path::new(path).exists())))
-            .unwrap()
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("file-exists?: expected string, got {}", args[0].type_name()),
-            ),
-        )
-    }
-}
-
-/// Check if path is a directory
-pub fn prim_is_directory(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("directory?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if args[0].is_string() {
-        args[0]
-            .with_string(|path| match std::fs::metadata(path) {
-                Ok(metadata) => (SIG_OK, Value::bool(metadata.is_dir())),
-                Err(_) => (SIG_OK, Value::FALSE),
-            })
-            .unwrap()
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("directory?: expected string, got {}", args[0].type_name()),
-            ),
-        )
-    }
-}
-
-/// Check if path is a file
-pub fn prim_is_file(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("file?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if args[0].is_string() {
-        args[0]
-            .with_string(|path| match std::fs::metadata(path) {
-                Ok(metadata) => (SIG_OK, Value::bool(metadata.is_file())),
-                Err(_) => (SIG_OK, Value::FALSE),
-            })
-            .unwrap()
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("file?: expected string, got {}", args[0].type_name()),
-            ),
-        )
-    }
-}
-
 /// Delete a file
 pub fn prim_delete_file(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -647,39 +563,6 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/append \"log.txt\" \"new line\")",
         aliases: &["append-file"],
-    },
-    PrimitiveDef {
-        name: "file/exists?",
-        func: prim_file_exists,
-        effect: Effect::none(),
-        arity: Arity::Exact(1),
-        doc: "Check if a file exists",
-        params: &["path"],
-        category: "file",
-        example: "(file/exists? \"data.txt\")",
-        aliases: &["file-exists?"],
-    },
-    PrimitiveDef {
-        name: "file/directory?",
-        func: prim_is_directory,
-        effect: Effect::none(),
-        arity: Arity::Exact(1),
-        doc: "Check if path is a directory",
-        params: &["path"],
-        category: "file",
-        example: "(file/directory? \"/home\")",
-        aliases: &["directory?"],
-    },
-    PrimitiveDef {
-        name: "file/file?",
-        func: prim_is_file,
-        effect: Effect::none(),
-        arity: Arity::Exact(1),
-        doc: "Check if path is a file",
-        params: &["path"],
-        category: "file",
-        example: "(file/file? \"data.txt\")",
-        aliases: &["file?"],
     },
     PrimitiveDef {
         name: "file/delete",

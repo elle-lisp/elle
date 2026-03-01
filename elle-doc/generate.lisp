@@ -664,20 +664,20 @@ tbody tr:nth-child(even) {
 (var output-dir "site")
 
 ## Create output directory if it doesn't exist
-(if (not (directory? output-dir))
+(if (not (path/dir? output-dir))
   (create-directory-all output-dir))
 
 ## Read and parse site configuration
 (display "Reading site configuration...")
 (newline)
-(var site-json (slurp (join-path docs-dir "site.json")))
+(var site-json (slurp (path/join docs-dir "site.json")))
 (var site-config (json-parse site-json))
 
 ## Generate and write CSS
 (display "Generating CSS...")
 (newline)
 (var css-content (generate-css))
-(spit (join-path output-dir "style.css") css-content)
+(spit (path/join output-dir "style.css") css-content)
 
 ## Get navigation items
 (var nav-items (get site-config "nav"))
@@ -694,7 +694,7 @@ tbody tr:nth-child(even) {
         (var rest-nav-items (rest current-nav-items))
         (var slug (get nav-item "slug"))
         (var title (get nav-item "title"))
-        (var page-file (join-path docs-dir (-> "pages/" (append slug) (append ".json"))))
+        (var page-file (path/join docs-dir (-> "pages/" (append slug) (append ".json"))))
         
         (display "Generating: ")
         (display slug)
@@ -725,7 +725,7 @@ tbody tr:nth-child(even) {
         (var full-html (generate-page site-config page-data all-nav-items css-content body-html))
         
         ## Write HTML file
-        (var output-file (join-path output-dir (append slug ".html")))
+        (var output-file (path/join output-dir (append slug ".html")))
         (spit output-file full-html)
         
         ## Process next page

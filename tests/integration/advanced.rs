@@ -14,16 +14,6 @@ fn test_import_file_integration() {
 }
 
 #[test]
-fn test_add_module_path_integration() {
-    // Test that add-module-path is available
-    assert!(eval_source("(add-module-path \"./modules\")").is_ok());
-
-    // Multiple paths
-    assert!(eval_source("(add-module-path \"./lib\")").is_ok());
-    assert!(eval_source("(add-module-path \"./src\")").is_ok());
-}
-
-#[test]
 fn test_spawn_and_thread_id() {
     // Get current thread ID
     let result = eval_source("(current-thread-id)").unwrap();
@@ -158,7 +148,6 @@ fn test_debug_print_with_nested_structures() {
 fn test_phase5_feature_availability() {
     // Verify all Phase 5 primitives are registered
     assert!(eval_source("(import-file \"test-modules/test.lisp\")").is_ok());
-    assert!(eval_source("(add-module-path \".\")").is_ok());
     // spawn now requires a closure, not a native function
     assert!(eval_source("(spawn (fn () 42))").is_ok());
     // join requires a thread handle, not a string
@@ -184,20 +173,6 @@ fn test_import_file_wrong_argument_type() {
     // import-file requires a string argument
     assert!(eval_source("(import-file 42)").is_err());
     assert!(eval_source("(import-file nil)").is_err());
-}
-
-#[test]
-fn test_add_module_path_wrong_argument_count() {
-    // add-module-path requires exactly 1 argument
-    assert!(eval_source("(add-module-path)").is_err());
-    assert!(eval_source("(add-module-path \"a\" \"b\")").is_err());
-}
-
-#[test]
-fn test_add_module_path_wrong_argument_type() {
-    // add-module-path requires a string argument
-    assert!(eval_source("(add-module-path 42)").is_err());
-    assert!(eval_source("(add-module-path (list 1 2))").is_err());
 }
 
 #[test]
@@ -498,12 +473,6 @@ fn test_import_file_returns_last_value() {
 }
 
 #[test]
-fn test_add_module_path_returns_nil() {
-    // add-module-path should return nil
-    assert_eq!(eval_source("(add-module-path \".\")").unwrap(), Value::NIL);
-}
-
-#[test]
 fn test_import_file_with_function_definitions() {
     // Load a file that defines functions
     // Note: This test skipped because math-lib.elle uses recursion which requires proper module context
@@ -540,14 +509,6 @@ fn test_import_same_file_twice_idempotent() {
         result.unwrap(),
         elle::list([Value::bool(true), Value::bool(true)])
     );
-}
-
-#[test]
-fn test_add_module_path_multiple_paths() {
-    // Add multiple module search paths
-    assert!(eval_source("(add-module-path \"test-modules\")").is_ok());
-    assert!(eval_source("(add-module-path \"./lib\")").is_ok());
-    assert!(eval_source("(add-module-path \".\")").is_ok());
 }
 
 #[test]

@@ -1,302 +1,432 @@
-//! Path manipulation primitives
+//! Path manipulation primitives.
+//!
+//! Thin wrappers around `crate::path`. No camino imports here.
+
 use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
-/// Get absolute path
-pub fn prim_absolute_path(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("absolute-path: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if let Some(result) = args[0].with_string(|path| match std::fs::canonicalize(path) {
-        Ok(abs_path) => (
-            SIG_OK,
-            Value::string(abs_path.to_string_lossy().into_owned()),
-        ),
-        Err(e) => (
-            SIG_ERROR,
-            error_val(
-                "error",
-                format!("absolute-path: failed to resolve '{}': {}", path, e),
-            ),
-        ),
-    }) {
+/// Call `f` with the string content of `val`, or return a type error
+/// tagged with `prim_name`.
+fn with_str_arg<F>(val: &Value, prim_name: &str, f: F) -> (SignalBits, Value)
+where
+    F: FnOnce(&str) -> (SignalBits, Value),
+{
+    if let Some(result) = val.with_string(|s| f(s)) {
         result
     } else {
         (
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!(
-                    "absolute-path: expected string, got {}",
-                    args[0].type_name()
-                ),
+                format!("{}: expected string, got {}", prim_name, val.type_name()),
             ),
         )
     }
 }
 
-/// Get current working directory
-pub fn prim_current_directory(_args: &[Value]) -> (SignalBits, Value) {
-    match std::env::current_dir() {
-        Ok(path) => (SIG_OK, Value::string(path.to_string_lossy().into_owned())),
-        Err(e) => (
-            SIG_ERROR,
-            error_val(
-                "error",
-                format!("current-directory: failed to get current directory: {}", e),
-            ),
-        ),
-    }
-}
-
-/// Change current working directory
-pub fn prim_change_directory(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("change-directory: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if let Some(result) = args[0].with_string(|path| match std::env::set_current_dir(path) {
-        Ok(_) => (SIG_OK, Value::TRUE),
-        Err(e) => (
-            SIG_ERROR,
-            error_val(
-                "error",
-                format!("change-directory: failed to change to '{}': {}", path, e),
-            ),
-        ),
-    }) {
-        result
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "change-directory: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
-    }
-}
-
-/// Join path components (return a properly formatted path)
-pub fn prim_join_path(args: &[Value]) -> (SignalBits, Value) {
+fn prim_path_join(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                "join-path: expected at least 1 argument, got 0",
+                "path/join: expected at least 1 argument, got 0",
             ),
         );
     }
-
-    let mut path = std::path::PathBuf::new();
+    let mut parts = Vec::with_capacity(args.len());
     for arg in args {
         if let Some(s) = arg.with_string(|s| s.to_string()) {
-            path.push(s);
+            parts.push(s);
         } else {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("join-path: expected string, got {}", arg.type_name()),
+                    format!("path/join: expected string, got {}", arg.type_name()),
                 ),
             );
         }
     }
-
-    (SIG_OK, Value::string(path.to_string_lossy().into_owned()))
+    let refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
+    (SIG_OK, Value::string(crate::path::join(&refs)))
 }
 
-/// Get file extension
-pub fn prim_file_extension(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("file-extension: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if let Some(result) = args[0].with_string(|path_str| {
-        let path = std::path::Path::new(path_str);
-        match path.extension() {
-            Some(ext) => (SIG_OK, Value::string(ext.to_string_lossy().into_owned())),
+fn prim_path_parent(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/parent", |s| match crate::path::parent(s) {
+        Some(p) if !p.is_empty() => (SIG_OK, Value::string(p.to_string())),
+        Some(_) => (SIG_OK, Value::NIL), // empty parent (e.g., parent("foo") is "")
+        None => (SIG_OK, Value::NIL),
+    })
+}
+
+fn prim_path_filename(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/filename", |s| {
+        match crate::path::filename(s) {
+            Some(f) => (SIG_OK, Value::string(f.to_string())),
             None => (SIG_OK, Value::NIL),
         }
-    }) {
-        result
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "file-extension: expected string, got {}",
-                    args[0].type_name()
+    })
+}
+
+fn prim_path_stem(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/stem", |s| match crate::path::stem(s) {
+        Some(st) => (SIG_OK, Value::string(st.to_string())),
+        None => (SIG_OK, Value::NIL),
+    })
+}
+
+fn prim_path_extension(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(
+        &args[0],
+        "path/extension",
+        |s| match crate::path::extension(s) {
+            Some(e) => (SIG_OK, Value::string(e.to_string())),
+            None => (SIG_OK, Value::NIL),
+        },
+    )
+}
+
+fn prim_path_with_extension(args: &[Value]) -> (SignalBits, Value) {
+    let path_str = match args[0].with_string(|s| s.to_string()) {
+        Some(s) => s,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "path/with-extension: expected string, got {}",
+                        args[0].type_name()
+                    ),
                 ),
-            ),
-        )
-    }
-}
-
-/// Get file name (without directory)
-pub fn prim_file_name(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("file-name: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if let Some(result) = args[0].with_string(|path_str| {
-        let path = std::path::Path::new(path_str);
-        match path.file_name() {
-            Some(name) => (SIG_OK, Value::string(name.to_string_lossy().into_owned())),
-            None => (SIG_OK, Value::NIL),
+            )
         }
-    }) {
-        result
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("file-name: expected string, got {}", args[0].type_name()),
-            ),
-        )
-    }
-}
-
-/// Get parent directory path
-pub fn prim_parent_directory(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("parent-directory: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if let Some(result) = args[0].with_string(|path_str| {
-        let path = std::path::Path::new(path_str);
-        match path.parent() {
-            Some(parent) => (SIG_OK, Value::string(parent.to_string_lossy().into_owned())),
-            None => (SIG_OK, Value::NIL),
-        }
-    }) {
-        result
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "parent-directory: expected string, got {}",
-                    args[0].type_name()
+    };
+    let ext_str = match args[1].with_string(|s| s.to_string()) {
+        Some(s) => s,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "path/with-extension: expected string, got {}",
+                        args[1].type_name()
+                    ),
                 ),
+            )
+        }
+    };
+    (
+        SIG_OK,
+        Value::string(crate::path::with_extension(&path_str, &ext_str)),
+    )
+}
+
+fn prim_path_normalize(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/normalize", |s| {
+        (SIG_OK, Value::string(crate::path::normalize(s)))
+    })
+}
+
+fn prim_path_absolute(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/absolute", |s| {
+        match crate::path::absolute(s) {
+            Ok(abs) => (SIG_OK, Value::string(abs)),
+            Err(e) => (
+                SIG_ERROR,
+                error_val("error", format!("path/absolute: {}", e)),
             ),
-        )
+        }
+    })
+}
+
+fn prim_path_canonicalize(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(
+        &args[0],
+        "path/canonicalize",
+        |s| match crate::path::canonicalize(s) {
+            Ok(c) => (SIG_OK, Value::string(c)),
+            Err(e) => (
+                SIG_ERROR,
+                error_val("error", format!("path/canonicalize: {}", e)),
+            ),
+        },
+    )
+}
+
+fn prim_path_relative(args: &[Value]) -> (SignalBits, Value) {
+    let path_str = match args[0].with_string(|s| s.to_string()) {
+        Some(s) => s,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "path/relative: expected string, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    let base_str = match args[1].with_string(|s| s.to_string()) {
+        Some(s) => s,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "path/relative: expected string, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    match crate::path::relative(&path_str, &base_str) {
+        Some(rel) => (SIG_OK, Value::string(rel)),
+        None => (SIG_OK, Value::NIL),
     }
 }
 
-/// Declarative primitive definitions for path manipulation.
+fn prim_path_components(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/components", |s| {
+        let parts = crate::path::components(s);
+        let values: Vec<Value> = parts.into_iter().map(Value::string).collect();
+        (SIG_OK, crate::value::list(values))
+    })
+}
+
+fn prim_path_is_absolute(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/absolute?", |s| {
+        (SIG_OK, Value::bool(crate::path::is_absolute(s)))
+    })
+}
+
+fn prim_path_is_relative(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/relative?", |s| {
+        (SIG_OK, Value::bool(crate::path::is_relative(s)))
+    })
+}
+
+fn prim_path_cwd(_args: &[Value]) -> (SignalBits, Value) {
+    match crate::path::cwd() {
+        Ok(c) => (SIG_OK, Value::string(c)),
+        Err(e) => (SIG_ERROR, error_val("error", format!("path/cwd: {}", e))),
+    }
+}
+
+fn prim_path_exists(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/exists?", |s| {
+        (SIG_OK, Value::bool(crate::path::exists(s)))
+    })
+}
+
+fn prim_path_is_file(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/file?", |s| {
+        (SIG_OK, Value::bool(crate::path::is_file(s)))
+    })
+}
+
+fn prim_path_is_dir(args: &[Value]) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/dir?", |s| {
+        (SIG_OK, Value::bool(crate::path::is_dir(s)))
+    })
+}
+
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "file/realpath",
-        func: prim_absolute_path,
-        effect: Effect::raises(),
-        arity: Arity::Exact(1),
-        doc: "Get absolute path",
-        params: &["path"],
-        category: "file",
-        example: "(file/realpath \"./data.txt\")",
-        aliases: &["absolute-path"],
+        name: "path/join",
+        func: prim_path_join,
+        effect: Effect::none(),
+        arity: Arity::AtLeast(1),
+        doc: "Join path components",
+        params: &["components"],
+        category: "path",
+        example: "(path/join \"a\" \"b\" \"c\")",
+        aliases: &[],
     },
     PrimitiveDef {
-        name: "file/cwd",
-        func: prim_current_directory,
+        name: "path/parent",
+        func: prim_path_parent,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get parent directory (nil if none)",
+        params: &["path"],
+        category: "path",
+        example: "(path/parent \"/home/user/data.txt\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/filename",
+        func: prim_path_filename,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get file name (last component, nil if none)",
+        params: &["path"],
+        category: "path",
+        example: "(path/filename \"/home/user/data.txt\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/stem",
+        func: prim_path_stem,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get file stem (filename without extension, nil if none)",
+        params: &["path"],
+        category: "path",
+        example: "(path/stem \"archive.tar.gz\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/extension",
+        func: prim_path_extension,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Get file extension without dot (nil if none)",
+        params: &["path"],
+        category: "path",
+        example: "(path/extension \"data.txt\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/with-extension",
+        func: prim_path_with_extension,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Replace file extension (empty string removes it)",
+        params: &["path", "ext"],
+        category: "path",
+        example: "(path/with-extension \"foo.txt\" \"rs\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/normalize",
+        func: prim_path_normalize,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Lexical path normalization (resolve . and ..)",
+        params: &["path"],
+        category: "path",
+        example: "(path/normalize \"./a/../b\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/absolute",
+        func: prim_path_absolute,
+        effect: Effect::raises(),
+        arity: Arity::Exact(1),
+        doc: "Compute absolute path (does not require path to exist)",
+        params: &["path"],
+        category: "path",
+        example: "(path/absolute \"src\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/canonicalize",
+        func: prim_path_canonicalize,
+        effect: Effect::raises(),
+        arity: Arity::Exact(1),
+        doc: "Resolve path through filesystem (symlinks resolved, must exist)",
+        params: &["path"],
+        category: "path",
+        example: "(path/canonicalize \".\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/relative",
+        func: prim_path_relative,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Compute relative path from base to target (nil if impossible)",
+        params: &["target", "base"],
+        category: "path",
+        example: "(path/relative \"/foo/bar/baz\" \"/foo/bar\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/components",
+        func: prim_path_components,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Split path into list of components",
+        params: &["path"],
+        category: "path",
+        example: "(path/components \"/a/b/c\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/absolute?",
+        func: prim_path_is_absolute,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "True if path is absolute",
+        params: &["path"],
+        category: "path",
+        example: "(path/absolute? \"/foo\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/relative?",
+        func: prim_path_is_relative,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "True if path is relative",
+        params: &["path"],
+        category: "path",
+        example: "(path/relative? \"foo\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "path/cwd",
+        func: prim_path_cwd,
         effect: Effect::raises(),
         arity: Arity::Exact(0),
         doc: "Get current working directory",
         params: &[],
-        category: "file",
-        example: "(file/cwd)",
-        aliases: &["current-directory"],
+        category: "path",
+        example: "(path/cwd)",
+        aliases: &[],
     },
     PrimitiveDef {
-        name: "file/cd",
-        func: prim_change_directory,
-        effect: Effect::raises(),
+        name: "path/exists?",
+        func: prim_path_exists,
+        effect: Effect::none(),
         arity: Arity::Exact(1),
-        doc: "Change current working directory",
+        doc: "Check if path exists",
         params: &["path"],
-        category: "file",
-        example: "(file/cd \"/home\")",
-        aliases: &["change-directory"],
+        category: "path",
+        example: "(path/exists? \"data.txt\")",
+        aliases: &["file-exists?", "file/exists?"],
     },
     PrimitiveDef {
-        name: "file/join",
-        func: prim_join_path,
-        effect: Effect::raises(),
-        arity: Arity::AtLeast(1),
-        doc: "Join path components",
-        params: &["components"],
-        category: "file",
-        example: "(file/join \"a\" \"b\" \"c\")",
-        aliases: &["join-path"],
-    },
-    PrimitiveDef {
-        name: "file/ext",
-        func: prim_file_extension,
-        effect: Effect::raises(),
+        name: "path/file?",
+        func: prim_path_is_file,
+        effect: Effect::none(),
         arity: Arity::Exact(1),
-        doc: "Get file extension",
+        doc: "Check if path is a regular file",
         params: &["path"],
-        category: "file",
-        example: "(file/ext \"data.txt\")",
-        aliases: &["file-extension"],
+        category: "path",
+        example: "(path/file? \"data.txt\")",
+        aliases: &["file?", "file/file?"],
     },
     PrimitiveDef {
-        name: "file/name",
-        func: prim_file_name,
-        effect: Effect::raises(),
+        name: "path/dir?",
+        func: prim_path_is_dir,
+        effect: Effect::none(),
         arity: Arity::Exact(1),
-        doc: "Get file name (without directory)",
+        doc: "Check if path is a directory",
         params: &["path"],
-        category: "file",
-        example: "(file/name \"/home/user/data.txt\")",
-        aliases: &["file-name"],
-    },
-    PrimitiveDef {
-        name: "file/parent",
-        func: prim_parent_directory,
-        effect: Effect::raises(),
-        arity: Arity::Exact(1),
-        doc: "Get parent directory path",
-        params: &["path"],
-        category: "file",
-        example: "(file/parent \"/home/user/data.txt\")",
-        aliases: &["parent-directory"],
+        category: "path",
+        example: "(path/dir? \"/home\")",
+        aliases: &["directory?", "file/directory?"],
     },
 ];

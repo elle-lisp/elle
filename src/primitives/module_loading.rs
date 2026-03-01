@@ -126,78 +126,15 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Add a directory to the module search path
-pub fn prim_add_module_path(args: &[Value]) -> (SignalBits, Value) {
-    // (add-module-path "path")
-    // Adds a directory to the module search path
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("add-module-path: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
-    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
-        s
-    } else {
-        return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "add-module-path: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        );
-    };
-
-    // Get VM context
-    let vm_ptr = match crate::context::get_vm_context() {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    "add-module-path: VM context not initialized".to_string(),
-                ),
-            );
-        }
-    };
-
-    unsafe {
-        let vm = &mut *vm_ptr;
-        vm.add_module_search_path(std::path::PathBuf::from(path));
-        (SIG_OK, Value::NIL)
-    }
-}
-
 /// Declarative primitive definitions for module loading operations
-pub const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "module/import",
-        func: prim_import_file,
-        effect: Effect::raises(),
-        arity: Arity::Exact(1),
-        doc: "Import a module file and execute it in the current context",
-        params: &["path"],
-        category: "module",
-        example: "(module/import \"lib/utils.elle\")",
-        aliases: &["import-file", "import"],
-    },
-    PrimitiveDef {
-        name: "module/add-path",
-        func: prim_add_module_path,
-        effect: Effect::raises(),
-        arity: Arity::Exact(1),
-        doc: "Add a directory to the module search path",
-        params: &["path"],
-        category: "module",
-        example: "(module/add-path \"./lib\")",
-        aliases: &["add-module-path"],
-    },
-];
+pub const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
+    name: "module/import",
+    func: prim_import_file,
+    effect: Effect::raises(),
+    arity: Arity::Exact(1),
+    doc: "Import a module file and execute it in the current context",
+    params: &["path"],
+    category: "module",
+    example: "(module/import \"lib/utils.elle\")",
+    aliases: &["import-file", "import"],
+}];
