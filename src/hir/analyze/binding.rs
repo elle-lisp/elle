@@ -9,17 +9,15 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: let requires bindings list", span));
         }
 
-        let bindings_syntax = items[1].as_list().ok_or_else(|| {
-            if matches!(items[1].kind, SyntaxKind::Tuple(_) | SyntaxKind::Array(_)) {
+        let bindings_syntax = items[1].as_list_or_tuple().ok_or_else(|| {
+            if matches!(items[1].kind, SyntaxKind::Array(_)) {
                 format!(
-                    "{}: let bindings must use parentheses ((name value) ...), \
-                     not brackets [...]",
+                    "{}: let bindings must use (...) or [...], not @[...]",
                     items[1].span
                 )
             } else {
                 format!(
-                    "{}: let bindings must be a parenthesized list ((name value) ...), \
-                     got {}",
+                    "{}: let bindings must be a list (...) or [...], got {}",
                     items[1].span,
                     items[1].kind_label()
                 )
@@ -37,8 +35,8 @@ impl<'a> Analyzer<'a> {
 
         for binding in bindings_syntax {
             let pair = binding
-                .as_list()
-                .ok_or_else(|| format!("{}: let binding must be a pair", span))?;
+                .as_list_or_tuple()
+                .ok_or_else(|| format!("{}: let binding must be a pair (...) or [...]", span))?;
             if pair.len() != 2 {
                 return Err(format!("{}: let binding must be (name value)", span));
             }
@@ -147,17 +145,15 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: letrec requires bindings and body", span));
         }
 
-        let bindings_syntax = items[1].as_list().ok_or_else(|| {
-            if matches!(items[1].kind, SyntaxKind::Tuple(_) | SyntaxKind::Array(_)) {
+        let bindings_syntax = items[1].as_list_or_tuple().ok_or_else(|| {
+            if matches!(items[1].kind, SyntaxKind::Array(_)) {
                 format!(
-                    "{}: letrec bindings must use parentheses ((name value) ...), \
-                     not brackets [...]",
+                    "{}: letrec bindings must use (...) or [...], not @[...]",
                     items[1].span
                 )
             } else {
                 format!(
-                    "{}: letrec bindings must be a parenthesized list ((name value) ...), \
-                     got {}",
+                    "{}: letrec bindings must be a list (...) or [...], got {}",
                     items[1].span,
                     items[1].kind_label()
                 )
@@ -170,8 +166,8 @@ impl<'a> Analyzer<'a> {
         let mut binding_handles = Vec::new();
         for binding in bindings_syntax {
             let pair = binding
-                .as_list()
-                .ok_or_else(|| format!("{}: letrec binding must be a pair", span))?;
+                .as_list_or_tuple()
+                .ok_or_else(|| format!("{}: letrec binding must be a pair (...) or [...]", span))?;
             if pair.len() != 2 {
                 return Err(format!("{}: letrec binding must be (name value)", span));
             }
@@ -186,7 +182,7 @@ impl<'a> Analyzer<'a> {
         let mut bindings = Vec::new();
         let mut effect = Effect::none();
         for (i, binding) in bindings_syntax.iter().enumerate() {
-            let pair = binding.as_list().unwrap();
+            let pair = binding.as_list_or_tuple().unwrap();
             let value = self.analyze_expr(&pair[1])?;
             effect = effect.combine(value.effect);
             // Track effect and arity for interprocedural analysis
@@ -303,7 +299,7 @@ impl<'a> Analyzer<'a> {
                 self.effect_env.insert(binding, Effect::none());
                 // Pre-seed arity from syntax (count params in the lambda form)
                 if let Some(list) = items[2].as_list() {
-                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list()) {
+                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
                         self.arity_env
                             .insert(binding, Self::arity_from_syntax_params(params_syn));
                     }
@@ -354,7 +350,7 @@ impl<'a> Analyzer<'a> {
                 self.effect_env.insert(binding, Effect::none());
                 // Pre-seed arity from syntax (count params in the lambda form)
                 if let Some(list) = items[2].as_list() {
-                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list()) {
+                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
                         let arity = Self::arity_from_syntax_params(params_syn);
                         self.arity_env.insert(binding, arity);
                         self.defined_global_arities.insert(sym, arity);

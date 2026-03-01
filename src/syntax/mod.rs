@@ -129,6 +129,18 @@ impl Syntax {
         }
     }
 
+    /// Get contents if this is a list or tuple.
+    ///
+    /// Structural positions in special forms (params, bindings, clauses,
+    /// arms) accept both `(...)` and `[...]`. Expression-position uses
+    /// of `[...]` remain tuple literals.
+    pub fn as_list_or_tuple(&self) -> Option<&[Syntax]> {
+        match &self.kind {
+            SyntaxKind::List(items) | SyntaxKind::Tuple(items) => Some(items),
+            _ => None,
+        }
+    }
+
     /// Human-readable label for the syntax kind, used in error messages.
     pub fn kind_label(&self) -> &'static str {
         match &self.kind {

@@ -173,4 +173,50 @@
                 (set ,g-idx (+ ,g-idx 1))))))
          (true (error :type-error "each: not a sequence"))))))
 
+## case - equality dispatch (flat pairs)
+## (case expr val1 body1 val2 body2 ... [default])
+## Uses gensym to avoid double evaluation of the dispatch expression.
+## Odd element count means the last element is the default.
+(defmacro case (expr & clauses)
+  (let* ((g (gensym)))
+    (letrec ((build (fn (cs)
+                      (if (empty? cs)
+                        nil
+                        (if (empty? (rest cs))
+                          (first cs)
+                          `(if (= ,g ,(first cs))
+                             ,(first (rest cs))
+                             ,(build (rest (rest cs)))))))))
+      `(let ((,g ,expr))
+         ,(build clauses)))))
+
+## if-let - conditional binding
+## (if-let ((x expr) ...) then else)
+## Each binding is evaluated and checked for truthiness.
+## If any binding value is falsy, the else branch runs.
+(defmacro if-let (bindings then else)
+  (if (empty? bindings)
+    then
+    (let* ((b (first bindings))
+           (name (first b))
+           (val (first (rest b))))
+      `(let ((,name ,val))
+         (if ,name
+           ,(if (empty? (rest bindings))
+              then
+              `(if-let ,(rest bindings) ,then ,else))
+           ,else)))))
+
+## when-let - conditional binding without else
+## (when-let ((x expr) ...) body...)
+## Sugar for (if-let bindings (begin body...) nil)
+(defmacro when-let (bindings & body)
+  `(if-let ,bindings (begin ,;body) nil))
+
+## forever - infinite loop
+## (forever body...)
+## Expands to (while true body...)
+## Use (break) or (break value) to exit.
+(defmacro forever (& body)
+  `(while true ,;body))
 

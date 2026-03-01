@@ -1,3 +1,4 @@
+use super::graph_def::define_graph_functions;
 use super::higher_order_def::define_higher_order_functions;
 use super::time_def::define_time_functions;
 use crate::symbol::SymbolTable;
@@ -8,8 +9,7 @@ pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable) {
     define_higher_order_functions(vm, symbols);
     define_time_functions(vm, symbols);
     define_vm_query_wrappers(vm, symbols);
-    // Graph functions temporarily disabled while sorting out compilation caching.
-    // define_graph_functions(vm, symbols);
+    define_graph_functions(vm, symbols);
 }
 
 /// Define Elle wrappers around vm/query operations

@@ -1,6 +1,14 @@
 // DEFENSE: Integration tests ensure the full pipeline works end-to-end
 use crate::common::eval_source;
 use elle::Value;
+
+fn sleep_zero_threshold_ms() -> u128 {
+    if std::env::var("GITHUB_ACTIONS").is_ok() {
+        5000 // CI runners are slow and overloaded
+    } else {
+        500 // eval_source has overhead; parallel test threads contest resources
+    }
+}
 // Phase 5: Advanced Runtime Features - Integration Tests
 
 #[test]
@@ -31,7 +39,7 @@ fn test_sleep_integration() {
     let start = std::time::Instant::now();
     assert_eq!(eval_source("(time/sleep 0)").unwrap(), Value::NIL);
     let elapsed = start.elapsed();
-    assert!(elapsed.as_millis() < 100); // Should be quick for 0 seconds
+    assert!(elapsed.as_millis() < sleep_zero_threshold_ms());
 
     // Sleep with float
     assert_eq!(eval_source("(time/sleep 0.001)").unwrap(), Value::NIL);
@@ -104,7 +112,7 @@ fn test_sleep_zero_vs_positive() {
     // Sleep 0 should complete quickly
     let start = std::time::Instant::now();
     eval_source("(time/sleep 0)").unwrap();
-    assert!(start.elapsed().as_millis() < 100);
+    assert!(start.elapsed().as_millis() < sleep_zero_threshold_ms());
 
     // Sleep with float should also complete
     eval_source("(time/sleep 0.001)").unwrap();

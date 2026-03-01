@@ -257,3 +257,193 @@ fn test_defer_hygiene_no_capture() {
         Value::int(100)
     );
 }
+
+// ============================================================================
+// SECTION 9: case — equality dispatch
+// ============================================================================
+
+#[test]
+fn test_case_basic_match() {
+    assert_eq!(
+        eval_source("(case 2 1 :one 2 :two 3 :three)").unwrap(),
+        Value::keyword("two")
+    );
+}
+
+#[test]
+fn test_case_default() {
+    assert_eq!(
+        eval_source("(case 99 1 :one 2 :two :default)").unwrap(),
+        Value::keyword("default")
+    );
+}
+
+#[test]
+fn test_case_no_match_no_default() {
+    assert_eq!(eval_source("(case 99 1 :one 2 :two)").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_case_no_double_eval() {
+    // Side effect should run exactly once
+    assert_eq!(
+        eval_source(
+            "(begin (var counter 0) \
+             (case (begin (set counter (+ counter 1)) counter) \
+               1 :one 2 :two) \
+             counter)"
+        )
+        .unwrap(),
+        Value::int(1)
+    );
+}
+
+#[test]
+fn test_case_string_keys() {
+    assert_eq!(
+        eval_source(r#"(case "b" "a" 1 "b" 2 "c" 3)"#).unwrap(),
+        Value::int(2)
+    );
+}
+
+#[test]
+fn test_case_first_match_wins() {
+    assert_eq!(
+        eval_source("(case 1 1 :first 1 :second)").unwrap(),
+        Value::keyword("first")
+    );
+}
+
+// ============================================================================
+// SECTION 10: if-let — conditional binding
+// ============================================================================
+
+#[test]
+fn test_if_let_truthy() {
+    assert_eq!(
+        eval_source("(if-let ((x 42)) x :else)").unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn test_if_let_falsy() {
+    assert_eq!(
+        eval_source("(if-let ((x nil)) :then :else)").unwrap(),
+        Value::keyword("else")
+    );
+}
+
+#[test]
+fn test_if_let_false_is_falsy() {
+    assert_eq!(
+        eval_source("(if-let ((x false)) :then :else)").unwrap(),
+        Value::keyword("else")
+    );
+}
+
+#[test]
+fn test_if_let_multi_binding_all_truthy() {
+    assert_eq!(
+        eval_source("(if-let ((x 1) (y 2)) (+ x y) :else)").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_if_let_multi_binding_second_falsy() {
+    assert_eq!(
+        eval_source("(if-let ((x 1) (y nil)) (+ x y) :else)").unwrap(),
+        Value::keyword("else")
+    );
+}
+
+// ============================================================================
+// SECTION 11: when-let — conditional binding without else
+// ============================================================================
+
+#[test]
+fn test_when_let_truthy() {
+    assert_eq!(
+        eval_source("(when-let ((x 42)) x)").unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn test_when_let_falsy() {
+    assert_eq!(eval_source("(when-let ((x nil)) x)").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_when_let_multi_body() {
+    assert_eq!(
+        eval_source("(when-let ((x 1)) (+ x 1) (+ x 2))").unwrap(),
+        Value::int(3)
+    );
+}
+
+// ============================================================================
+// SECTION 12: while — multi-body forms
+// ============================================================================
+
+#[test]
+fn test_while_multi_body() {
+    assert_eq!(
+        eval_source(
+            "(begin (var n 0) (var sum 0) \
+             (while (< n 3) \
+               (set sum (+ sum n)) \
+               (set n (+ n 1))) \
+             sum)"
+        )
+        .unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_while_single_body() {
+    assert_eq!(
+        eval_source(
+            "(begin (var n 0) \
+             (while (< n 5) (set n (+ n 1))) \
+             n)"
+        )
+        .unwrap(),
+        Value::int(5)
+    );
+}
+
+// ============================================================================
+// SECTION 13: forever — infinite loop (with break to exit)
+// ============================================================================
+
+#[test]
+fn test_forever_with_break() {
+    assert_eq!(
+        eval_source(
+            "(begin (var n 0) \
+             (forever \
+               (set n (+ n 1)) \
+               (if (= n 5) (break))) \
+             n)"
+        )
+        .unwrap(),
+        Value::int(5)
+    );
+}
+
+#[test]
+fn test_forever_break_value() {
+    assert_eq!(
+        eval_source(
+            "(begin (var n 0) \
+             (forever \
+               (set n (+ n 1)) \
+               (if (= n 3) (break :while :done))))"
+        )
+        .unwrap(),
+        Value::keyword("done")
+    );
+}

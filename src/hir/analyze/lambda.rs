@@ -10,17 +10,15 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: lambda requires parameters and body", span));
         }
 
-        let params_syntax = items[1].as_list().ok_or_else(|| {
-            if matches!(items[1].kind, SyntaxKind::Tuple(_) | SyntaxKind::Array(_)) {
+        let params_syntax = items[1].as_list_or_tuple().ok_or_else(|| {
+            if matches!(items[1].kind, SyntaxKind::Array(_)) {
                 format!(
-                    "{}: lambda parameters must use parentheses (params...), \
-                     not brackets [...]",
+                    "{}: lambda parameters must use (...) or [...], not @[...]",
                     items[1].span
                 )
             } else {
                 format!(
-                    "{}: lambda parameters must be a parenthesized list (params...), \
-                     got {}",
+                    "{}: lambda parameters must be a list (...) or [...], got {}",
                     items[1].span,
                     items[1].kind_label()
                 )

@@ -74,7 +74,7 @@ mod primitives {
 mod ffi {
     include!("ffi.rs");
 }
-mod bracket_errors {
+mod bracket_syntax {
     include!("bracket_errors.rs");
 }
 mod booleans {
@@ -106,6 +106,12 @@ mod regex {
 }
 mod docstrings {
     include!("docstrings.rs");
+}
+mod fn_flow {
+    include!("fn_flow.rs");
+}
+mod fn_graph {
+    include!("fn_graph.rs");
 }
 mod table_keys {
     include!("table_keys.rs");
