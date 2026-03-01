@@ -8,6 +8,25 @@ use super::{Span, Syntax, SyntaxKind};
 use crate::symbol::SymbolTable;
 use crate::value::{TableKey, Value};
 
+/// Check if a Syntax tree contains any SyntaxLiteral nodes.
+/// Used as a debug assertion in `from_value` to catch arena pointer escapes.
+fn contains_syntax_literal(s: &Syntax) -> bool {
+    match &s.kind {
+        SyntaxKind::SyntaxLiteral(_) => true,
+        SyntaxKind::List(items)
+        | SyntaxKind::Tuple(items)
+        | SyntaxKind::Array(items)
+        | SyntaxKind::Struct(items)
+        | SyntaxKind::Table(items) => items.iter().any(contains_syntax_literal),
+        SyntaxKind::Quote(inner)
+        | SyntaxKind::Quasiquote(inner)
+        | SyntaxKind::Unquote(inner)
+        | SyntaxKind::UnquoteSplicing(inner)
+        | SyntaxKind::Splice(inner) => contains_syntax_literal(inner),
+        _ => false,
+    }
+}
+
 /// Convert a TableKey back to a Syntax node.
 fn table_key_to_syntax(
     key: &TableKey,
@@ -110,6 +129,15 @@ impl Syntax {
         if let Some(syntax_rc) = value.as_syntax() {
             let mut s = syntax_rc.as_ref().clone();
             s.scope_exempt = true;
+            // Safety check: the cloned Syntax must not contain SyntaxLiteral
+            // children. SyntaxLiteral holds a heap-pointer Value that may be
+            // arena-allocated; if it survives into the result Syntax, it will
+            // dangle after arena release. Current code paths don't produce
+            // nested SyntaxLiterals, but this assertion catches future regressions.
+            debug_assert!(
+                !contains_syntax_literal(&s),
+                "from_value: cloned Syntax contains SyntaxLiteral (arena pointer would escape)"
+            );
             return Ok(s);
         }
         let kind = if value.is_nil() {

@@ -355,17 +355,103 @@ impl std::fmt::Debug for HeapObject {
 }
 
 // =============================================================================
-// Heap Allocation
+// Heap Arena
+//
+// STOPGAP: This is a tactical fix for unbounded memory growth during macro
+// expansion (see docs/heap-arena-plan.md). It is NOT a proper GC or lifetime
+// system. Known unsoundnesses:
+//
+// 1. `deref()` returns `&'static HeapObject`. For arena-allocated objects,
+//    this lifetime is a lie — the reference becomes dangling after release.
+//    Safe only because no code path retains a `&HeapObject` across a release.
+//
+// 2. There is no type-level distinction between arena-allocated and
+//    permanently-allocated Values. `clone_heap`/`drop_heap` assume Rc-backed
+//    pointers; calling them on arena-allocated Values is undefined behavior.
+//
+// 3. `HeapObject::Drop` during `truncate` must not allocate Values (would
+//    re-borrow the arena RefCell and panic). This constrains ExternalObject
+//    Drop impls.
+//
+// When we move to a real memory management solution, delete this entire
+// section and the `alloc_permanent` function.
 // =============================================================================
 
-/// Allocated heap object with reference counting.
-/// This is what Value::Heap pointers actually point to.
-pub type HeapRef = Rc<HeapObject>;
+struct HeapArena {
+    /// Box provides pointer stability: HeapObject addresses survive Vec reallocation.
+    #[allow(clippy::vec_box)]
+    objects: Vec<Box<HeapObject>>,
+}
 
-/// Allocate a heap object and return a Value pointing to it.
+impl HeapArena {
+    fn new() -> Self {
+        HeapArena {
+            objects: Vec::new(),
+        }
+    }
+}
+
+thread_local! {
+    static HEAP_ARENA: RefCell<HeapArena> = RefCell::new(HeapArena::new());
+}
+
+/// Opaque mark for arena scope management.
+pub struct ArenaMark(usize);
+
+/// RAII guard that releases the arena to a saved mark on drop.
+pub struct ArenaGuard(Option<ArenaMark>);
+
+impl Default for ArenaGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ArenaGuard {
+    pub fn new() -> Self {
+        ArenaGuard(Some(heap_arena_mark()))
+    }
+}
+
+impl Drop for ArenaGuard {
+    fn drop(&mut self) {
+        if let Some(mark) = self.0.take() {
+            heap_arena_release(mark);
+        }
+    }
+}
+
+/// Save the current arena position.
+pub fn heap_arena_mark() -> ArenaMark {
+    HEAP_ARENA.with(|arena| ArenaMark(arena.borrow().objects.len()))
+}
+
+/// Release all arena allocations back to the mark, dropping freed objects.
+///
+/// SAFETY CONSTRAINT: `HeapObject` variants dropped during truncate must not
+/// allocate Values in their Drop impls. Doing so would re-borrow the arena
+/// RefCell (already held by this truncate) and panic. This constrains
+/// `ExternalObject` — plugin Drop impls must not call `Value::cons()` etc.
+pub fn heap_arena_release(mark: ArenaMark) {
+    HEAP_ARENA.with(|arena| arena.borrow_mut().objects.truncate(mark.0))
+}
+
+/// Allocate a heap object on the thread-local arena and return a Value pointing to it.
 pub fn alloc(obj: HeapObject) -> Value {
-    let heap_ref: HeapRef = Rc::new(obj);
-    let ptr = Rc::into_raw(heap_ref) as *const ();
+    HEAP_ARENA.with(|arena| {
+        let mut a = arena.borrow_mut();
+        let boxed = Box::new(obj);
+        let ptr = &*boxed as *const HeapObject as *const ();
+        a.objects.push(boxed);
+        Value::from_heap_ptr(ptr)
+    })
+}
+
+/// Allocate a heap object permanently (bypasses arena tracking).
+/// Used for objects that must outlive any mark/release scope (e.g., NativeFn).
+pub fn alloc_permanent(obj: HeapObject) -> Value {
+    let rc: Rc<HeapObject> = Rc::new(obj);
+    let ptr = Rc::into_raw(rc) as *const ();
     Value::from_heap_ptr(ptr)
 }
 
@@ -382,7 +468,7 @@ pub unsafe fn deref(value: Value) -> &'static HeapObject {
 /// Clone (increment refcount) a heap value.
 ///
 /// # Safety
-/// The Value must be a heap pointer.
+/// The Value must be a heap pointer allocated via `alloc_permanent` (Rc-based).
 #[inline]
 pub unsafe fn clone_heap(value: Value) {
     let ptr = value.as_heap_ptr().unwrap() as *const HeapObject;
@@ -394,7 +480,7 @@ pub unsafe fn clone_heap(value: Value) {
 /// Drop (decrement refcount) a heap value.
 ///
 /// # Safety
-/// The Value must be a heap pointer.
+/// The Value must be a heap pointer allocated via `alloc_permanent` (Rc-based).
 #[inline]
 pub unsafe fn drop_heap(value: Value) {
     let ptr = value.as_heap_ptr().unwrap() as *const HeapObject;
@@ -415,9 +501,89 @@ mod tests {
                 HeapObject::String(s) => assert_eq!(&**s, "hello"),
                 _ => panic!("Expected String"),
             }
-            // Clean up
+        }
+        // Arena owns the allocation; no manual drop needed
+    }
+
+    #[test]
+    fn test_alloc_permanent_string() {
+        let v = alloc_permanent(HeapObject::String("permanent".into()));
+        assert!(v.is_heap());
+        unsafe {
+            let obj = deref(v);
+            match obj {
+                HeapObject::String(s) => assert_eq!(&**s, "permanent"),
+                _ => panic!("Expected String"),
+            }
+            // Permanent allocations use Rc::into_raw — clean up
             drop_heap(v);
         }
+    }
+
+    #[test]
+    fn test_arena_mark_release() {
+        let mark = heap_arena_mark();
+        let v = alloc(HeapObject::String("temporary".into()));
+        assert!(v.is_heap());
+        unsafe {
+            let obj = deref(v);
+            match obj {
+                HeapObject::String(s) => assert_eq!(&**s, "temporary"),
+                _ => panic!("Expected String"),
+            }
+        }
+        heap_arena_release(mark);
+        // v is now dangling — don't use it
+    }
+
+    #[test]
+    fn test_arena_guard_raii() {
+        let before = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        {
+            let _guard = ArenaGuard::new();
+            alloc(HeapObject::String("guarded".into()));
+            alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+            let during = HEAP_ARENA.with(|a| a.borrow().objects.len());
+            assert_eq!(during, before + 2);
+        }
+        let after = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn test_arena_nested_guards() {
+        let before = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        {
+            let _outer = ArenaGuard::new();
+            alloc(HeapObject::String("outer alloc".into()));
+            {
+                let _inner = ArenaGuard::new();
+                alloc(HeapObject::String("inner alloc".into()));
+                let during_inner = HEAP_ARENA.with(|a| a.borrow().objects.len());
+                assert_eq!(during_inner, before + 2);
+            }
+            // Inner guard released — inner alloc freed, outer alloc survives
+            let after_inner = HEAP_ARENA.with(|a| a.borrow().objects.len());
+            assert_eq!(after_inner, before + 1);
+        }
+        // Outer guard released — everything freed
+        let after_outer = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        assert_eq!(after_outer, before);
+    }
+
+    #[test]
+    fn test_arena_guard_fires_on_error_path() {
+        let before = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        let result: Result<(), String> = {
+            let _guard = ArenaGuard::new();
+            alloc(HeapObject::String("will be freed".into()));
+            alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+            Err("simulated error".to_string())
+        };
+        assert!(result.is_err());
+        // Guard dropped during stack unwind — allocations freed
+        let after = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        assert_eq!(after, before);
     }
 
     #[test]

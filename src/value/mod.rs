@@ -20,6 +20,9 @@ pub use repr::{cons, list, Value};
 // Export heap types
 pub use heap::{Cons, HeapObject, HeapTag};
 
+// Export arena management
+pub use heap::{ArenaGuard, ArenaMark};
+
 // Export error value construction
 pub use error::{error_val, format_error};
 
