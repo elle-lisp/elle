@@ -27,7 +27,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run all workspace tests
-        run: cargo test --workspace --verbose
+        run: cargo test --workspace --verbose -- --test-threads=1
         env:
           PROPTEST_CASES: 32
 
@@ -310,7 +310,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
       - name: Run all workspace tests
-        run: cargo test --workspace --verbose
+        run: cargo test --workspace --verbose -- --test-threads=1
         env:
           PROPTEST_CASES: 32
 
