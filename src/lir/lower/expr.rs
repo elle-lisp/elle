@@ -22,7 +22,9 @@ impl Lowerer {
             HirKind::Letrec { bindings, body } => self.lower_letrec(bindings, body),
             HirKind::Lambda {
                 params,
+                num_required,
                 rest_param,
+                vararg_kind,
                 captures,
                 body,
                 num_locals,
@@ -30,7 +32,9 @@ impl Lowerer {
                 doc,
             } => self.lower_lambda_expr(
                 params,
+                *num_required,
                 rest_param.as_ref(),
+                vararg_kind,
                 captures,
                 body,
                 *num_locals,

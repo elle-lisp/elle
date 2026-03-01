@@ -56,6 +56,12 @@ pub struct LirFunction {
     pub effect: Effect,
     /// Optional docstring from the source lambda
     pub doc: Option<Value>,
+    /// How varargs are collected: List (cons chain) or Struct (immutable struct).
+    /// Only meaningful when arity is AtLeast.
+    pub vararg_kind: crate::hir::VarargKind,
+    /// Total number of parameter slots (required + optional + rest if present).
+    /// Used by VM populate_env to know how many fixed slots to fill.
+    pub num_params: usize,
 }
 
 impl LirFunction {
@@ -73,6 +79,8 @@ impl LirFunction {
             cell_locals_mask: 0,
             effect: Effect::none(),
             doc: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            num_params: 0,
         }
     }
 }

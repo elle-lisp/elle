@@ -248,6 +248,8 @@ mod tests {
             jit_code: None,
             lir_function: Some(Rc::new(lir)),
             doc: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            num_params: 0,
         };
         Value::closure(closure)
     }
@@ -453,6 +455,8 @@ mod tests {
             jit_code: None,
             lir_function: None,
             doc: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            num_params: 0,
         };
 
         let mut globals = vec![Value::NIL; 10];

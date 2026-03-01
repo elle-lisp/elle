@@ -256,6 +256,8 @@ impl Emitter {
                     jit_code: None,
                     lir_function: Some(Rc::new(func.as_ref().clone())),
                     doc: func.doc,
+                    vararg_kind: func.vararg_kind.clone(),
+                    num_params: func.num_params,
                 };
 
                 // Add closure template to constants

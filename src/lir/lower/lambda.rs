@@ -10,7 +10,9 @@ impl Lowerer {
     pub(super) fn lower_lambda_expr(
         &mut self,
         params: &[Binding],
+        num_required: usize,
         rest_param: Option<&Binding>,
+        vararg_kind: &crate::hir::VarargKind,
         captures: &[CaptureInfo],
         body: &Hir,
         num_locals: u16,
@@ -94,7 +96,9 @@ impl Lowerer {
         // Lower the lambda body to a separate LirFunction
         let nested_lir = self.lower_lambda_body(
             params,
+            num_required,
             rest_param,
+            vararg_kind,
             captures,
             body,
             num_locals,
@@ -117,19 +121,17 @@ impl Lowerer {
     fn lower_lambda_body(
         &mut self,
         params: &[Binding],
+        num_required: usize,
         rest_param: Option<&Binding>,
+        vararg_kind: &crate::hir::VarargKind,
         captures: &[CaptureInfo],
         body: &Hir,
         _num_locals: u16,
         inferred_effect: crate::effects::Effect,
         doc: Option<crate::value::Value>,
     ) -> Result<LirFunction, String> {
-        // Compute arity: if variadic, fixed params = total - 1 (rest slot)
-        let arity = if rest_param.is_some() {
-            Arity::AtLeast(params.len() - 1)
-        } else {
-            Arity::Exact(params.len())
-        };
+        // Compute arity
+        let arity = Arity::for_lambda(rest_param.is_some(), num_required, params.len());
 
         // Save state
         let saved_func = std::mem::replace(&mut self.current_func, LirFunction::new(arity));
@@ -152,6 +154,8 @@ impl Lowerer {
         self.in_lambda = true;
         self.num_captures = captures.len() as u16;
         self.current_func.doc = doc;
+        self.current_func.vararg_kind = vararg_kind.clone();
+        self.current_func.num_params = params.len();
 
         // In a closure, the environment is laid out as:
         // [captured_vars..., parameters..., locally_defined_cells...]

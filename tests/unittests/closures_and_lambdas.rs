@@ -38,6 +38,8 @@ fn test_closure_type_identification() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     let value = Value::closure(closure);
 
@@ -65,6 +67,8 @@ fn test_closure_display() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     let value = Value::closure(closure);
     let s = format!("{}", value);
@@ -89,6 +93,8 @@ fn test_closure_clone() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     let value1 = Value::closure(closure.clone());
     let value2 = value1;
@@ -159,6 +165,8 @@ fn test_closure_empty_environment() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert_eq!(closure.env.len(), 0);
 }
@@ -182,6 +190,8 @@ fn test_closure_single_captured_variable() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert_eq!(closure.env.len(), 1);
     assert_eq!(closure.env[0], Value::int(42));
@@ -211,6 +221,8 @@ fn test_closure_multiple_captured_variables() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert_eq!(closure.env.len(), 4);
     assert_eq!(closure.env[0], Value::int(1));
@@ -237,6 +249,8 @@ fn test_closure_environment_sharing() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     let closure2 = Closure {
@@ -254,6 +268,8 @@ fn test_closure_environment_sharing() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     // Both closures share the same environment
@@ -284,6 +300,8 @@ fn test_closure_bytecode_storage() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert_eq!(*closure.bytecode, bytecode);
 }
@@ -307,6 +325,8 @@ fn test_closure_constants_storage() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert_eq!(*closure.constants, constants);
 }
@@ -330,6 +350,8 @@ fn test_closure_num_locals() {
             jit_code: None,
             lir_function: None,
             doc: None,
+            vararg_kind: elle::hir::VarargKind::List,
+            num_params: 0,
         };
         assert_eq!(closure.num_locals, num_locals);
     }
@@ -356,6 +378,8 @@ fn test_closure_zero_parameters() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert!(closure.arity.matches(0));
     assert!(!closure.arity.matches(1));
@@ -378,6 +402,8 @@ fn test_closure_single_parameter() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert!(closure.arity.matches(1));
 }
@@ -399,6 +425,8 @@ fn test_closure_multiple_parameters() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert!(closure.arity.matches(3));
     assert!(!closure.arity.matches(2));
@@ -422,6 +450,8 @@ fn test_closure_variadic_parameters() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert!(closure.arity.matches(1));
     assert!(closure.arity.matches(2));
@@ -450,6 +480,8 @@ fn test_closures_never_equal() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     });
 
     let closure2 = Value::closure(Closure {
@@ -467,6 +499,8 @@ fn test_closures_never_equal() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     });
 
     // Even though they're structurally identical, they should not be equal
@@ -491,6 +525,8 @@ fn test_same_closure_reference_equality() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     });
 
     let value1 = Value::closure((*closure_rc).clone());
@@ -525,6 +561,8 @@ fn test_closure_with_nested_captured_values() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     assert_eq!(closure.env.len(), 1);
@@ -548,6 +586,8 @@ fn test_closure_with_closure_in_constants() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     });
 
     let outer_closure = Closure {
@@ -565,6 +605,8 @@ fn test_closure_with_closure_in_constants() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     assert_eq!(outer_closure.constants.len(), 1);
@@ -590,6 +632,8 @@ fn test_closure_with_many_upvalues() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     assert_eq!(closure.env.len(), 100);
@@ -618,6 +662,8 @@ fn test_closure_as_method() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     let value = Value::closure(closure);
@@ -648,6 +694,8 @@ fn test_closure_type_check() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     });
 
     assert!(closure.is_closure());
@@ -681,6 +729,8 @@ fn test_closure_environment_isolation() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     let closure2 = Closure {
@@ -698,6 +748,8 @@ fn test_closure_environment_isolation() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     assert_ne!(closure1.env[0], closure2.env[0]);
@@ -722,6 +774,8 @@ fn test_closure_local_variables_count() {
             jit_code: None,
             lir_function: None,
             doc: None,
+            vararg_kind: elle::hir::VarargKind::List,
+            num_params: 0,
         };
         assert_eq!(closure.num_locals, locals);
     }
@@ -748,6 +802,8 @@ fn test_closure_with_empty_bytecode() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert_eq!(closure.bytecode.len(), 0);
 }
@@ -771,6 +827,8 @@ fn test_closure_with_large_bytecode() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
     assert_eq!(closure.bytecode.len(), 10000);
 }
@@ -796,6 +854,8 @@ fn test_closure_rc_reference_counting() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     // Reference should still be alive
@@ -824,6 +884,8 @@ fn test_closure_debug_format() {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 0,
     };
 
     let debug_str = format!("{:?}", closure);

@@ -69,6 +69,8 @@ fn root_closure() -> Rc<Closure> {
         jit_code: None,
         lir_function: None,
         doc: None,
+        vararg_kind: crate::hir::VarargKind::List,
+        num_params: 0,
     })
 }
 

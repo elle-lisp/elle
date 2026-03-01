@@ -267,7 +267,13 @@ impl VM {
             return SIG_ERROR;
         }
 
-        let env_rc = self.build_closure_env(&closure, args);
+        let env_rc = match self.build_closure_env(&closure, args) {
+            Some(env) => env,
+            None => {
+                // Error already set on fiber.signal
+                return SIG_ERROR;
+            }
+        };
 
         let (bits, ip) =
             self.execute_bytecode_saving_stack(&closure.bytecode, &closure.constants, &env_rc);

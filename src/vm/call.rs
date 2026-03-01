@@ -153,7 +153,14 @@ impl VM {
             }
 
             // Build the new environment
-            let new_env_rc = self.build_closure_env(closure, &args);
+            let new_env_rc = match self.build_closure_env(closure, &args) {
+                Some(env) => env,
+                None => {
+                    self.fiber.call_depth -= 1;
+                    self.fiber.stack.push(Value::NIL);
+                    return None;
+                }
+            };
 
             // Execute the closure, saving/restoring the caller's stack.
             // Essential for fiber/signal propagation and yield-through-nested-calls.
@@ -308,7 +315,14 @@ impl VM {
             }
 
             // Build proper environment using cached vector
-            Self::populate_env(&mut self.tail_call_env_cache, closure, &args);
+            if !Self::populate_env(
+                &mut self.tail_call_env_cache,
+                &mut self.fiber,
+                closure,
+                &args,
+            ) {
+                return Some(SIG_ERROR);
+            }
             let new_env_rc = Rc::new(self.tail_call_env_cache.clone());
 
             // Store the tail call information (Rc clones, not data copies)
@@ -591,13 +605,16 @@ impl VM {
     /// Build a closure environment from captured variables and arguments.
     ///
     /// Reuses `self.env_cache` to avoid a fresh Vec allocation per call.
+    /// Returns `None` if `populate_env` fails (e.g., bad keyword args for `&keys`/`&named`).
     pub(super) fn build_closure_env(
         &mut self,
         closure: &crate::value::Closure,
         args: &[Value],
-    ) -> Rc<Vec<Value>> {
-        Self::populate_env(&mut self.env_cache, closure, args);
-        Rc::new(self.env_cache.clone())
+    ) -> Option<Rc<Vec<Value>>> {
+        if !Self::populate_env(&mut self.env_cache, &mut self.fiber, closure, args) {
+            return None;
+        }
+        Some(Rc::new(self.env_cache.clone()))
     }
 
     /// Populate an environment buffer with captures, arguments, and local slots.
@@ -606,7 +623,14 @@ impl VM {
     /// `tail_call_inner` (which uses `tail_call_env_cache`). The two caches
     /// can't alias — a tail call may occur inside a closure call that is
     /// still using `env_cache`.
-    fn populate_env(buf: &mut Vec<Value>, closure: &crate::value::Closure, args: &[Value]) {
+    ///
+    /// Returns `false` if keyword argument collection fails (error set on fiber).
+    fn populate_env(
+        buf: &mut Vec<Value>,
+        fiber: &mut crate::value::Fiber,
+        closure: &crate::value::Closure,
+        args: &[Value],
+    ) -> bool {
         buf.clear();
         let needed = closure.env_capacity();
         if buf.capacity() < needed {
@@ -614,44 +638,101 @@ impl VM {
         }
         buf.extend((*closure.env).iter().cloned());
 
-        // Add parameters, handling variadic rest collection
         match closure.arity {
-            crate::value::Arity::AtLeast(n) => {
-                for (i, arg) in args[..n].iter().enumerate() {
-                    if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-                        buf.push(Value::local_cell(*arg));
-                    } else {
-                        buf.push(*arg);
+            crate::value::Arity::AtLeast(min) => {
+                // Total fixed slots = num_params - 1 (rest slot is last param)
+                let fixed_slots = closure.num_params - 1;
+
+                // Determine how many positional args to consume for fixed slots.
+                // For &keys/&named, keyword args should not fill optional slots —
+                // once we see a keyword past the required params, the rest are
+                // keyword arguments for the collector.
+                let collects_keywords = matches!(
+                    closure.vararg_kind,
+                    crate::hir::VarargKind::Struct | crate::hir::VarargKind::StrictStruct(_)
+                );
+                let provided_fixed = if collects_keywords {
+                    // Always fill required slots, then fill optional slots
+                    // only with non-keyword args
+                    let mut count = args.len().min(min);
+                    while count < fixed_slots && count < args.len() {
+                        if args[count].as_keyword_name().is_some() {
+                            break;
+                        }
+                        count += 1;
                     }
-                }
-                let rest = Self::args_to_list(&args[n..]);
-                let rest_idx = n;
-                if rest_idx < 64 && (closure.cell_params_mask & (1 << rest_idx)) != 0 {
-                    buf.push(Value::local_cell(rest));
+                    count
                 } else {
-                    buf.push(rest);
+                    args.len().min(fixed_slots)
+                };
+
+                // Push args for fixed slots (required + optional)
+                for (i, arg) in args[..provided_fixed].iter().enumerate() {
+                    Self::push_param(buf, closure, i, *arg);
+                }
+                // Fill missing optional slots with nil
+                for i in provided_fixed..fixed_slots {
+                    Self::push_param(buf, closure, i, Value::NIL);
+                }
+
+                // Collect remaining args into rest slot
+                let rest_args = if args.len() > provided_fixed {
+                    &args[provided_fixed..]
+                } else {
+                    &[]
+                };
+                let collected = match &closure.vararg_kind {
+                    crate::hir::VarargKind::List => Self::args_to_list(rest_args),
+                    crate::hir::VarargKind::Struct => {
+                        match Self::args_to_struct_static(fiber, rest_args, None) {
+                            Some(v) => v,
+                            None => return false,
+                        }
+                    }
+                    crate::hir::VarargKind::StrictStruct(ref keys) => {
+                        match Self::args_to_struct_static(fiber, rest_args, Some(keys)) {
+                            Some(v) => v,
+                            None => return false,
+                        }
+                    }
+                };
+                Self::push_param(buf, closure, fixed_slots, collected);
+            }
+            crate::value::Arity::Range(_, max) => {
+                // All slots are fixed (no rest param)
+                // Push provided args
+                for (i, arg) in args.iter().enumerate() {
+                    Self::push_param(buf, closure, i, *arg);
+                }
+                // Fill missing optional slots with nil
+                for i in args.len()..max {
+                    Self::push_param(buf, closure, i, Value::NIL);
                 }
             }
-            _ => {
+            crate::value::Arity::Exact(_) => {
                 for (i, arg) in args.iter().enumerate() {
-                    if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-                        buf.push(Value::local_cell(*arg));
-                    } else {
-                        buf.push(*arg);
-                    }
+                    Self::push_param(buf, closure, i, *arg);
                 }
             }
         }
 
         // Add empty LocalCells for locally-defined variables
-        let num_param_slots = match closure.arity {
-            crate::value::Arity::Exact(n) => n,
-            crate::value::Arity::AtLeast(n) => n + 1,
-            crate::value::Arity::Range(min, _) => min,
-        };
-        let num_locally_defined = closure.num_locals.saturating_sub(num_param_slots);
+        let num_locally_defined = closure.num_locals.saturating_sub(closure.num_params);
         for _ in 0..num_locally_defined {
             buf.push(Value::local_cell(Value::NIL));
+        }
+
+        true
+    }
+
+    /// Push a parameter value into the environment buffer, wrapping in a
+    /// LocalCell if the cell_params_mask indicates it's needed.
+    #[inline]
+    fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, val: Value) {
+        if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+            buf.push(Value::local_cell(val));
+        } else {
+            buf.push(val);
         }
     }
 
@@ -662,5 +743,80 @@ impl VM {
             list = Value::cons(*arg, list);
         }
         list
+    }
+
+    /// Collect alternating key-value args into an immutable struct.
+    /// Returns `None` if odd number of args or non-keyword keys (error set on fiber).
+    /// If `valid_keys` is `Some`, returns error on unknown keys (strict `&named` mode).
+    fn args_to_struct_static(
+        fiber: &mut crate::value::Fiber,
+        args: &[Value],
+        valid_keys: Option<&[String]>,
+    ) -> Option<Value> {
+        use crate::value::types::TableKey;
+        use std::collections::BTreeMap;
+
+        if args.is_empty() {
+            return Some(Value::struct_from(BTreeMap::new()));
+        }
+
+        if !args.len().is_multiple_of(2) {
+            set_error(
+                fiber,
+                "error",
+                format!("odd number of keyword arguments ({} args)", args.len()),
+            );
+            return None;
+        }
+
+        let mut map = BTreeMap::new();
+        for i in (0..args.len()).step_by(2) {
+            let key = match TableKey::from_value(&args[i]) {
+                Some(TableKey::Keyword(k)) => k,
+                _ => {
+                    set_error(
+                        fiber,
+                        "error",
+                        format!(
+                            "keyword argument key must be a keyword, got {}",
+                            args[i].type_name()
+                        ),
+                    );
+                    return None;
+                }
+            };
+
+            // Strict validation for &named
+            if let Some(valid) = valid_keys {
+                if !valid.iter().any(|v| v == &key) {
+                    set_error(
+                        fiber,
+                        "error",
+                        format!(
+                            "unknown named parameter :{}, valid parameters are: {}",
+                            key,
+                            valid
+                                .iter()
+                                .map(|v| format!(":{}", v))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    );
+                    return None;
+                }
+            }
+
+            let table_key = TableKey::Keyword(key.clone());
+            if map.contains_key(&table_key) {
+                set_error(
+                    fiber,
+                    "error",
+                    format!("duplicate keyword argument :{}", key),
+                );
+                return None;
+            }
+            map.insert(table_key, args[i + 1]);
+        }
+        Some(Value::struct_from(map))
     }
 }

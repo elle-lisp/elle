@@ -41,18 +41,37 @@ impl<'a> Analyzer<'a> {
 
         self.push_scope(true);
 
-        // Split params at & for variadic rest parameter
-        let (fixed_params, rest_syntax) = Self::split_rest_pattern(params_syntax, &span)?;
+        // Parse parameter list (handles &opt, &, &keys, &named)
+        let parsed = Self::parse_params(params_syntax, &span)?;
 
-        // Bind fixed parameters — some may be destructuring patterns
+        // Bind required parameters
         let mut params = Vec::new();
         let mut param_destructures = Vec::new();
-        for param in fixed_params.iter() {
+        for param in parsed.required.iter() {
             if let Some(name) = param.as_symbol() {
                 let binding = self.bind(name, param.scopes.as_slice(), BindingScope::Parameter);
                 params.push(binding);
             } else if Self::is_destructure_pattern(param) {
-                // Create a tmp parameter binding; destructure in body
+                let tmp = self.bind("__destructure_param", &[], BindingScope::Parameter);
+                params.push(tmp);
+                let pattern =
+                    self.analyze_destructure_pattern(param, BindingScope::Local, false, &span)?;
+                param_destructures.push((pattern, tmp));
+            } else {
+                return Err(format!(
+                    "{}: lambda parameter must be a symbol, list, or array",
+                    span
+                ));
+            }
+        }
+        let num_required = params.len();
+
+        // Bind optional parameters (same as required — they're all param slots)
+        for param in parsed.optional.iter() {
+            if let Some(name) = param.as_symbol() {
+                let binding = self.bind(name, param.scopes.as_slice(), BindingScope::Parameter);
+                params.push(binding);
+            } else if Self::is_destructure_pattern(param) {
                 let tmp = self.bind("__destructure_param", &[], BindingScope::Parameter);
                 params.push(tmp);
                 let pattern =
@@ -66,17 +85,70 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Bind rest parameter if present — it occupies a parameter slot
-        // that the VM will fill with a list of extra arguments
-        let rest_param = if let Some(rest_syn) = rest_syntax {
-            let name = rest_syn
-                .as_symbol()
-                .ok_or_else(|| format!("{}: rest parameter after & must be a symbol", span))?;
-            let binding = self.bind(name, rest_syn.scopes.as_slice(), BindingScope::Parameter);
-            params.push(binding);
-            Some(binding)
-        } else {
-            None
+        // Handle collector (& / &keys / &named)
+        use super::destructure::CollectorParams;
+        use crate::hir::pattern::HirPattern;
+        use crate::hir::VarargKind;
+        let (rest_param, vararg_kind) = match parsed.collector {
+            Some(CollectorParams::Rest(rest_syn)) => {
+                let name = rest_syn
+                    .as_symbol()
+                    .ok_or_else(|| format!("{}: rest parameter after & must be a symbol", span))?;
+                let binding = self.bind(name, rest_syn.scopes.as_slice(), BindingScope::Parameter);
+                params.push(binding);
+                (Some(binding), VarargKind::List)
+            }
+            Some(CollectorParams::Keys(keys_syn)) => {
+                if let Some(name) = keys_syn.as_symbol() {
+                    // &keys opts — simple symbol binding
+                    let binding =
+                        self.bind(name, keys_syn.scopes.as_slice(), BindingScope::Parameter);
+                    params.push(binding);
+                    (Some(binding), VarargKind::Struct)
+                } else if Self::is_destructure_pattern(keys_syn) {
+                    // &keys {:host h :port p} — destructure pattern
+                    let tmp = self.bind("__keys_param", &[], BindingScope::Parameter);
+                    params.push(tmp);
+                    let pattern = self.analyze_destructure_pattern(
+                        keys_syn,
+                        BindingScope::Local,
+                        false,
+                        &span,
+                    )?;
+                    param_destructures.push((pattern, tmp));
+                    (Some(tmp), VarargKind::Struct)
+                } else {
+                    return Err(format!(
+                        "{}: &keys must be followed by a symbol or destructure pattern",
+                        span
+                    ));
+                }
+            }
+            Some(CollectorParams::Named(named_syms)) => {
+                // &named host port → synthetic binding + struct destructure
+                let tmp = self.bind("__named_param", &[], BindingScope::Parameter);
+                params.push(tmp);
+
+                // Collect valid key names for strict validation
+                let mut valid_keys = Vec::new();
+                let mut entries = Vec::new();
+                for sym_syntax in named_syms {
+                    let name = sym_syntax.as_symbol().unwrap(); // validated by parse_params
+                    valid_keys.push(name.to_string());
+
+                    // Create a binding for each named param
+                    let binding =
+                        self.bind(name, sym_syntax.scopes.as_slice(), BindingScope::Local);
+                    entries.push((name.to_string(), HirPattern::Var(binding)));
+                }
+
+                // Build struct destructure pattern: {:name1 name1 :name2 name2 ...}
+                let pattern = HirPattern::Struct { entries };
+                param_destructures.push((pattern, tmp));
+
+                (Some(tmp), VarargKind::StrictStruct(valid_keys))
+            }
+            None => (None, VarargKind::List), // default; irrelevant when no rest_param
         };
 
         // Set current lambda params for effect source tracking
@@ -161,7 +233,9 @@ impl<'a> Analyzer<'a> {
         Ok(Hir::new(
             HirKind::Lambda {
                 params,
+                num_required,
                 rest_param,
+                vararg_kind,
                 captures,
                 body: Box::new(body),
                 num_locals,

@@ -4,6 +4,29 @@ use super::*;
 use crate::hir::pattern::HirPattern;
 use crate::syntax::{ScopeId, Syntax, SyntaxKind};
 
+/// Parsed parameter list structure for lambda/fn parameter lists.
+/// Only used by `analyze_lambda` — destructuring contexts use `split_rest_pattern`.
+pub(super) struct ParsedParams<'s> {
+    /// Required parameters (before &opt)
+    pub required: &'s [Syntax],
+    /// Optional parameters (between &opt and collector, if any)
+    pub optional: &'s [Syntax],
+    /// Collector kind and binding, if present
+    pub collector: Option<CollectorParams<'s>>,
+}
+
+/// The collector portion of a parameter list (the part after & / &keys / &named).
+pub(super) enum CollectorParams<'s> {
+    /// `& binding` — collect extra args into a list
+    Rest(&'s Syntax),
+    /// `&keys binding` — collect extra args into an immutable struct.
+    /// Binding may be a symbol or a destructure pattern (struct literal).
+    Keys(&'s Syntax),
+    /// `&named sym1 sym2 ...` — collect extra args into an immutable struct,
+    /// auto-destructure by name, and validate keys strictly.
+    Named(&'s [Syntax]),
+}
+
 impl<'a> Analyzer<'a> {
     /// Check if an expression is a var or def form and return all names being defined.
     /// For simple defines like `(def x ...)`, returns one name.
@@ -33,8 +56,14 @@ impl<'a> Analyzer<'a> {
     /// Recursively extract all symbol names from a syntax pattern (list, tuple, array, struct, or table).
     fn extract_pattern_names<'s>(syntax: &'s Syntax, out: &mut Vec<(&'s str, &'s [ScopeId])>) {
         match &syntax.kind {
-            SyntaxKind::Symbol(name) if name == "_" || name == "&" => {
-                // Skip wildcard and rest marker
+            SyntaxKind::Symbol(name)
+                if name == "_"
+                    || name == "&"
+                    || name == "&opt"
+                    || name == "&keys"
+                    || name == "&named" =>
+            {
+                // Skip wildcard and parameter markers
             }
             SyntaxKind::Symbol(name) => {
                 out.push((name.as_str(), syntax.scopes.as_slice()));
@@ -68,20 +97,29 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Estimate arity from syntax-level parameter list (before analysis).
-    /// Detects `&` for variadic functions.
+    /// Detects `&opt`, `&`, `&keys`, `&named` for variadic/optional functions.
     pub(super) fn arity_from_syntax_params(params: &[Syntax]) -> Arity {
-        let has_rest = params
-            .iter()
-            .any(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"));
-        if has_rest {
-            // Count fixed params (everything before &)
-            let fixed = params
-                .iter()
-                .position(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"))
-                .unwrap_or(params.len());
-            Arity::AtLeast(fixed)
+        // Use parse_params for accurate arity.
+        // If parsing fails, fall back to Exact (the error will be caught later
+        // during actual lambda analysis).
+        let span = if let Some(first) = params.first() {
+            first.span.clone()
         } else {
-            Arity::Exact(params.len())
+            Span::synthetic()
+        };
+        match Self::parse_params(params, &span) {
+            Ok(parsed) => {
+                let num_required = parsed.required.len();
+                let num_optional = parsed.optional.len();
+                let has_collector = parsed.collector.is_some();
+
+                Arity::for_lambda(has_collector, num_required, num_required + num_optional)
+            }
+            Err(_) => {
+                // Fall back to old logic for error cases
+                // (the real error will surface during analyze_lambda)
+                Arity::Exact(params.len())
+            }
         }
     }
 
@@ -114,6 +152,152 @@ impl<'a> Analyzer<'a> {
                 Ok((&items[..pos], Some(&remaining[0])))
             }
         }
+    }
+
+    /// Parse a lambda parameter list, recognizing &opt, &, &keys, &named markers.
+    ///
+    /// Grammar:
+    /// ```text
+    /// params := required* opt-section? collector?
+    /// opt-section := &opt required+
+    /// collector := & symbol | &keys binding | &named symbol+
+    /// ```
+    ///
+    /// Ordering rules:
+    /// - &opt must precede any collector
+    /// - At most one collector (& / &keys / &named are mutually exclusive)
+    /// - No markers may follow the collector
+    pub(super) fn parse_params<'s>(
+        items: &'s [Syntax],
+        span: &Span,
+    ) -> Result<ParsedParams<'s>, String> {
+        // Find positions of all markers
+        let mut opt_pos = None;
+        let mut amp_pos = None; // &
+        let mut keys_pos = None; // &keys
+        let mut named_pos = None; // &named
+
+        for (i, s) in items.iter().enumerate() {
+            if let SyntaxKind::Symbol(name) = &s.kind {
+                match name.as_str() {
+                    "&opt" => {
+                        if opt_pos.is_some() {
+                            return Err(format!("{}: duplicate &opt", span));
+                        }
+                        opt_pos = Some(i);
+                    }
+                    "&" => {
+                        if amp_pos.is_some() || keys_pos.is_some() || named_pos.is_some() {
+                            return Err(format!(
+                                "{}: multiple collectors (& / &keys / &named)",
+                                span
+                            ));
+                        }
+                        amp_pos = Some(i);
+                    }
+                    "&keys" => {
+                        if amp_pos.is_some() || keys_pos.is_some() || named_pos.is_some() {
+                            return Err(format!(
+                                "{}: multiple collectors (& / &keys / &named)",
+                                span
+                            ));
+                        }
+                        keys_pos = Some(i);
+                    }
+                    "&named" => {
+                        if amp_pos.is_some() || keys_pos.is_some() || named_pos.is_some() {
+                            return Err(format!(
+                                "{}: multiple collectors (& / &keys / &named)",
+                                span
+                            ));
+                        }
+                        named_pos = Some(i);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Determine collector position (earliest of &, &keys, &named)
+        let collector_pos = amp_pos.or(keys_pos).or(named_pos);
+
+        // Validate ordering: &opt must come before collector
+        if let (Some(opt), Some(coll)) = (opt_pos, collector_pos) {
+            if opt > coll {
+                return Err(format!(
+                    "{}: &opt must appear before & / &keys / &named",
+                    span
+                ));
+            }
+        }
+
+        // Required params: everything before &opt (or before collector if no &opt)
+        let required_end = opt_pos.unwrap_or(collector_pos.unwrap_or(items.len()));
+        let required = &items[..required_end];
+
+        // Optional params: between &opt marker and collector (or end)
+        let optional = if let Some(opt) = opt_pos {
+            let start = opt + 1;
+            let end = collector_pos.unwrap_or(items.len());
+            let slice = &items[start..end];
+            if slice.is_empty() {
+                return Err(format!(
+                    "{}: &opt must be followed by at least one parameter",
+                    span
+                ));
+            }
+            slice
+        } else {
+            &items[0..0] // empty slice
+        };
+
+        // Parse collector
+        let collector = if let Some(pos) = amp_pos {
+            let remaining = &items[pos + 1..];
+            if remaining.len() != 1 {
+                return Err(format!(
+                    "{}: & must be followed by exactly one pattern",
+                    span
+                ));
+            }
+            Some(CollectorParams::Rest(&remaining[0]))
+        } else if let Some(pos) = keys_pos {
+            let remaining = &items[pos + 1..];
+            if remaining.len() != 1 {
+                return Err(format!(
+                    "{}: &keys must be followed by exactly one binding (symbol or destructure pattern)",
+                    span
+                ));
+            }
+            Some(CollectorParams::Keys(&remaining[0]))
+        } else if let Some(pos) = named_pos {
+            let remaining = &items[pos + 1..];
+            if remaining.is_empty() {
+                return Err(format!(
+                    "{}: &named must be followed by at least one symbol",
+                    span
+                ));
+            }
+            // Validate all are symbols
+            for s in remaining {
+                if s.as_symbol().is_none() {
+                    return Err(format!(
+                        "{}: &named parameters must be symbols, got {}",
+                        span,
+                        s.kind_label()
+                    ));
+                }
+            }
+            Some(CollectorParams::Named(remaining))
+        } else {
+            None
+        };
+
+        Ok(ParsedParams {
+            required,
+            optional,
+            collector,
+        })
     }
 
     /// Convert a syntax pattern into an HirPattern, creating bindings for each leaf symbol.
