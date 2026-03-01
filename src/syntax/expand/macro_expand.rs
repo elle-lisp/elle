@@ -92,6 +92,11 @@ impl Expander {
     ) -> Result<Syntax, String> {
         let span = call_site.span.clone();
 
+        // Mark the heap arena — all allocations until release are temporary.
+        // After from_value() converts the result to owned Syntax, all heap
+        // Values from let_expr construction and eval_syntax are dead.
+        let _arena_guard = crate::value::heap::ArenaGuard::new();
+
         // Build let-expression: (let ((p1 arg1) (p2 arg2)) body)
         // Symbols and compound forms are wrapped as Value::syntax(arg) via
         // SyntaxLiteral to preserve scope sets through the Value round-trip.
@@ -151,6 +156,10 @@ impl Expander {
 
         // Convert result back to Syntax
         let result_syntax = Syntax::from_value(&result_value, symbols, span)?;
+
+        // Release arena — all temp heap objects from this expansion are freed.
+        // Must happen BEFORE expand() recurse, which may trigger more expansions.
+        drop(_arena_guard);
 
         // Add intro scope for hygiene
         let intro_scope = self.fresh_scope();

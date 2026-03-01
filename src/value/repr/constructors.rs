@@ -234,10 +234,11 @@ impl Value {
     }
 
     /// Create a native function value.
+    /// Uses permanent allocation — native functions outlive any arena scope.
     #[inline]
     pub fn native_fn(f: crate::value::heap::NativeFn) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::NativeFn(f))
+        use crate::value::heap::{alloc_permanent, HeapObject};
+        alloc_permanent(HeapObject::NativeFn(f))
     }
 
     /// Create an immutable tuple value.
