@@ -95,7 +95,8 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `string.rs` | `string/upcase`, `string/downcase`, `string/slice`, `string/index`, `string/char-at`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
 | `table.rs` | `table`, `get`, `put`, `del`, `keys`, `values`, `has-key?` |
 | `structs.rs` | `struct` |
-| `file_io.rs` | `slurp`, `spit`, `file-exists?`, `join-path` |
+| `file_io.rs` | `slurp`, `spit` |
+| `path.rs` | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
 | `display.rs` | `print`, `println`, `display`, `newline` |
 | `type_check.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `tuple?`, `table?`, `struct?`, `buffer?`, `box?`, `type-of`, `eq?`, `equal?` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |

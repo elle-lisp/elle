@@ -1,7 +1,6 @@
 /// Integration tests for lint functionality
 use elle::lint::cli::{LintConfig, Linter, OutputFormat};
 use elle::lint::diagnostics::Severity;
-use std::path::Path;
 
 #[test]
 fn test_lint_naming_good() {
@@ -11,7 +10,7 @@ fn test_lint_naming_good() {
     };
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_file(Path::new("tests/fixtures/naming-good.lisp"));
+    let result = linter.lint_file("tests/fixtures/naming-good.lisp");
     assert!(result.is_ok());
     assert_eq!(linter.diagnostics().len(), 0);
 }
@@ -24,7 +23,7 @@ fn test_lint_naming_bad() {
     };
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_file(Path::new("tests/fixtures/naming-bad.lisp"));
+    let result = linter.lint_file("tests/fixtures/naming-bad.lisp");
     assert!(result.is_ok());
     assert!(!linter.diagnostics().is_empty());
 
@@ -43,7 +42,7 @@ fn test_json_output() {
     };
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_file(Path::new("tests/fixtures/naming-bad.lisp"));
+    let result = linter.lint_file("tests/fixtures/naming-bad.lisp");
     assert!(result.is_ok());
 
     let output = linter.format_output();
@@ -63,7 +62,7 @@ fn test_lint_nonexistent_file() {
     let config = LintConfig::default();
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_file(Path::new("nonexistent.lisp"));
+    let result = linter.lint_file("nonexistent.lisp");
     assert!(result.is_err());
 }
 

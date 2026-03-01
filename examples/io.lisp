@@ -149,18 +149,18 @@
   (newline)
 
   (display "File name: ")
-  (display (file-name full-path))
+  (display (path/filename full-path))
   (newline)
 
   (display "File extension: ")
-  (display (file-extension full-path))
+  (display (path/extension full-path))
   (newline)
 
   (display "Parent directory: ")
-  (display (parent-directory full-path))
+  (display (path/parent full-path))
   (newline)
 
-  (var composed-path (join-path "." "test" "nested" "file.txt"))
+  (var composed-path (path/join "." "test" "nested" "file.txt"))
   (display "Composed path: ")
   (display composed-path)
   (newline)
@@ -216,9 +216,9 @@
   (newline)
 
   ## Create some test files in a directory
-  (spit (join-path test-dir "file1.txt") "Content 1")
-  (spit (join-path test-dir "file2.txt") "Content 2")
-  (spit (join-path test-dir "file3.txt") "Content 3")
+  (spit (path/join test-dir "file1.txt") "Content 1")
+  (spit (path/join test-dir "file2.txt") "Content 2")
+  (spit (path/join test-dir "file3.txt") "Content 3")
 
   (display "Files in directory:")
   (newline)
@@ -235,10 +235,10 @@
   (newline)
 
    (display "Current directory: ")
-   (let ((cwd (current-directory)))
+   (let ((cwd (path/cwd)))
      (display cwd)
      (newline)
-     (assert-true (> (length cwd) 0) "I/O: current-directory returns valid path"))
+     (assert-true (> (length cwd) 0) "I/O: path/cwd returns valid path"))
   (newline)
 
   ## Part 12: Practical Example - Config File Handling
@@ -289,17 +289,17 @@
   (create-directory-all archive-dir)
 
   ## Create some data files
-  (spit (join-path data-dir "data1.txt") "Important data 1")
-  (spit (join-path data-dir "data2.txt") "Important data 2")
-  (spit (join-path data-dir "data3.txt") "Important data 3")
+  (spit (path/join data-dir "data1.txt") "Important data 1")
+  (spit (path/join data-dir "data2.txt") "Important data 2")
+  (spit (path/join data-dir "data3.txt") "Important data 3")
 
   (display "Organized data files in: ")
   (display data-dir)
   (newline)
 
   ## Archive a file (copy to archive directory)
-  (var original (join-path data-dir "data1.txt"))
-  (var archived (join-path archive-dir "data1_archived.txt"))
+  (var original (path/join data-dir "data1.txt"))
+  (var archived (path/join archive-dir "data1_archived.txt"))
   (copy-file original archived)
 
   (display "Archived file to: ")
@@ -355,14 +355,14 @@
   (newline)
 
   ## Delete files in test directories
-  (delete-file (join-path data-dir "data1.txt"))
-  (delete-file (join-path data-dir "data2.txt"))
-  (delete-file (join-path data-dir "data3.txt"))
-  (delete-file (join-path archive-dir "data1_archived.txt"))
-  (delete-file (join-path test-dir "file1.txt"))
-  (delete-file (join-path test-dir "file2.txt"))
-  (delete-file (join-path test-dir "file3.txt"))
-  (delete-directory (join-path test-dir "subdir"))
+  (delete-file (path/join data-dir "data1.txt"))
+  (delete-file (path/join data-dir "data2.txt"))
+  (delete-file (path/join data-dir "data3.txt"))
+  (delete-file (path/join archive-dir "data1_archived.txt"))
+  (delete-file (path/join test-dir "file1.txt"))
+  (delete-file (path/join test-dir "file2.txt"))
+  (delete-file (path/join test-dir "file3.txt"))
+  (delete-directory (path/join test-dir "subdir"))
   (delete-directory data-dir)
   (delete-directory archive-dir)
   (delete-directory test-dir)
@@ -424,19 +424,21 @@
 
   (display "Path Operations:")
   (newline)
-  (display "  (file-name path) - Extract filename")
+  (display "  (path/filename path) - Extract filename")
   (newline)
-  (display "  (file-extension path) - Extract file extension")
+  (display "  (path/stem path) - Extract file stem")
   (newline)
-  (display "  (parent-directory path) - Get parent directory")
+  (display "  (path/extension path) - Extract file extension")
   (newline)
-  (display "  (join-path ...parts) - Join path components")
+  (display "  (path/parent path) - Get parent directory")
   (newline)
-  (display "  (absolute-path path) - Get absolute path")
+  (display "  (path/join ...parts) - Join path components")
   (newline)
-  (display "  (current-directory) - Get working directory")
+  (display "  (path/normalize path) - Normalize path")
   (newline)
-  (display "  (change-directory path) - Change working directory")
+  (display "  (path/absolute path) - Get absolute path")
+  (newline)
+  (display "  (path/cwd) - Get working directory")
   (newline)
   (newline)
 

@@ -2,8 +2,6 @@
 //!
 //! Supports loading .so files on Linux and provides stubs for other platforms.
 
-use std::path::Path;
-
 /// Handle to a loaded shared library.
 pub struct LibraryHandle {
     /// Unique ID for this library in the FFI subsystem
@@ -68,7 +66,7 @@ pub fn load_library(path: &str) -> Result<LibraryHandle, String> {
         // Only check existence for absolute/relative paths.
         // Bare names like "libm.so.6" are resolved by the dynamic linker
         // via LD_LIBRARY_PATH / /etc/ld.so.cache — don't reject them.
-        if path.contains('/') && !Path::new(path).exists() {
+        if path.contains('/') && !crate::path::exists(path) {
             return Err(format!("Library file not found: {}", path));
         }
 

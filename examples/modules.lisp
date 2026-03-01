@@ -2,7 +2,6 @@
 #
 # This example demonstrates Elle's module system:
 # - import-file: Import module from file
-# - add-module-path: Add to module search path
 # - Module organization patterns
 # - Importing functions from modules
 # - Package system integration
@@ -11,22 +10,10 @@
 
 (import-file "./examples/assertions.lisp")
 
-(display "=== 1. Module Path Management ===\n")
-
-(display "Adding module search paths:\n")
-
-(add-module-path "test-modules")
-(display "  Added 'test-modules' to module search path\n")
-
-(add-module-path "lib")
-(display "  Added 'lib' to module search path\n")
-
-(display "✓ Module paths added successfully\n")
-
 # ========================================
-# 2. Importing modules from files
+# 1. Importing modules from files
 # ========================================
-(display "\n=== 2. Importing Modules from Files ===\n")
+(display "=== 1. Importing Modules from Files ===\n")
 
 (display "Importing test module:\n")
 
@@ -36,9 +23,9 @@
 (display "✓ Module import successful\n")
 
 # ========================================
-# 3. Idempotent module loading
+# 2. Idempotent module loading
 # ========================================
-(display "\n=== 3. Idempotent Module Loading ===\n")
+(display "\n=== 2. Idempotent Module Loading ===\n")
 
 (display "Loading the same module twice:\n")
 
@@ -51,9 +38,9 @@
 (display "✓ Idempotent loading works\n")
 
 # ========================================
-# 4. Module organization: Utilities
+# 3. Module organization: Utilities
 # ========================================
-(display "\n=== 4. Module Organization: Utilities ===\n")
+(display "\n=== 3. Module Organization: Utilities ===\n")
 
 (display "Organizing code into utility modules:\n")
 
@@ -74,9 +61,9 @@
 (display "✓ Utility modules organized\n")
 
 # ========================================
-# 5. Module composition
+# 4. Module composition
 # ========================================
-(display "\n=== 5. Module Composition ===\n")
+(display "\n=== 4. Module Composition ===\n")
 
 (display "Composing functionality from multiple modules:\n")
 
@@ -109,9 +96,9 @@
 (display "✓ Module composition works\n")
 
 # ========================================
-# 6. Module namespacing
+# 5. Module namespacing
 # ========================================
-(display "\n=== 6. Module Namespacing ===\n")
+(display "\n=== 5. Module Namespacing ===\n")
 
 (display "Creating namespaced modules:\n")
 
@@ -139,9 +126,9 @@
 (display "✓ Module namespacing works\n")
 
 # ========================================
-# 7. Module dependencies
+# 6. Module dependencies
 # ========================================
-(display "\n=== 7. Module Dependencies ===\n")
+(display "\n=== 6. Module Dependencies ===\n")
 
 (display "Managing module dependencies:\n")
 
@@ -170,9 +157,9 @@
 (display "✓ Module dependencies work\n")
 
 # ========================================
-# 8. Module re-export
+# 7. Module re-export
 # ========================================
-(display "\n=== 8. Module Re-export ===\n")
+(display "\n=== 7. Module Re-export ===\n")
 
 (display "Re-exporting functions from modules:\n")
 
@@ -208,9 +195,9 @@
 (display "✓ Module re-export works\n")
 
 # ========================================
-# 9. Module initialization
+# 8. Module initialization
 # ========================================
-(display "\n=== 9. Module Initialization ===\n")
+(display "\n=== 8. Module Initialization ===\n")
 
 (display "Module initialization patterns:\n")
 
@@ -241,9 +228,9 @@
 (display "✓ Module initialization works\n")
 
 # ========================================
-# 10. Module testing
+# 9. Module testing
 # ========================================
-(display "\n=== 10. Module Testing ===\n")
+(display "\n=== 9. Module Testing ===\n")
 
 (display "Testing module functionality:\n")
 
@@ -270,12 +257,11 @@
 (display "✓ Module testing works\n")
 
 # ========================================
-# 11. Module loading summary
+# 10. Module loading summary
 # ========================================
 (display "\n=== Module Loading Summary ===\n")
 
 (display "Features demonstrated:\n")
-(display "  ✓ add-module-path - Add module search paths\n")
 (display "  ✓ import-file - Import modules from files\n")
 (display "  ✓ Idempotent loading - Load modules safely\n")
 (display "  ✓ Module organization - Organize code into modules\n")
@@ -287,7 +273,6 @@
 (display "  ✓ Module testing - Test module functionality\n")
 
 (display "\nKey concepts:\n")
-(display "  - add-module-path extends module search paths\n")
 (display "  - import-file loads modules from files\n")
 (display "  - Modules can be organized hierarchically\n")
 (display "  - Modules can depend on other modules\n")
@@ -310,18 +295,13 @@
 (display "Test 1: Module Import Success\n")
 (display "  Successfully imported test-modules/test.lisp\n")
 
-# Test 2: Add a module search path
-(display "Test 2: Adding Module Search Paths\n")
-(add-module-path "test-modules")
-(display "  Added 'test-modules' to module search path\n")
-
-# Test 3: Import the same file twice (idempotent)
-(display "Test 3: Idempotent Loading\n")
+# Test 2: Import the same file twice (idempotent)
+(display "Test 2: Idempotent Loading\n")
 (import-file "test-modules/test.lisp")
 (display "  Successfully imported the same file twice (idempotent)\n")
 
-# Test 4: Demonstrate basic arithmetic with imported modules loaded
-(display "Test 4: Arithmetic Operations\n")
+# Test 3: Demonstrate basic arithmetic with imported modules loaded
+(display "Test 3: Arithmetic Operations\n")
 (display "  5 + 3 = ")
 (var sum-result (+ 5 3))
 (display sum-result)

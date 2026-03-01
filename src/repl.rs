@@ -7,7 +7,6 @@
 //! - Syntax highlighting
 
 use rustyline::{DefaultEditor, Result as RustylineResult};
-use std::path::PathBuf;
 
 const HISTORY_FILE: &str = ".elle_history";
 
@@ -29,11 +28,11 @@ impl Repl {
     }
 
     /// Get the path to the history file
-    fn history_file_path() -> PathBuf {
+    fn history_file_path() -> String {
         if let Some(home) = dirs_home() {
-            home.join(HISTORY_FILE)
+            crate::path::join(&[&home, HISTORY_FILE])
         } else {
-            PathBuf::from(HISTORY_FILE)
+            HISTORY_FILE.to_string()
         }
     }
 
@@ -60,14 +59,14 @@ impl Repl {
 }
 
 /// Get home directory path (cross-platform)
-fn dirs_home() -> Option<PathBuf> {
+fn dirs_home() -> Option<String> {
     #[cfg(unix)]
     {
-        std::env::var("HOME").ok().map(PathBuf::from)
+        std::env::var("HOME").ok()
     }
     #[cfg(windows)]
     {
-        std::env::var("USERPROFILE").ok().map(PathBuf::from)
+        std::env::var("USERPROFILE").ok()
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -88,6 +87,6 @@ mod tests {
     #[test]
     fn test_history_file_path() {
         let path = Repl::history_file_path();
-        assert!(path.to_string_lossy().contains("elle_history"));
+        assert!(path.contains("elle_history"));
     }
 }

@@ -2,7 +2,6 @@
 
 use crate::lint::cli::{LintConfig, Linter, OutputFormat};
 use crate::lint::diagnostics::Severity;
-use std::path::Path;
 
 /// Run the linter with the given arguments (everything after `--lint`).
 /// Returns an exit code: 0 = clean, 1 = errors, 2 = warnings only.
@@ -67,14 +66,13 @@ pub fn run(args: &[String]) -> i32 {
     let mut had_errors = false;
 
     for file_path in files {
-        let path = Path::new(&file_path);
-        if path.is_file() {
-            if let Err(e) = linter.lint_file(path) {
+        if crate::path::is_file(&file_path) {
+            if let Err(e) = linter.lint_file(&file_path) {
                 eprintln!("Error linting {}: {}", file_path, e);
                 had_errors = true;
             }
-        } else if path.is_dir() {
-            lint_directory(&mut linter, path);
+        } else if crate::path::is_dir(&file_path) {
+            lint_directory(&mut linter, &file_path);
         } else {
             eprintln!("File not found: {}", file_path);
             had_errors = true;
@@ -90,18 +88,20 @@ pub fn run(args: &[String]) -> i32 {
     }
 }
 
-fn lint_directory(linter: &mut Linter, dir: &Path) {
+fn lint_directory(linter: &mut Linter, dir: &str) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|ext| ext == "l") {
-                let _ = linter.lint_file(&path);
-            } else if path.is_dir()
-                && !path
-                    .file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+            let Some(path_str) = entry.path().to_str().map(|s| s.to_string()) else {
+                continue; // skip non-UTF-8 paths
+            };
+            if crate::path::is_file(&path_str)
+                && crate::path::extension(&path_str).is_some_and(|ext| ext == "l")
             {
-                lint_directory(linter, &path);
+                let _ = linter.lint_file(&path_str);
+            } else if crate::path::is_dir(&path_str)
+                && !crate::path::filename(&path_str).is_some_and(|n| n.starts_with('.'))
+            {
+                lint_directory(linter, &path_str);
             }
         }
     }

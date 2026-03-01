@@ -121,9 +121,6 @@ pub enum ErrorKind {
     UncaughtException {
         message: String,
     },
-    ExceptionInFinally {
-        message: String,
-    },
 
     // IO
     FileNotFound {
@@ -232,9 +229,6 @@ impl LError {
             ErrorKind::ExecutionError { message } => format!("Execution error: {}", message),
             ErrorKind::UncaughtException { message } => {
                 format!("Uncaught exception: {}", message)
-            }
-            ErrorKind::ExceptionInFinally { message } => {
-                format!("Exception in finally clause: {}", message)
             }
             ErrorKind::FileNotFound { path } => format!("File not found: {}", path),
             ErrorKind::FileReadError { path, reason } => {

@@ -132,12 +132,6 @@ impl LError {
         })
     }
 
-    pub fn exception_in_finally(message: impl Into<String>) -> Self {
-        LError::new(ErrorKind::ExceptionInFinally {
-            message: message.into(),
-        })
-    }
-
     // IO
     pub fn file_not_found(path: impl Into<String>) -> Self {
         LError::new(ErrorKind::FileNotFound { path: path.into() })

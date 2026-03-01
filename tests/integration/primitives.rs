@@ -239,11 +239,11 @@ fn test_symbol_to_string_type_error() {
     assert!(result.unwrap_err().contains("type"));
 }
 
-// === Path primitives ===
+// === Path primitives (path/* API) ===
 
 #[test]
-fn test_current_directory() {
-    let result = eval_source("(file/cwd)").unwrap();
+fn test_path_cwd() {
+    let result = eval_source("(path/cwd)").unwrap();
     let s = result
         .with_string(|s| s.to_string())
         .expect("should be a string");
@@ -251,86 +251,240 @@ fn test_current_directory() {
 }
 
 #[test]
-fn test_join_path() {
-    let result = eval_source("(file/join \"a\" \"b\" \"c\")").unwrap();
+fn test_path_join() {
+    let result = eval_source("(path/join \"a\" \"b\" \"c\")").unwrap();
+    assert_eq!(result, Value::string("a/b/c"));
+}
+
+#[test]
+fn test_path_join_single() {
+    assert_eq!(
+        eval_source("(path/join \"hello\")").unwrap(),
+        Value::string("hello"),
+    );
+}
+
+#[test]
+fn test_path_join_type_error() {
+    let result = eval_source("(path/join 42)");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("type"));
+}
+
+#[test]
+fn test_path_join_absolute_replaces() {
+    assert_eq!(
+        eval_source("(path/join \"a\" \"/b\")").unwrap(),
+        Value::string("/b"),
+    );
+}
+
+#[test]
+fn test_path_parent() {
+    assert_eq!(
+        eval_source("(path/parent \"/home/user/data.txt\")").unwrap(),
+        Value::string("/home/user"),
+    );
+}
+
+#[test]
+fn test_path_parent_root() {
+    assert_eq!(eval_source("(path/parent \"/\")").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_path_parent_relative() {
+    assert_eq!(
+        eval_source("(path/parent \"a/b/c\")").unwrap(),
+        Value::string("a/b"),
+    );
+}
+
+#[test]
+fn test_path_filename() {
+    assert_eq!(
+        eval_source("(path/filename \"/home/user/data.txt\")").unwrap(),
+        Value::string("data.txt"),
+    );
+}
+
+#[test]
+fn test_path_filename_bare() {
+    assert_eq!(
+        eval_source("(path/filename \"data.txt\")").unwrap(),
+        Value::string("data.txt"),
+    );
+}
+
+#[test]
+fn test_path_filename_trailing_slash() {
+    assert_eq!(
+        eval_source("(path/filename \"/home/user/\")").unwrap(),
+        Value::string("user"),
+    );
+}
+
+#[test]
+fn test_path_stem() {
+    assert_eq!(
+        eval_source("(path/stem \"data.txt\")").unwrap(),
+        Value::string("data"),
+    );
+}
+
+#[test]
+fn test_path_stem_multiple_dots() {
+    assert_eq!(
+        eval_source("(path/stem \"archive.tar.gz\")").unwrap(),
+        Value::string("archive.tar"),
+    );
+}
+
+#[test]
+fn test_path_extension() {
+    assert_eq!(
+        eval_source("(path/extension \"data.txt\")").unwrap(),
+        Value::string("txt"),
+    );
+}
+
+#[test]
+fn test_path_extension_none() {
+    assert_eq!(
+        eval_source("(path/extension \"noext\")").unwrap(),
+        Value::NIL
+    );
+}
+
+#[test]
+fn test_path_extension_multiple_dots() {
+    assert_eq!(
+        eval_source("(path/extension \"archive.tar.gz\")").unwrap(),
+        Value::string("gz"),
+    );
+}
+
+#[test]
+fn test_path_with_extension() {
+    assert_eq!(
+        eval_source("(path/with-extension \"foo.txt\" \"rs\")").unwrap(),
+        Value::string("foo.rs"),
+    );
+}
+
+#[test]
+fn test_path_normalize() {
+    assert_eq!(
+        eval_source("(path/normalize \"./a/../b\")").unwrap(),
+        Value::string("b"),
+    );
+}
+
+#[test]
+fn test_path_absolute() {
+    let result = eval_source("(path/absolute \"src\")").unwrap();
     let s = result
         .with_string(|s| s.to_string())
-        .expect("should be a string");
-    assert!(s.contains("a"));
-    assert!(s.contains("b"));
-    assert!(s.contains("c"));
+        .expect("should be string");
+    assert!(s.starts_with('/'), "absolute path should start with /");
 }
 
 #[test]
-fn test_join_path_single() {
-    assert_eq!(
-        eval_source("(file/join \"hello\")").unwrap(),
-        Value::string("hello")
-    );
+fn test_path_canonicalize_dot() {
+    let result = eval_source("(path/canonicalize \".\")").unwrap();
+    let s = result
+        .with_string(|s| s.to_string())
+        .expect("should be string");
+    assert!(s.starts_with('/'));
 }
 
 #[test]
-fn test_join_path_type_error() {
-    let result = eval_source("(file/join 42)");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("type"));
-}
-
-#[test]
-fn test_file_extension() {
-    assert_eq!(
-        eval_source("(file/ext \"data.txt\")").unwrap(),
-        Value::string("txt")
-    );
-}
-
-#[test]
-fn test_file_extension_none() {
-    assert_eq!(eval_source("(file/ext \"noext\")").unwrap(), Value::NIL);
-}
-
-#[test]
-fn test_file_name() {
-    assert_eq!(
-        eval_source("(file/name \"/home/user/data.txt\")").unwrap(),
-        Value::string("data.txt")
-    );
-}
-
-#[test]
-fn test_file_name_no_dir() {
-    assert_eq!(
-        eval_source("(file/name \"data.txt\")").unwrap(),
-        Value::string("data.txt")
-    );
-}
-
-#[test]
-fn test_parent_directory() {
-    assert_eq!(
-        eval_source("(file/parent \"/home/user/data.txt\")").unwrap(),
-        Value::string("/home/user")
-    );
-}
-
-#[test]
-fn test_parent_directory_root() {
-    // Root has no parent — returns nil
-    assert_eq!(eval_source("(file/parent \"/\")").unwrap(), Value::NIL);
-}
-
-#[test]
-fn test_absolute_path_nonexistent() {
-    // Non-existent path should error
-    let result = eval_source("(file/realpath \"/nonexistent/path/xyz\")");
+fn test_path_canonicalize_nonexistent() {
+    let result = eval_source("(path/canonicalize \"/nonexistent/path/xyz\")");
     assert!(result.is_err());
 }
 
 #[test]
-fn test_absolute_path_type_error() {
-    let result = eval_source("(file/realpath 42)");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("type"));
+fn test_path_relative() {
+    assert_eq!(
+        eval_source("(path/relative \"/foo/bar/baz\" \"/foo/bar\")").unwrap(),
+        Value::string("baz"),
+    );
+}
+
+#[test]
+fn test_path_components() {
+    // Components of "/a/b/c" should be a list: ("/" "a" "b" "c")
+    let result = eval_source("(length (path/components \"/a/b/c\"))").unwrap();
+    assert_eq!(result, Value::int(4));
+}
+
+#[test]
+fn test_path_is_absolute() {
+    assert_eq!(
+        eval_source("(path/absolute? \"/foo\")").unwrap(),
+        Value::TRUE
+    );
+    assert_eq!(
+        eval_source("(path/absolute? \"foo\")").unwrap(),
+        Value::FALSE
+    );
+}
+
+#[test]
+fn test_path_is_relative() {
+    assert_eq!(
+        eval_source("(path/relative? \"foo\")").unwrap(),
+        Value::TRUE
+    );
+    assert_eq!(
+        eval_source("(path/relative? \"/foo\")").unwrap(),
+        Value::FALSE
+    );
+}
+
+#[test]
+fn test_path_exists() {
+    assert_eq!(eval_source("(path/exists? \".\")").unwrap(), Value::TRUE);
+    assert_eq!(
+        eval_source("(path/exists? \"/nonexistent/xyz\")").unwrap(),
+        Value::FALSE,
+    );
+}
+
+#[test]
+fn test_path_is_file() {
+    assert_eq!(
+        eval_source("(path/file? \"Cargo.toml\")").unwrap(),
+        Value::TRUE
+    );
+    assert_eq!(eval_source("(path/file? \".\")").unwrap(), Value::FALSE);
+}
+
+#[test]
+fn test_path_is_dir() {
+    assert_eq!(eval_source("(path/dir? \".\")").unwrap(), Value::TRUE);
+    assert_eq!(
+        eval_source("(path/dir? \"Cargo.toml\")").unwrap(),
+        Value::FALSE
+    );
+}
+
+// --- Alias tests for predicates ---
+
+#[test]
+fn test_path_exists_alias_file_exists() {
+    assert_eq!(eval_source("(file-exists? \".\")").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_path_dir_alias_directory() {
+    assert_eq!(eval_source("(directory? \".\")").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_path_file_alias() {
+    assert_eq!(eval_source("(file? \"Cargo.toml\")").unwrap(), Value::TRUE);
 }
 
 // === Read edge cases ===
@@ -391,41 +545,6 @@ fn test_string_from_empty_list() {
     assert!(result.is_string());
 }
 
-// === Path edge cases ===
-
-#[test]
-fn test_file_extension_multiple_dots() {
-    assert_eq!(
-        eval_source("(file/ext \"archive.tar.gz\")").unwrap(),
-        Value::string("gz")
-    );
-}
-
-#[test]
-fn test_file_name_trailing_slash() {
-    // Trailing slash means the path refers to a directory
-    let result = eval_source("(file/name \"/home/user/\")").unwrap();
-    assert_eq!(result, Value::string("user"));
-}
-
-#[test]
-fn test_join_path_absolute() {
-    // Joining with an absolute path should replace
-    let result = eval_source("(file/join \"a\" \"/b\")").unwrap();
-    let s = result
-        .with_string(|s| s.to_string())
-        .expect("should be string");
-    assert_eq!(s, "/b");
-}
-
-#[test]
-fn test_parent_directory_relative() {
-    assert_eq!(
-        eval_source("(file/parent \"a/b/c\")").unwrap(),
-        Value::string("a/b")
-    );
-}
-
 // === Alias tests ===
 
 #[test]
@@ -438,22 +557,6 @@ fn test_string_to_int_alias() {
 fn test_int_alias() {
     // int is an alias for integer
     assert_eq!(eval_source("(int 42)").unwrap(), Value::int(42));
-}
-
-#[test]
-fn test_current_directory_alias() {
-    // current-directory is an alias for file/cwd
-    let result = eval_source("(current-directory)").unwrap();
-    assert!(result.is_string());
-}
-
-#[test]
-fn test_join_path_alias() {
-    // join-path is an alias for file/join
-    assert_eq!(
-        eval_source("(join-path \"a\" \"b\")").unwrap(),
-        eval_source("(file/join \"a\" \"b\")").unwrap()
-    );
 }
 
 // === Type predicates for collections ===

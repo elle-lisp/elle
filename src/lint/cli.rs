@@ -4,7 +4,6 @@ use crate::hir::HirLinter;
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::symbol::SymbolTable;
 use crate::{analyze_all, init_stdlib, register_primitives, VM};
-use std::path::Path;
 
 /// Main linter configuration
 #[derive(Debug, Clone)]
@@ -65,13 +64,11 @@ impl Linter {
     }
 
     /// Lint a file
-    pub fn lint_file(&mut self, path: &Path) -> Result<(), String> {
+    pub fn lint_file(&mut self, path: &str) -> Result<(), String> {
         let content =
             std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
 
-        let filename = path.to_str().unwrap_or("unknown").to_string();
-
-        self.lint_str(&content, &filename)
+        self.lint_str(&content, path)
     }
 
     /// Get all diagnostics

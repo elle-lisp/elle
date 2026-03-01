@@ -667,24 +667,27 @@ mod tests {
     #[test]
     fn test_compile_all_examples() {
         use std::fs;
-        use std::path::Path;
 
         let examples_dir = "examples";
         let mut passed = Vec::new();
         let mut failed = Vec::new();
 
-        if !Path::new(examples_dir).exists() {
+        if !crate::path::exists(examples_dir) {
             println!("Examples directory not found, skipping test");
             return;
         }
 
         for entry in fs::read_dir(examples_dir).expect("Failed to read examples directory") {
             let entry = entry.expect("Failed to read directory entry");
-            let path = entry.path();
+            let Some(path_str) = entry.path().to_str().map(|s| s.to_string()) else {
+                continue; // skip non-UTF-8 paths
+            };
 
-            if path.extension().is_some_and(|e| e == "lisp") {
-                let filename = path.file_name().unwrap().to_string_lossy().to_string();
-                let content = fs::read_to_string(&path).expect("Failed to read example file");
+            if crate::path::extension(&path_str).is_some_and(|e| e == "lisp") {
+                let filename = crate::path::filename(&path_str)
+                    .unwrap_or("unknown")
+                    .to_string();
+                let content = fs::read_to_string(&path_str).expect("Failed to read example file");
 
                 let (mut symbols, _) = setup();
                 match compile(&content, &mut symbols) {
@@ -720,13 +723,12 @@ mod tests {
     #[test]
     fn test_execute_simple_examples() {
         use std::fs;
-        use std::path::Path;
 
         let examples_dir = "examples";
         let mut executed = Vec::new();
         let mut execution_failed = Vec::new();
 
-        if !Path::new(examples_dir).exists() {
+        if !crate::path::exists(examples_dir) {
             println!("Examples directory not found, skipping test");
             return;
         }
@@ -735,8 +737,8 @@ mod tests {
         let test_files = vec!["hello.lisp"];
 
         for filename in test_files {
-            let path = Path::new(examples_dir).join(filename);
-            if path.exists() {
+            let path = crate::path::join(&[examples_dir, filename]);
+            if crate::path::exists(&path) {
                 let content = fs::read_to_string(&path).expect("Failed to read example file");
                 let (mut symbols, mut vm) = setup();
 
