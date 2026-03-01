@@ -6,7 +6,30 @@
 
 use super::{Span, Syntax, SyntaxKind};
 use crate::symbol::SymbolTable;
-use crate::value::Value;
+use crate::value::{TableKey, Value};
+
+/// Convert a TableKey back to a Syntax node.
+fn table_key_to_syntax(
+    key: &TableKey,
+    symbols: &SymbolTable,
+    span: &Span,
+) -> Result<Syntax, String> {
+    let kind = match key {
+        TableKey::Nil => SyntaxKind::Nil,
+        TableKey::Bool(b) => SyntaxKind::Bool(*b),
+        TableKey::Int(n) => SyntaxKind::Int(*n),
+        TableKey::Symbol(id) => {
+            let name = symbols.name(*id).ok_or("Unknown symbol in table key")?;
+            SyntaxKind::Symbol(name.to_string())
+        }
+        TableKey::String(s) => SyntaxKind::String(s.clone()),
+        TableKey::Keyword(s) => SyntaxKind::Keyword(s.clone()),
+        TableKey::Identity(_) => {
+            return Err("Cannot convert identity key to Syntax".to_string());
+        }
+    };
+    Ok(Syntax::new(kind, span.clone()))
+}
 
 impl Syntax {
     /// Convert Syntax to runtime Value
@@ -129,18 +152,20 @@ impl Syntax {
                 .collect();
             SyntaxKind::Array(syntaxes?)
         } else if let Some(struct_ref) = value.as_struct() {
-            let syntaxes: Result<Vec<Syntax>, String> = struct_ref
-                .iter()
-                .flat_map(|(_, v)| vec![Syntax::from_value(v, symbols, span.clone())])
-                .collect();
-            SyntaxKind::Struct(syntaxes?)
+            let mut syntaxes = Vec::with_capacity(struct_ref.len() * 2);
+            for (k, v) in struct_ref.iter() {
+                syntaxes.push(table_key_to_syntax(k, symbols, &span)?);
+                syntaxes.push(Syntax::from_value(v, symbols, span.clone())?);
+            }
+            SyntaxKind::Struct(syntaxes)
         } else if let Some(table_ref) = value.as_table() {
-            let items = table_ref.borrow().clone();
-            let syntaxes: Result<Vec<Syntax>, String> = items
-                .iter()
-                .flat_map(|(_, v)| vec![Syntax::from_value(v, symbols, span.clone())])
-                .collect();
-            SyntaxKind::Table(syntaxes?)
+            let items = table_ref.borrow();
+            let mut syntaxes = Vec::with_capacity(items.len() * 2);
+            for (k, v) in items.iter() {
+                syntaxes.push(table_key_to_syntax(k, symbols, &span)?);
+                syntaxes.push(Syntax::from_value(v, symbols, span.clone())?);
+            }
+            SyntaxKind::Table(syntaxes)
         } else {
             return Err(format!("Cannot convert {:?} to Syntax", value));
         };
@@ -363,5 +388,70 @@ mod tests {
         // Should be a plain symbol, not a syntax object
         assert!(value.as_symbol().is_some());
         assert!(!value.is_syntax());
+    }
+
+    #[test]
+    fn test_roundtrip_struct() {
+        use crate::value::TableKey;
+        use std::collections::BTreeMap;
+
+        let symbols = SymbolTable::new();
+        // Build a struct Value directly (to_value produces a list, not a struct)
+        let mut fields = BTreeMap::new();
+        fields.insert(TableKey::Keyword("alpha".to_string()), Value::int(1));
+        fields.insert(TableKey::Keyword("bravo".to_string()), Value::int(2));
+        let value = Value::struct_from(fields);
+
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        match result.kind {
+            SyntaxKind::Struct(items) => {
+                assert_eq!(
+                    items.len(),
+                    4,
+                    "expected 4 items (2 key-value pairs), got {}",
+                    items.len()
+                );
+                // BTreeMap sorts by key, so order may differ from insertion.
+                // Just verify all keys and values are present.
+                let keys: Vec<_> = items.iter().step_by(2).collect();
+                let vals: Vec<_> = items.iter().skip(1).step_by(2).collect();
+                assert!(keys
+                    .iter()
+                    .any(|k| matches!(&k.kind, SyntaxKind::Keyword(s) if s == "alpha")));
+                assert!(keys
+                    .iter()
+                    .any(|k| matches!(&k.kind, SyntaxKind::Keyword(s) if s == "bravo")));
+                assert!(vals.iter().any(|v| matches!(&v.kind, SyntaxKind::Int(1))));
+                assert!(vals.iter().any(|v| matches!(&v.kind, SyntaxKind::Int(2))));
+            }
+            other => panic!("expected Struct, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_table() {
+        use crate::value::TableKey;
+        use std::collections::BTreeMap;
+
+        let symbols = SymbolTable::new();
+        // Build a table Value directly (to_value produces a list, not a table)
+        let mut entries = BTreeMap::new();
+        entries.insert(TableKey::Keyword("charlie".to_string()), Value::int(3));
+        let value = Value::table_from(entries);
+
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        match result.kind {
+            SyntaxKind::Table(items) => {
+                assert_eq!(
+                    items.len(),
+                    2,
+                    "expected 2 items (1 key-value pair), got {}",
+                    items.len()
+                );
+                assert!(matches!(&items[0].kind, SyntaxKind::Keyword(s) if s == "charlie"));
+                assert!(matches!(&items[1].kind, SyntaxKind::Int(3)));
+            }
+            other => panic!("expected Table, got {:?}", other),
+        }
     }
 }
