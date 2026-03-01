@@ -6,7 +6,7 @@
 //! - `TableKey` - Keys for tables and structs
 //! - `NativeFn` - Unified primitive function type
 
-use crate::error::{LError, LResult};
+use crate::value::heap::HeapTag;
 use crate::value::Value;
 use std::fmt;
 
@@ -73,7 +73,7 @@ impl fmt::Display for Arity {
 }
 
 /// Wrapper for table/struct keys - allows specific Value types to be keys
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub enum TableKey {
     Nil,
     Bool(bool),
@@ -81,25 +81,77 @@ pub enum TableKey {
     Symbol(SymbolId),
     String(String),
     Keyword(String),
+    /// Identity-compared key for reference types (fiber, closure, external).
+    ///
+    /// **Invariant**: Only constructed via `from_value()`. The stored `Value`
+    /// must be a type where `eq?` uses pointer identity (currently: fiber,
+    /// closure, external). Storing a value-compared type here would silently
+    /// use bit-pattern comparison instead of value comparison.
+    ///
+    /// Hash/Eq/Ord compare by `Value.0` (the raw NaN-boxed bits), which
+    /// encodes the heap pointer. This gives the same identity semantics as
+    /// `eq?` for these types.
+    Identity(Value),
 }
 
 impl TableKey {
-    /// Convert a Value to a TableKey if possible
-    pub fn from_value(val: &Value) -> LResult<TableKey> {
+    /// Convert a Value to a TableKey if possible.
+    ///
+    /// Returns `None` if the value cannot be used as a key.
+    /// Callers produce their own error messages from the `None` case.
+    pub fn from_value(val: &Value) -> Option<TableKey> {
         if val.is_nil() {
-            Ok(TableKey::Nil)
+            Some(TableKey::Nil)
         } else if let Some(b) = val.as_bool() {
-            Ok(TableKey::Bool(b))
+            Some(TableKey::Bool(b))
         } else if let Some(i) = val.as_int() {
-            Ok(TableKey::Int(i))
+            Some(TableKey::Int(i))
         } else if let Some(id) = val.as_symbol() {
-            Ok(TableKey::Symbol(SymbolId(id)))
+            Some(TableKey::Symbol(SymbolId(id)))
         } else if let Some(name) = val.as_keyword_name() {
-            Ok(TableKey::Keyword(name.to_string()))
+            Some(TableKey::Keyword(name.to_string()))
         } else if let Some(s) = val.with_string(|s| s.to_string()) {
-            Ok(TableKey::String(s))
+            Some(TableKey::String(s))
+        } else if val.is_fiber() || val.is_closure() || val.heap_tag() == Some(HeapTag::External) {
+            Some(TableKey::Identity(*val))
         } else {
-            Err(LError::type_mismatch("table key", val.type_name()))
+            None
+        }
+    }
+
+    /// Convert a TableKey back to a Value.
+    ///
+    /// This is the inverse of `from_value()`.
+    pub fn to_value(&self) -> Value {
+        match self {
+            TableKey::Nil => Value::NIL,
+            TableKey::Bool(b) => Value::bool(*b),
+            TableKey::Int(i) => Value::int(*i),
+            TableKey::Symbol(sid) => Value::symbol(sid.0),
+            TableKey::String(s) => Value::string(s.as_str()),
+            TableKey::Keyword(s) => Value::keyword(s.as_str()),
+            TableKey::Identity(v) => *v,
+        }
+    }
+
+    /// Whether this key can be safely sent across thread boundaries.
+    ///
+    /// Identity keys contain heap pointers (`Rc`) that are not thread-safe.
+    /// Value-based keys (nil, bool, int, symbol, string, keyword) are always
+    /// sendable.
+    pub fn is_sendable(&self) -> bool {
+        !matches!(self, TableKey::Identity(_))
+    }
+
+    fn discriminant_index(&self) -> u8 {
+        match self {
+            TableKey::Nil => 0,
+            TableKey::Bool(_) => 1,
+            TableKey::Int(_) => 2,
+            TableKey::Symbol(_) => 3,
+            TableKey::String(_) => 4,
+            TableKey::Keyword(_) => 5,
+            TableKey::Identity(_) => 6,
         }
     }
 }
@@ -114,6 +166,53 @@ impl std::hash::Hash for TableKey {
             TableKey::Symbol(id) => id.hash(state),
             TableKey::String(s) => s.hash(state),
             TableKey::Keyword(s) => s.hash(state),
+            TableKey::Identity(v) => v.0.hash(state),
+        }
+    }
+}
+
+impl PartialEq for TableKey {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (TableKey::Nil, TableKey::Nil) => true,
+            (TableKey::Bool(a), TableKey::Bool(b)) => a == b,
+            (TableKey::Int(a), TableKey::Int(b)) => a == b,
+            (TableKey::Symbol(a), TableKey::Symbol(b)) => a == b,
+            (TableKey::String(a), TableKey::String(b)) => a == b,
+            (TableKey::Keyword(a), TableKey::Keyword(b)) => a == b,
+            (TableKey::Identity(a), TableKey::Identity(b)) => a.0 == b.0,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for TableKey {}
+
+impl PartialOrd for TableKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TableKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Variant ordering follows enum declaration order (same as derive).
+        // Discriminant index: Nil=0, Bool=1, Int=2, Symbol=3, String=4, Keyword=5, Identity=6
+        let self_disc = self.discriminant_index();
+        let other_disc = other.discriminant_index();
+        match self_disc.cmp(&other_disc) {
+            std::cmp::Ordering::Equal => {}
+            ord => return ord,
+        }
+        match (self, other) {
+            (TableKey::Nil, TableKey::Nil) => std::cmp::Ordering::Equal,
+            (TableKey::Bool(a), TableKey::Bool(b)) => a.cmp(b),
+            (TableKey::Int(a), TableKey::Int(b)) => a.cmp(b),
+            (TableKey::Symbol(a), TableKey::Symbol(b)) => a.cmp(b),
+            (TableKey::String(a), TableKey::String(b)) => a.cmp(b),
+            (TableKey::Keyword(a), TableKey::Keyword(b)) => a.cmp(b),
+            (TableKey::Identity(a), TableKey::Identity(b)) => a.0.cmp(&b.0),
+            _ => unreachable!("discriminant match already handled"),
         }
     }
 }
@@ -127,6 +226,7 @@ impl fmt::Display for TableKey {
             TableKey::Symbol(id) => write!(f, "{:?}", id),
             TableKey::String(s) => write!(f, "\"{}\"", s),
             TableKey::Keyword(s) => write!(f, ":{}", s),
+            TableKey::Identity(v) => write!(f, "{}", v),
         }
     }
 }
