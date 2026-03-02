@@ -120,6 +120,8 @@ impl VM {
     /// - (:"fiber/self" . _) — return the currently executing fiber, or nil
     /// - (:"list-primitives" . _) — return sorted list of all primitive names
     /// - (:"primitive-meta" . name) — return struct with primitive metadata
+    /// - (:"arena" . _) — return struct with heap arena :count and :capacity
+    /// - (:"arena-count" . _) — return heap arena object count as int (zero overhead)
     pub(crate) fn dispatch_query(&self, value: Value) -> (SignalBits, Value) {
         let cons = match value.as_cons() {
             Some(c) => c,
@@ -283,6 +285,24 @@ impl VM {
                 } else {
                     (SIG_OK, Value::NIL)
                 }
+            }
+            "arena" => {
+                use crate::value::heap::{heap_arena_capacity, heap_arena_len, TableKey};
+                use std::collections::BTreeMap;
+                let mut fields = BTreeMap::new();
+                fields.insert(
+                    TableKey::Keyword("count".to_string()),
+                    Value::int(heap_arena_len() as i64),
+                );
+                fields.insert(
+                    TableKey::Keyword("capacity".to_string()),
+                    Value::int(heap_arena_capacity() as i64),
+                );
+                (SIG_OK, Value::struct_from(fields))
+            }
+            "arena-count" => {
+                use crate::value::heap::heap_arena_len;
+                (SIG_OK, Value::int(heap_arena_len() as i64))
             }
             _ => (
                 SIG_ERROR,

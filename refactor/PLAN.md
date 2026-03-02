@@ -116,7 +116,7 @@ independent — no shared state, no ordering constraints.
 | File | Lines | Split into |
 |------|-------|------------|
 | `primitives/string.rs` | 1,219 | `string.rs` (core: length, append, substring, char ops) + `string_convert.rs` (to-string, format, replace, split, join) |
-| `primitives/file_io.rs` | 1,047 | `file_read.rs` (read-file, read-lines, file-exists?, stat) + `file_write.rs` (write-file, delete, rename, directory ops) |
+| `primitives/fileio.rs` | 1,047 | `file_read.rs` (read-file, read-lines, file-exists?, stat) + `file_write.rs` (write-file, delete, rename, directory ops) |
 | `primitives/fibers.rs` | 890 | `fibers.rs` (fiber/new, resume, signal, status, value) + `fiber_ops.rs` (mask, parent, child, propagate, cancel, bits) |
 
 Also extract `register_builtin_docs()` (333 lines) from `registration.rs`

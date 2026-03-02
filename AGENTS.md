@@ -220,15 +220,19 @@ Things that look wrong but aren't:
   bare delimiters are immutable, `@`-prefixed are mutable. `{:key val ...}` →
   struct (immutable). `@{:key val}` → table (mutable). `[1 2 3]` → tuple
   (immutable). `@[1 2 3]` → array (mutable). `"hello"` → string (immutable).
-  `@"hello"` → buffer (mutable). `SyntaxKind::Tuple` represents `[...]`,
-  `SyntaxKind::Array` represents `@[...]`, `SyntaxKind::Struct` represents
-  `{...}`, `SyntaxKind::Table` represents `@{...}`. The reader produces all
-  four directly (no desugaring to List with prepended symbols). `@"..."` desugars
-  to `(string->buffer "...")`. In `match`, `[...]` matches tuples (`IsTuple`),
-  `@[...]` matches arrays (`IsArray`), `{...}` matches structs (`IsStruct`),
-  `@{...}` matches tables (`IsTable`). In destructuring (`def`/`let`/`fn`),
-  no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle both mutable and
-  immutable types.
+  `@"hello"` → buffer (mutable). Bytes (immutable binary data) and blob
+  (mutable binary data) have no reader literal syntax — they are constructed
+  via primitives: `(bytes 1 2 3)`, `(blob 1 2 3)`, `(string->bytes "hello")`,
+  `(string->blob "hello")`. Display format is `#bytes[hex ...]` and
+  `#blob[hex ...]` (output-only, not readable). `SyntaxKind::Tuple` represents
+  `[...]`, `SyntaxKind::Array` represents `@[...]`, `SyntaxKind::Struct`
+  represents `{...}`, `SyntaxKind::Table` represents `@{...}`. The reader
+  produces all four directly (no desugaring to List with prepended symbols).
+  `@"..."` desugars to `(string->buffer "...")`. In `match`, `[...]` matches
+  tuples (`IsTuple`), `@[...]` matches arrays (`IsArray`), `{...}` matches
+  structs (`IsStruct`), `@{...}` matches tables (`IsTable`). In destructuring
+  (`def`/`let`/`fn`), no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle
+  both mutable and immutable types.
 - `[...]` has dual meaning depending on position. In expression position,
   it's a tuple literal (`SyntaxKind::Tuple`). In structural positions of
   special forms — lambda params, binding lists, binding pairs, cond clauses,
@@ -300,7 +304,7 @@ Array, Table, Tuple, Struct, Closure types.
       `SendValue::from_value()` and `SendValue::into_value()` (or return
       error if not sendable)
 - [ ] `src/value/mod.rs` — re-export new types if needed
-- [ ] `src/primitives/type_check.rs` — add `your_type?` predicate function
+- [ ] `src/primitives/types.rs` — add `your_type?` predicate function
       and entry in `PRIMITIVES` array
 - [ ] `src/primitives/registration.rs` — add your module to `ALL_TABLES`
       if you created a new primitives file
@@ -373,7 +377,7 @@ If the form needs new syntax:
 - [ ] `src/syntax/mod.rs` — add variant to `SyntaxKind`, update
       `kind_label()`, `set_scopes_recursive()`
 - [ ] `src/syntax/display.rs` — add display arm
-- [ ] `src/reader/syntax_parser.rs` — add parsing logic
+- [ ] `src/reader/syntax.rs` — add parsing logic
 - [ ] `src/reader/lexer.rs` — add token type if new delimiter needed
 
 If the form needs new bytecode instructions, follow the bytecode
@@ -387,7 +391,7 @@ Reader (source → tokens → syntax):
 - [ ] `src/reader/lexer.rs` — add delimiter handling (e.g., `@[` for
       arrays, `@{` for tables)
 - [ ] `src/reader/token.rs` — add token variant if needed
-- [ ] `src/reader/syntax_parser.rs` — add parsing to `SyntaxKind`
+- [ ] `src/reader/syntax.rs` — add parsing to `SyntaxKind`
 - [ ] `src/reader/parser.rs` — add parsing to `Value` (legacy reader)
 
 Syntax (expansion):
