@@ -8,6 +8,7 @@ version = "1.0.0"
 edition = "2021"
 
 [dependencies]
+bumpalo = "3"
 rustc-hash = "2.0"
 smallvec = "1.11"
 libloading = "0.8"

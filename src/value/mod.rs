@@ -8,10 +8,12 @@ pub mod display;
 pub mod error;
 pub mod ffi;
 pub mod fiber;
+pub mod fiber_heap;
 pub mod heap;
 pub mod intern;
 pub mod repr;
 pub mod send;
+pub mod shared_alloc;
 pub mod types;
 
 // Export the new NaN-boxed Value as the canonical Value type
@@ -31,6 +33,9 @@ pub use send::SendValue;
 
 // Export core types
 pub use types::{Arity, NativeFn, SymbolId, TableKey};
+
+// Export fiber heap
+pub use fiber_heap::FiberHeap;
 
 // Export closure and fiber types
 pub use closure::Closure;

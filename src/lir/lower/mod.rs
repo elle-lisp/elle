@@ -20,6 +20,10 @@ struct BlockLowerContext {
     block_id: BlockId,
     result_reg: Reg,
     exit_label: Label,
+    /// The `region_depth` at the time this block was entered.
+    /// `break` emits `(current_region_depth - region_depth_at_entry)`
+    /// compensating `RegionExit` instructions before jumping to the exit.
+    region_depth_at_entry: u32,
 }
 
 /// Lowers HIR to LIR
@@ -50,6 +54,10 @@ pub struct Lowerer {
     immutable_values: HashMap<Binding, Value>,
     /// Stack of active block contexts for `break` lowering
     block_lower_contexts: Vec<BlockLowerContext>,
+    /// Current nesting depth of active allocation regions.
+    /// Incremented on `RegionEnter`, decremented on `RegionExit`.
+    /// Used by `lower_break` to emit compensating `RegionExit`s.
+    region_depth: u32,
 }
 
 impl Lowerer {
@@ -67,6 +75,7 @@ impl Lowerer {
             intrinsics: FxHashMap::default(),
             immutable_values: HashMap::new(),
             block_lower_contexts: Vec::new(),
+            region_depth: 0,
         }
     }
 
@@ -167,6 +176,42 @@ impl Lowerer {
     fn start_new_block(&mut self, label: Label) {
         self.finish_block();
         self.current_block = BasicBlock::new(label);
+    }
+
+    /// Emit `RegionEnter` and increment the region depth counter.
+    fn emit_region_enter(&mut self) {
+        self.emit(LirInstr::RegionEnter);
+        self.region_depth += 1;
+    }
+
+    /// Emit `RegionExit` and decrement the region depth counter.
+    fn emit_region_exit(&mut self) {
+        self.emit(LirInstr::RegionExit);
+        self.region_depth -= 1;
+    }
+
+    // ── Escape analysis stubs ─────────────────────────────────────
+
+    /// Determine if a `let` scope's allocations can be safely released
+    /// at scope exit. Returns `false` if any binding's value might escape.
+    ///
+    /// Current policy: maximally conservative (always returns `false`).
+    /// No scopes qualify for scope allocation until escape analysis is
+    /// implemented and validated.
+    fn can_scope_allocate_let(&self, _bindings: &[(Binding, Hir)], _body: &Hir) -> bool {
+        false
+    }
+
+    /// Determine if a `letrec` scope's allocations can be safely released.
+    /// Same conservative policy as `can_scope_allocate_let`.
+    fn can_scope_allocate_letrec(&self, _bindings: &[(Binding, Hir)], _body: &Hir) -> bool {
+        false
+    }
+
+    /// Determine if a `block` scope's allocations can be safely released.
+    /// Same conservative policy as above.
+    fn can_scope_allocate_block(&self, _body: &[Hir]) -> bool {
+        false
     }
 }
 

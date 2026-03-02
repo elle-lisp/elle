@@ -89,7 +89,7 @@ representation. Create values via methods like `Value::int()`, `Value::cons()`,
 `Value::closure()` rather than enum variants. Notable types:
 - `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>` + `doc: Option<Value>`
 - `Cell` / `LocalCell` - mutable cells for captured variables
-- `Fiber` - independent execution context with stack, frames, and signal mask
+- `Fiber` - independent execution context with stack, frames, signal mask, and per-fiber `FiberHeap`
 - `External` - opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
 
 All heap-allocated values use `Rc`. Mutable values use `RefCell`. The

@@ -133,6 +133,10 @@ pub struct SuspendedFrame {
     pub ip: usize,
     /// Operand stack state (empty for signal suspension)
     pub stack: Vec<Value>,
+    /// Saved `active_allocator` pointer from the FiberHeap at suspension time.
+    /// Null for root fiber (no FiberHeap installed). Package 4 writes this
+    /// but nothing reads it yet; Package 5 will restore it on resume.
+    pub active_allocator: *const bumpalo::Bump,
 }
 
 /// Signal type bits. The first 16 are compiler-reserved.
@@ -220,6 +224,10 @@ pub struct CallFrame {
 /// operand stack, call frames, exception handlers.
 /// The VM retains only global/shared state (globals, modules, JIT cache, FFI).
 pub struct Fiber {
+    /// Per-fiber heap for arena-style allocation. Boxed for pointer stability:
+    /// the thread-local stores `*mut FiberHeap`, which must survive moves of
+    /// the Fiber struct (e.g., during `std::mem::swap` in fiber transitions).
+    pub heap: Box<crate::value::fiber_heap::FiberHeap>,
     /// Operand stack (temporaries). SmallVec avoids heap allocation for
     /// fibers with fewer than 256 stack entries.
     pub stack: SmallVec<[Value; 256]>,
@@ -271,6 +279,7 @@ impl Fiber {
     /// Create a new fiber from a closure with the given signal mask.
     pub fn new(closure: Rc<Closure>, mask: SignalBits) -> Self {
         Fiber {
+            heap: Box::new(crate::value::fiber_heap::FiberHeap::new()),
             stack: SmallVec::new(),
             frames: Vec::new(),
             status: FiberStatus::New,

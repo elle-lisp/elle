@@ -272,6 +272,14 @@ pub enum LirInstr {
     CallArray { dst: Reg, func: Reg, args: Reg },
     /// Tail call with elements of an array as arguments.
     TailCallArray { func: Reg, args: Reg },
+
+    // === Allocation Regions ===
+    /// Enter an allocation region (scope boundary for allocator).
+    /// No registers produced or consumed.
+    RegionEnter,
+    /// Exit an allocation region (scope boundary for allocator).
+    /// No registers produced or consumed.
+    RegionExit,
 }
 
 /// Binary operations

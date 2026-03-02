@@ -396,7 +396,27 @@ thread_local! {
 }
 
 /// Opaque mark for arena scope management.
-pub struct ArenaMark(usize);
+///
+/// Stores the HEAP_ARENA Vec position (for the root fiber) and the
+/// FiberHeap destructor list length (for child fibers with bumpalo).
+pub struct ArenaMark {
+    position: usize,
+    dtor_len: usize,
+}
+
+impl ArenaMark {
+    pub(crate) fn new_with_dtor_len(position: usize, dtor_len: usize) -> Self {
+        ArenaMark { position, dtor_len }
+    }
+
+    pub(crate) fn position(&self) -> usize {
+        self.position
+    }
+
+    pub(crate) fn dtor_len(&self) -> usize {
+        self.dtor_len
+    }
+}
 
 /// RAII guard that releases the arena to a saved mark on drop.
 pub struct ArenaGuard(Option<ArenaMark>);
@@ -423,7 +443,13 @@ impl Drop for ArenaGuard {
 
 /// Save the current arena position.
 pub fn heap_arena_mark() -> ArenaMark {
-    HEAP_ARENA.with(|arena| ArenaMark(arena.borrow().objects.len()))
+    if let Some(mark) = crate::value::fiber_heap::with_current_heap_mut(|heap| heap.mark()) {
+        return mark;
+    }
+    HEAP_ARENA.with(|arena| ArenaMark {
+        position: arena.borrow().objects.len(),
+        dtor_len: 0,
+    })
 }
 
 /// Release all arena allocations back to the mark, dropping freed objects.
@@ -433,21 +459,40 @@ pub fn heap_arena_mark() -> ArenaMark {
 /// RefCell (already held by this truncate) and panic. This constrains
 /// `ExternalObject` — plugin Drop impls must not call `Value::cons()` etc.
 pub fn heap_arena_release(mark: ArenaMark) {
-    HEAP_ARENA.with(|arena| arena.borrow_mut().objects.truncate(mark.0))
+    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    if !heap_ptr.is_null() {
+        unsafe { (*heap_ptr).release(mark) };
+        return;
+    }
+    HEAP_ARENA.with(|arena| arena.borrow_mut().objects.truncate(mark.position()))
 }
 
 /// Current number of live objects in the thread-local heap arena.
 pub fn heap_arena_len() -> usize {
+    if let Some(len) = crate::value::fiber_heap::with_current_heap_mut(|heap| heap.len()) {
+        return len;
+    }
     HEAP_ARENA.with(|arena| arena.borrow().objects.len())
 }
 
 /// Current capacity of the thread-local heap arena Vec.
 pub fn heap_arena_capacity() -> usize {
+    if let Some(cap) = crate::value::fiber_heap::with_current_heap_mut(|heap| heap.capacity()) {
+        return cap;
+    }
     HEAP_ARENA.with(|arena| arena.borrow().objects.capacity())
 }
 
 /// Allocate a heap object on the thread-local arena and return a Value pointing to it.
+///
+/// Single thread-local read: check the raw pointer once, then dispatch.
+/// `HeapObject` is not `Copy`, so we must not move it into a closure that
+/// might not execute (that would silently drop the object).
 pub fn alloc(obj: HeapObject) -> Value {
+    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    if !heap_ptr.is_null() {
+        return unsafe { (*heap_ptr).alloc(obj) };
+    }
     HEAP_ARENA.with(|arena| {
         let mut a = arena.borrow_mut();
         let boxed = Box::new(obj);
@@ -548,42 +593,42 @@ mod tests {
 
     #[test]
     fn test_arena_guard_raii() {
-        let before = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        let before = heap_arena_len();
         {
             let _guard = ArenaGuard::new();
             alloc(HeapObject::String("guarded".into()));
             alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-            let during = HEAP_ARENA.with(|a| a.borrow().objects.len());
+            let during = heap_arena_len();
             assert_eq!(during, before + 2);
         }
-        let after = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        let after = heap_arena_len();
         assert_eq!(after, before);
     }
 
     #[test]
     fn test_arena_nested_guards() {
-        let before = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        let before = heap_arena_len();
         {
             let _outer = ArenaGuard::new();
             alloc(HeapObject::String("outer alloc".into()));
             {
                 let _inner = ArenaGuard::new();
                 alloc(HeapObject::String("inner alloc".into()));
-                let during_inner = HEAP_ARENA.with(|a| a.borrow().objects.len());
+                let during_inner = heap_arena_len();
                 assert_eq!(during_inner, before + 2);
             }
             // Inner guard released — inner alloc freed, outer alloc survives
-            let after_inner = HEAP_ARENA.with(|a| a.borrow().objects.len());
+            let after_inner = heap_arena_len();
             assert_eq!(after_inner, before + 1);
         }
         // Outer guard released — everything freed
-        let after_outer = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        let after_outer = heap_arena_len();
         assert_eq!(after_outer, before);
     }
 
     #[test]
     fn test_arena_guard_fires_on_error_path() {
-        let before = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        let before = heap_arena_len();
         let result: Result<(), String> = {
             let _guard = ArenaGuard::new();
             alloc(HeapObject::String("will be freed".into()));
@@ -592,7 +637,7 @@ mod tests {
         };
         assert!(result.is_err());
         // Guard dropped during stack unwind — allocations freed
-        let after = HEAP_ARENA.with(|a| a.borrow().objects.len());
+        let after = heap_arena_len();
         assert_eq!(after, before);
     }
 

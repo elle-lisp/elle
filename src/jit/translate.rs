@@ -645,6 +645,9 @@ impl<'a> FunctionTranslator<'a> {
                     "TailCallArray".to_string(),
                 ));
             }
+            LirInstr::RegionEnter | LirInstr::RegionExit => {
+                // No-op in JIT (allocation regions not yet active)
+            }
         }
         Ok(false)
     }

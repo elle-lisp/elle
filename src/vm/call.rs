@@ -195,6 +195,7 @@ impl VM {
                             env: closure_env.clone(),
                             ip: *ip,
                             stack: caller_stack,
+                            active_allocator: crate::value::fiber_heap::save_active_allocator(),
                         };
 
                         frames.push(caller_frame);

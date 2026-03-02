@@ -22,6 +22,8 @@ Runtime value representation using NaN-boxing.
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`, `SignalBits` |
 | `error.rs` | `error_val()` and `format_error()` helpers for error tuples |
 | `ffi.rs` | `LibHandle` for C interop |
+| `fiber_heap.rs` | `FiberHeap` struct (bumpalo + destructor tracking + scope marks + active_allocator + shared alloc ownership), thread-local routing, `region_enter`/`region_exit` |
+| `shared_alloc.rs` | `SharedAllocator` for zero-copy inter-fiber value exchange |
 | `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle`, `BindingInner`, `BindingScope` |
 | `send.rs` | `SendValue` wrapper for thread-safe transfer |
 | `display.rs` | `Display` implementation for values |
@@ -36,6 +38,8 @@ Runtime value representation using NaN-boxing.
 | `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
 | `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
+| `FiberHeap` | `fiber_heap.rs` | Per-fiber bump allocator (bumpalo) with destructor tracking and shared alloc ownership |
+| `SharedAllocator` | `shared_alloc.rs` | Bump allocator for zero-copy inter-fiber value exchange |
 
 ### Fiber fields for parent/child chain
 
@@ -51,7 +55,7 @@ so that `fiber/parent` and `fiber/child` return identity-preserving values
 | `child_value` | `Option<Value>` | Cached NaN-boxed Value for child |
 
 These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
-| `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
+| `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack/active_allocator for resuming a suspended fiber |
 | `Frame` | `fiber.rs` | Single call frame (closure + ip + base) |
 | `FiberStatus` | `fiber.rs` | Fiber lifecycle: New, Alive, Suspended, Dead, Error |
 | `SignalBits` | `fiber.rs` | u32 bitmask: SIG_OK(0), SIG_ERROR(1), SIG_YIELD(2), SIG_DEBUG(4), SIG_RESUME(8), SIG_FFI(16), SIG_PROPAGATE(32), SIG_CANCEL(64), SIG_HALT(256) |
@@ -82,6 +86,15 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
     A single type captures everything needed to resume: bytecode (`Rc<Vec<u8>>`),
     constants (`Rc<Vec<Value>>`), env (`Rc<Vec<Value>>`), IP, and operand stack.
     Signal suspension has an empty stack; yield suspension captures the stack.
+
+7. **Shared allocators enable zero-copy fiber exchange.** When a yielding child
+    fiber allocates heap objects, those allocations route to a `SharedAllocator`
+    owned by the parent's `FiberHeap` (or the child's own `FiberHeap` for
+    root→child chains). The parent reads yielded values directly — no deep copy.
+    `FiberHeap.shared_alloc` is a raw `*mut SharedAllocator` set during
+    `with_child_fiber` and nulled on swap-back. Routing: when `shared_alloc`
+    is non-null, `FiberHeap::alloc()` routes all allocations to the shared
+    allocator. Only yielding fibers (`Effect::Yields`) get shared allocators.
 
 ## Value encoding
 
@@ -128,10 +141,12 @@ variants directly.
 | `repr/tests.rs` | ~100 | NaN-boxing tests |
 | `types.rs` | ~150 | Arity, SymbolId, NativeFn, etc. |
 | `closure.rs` | ~70 | Closure struct |
-| `fiber.rs` | ~515 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
+| `fiber.rs` | ~540 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
+| `fiber_heap.rs` | ~810 | FiberHeap (bumpalo + destructor tracking + scope marks + active_allocator + shared alloc ownership/routing), thread-local routing, `needs_drop`, `region_enter`/`region_exit` |
+| `shared_alloc.rs` | ~180 | SharedAllocator (bump + destructor tracking), teardown, Drop impl |
 | `error.rs` | ~50 | error_val() and format_error() helpers |
 | `ffi.rs` | ~22 | LibHandle |
-| `heap.rs` | ~320 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope, `heap_arena_len()`, `heap_arena_capacity()` |
+| `heap.rs` | ~650 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope, `heap_arena_len()`, `heap_arena_capacity()` |
 | `send.rs` | ~150 | SendValue for thread transfer |
 | `display.rs` | ~100 | Display formatting |
 | `intern.rs` | ~100 | Symbol interning |

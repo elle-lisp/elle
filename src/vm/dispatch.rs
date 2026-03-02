@@ -325,6 +325,15 @@ impl VM {
                         return (bits, ip);
                     }
                 }
+
+                // Allocation region markers: push/pop scope marks on FiberHeap.
+                // No-op for root fiber (no FiberHeap installed).
+                Instruction::RegionEnter => {
+                    crate::value::fiber_heap::region_enter();
+                }
+                Instruction::RegionExit => {
+                    crate::value::fiber_heap::region_exit();
+                }
             }
 
             // If an error or halt signal was set by the instruction, propagate.
@@ -360,6 +369,7 @@ impl VM {
             env: closure_env.clone(),
             ip,
             stack: saved_stack,
+            active_allocator: crate::value::fiber_heap::save_active_allocator(),
         };
 
         self.fiber.signal = Some((SIG_YIELD, yielded_value));

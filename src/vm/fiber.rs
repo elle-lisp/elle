@@ -62,6 +62,37 @@ impl VM {
         self.current_fiber_value = Some(child_value);
         std::mem::swap(&mut self.fiber, &mut child_fiber);
 
+        // 3a. Install child's fiber heap as the active allocation target.
+        //     Save whatever was active (parent's heap or null for root fiber).
+        let saved_heap = crate::value::fiber_heap::save_current_heap();
+        unsafe {
+            crate::value::fiber_heap::install_fiber_heap(
+                &mut *self.fiber.heap as *mut crate::value::FiberHeap,
+            );
+        }
+        // Initialize active_allocator now that the heap is in its stable Box.
+        self.fiber.heap.init_active_allocator();
+
+        // 3b. Provide shared allocator to child (for yielding fibers only).
+        //     After the swap: self.fiber is child, child_fiber is parent.
+        //     Three cases:
+        //     (a) Parent already has shared_alloc → propagate down the chain.
+        //     (b) Root fiber parent (saved_heap is null) → child creates its own.
+        //     (c) Non-root parent, no existing shared_alloc → create on parent's heap.
+        if self.fiber.closure.effect.may_yield() {
+            let shared_ptr = if !child_fiber.heap.shared_alloc().is_null() {
+                // Case (a): parent has shared_alloc from its own parent — propagate
+                child_fiber.heap.shared_alloc()
+            } else if saved_heap.is_null() {
+                // Case (b): root→child — child creates and owns its own
+                self.fiber.heap.create_shared_allocator()
+            } else {
+                // Case (c): non-root parent, first in chain — create on parent's heap
+                child_fiber.heap.create_shared_allocator()
+            };
+            self.fiber.heap.set_shared_alloc(shared_ptr);
+        }
+
         // 4. Execute the closure
         let bits = execute(self);
 
@@ -87,7 +118,13 @@ impl VM {
             .unwrap_or(Value::NIL);
         let result_bits = self.fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(bits);
 
-        // 7. Swap back: parent in, child out; restore parent's handle and value
+        // 7a. Clear child's shared_alloc pointer — no longer valid after swap-back.
+        self.fiber.heap.clear_shared_alloc();
+
+        // 7. Swap back: parent in, child out; restore parent's heap and handle
+        unsafe {
+            crate::value::fiber_heap::restore_saved_heap(saved_heap);
+        }
         std::mem::swap(&mut self.fiber, &mut child_fiber);
         self.current_fiber_handle = parent_handle;
         self.current_fiber_value = parent_value;
@@ -288,6 +325,7 @@ impl VM {
                 env: env_rc,
                 ip,
                 stack: vec![],
+                active_allocator: crate::value::fiber_heap::save_active_allocator(),
             }]);
         }
 
