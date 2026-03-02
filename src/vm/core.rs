@@ -364,6 +364,7 @@ impl VM {
                             env: frame.env.clone(),
                             ip,
                             stack: vec![],
+                            active_allocator: crate::value::fiber_heap::save_active_allocator(),
                         }]);
                     }
 

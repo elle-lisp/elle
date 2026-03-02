@@ -9,6 +9,19 @@
 //! — bumpalo has no partial reset. The real memory savings come from Drop
 //! freeing the inner allocations (which live on the global heap, not in the
 //! bump).
+//!
+//! ## Active allocator pointer
+//!
+//! `FiberHeap` carries an `active_allocator: *const bumpalo::Bump` pointer
+//! that tracks which bump allocator the current execution context should use.
+//! In Package 4 this is plumbing only (always points to the fiber's root bump).
+//! In Package 5, `RegionEnter`/`RegionExit` will push/pop scope bumps and
+//! redirect this pointer.
+//!
+//! The pointer is saved/restored:
+//! - On **Call/Return** via `execute_bytecode_saving_stack` (Rust call stack)
+//! - On **Yield/Resume** via the `SuspendedFrame.active_allocator` field
+//! - On **Fiber swap** implicitly (each fiber owns its own `FiberHeap`)
 
 use std::cell::Cell;
 
@@ -22,6 +35,14 @@ pub struct FiberHeap {
     dtors: Vec<*mut HeapObject>,
     /// Total number of objects allocated (including those not needing Drop).
     alloc_count: usize,
+    /// Pointer to the bump allocator that new allocations should use.
+    /// In Package 4 this is write-only plumbing (always points to `self.bump`
+    /// once initialized). In Package 5, `RegionEnter`/`RegionExit` will push
+    /// sub-bumps and redirect this pointer to implement scope-based allocation.
+    ///
+    /// Starts as null; set via `init_active_allocator()` after the FiberHeap
+    /// is in its final Box location (pointer stability requires this).
+    active_allocator: *const bumpalo::Bump,
 }
 
 impl FiberHeap {
@@ -30,7 +51,22 @@ impl FiberHeap {
             bump: bumpalo::Bump::new(),
             dtors: Vec::new(),
             alloc_count: 0,
+            active_allocator: std::ptr::null(),
         }
+    }
+
+    /// Set `active_allocator` to point to this FiberHeap's own bump.
+    ///
+    /// Must be called after the FiberHeap is in its final Box location
+    /// (the pointer targets `&self.bump`, which must not move). Called by
+    /// `with_child_fiber` when installing the child's heap.
+    pub fn init_active_allocator(&mut self) {
+        self.active_allocator = &self.bump as *const bumpalo::Bump;
+    }
+
+    /// Current active allocator pointer. Returns null if not yet initialized.
+    pub fn active_allocator(&self) -> *const bumpalo::Bump {
+        self.active_allocator
     }
 
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
@@ -76,6 +112,10 @@ impl FiberHeap {
     }
 
     /// Drop all tracked objects and reset the bump allocator.
+    ///
+    /// Resets `active_allocator` to point to the root bump (in case
+    /// Package 5 scope bumps were stacked). The pointer remains valid
+    /// because `Bump::reset()` doesn't move the Bump struct.
     pub fn clear(&mut self) {
         for i in (0..self.dtors.len()).rev() {
             unsafe {
@@ -85,6 +125,10 @@ impl FiberHeap {
         self.dtors.clear();
         self.alloc_count = 0;
         self.bump.reset();
+        // Reset to root bump in case scope bumps were active.
+        if !self.active_allocator.is_null() {
+            self.active_allocator = &self.bump as *const bumpalo::Bump;
+        }
     }
 }
 
@@ -170,6 +214,32 @@ pub fn save_current_heap() -> *mut FiberHeap {
 /// Pointer must still be valid or null.
 pub unsafe fn restore_saved_heap(saved: *mut FiberHeap) {
     CURRENT_FIBER_HEAP.with(|cell| cell.set(saved));
+}
+
+/// Save the current `active_allocator` pointer from the installed FiberHeap.
+/// Returns null if no FiberHeap is installed (root fiber).
+pub fn save_active_allocator() -> *const bumpalo::Bump {
+    CURRENT_FIBER_HEAP.with(|cell| {
+        let ptr = cell.get();
+        if ptr.is_null() {
+            std::ptr::null()
+        } else {
+            unsafe { (*ptr).active_allocator }
+        }
+    })
+}
+
+/// Restore a previously saved `active_allocator` pointer on the installed FiberHeap.
+/// No-op if no FiberHeap is installed (root fiber).
+pub fn restore_active_allocator(saved: *const bumpalo::Bump) {
+    CURRENT_FIBER_HEAP.with(|cell| {
+        let ptr = cell.get();
+        if !ptr.is_null() {
+            unsafe {
+                (*ptr).active_allocator = saved;
+            }
+        }
+    })
 }
 
 pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R> {
@@ -331,5 +401,74 @@ mod tests {
         assert_eq!(with_current_heap_mut(|h| h.len()), Some(1));
 
         uninstall_fiber_heap();
+    }
+
+    #[test]
+    fn test_active_allocator_starts_null() {
+        let heap = FiberHeap::new();
+        assert!(heap.active_allocator().is_null());
+    }
+
+    #[test]
+    fn test_init_active_allocator_points_to_bump() {
+        let mut heap = Box::new(FiberHeap::new());
+        heap.init_active_allocator();
+        let ptr = heap.active_allocator();
+        assert!(!ptr.is_null());
+        // The pointer should target the bump field inside the same FiberHeap.
+        let bump_addr = &heap.bump as *const bumpalo::Bump;
+        assert_eq!(ptr, bump_addr);
+    }
+
+    #[test]
+    fn test_active_allocator_survives_clear() {
+        let mut heap = Box::new(FiberHeap::new());
+        heap.init_active_allocator();
+        let ptr_before = heap.active_allocator();
+        heap.alloc(HeapObject::String("x".into()));
+        heap.clear();
+        let ptr_after = heap.active_allocator();
+        // Pointer should still be valid and point to the same bump.
+        assert!(!ptr_after.is_null());
+        assert_eq!(ptr_before, ptr_after);
+    }
+
+    #[test]
+    fn test_save_restore_active_allocator() {
+        let mut heap = Box::new(FiberHeap::new());
+        heap.init_active_allocator();
+        let heap_ptr = &mut *heap as *mut FiberHeap;
+
+        unsafe { install_fiber_heap(heap_ptr) };
+
+        let saved = save_active_allocator();
+        assert!(!saved.is_null());
+
+        // Simulate Package 5: active_allocator changes to something else
+        restore_active_allocator(std::ptr::null());
+        assert!(save_active_allocator().is_null());
+
+        // Restore original
+        restore_active_allocator(saved);
+        assert_eq!(save_active_allocator(), saved);
+
+        uninstall_fiber_heap();
+    }
+
+    #[test]
+    fn test_save_active_allocator_no_heap_installed() {
+        uninstall_fiber_heap();
+        // No heap installed — returns null, no panic
+        assert!(save_active_allocator().is_null());
+    }
+
+    #[test]
+    fn test_restore_active_allocator_no_heap_installed() {
+        uninstall_fiber_heap();
+        // No heap installed — no-op, no panic
+        let fake_ptr = 0x1234 as *const bumpalo::Bump;
+        restore_active_allocator(fake_ptr);
+        // Still no heap, so save returns null
+        assert!(save_active_allocator().is_null());
     }
 }

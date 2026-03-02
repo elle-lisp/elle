@@ -53,7 +53,7 @@ so that `fiber/parent` and `fiber/child` return identity-preserving values
 | `child_value` | `Option<Value>` | Cached NaN-boxed Value for child |
 
 These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
-| `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
+| `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack/active_allocator for resuming a suspended fiber |
 | `Frame` | `fiber.rs` | Single call frame (closure + ip + base) |
 | `FiberStatus` | `fiber.rs` | Fiber lifecycle: New, Alive, Suspended, Dead, Error |
 | `SignalBits` | `fiber.rs` | u32 bitmask: SIG_OK(0), SIG_ERROR(1), SIG_YIELD(2), SIG_DEBUG(4), SIG_RESUME(8), SIG_FFI(16), SIG_PROPAGATE(32), SIG_CANCEL(64), SIG_HALT(256) |
@@ -131,7 +131,7 @@ variants directly.
 | `types.rs` | ~150 | Arity, SymbolId, NativeFn, etc. |
 | `closure.rs` | ~70 | Closure struct |
 | `fiber.rs` | ~535 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
-| `fiber_heap.rs` | ~320 | FiberHeap (bumpalo + destructor tracking), thread-local routing, `needs_drop` |
+| `fiber_heap.rs` | ~460 | FiberHeap (bumpalo + destructor tracking + active_allocator), thread-local routing, `needs_drop`, save/restore active_allocator |
 | `error.rs` | ~50 | error_val() and format_error() helpers |
 | `ffi.rs` | ~22 | LibHandle |
 | `heap.rs` | ~330 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope, `heap_arena_len()`, `heap_arena_capacity()` |

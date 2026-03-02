@@ -70,6 +70,8 @@ impl VM {
                 &mut *self.fiber.heap as *mut crate::value::FiberHeap,
             );
         }
+        // Initialize active_allocator now that the heap is in its stable Box.
+        self.fiber.heap.init_active_allocator();
 
         // 4. Execute the closure
         let bits = execute(self);
@@ -300,6 +302,7 @@ impl VM {
                 env: env_rc,
                 ip,
                 stack: vec![],
+                active_allocator: crate::value::fiber_heap::save_active_allocator(),
             }]);
         }
 

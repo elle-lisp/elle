@@ -190,7 +190,7 @@ When a fiber suspends (via yield instruction or `fiber/signal`):
 
 Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants
-- `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
+- `execute_bytecode_saving_stack`: Saves/restores caller's stack and active_allocator, handles tail calls
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and errors
 - `with_child_fiber`: Shared swap protocol for fiber resume/cancel. Also
   manages per-fiber heap routing: saves the current thread-local heap pointer,
@@ -202,6 +202,30 @@ Key methods:
 
 `RegionEnter` and `RegionExit` are dispatched as no-ops in the VM (Package 3).
 Package 5 will activate them to push/pop arena marks on the active FiberHeap.
+
+## Active allocator plumbing (Package 4)
+
+`FiberHeap` has an `active_allocator: *const bumpalo::Bump` pointer. In Package 4
+this is write-only plumbing — it always points to the fiber's root bump. In Package 5,
+`RegionEnter`/`RegionExit` will push/pop sub-bumps and redirect this pointer.
+
+**Initialization:** `init_active_allocator()` is called in `with_child_fiber` after
+the child's heap is installed as thread-local (pointer stability requires the heap
+to be in its final Box location).
+
+**Save/restore on Call/Return:** `execute_bytecode_saving_stack` saves the active
+allocator pointer before execution and restores it after, so callee scope changes
+don't leak into the caller's context.
+
+**Save/restore on Yield/Resume:** `SuspendedFrame` carries `active_allocator` so the
+pointer can be restored when a fiber resumes. All construction sites write the current
+value via `save_active_allocator()`.
+
+**Fiber swap:** `with_child_fiber` handles heap swapping. Each fiber's `active_allocator`
+lives on its own `FiberHeap`, so fiber transitions naturally switch allocator context.
+
+**Root fiber:** Has no FiberHeap installed. `save_active_allocator()` returns null,
+`restore_active_allocator()` is a no-op.
 
 ## Fiber heap routing
 
