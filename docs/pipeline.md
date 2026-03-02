@@ -24,7 +24,7 @@ pub struct AnalyzeResult {
 | Function | Lines | VM for macros | Fixpoint? | Callers |
 |----------|-------|---------------|-----------|---------|
 | `compile` | 119–151 | Internal | No | REPL (`main.rs:169,289`), integration tests |
-| `compile_all` | 162–261 | Internal | Yes | `main.rs:86` (file/stdin), `module_loading.rs:78` (`import-file`) |
+| `compile_all` | 162–261 | Internal | Yes | `main.rs:86` (file/stdin), `modules.rs:78` (`import-file`) |
 | `eval` | 266–291 | Borrowed | No | `init_stdlib` (`higher_order_def.rs`, `time_def.rs`, `module_init.rs`), tests |
 | `eval_all` | 298–309 | Internal (delegates to `compile_all`) | Yes | Tests |
 | `eval_syntax` | 91–113 | Borrowed | No | `macro_expand.rs:150` (macro body evaluation) |

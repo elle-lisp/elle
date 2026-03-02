@@ -5,8 +5,8 @@ use crate::vm::VM;
 use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
 use super::{
     arithmetic, array, bitwise, buffer, bytes, cell, comparison, concurrency, convert, coroutines,
-    debug, debugging, display, ffi, fibers, file_io, json, list, logic, math, meta, module_loading,
-    package, path, process, read, string, structs, table, time, type_check,
+    debug, display, ffi, fibers, fileio, json, list, logic, math, meta, modules, package, path,
+    process, read, string, structs, table, time, types,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
@@ -23,17 +23,16 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     concurrency::PRIMITIVES,
     coroutines::PRIMITIVES,
     debug::PRIMITIVES,
-    debugging::PRIMITIVES,
     display::PRIMITIVES,
     ffi::PRIMITIVES,
     fibers::PRIMITIVES,
-    file_io::PRIMITIVES,
+    fileio::PRIMITIVES,
     json::PRIMITIVES,
     list::PRIMITIVES,
     logic::PRIMITIVES,
     math::PRIMITIVES,
     meta::PRIMITIVES,
-    module_loading::PRIMITIVES,
+    modules::PRIMITIVES,
     package::PRIMITIVES,
     path::PRIMITIVES,
     process::PRIMITIVES,
@@ -42,7 +41,7 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     structs::PRIMITIVES,
     table::PRIMITIVES,
     time::PRIMITIVES,
-    type_check::PRIMITIVES,
+    types::PRIMITIVES,
 ];
 
 /// Register all primitive functions with the VM and build metadata.

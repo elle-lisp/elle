@@ -253,7 +253,7 @@ HeapObject::MyType(_) => Err("Cannot send my-type".to_string()),
 ### After adding the type
 
 You'll likely want primitives to create and manipulate it (see Recipe 1)
-and a type-check predicate in `src/primitives/type_check.rs`.
+and a type-check predicate in `src/primitives/types.rs`.
 
 ---
 

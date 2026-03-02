@@ -57,7 +57,7 @@ inner dispatch loop):
 - `SIG_RESUME` (8): VM-internal. Fiber primitive requests VM-side execution.
 - `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-raises caught signal.
 - `SIG_CANCEL` (64): VM-internal. `fiber/cancel` injects error into fiber.
-- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (e.g., call counts, global bindings).
+- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (e.g., call counts, global bindings, arena stats).
 - `SIG_HALT` (256): Graceful VM termination. Value in `fiber.signal`. Non-resumable; fiber is Dead.
 
 The public `execute_bytecode` method is the translation boundary — it converts
