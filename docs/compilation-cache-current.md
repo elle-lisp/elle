@@ -333,7 +333,7 @@ They use primitives and prelude macros only.
 |--------|----------|---------|
 | `eval_all` | pipeline.rs:303 | Test helper and API |
 | `run_source` | main.rs:86 | File execution |
-| `prim_import_file` | primitives/module_loading.rs:96 | Runtime import |
+| `prim_import_file` | primitives/modules.rs:96 | Runtime import |
 | Pipeline tests | pipeline.rs (various) | Internal unit tests |
 
 All callers follow the same pattern: `compile_all` returns bytecodes, caller

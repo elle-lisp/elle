@@ -131,7 +131,7 @@ variants directly.
 | `fiber.rs` | ~515 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
 | `error.rs` | ~50 | error_val() and format_error() helpers |
 | `ffi.rs` | ~22 | LibHandle |
-| `heap.rs` | ~320 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope |
+| `heap.rs` | ~320 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope, `heap_arena_len()`, `heap_arena_capacity()` |
 | `send.rs` | ~150 | SendValue for thread transfer |
 | `display.rs` | ~100 | Display formatting |
 | `intern.rs` | ~100 | Symbol interning |
