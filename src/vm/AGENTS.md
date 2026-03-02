@@ -207,6 +207,13 @@ etc. calls during child execution route to the child's `FiberHeap` instead of
 the global `HEAP_ARENA`. On swap-back, the parent's heap (or null for root)
 is restored.
 
+`FiberHeap` uses bumpalo for bump allocation. Destructor tracking ensures
+`HeapObject` variants with inner heap allocations (`Vec`, `Rc`, `BTreeMap`,
+`Box<str>`) have their `Drop` impls called on `release()` and `clear()`.
+The bump itself only fully resets on `clear()` (fiber death); partial
+`release()` runs destructors but does not reclaim bump memory (bumpalo has
+no partial reset).
+
 The root fiber does NOT install a heap. This is intentional: `execute_bytecode`
 returns `Value`s that outlive the VM. If the root fiber's allocations went to
 a `FiberHeap` owned by the VM, those Values would dangle after `VM::drop()`.

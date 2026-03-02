@@ -37,7 +37,7 @@ Runtime value representation using NaN-boxing.
 | `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
 | `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
-| `FiberHeap` | `fiber_heap.rs` | Per-fiber arena for heap allocation (dormant; routing infrastructure only) |
+| `FiberHeap` | `fiber_heap.rs` | Per-fiber bump allocator (bumpalo) with destructor tracking |
 
 ### Fiber fields for parent/child chain
 
@@ -131,7 +131,7 @@ variants directly.
 | `types.rs` | ~150 | Arity, SymbolId, NativeFn, etc. |
 | `closure.rs` | ~70 | Closure struct |
 | `fiber.rs` | ~535 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
-| `fiber_heap.rs` | ~100 | FiberHeap struct, thread-local routing, install/uninstall/save/restore |
+| `fiber_heap.rs` | ~320 | FiberHeap (bumpalo + destructor tracking), thread-local routing, `needs_drop` |
 | `error.rs` | ~50 | error_val() and format_error() helpers |
 | `ffi.rs` | ~22 | LibHandle |
 | `heap.rs` | ~330 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope, `heap_arena_len()`, `heap_arena_capacity()` |

@@ -396,15 +396,32 @@ thread_local! {
 }
 
 /// Opaque mark for arena scope management.
-pub struct ArenaMark(usize);
+///
+/// Stores the HEAP_ARENA Vec position (for the root fiber) and the
+/// FiberHeap destructor list length (for child fibers with bumpalo).
+pub struct ArenaMark {
+    position: usize,
+    dtor_len: usize,
+}
 
 impl ArenaMark {
     pub(crate) fn new(position: usize) -> Self {
-        ArenaMark(position)
+        ArenaMark {
+            position,
+            dtor_len: 0,
+        }
+    }
+
+    pub(crate) fn new_with_dtor_len(position: usize, dtor_len: usize) -> Self {
+        ArenaMark { position, dtor_len }
     }
 
     pub(crate) fn position(&self) -> usize {
-        self.0
+        self.position
+    }
+
+    pub(crate) fn dtor_len(&self) -> usize {
+        self.dtor_len
     }
 }
 
