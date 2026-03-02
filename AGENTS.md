@@ -220,15 +220,19 @@ Things that look wrong but aren't:
   bare delimiters are immutable, `@`-prefixed are mutable. `{:key val ...}` →
   struct (immutable). `@{:key val}` → table (mutable). `[1 2 3]` → tuple
   (immutable). `@[1 2 3]` → array (mutable). `"hello"` → string (immutable).
-  `@"hello"` → buffer (mutable). `SyntaxKind::Tuple` represents `[...]`,
-  `SyntaxKind::Array` represents `@[...]`, `SyntaxKind::Struct` represents
-  `{...}`, `SyntaxKind::Table` represents `@{...}`. The reader produces all
-  four directly (no desugaring to List with prepended symbols). `@"..."` desugars
-  to `(string->buffer "...")`. In `match`, `[...]` matches tuples (`IsTuple`),
-  `@[...]` matches arrays (`IsArray`), `{...}` matches structs (`IsStruct`),
-  `@{...}` matches tables (`IsTable`). In destructuring (`def`/`let`/`fn`),
-  no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle both mutable and
-  immutable types.
+  `@"hello"` → buffer (mutable). Bytes (immutable binary data) and blob
+  (mutable binary data) have no reader literal syntax — they are constructed
+  via primitives: `(bytes 1 2 3)`, `(blob 1 2 3)`, `(string->bytes "hello")`,
+  `(string->blob "hello")`. Display format is `#bytes[hex ...]` and
+  `#blob[hex ...]` (output-only, not readable). `SyntaxKind::Tuple` represents
+  `[...]`, `SyntaxKind::Array` represents `@[...]`, `SyntaxKind::Struct`
+  represents `{...}`, `SyntaxKind::Table` represents `@{...}`. The reader
+  produces all four directly (no desugaring to List with prepended symbols).
+  `@"..."` desugars to `(string->buffer "...")`. In `match`, `[...]` matches
+  tuples (`IsTuple`), `@[...]` matches arrays (`IsArray`), `{...}` matches
+  structs (`IsStruct`), `@{...}` matches tables (`IsTable`). In destructuring
+  (`def`/`let`/`fn`), no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle
+  both mutable and immutable types.
 - `[...]` has dual meaning depending on position. In expression position,
   it's a tuple literal (`SyntaxKind::Tuple`). In structural positions of
   special forms — lambda params, binding lists, binding pairs, cond clauses,

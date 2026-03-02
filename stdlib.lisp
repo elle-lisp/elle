@@ -24,7 +24,8 @@
      (if (empty? coll)
        ()
        (cons (f (first coll)) (map f (rest coll)))))
-    (true (error :type-error "map: not a sequence")))))
+    (true (error [:type-error "map: not a sequence"])))))
+
 
 (def filter (fn (p lst)
   (if (empty? lst)
