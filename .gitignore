@@ -11,5 +11,8 @@ perf.data.old
 # Issue workflow scratch dirs
 issue-*/
 
+# Example temp dirs (io.lisp cleanup)
+.elle-test-*
+
 # OpenCode agents
 .opencode/

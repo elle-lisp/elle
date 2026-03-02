@@ -1,448 +1,226 @@
-#!/usr/bin/elle
-## I/O Operations - Comprehensive Demonstration
-## This example showcases all I/O primitives available in Elle
-## 
-## Note: Uses relative paths (./elle_example_*) to work in any environment,
-## including CI systems.
+#!/usr/bin/env elle
 
+# Files, JSON, and modules
+#
+# Demonstrates:
+#   Module loading    — import-file loads .lisp files
+#   File read/write   — slurp, spit, append-file, read-lines
+#   File info         — file-exists?, file?, directory?, file-size
+#   File ops          — delete-file, rename-file, copy-file
+#   Directory ops     — create-directory, create-directory-all,
+#                       delete-directory, list-directory
+#   Path ops          — path/filename, path/extension, path/parent,
+#                       path/join, path/cwd
+#   JSON parse        — json-parse for null, bool, int, float, string,
+#                       array, object, nested
+#   JSON serialize    — json-serialize, json-serialize-pretty, round-trip
+
+# import-file loads another .lisp file and returns its last expression's
+# value. assertions.lisp is loaded at the top of every example — this
+# line IS the module-loading demonstration.
 (import-file "./examples/assertions.lisp")
 
-(begin
-  ## Cleanup from previous runs
-  (var cleanup-files (list "./elle_example_basic.txt" "./elle_example_copy.txt" "./elle_example_renamed.txt" "./elle_example_lines.txt" "./elle_example_config.txt"))
-  (var cleanup-dirs (list "./elle_example_dir" "./elle_example_data" "./elle_example_archive"))
-  
-  (display "=== I/O Operations in Elle ===")
-  (newline)
-  (newline)
-
-  ## Part 1: Basic File Writing and Reading
-  (display "Part 1: Basic File Writing and Reading")
-  (newline)
-  (display "---")
-  (newline)
-
-  (var temp-file "./elle_example_basic.txt")
-  (spit temp-file "Hello, Elle!")
-  (display "Wrote to file: ")
-  (display temp-file)
-  (newline)
-
-  (var content (slurp temp-file))
-  (display "Read from file: ")
-  (display content)
-  (newline)
-  (assert-equal content "Hello, Elle!" "I/O: spit/slurp basic read-write")
-  (newline)
-
-  ## Part 2: File Existence Checking
-  (display "Part 2: File Existence Checking")
-  (newline)
-  (display "---")
-  (newline)
-
-  (display "Does file exist? ")
-  (let ((exists (file-exists? temp-file)))
-    (display exists)
-    (newline)
-    (assert-true exists "I/O: file-exists? returns true for created file"))
-
-  (display "Does nonexistent file exist? ")
-  (let ((not-exists (file-exists? "./this_does_not_exist_12345.txt")))
-    (display not-exists)
-    (newline)
-    (assert-true (not not-exists) "I/O: file-exists? returns false for nonexistent file"))
-  (newline)
-
-  ## Part 3: File Properties and Information
-  (display "Part 3: File Properties and Information")
-  (newline)
-  (display "---")
-  (newline)
-
-  (display "File size: ")
-  (let ((size (file-size temp-file)))
-    (display size)
-    (display " bytes")
-    (newline)
-    (assert-equal size 12 "I/O: file-size returns 12 for 'Hello, Elle!'"))
-
-  (display "Is file? ")
-  (let ((is-file (file? temp-file)))
-    (display is-file)
-    (newline)
-    (assert-true is-file "I/O: file? returns true for file"))
-
-  (display "Is directory? ")
-  (let ((is-dir (directory? ".")))
-    (display is-dir)
-    (newline)
-    (assert-true is-dir "I/O: directory? returns true for directory"))
-  (newline)
-
-  ## Part 4: Appending to Files
-  (display "Part 4: Appending Content to Files")
-  (newline)
-  (display "---")
-  (newline)
-
-  (append-file temp-file "\nThis is appended content.")
-  (display "Appended more content. New content:")
-  (newline)
-   (let ((appended-content (slurp temp-file)))
-     (display appended-content)
-     (newline)
-     (assert-true (> (length appended-content) 12) "I/O: appended content is longer"))
-  (newline)
-
-  ## Part 5: File Copying
-  (display "Part 5: File Copying")
-  (newline)
-  (display "---")
-  (newline)
-
-  (var copied-file "./elle_example_copy.txt")
-  (copy-file temp-file copied-file)
-  (display "Copied file to: ")
-  (display copied-file)
-  (newline)
-  (display "Copy exists? ")
-  (let ((copy-exists (file-exists? copied-file)))
-    (display copy-exists)
-    (newline)
-    (assert-true copy-exists "I/O: copy-file creates new file"))
-  (newline)
-
-  ## Part 6: File Renaming
-  (display "Part 6: File Renaming")
-  (newline)
-  (display "---")
-  (newline)
-
-  (var renamed-file "./elle_example_renamed.txt")
-  (rename-file copied-file renamed-file)
-  (display "Renamed to: ")
-  (display renamed-file)
-  (newline)
-  (display "Old name exists? ")
-  (let ((old-exists (file-exists? copied-file)))
-    (display old-exists)
-    (newline)
-    (assert-true (not old-exists) "I/O: rename-file removes old name"))
-  (display "New name exists? ")
-  (let ((new-exists (file-exists? renamed-file)))
-    (display new-exists)
-    (newline)
-    (assert-true new-exists "I/O: rename-file creates new name"))
-  (newline)
-
-  ## Part 7: Path Operations
-  (display "Part 7: Path Operations")
-  (newline)
-  (display "---")
-  (newline)
-
-  (var full-path "/home/user/documents/project/report.pdf")
-
-  (display "Full path: ")
-  (display full-path)
-  (newline)
-
-  (display "File name: ")
-  (display (path/filename full-path))
-  (newline)
-
-  (display "File extension: ")
-  (display (path/extension full-path))
-  (newline)
-
-  (display "Parent directory: ")
-  (display (path/parent full-path))
-  (newline)
-
-  (var composed-path (path/join "." "test" "nested" "file.txt"))
-  (display "Composed path: ")
-  (display composed-path)
-  (newline)
-  (newline)
-
-  ## Part 8: Directory Operations
-  (display "Part 8: Directory Operations")
-  (newline)
-  (display "---")
-  (newline)
-
-  (var test-dir "./elle_example_dir")
-  (var sub-dir "./elle_example_dir/subdir")
-
-  (create-directory test-dir)
-  (display "Created directory: ")
-  (display test-dir)
-  (newline)
-
-  (create-directory-all sub-dir)
-  (display "Created subdirectory: ")
-  (display sub-dir)
-  (newline)
-
-  (display "Directory exists? ")
-  (let ((dir-exists (directory? test-dir)))
-    (display dir-exists)
-    (newline)
-    (assert-true dir-exists "I/O: create-directory creates directory"))
-  (newline)
-
-  ## Part 9: Reading Files Line by Line
-  (display "Part 9: Reading Files Line by Line")
-  (newline)
-  (display "---")
-  (newline)
-
-  (var lines-file "./elle_example_lines.txt")
-  (spit lines-file "Line 1: First line of text\nLine 2: Second line of text\nLine 3: Third line of text\n")
-
-  (display "Lines in file:")
-  (newline)
-  (var lines (read-lines lines-file))
-  (display lines)
-  (newline)
-  (assert-equal (length lines) 3 "I/O: read-lines returns 3 lines")
-  (newline)
-
-  ## Part 10: Directory Listing
-  (display "Part 10: Directory Listing")
-  (newline)
-  (display "---")
-  (newline)
-
-  ## Create some test files in a directory
-  (spit (path/join test-dir "file1.txt") "Content 1")
-  (spit (path/join test-dir "file2.txt") "Content 2")
-  (spit (path/join test-dir "file3.txt") "Content 3")
-
-  (display "Files in directory:")
-  (newline)
-  (let ((dir-list (list-directory test-dir)))
-    (display dir-list)
-    (newline)
-    (assert-true (> (length dir-list) 0) "I/O: list-directory returns files"))
-  (newline)
-
-  ## Part 11: Working Directory Operations
-  (display "Part 11: Working Directory Operations")
-  (newline)
-  (display "---")
-  (newline)
-
-   (display "Current directory: ")
-   (let ((cwd (path/cwd)))
-     (display cwd)
-     (newline)
-     (assert-true (> (length cwd) 0) "I/O: path/cwd returns valid path"))
-  (newline)
-
-  ## Part 12: Practical Example - Config File Handling
-  (display "Part 12: Practical Example - Config File Handling")
-  (newline)
-  (display "---")
-  (newline)
-
-  (var config-file "./elle_example_config.txt")
-
-  ## Write initial config
-  (spit config-file "# Elle Configuration File\nversion=1.0\nauthor=Elle Users\n")
-  (display "Created config file")
-  (newline)
-
-  ## Read and display config
-  (display "Current config:")
-  (newline)
-   (var config-content (slurp config-file))
-   (display config-content)
-   (newline)
-   (assert-true (> (length config-content) 0) "I/O: config file has content")
-
-  ## Append new settings
-  (append-file config-file "debug=true\nverbose=false\n")
-  (display "Updated config file")
-  (newline)
-
-  ## Read updated version
-  (display "Updated config:")
-  (newline)
-   (var updated-config (slurp config-file))
-   (display updated-config)
-   (newline)
-   (assert-true (> (length updated-config) (length config-content)) "I/O: updated config is longer")
-  (newline)
-
-  ## Part 13: File Organization Example
-  (display "Part 13: File Organization Example")
-  (newline)
-  (display "---")
-  (newline)
-
-  (var data-dir "./elle_example_data")
-  (var archive-dir "./elle_example_archive")
-
-  (create-directory-all data-dir)
-  (create-directory-all archive-dir)
-
-  ## Create some data files
-  (spit (path/join data-dir "data1.txt") "Important data 1")
-  (spit (path/join data-dir "data2.txt") "Important data 2")
-  (spit (path/join data-dir "data3.txt") "Important data 3")
-
-  (display "Organized data files in: ")
-  (display data-dir)
-  (newline)
-
-  ## Archive a file (copy to archive directory)
-  (var original (path/join data-dir "data1.txt"))
-  (var archived (path/join archive-dir "data1_archived.txt"))
-  (copy-file original archived)
-
-  (display "Archived file to: ")
-  (display archived)
-  (newline)
-  (display "Archived file exists? ")
-  (let ((archived-exists (file-exists? archived)))
-    (display archived-exists)
-    (newline)
-    (assert-true archived-exists "I/O: archived file exists after copy"))
-  (newline)
-
-  ## Part 14: Error Handling and Edge Cases
-  (display "Part 14: Error Handling Considerations")
-  (newline)
-  (display "---")
-  (newline)
-
-  (display "The following operations gracefully handle errors:")
-  (newline)
-  (display "- Reading non-existent files returns an error")
-  (newline)
-  (display "- Writing to invalid paths returns an error")
-  (newline)
-  (display "- Deleting non-existent files returns an error")
-  (newline)
-  (newline)
-
-  ## Part 15: Cleanup
-  (display "Part 15: Cleanup Operations")
-  (newline)
-  (display "---")
-  (newline)
-
-  (delete-file temp-file)
-  (display "Deleted: ")
-  (display temp-file)
-  (newline)
-
-  (delete-file renamed-file)
-  (display "Deleted: ")
-  (display renamed-file)
-  (newline)
-
-  (delete-file lines-file)
-  (display "Deleted: ")
-  (display lines-file)
-  (newline)
-
-  (delete-file config-file)
-  (display "Deleted: ")
-  (display config-file)
-  (newline)
-
-  ## Delete files in test directories
-  (delete-file (path/join data-dir "data1.txt"))
-  (delete-file (path/join data-dir "data2.txt"))
-  (delete-file (path/join data-dir "data3.txt"))
-  (delete-file (path/join archive-dir "data1_archived.txt"))
-  (delete-file (path/join test-dir "file1.txt"))
-  (delete-file (path/join test-dir "file2.txt"))
-  (delete-file (path/join test-dir "file3.txt"))
-  (delete-directory (path/join test-dir "subdir"))
-  (delete-directory data-dir)
-  (delete-directory archive-dir)
-  (delete-directory test-dir)
-
-  (display "Cleanup complete")
-  (newline)
-  (newline)
-
-  ## Summary
-  (display "=== Summary of I/O Functions ===")
-  (newline)
-  (newline)
-
-  (display "Reading and Writing:")
-  (newline)
-  (display "  (slurp path) - Read entire file as string")
-  (newline)
-  (display "  (spit path content) - Write or overwrite file")
-  (newline)
-  (display "  (append-file path content) - Append to file")
-  (newline)
-  (display "  (read-lines path) - Read file as list of lines")
-  (newline)
-  (newline)
-
-  (display "File Information:")
-  (newline)
-  (display "  (file-exists? path) - Check if file exists")
-  (newline)
-  (display "  (file? path) - Check if path is a file")
-  (newline)
-  (display "  (directory? path) - Check if path is a directory")
-  (newline)
-  (display "  (file-size path) - Get file size in bytes")
-  (newline)
-  (newline)
-
-  (display "File Operations:")
-  (newline)
-  (display "  (delete-file path) - Delete a file")
-  (newline)
-  (display "  (rename-file old-path new-path) - Rename file")
-  (newline)
-  (display "  (copy-file src dest) - Copy file")
-  (newline)
-  (newline)
-
-  (display "Directory Operations:")
-  (newline)
-  (display "  (create-directory path) - Create single directory")
-  (newline)
-  (display "  (create-directory-all path) - Create with parents")
-  (newline)
-  (display "  (delete-directory path) - Delete empty directory")
-  (newline)
-  (display "  (list-directory path) - List directory contents")
-  (newline)
-  (newline)
-
-  (display "Path Operations:")
-  (newline)
-  (display "  (path/filename path) - Extract filename")
-  (newline)
-  (display "  (path/stem path) - Extract file stem")
-  (newline)
-  (display "  (path/extension path) - Extract file extension")
-  (newline)
-  (display "  (path/parent path) - Get parent directory")
-  (newline)
-  (display "  (path/join ...parts) - Join path components")
-  (newline)
-  (display "  (path/normalize path) - Normalize path")
-  (newline)
-  (display "  (path/absolute path) - Get absolute path")
-  (newline)
-  (display "  (path/cwd) - Get working directory")
-  (newline)
-  (newline)
-
-  (display "=== I/O Example Complete ===")
-  (newline)
-  (display "=== I/O Assertions Complete ===")
-  (newline))
+
+# All temp files live under a unique directory relative to the working dir.
+(def tmp-dir
+  (string/join (list ".elle-test-"
+                     (string (integer (* (clock/monotonic) 1000000000)))) ""))
+(create-directory-all tmp-dir)
+
+(defn tmp [name]
+  "Build a path inside the temp directory."
+  (path/join tmp-dir name))
+
+
+# ========================================
+# 1. Read/write files
+# ========================================
+
+(spit (tmp "hello.txt") "Hello, Elle!")
+(def content (slurp (tmp "hello.txt")))
+(display "  slurp: ") (print content)
+(assert-eq content "Hello, Elle!" "spit then slurp round-trips")
+
+(append-file (tmp "hello.txt") "\nSecond line.")
+(def appended (slurp (tmp "hello.txt")))
+(assert-eq appended "Hello, Elle!\nSecond line." "append-file adds content")
+
+(spit (tmp "lines.txt") "alpha\nbeta\ngamma\n")
+(def lines (read-lines (tmp "lines.txt")))
+(display "  lines: ") (print lines)
+(assert-eq (length lines) 3 "read-lines splits on newlines")
+
+
+# ========================================
+# 2. File info
+# ========================================
+
+(assert-true (file-exists? (tmp "hello.txt")) "file-exists? on existing file")
+(assert-false (file-exists? (tmp "nope.txt")) "file-exists? on missing file")
+(assert-true (file? (tmp "hello.txt")) "file? on file")
+(assert-true (directory? tmp-dir) "directory? on directory")
+
+(def size (file-size (tmp "hello.txt")))
+(display "  file-size: ") (print size)
+(assert-eq size 25 "file-size returns byte count")
+
+
+# ========================================
+# 3. File operations
+# ========================================
+
+(copy-file (tmp "hello.txt") (tmp "copy.txt"))
+(assert-true (file-exists? (tmp "copy.txt")) "copy-file creates target")
+(assert-eq (slurp (tmp "copy.txt")) (slurp (tmp "hello.txt"))
+  "copy-file preserves content")
+
+(rename-file (tmp "copy.txt") (tmp "renamed.txt"))
+(assert-false (file-exists? (tmp "copy.txt")) "rename-file removes source")
+(assert-true (file-exists? (tmp "renamed.txt")) "rename-file creates target")
+
+
+# ========================================
+# 4. Directory operations
+# ========================================
+
+(def sub (tmp "sub"))
+(create-directory sub)
+(assert-true (directory? sub) "create-directory works")
+
+(def deep (path/join tmp-dir "a" "b" "c"))
+(create-directory-all deep)
+(assert-true (directory? deep) "create-directory-all creates nested dirs")
+
+# Populate a directory and list it.
+(spit (path/join sub "one.txt") "1")
+(spit (path/join sub "two.txt") "2")
+(def entries (list-directory sub))
+(display "  list-directory: ") (print entries)
+(assert-eq (length entries) 2 "list-directory returns all entries")
+
+
+# ========================================
+# 5. Path operations
+# ========================================
+
+(def p "/home/user/docs/report.pdf")
+(assert-eq (path/filename p) "report.pdf" "path/filename")
+(assert-eq (path/extension p) "pdf" "path/extension")
+(assert-eq (path/parent p) "/home/user/docs" "path/parent")
+
+(def joined (path/join "a" "b" "c.txt"))
+(display "  path/join: ") (print joined)
+(assert-eq joined "a/b/c.txt" "path/join composes segments")
+
+(def cwd (path/cwd))
+(display "  path/cwd: ") (print cwd)
+(assert-true (> (length cwd) 0) "path/cwd returns non-empty string")
+
+
+# ========================================
+# 6. JSON: parsing scalars
+# ========================================
+
+(assert-eq (json-parse "null") nil "json-parse null")
+(assert-eq (json-parse "true") true "json-parse true")
+(assert-eq (json-parse "false") false "json-parse false")
+(assert-eq (json-parse "42") 42 "json-parse integer")
+(assert-eq (json-parse "3.14") 3.14 "json-parse float")
+(assert-eq (json-parse "\"hello\"") "hello" "json-parse string")
+
+
+# ========================================
+# 7. JSON: serializing scalars
+# ========================================
+
+(assert-eq (json-serialize nil) "null" "json-serialize nil")
+(assert-eq (json-serialize true) "true" "json-serialize true")
+(assert-eq (json-serialize false) "false" "json-serialize false")
+(assert-eq (json-serialize 42) "42" "json-serialize int")
+(assert-eq (json-serialize 3.14) "3.14" "json-serialize float")
+(assert-eq (json-serialize "hello") "\"hello\"" "json-serialize string")
+
+
+# ========================================
+# 8. JSON: collections and nesting
+# ========================================
+
+(def arr (json-parse "[1, \"two\", true, null]"))
+(display "  parsed array: ") (print arr)
+(assert-eq (length arr) 4 "json-parse array length")
+(assert-eq (get arr 1) "two" "json-parse array element")
+
+(def obj (json-parse "{\"name\": \"Alice\", \"age\": 30}"))
+(display "  parsed object: ") (print obj)
+(assert-eq (get obj "name") "Alice" "json-parse object field")
+(assert-eq (get obj "age") 30 "json-parse object field int")
+
+(def nested (json-parse "{\"user\": {\"name\": \"Bob\", \"scores\": [95, 87]}}"))
+(def user (get nested "user"))
+(assert-eq (get user "name") "Bob" "nested object access")
+(assert-eq (get (get user "scores") 0) 95 "nested array access")
+
+
+# ========================================
+# 9. JSON: round-trip
+# ========================================
+
+# Serialize a list as a JSON array.
+(assert-eq (json-serialize (list 1 2 3)) "[1,2,3]" "list serializes as array")
+
+# Parse → modify → serialize.
+(def product (json-parse "{\"name\": \"Widget\", \"price\": 19.99}"))
+(put product "price" 24.99)
+(put product "sale" true)
+(def updated-json (json-serialize product))
+(display "  round-trip: ") (print updated-json)
+
+# Pretty-print for readability.
+(def pretty (json-serialize-pretty product))
+(display "  pretty:\n") (display pretty) (print "")
+
+# Verify the modified value survived the round-trip.
+(def reparsed (json-parse updated-json))
+(assert-eq (get reparsed "price") 24.99 "round-trip preserves modified value")
+(assert-eq (get reparsed "sale") true "round-trip preserves added field")
+
+
+# ========================================
+# 10. JSON: file I/O integration
+# ========================================
+
+# Write JSON to a file and read it back — the natural use case.
+(def config (table))
+(put config "app" "elle-test")
+(put config "version" 1)
+(put config "debug" false)
+
+(spit (tmp "config.json") (json-serialize-pretty config))
+(def loaded (json-parse (slurp (tmp "config.json"))))
+(display "  config from file: ") (print loaded)
+(assert-eq (get loaded "app") "elle-test" "JSON config round-trips through file")
+(assert-eq (get loaded "version") 1 "JSON config preserves int")
+
+
+# ========================================
+# Cleanup
+# ========================================
+
+# Remove all files and directories we created.
+(delete-file (tmp "hello.txt"))
+(delete-file (tmp "lines.txt"))
+(delete-file (tmp "renamed.txt"))
+(delete-file (tmp "config.json"))
+(delete-file (path/join sub "one.txt"))
+(delete-file (path/join sub "two.txt"))
+(delete-directory sub)
+(delete-directory deep)
+(delete-directory (path/join tmp-dir "a" "b"))
+(delete-directory (path/join tmp-dir "a"))
+(delete-directory tmp-dir)
+
+# Verify cleanup.
+(assert-false (file-exists? tmp-dir) "temp directory removed")
+
+(print "")
+(print "all io passed.")

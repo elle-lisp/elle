@@ -294,6 +294,16 @@ pub(crate) fn register_builtin_docs(docs: &mut std::collections::HashMap<String,
             aliases: &[],
         },
         Doc {
+            name: "error",
+            doc: "Raise an error signal. The value can be anything; by convention a tuple [:kind \"message\"].",
+            params: &["value"],
+            arity: Arity::Exact(1),
+            effect: Effect::yields(),
+            category: "syntax sugar",
+            example: "(error [:not-found \"missing key\"])\n(error \"something broke\")",
+            aliases: &[],
+        },
+        Doc {
             name: "try",
             doc: "Error handling. Evaluates body; if an error is signaled, evaluates catch handler with the error value.",
             params: &["body", "(catch (e) handler)"],
@@ -402,7 +412,9 @@ pub fn help_text() -> String {
     out.push_str("  match, while, each, yield, and, or, quote, cond, eval, defmacro, doc,\n");
     out.push_str("  splice\n");
     out.push_str("\nSyntax sugar:\n");
-    out.push_str("  defn, let*, ->, ->>, when, unless, try, protect, defer, with, yield*,\n");
+    out.push_str(
+        "  defn, let*, ->, ->>, when, unless, error, try, protect, defer, with, yield*,\n",
+    );
     out.push_str("  ffi/defbind\n");
     out.push_str("\nREPL commands:\n");
     out.push_str("  (help)         Show this help\n");

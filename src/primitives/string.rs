@@ -4,6 +4,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Extract text content from a string or buffer value.
 /// Returns (text, is_buffer). For buffers, validates UTF-8.
@@ -113,7 +114,8 @@ pub fn prim_substring(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    let char_count = s.chars().count();
+    let graphemes: Vec<&str> = s.graphemes(true).collect();
+    let grapheme_count = graphemes.len();
     let end = if args.len() == 3 {
         match args[2].as_int() {
             Some(n) => n as usize,
@@ -128,69 +130,92 @@ pub fn prim_substring(args: &[Value]) -> (SignalBits, Value) {
             }
         }
     } else {
-        char_count
+        grapheme_count
     };
 
-    if start > char_count || end > char_count || start > end {
+    if start > grapheme_count || end > grapheme_count || start > end {
         return (SIG_OK, Value::NIL);
     }
 
-    // Convert character indices to byte indices
-    let byte_start = s
-        .char_indices()
-        .nth(start)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len());
-    let byte_end = s.char_indices().nth(end).map(|(i, _)| i).unwrap_or(s.len());
+    // Convert grapheme indices to byte indices
+    let byte_start: usize = graphemes[..start].iter().map(|g| g.len()).sum();
+    let byte_end: usize = graphemes[..end].iter().map(|g| g.len()).sum();
     (SIG_OK, Value::string(&s[byte_start..byte_end]))
 }
 
-/// Find the index of a character in a string or buffer
-pub fn prim_string_index(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
+/// Find the grapheme index of a substring, with optional start offset
+pub fn prim_string_find(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() < 2 || args.len() > 3 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("string-index: expected 2 arguments, got {}", args.len()),
+                format!("string/find: expected 2-3 arguments, got {}", args.len()),
             ),
         );
     }
 
-    let (haystack, _is_buffer) = match as_text(&args[0], "string-index") {
+    let (haystack, _is_buffer) = match as_text(&args[0], "string/find") {
         Ok(v) => v,
         Err(e) => return e,
     };
 
-    let needle = if let Some(r) = args[1].with_string(|s| {
-        let chars: Vec<char> = s.chars().collect();
-        if chars.len() != 1 {
-            return Err((
+    let needle = match args[1].with_string(|s| s.to_string()) {
+        Some(s) => s,
+        None => {
+            return (
                 SIG_ERROR,
                 error_val(
-                    "error",
-                    "string-index: requires a single character as second argument".to_string(),
+                    "type-error",
+                    format!("string/find: expected string, got {}", args[1].type_name()),
                 ),
-            ));
+            )
         }
-        Ok(chars[0])
-    }) {
-        match r {
-            Ok(c) => c,
-            Err(e) => return e,
-        }
-    } else {
-        return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("string-index: expected string, got {}", args[1].type_name()),
-            ),
-        );
     };
 
-    match haystack.chars().position(|ch| ch == needle) {
-        Some(pos) => (SIG_OK, Value::int(pos as i64)),
+    let offset = if args.len() == 3 {
+        match args[2].as_int() {
+            Some(n) if n >= 0 => n as usize,
+            Some(_) => return (SIG_OK, Value::NIL),
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "string/find: offset must be integer, got {}",
+                            args[2].type_name()
+                        ),
+                    ),
+                )
+            }
+        }
+    } else {
+        0
+    };
+
+    let graphemes: Vec<&str> = haystack.graphemes(true).collect();
+
+    if offset > graphemes.len() {
+        return (SIG_OK, Value::NIL);
+    }
+
+    // Build the substring from offset onwards, then search
+    let search_start_byte: usize = graphemes[..offset].iter().map(|g| g.len()).sum();
+    match haystack[search_start_byte..].find(&needle) {
+        Some(byte_pos) => {
+            // Convert byte position back to grapheme index
+            let abs_byte = search_start_byte + byte_pos;
+            let mut byte_idx = 0;
+            for (grapheme_idx, g) in graphemes.iter().enumerate() {
+                if byte_idx == abs_byte {
+                    return (SIG_OK, Value::int(grapheme_idx as i64));
+                }
+                byte_idx += g.len();
+            }
+            // byte_pos pointed to end of string
+            (SIG_OK, Value::NIL)
+        }
         None => (SIG_OK, Value::NIL),
     }
 }
@@ -224,30 +249,30 @@ pub fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    let char_count = s.chars().count();
+    let grapheme_count = s.graphemes(true).count();
 
-    if index >= char_count {
+    if index >= grapheme_count {
         return (
             SIG_ERROR,
             error_val(
                 "error",
                 format!(
                     "char-at: index {} out of bounds (length {})",
-                    index, char_count
+                    index, grapheme_count
                 ),
             ),
         );
     }
 
-    match s.chars().nth(index) {
-        Some(c) => (SIG_OK, Value::string(c.to_string())),
+    match s.graphemes(true).nth(index) {
+        Some(g) => (SIG_OK, Value::string(g)),
         None => (
             SIG_ERROR,
             error_val(
                 "error",
                 format!(
                     "char-at: index {} out of bounds (length {})",
-                    index, char_count
+                    index, grapheme_count
                 ),
             ),
         ),
@@ -659,15 +684,15 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &["substring"],
     },
     PrimitiveDef {
-        name: "string/index",
-        func: prim_string_index,
+        name: "string/find",
+        func: prim_string_find,
         effect: Effect::none(),
-        arity: Arity::Exact(2),
-        doc: "Find index of first occurrence of substring. Returns nil if not found.",
-        params: &["s", "substr"],
+        arity: Arity::Range(2, 3),
+        doc: "Find the grapheme index of a substring, with optional start offset.",
+        params: &["haystack", "needle", "offset"],
         category: "string",
-        example: "(string/index \"hello\" \"l\") #=> 2",
-        aliases: &["string-index"],
+        example: "(string/find \"hello\" \"ll\") #=> 2",
+        aliases: &["string-index", "string/index", "string-find"],
     },
     PrimitiveDef {
         name: "string/char-at",

@@ -26,7 +26,7 @@ pub fn define_higher_order_functions(vm: &mut VM, symbols: &mut SymbolTable) {
              (if (empty? coll)
                ()
                (cons (f (first coll)) (map f (rest coll)))))
-            (true (error :type-error "map: not a sequence")))))
+            (true (error [:type-error "map: not a sequence"])))))
     "#;
 
     // Define filter

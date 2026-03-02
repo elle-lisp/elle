@@ -24,10 +24,10 @@
 
 (def assert-eq (fn (actual expected msg)
   "Assert that actual equals expected (using = for numbers, eq? for symbols)"
-  (let ((matches
+  (let ([matches
     (if (symbol? expected)
         (eq? actual expected)
-        (= actual expected))))
+        (= actual expected))])
     (if matches
         true
         (begin
