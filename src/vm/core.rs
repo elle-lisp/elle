@@ -103,11 +103,20 @@ impl VM {
     /// Reset the VM's fiber and transient state for reuse.
     ///
     /// Preserves: globals (primitives), docs, ffi, jit_cache,
-    /// eval_expander, env_cache, tail_call_env_cache.
+    /// eval_expander, env_cache, tail_call_env_cache, fiber heap Box
+    /// (reused for pointer stability).
     /// Resets: fiber, call state, scope stack, location map,
     /// loaded modules, closure call counts.
     pub fn reset_fiber(&mut self) {
+        // Extract and clear the heap Box so the thread-local pointer stays valid.
+        let mut heap = std::mem::replace(
+            &mut self.fiber.heap,
+            Box::new(crate::value::fiber_heap::FiberHeap::new()),
+        );
+        heap.clear();
+
         self.fiber = Fiber::new(root_closure(), 0);
+        self.fiber.heap = heap;
         self.fiber.status = crate::value::FiberStatus::Alive;
         self.current_fiber_handle = None;
         self.current_fiber_value = None;

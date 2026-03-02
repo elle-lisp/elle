@@ -165,6 +165,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `call_depth` | `usize` | Stack overflow detection |
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
+| `heap` | `Box<FiberHeap>` | Per-fiber arena for heap allocation (installed as thread-local during child execution) |
 | `signal_mask` | `SignalBits` | Which signals this fiber catches |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
 | `parent_value` | `Option<Value>` | Cached NaN-boxed Value for parent (identity-preserving) |
@@ -191,7 +192,28 @@ Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and errors
-- `with_child_fiber`: Shared swap protocol for fiber resume/cancel
+- `with_child_fiber`: Shared swap protocol for fiber resume/cancel. Also
+  manages per-fiber heap routing: saves the current thread-local heap pointer,
+  installs the child fiber's `FiberHeap`, executes, then restores the saved
+  pointer on swap-back. Root fibers have no heap installed (allocate to the
+  global `HEAP_ARENA`); only child fibers get per-fiber heap routing.
+
+## Fiber heap routing
+
+Child fibers each own a `Box<FiberHeap>` (on the `Fiber` struct). When the
+VM swaps to a child fiber via `with_child_fiber`, it installs the child's
+heap as the thread-local allocation target. All `Value::cons()`, `Value::closure()`,
+etc. calls during child execution route to the child's `FiberHeap` instead of
+the global `HEAP_ARENA`. On swap-back, the parent's heap (or null for root)
+is restored.
+
+The root fiber does NOT install a heap. This is intentional: `execute_bytecode`
+returns `Value`s that outlive the VM. If the root fiber's allocations went to
+a `FiberHeap` owned by the VM, those Values would dangle after `VM::drop()`.
+Root fiber allocations go to `HEAP_ARENA` (thread-local, outlives any VM).
+
+`reset_fiber()` in `core.rs` extracts, clears, and reuses the heap `Box` to
+maintain pointer stability (the thread-local stores a raw pointer to the heap).
 
 ## Files
 

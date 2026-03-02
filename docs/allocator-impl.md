@@ -14,13 +14,38 @@ behavior changes. The sixth is deferred.
 
 ### Package 1: FiberHeap routing
 
-Create `FiberHeap`. Add it to `Fiber`. Replace the thread-local
-`HEAP_ARENA` with a "current fiber heap" thread-local that gets swapped
-on fiber transitions. `alloc()` dispatches to it. `ArenaGuard` operates
-on it.
+Create `FiberHeap`. Add it to `Fiber`. Add a "current fiber heap"
+thread-local that child fibers install during execution. `alloc()`
+dispatches to the current fiber heap if one is installed, otherwise
+falls back to `HEAP_ARENA`. `ArenaGuard` operates on whichever is
+active.
 
 Initially `FiberHeap` wraps the same `Vec<Box<HeapObject>>`. The routing
 changes; the backing store doesn't.
+
+> **Amendment (discovered during implementation):** The root fiber does
+> NOT get a FiberHeap installed. Only child fibers (created via
+> `fiber/new`) get FiberHeap routing during `with_child_fiber`. The root
+> fiber continues allocating from `HEAP_ARENA` (the thread-local
+> fallback).
+>
+> **Rationale:** The original plan had `VM::new()` install the fiber
+> heap and `VM::drop()` uninstall it. This causes SIGSEGV because
+> `eval_source()` creates a VM, runs code, returns a `Value`, then
+> drops the VM — returned Values point into the fiber heap which gets
+> destroyed on VM drop. Keeping the root fiber on `HEAP_ARENA` means
+> root-allocated Values survive VM destruction, which is the existing
+> lifetime contract.
+>
+> **Consequences:**
+> - `VM::new()` does NOT install a fiber heap
+> - `VM::drop()` does NOT uninstall anything (no Drop impl needed)
+> - `with_child_fiber` installs the child's heap before executing,
+>   restores the parent's heap (or null for root) after
+> - `pipeline.rs` save/restore is still needed for the compilation
+>   cache VM (it creates a child VM context)
+> - The fallback to `HEAP_ARENA` in the dispatch functions IS the root
+>   fiber's allocator — this is by design, not a missing feature
 
 **Depends on:** nothing. **Risk:** low. Pure plumbing. If routing is
 wrong, tests fail with null derefs or wrong pointers.
@@ -66,8 +91,9 @@ heavily.
 
 Add `active_allocator: *const bumpalo::Bump` to `FiberHeap`. Save/
 restore on Call/Return. Add to `SuspendedFrame` for yield/resume.
-Initialize to the fiber's root bump on creation. Tail calls inherit
-implicitly (pointer on FiberHeap, not on the frame).
+Initialize to the child fiber's root bump on creation (root fiber has
+no FiberHeap; see Package 1 amendment). Tail calls inherit implicitly
+(pointer on FiberHeap, not on the frame).
 
 This is a single pointer — the callee inherits the caller's allocator
 for everything (temporaries and return values). The two-pointer

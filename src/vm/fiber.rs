@@ -62,6 +62,15 @@ impl VM {
         self.current_fiber_value = Some(child_value);
         std::mem::swap(&mut self.fiber, &mut child_fiber);
 
+        // 3a. Install child's fiber heap as the active allocation target.
+        //     Save whatever was active (parent's heap or null for root fiber).
+        let saved_heap = crate::value::fiber_heap::save_current_heap();
+        unsafe {
+            crate::value::fiber_heap::install_fiber_heap(
+                &mut *self.fiber.heap as *mut crate::value::FiberHeap,
+            );
+        }
+
         // 4. Execute the closure
         let bits = execute(self);
 
@@ -87,7 +96,10 @@ impl VM {
             .unwrap_or(Value::NIL);
         let result_bits = self.fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(bits);
 
-        // 7. Swap back: parent in, child out; restore parent's handle and value
+        // 7. Swap back: parent in, child out; restore parent's heap and handle
+        unsafe {
+            crate::value::fiber_heap::restore_saved_heap(saved_heap);
+        }
         std::mem::swap(&mut self.fiber, &mut child_fiber);
         self.current_fiber_handle = parent_handle;
         self.current_fiber_value = parent_value;
