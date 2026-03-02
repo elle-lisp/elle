@@ -3,6 +3,8 @@ use elle::pipeline::{compile, eval};
 use elle::primitives::register_primitives;
 use elle::{SymbolTable, Value, VM};
 
+use crate::common::eval_source_bare;
+
 fn run(input: &str) -> Value {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
@@ -260,5 +262,136 @@ fn while_without_break() {
                (while (< i 3)
                  (set i (+ i 1))))"),
         Value::NIL
+    );
+}
+
+// === Break with value in while and each ===
+
+#[test]
+fn break_in_while_with_value() {
+    // unnamed break with a non-nil value in while
+    assert_eq!(
+        run("(begin
+               (var i 0)
+               (while true
+                 (begin
+                   (set i (+ i 1))
+                   (if (= i 3) (break 42) nil))))"),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn break_in_nested_while_inner() {
+    // break from inner while, outer while continues
+    assert_eq!(
+        run("(begin
+               (var total 0)
+               (var outer 0)
+               (while (< outer 3)
+                 (begin
+                   (var inner 0)
+                   (while true
+                     (begin
+                       (if (= inner 2) (break) nil)
+                       (set total (+ total 1))
+                       (set inner (+ inner 1))))
+                   (set outer (+ outer 1))))
+               total)"),
+        Value::int(6)
+    );
+}
+
+#[test]
+fn break_in_nested_while_with_value() {
+    // break from inner while with a value, use that value in outer while
+    assert_eq!(
+        run("(begin
+               (var sum 0)
+               (var i 0)
+               (while (< i 3)
+                 (begin
+                   (let ((inner-result
+                           (while true
+                             (break 10))))
+                     (set sum (+ sum inner-result)))
+                   (set i (+ i 1))))
+               sum)"),
+        Value::int(30)
+    );
+}
+
+#[test]
+fn break_in_each_list() {
+    // break out of each iterating over a list
+    assert_eq!(
+        eval_source_bare(
+            "(begin
+               (var last nil)
+               (each x '(1 2 3 4 5)
+                 (begin
+                   (set last x)
+                   (if (= x 3) (break) nil)))
+               last)"
+        )
+        .unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn break_in_each_with_value() {
+    // break out of each with a value — the each expression returns it
+    // (break :while :found) targets the implicit :while block with value :found
+    assert_eq!(
+        eval_source_bare(
+            "(each x '(10 20 30 40)
+               (if (= x 30) (break :while :found) nil))"
+        )
+        .unwrap(),
+        Value::keyword("found")
+    );
+}
+
+#[test]
+fn each_without_break() {
+    // each without break returns nil
+    assert_eq!(
+        eval_source_bare(
+            "(let ((result (each x '(1 2 3) x)))
+               result)"
+        )
+        .unwrap(),
+        Value::NIL
+    );
+}
+
+#[test]
+fn break_in_each_array() {
+    // break out of each iterating over a mutable array
+    assert_eq!(
+        eval_source_bare(
+            "(each x @[100 200 300 400]
+               (if (= x 300) (break x) nil))"
+        )
+        .unwrap(),
+        Value::int(300)
+    );
+}
+
+#[test]
+fn break_in_each_string() {
+    // break out of each iterating over a string
+    assert_eq!(
+        eval_source_bare(
+            "(begin
+               (var count 0)
+               (each ch \"hello\"
+                 (begin
+                   (set count (+ count 1))
+                   (if (= ch \"l\") (break count) nil))))"
+        )
+        .unwrap(),
+        Value::int(3)
     );
 }
