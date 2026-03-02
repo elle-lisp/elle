@@ -5,6 +5,7 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, TableKey, Value};
 use std::collections::BTreeMap;
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Declarative table of table primitives.
 pub const PRIMITIVES: &[PrimitiveDef] = &[
@@ -288,10 +289,9 @@ pub fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        match s.chars().nth(index as usize) {
-            Some(ch) => {
-                let ch_str = ch.to_string();
-                return (SIG_OK, Value::string(ch_str.as_str()));
+        match s.graphemes(true).nth(index as usize) {
+            Some(g) => {
+                return (SIG_OK, Value::string(g));
             }
             None => return (SIG_OK, default),
         }
@@ -382,11 +382,8 @@ pub fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 if index < 0 {
                     return (SIG_OK, default);
                 }
-                match s.chars().nth(index as usize) {
-                    Some(ch) => {
-                        let ch_str = ch.to_string();
-                        (SIG_OK, Value::string(ch_str.as_str()))
-                    }
+                match s.graphemes(true).nth(index as usize) {
+                    Some(g) => (SIG_OK, Value::string(g)),
                     None => (SIG_OK, default),
                 }
             })
@@ -915,8 +912,8 @@ pub fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                         )
                     }
                 };
-                let chars: Vec<char> = s.chars().collect();
-                if index < 0 || index as usize >= chars.len() {
+                let graphemes: Vec<&str> = s.graphemes(true).collect();
+                if index < 0 || index as usize >= graphemes.len() {
                     return (
                         SIG_ERROR,
                         error_val(
@@ -924,17 +921,17 @@ pub fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                             format!(
                                 "put: index {} out of bounds (length {})",
                                 index,
-                                chars.len()
+                                graphemes.len()
                             ),
                         ),
                     );
                 }
                 let mut result = String::new();
-                for (i, ch) in chars.iter().enumerate() {
+                for (i, g) in graphemes.iter().enumerate() {
                     if i == index as usize {
                         result.push_str(&replacement);
                     } else {
-                        result.push(*ch);
+                        result.push_str(g);
                     }
                 }
                 (SIG_OK, Value::string(result.as_str()))

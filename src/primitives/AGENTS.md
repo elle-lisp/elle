@@ -92,7 +92,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `list.rs` | `cons`, `first`, `rest`, `list`, `length`, `empty?`, `append`, `concat`, `reverse`, `last`, `butlast`, `take`, `drop` |
 | `array.rs` | `tuple`, `array`, `array/new`, `push`, `pop`, `popn`, `insert`, `remove` |
 | `buffer.rs` | `buffer`, `string->buffer`, `buffer->string` |
-| `string.rs` | `string/upcase`, `string/downcase`, `string/slice`, `string/index`, `string/char-at`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
+| `string.rs` | `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/char-at`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
 | `table.rs` | `table`, `get`, `put`, `del`, `keys`, `values`, `has-key?` |
 | `structs.rs` | `struct` |
 | `file_io.rs` | `slurp`, `spit` |

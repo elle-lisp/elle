@@ -1,519 +1,275 @@
-# Destructuring in Elle
+#!/usr/bin/env elle
+
+# Destructuring — unpacking data at every level
 #
-# This example demonstrates:
-# - List destructuring with def and var
-# - Array destructuring with def
-# - Nested destructuring
-# - Destructuring in let and let*
-# - Destructuring in function parameters
-# - Silent nil semantics for missing values
-# - defn with destructured parameters
-# - Variadic & rest in function parameters
-# - Table/struct destructuring with {:key var} syntax
+# Demonstrates:
+#   Silent nil semantics — missing elements become nil, not an error
+#   Wildcard _           — discarding elements you don't need
+#   List & rest          — collecting remaining list elements
+#   Tuple/array & rest   — rest collects into an array
+#   Nested patterns      — list-in-list, tuple-in-list, struct-in-struct
+#   Mutable destructuring — var + set on destructured bindings
+#   let / let*           — destructuring with sequential dependencies
+#   Struct/table by-key  — extraction, missing keys, nested structs
+#   Match dispatch       — struct tag patterns for polymorphic data
 
 (import-file "./examples/assertions.lisp")
 
-(display "=== Destructuring ===")
-(newline)
-(newline)
 
-# ============================================================================
-# PART 1: List Destructuring with def
-# ============================================================================
+# ========================================
+# 1. Silent nil semantics
+# ========================================
 
-(display "PART 1: List Destructuring with def")
-(newline)
-(newline)
+# Destructuring never errors on shape mismatch. Missing → nil.
 
-# Basic list destructuring binds names to successive elements
-(def (a b c) (list 1 2 3))
-(assert-eq a 1 "list destructure first element")
-(assert-eq b 2 "list destructure second element")
-(assert-eq c 3 "list destructure third element")
-(display "  (def (a b c) (list 1 2 3)) => a=")
-(display a) (display " b=") (display b) (display " c=") (display c)
-(newline)
+# Fewer values than bindings: extras get nil
+(def (sn-a sn-b sn-c) (list 10))
+(assert-eq sn-a 10 "silent nil: present element")
+(assert-eq sn-b nil "silent nil: missing => nil")
 
-# Missing elements become nil (no error)
-(def (x y z) (list 10))
-(assert-eq x 10 "short list first element")
-(assert-eq y nil "short list missing second => nil")
-(assert-eq z nil "short list missing third => nil")
-(display "  (def (x y z) (list 10)) => x=")
-(display x) (display " y=") (display y) (display " z=") (display z)
-(newline)
+# More values than bindings: extras silently ignored
+(def (sn-p sn-q) (list 1 2 3 4 5))
+(assert-eq sn-q 2 "silent nil: extra elements ignored")
 
-# Extra elements are silently ignored
-(def (p q) (list 1 2 3 4 5))
-(assert-eq p 1 "extra elements: first")
-(assert-eq q 2 "extra elements: second")
-(display "  (def (p q) (list 1 2 3 4 5)) => p=")
-(display p) (display " q=") (display q)
-(newline)
-(newline)
+# Wrong type entirely: non-list gives nil for all bindings
+(def (sn-x sn-y) 42)
+(assert-eq sn-x nil "silent nil: non-list => nil")
 
-# ============================================================================
-# PART 2: Array Destructuring with def
-# ============================================================================
+# Same for tuple patterns on a non-indexed value
+(def [sn-i sn-j] "hello")
+(assert-eq sn-i nil "silent nil: string in tuple pattern => nil")
 
-(display "PART 2: Array Destructuring with def")
-(newline)
-(newline)
+(display "  fewer vals:  (def (a b c) (list 10)) → b=") (print sn-b)
+(display "  wrong type:  (def (x y) 42)          → x=") (print sn-x)
 
-(def [i j] [10 20])
-(assert-eq i 10 "array destructure first")
-(assert-eq j 20 "array destructure second")
-(display "  (def [i j] [10 20]) => i=")
-(display i) (display " j=") (display j)
-(newline)
 
-# Short array gives nil for missing
-(def [m n o] [42])
-(assert-eq m 42 "short array first")
-(assert-eq n nil "short array missing => nil")
-(assert-eq o nil "short array missing => nil")
-(display "  (def [m n o] [42]) => m=")
-(display m) (display " n=") (display n) (display " o=") (display o)
-(newline)
-(newline)
+# ========================================
+# 2. Wildcard _ pattern
+# ========================================
 
-# Tuple destructuring with bracket pattern
-# (tuples are immutable sequences# see docs/types.md)
-(def [ta tb] (tuple :hello 42))
-(assert-eq ta :hello "tuple destructure first")
-(assert-eq tb 42 "tuple destructure second")
-(display "  (def [ta tb] (tuple :hello 42)) => ta=")
-(display ta) (display " tb=") (display tb)
-(newline)
+# _ discards the matched value — no binding is created.
+(def (_ wc-mid _) (list 10 20 30))
+(assert-eq wc-mid 20 "wildcard: skip first and third")
 
-# Short tuple gives nil for missing
-(def [tc td te] (tuple :only-one))
-(assert-eq tc :only-one "short tuple first")
-(assert-eq td nil "short tuple missing => nil")
-(display "  (def [tc td te] (tuple :only-one)) => tc=")
-(display tc) (display " td=") (display td)
-(newline)
+# Wildcard in tuple patterns
+(def [_ wc-second _ wc-fourth] [100 200 300 400])
+(assert-eq wc-second 200 "wildcard: tuple skip")
+(assert-eq wc-fourth 400 "wildcard: tuple skip to fourth")
 
-# Tuple rest collects remaining into array
-(def [tf & trest] (tuple :a :b :c))
-(assert-eq tf :a "tuple rest: first")
-(assert-eq (get trest 0) :b "tuple rest: rest[0]")
-(display "  (def [tf & trest] (tuple :a :b :c)) => tf=")
-(display tf) (display " trest=") (display trest)
-(newline)
+# Nested wildcard — skip outer, extract inner
+(def ((_ wc-inner) _) (list (list :skip :want) :also-skip))
+(assert-eq wc-inner :want "wildcard: nested extraction")
 
-# Error value destructuring (the motivating use case for tuple destructuring)
-(def err-tuple (tuple :division-by-zero "division by zero"))
-(def [ek em] err-tuple)
-(assert-eq ek :division-by-zero "error tuple: kind")
-(assert-eq em "division by zero" "error tuple: message")
-(display "  (def [ek em] err-tuple) => ek=")
-(display ek) (display " em=") (display em)
-(newline)
-(newline)
+# Wildcard in struct pattern — acknowledge a key without binding it
+(def {:x _ :y wc-y} {:x 10 :y 20})
+(assert-eq wc-y 20 "wildcard: struct skip value")
 
-# ============================================================================
-# PART 3: Nested Destructuring
-# ============================================================================
+(display "  (def (_ mid _) (list 10 20 30)) → mid=") (print wc-mid)
+(display "  (def ((_ inner) _) ...) → inner=") (print wc-inner)
 
-(display "PART 3: Nested Destructuring")
-(newline)
-(newline)
 
-# List within list
-(def ((d e) f) (list (list 1 2) 3))
-(assert-eq d 1 "nested list inner first")
-(assert-eq e 2 "nested list inner second")
-(assert-eq f 3 "nested list outer second")
-(display "  (def ((d e) f) (list (list 1 2) 3)) => d=")
-(display d) (display " e=") (display e) (display " f=") (display f)
-(newline)
+# ========================================
+# 3. List & rest
+# ========================================
 
-# Array within list
-(def ([g h] k) (list [10 20] 30))
-(assert-eq g 10 "array-in-list first")
-(assert-eq h 20 "array-in-list second")
-(assert-eq k 30 "array-in-list outer")
-(display "  (def ([g h] k) (list [10 20] 30)) => g=")
-(display g) (display " h=") (display h) (display " k=") (display k)
-(newline)
-(newline)
+# & rest collects remaining list elements into a new list.
+(def (lr-head & lr-tail) (list 1 2 3 4))
+(assert-eq lr-head 1 "list rest: head")
+(assert-eq (first lr-tail) 2 "list rest: tail first")
+(assert-eq (length lr-tail) 3 "list rest: tail length")
 
-# ============================================================================
-# PART 4: Mutable Destructuring with var
-# ============================================================================
+# All elements consumed: rest is empty list (not nil!)
+(def (lr-a lr-b & lr-empty) (list 1 2))
+(assert-true (empty? lr-empty) "list rest empty: rest is empty list")
+(assert-false (nil? lr-empty) "list rest empty: rest is NOT nil")
 
-(display "PART 4: Mutable Destructuring with var")
-(newline)
-(newline)
+# Wildcard + rest: skip head, collect tail
+(def (_ & lr-skip) (list :discard :keep1 :keep2))
+(assert-eq (first lr-skip) :keep1 "wildcard+rest: first of rest")
 
-(var (va vb) (list 1 2))
-(assert-eq va 1 "var destructure first")
-(set va 100)
-(assert-eq va 100 "var destructure mutated")
-(display "  (var (va vb) (list 1 2)) then (set va 100) => va=")
-(display va) (display " vb=") (display vb)
-(newline)
-(newline)
+(display "  (h & t) from (1 2 3 4)    → h=") (display lr-head)
+  (display " t=") (print lr-tail)
+(display "  (a b & r) from (1 2)      → r=") (print lr-empty)
 
-# ============================================================================
-# PART 5: Destructuring in let
-# ============================================================================
 
-(display "PART 5: Destructuring in let")
-(newline)
-(newline)
+# ========================================
+# 4. Tuple/array & rest
+# ========================================
 
-(var let-result (let (((la lb) (list 10 20))) (+ la lb)))
-(assert-eq let-result 30 "let destructure sum")
-(display "  (let (((la lb) (list 10 20))) (+ la lb)) => ")
-(display let-result)
-(newline)
+# Tuple rest collects remaining elements into an *array* (not a tuple).
+(def [tr-first & tr-rest] [10 20 30])
+(assert-eq tr-first 10 "tuple rest: first")
+(assert-eq (get tr-rest 0) 20 "tuple rest: rest[0]")
+(assert-true (array? tr-rest) "tuple rest: rest is array, not tuple")
 
-# Mixed simple and destructured bindings
-(var mixed-result (let ((s 1) ((t u) (list 2 3))) (+ s t u)))
-(assert-eq mixed-result 6 "let mixed bindings")
-(display "  (let ((s 1) ((t u) (list 2 3))) (+ s t u)) => ")
-(display mixed-result)
-(newline)
-(newline)
+# Array rest also collects into array
+(def [ar-first & ar-rest] @[100 200 300])
+(assert-eq ar-first 100 "array rest: first")
 
-# ============================================================================
-# PART 6: Destructuring in let*
-# ============================================================================
+# Empty rest
+(def [tr-only & tr-none] [42])
+(assert-eq (length tr-none) 0 "tuple rest empty: no remaining")
 
-(display "PART 6: Destructuring in let*")
-(newline)
-(newline)
+(display "  [a & r] from [10 20 30] → a=") (display tr-first)
+  (display " r=") (display tr-rest)
+  (display " array?=") (print (array? tr-rest))
 
-# Sequential: second binding uses first
-(var star-result (let* (((sa sb) (list 1 2)) (sc (+ sa sb))) sc))
-(assert-eq star-result 3 "let* destructure sequential")
-(display "  (let* (((sa sb) (list 1 2)) (sc (+ sa sb))) sc) => ")
-(display star-result)
-(newline)
 
-# Destructure referencing previous binding
-(var star2 (let* ((w 10) ((wa wb) (list w 20))) (+ wa wb)))
-(assert-eq star2 30 "let* mixed sequential")
-(display "  (let* ((w 10) ((wa wb) (list w 20))) (+ wa wb)) => ")
-(display star2)
-(newline)
-(newline)
+# ========================================
+# 5. Nested patterns
+# ========================================
 
-# ============================================================================
-# PART 7: Destructuring in Function Parameters
-# ============================================================================
+# List inside list — two levels deep
+(def ((np-a np-b) np-c) (list (list 1 2) 3))
+(assert-eq np-a 1 "nested: list-in-list inner")
+(assert-eq np-c 3 "nested: list-in-list outer")
 
-(display "PART 7: Destructuring in Function Parameters")
-(newline)
-(newline)
+# Tuple inside list
+(def ([np-x np-y] np-z) (list [10 20] 30))
+(assert-eq np-x 10 "nested: tuple-in-list inner")
+(assert-eq np-z 30 "nested: tuple-in-list outer")
 
-(defn add-pair ((pa pb)) (+ pa pb))
-(var pair-result (add-pair (list 3 4)))
-(assert-eq pair-result 7 "fn param destructure")
-(display "  (defn add-pair ((pa pb)) (+ pa pb)) => (add-pair (list 3 4)) = ")
-(display pair-result)
-(newline)
+# Struct inside struct
+(def {:outer {:inner np-val}} {:outer {:inner 42}})
+(assert-eq np-val 42 "nested: struct-in-struct")
 
-# Mixed normal and destructured params
-(defn weighted-sum (weight (wa wb))
-  (+ (* weight wa) (* weight wb)))
-(var ws-result (weighted-sum 2 (list 3 4)))
-(assert-eq ws-result 14 "fn mixed params")
-(display "  (defn weighted-sum (weight (wa wb)) ...) => (weighted-sum 2 (list 3 4)) = ")
-(display ws-result)
-(newline)
+# Three levels: struct containing tuple containing a value we want
+(def {:point [_ np-second]} {:point [:skip :target]})
+(assert-eq np-second :target "nested: struct → tuple → element")
 
-# Nested destructuring in params
-(defn deep-sum (((da db) dc))
-  (+ da db dc))
-(var deep-result (deep-sum (list (list 1 2) 3)))
-(assert-eq deep-result 6 "fn nested param destructure")
-(display "  (defn deep-sum (((da db) dc)) ...) => (deep-sum (list (list 1 2) 3)) = ")
-(display deep-result)
-(newline)
-(newline)
+# Mixed: list of [name, {metadata}]
+(def (np-name {:role np-role}) (list "Alice" {:role :admin :id 7}))
+(assert-eq np-name "Alice" "nested: mixed list+struct name")
+(assert-eq np-role :admin "nested: mixed list+struct role")
 
-# ============================================================================
-# PART 8: Wildcard _ Pattern
-# ============================================================================
+(display "  nested list     → a=") (display np-a) (display " c=") (print np-c)
+(display "  struct-in-struct → v=") (print np-val)
+(display "  list+struct mix  → ") (display np-name) (display " ") (print np-role)
 
-(display "PART 8: Wildcard _ Pattern")
-(newline)
-(newline)
 
-# _ discards the matched value — no binding is created
-(def (_ second _) (list 10 20 30))
-(assert-eq second 20 "wildcard skips first and third")
-(display "  (def (_ second _) (list 10 20 30)) => second=")
-(display second)
-(newline)
+# ========================================
+# 6. Mutable destructuring
+# ========================================
 
-# Wildcard in array destructuring
-(def [_ y2] [100 200])
-(assert-eq y2 200 "array wildcard")
-(display "  (def [_ y2] [100 200]) => y2=")
-(display y2)
-(newline)
+# var + destructuring creates mutable bindings.
+(var (mut-a mut-b) (list 1 2))
+(set mut-a 100)
+(assert-eq mut-a 100 "mutable: set after destructure")
 
-# Wildcard in nested destructuring
-(def ((_ nb) nc) (list (list 1 2) 3))
-(assert-eq nb 2 "nested wildcard inner")
-(assert-eq nc 3 "nested wildcard outer")
-(display "  (def ((_ nb) nc) (list (list 1 2) 3)) => nb=")
-(display nb) (display " nc=") (display nc)
-(newline)
+# Works with tuples and structs too
+(var [mut-x mut-y] [10 20])
+(set mut-x (+ mut-x mut-y))
+(assert-eq mut-x 30 "mutable: tuple set x = x + y")
 
-# Wildcard in function parameters
-(defn second-of-pair ((_ b)) b)
-(assert-eq (second-of-pair (list 10 20)) 20 "fn wildcard param")
-(display "  (defn second-of-pair ((_ b)) b) => (second-of-pair (list 10 20)) = ")
-(display (second-of-pair (list 10 20)))
-(newline)
-(newline)
+(var {:count mut-count} {:count 0})
+(set mut-count (+ mut-count 1))
+(set mut-count (+ mut-count 1))
+(assert-eq mut-count 2 "mutable: struct incremented twice")
 
-# ============================================================================
-# PART 9: & rest Pattern
-# ============================================================================
+(display "  var list then set → a=") (print mut-a)
+(display "  var struct, 2 increments → c=") (print mut-count)
 
-(display "PART 9: & rest Pattern")
-(newline)
-(newline)
 
-# Collect remaining list elements
-(def (head & tail) (list 1 2 3 4))
-(assert-eq head 1 "rest: head")
-(assert-eq (first tail) 2 "rest: tail first")
-(assert-eq (length tail) 3 "rest: tail length")
-(display "  (def (head & tail) (list 1 2 3 4)) => head=")
-(display head) (display " tail=") (display tail)
-(newline)
+# ========================================
+# 7. let and let* destructuring
+# ========================================
 
-# Empty rest when all elements consumed
-(def (ra rb & rc) (list 1 2))
-(assert-eq ra 1 "rest empty: first")
-(assert-eq rb 2 "rest empty: second")
-(assert-eq rc (list) "rest empty: rest is empty list")
-(display "  (def (ra rb & rc) (list 1 2)) => ra=")
-(display ra) (display " rb=") (display rb) (display " rc=") (display rc)
-(newline)
+# Destructuring in let — parallel bindings
+(def let-sum (let ([(la lb) (list 10 20)]) (+ la lb)))
+(assert-eq let-sum 30 "let: destructure sum")
 
-# Array rest collects into a sub-array
-(def [ax & ar] [10 20 30])
-(assert-eq ax 10 "array rest: first")
-(assert-eq (get ar 0) 20 "array rest: rest[0]")
-(assert-eq (get ar 1) 30 "array rest: rest[1]")
-(display "  (def [ax & ar] [10 20 30]) => ax=")
-(display ax) (display " ar=") (display ar)
-(newline)
+# let* — sequential: second binding uses the first
+(def star-seq (let* ([(sa sb) (list 1 2)]
+                     [sc (+ sa sb)])
+                sc))
+(assert-eq star-seq 3 "let*: sequential destructure")
 
-# Wildcard + rest combined
-(def (_ & wr) (list 1 2 3))
-(assert-eq (first wr) 2 "wildcard+rest: first of rest")
-(display "  (def (_ & wr) (list 1 2 3)) => wr=")
-(display wr)
-(newline)
+# let* — chained destructuring, each level depends on previous
+(def star-chain
+  (let* ([(ca cb) (list 3 4)]
+         [[cx cy] [ca cb]]
+         [total (+ cx cy)])
+    total))
+(assert-eq star-chain 7 "let*: chained destructure")
 
-# Rest in function parameters (via list destructuring)
-(defn sum-head-next ((hd & r))
-  (if (empty? r)
-    hd
-    (+ hd (first r))))
-(assert-eq (sum-head-next (list 10 20)) 30 "fn rest param")
-(display "  (defn sum-head-next ((hd & r)) ...) => (sum-head-next (list 10 20)) = ")
-(display (sum-head-next (list 10 20)))
-(newline)
-(newline)
+(display "  (let (((a b) (list 10 20))) (+ a b)) → ") (print let-sum)
+(display "  (let* (((a b) ...) (c (+ a b))) c)   → ") (print star-seq)
+(display "  chained let* across 3 bindings        → ") (print star-chain)
 
-# ============================================================================
-# PART 10: Variadic & rest in Function Parameters
-# ============================================================================
 
-(display "PART 10: Variadic & rest in Function Parameters")
-(newline)
-(newline)
+# ========================================
+# 8. Struct/table by-key extraction
+# ========================================
 
-# Collect all arguments into a list
-(defn my-list (& items) items)
-(assert-eq (my-list 1 2 3) (list 1 2 3) "variadic: collect all")
-(display "  (defn my-list (& items) items) => (my-list 1 2 3) = ")
-(display (my-list 1 2 3))
-(newline)
-
-# No extra args → empty list
-(assert-eq (my-list) (list) "variadic: no args => empty list")
-(display "  (my-list) => ")
-(display (my-list))
-(newline)
-
-# Fixed params + rest
-(defn head-and-rest (x & rest) (list x rest))
-(def (hd rst) (head-and-rest 1 2 3))
-(assert-eq hd 1 "variadic: fixed head")
-(assert-eq rst (list 2 3) "variadic: rest list")
-(display "  (defn head-and-rest (x & rest) ...) => (head-and-rest 1 2 3) = ")
-(display (head-and-rest 1 2 3))
-(newline)
-
-# Rest with no extra args
-(def (hd2 rst2) (head-and-rest 42))
-(assert-eq hd2 42 "variadic: fixed only")
-(assert-eq rst2 (list) "variadic: rest empty")
-(display "  (head-and-rest 42) => ")
-(display (head-and-rest 42))
-(newline)
-
-# Variadic with closure capture
-(def multiplier 10)
-(defn scale-all (& nums)
-  (if (empty? nums) (list)
-      (cons (* multiplier (first nums))
-            (scale-all))))
-(display "  Variadic with closure capture: scale-all defined")
-(newline)
-
-# Variadic higher-order: apply-fn
-(defn apply-fn (f & args)
-  (f (first args)))
-(assert-eq (apply-fn (fn (x) (+ x 1)) 10) 11 "variadic higher-order")
-(display "  (defn apply-fn (f & args) (f (first args))) => (apply-fn inc 10) = ")
-(display (apply-fn (fn (x) (+ x 1)) 10))
-(newline)
-(newline)
-
-# ============================================================================
-# PART 11: Practical Examples
-# ============================================================================
-
-(display "PART 11: Practical Examples")
-(newline)
-(newline)
-
-# Swap two values
-(def (first-val second-val) (list 1 2))
-(def (swapped-b swapped-a) (list second-val first-val))
-(assert-eq swapped-a 1 "swap a")
-(assert-eq swapped-b 2 "swap b")
-(display "  Swap: (1, 2) => (")
-(display swapped-a) (display ", ") (display swapped-b) (display ")")
-(newline)
-
-# Destructure a function's return value
-(defn divide-with-remainder (a b)
-  (list (/ a b) (% a b)))
-(def (quotient remainder) (divide-with-remainder 17 5))
-(assert-eq quotient 3 "divmod quotient")
-(assert-eq remainder 2 "divmod remainder")
-(display "  17 / 5 => quotient=")
-(display quotient) (display " remainder=") (display remainder)
-(newline)
-
-# ============================================================================
-# PART 12: Table/Struct Destructuring
-# ============================================================================
-
-(display "PART 12: Table/Struct Destructuring")
-(newline)
-(newline)
-
-# Basic struct destructuring with def
-(def {:name name :age age} {:name "Alice" :age 30})
-(assert-eq name "Alice" "table destr: name")
-(assert-eq age 30 "table destr: age")
-(display "  (def {:name name :age age} {:name \"Alice\" :age 30}) => name=")
-(display name) (display " age=") (display age)
-(newline)
+# Struct: extract named fields
+(def {:name sk-name :age sk-age} {:name "Bob" :age 25})
+(assert-eq sk-name "Bob" "struct key: name")
 
 # Missing key gives nil
-(def {:missing val} {:other 42})
-(assert-eq val nil "table destr: missing key => nil")
-(display "  (def {:missing val} {:other 42}) => val=")
-(display val)
-(newline)
+(def {:missing sk-missing} {:other 42})
+(assert-eq sk-missing nil "struct key: missing => nil")
 
-# Non-table gives nil for all bindings
-(def {:x nx} 42)
-(assert-eq nx nil "table destr: non-table => nil")
-(display "  (def {:x nx} 42) => nx=")
-(display nx)
-(newline)
+# Non-struct gives nil for all bindings
+(def {:x sk-from-int} 42)
+(assert-eq sk-from-int nil "struct key: non-struct => nil")
 
-# Mutable table destructuring
-(def {:a ta} @{:a 99})
-(assert-eq ta 99 "table destr: mutable table")
-(display "  (def {:a ta} @{:a 99}) => ta=")
-(display ta)
-(newline)
+# Mutable table works with the same pattern
+(def {:a sk-from-tbl} @{:a 99 :b 100})
+(assert-eq sk-from-tbl 99 "table key: extract from mutable table")
 
-# Nested table destructuring
-(def {:point {:x px :y py}} {:point {:x 3 :y 4}})
-(assert-eq px 3 "nested table: x")
-(assert-eq py 4 "nested table: y")
-(display "  (def {:point {:x px :y py}} {:point {:x 3 :y 4}}) => px=")
-(display px) (display " py=") (display py)
-(newline)
+# Nested struct extraction — three levels deep
+(def {:config {:db {:host sk-host :port sk-port}}}
+  {:config {:db {:host "localhost" :port 5432}}})
+(assert-eq sk-host "localhost" "nested struct: host")
 
-# Table destructuring in let
-(var let-tbl-result (let (({:a la :b lb} {:a 10 :b 20})) (+ la lb)))
-(assert-eq let-tbl-result 30 "let table destr sum")
-(display "  (let (({:a la :b lb} {:a 10 :b 20})) (+ la lb)) => ")
-(display let-tbl-result)
-(newline)
+# Struct destructuring in function parameters
+(defn point-magnitude [{:x x :y y}]
+  "Compute x + y from a point struct."
+  (+ x y))
+(assert-eq (point-magnitude {:x 3 :y 4}) 7 "fn struct param")
 
-# Table destructuring in function parameters
-(defn point-sum ({:x x :y y}) (+ x y))
-(assert-eq (point-sum {:x 5 :y 7}) 12 "fn table param")
-(display "  (defn point-sum ({:x x :y y}) (+ x y)) => (point-sum {:x 5 :y 7}) = ")
-(display (point-sum {:x 5 :y 7}))
-(newline)
+# Table in let
+(def let-tbl (let ([{:a la :b lb} {:a 10 :b 20}]) (+ la lb)))
+(assert-eq let-tbl 30 "let: table destructure sum")
 
-# Table pattern matching in match
-(var shape {:type :circle :radius 5})
-(var area (match shape
-  ({:type :circle :radius r} (* r r))
-  ({:type :square :side s} (* s s))
-  (_ 0)))
-(assert-eq area 25 "match table: circle area")
-(display "  (match {:type :circle :radius 5} ...) => ")
-(display area)
-(newline)
+(display "  {:name n :age a} → ") (display sk-name) (display ", ") (print sk-age)
+(display "  nested 3-level struct → host=") (print sk-host)
+(display "  missing key → ") (print sk-missing)
 
-# Match falls through on wrong literal key value
-(var shape2 {:type :square :side 7})
-(var area2 (match shape2
-  ({:type :circle :radius r} (* r r))
-  ({:type :square :side s} (* s s))
-  (_ 0)))
-(assert-eq area2 49 "match table: square area")
-(display "  (match {:type :square :side 7} ...) => ")
-(display area2)
-(newline)
 
-# Match rejects non-table values
-(var non-tbl (match 42
-  ({:x x} x)
-  (_ :no-match)))
-(assert-eq non-tbl :no-match "match table: non-table fallback")
-(display "  (match 42 ({:x x} x) (_ :no-match)) => ")
-(display non-tbl)
-(newline)
+# ========================================
+# 9. Match dispatch on struct tags
+# ========================================
 
-# Wildcard value in table destructuring
-(def {:x _ :y ty} {:x 10 :y 20})
-(assert-eq ty 20 "table destr: wildcard value")
-(display "  (def {:x _ :y ty} {:x 10 :y 20}) => ty=")
-(display ty)
-(newline)
+# Pattern matching on literal key values: tagged structs as sum types.
+# {:type :circle :radius r} only matches when :type is literally :circle.
 
-# Table inside list destructuring
-(def (tl-a {:x tl-x}) (list 1 {:x 2}))
-(assert-eq tl-a 1 "table-in-list: list elem")
-(assert-eq tl-x 2 "table-in-list: table elem")
-(display "  (def (tl-a {:x tl-x}) (list 1 {:x 2})) => tl-a=")
-(display tl-a) (display " tl-x=") (display tl-x)
-(newline)
+(defn area [shape]
+  "Compute area from a tagged shape struct."
+  (match shape
+    ({:type :circle :radius r} (* r r))
+    ({:type :square :side s}   (* s s))
+    (_                         0)))
 
-(newline)
-(display "=== All destructuring tests passed ===")
-(newline)
+(assert-eq (area {:type :circle :radius 5}) 25 "match dispatch: circle")
+(assert-eq (area {:type :square :side 7})   49 "match dispatch: square")
+(assert-eq (area {:type :triangle})          0 "match dispatch: fallback")
+(assert-eq (area 42)                         0 "match dispatch: non-struct")
+
+# Nested struct match — extract from inner structs
+(defn db-host [config]
+  "Extract host from a config struct, defaulting to unknown."
+  (match config
+    ({:db {:host h}} h)
+    (_               "unknown")))
+
+(assert-eq (db-host {:db {:host "pg.local"}}) "pg.local" "match: nested struct")
+(assert-eq (db-host {:nodb true})             "unknown" "match: missing :db")
+
+(display "  area(circle r=5) = ") (print (area {:type :circle :radius 5}))
+(display "  area(square s=7) = ") (print (area {:type :square :side 7}))
+(display "  db-host(pg)      = ") (print (db-host {:db {:host "pg"}}))
+
+
+(print "")
+(print "all destructuring passed.")

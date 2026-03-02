@@ -505,6 +505,7 @@ dependencies = [
  "smallvec",
  "stats_alloc",
  "target-lexicon",
+ "unicode-segmentation",
 ]
 
 [[package]]

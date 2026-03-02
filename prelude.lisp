@@ -51,6 +51,11 @@
 (defmacro unless (test & body)
   `(if ,test nil (begin ,;body)))
 
+## error - raise a fiber error signal
+## (error value) => (fiber/signal 1 value)
+(defmacro error (val)
+  `(fiber/signal 1 ,val))
+
 ## try/catch - error handling via fibers
 ## Usage: (try body... (catch e handler...))
 ## The last form must be (catch binding handler-body...)
@@ -171,7 +176,7 @@
                 (let ((,var (string/char-at ,g-iter ,g-idx)))
                   ,;body)
                 (set ,g-idx (+ ,g-idx 1))))))
-         (true (error :type-error "each: not a sequence"))))))
+         (true (error [:type-error "each: not a sequence"]))))))
 
 ## case - equality dispatch (flat pairs)
 ## (case expr val1 body1 val2 body2 ... [default])

@@ -1,7 +1,17 @@
-# Process Model - Erlang-style message passing via fibers
+#!/usr/bin/env elle
+
+# Processes — Erlang-style message passing via fibers
 #
-# yield IS receive. The resume value IS the message. A scheduler mediates.
-#
+# Demonstrates:
+#   yield-as-receive    — yield IS receive, resume value IS the message
+#   Scheduler protocol  — [:send], [:recv], [:self], [:spawn], [:link], [:unlink]
+#   trap-exit           — converting exit signals to messages
+#   spawn-link          — atomic spawn + link
+#   Message ring        — chained forwarders incrementing a value
+#   Fan-in              — multiple workers sending to a collector
+#   Link crash cascade  — linked process death propagation
+#   Unlink              — preventing exit notification
+
 # Protocol (process yields a command, scheduler resumes with the result):
 #
 #   (yield [:send pid msg])    → delivers msg, resumes with :ok
@@ -15,14 +25,12 @@
 
 (import-file "./examples/assertions.lisp")
 
-(display "=== Process Model: Erlang-style Message Passing ===\n")
-
 
 # ========================================
 # Process API (used inside processes)
 # ========================================
 
-(def ! (fn (pid msg) (yield [:send pid msg])))
+(def send (fn [pid msg] (yield [:send pid msg])))
 (def recv (fn () (yield [:recv])))
 (def self (fn () (yield [:self])))
 (def link (fn (pid) (yield [:link pid])))
@@ -38,20 +46,20 @@
 
 (def make-scheduler (fn ()
   # Per-PID state (parallel arrays indexed by PID):
-  (let ((fibers    @[])    # fiber value
-        (mboxes    @[])    # @[@[] ...] — mailbox per PID
-        (resumes   @[])    # pending resume value
-        (statuses  @[])    # :alive | :dead | :error
-        (links     @[])    # @[@[] ...] — linked PIDs per PID
-        (trapping  @[])    # @[bool ...] — trap_exit flag per PID
-        (ready     @[])    # PIDs ready to run
-        (waiting   @[]))   # PIDs blocked on recv
+  (let ([fibers    @[]]    # fiber value
+        [mboxes    @[]]    # @[@[] ...] — mailbox per PID
+        [resumes   @[]]    # pending resume value
+        [statuses  @[]]    # :alive | :dead | :error
+        [links     @[]]    # @[@[] ...] — linked PIDs per PID
+        [trapping  @[]]    # @[bool ...] — trap_exit flag per PID
+        [ready     @[]]    # PIDs ready to run
+        [waiting   @[]])   # PIDs blocked on recv
 
     # ---- helpers ----
 
     (var sched-spawn (fn (closure)
-      (let ((pid (length fibers))
-            (f (fiber/new closure 3)))  # mask=3: catch yield(2) + error(1)
+      (let ([pid (length fibers)]
+            [f (fiber/new closure 3)])  # mask=3: catch yield(2) + error(1)
         (push fibers f)
         (push mboxes @[])
         (push resumes nil)
@@ -83,8 +91,8 @@
 
     # Remove a bidirectional link
     (var remove-link (fn (a b)
-      (let ((a-links (get links a))
-            (b-links (get links b)))
+      (let ([a-links (get links a)]
+            [b-links (get links b)])
         # Remove b from a's links
         (var i 0)
         (while (< i (length a-links))
@@ -107,13 +115,13 @@
 
     # Wake waiting processes that now have messages
     (var wake-waiting (fn ()
-      (let ((still-waiting @[]))
+      (let ([still-waiting @[]])
         (each pid in waiting
           (if (= (get statuses pid) :alive)
             (if (> (length (get mboxes pid)) 0)
               (begin
-                (let* ((mbox (get mboxes pid))
-                       (msg (get mbox 0)))
+                (let* ([mbox (get mboxes pid)]
+                       [msg (get mbox 0)])
                   (remove mbox 0)
                   (put resumes pid msg)
                   (push ready pid)))
@@ -130,10 +138,10 @@
           (push ready pid))
 
         ([:recv]
-          (let ((mbox (get mboxes pid)))
+          (let ([mbox (get mboxes pid)])
             (if (> (length mbox) 0)
               (begin
-                (let ((msg (get mbox 0)))
+                (let ([msg (get mbox 0)])
                   (remove mbox 0)
                   (put resumes pid msg)
                   (push ready pid)))
@@ -144,12 +152,12 @@
           (push ready pid))
 
         ([:spawn closure]
-          (let ((new-pid (sched-spawn closure)))
+          (let ([new-pid (sched-spawn closure)])
             (put resumes pid new-pid)
             (push ready pid)))
 
         ([:spawn-link closure]
-          (let ((new-pid (sched-spawn closure)))
+          (let ([new-pid (sched-spawn closure)])
             (add-link pid new-pid)
             (put resumes pid new-pid)
             (push ready pid)))
@@ -170,17 +178,17 @@
           (push ready pid))
 
         (_
-          (error :protocol-error "unknown scheduler command")))))
+          (error [:protocol-error "unknown scheduler command"])))))
 
     # Run one process: resume it, handle the result
     (var run-one (fn (pid)
       (if (not (= (get statuses pid) :alive))
         nil  # skip dead/errored processes
-        (let ((f (get fibers pid))
-              (resume-val (get resumes pid)))
+        (let ([f (get fibers pid)]
+              [resume-val (get resumes pid)])
           (put resumes pid nil)
           (fiber/resume f resume-val)
-          (let ((bits (fiber/bits f)))
+          (let ([bits (fiber/bits f)])
             (cond
               # Process completed normally
               ((= (fiber/status f) :dead)
@@ -195,7 +203,7 @@
                 (handle-cmd pid (fiber/value f)))
 
               (true
-                (error :scheduler-error "unexpected signal bits"))))))))
+                (error [:scheduler-error "unexpected signal bits"]))))))))
 
     # ---- main loop ----
 
@@ -210,9 +218,9 @@
           (wake-waiting)
 
           (if (and (empty? ready) (not (empty? waiting)))
-            (error :deadlock "all processes waiting, no messages pending"))
+            (error [:deadlock "all processes waiting, no messages pending"]))
 
-          (let ((batch ready))
+          (let ([batch ready])
             (set ready @[])
             (each pid in batch
               (run-one pid)))))))
@@ -221,65 +229,56 @@
 
 
 # ========================================
-# Test 1: Ping-pong
+# 1. Ping-pong
 # ========================================
-(display "\n--- Test 1: Ping-Pong ---\n")
 
-(let ((run (make-scheduler)))
+(let ([run (make-scheduler)])
   (run (fn ()
-    (let ((me (self))
-          (ponger (spawn (fn ()
-                    (let ((msg (recv)))
+    (let ([me (self)]
+          [ponger (spawn (fn ()
+                    (let ([msg (recv)])
                       (match msg
                         ([from :ping]
-                          (! from :pong))))))))
-      (! ponger [me :ping])
-      (let ((reply (recv)))
-        (display "  got: ")
-        (display reply)
-        (display "\n")
-        (assert-eq reply :pong "ping-pong reply is :pong")))))
-  (display "✓ Ping-pong works\n"))
+                          (send from :pong))))))])
+      (send ponger [me :ping])
+      (let ([reply (recv)])
+        (display "  ping-pong reply: ") (print reply)
+        (assert-eq reply :pong "ping-pong reply is :pong"))))))
 
 
 # ========================================
-# Test 2: Ring of processes
+# 2. Ring of processes
 # ========================================
-(display "\n--- Test 2: Message Ring ---\n")
 
-(let ((run (make-scheduler)))
+(let ([run (make-scheduler)])
   (run (fn ()
-    (let ((me (self)))
+    (let ([me (self)])
       (var make-forwarder (fn (next)
         (fn ()
-          (let ((msg (recv)))
-            (! next (+ msg 1))))))
+          (let ([msg (recv)])
+            (send next (+ msg 1))))))
 
-      (let* ((p3 (spawn (make-forwarder me)))
-             (p2 (spawn (make-forwarder p3)))
-             (p1 (spawn (make-forwarder p2))))
-        (! p1 0)
-        (let ((result (recv)))
-          (display "  sent 0, received ")
-          (display result)
-          (display " (passed through 3 forwarders)\n")
-          (assert-eq result 3 "ring increments message 3 times"))))))
-  (display "✓ Message ring works\n"))
+      (let* ([p3 (spawn (make-forwarder me))]
+             [p2 (spawn (make-forwarder p3))]
+             [p1 (spawn (make-forwarder p2))])
+        (send p1 0)
+        (let ([result (recv)])
+          (display "  sent 0 through 3 forwarders, got: ") (print result)
+          (assert-eq result 3 "ring increments message 3 times")))))))
 
 
 # ========================================
-# Test 3: Fan-in
+# 3. Fan-in
 # ========================================
-(display "\n--- Test 3: Fan-in ---\n")
 
-(let ((run (make-scheduler)))
+(let ([run (make-scheduler)])
   (run (fn ()
-    (let ((me (self)))
+    (let ([me (self)])
       (var i 0)
       (while (< i 5)
         (begin
-          (let ((id i))
-            (spawn (fn () (! me id))))
+          (let ([id i])
+            (spawn (fn () (send me id))))
           (set i (+ i 1))))
 
       (var total 0)
@@ -289,127 +288,105 @@
           (set total (+ total (recv)))
           (set i (+ i 1))))
 
-      (display "  sum of worker ids: ")
-      (display total)
-      (display "\n")
-      (assert-eq total 10 "fan-in: 0+1+2+3+4 = 10"))))
-  (display "✓ Fan-in works\n"))
+      (display "  fan-in sum of 5 worker ids: ") (print total)
+      (assert-eq total 10 "fan-in: 0+1+2+3+4 = 10")))))
 
 
 # ========================================
-# Test 4: Link — crash propagation
+# 4. Link — crash propagation
 # ========================================
-(display "\n--- Test 4: Link Crash Propagation ---\n")
 
-# When a linked process crashes, the linked partner should also die.
-# We test this by having a supervisor (trap_exit) observe the cascade.
+# When a linked process crashes, the linked partner also dies.
+# A supervisor (trap_exit) observes the cascade.
 
-(let ((run (make-scheduler)))
+(let ([run (make-scheduler)])
   (run (fn ()
     (trap-exit true)
-    (let ((me (self)))
+    (let ([me (self)])
 
       # Spawn worker-a, link it to us
-      (let ((worker-a (spawn-link (fn ()
+      (let ([worker-a (spawn-link (fn ()
               # worker-a spawns worker-b and links to it
-              (let ((b (spawn-link (fn ()
+              (let ([b (spawn-link (fn ()
                           # worker-b crashes
-                          (fiber/signal 1 [:boom "worker-b crashed"])))))
+                          (fiber/signal 1 [:boom "worker-b crashed"])))])
                 # worker-a waits for something (will be killed by link)
-                (recv))))))
+                (recv))))])
 
         # We should get an EXIT message because worker-a died (linked to us)
-        (let ((msg (recv)))
-          (display "  supervisor received: ")
-          (display msg)
-          (display "\n")
+        (let ([msg (recv)])
+          (display "  supervisor got EXIT from pid ") (display (get msg 1))
+          (display ", reason: ") (print (get msg 2))
           (match msg
             ([:EXIT pid reason]
-              (assert-eq pid worker-a "EXIT from worker-a")
-              (display "  ✓ got EXIT from linked worker\n"))))))))
-
-  (display "✓ Link crash propagation works\n"))
+              (assert-eq pid worker-a "EXIT from worker-a")))))))))
 
 
 # ========================================
-# Test 5: trap_exit — convert signals to messages
+# 5. trap_exit — convert signals to messages
 # ========================================
-(display "\n--- Test 5: trap_exit ---\n")
 
-(let ((run (make-scheduler)))
+(let ([run (make-scheduler)])
   (run (fn ()
     (trap-exit true)
-    (let* ((me (self))
-           (child (spawn-link (fn ()
-                    (fiber/signal 1 [:intentional "test crash"])))))
+    (let* ([me (self)]
+           [child (spawn-link (fn ()
+                    (fiber/signal 1 [:intentional "test crash"])))])
 
-      (let ((msg (recv)))
-        (display "  trapped: ")
-        (display msg)
-        (display "\n")
+      (let ([msg (recv)])
+        (display "  trapped exit: ") (print msg)
         (match msg
           ([:EXIT pid reason]
             (assert-eq pid child "EXIT from child")
             (match reason
               ([:error _]
-                (assert-true true "got error reason")))))))))
-
-  (display "✓ trap_exit works\n"))
+                (assert-true true "got error reason"))))))))))
 
 
 # ========================================
-# Test 6: Normal exit delivers [:EXIT pid [:normal val]]
+# 6. Normal exit delivers [:EXIT pid [:normal val]]
 # ========================================
-(display "\n--- Test 6: Normal Exit Notification ---\n")
 
-(let ((run (make-scheduler)))
+(let ([run (make-scheduler)])
   (run (fn ()
     (trap-exit true)
-    (let ((child (spawn-link (fn () 42))))
-      (let ((msg (recv)))
-        (display "  normal exit: ")
-        (display msg)
-        (display "\n")
+    (let ([child (spawn-link (fn () 42))])
+      (let ([msg (recv)])
+        (display "  normal exit: ") (print msg)
         (match msg
           ([:EXIT pid reason]
             (assert-eq pid child "EXIT from child")
             (match reason
               ([:normal val]
-                (assert-eq val 42 "normal exit value is 42")))))))))
-
-  (display "✓ Normal exit notification works\n"))
+                (assert-eq val 42 "normal exit value is 42"))))))))))
 
 
 # ========================================
-# Test 7: Unlink prevents notification
+# 7. Unlink prevents notification
 # ========================================
-(display "\n--- Test 7: Unlink ---\n")
 
-(let ((run (make-scheduler)))
+(let ([run (make-scheduler)])
   (run (fn ()
     (trap-exit true)
-    (let* ((me (self))
-           (child (spawn-link (fn ()
+    (let* ([me (self)]
+           [child (spawn-link (fn ()
                     # Wait for go signal, then crash
                     (recv)
-                    (fiber/signal 1 [:boom "crash"])))))
+                    (fiber/signal 1 [:boom "crash"])))])
 
       # Unlink before the child crashes
       (unlink child)
 
       # Tell child to proceed
-      (! child :go)
+      (send child :go)
 
       # Send ourselves a marker to prove we don't get EXIT
-      (! me :still-alive)
+      (send me :still-alive)
 
-      (let ((msg (recv)))
-        (display "  after unlink, got: ")
-        (display msg)
-        (display "\n")
-        (assert-eq msg :still-alive "no EXIT after unlink")))))
-
-  (display "✓ Unlink works\n"))
+      (let ([msg (recv)])
+        (display "  after unlink, got: ") (print msg)
+        (assert-eq msg :still-alive "no EXIT after unlink"))))))
 
 
-(display "\n=== All process model tests passed ===\n")
+(print "")
+(print "all processes passed.")

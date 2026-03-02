@@ -7,6 +7,7 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, list, SymbolId, Value};
 use std::cell::RefCell;
+use unicode_segmentation::UnicodeSegmentation;
 
 thread_local! {
     static SYMBOL_TABLE: RefCell<Option<*mut SymbolTable>> = const { RefCell::new(None) };
@@ -167,7 +168,8 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         (SIG_OK, Value::int(b.len() as i64))
     } else if let Some(blob_ref) = args[0].as_blob() {
         (SIG_OK, Value::int(blob_ref.borrow().len() as i64))
-    } else if let Some(r) = args[0].with_string(|s| (SIG_OK, Value::int(s.chars().count() as i64)))
+    } else if let Some(r) =
+        args[0].with_string(|s| (SIG_OK, Value::int(s.graphemes(true).count() as i64)))
     {
         r
     } else if let Some(elems) = args[0].as_tuple() {
@@ -208,7 +210,7 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
     } else if let Some(sid) = args[0].as_symbol() {
         // Get the symbol name from the symbol table context
         if let Some(name) = get_symbol_name(crate::value::SymbolId(sid)) {
-            (SIG_OK, Value::int(name.chars().count() as i64))
+            (SIG_OK, Value::int(name.graphemes(true).count() as i64))
         } else {
             (
                 SIG_ERROR,
@@ -219,7 +221,7 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     } else if let Some(name) = args[0].as_keyword_name() {
-        (SIG_OK, Value::int(name.chars().count() as i64))
+        (SIG_OK, Value::int(name.graphemes(true).count() as i64))
     } else {
         (SIG_ERROR, error_val("type-error", format!(
             "length: expected collection type (list, string, array, tuple, table, struct, symbol, or keyword), got {}",
