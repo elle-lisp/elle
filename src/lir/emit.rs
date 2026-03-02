@@ -659,6 +659,16 @@ impl Emitter {
                 self.pop(); // args
                 self.pop(); // func
             }
+
+            LirInstr::RegionEnter => {
+                self.bytecode.emit(Instruction::RegionEnter);
+                // No stack effect
+            }
+
+            LirInstr::RegionExit => {
+                self.bytecode.emit(Instruction::RegionExit);
+                // No stack effect
+            }
         }
     }
 

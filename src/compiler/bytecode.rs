@@ -192,6 +192,16 @@ pub enum Instruction {
     /// Tail call with elements of an array as arguments (for splice).
     /// Pops args array, pops function, tail calls with array elements.
     TailCallArray,
+
+    /// Enter an allocation region (scope boundary for allocator).
+    /// No operands. Pushes a scope mark on the current FiberHeap.
+    /// No-op for the root fiber (no FiberHeap installed).
+    RegionEnter,
+
+    /// Exit an allocation region (scope boundary for allocator).
+    /// No operands. Pops scope mark and releases scoped objects.
+    /// No-op for the root fiber (no FiberHeap installed).
+    RegionExit,
 }
 
 /// Inline cache entry for function lookups
@@ -409,6 +419,9 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::CallArray | Instruction::TailCallArray => {
                 // No operands (arg count is dynamic, determined by array length)
             }
+            Instruction::RegionEnter | Instruction::RegionExit => {
+                // No operands
+            }
             _ => {}
         }
 
@@ -486,5 +499,31 @@ mod tests {
             let decoded: Instruction = unsafe { std::mem::transmute(byte) };
             assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
         }
+    }
+
+    #[test]
+    fn test_region_instruction_roundtrip() {
+        for instr in [Instruction::RegionEnter, Instruction::RegionExit] {
+            let mut bc = Bytecode::new();
+            bc.emit(instr);
+            assert_eq!(
+                bc.instructions.len(),
+                1,
+                "Region instruction should be 1 byte"
+            );
+            let decoded: Instruction = unsafe { std::mem::transmute(bc.instructions[0]) };
+            assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
+        }
+    }
+
+    #[test]
+    fn test_region_disassembly() {
+        let mut bc = Bytecode::new();
+        bc.emit(Instruction::RegionEnter);
+        bc.emit(Instruction::RegionExit);
+        let lines = disassemble_lines(&bc.instructions);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("RegionEnter"));
+        assert!(lines[1].contains("RegionExit"));
     }
 }

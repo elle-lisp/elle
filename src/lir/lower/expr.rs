@@ -241,11 +241,17 @@ impl Lowerer {
     fn lower_block(&mut self, block_id: &BlockId, body: &[Hir]) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
         let exit_label = self.fresh_label();
+        let scoped = self.can_scope_allocate_block(body);
+
+        if scoped {
+            self.emit_region_enter();
+        }
 
         self.block_lower_contexts.push(BlockLowerContext {
             block_id: *block_id,
             result_reg,
             exit_label,
+            region_depth_at_entry: self.region_depth,
         });
 
         // Lower body (same as lower_begin but simpler — body is typically a single Begin node)
@@ -269,6 +275,10 @@ impl Lowerer {
 
         self.block_lower_contexts.pop();
 
+        if scoped {
+            self.emit_region_exit();
+        }
+
         // Normal exit: jump to the exit label
         self.terminate(Terminator::Jump(exit_label));
         self.start_new_block(exit_label);
@@ -287,15 +297,30 @@ impl Lowerer {
 
         let target_result_reg = target.result_reg;
         let target_exit_label = target.exit_label;
+        let target_region_depth = target.region_depth_at_entry;
 
         // Lower the value expression
         let value_reg = self.lower_expr(value)?;
 
-        // Move value to the block's result register and jump to exit
+        // Move value to the block's result register
         self.emit(LirInstr::Move {
             dst: target_result_reg,
             src: value_reg,
         });
+
+        // Emit compensating RegionExit for each region entered since the
+        // target block was opened. This ensures scope marks are popped
+        // correctly on early exit.
+        let compensating_exits = self.region_depth - target_region_depth;
+        for _ in 0..compensating_exits {
+            self.emit(LirInstr::RegionExit);
+        }
+        // Note: we emit raw RegionExit (not emit_region_exit) because we
+        // don't want to decrement region_depth — the break jumps out of
+        // the block entirely, and the dead code after the break is
+        // unreachable. The block's RegionExit at the normal exit path
+        // handles the depth bookkeeping for the normal flow.
+
         self.terminate(Terminator::Jump(target_exit_label));
 
         // Start a new (unreachable) block for any dead code after the break

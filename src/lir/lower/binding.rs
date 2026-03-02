@@ -8,6 +8,11 @@ impl Lowerer {
         bindings: &[(Binding, Hir)],
         body: &Hir,
     ) -> Result<Reg, String> {
+        let scoped = self.can_scope_allocate_let(bindings, body);
+        if scoped {
+            self.emit_region_enter();
+        }
+
         // Allocate slots and lower initializers
         for (binding, init) in bindings {
             let init_reg = self.lower_expr(init)?;
@@ -56,7 +61,11 @@ impl Lowerer {
                 }
             }
         }
-        self.lower_expr(body)
+        let result = self.lower_expr(body)?;
+        if scoped {
+            self.emit_region_exit();
+        }
+        Ok(result)
     }
 
     pub(super) fn lower_letrec(
@@ -64,6 +73,11 @@ impl Lowerer {
         bindings: &[(Binding, Hir)],
         body: &Hir,
     ) -> Result<Reg, String> {
+        let scoped = self.can_scope_allocate_letrec(bindings, body);
+        if scoped {
+            self.emit_region_enter();
+        }
+
         // First allocate all slots with nil (or cells containing nil)
         for (binding, _) in bindings {
             let nil_reg = self.emit_const(LirConst::Nil)?;
@@ -131,7 +145,11 @@ impl Lowerer {
                 });
             }
         }
-        self.lower_expr(body)
+        let result = self.lower_expr(body)?;
+        if scoped {
+            self.emit_region_exit();
+        }
+        Ok(result)
     }
 
     pub(super) fn lower_define(&mut self, binding: Binding, value: &Hir) -> Result<Reg, String> {

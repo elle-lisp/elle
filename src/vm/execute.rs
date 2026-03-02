@@ -48,8 +48,8 @@ impl VM {
     /// Execute bytecode returning SignalBits (for fiber/closure execution).
     /// The result value is stored in `self.fiber.signal`.
     ///
-    /// Saves/restores the caller's stack around execution. Handles pending
-    /// tail calls in a loop.
+    /// Saves/restores the caller's stack and the active allocator pointer
+    /// around execution. Handles pending tail calls in a loop.
     ///
     /// Returns `(SignalBits, ip)` — the signal and the IP at exit.
     pub fn execute_bytecode_saving_stack(
@@ -58,8 +58,10 @@ impl VM {
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
     ) -> (SignalBits, usize) {
-        // Save the caller's stack
+        // Save the caller's stack and active allocator (Package 4 plumbing;
+        // the allocator pointer is write-only until Package 5 activates it).
         let saved_stack = std::mem::take(&mut self.fiber.stack);
+        let saved_allocator = crate::value::fiber_heap::save_active_allocator();
 
         let mut current_bytecode = bytecode.clone();
         let mut current_constants = constants.clone();
@@ -86,8 +88,9 @@ impl VM {
             }
         };
 
-        // Restore the caller's stack
+        // Restore the caller's stack and active allocator
         self.fiber.stack = saved_stack;
+        crate::value::fiber_heap::restore_active_allocator(saved_allocator);
 
         result
     }

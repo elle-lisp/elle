@@ -136,6 +136,24 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 | `IsTable` | value → bool | Type check: is value a table or struct? (for pattern matching) |
 | `ArrayLen` | array → int | Get array length (for pattern matching) |
 | `TableGetOrNil` | table → value | Get key from table/struct, or nil if missing/wrong type (u16 const_idx operand) |
+| `RegionEnter` | (none) | Push scope mark on FiberHeap (no-op for root fiber) |
+| `RegionExit` | (none) | Pop scope mark and release scoped objects (no-op for root fiber) |
+
+## Allocation regions
+
+`RegionEnter` and `RegionExit` are no-register, no-stack-effect instructions
+that push/pop scope marks on the current FiberHeap. In the VM, they call
+`region_enter()`/`region_exit()` which are no-ops for the root fiber
+(no FiberHeap installed).
+
+The lowerer only emits these instructions when escape analysis determines
+the scope's allocations are safe to release at scope exit. Currently the
+escape analysis is maximally conservative (nothing qualifies), so no region
+instructions are emitted. Function bodies never get region instructions.
+
+`break` emits compensating `RegionExit` instructions for each region entered
+between the break site and the target block. The lowerer tracks `region_depth`
+and each `BlockLowerContext` records `region_depth_at_entry`.
 
 ## Yield as terminator
 

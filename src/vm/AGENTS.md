@@ -165,6 +165,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `call_depth` | `usize` | Stack overflow detection |
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
+| `heap` | `Box<FiberHeap>` | Per-fiber arena for heap allocation (installed as thread-local during child execution) |
 | `signal_mask` | `SignalBits` | Which signals this fiber catches |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
 | `parent_value` | `Option<Value>` | Cached NaN-boxed Value for parent (identity-preserving) |
@@ -189,21 +190,112 @@ When a fiber suspends (via yield instruction or `fiber/signal`):
 
 Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants
-- `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
+- `execute_bytecode_saving_stack`: Saves/restores caller's stack and active_allocator, handles tail calls
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and errors
-- `with_child_fiber`: Shared swap protocol for fiber resume/cancel
+- `with_child_fiber`: Shared swap protocol for fiber resume/cancel. Also
+  manages per-fiber heap routing: saves the current thread-local heap pointer,
+  installs the child fiber's `FiberHeap`, executes, then restores the saved
+  pointer on swap-back. Root fibers have no heap installed (allocate to the
+  global `HEAP_ARENA`); only child fibers get per-fiber heap routing.
+  For yielding fibers (`Effect::Yields`), also provisions a shared allocator
+  via a three-way branch (step 3b): (a) parent has shared_alloc → propagate
+  down, (b) root parent → child creates its own, (c) non-root parent →
+  create on parent's heap. Cleared on swap-back (step 7a).
+
+## Allocation region instructions
+
+`RegionEnter` and `RegionExit` push/pop scope marks on the current FiberHeap
+via `region_enter()`/`region_exit()`. No-op for the root fiber (no FiberHeap
+installed). The lowerer gates emission on escape analysis — currently maximally
+conservative, so no region instructions are emitted in normal code.
+
+## Active allocator pointer
+
+`FiberHeap` has an `active_allocator: *const bumpalo::Bump` pointer that currently
+always points to the fiber's root bump. Supports future scope-level redirection.
+
+**Initialization:** `init_active_allocator()` is called in `with_child_fiber` after
+the child's heap is installed as thread-local (pointer stability requires the heap
+to be in its final Box location).
+
+**Save/restore on Call/Return:** `execute_bytecode_saving_stack` saves the active
+allocator pointer before execution and restores it after, so callee scope changes
+don't leak into the caller's context.
+
+**Save/restore on Yield/Resume:** `SuspendedFrame` carries `active_allocator` so the
+pointer can be restored when a fiber resumes. All construction sites write the current
+value via `save_active_allocator()`.
+
+**Fiber swap:** `with_child_fiber` handles heap swapping. Each fiber's `active_allocator`
+lives on its own `FiberHeap`, so fiber transitions naturally switch allocator context.
+
+**Root fiber:** Has no FiberHeap installed. `save_active_allocator()` returns null,
+`restore_active_allocator()` is a no-op.
+
+## Fiber heap routing
+
+Child fibers each own a `Box<FiberHeap>` (on the `Fiber` struct). When the
+VM swaps to a child fiber via `with_child_fiber`, it installs the child's
+heap as the thread-local allocation target. All `Value::cons()`, `Value::closure()`,
+etc. calls during child execution route to the child's `FiberHeap` instead of
+the global `HEAP_ARENA`. On swap-back, the parent's heap (or null for root)
+is restored.
+
+`FiberHeap` uses bumpalo for bump allocation. Destructor tracking ensures
+`HeapObject` variants with inner heap allocations (`Vec`, `Rc`, `BTreeMap`,
+`Box<str>`) have their `Drop` impls called on `release()` and `clear()`.
+The bump itself only fully resets on `clear()` (fiber death); partial
+`release()` runs destructors but does not reclaim bump memory (bumpalo has
+no partial reset).
+
+The root fiber does NOT install a heap. This is intentional: `execute_bytecode`
+returns `Value`s that outlive the VM. If the root fiber's allocations went to
+a `FiberHeap` owned by the VM, those Values would dangle after `VM::drop()`.
+Root fiber allocations go to `HEAP_ARENA` (thread-local, outlives any VM).
+
+`reset_fiber()` in `core.rs` extracts, clears, and reuses the heap `Box` to
+maintain pointer stability (the thread-local stores a raw pointer to the heap).
+
+## Shared allocator provisioning
+
+When `with_child_fiber` swaps in a yielding child fiber, step 3b provisions
+a `SharedAllocator` for zero-copy value exchange. The child's `FiberHeap`
+receives a raw `*mut SharedAllocator` pointer — all allocations during child
+execution route to this shared allocator instead of the child's private bump.
+
+**Three-way branch** (after swap, `self.fiber` = child, `child_fiber` = parent):
+
+1. **Parent has shared_alloc** (case a): Parent already received a shared_alloc
+   from its own parent (A→B→C chain). Propagate the same pointer down.
+2. **Root parent** (case b, `saved_heap.is_null()`): Root fiber has no FiberHeap.
+   Child creates the shared allocator on its own FiberHeap's `owned_shared`.
+3. **Non-root parent, no shared_alloc** (case c): Create a new shared allocator
+   on the parent's FiberHeap's `owned_shared`.
+
+**Effect gate (M1)**: Only fibers whose closure has `Effect::Yields` (checked
+via `self.fiber.closure.effect.may_yield()`) get shared allocators. Non-yielding
+fibers skip step 3b entirely.
+
+**Per-resume creation (M2 tech debt)**: Each resume of a yielding child creates
+a new shared allocator because `shared_alloc` was nulled on the previous
+swap-back. Old shared allocators accumulate in `owned_shared` until the owner's
+`FiberHeap::clear()`. Optimization (reuse across resumes) is deferred.
+
+**Cleanup (step 7a)**: Before swap-back, `self.fiber.heap.clear_shared_alloc()`
+nulls the child's `shared_alloc` pointer. The shared allocator data remains
+alive in the owner's `owned_shared` Vec.
 
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | ~100 | VM struct, VmResult, public interface |
-| `dispatch.rs` | ~334 | Main execution loop, instruction dispatch, returns `(SignalBits, usize)` |
-| `call.rs` | ~662 | Call, TailCall, JIT dispatch (solo + batch), environment building |
+| `dispatch.rs` | ~373 | Main execution loop, instruction dispatch, returns `(SignalBits, usize)` |
+| `call.rs` | ~823 | Call, TailCall, JIT dispatch (solo + batch), environment building |
 | `signal.rs` | ~177 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch |
-| `fiber.rs` | ~388 | Fiber resume/propagate/cancel, shared swap protocol |
-| `execute.rs` | ~94 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack` |
-| `core.rs` | ~453 | VM struct, `resume_suspended`, stack trace helpers |
+| `fiber.rs` | ~555 | Fiber resume/propagate/cancel, shared swap protocol, shared alloc provisioning |
+| `execute.rs` | ~147 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack` |
+| `core.rs` | ~456 | VM struct, `resume_suspended`, stack trace helpers |
 | `stack.rs` | ~100 | Stack operations: LoadConst, Pop, Dup |
 | `variables.rs` | ~150 | LoadGlobal, StoreGlobal, LoadUpvalue, etc. |
 | `control.rs` | ~100 | Jump, JumpIfFalse, Return |
