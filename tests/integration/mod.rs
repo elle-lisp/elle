@@ -119,6 +119,9 @@ mod fn_graph {
 mod table_keys {
     include!("table_keys.rs");
 }
+mod arena {
+    include!("arena.rs");
+}
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
 //     include!("fn_flow.rs");

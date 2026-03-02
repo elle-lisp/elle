@@ -436,6 +436,16 @@ pub fn heap_arena_release(mark: ArenaMark) {
     HEAP_ARENA.with(|arena| arena.borrow_mut().objects.truncate(mark.0))
 }
 
+/// Current number of live objects in the thread-local heap arena.
+pub fn heap_arena_len() -> usize {
+    HEAP_ARENA.with(|arena| arena.borrow().objects.len())
+}
+
+/// Current capacity of the thread-local heap arena Vec.
+pub fn heap_arena_capacity() -> usize {
+    HEAP_ARENA.with(|arena| arena.borrow().objects.capacity())
+}
+
 /// Allocate a heap object on the thread-local arena and return a Value pointing to it.
 pub fn alloc(obj: HeapObject) -> Value {
     HEAP_ARENA.with(|arena| {

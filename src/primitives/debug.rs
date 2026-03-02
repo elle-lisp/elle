@@ -298,6 +298,42 @@ pub fn prim_primitive_meta(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
+/// (arena-count) — return current heap arena object count
+///
+/// Returns a bare integer. Unlike vm/arena (which returns a struct),
+/// this has zero measurement overhead — integers are immediate values.
+pub fn prim_arena_count(args: &[Value]) -> (SignalBits, Value) {
+    if !args.is_empty() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("arena-count: expected 0 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    (
+        SIG_QUERY,
+        Value::cons(Value::keyword("arena-count"), Value::NIL),
+    )
+}
+
+/// (vm/arena) — return heap arena statistics
+///
+/// Returns a struct with :count (live objects) and :capacity (vec capacity).
+pub fn prim_arena_stats(args: &[Value]) -> (SignalBits, Value) {
+    if !args.is_empty() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("vm/arena: expected 0 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_QUERY, Value::cons(Value::keyword("arena"), Value::NIL))
+}
+
 // ============================================================================
 // Disassembly
 // ============================================================================
@@ -886,6 +922,28 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         example:
             "(struct-get (vm/primitive-meta \"cons\") \"doc\") #=> \"Construct a cons cell...\"",
         aliases: &["primitive-meta"],
+    },
+    PrimitiveDef {
+        name: "vm/arena",
+        func: prim_arena_stats,
+        effect: Effect::none(),
+        arity: Arity::Exact(0),
+        doc: "Return heap arena statistics as a struct with :count and :capacity.",
+        params: &[],
+        category: "meta",
+        example: "(vm/arena)",
+        aliases: &["arena-stats"],
+    },
+    PrimitiveDef {
+        name: "arena-count",
+        func: prim_arena_count,
+        effect: Effect::none(),
+        arity: Arity::Exact(0),
+        doc: "Return current heap arena object count as an integer (zero measurement overhead).",
+        params: &[],
+        category: "meta",
+        example: "(arena-count)",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "debug/print",

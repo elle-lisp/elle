@@ -57,6 +57,15 @@
 (def global? (fn (sym) (vm/query "global?" sym)))
 (def fiber/self (fn () (vm/query "fiber/self" nil)))
 
+## ── Arena introspection ─────────────────────────────────────────────
+
+(def arena/allocs (fn (thunk)
+  "Run thunk, return (result alloc-count) where alloc-count is net heap objects allocated."
+  (let* ((before (arena-count))
+         (result (thunk))
+         (after (arena-count)))
+    (list result (- after before 1)))))
+
 ## ── Graph visualization ─────────────────────────────────────────────
 
 (defn fn/dot-escape (s)
