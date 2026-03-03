@@ -19,10 +19,38 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  test:
-    name: Test Suite
+  changes:
+    name: Detect Changes
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    outputs:
+      source: ${{ steps.filter.outputs.source }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for source changes
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.merge_group.base_sha }}"
+          fi
+          CHANGED=$(git diff --name-only "$BASE" HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '\.(rs|lisp)$|^Cargo\.|^Makefile$|^\.cargo/'; then
+            echo "source=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "source=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    name: Test Suite
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -34,8 +62,9 @@ jobs:
 
   fmt:
     name: Rustfmt
+    needs: changes
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.source == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -45,8 +74,9 @@ jobs:
 
   clippy:
     name: Clippy
+    needs: changes
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.source == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -58,8 +88,9 @@ jobs:
 
   audit:
     name: Dependency Audit
+    needs: changes
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.source == 'true'
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -72,8 +103,9 @@ jobs:
 
   examples:
     name: Examples
+    needs: changes
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.source == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -318,27 +350,30 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [test, fmt, clippy, examples, docs, benchmarks]
+    needs: [changes, test, fmt, clippy, examples, docs, benchmarks]
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
     steps:
       - name: Check test
-        if: needs.test.result != 'success'
+        if: needs.test.result == 'failure'
         run: exit 1
       - name: Check fmt
-        if: needs.fmt.result != 'success'
+        if: needs.fmt.result == 'failure'
         run: exit 1
       - name: Check clippy
-        if: needs.clippy.result != 'success'
+        if: needs.clippy.result == 'failure'
         run: exit 1
       - name: Check examples
-        if: needs.examples.result != 'success'
+        if: needs.examples.result == 'failure'
         run: exit 1
       - name: Check docs
         if: needs.docs.result == 'failure'
         run: exit 1
       - name: Check benchmarks
         if: needs.benchmarks.result == 'failure'
+        run: exit 1
+      - name: Check changes detection
+        if: needs.changes.result == 'failure'
         run: exit 1
       - name: Success
         run: echo "All checks passed"
