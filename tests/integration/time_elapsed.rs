@@ -34,7 +34,7 @@ fn extract_float_list(list_val: Value) -> Vec<f64> {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn elapsed_time_is_non_negative(_seed in 0u32..50) {

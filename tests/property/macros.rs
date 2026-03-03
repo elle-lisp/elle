@@ -18,7 +18,7 @@ use proptest::prelude::*;
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: defn produces the same result as def + fn
     #[test]
@@ -97,7 +97,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: let* allows later bindings to reference earlier ones
     #[test]
@@ -169,7 +169,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: (-> v (+ a)) is equivalent to (+ v a)
     #[test]
@@ -222,7 +222,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: (->> v (- a)) is equivalent to (- a v)
     #[test]
@@ -263,7 +263,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: (block v) returns v
     #[test]
@@ -342,7 +342,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: when macro works correctly
     #[test]
@@ -428,7 +428,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     /// Property: defn with let* and thread-first
     #[test]

@@ -61,7 +61,7 @@ fn clock_monotonic_never_decreases() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn clock_monotonic_is_non_negative(_seed in 0u32..50) {
@@ -86,7 +86,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn clock_realtime_is_plausible(_seed in 0u32..50) {
@@ -195,7 +195,7 @@ fn monotonic_and_realtime_advance_together() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
+    #![proptest_config(crate::common::proptest_cases(20))]
 
     #[test]
     fn monotonic_and_realtime_both_advance(_seed in 0u32..20) {

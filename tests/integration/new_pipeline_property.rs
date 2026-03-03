@@ -12,7 +12,7 @@ use proptest::prelude::*;
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     #[test]
     fn addition_commutative(a in -1000i64..1000, b in -1000i64..1000) {
@@ -95,7 +95,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     #[test]
     fn equality_reflexive(a in -1000i64..1000) {
@@ -150,7 +150,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     #[test]
     fn if_true_returns_then(a in -100i64..100, b in -100i64..100) {
@@ -199,7 +199,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     #[test]
     fn let_binds_value(a in -1000i64..1000) {
@@ -247,7 +247,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn lambda_identity(a in -1000i64..1000) {
@@ -294,7 +294,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn list_first_returns_first(a in -100i64..100, b in -100i64..100) {
@@ -339,7 +339,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     #[test]
     fn not_involution(b in prop::bool::ANY) {
@@ -394,7 +394,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn match_literal_exact(a in -100i64..100) {
@@ -431,7 +431,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn array_length_correct(len in 0usize..10) {
@@ -462,7 +462,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn match_multiple_literals_first_matches(a in -100i64..100) {
@@ -525,7 +525,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn each_iterates_all_elements(len in 1usize..5) {
@@ -561,7 +561,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn closure_mutation_persists(_start in 0i64..100, increments in 1usize..5) {
@@ -743,7 +743,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn nested_let_in_if(cond in prop::bool::ANY, a in -100i64..100, b in -100i64..100) {
@@ -800,7 +800,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn begin_returns_last(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
@@ -830,7 +830,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn cond_first_true(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
@@ -875,7 +875,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn quasiquote_with_unquote(a in -100i64..100) {
@@ -898,7 +898,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
 
 
@@ -917,7 +917,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn make_adder_works(n in -50i64..50, x in -50i64..50) {
@@ -988,7 +988,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn manual_curry_add(a in -50i64..50, b in -50i64..50) {
@@ -1010,7 +1010,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn recursive_factorial(n in 0u8..8) {
@@ -1090,7 +1090,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
+    #![proptest_config(crate::common::proptest_cases(20))]
 
     #[test]
     fn store_function_in_list(a in -50i64..50, b in -50i64..50) {
@@ -1125,7 +1125,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn map_adds_one(a in -50i64..50, b in -50i64..50, c in -50i64..50) {
@@ -1562,7 +1562,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn letrec_mutual_recursion_in_lambda(n in 0u8..20) {

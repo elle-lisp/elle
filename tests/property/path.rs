@@ -52,7 +52,7 @@ fn arb_path() -> impl Strategy<Value = String> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(crate::common::proptest_cases(1000))]
 
     // =========================================================================
     // join / parent roundtrip

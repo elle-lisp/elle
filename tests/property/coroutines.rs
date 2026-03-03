@@ -26,7 +26,7 @@ fn collect_list_ints(value: &Value) -> Vec<i64> {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn sequential_yields_in_order(n in 1usize..=10, values in prop::collection::vec(-1000i64..1000, 1..=10)) {
@@ -72,7 +72,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn resume_values_flow_into_yield(resume_values in prop::collection::vec(-100i64..100, 1..=5)) {
@@ -126,7 +126,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn yield_in_conditional(cond in prop::bool::ANY, a in -1000i64..1000, b in -1000i64..1000) {
@@ -153,7 +153,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn yield_in_loop(n in 1usize..=5) {
@@ -192,7 +192,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn coroutine_state_transitions(num_yields in 1usize..=5) {
@@ -249,7 +249,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn interleaved_coroutines(
@@ -506,7 +506,7 @@ fn effect_threading_yields_effect_on_closure() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
+    #![proptest_config(crate::common::proptest_cases(20))]
 
     #[test]
     fn yielding_closure_has_correct_effect(value in -1000i64..1000) {

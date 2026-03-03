@@ -7,7 +7,7 @@ use crate::common::eval_source_bare as eval_source;
 use proptest::prelude::*;
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     #[test]
     fn arithmetic_deterministic(a in -100i64..100, b in -100i64..100) {

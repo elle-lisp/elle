@@ -6,7 +6,7 @@ use proptest::prelude::*;
 // === integer conversion roundtrip ===
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     #[test]
     fn integer_from_int_is_identity(n in -10000i64..=10000) {
@@ -17,7 +17,7 @@ proptest! {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     #[test]
     fn integer_from_string_roundtrip(n in -10000i64..=10000) {
@@ -30,7 +30,7 @@ proptest! {
 // === float conversion roundtrip ===
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     #[test]
     fn float_from_int_preserves_value(n in -10000i64..=10000) {
@@ -44,7 +44,7 @@ proptest! {
 // === number->string roundtrip ===
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     #[test]
     fn number_to_string_int_roundtrip(n in -10000i64..=10000) {
@@ -57,7 +57,7 @@ proptest! {
 // === string conversion ===
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     #[test]
     fn string_from_int_matches_format(n in -10000i64..=10000) {
@@ -69,7 +69,7 @@ proptest! {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     #[test]
     fn string_from_bool_is_correct(b in prop::bool::ANY) {
@@ -84,7 +84,7 @@ proptest! {
 // === integer truncation from float ===
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     #[test]
     fn integer_from_float_truncates(n in -1000i64..=1000) {

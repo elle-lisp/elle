@@ -22,7 +22,7 @@ fn infer_effect(source: &str) -> Result<Effect, String> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     // =========================================================================
     // Pure expressions: should NEVER have may_yield()
