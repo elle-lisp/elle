@@ -29,13 +29,13 @@ pub enum HirPattern {
         rest: Option<Box<HirPattern>>,
     },
 
-    /// Match a tuple [...] pattern with optional rest (emits IsTuple guard)
+    /// Match a tuple \[...\] pattern with optional rest (emits IsTuple guard)
     Tuple {
         elements: Vec<HirPattern>,
         rest: Option<Box<HirPattern>>,
     },
 
-    /// Match an array @[...] pattern with optional rest (emits IsArray guard)
+    /// Match an array @\[...\] pattern with optional rest (emits IsArray guard)
     Array {
         elements: Vec<HirPattern>,
         rest: Option<Box<HirPattern>>,

@@ -435,19 +435,19 @@ pub fn prim_fiber_propagate(args: &[Value]) -> (SignalBits, Value) {
     (SIG_PROPAGATE, args[0])
 }
 
-/// (fiber/cancel fiber value) → value
+/// (fiber/cancel fiber \[value\]) → value
 ///
 /// Inject an error into a suspended fiber. The error is injected directly
 /// into the target fiber (does not walk the child chain).
 ///
 /// Returns SIG_CANCEL — the VM handles the cancellation.
 pub fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
+    if args.is_empty() || args.len() > 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("fiber/cancel: expected 2 arguments, got {}", args.len()),
+                format!("fiber/cancel: expected 1-2 arguments, got {}", args.len()),
             ),
         );
     }
@@ -471,7 +471,7 @@ pub fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
         FiberStatus::New | FiberStatus::Suspended => {
             // Valid for cancel — store the error value on the fiber
             handle.with_mut(|fiber| {
-                fiber.signal = Some((SIG_ERROR, args[1]));
+                fiber.signal = Some((SIG_ERROR, args.get(1).copied().unwrap_or(Value::NIL)));
             });
         }
         FiberStatus::Alive => {
@@ -625,12 +625,12 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "fiber/cancel",
         func: prim_fiber_cancel,
         effect: Effect::raises(),
-        arity: Arity::Exact(2),
-        doc: "Inject an error into a suspended fiber",
-        params: &["fiber", "error"],
+        arity: Arity::Range(1, 2),
+        doc: "Inject an error into a suspended fiber. Error value defaults to nil.",
+        params: &["fiber", "error?"],
         category: "fiber",
-        example: "(fiber/cancel f error)",
-        aliases: &[],
+        example: "(fiber/cancel f)\n(fiber/cancel f :reason)",
+        aliases: &["cancel"],
     },
 ];
 
@@ -888,6 +888,24 @@ mod tests {
     #[test]
     fn test_fiber_mask_wrong_type() {
         let (sig, _) = prim_fiber_mask(&[Value::int(42)]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_cancel_one_arg_defaults_nil() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(SIG_ERROR as i64)]);
+        let (sig, _) = prim_fiber_cancel(&[fiber_val]);
+        assert_eq!(sig, SIG_CANCEL);
+        // Verify the error value stored on the fiber is nil
+        fiber_val.as_fiber().unwrap().with(|fiber| {
+            assert_eq!(fiber.signal, Some((SIG_ERROR, Value::NIL)));
+        });
+    }
+
+    #[test]
+    fn test_fiber_cancel_zero_args_errors() {
+        let (sig, _) = prim_fiber_cancel(&[]);
         assert_eq!(sig, SIG_ERROR);
     }
 }

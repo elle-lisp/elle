@@ -100,7 +100,7 @@ Performance optimizations:
 
 ### Debugging toolkit and effect unification (PR #291, Feb 2026)
 - `disbit`/`disjit` primitives for bytecode and Cranelift IR inspection
-- Introspection predicates: `closure?`, `jit?`, `pure?`, `coro?`, `raises?`,
+- Introspection predicates: `closure?`, `jit?`, `pure?`, `coro?`, `fn/errors?`,
   `arity`, `captures`, `bytecode-size`
 - Effect type reworked to struct `{ yield_behavior, may_raise }`
 - `is_pure()` fixed — pure functions CAN raise
