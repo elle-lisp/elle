@@ -25,7 +25,7 @@ context, matching existing behavior).
 Switch 10 property test files to use it. Property tests never use stdlib
 functions (verified by grep — zero Elle-level hits for `map`, `filter`, `fold`,
 `call-count`, `global?`, `fiber/self`, `time/stopwatch`, `time/elapsed`,
-`fn/flow`, `fn/graph`, `fn/save-graph`, `fn/dot-escape`).
+`fn/flow`, `fn/cfg`, `fn/cfg-label`, `fn/cfg-dot`, `fn/cfg-mermaid`).
 
 Prelude macros (`defn`, `let*`, `->`, `->>`, `when`, `unless`, `try`/`catch`,
 `protect`, `defer`, `with`, `yield*`, `each`, `ffi/defbind`) are loaded by
