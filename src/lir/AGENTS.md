@@ -146,10 +146,27 @@ that push/pop scope marks on the current FiberHeap. In the VM, they call
 `region_enter()`/`region_exit()` which are no-ops for the root fiber
 (no FiberHeap installed).
 
-The lowerer only emits these instructions when escape analysis determines
-the scope's allocations are safe to release at scope exit. Currently the
-escape analysis is maximally conservative (nothing qualifies), so no region
-instructions are emitted. Function bodies never get region instructions.
+The lowerer emits these instructions when escape analysis (in `lower/escape.rs`)
+determines the scope's allocations are safe to release at scope exit.
+Function bodies never get region instructions.
+
+**Escape analysis conditions (all must hold):**
+1. No binding is captured by a nested lambda
+2. Body cannot suspend (`may_suspend()`)
+3. Body result is provably a NaN-boxed immediate (`result_is_safe`)
+4. Body contains no `set` to bindings outside the scope
+
+For `let`/`letrec`: all four conditions. `letrec` delegates to `let`.
+For `block`: conditions 1-4 plus no `break` nodes in the body.
+
+`result_is_safe` returns `true` for: literals (int, float, bool, nil,
+keyword, empty-list), `if`/`begin`/`cond`/`and`/`or` where all result
+positions are recursively safe, and calls to intrinsics (`BinOp`,
+`CmpOp`, `UnaryOp`) with correct arity.
+
+**Known limitation (E5/E6):** If the body passes a scope-allocated
+value to a function that stores it externally, the analysis cannot
+detect this. Requires interprocedural analysis. Accepted for Tier 0.
 
 `break` emits compensating `RegionExit` instructions for each region entered
 between the break site and the target block. The lowerer tracks `region_depth`
@@ -190,7 +207,8 @@ No new bytecode instructions — break compiles to existing Move + Jump.
 | `mod.rs` | 20 | Re-exports |
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
 | `intrinsics.rs` | ~55 | `IntrinsicOp` enum, maps primitive SymbolIds to specialized LIR instructions (BinOp, CmpOp, UnaryOp) |
-| `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point |
+| `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point, `can_scope_allocate_*` analysis |
+| `lower/escape.rs` | ~340 | Escape analysis helpers: `result_is_safe`, `body_contains_outward_set`, `body_contains_break` |
 | `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
 | `lower/binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
 | `lower/lambda.rs` | ~250 | fn lowering, closure capture, cell wrapping |

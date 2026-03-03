@@ -122,6 +122,9 @@ mod table_keys {
 mod arena {
     include!("arena.rs");
 }
+mod escape {
+    include!("escape.rs");
+}
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
 //     include!("fn_flow.rs");
