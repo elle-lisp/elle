@@ -768,6 +768,15 @@ pub fn prim_take(args: &[Value]) -> (SignalBits, Value) {
     }
 
     let count = match args[0].as_int() {
+        Some(n) if n < 0 => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("take: count must be non-negative, got {}", n),
+                ),
+            );
+        }
         Some(n) => n as usize,
         None => {
             return (
@@ -801,6 +810,15 @@ pub fn prim_drop(args: &[Value]) -> (SignalBits, Value) {
     }
 
     let count = match args[0].as_int() {
+        Some(n) if n < 0 => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("drop: count must be non-negative, got {}", n),
+                ),
+            );
+        }
         Some(n) => n as usize,
         None => {
             return (

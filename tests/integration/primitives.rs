@@ -654,3 +654,93 @@ fn test_fn_errors_on_non_closure() {
     assert_eq!(eval_source("(fn/errors? 42)").unwrap(), Value::FALSE);
     assert_eq!(eval_source("(fn/errors? \"hello\")").unwrap(), Value::FALSE);
 }
+
+// === take/drop negative count (#434) ===
+
+#[test]
+fn test_take_negative_count_errors() {
+    let result = eval_source("(take -1 (list 1 2 3))");
+    assert!(result.is_err(), "take with negative count should error");
+    assert!(result.unwrap_err().contains("non-negative"));
+}
+
+#[test]
+fn test_drop_negative_count_errors() {
+    let result = eval_source("(drop -1 (list 1 2 3))");
+    assert!(result.is_err(), "drop with negative count should error");
+    assert!(result.unwrap_err().contains("non-negative"));
+}
+
+#[test]
+fn test_take_zero() {
+    assert_eq!(
+        eval_source("(take 0 (list 1 2 3))").unwrap(),
+        Value::EMPTY_LIST
+    );
+}
+
+#[test]
+fn test_drop_zero() {
+    assert_eq!(
+        eval_source("(drop 0 (list 1 2 3))").unwrap(),
+        eval_source("(list 1 2 3)").unwrap()
+    );
+}
+
+// === Bitwise float truncation (#432) ===
+
+#[test]
+fn test_bit_and_float_truncation() {
+    assert_eq!(eval_source("(bit/and 12.7 10.3)").unwrap(), Value::int(8));
+}
+
+#[test]
+fn test_bit_or_float_truncation() {
+    assert_eq!(eval_source("(bit/or 12.7 10.3)").unwrap(), Value::int(14));
+}
+
+#[test]
+fn test_bit_xor_float_truncation() {
+    assert_eq!(eval_source("(bit/xor 12.7 10.3)").unwrap(), Value::int(6));
+}
+
+#[test]
+fn test_bit_not_float_truncation() {
+    // 0.9 truncates to 0, bit/not 0 = -1
+    assert_eq!(eval_source("(bit/not 0.9)").unwrap(), Value::int(-1));
+}
+
+#[test]
+fn test_bit_shl_float_value() {
+    // 1.9 truncates to 1, shift left 3 = 8
+    assert_eq!(eval_source("(bit/shl 1.9 3)").unwrap(), Value::int(8));
+}
+
+#[test]
+fn test_bit_shr_float_value() {
+    // 8.7 truncates to 8, shift right 2 = 2
+    assert_eq!(eval_source("(bit/shr 8.7 2)").unwrap(), Value::int(2));
+}
+
+#[test]
+fn test_bit_and_nan_errors() {
+    let result = eval_source("(bit/and (sqrt -1.0) 1)");
+    assert!(result.is_err(), "NaN should error in bitwise ops");
+    assert!(result.unwrap_err().contains("non-finite"));
+}
+
+#[test]
+fn test_bit_and_inf_errors() {
+    let result = eval_source("(bit/and (exp 1000.0) 1)");
+    assert!(result.is_err(), "infinity should error in bitwise ops");
+    assert!(result.unwrap_err().contains("non-finite"));
+}
+
+#[test]
+fn test_bit_and_neg_float() {
+    // -3.7 truncates to -3
+    assert_eq!(
+        eval_source("(bit/and -3.7 255)").unwrap(),
+        eval_source("(bit/and -3 255)").unwrap()
+    );
+}
