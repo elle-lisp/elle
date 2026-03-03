@@ -8,11 +8,13 @@
 //! HIR → Lower → LIR → Emit → Bytecode
 //! ```
 
+mod display;
 mod emit;
 pub mod intrinsics;
 mod lower;
 mod types;
 
+pub use display::terminator_kind;
 pub use emit::Emitter;
 pub use lower::Lowerer;
 pub use types::{
