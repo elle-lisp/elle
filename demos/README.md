@@ -149,15 +149,15 @@ DateTime (YYYYMMDDTHHmmSSZ): 20230208T153045Z
 ### ✓ FIXED: Janet Bug #155: Array Accumulation in Recursion
 Janet's `array/concat` in recursive backtracking contexts failed to accumulate solutions.
 - File: `nqueens/nqueens.janet`
-- Issue: [#155](https://github.com/disruptek/elle/issues/155)
-- Fix: [PR #158](https://github.com/disruptek/elle/pull/158) - Corrected queen array ordering
+- Issue: [#155](https://github.com/elle-lisp/elle/issues/155)
+- Fix: [PR #158](https://github.com/elle-lisp/elle/pull/158) - Corrected queen array ordering
 - Previous Impact: All test sizes returned 0 solutions
 - Current Status: All test sizes return correct solution counts
 
 ### ✓ FIXED: Elle Bug #154: Incomplete Solution Search
 Elle now correctly accumulates all solutions in recursive backtracking.
 - File: `nqueens/nqueens.lisp`
-- Issue: [#154](https://github.com/disruptek/elle/issues/154)
+- Issue: [#154](https://github.com/elle-lisp/elle/issues/154)
 - Fix: Provided working implementation that correctly uses append
 - Previous Impact: All test sizes returned 1 solution instead of correct count
 - Current Status: N=8 finds 92 solutions correctly

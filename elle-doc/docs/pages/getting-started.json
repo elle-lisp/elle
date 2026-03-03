@@ -192,7 +192,7 @@
       "content": [
         {
           "type": "note",
-          "text": "Elle is under active development. Some features described in this documentation may change. Check the [GitHub repository](https://github.com/disruptek/elle) for the latest updates.",
+          "text": "Elle is under active development. Some features described in this documentation may change. Check the [GitHub repository](https://github.com/elle-lisp/elle) for the latest updates.",
           "kind": "info"
         }
       ]

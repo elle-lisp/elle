@@ -48,9 +48,9 @@ jobs:
 
   test:
     name: Test Suite
-    needs: changes
+    needs: [changes, examples]
     runs-on: ubuntu-latest
-    if: needs.changes.outputs.source == 'true'
+    if: needs.changes.outputs.source == 'true' && needs.examples.result == 'success'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -191,19 +191,19 @@ jobs:
           cat > site/robots.txt << 'EOF'
           User-agent: *
           Allow: /
-          Sitemap: https://disruptek.github.io/elle/sitemap.txt
+          Sitemap: https://elle-lisp.github.io/elle/sitemap.txt
           EOF
           # Create sitemap
           cat > site/sitemap.txt << 'EOF'
-          https://disruptek.github.io/elle/
-          https://disruptek.github.io/elle/getting-started.html
-          https://disruptek.github.io/elle/language-guide.html
-          https://disruptek.github.io/elle/stdlib-reference.html
-          https://disruptek.github.io/elle/examples.html
-          https://disruptek.github.io/elle/api/elle/
-          https://disruptek.github.io/elle/api/elle/vm/
-          https://disruptek.github.io/elle/api/elle/ffi/
-          https://disruptek.github.io/elle/api/elle/compiler/
+          https://elle-lisp.github.io/elle/
+          https://elle-lisp.github.io/elle/getting-started.html
+          https://elle-lisp.github.io/elle/language-guide.html
+          https://elle-lisp.github.io/elle/stdlib-reference.html
+          https://elle-lisp.github.io/elle/examples.html
+          https://elle-lisp.github.io/elle/api/elle/
+          https://elle-lisp.github.io/elle/api/elle/vm/
+          https://elle-lisp.github.io/elle/api/elle/ffi/
+          https://elle-lisp.github.io/elle/api/elle/compiler/
           EOF
       - name: Fetch benchmark data
         run: |
