@@ -46,7 +46,7 @@ Run the following GitHub CLI command:
 
 ```bash
 # Set up main branch protection
-gh api repos/disruptek/elle/branches/main/protection \
+gh api repos/elle-lisp/elle/branches/main/protection \
   -f required_status_checks='{
     "strict": true,
     "contexts": ["All Checks Passed"]
