@@ -107,13 +107,13 @@
 
 (var sym1 (gensym))
 (var sym2 (gensym))
-(assert-false (eq? sym1 sym2) "gensym symbols are unique")
+(assert-false (identical? sym1 sym2) "gensym symbols are unique")
 (display "  gensym => ") (print sym1)
 
 # With prefix for readability
 (var tmp1 (gensym "tmp"))
 (var tmp2 (gensym "tmp"))
-(assert-false (eq? tmp1 tmp2) "prefixed gensym symbols are unique")
+(assert-false (identical? tmp1 tmp2) "prefixed gensym symbols are unique")
 (display "  (gensym \"tmp\") => ") (print tmp1)
 
 

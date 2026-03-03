@@ -5,7 +5,7 @@
 ##
 ## Functions:
 ##   - assert-eq(actual, expected, msg)
-##     Assert that actual equals expected (using = for numbers, eq? for symbols)
+##     Assert that actual equals expected (using =, which is numeric-aware)
 ##   - assert-equal(actual, expected, msg)
 ##     Alias for assert-eq
 ##   - assert-true(val, msg)
@@ -27,43 +27,34 @@
 ## act as contracts for the implementation.
 
 (def assert-eq (fn (actual expected msg)
-  "Assert that actual equals expected (using = for numbers, eq? for symbols)"
-  (let ([matches
-    (if (symbol? expected)
-        (eq? actual expected)
-        (= actual expected))])
-    (if matches
-        true
-        (begin
-          (display "FAIL: ")
-          (display msg)
-          (display "\n  Expected: ")
-          (display expected)
-          (display "\n  Actual: ")
-          (display actual)
-          (display "\n")
-          (exit 1))))))
+  "Assert that actual equals expected"
+  (if (= actual expected)
+      true
+      (begin
+        (display "FAIL: ")
+        (display msg)
+        (display "\n  Expected: ")
+        (display expected)
+        (display "\n  Actual: ")
+        (display actual)
+        (display "\n")
+        (exit 1)))))
 
 (def assert-true (fn (val msg)
-  "Assert that val is #t"
+  "Assert that val is true"
   (assert-eq val true msg)))
 
 (def assert-false (fn (val msg)
-  "Assert that val is #f"
+  "Assert that val is false"
   (assert-eq val false msg)))
 
 (def assert-list-eq (fn (actual expected msg)
   "Assert that two lists are equal (same length and elements)"
   (if (= (length actual) (length expected))
-      # Check each element - use a simple loop approach
-      # NOTE: letrec is required here because check-all calls itself recursively.
-      # A plain let would leave check-all unbound in its own body.
       (letrec ((check-all (fn (index)
         (if (>= index (length actual))
             true
-            (if (if (symbol? (get expected index))
-                    (eq? (get actual index) (get expected index))
-                    (= (get actual index) (get expected index)))
+            (if (= (get actual index) (get expected index))
                 (check-all (+ index 1))
                 (begin
                   (display "FAIL: ")
@@ -93,7 +84,7 @@
 ## Assert that a value is not nil
 (def assert-not-nil (fn (val msg)
   "Assert that val is not nil"
-  (if (not (eq? val nil))
+  (if (not (nil? val))
       true
       (begin
         (display "FAIL: ")

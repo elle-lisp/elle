@@ -5,7 +5,9 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
-/// Equality comparison
+/// Equality comparison — numeric-aware.
+/// If both values are numbers, compares numerically (int 1 == float 1.0).
+/// Otherwise, uses structural equality (PartialEq).
 pub fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -13,6 +15,31 @@ pub fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "arity-error",
                 format!("=: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    // Fast path: bitwise identical (covers same-type immediates)
+    if args[0] == args[1] {
+        return (SIG_OK, Value::TRUE);
+    }
+    // Numeric coercion: if both are numbers, compare as f64
+    if args[0].is_number() && args[1].is_number() {
+        if let (Some(a), Some(b)) = (args[0].as_number(), args[1].as_number()) {
+            return (SIG_OK, if a == b { Value::TRUE } else { Value::FALSE });
+        }
+    }
+    (SIG_OK, Value::FALSE)
+}
+
+/// Strict identity comparison — bitwise/structural equality with no coercion.
+/// This is what `=` used to be: (identical? 1 1.0) is false.
+pub fn prim_identical(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("identical?: expected 2 arguments, got {}", args.len()),
             ),
         );
     }
@@ -153,11 +180,22 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_eq,
         effect: Effect::none(),
         arity: Arity::Exact(2),
-        doc: "Test equality of two values",
+        doc: "Test equality. Numeric-aware: (= 1 1.0) is true. For strict identity, use identical?",
         params: &["a", "b"],
         category: "comparison",
-        example: "(= 1 1)",
-        aliases: &["eq?"],
+        example: "(= 1 1) #=> true\n(= 1 1.0) #=> true\n(= \"a\" \"a\") #=> true",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "identical?",
+        func: prim_identical,
+        effect: Effect::none(),
+        arity: Arity::Exact(2),
+        doc: "Test strict identity. No numeric coercion: (identical? 1 1.0) is false.",
+        params: &["a", "b"],
+        category: "comparison",
+        example: "(identical? 1 1) #=> true\n(identical? 1 1.0) #=> false",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "<",

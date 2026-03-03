@@ -1902,13 +1902,13 @@ fn test_fiber_self_identity() {
     let result = eval_full(
         "(let ((f (fiber/new (fn () (fiber/self)) 0)))
            (fiber/resume f nil)
-           (eq? f (fiber/value f)))",
+            (identical? f (fiber/value f)))",
     )
     .unwrap();
     assert_eq!(
         result,
         Value::TRUE,
-        "fiber/self should be eq? to the fiber handle"
+        "fiber/self should be identical? to the fiber handle"
     );
 }
 

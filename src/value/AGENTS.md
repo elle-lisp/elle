@@ -45,7 +45,7 @@ Runtime value representation using NaN-boxing.
 
 Fibers maintain cached NaN-boxed `Value`s alongside their handle references
 so that `fiber/parent` and `fiber/child` return identity-preserving values
-(i.e., `(eq? (fiber/parent f) (fiber/parent f))` is `true`):
+(i.e., `(identical? (fiber/parent f) (fiber/parent f))` is `true`):
 
 | Field | Type | Purpose |
 |-------|------|---------|
