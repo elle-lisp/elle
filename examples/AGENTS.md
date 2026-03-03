@@ -40,8 +40,9 @@ complete file inventory with themes and coverage.
 `assert-list-eq`, `assert-not-nil`, `assert-string-eq`. All print
 expected-vs-actual on failure and `(exit 1)`.
 
-`assert-eq` uses `eq?` for symbols, `=` for everything else. For list
+`assert-eq` uses `=` (numeric-aware equality) for all comparisons. For list
 comparison use `assert-list-eq` (element-wise, handles length mismatch).
+For strict identity checks (no numeric coercion), use `identical?`.
 
 ## Gotchas
 

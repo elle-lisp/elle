@@ -4,9 +4,21 @@ use crate::value::{error_val, Value, SIG_ERROR};
 pub fn handle_eq(vm: &mut VM) {
     let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Eq");
     let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Eq");
-    vm.fiber
-        .stack
-        .push(if a == b { Value::TRUE } else { Value::FALSE });
+    // Fast path: bitwise identical
+    if a == b {
+        vm.fiber.stack.push(Value::TRUE);
+        return;
+    }
+    // Numeric coercion: int 1 == float 1.0
+    if a.is_number() && b.is_number() {
+        if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
+            vm.fiber
+                .stack
+                .push(if x == y { Value::TRUE } else { Value::FALSE });
+            return;
+        }
+    }
+    vm.fiber.stack.push(Value::FALSE);
 }
 
 pub fn handle_lt(vm: &mut VM) {

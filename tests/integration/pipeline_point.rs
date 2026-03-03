@@ -181,16 +181,16 @@ fn test_struct_type_check() {
 #[test]
 fn test_type_of_table() {
     // (type-of (table)) returns :table keyword
-    // We verify by checking that (eq? (type-of (table)) :table) is true
-    let result = eval_source("(eq? (type-of (table)) :table)");
+    // We verify by checking that (= (type-of (table)) :table) is true
+    let result = eval_source("(= (type-of (table)) :table)");
     assert_eq!(result.unwrap(), Value::bool(true));
 }
 
 #[test]
 fn test_type_of_struct() {
     // (type-of (struct)) returns :struct keyword
-    // We verify by checking that (eq? (type-of (struct)) :struct) is true
-    let result = eval_source("(eq? (type-of (struct)) :struct)");
+    // We verify by checking that (= (type-of (struct)) :struct) is true
+    let result = eval_source("(= (type-of (struct)) :struct)");
     assert_eq!(result.unwrap(), Value::bool(true));
 }
 
@@ -829,7 +829,7 @@ fn test_put_array_mutable_same_reference() {
     let result = eval_source(
         r#"(let ((a @[1 2 3]))
              (let ((a2 (put a 0 99)))
-               (eq? a a2)))"#,
+               (identical? a a2)))"#,
     );
     assert_eq!(result.unwrap(), Value::bool(true));
 }
@@ -996,7 +996,7 @@ fn test_put_table_mutable_same_reference() {
     let result = eval_source(
         r#"(let ((t @{:a 1}))
              (let ((t2 (put t :a 99)))
-               (eq? t t2)))"#,
+               (identical? t t2)))"#,
     );
     assert_eq!(result.unwrap(), Value::bool(true));
 }
@@ -1149,7 +1149,7 @@ fn test_push_returns_same_array() {
     let result = eval_source(
         r#"(let ((a @[1 2]))
              (let ((a2 (push a 3)))
-               (eq? a a2)))"#,
+               (identical? a a2)))"#,
     );
     assert_eq!(result.unwrap(), Value::bool(true));
 }
@@ -1426,7 +1426,7 @@ fn test_insert_returns_same_array() {
     let result = eval_source(
         r#"(let ((a @[1 3]))
              (let ((a2 (insert a 1 2)))
-               (eq? a a2)))"#,
+               (identical? a a2)))"#,
     );
     assert_eq!(result.unwrap(), Value::bool(true));
 }
@@ -1541,7 +1541,7 @@ fn test_remove_returns_same_array() {
     let result = eval_source(
         r#"(let ((a @[1 2 3]))
              (let ((a2 (remove a 1)))
-               (eq? a a2)))"#,
+               (identical? a a2)))"#,
     );
     assert_eq!(result.unwrap(), Value::bool(true));
 }
@@ -1636,7 +1636,7 @@ fn test_append_arrays_returns_same_reference() {
     let result = eval_source(
         r#"(let ((a @[1 2]))
              (let ((a2 (append a @[3 4])))
-               (eq? a a2)))"#,
+               (identical? a a2)))"#,
     );
     assert_eq!(result.unwrap(), Value::bool(true));
 }

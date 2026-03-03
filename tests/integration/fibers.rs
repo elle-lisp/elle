@@ -327,7 +327,7 @@ fn test_fiber_propagate_child_identity() {
                            (fiber/propagate inner))
                          2)))
             (fiber/resume outer)
-            (eq? inner (fiber/child outer))))
+            (identical? inner (fiber/child outer))))
         "#,
     );
     assert!(result.is_ok(), "Expected ok, got: {:?}", result);
@@ -466,7 +466,7 @@ fn test_three_level_nested_fiber_error_propagation() {
 
 #[test]
 fn test_fiber_parent_identity() {
-    // fiber/parent called twice on the same fiber should return eq? values
+    // fiber/parent called twice on the same fiber should return identical? values
     let result = eval_source(
         r#"
         (let ((f (fiber/new (fn () 42) 0)))
@@ -476,7 +476,7 @@ fn test_fiber_parent_identity() {
                            42)
                          0)))
             (fiber/resume outer)
-            (eq? (fiber/parent f) (fiber/parent f))))
+            (identical? (fiber/parent f) (fiber/parent f))))
         "#,
     );
     assert!(result.is_ok(), "Expected ok, got: {:?}", result);
@@ -489,7 +489,7 @@ fn test_fiber_parent_identity() {
 
 #[test]
 fn test_fiber_child_identity() {
-    // fiber/child called twice on the same fiber should return eq? values
+    // fiber/child called twice on the same fiber should return identical? values
     let result = eval_source(
         r#"
         (let ((inner (fiber/new (fn () (fiber/signal 1 "err")) 0)))
@@ -499,7 +499,7 @@ fn test_fiber_child_identity() {
                            42)
                          1)))
             (fiber/resume outer)
-            (eq? (fiber/child outer) (fiber/child outer))))
+            (identical? (fiber/child outer) (fiber/child outer))))
         "#,
     );
     // inner errors, not caught by inner's mask=0, propagates to outer.
