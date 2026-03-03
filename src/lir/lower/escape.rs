@@ -37,14 +37,19 @@ impl Lowerer {
     /// Check if the result of a HIR expression is provably a NaN-boxed
     /// immediate (not a heap pointer to something allocated inside the scope).
     ///
-    /// Returns `true` only for expressions that are guaranteed to produce
-    /// non-heap values: literals, intrinsic arithmetic/comparison/logical
-    /// operations, and control flow where all result positions are safe.
+    /// `scope_bindings` contains the bindings introduced by the let/letrec
+    /// being analyzed. A `Var` referencing a binding NOT in this set is
+    /// safe to return (the value was allocated before the scope's
+    /// `RegionEnter`). A `Var` referencing a scope binding is safe only
+    /// if its init expression is itself provably immediate.
+    ///
+    /// Returns `true` for: literals, intrinsic/whitelisted calls, Var
+    /// references to outer bindings (or scope bindings with immediate inits),
+    /// and control flow where all result positions are safe.
     ///
     /// Returns `false` for anything that might produce a heap-allocated
-    /// value: variables (might hold heap pointers), non-intrinsic calls,
-    /// lambdas, strings, quotes, etc.
-    pub(super) fn result_is_safe(&self, hir: &Hir) -> bool {
+    /// value: non-intrinsic calls, lambdas, strings, quotes, etc.
+    pub(super) fn result_is_safe(&self, hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
         match &hir.kind {
             // Literals: all NaN-boxed immediates
             HirKind::Int(_)
@@ -54,17 +59,30 @@ impl Lowerer {
             | HirKind::Keyword(_)
             | HirKind::EmptyList => true,
 
+            // Var: safe if binding is from outside the scope (value was
+            // allocated before RegionEnter) or if the binding is in-scope
+            // but its init expression is provably immediate.
+            HirKind::Var(binding) => {
+                match scope_bindings.iter().find(|(b, _)| b == binding) {
+                    None => true, // outer binding — safe
+                    Some((_, init)) => self.result_is_safe(init, scope_bindings),
+                }
+            }
+
             // Control flow: recurse into all result positions
             HirKind::If {
                 then_branch,
                 else_branch,
                 ..
-            } => self.result_is_safe(then_branch) && self.result_is_safe(else_branch),
+            } => {
+                self.result_is_safe(then_branch, scope_bindings)
+                    && self.result_is_safe(else_branch, scope_bindings)
+            }
 
             HirKind::Begin(exprs) => {
                 // Empty begin produces nil (an immediate)
                 match exprs.last() {
-                    Some(last) => self.result_is_safe(last),
+                    Some(last) => self.result_is_safe(last, scope_bindings),
                     None => true,
                 }
             }
@@ -74,10 +92,12 @@ impl Lowerer {
                 else_branch,
             } => {
                 // All clause bodies must be safe
-                let clauses_safe = clauses.iter().all(|(_, body)| self.result_is_safe(body));
+                let clauses_safe = clauses
+                    .iter()
+                    .all(|(_, body)| self.result_is_safe(body, scope_bindings));
                 // Missing else produces nil (safe); present else must be safe
                 let else_safe = match else_branch {
-                    Some(branch) => self.result_is_safe(branch),
+                    Some(branch) => self.result_is_safe(branch, scope_bindings),
                     None => true,
                 };
                 clauses_safe && else_safe
@@ -85,14 +105,14 @@ impl Lowerer {
 
             HirKind::And(exprs) | HirKind::Or(exprs) => {
                 // Short-circuit: any sub-expression could be the result
-                exprs.iter().all(|e| self.result_is_safe(e))
+                exprs.iter().all(|e| self.result_is_safe(e, scope_bindings))
             }
 
             // Intrinsic calls that return immediates
             HirKind::Call { func, args, .. } => self.call_result_is_safe(func, args),
 
             // Everything else: conservatively unsafe
-            // String, Var, Lambda, Let, Letrec, Block, While, Match,
+            // String, Lambda, Let, Letrec, Block, While, Match,
             // Yield, Quote, Eval, Set, Define, Destructure, Break
             _ => false,
         }

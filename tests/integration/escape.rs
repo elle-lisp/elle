@@ -168,11 +168,42 @@ fn region_emitted_for_unary_minus() {
     assert!(has_region("(let ((x 42)) (- x))"));
 }
 
+// ── Positive: Var in result position (Tier 3) ──────────────────────
+
+#[test]
+fn region_emitted_when_returning_outer_binding() {
+    // Inner let returns outer binding — outer value was allocated
+    // before inner let's RegionEnter, so RegionExit won't free it.
+    assert!(has_region("(let ((x 42)) (let ((temp (list 1 2 3))) x))"));
+}
+
+#[test]
+fn region_emitted_when_returning_outer_in_branches() {
+    // Both branches of if return safe values (outer binding or intrinsic)
+    assert!(has_region(
+        "(let ((x 1)) (let ((y (list 1 2 3))) (if (empty? y) x (+ x 1))))"
+    ));
+}
+
+#[test]
+fn region_emitted_when_returning_scope_binding_with_immediate_init() {
+    // Scope binding x has immediate init (42) — returning it is safe
+    assert!(has_region("(let ((x 42)) x)"));
+}
+
+#[test]
+fn region_emitted_for_block_returning_any_var() {
+    // Blocks have no bindings, so any Var is from outside — safe.
+    assert!(has_region("(let ((x 1)) (block (list 1 2 3) x))"));
+}
+
 // ── Negative: scopes that must NOT emit RegionEnter/RegionExit ──────
 
 #[test]
-fn no_region_when_result_is_var() {
-    // Body returns binding value → might be heap-allocated → unsafe
+fn no_region_when_result_is_scope_var_with_heap_init() {
+    // Returns own scope binding whose init is (list ...) — heap-allocated.
+    // The init is not provably immediate, so returning the scope binding
+    // is unsafe (RegionExit would free the list).
     assert!(!has_region("(let ((x (list 1 2 3))) x)"));
 }
 
@@ -471,6 +502,40 @@ fn wrong_arity_whitelisted_primitive_signals_error() {
     let result = eval_source("(let ((x (list 1 2 3))) (length x 99))");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("arity"));
+}
+
+// ── Correctness: Tier 3 outer-Var returns correct values ────────────
+
+#[test]
+fn correct_outer_binding_returned_from_scope() {
+    // Inner let does work with temp, returns outer binding x
+    assert_eq!(
+        eval_source("(let ((x 42)) (let ((temp (list 1 2 3))) x))").unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn correct_scope_binding_with_immediate_init() {
+    // Scope binding x holds 42 (immediate), returned directly
+    assert_eq!(eval_source("(let ((x 42)) x)").unwrap(), Value::int(42));
+}
+
+#[test]
+fn correct_outer_heap_binding_survives_scope() {
+    // Outer binding holds a list (heap). Inner let scope-allocates,
+    // returns outer binding. The list survives because it was allocated
+    // before the inner scope's RegionEnter.
+    assert_eq!(
+        eval_source(
+            "(let ((outer (list 1 2 3)))
+               (let ((temp (list 4 5 6)))
+                 (length temp))
+               (length outer))"
+        )
+        .unwrap(),
+        Value::int(3)
+    );
 }
 
 // ── Regression: unsafe patterns must produce correct results ────────

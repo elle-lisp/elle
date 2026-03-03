@@ -297,11 +297,25 @@ fn count_in_bytecode(source: &str, needle: &str) -> usize {
 }
 
 #[test]
-fn test_let_no_region_when_result_is_var() {
-    // Body returns a variable → result_is_safe returns false.
-    // No scope allocation, no region instructions.
-    assert!(!bytecode_contains("(let* ((x 1)) x)", "RegionEnter"));
-    assert!(!bytecode_contains("(let* ((x 1)) x)", "RegionExit"));
+fn test_let_region_when_result_is_var_with_immediate_init() {
+    // Body returns scope binding whose init is immediate (1).
+    // Tier 3 recognizes this as safe → scope allocation fires.
+    assert!(bytecode_contains("(let* ((x 1)) x)", "RegionEnter"));
+    assert!(bytecode_contains("(let* ((x 1)) x)", "RegionExit"));
+}
+
+#[test]
+fn test_let_no_region_when_result_is_var_with_heap_init() {
+    // Body returns scope binding whose init is (list 1 2 3) — heap.
+    // result_is_safe returns false → no scope allocation.
+    assert!(!bytecode_contains(
+        "(let* ((x (list 1 2 3))) x)",
+        "RegionEnter"
+    ));
+    assert!(!bytecode_contains(
+        "(let* ((x (list 1 2 3))) x)",
+        "RegionExit"
+    ));
 }
 
 #[test]

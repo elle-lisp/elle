@@ -160,11 +160,15 @@ Function bodies never get region instructions.
 For `let`/`letrec`: all five conditions. `letrec` delegates to `let`.
 For `block`: conditions 1-4 plus no `break` nodes in the body.
 
-`result_is_safe` returns `true` for: literals (int, float, bool, nil,
-keyword, empty-list), `if`/`begin`/`cond`/`and`/`or` where all result
-positions are recursively safe, calls to intrinsics (`BinOp`,
-`CmpOp`, `UnaryOp`) with correct arity, and calls to whitelisted
-immediate-returning primitives (Tier 1).
+`result_is_safe` takes `scope_bindings: &[(Binding, &Hir)]` — the
+bindings introduced by the let/letrec being analyzed. It returns
+`true` for: literals, `Var` referencing an outer binding (not in
+scope set), `Var` referencing a scope binding whose init is provably
+immediate (Tier 3), `if`/`begin`/`cond`/`and`/`or` where all result
+positions are recursively safe, calls to intrinsics (`BinOp`, `CmpOp`,
+`UnaryOp`) with correct arity (including unary `-` as `Neg`, Tier 2),
+and calls to whitelisted immediate-returning primitives (Tier 1).
+For blocks, `scope_bindings` is empty — any Var is outer and safe.
 
 **Tier 1 primitive whitelist** (in `intrinsics.rs`): `length`, `empty?`,
 `abs`, `floor`, `ceil`, `round`, `type`, `type-of`, and all type

@@ -231,7 +231,9 @@ impl Lowerer {
         }
 
         // Condition 3: result is immediate
-        if !self.result_is_safe(body) {
+        let scope_binding_refs: Vec<(Binding, &Hir)> =
+            bindings.iter().map(|(b, init)| (*b, init)).collect();
+        if !self.result_is_safe(body, &scope_binding_refs) {
             return false;
         }
 
@@ -271,8 +273,10 @@ impl Lowerer {
         }
 
         // Condition 2: result is immediate (empty body → nil → safe)
+        // Blocks have no bindings, so scope_bindings is empty — any Var
+        // references something from outside and is safe to return.
         if let Some(last) = body.last() {
-            if !self.result_is_safe(last) {
+            if !self.result_is_safe(last, &[]) {
                 return false;
             }
         }
