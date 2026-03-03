@@ -654,3 +654,290 @@ fn test_fn_errors_on_non_closure() {
     assert_eq!(eval_source("(fn/errors? 42)").unwrap(), Value::FALSE);
     assert_eq!(eval_source("(fn/errors? \"hello\")").unwrap(), Value::FALSE);
 }
+
+// === take/drop negative count (#434) ===
+
+#[test]
+fn test_take_negative_count_errors() {
+    let result = eval_source("(take -1 (list 1 2 3))");
+    assert!(result.is_err(), "take with negative count should error");
+    assert!(result.unwrap_err().contains("non-negative"));
+}
+
+#[test]
+fn test_drop_negative_count_errors() {
+    let result = eval_source("(drop -1 (list 1 2 3))");
+    assert!(result.is_err(), "drop with negative count should error");
+    assert!(result.unwrap_err().contains("non-negative"));
+}
+
+#[test]
+fn test_take_zero() {
+    assert_eq!(
+        eval_source("(take 0 (list 1 2 3))").unwrap(),
+        Value::EMPTY_LIST
+    );
+}
+
+#[test]
+fn test_drop_zero() {
+    assert_eq!(
+        eval_source("(drop 0 (list 1 2 3))").unwrap(),
+        eval_source("(list 1 2 3)").unwrap()
+    );
+}
+
+// === Bitwise float truncation (#432) ===
+
+#[test]
+fn test_bit_and_float_truncation() {
+    assert_eq!(eval_source("(bit/and 12.7 10.3)").unwrap(), Value::int(8));
+}
+
+#[test]
+fn test_bit_or_float_truncation() {
+    assert_eq!(eval_source("(bit/or 12.7 10.3)").unwrap(), Value::int(14));
+}
+
+#[test]
+fn test_bit_xor_float_truncation() {
+    assert_eq!(eval_source("(bit/xor 12.7 10.3)").unwrap(), Value::int(6));
+}
+
+#[test]
+fn test_bit_not_float_truncation() {
+    // 0.9 truncates to 0, bit/not 0 = -1
+    assert_eq!(eval_source("(bit/not 0.9)").unwrap(), Value::int(-1));
+}
+
+#[test]
+fn test_bit_shl_float_value() {
+    // 1.9 truncates to 1, shift left 3 = 8
+    assert_eq!(eval_source("(bit/shl 1.9 3)").unwrap(), Value::int(8));
+}
+
+#[test]
+fn test_bit_shr_float_value() {
+    // 8.7 truncates to 8, shift right 2 = 2
+    assert_eq!(eval_source("(bit/shr 8.7 2)").unwrap(), Value::int(2));
+}
+
+#[test]
+fn test_bit_and_nan_errors() {
+    let result = eval_source("(bit/and (sqrt -1.0) 1)");
+    assert!(result.is_err(), "NaN should error in bitwise ops");
+    assert!(result.unwrap_err().contains("non-finite"));
+}
+
+#[test]
+fn test_bit_and_inf_errors() {
+    let result = eval_source("(bit/and (exp 1000.0) 1)");
+    assert!(result.is_err(), "infinity should error in bitwise ops");
+    assert!(result.unwrap_err().contains("non-finite"));
+}
+
+#[test]
+fn test_bit_and_neg_float() {
+    // -3.7 truncates to -3
+    assert_eq!(
+        eval_source("(bit/and -3.7 255)").unwrap(),
+        eval_source("(bit/and -3 255)").unwrap()
+    );
+}
+
+// === first polymorphism (#423) ===
+
+#[test]
+fn test_first_list() {
+    assert_eq!(eval_source("(first (list 1 2 3))").unwrap(), Value::int(1));
+}
+
+#[test]
+fn test_first_empty_list() {
+    assert_eq!(eval_source("(first (list))").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_first_tuple() {
+    assert_eq!(eval_source("(first [1 2 3])").unwrap(), Value::int(1));
+}
+
+#[test]
+fn test_first_empty_tuple() {
+    assert_eq!(eval_source("(first [])").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_first_array() {
+    assert_eq!(eval_source("(first @[1 2 3])").unwrap(), Value::int(1));
+}
+
+#[test]
+fn test_first_empty_array() {
+    assert_eq!(eval_source("(first @[])").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_first_string() {
+    assert_eq!(eval_source(r#"(first "abc")"#).unwrap(), Value::string("a"));
+}
+
+#[test]
+fn test_first_empty_string() {
+    assert_eq!(eval_source(r#"(first "")"#).unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_first_non_sequence_errors() {
+    let result = eval_source("(first 42)");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("type"));
+}
+
+// === rest polymorphism (#423) ===
+
+#[test]
+fn test_rest_list() {
+    // rest of (1 2 3) is (2 3)
+    assert_eq!(
+        eval_source("(first (rest (list 1 2 3)))").unwrap(),
+        Value::int(2)
+    );
+}
+
+#[test]
+fn test_rest_empty_list() {
+    assert_eq!(eval_source("(rest (list))").unwrap(), Value::EMPTY_LIST);
+}
+
+#[test]
+fn test_rest_single_list() {
+    assert_eq!(eval_source("(rest (list 1))").unwrap(), Value::EMPTY_LIST);
+}
+
+#[test]
+fn test_rest_tuple() {
+    // rest of [1 2 3] is [2 3] — a tuple
+    assert_eq!(
+        eval_source("(length (rest [1 2 3]))").unwrap(),
+        Value::int(2)
+    );
+    // verify it's a tuple by checking tuple?
+    assert_eq!(eval_source("(tuple? (rest [1 2 3]))").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_rest_empty_tuple() {
+    assert_eq!(eval_source("(tuple? (rest []))").unwrap(), Value::TRUE);
+    assert_eq!(eval_source("(length (rest []))").unwrap(), Value::int(0));
+}
+
+#[test]
+fn test_rest_array() {
+    // rest of @[1 2 3] is @[2 3] — an array
+    assert_eq!(
+        eval_source("(length (rest @[1 2 3]))").unwrap(),
+        Value::int(2)
+    );
+    assert_eq!(
+        eval_source("(array? (rest @[1 2 3]))").unwrap(),
+        Value::TRUE
+    );
+}
+
+#[test]
+fn test_rest_empty_array() {
+    assert_eq!(eval_source("(array? (rest @[]))").unwrap(), Value::TRUE);
+    assert_eq!(eval_source("(length (rest @[]))").unwrap(), Value::int(0));
+}
+
+#[test]
+fn test_rest_string() {
+    assert_eq!(eval_source(r#"(rest "abc")"#).unwrap(), Value::string("bc"));
+}
+
+#[test]
+fn test_rest_empty_string() {
+    assert_eq!(eval_source(r#"(rest "")"#).unwrap(), Value::string(""));
+}
+
+#[test]
+fn test_rest_single_string() {
+    assert_eq!(eval_source(r#"(rest "a")"#).unwrap(), Value::string(""));
+}
+
+#[test]
+fn test_rest_non_sequence_errors() {
+    let result = eval_source("(rest 42)");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("type"));
+}
+
+// === reverse polymorphism (#431) ===
+
+#[test]
+fn test_reverse_list() {
+    assert_eq!(
+        eval_source("(first (reverse (list 1 2 3)))").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_reverse_empty_list() {
+    assert_eq!(eval_source("(reverse (list))").unwrap(), Value::EMPTY_LIST);
+}
+
+#[test]
+fn test_reverse_tuple() {
+    assert_eq!(
+        eval_source("(tuple? (reverse [1 2 3]))").unwrap(),
+        Value::TRUE
+    );
+    assert_eq!(
+        eval_source("(get (reverse [1 2 3]) 0)").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_reverse_empty_tuple() {
+    assert_eq!(eval_source("(tuple? (reverse []))").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_reverse_array() {
+    assert_eq!(
+        eval_source("(array? (reverse @[1 2 3]))").unwrap(),
+        Value::TRUE
+    );
+    assert_eq!(
+        eval_source("(get (reverse @[1 2 3]) 0)").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_reverse_empty_array() {
+    assert_eq!(eval_source("(array? (reverse @[]))").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_reverse_string() {
+    assert_eq!(
+        eval_source(r#"(reverse "abc")"#).unwrap(),
+        Value::string("cba")
+    );
+}
+
+#[test]
+fn test_reverse_empty_string() {
+    assert_eq!(eval_source(r#"(reverse "")"#).unwrap(), Value::string(""));
+}
+
+#[test]
+fn test_reverse_non_sequence_errors() {
+    let result = eval_source("(reverse 42)");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("type"));
+}

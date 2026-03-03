@@ -200,7 +200,9 @@ Things that look wrong but aren't:
   See `src/value/fiber.rs` lines 138-165 for the constants and partitioning
   comment.
 - Destructuring uses **silent nil semantics**: missing values become `nil`,
-  wrong types produce `nil`, no runtime errors. This is separate from `match`
+  except `CdrOrNil` which returns `EMPTY_LIST` for non-cons inputs (the rest
+  of an exhausted list is an empty list, not absence).
+  Wrong types produce `nil`, no runtime errors. This is separate from `match`
   pattern matching which is conditional. `CarOrNil`/`CdrOrNil`/`ArrayRefOrNil`/
   `ArraySliceFrom`/`TableGetOrNil` are dedicated bytecode instructions for
   this — they never signal errors. `ArrayRefOrNil` and `ArraySliceFrom` handle
@@ -241,8 +243,8 @@ Things that look wrong but aren't:
 - `;expr` is the splice reader macro (Janet-style). It marks a value for
   array-spreading at call sites and data constructors. `(splice expr)` is the
   long form. `;` is a delimiter, so `a;b` is three tokens. `,;` is
-  unquote-splicing (inside quasiquote), not comma + splice. Splice only works
-  on arrays and tuples (indexed types). Structs and tables reject splice at
+  unquote-splicing (inside quasiquote), not comma + splice. Splice works
+  on arrays, tuples, and lists. Structs and tables reject splice at
   compile time (key-value semantics). When a call has spliced args, the lowerer
   builds an args array (`MakeArray` → `ArrayExtend`/`ArrayPush` → `CallArray`)
   instead of the normal `Call` instruction. Arity checking is disabled for

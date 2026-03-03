@@ -243,14 +243,48 @@ fn test_yield_through_splice() {
 
 #[test]
 fn test_splice_with_list() {
-    // Splicing a cons list (not array/tuple) should error at runtime.
-    // Lists are not indexed types.
+    // Splicing a cons list should work — lists are converted to vec internally
     let result = eval_source(
         r#"(begin
              (def xs (list 1 2 3))
              (+ ;xs))"#,
     );
-    assert!(result.is_err(), "splicing a list should error");
+    assert_eq!(result.unwrap(), Value::int(6));
+}
+
+#[test]
+fn test_splice_list_empty() {
+    let result = eval_source(
+        r#"(begin
+             (def xs (list))
+             (+ 0 ;xs))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(0));
+}
+
+#[test]
+fn test_splice_list_in_array_literal() {
+    let result = eval_source(
+        r#"(let ((a @[1 ;(list 2 3) 4]))
+             (length a))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(4));
+}
+
+#[test]
+fn test_splice_list_mixed_with_array() {
+    let result = eval_source("(+ ;(list 1 2) ;@[3 4])");
+    assert_eq!(result.unwrap(), Value::int(10));
+}
+
+#[test]
+fn test_splice_list_in_function_call() {
+    let result = eval_source(
+        r#"(begin
+             (defn f (a b c) (+ a b c))
+             (f ;(list 1 2 3)))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(6));
 }
 
 // ── Nested splice ──────────────────────────────────────────────────

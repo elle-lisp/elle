@@ -130,7 +130,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 | `EmptyList` | → empty_list | Push Value::EMPTY_LIST (truthy, unlike Nil) |
 | `LoadResumeValue` | → value | First instruction in yield resume block |
 | `CarOrNil` | value → car | Car of cons, or nil if not a cons |
-| `CdrOrNil` | value → cdr | Cdr of cons, or nil if not a cons |
+| `CdrOrNil` | value → cdr | Cdr of cons, or EMPTY_LIST if not a cons |
 | `ArrayRefOrNil` | array → elem | Array element by immediate u16 index, or nil if out of bounds |
 | `IsArray` | value → bool | Type check: is value an array? (for pattern matching) |
 | `IsTable` | value → bool | Type check: is value a table or struct? (for pattern matching) |

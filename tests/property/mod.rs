@@ -45,3 +45,6 @@ mod ffi {
 mod path {
     include!("path.rs");
 }
+mod sequences {
+    include!("sequences.rs");
+}
