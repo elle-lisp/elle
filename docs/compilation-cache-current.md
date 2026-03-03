@@ -161,7 +161,7 @@ pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable) {
     define_higher_order_functions(vm, symbols);  // 3 eval calls: map, filter, fold
     define_time_functions(vm, symbols);           // 2 eval calls: time/stopwatch, time/elapsed
     define_vm_query_wrappers(vm, symbols);        // 3 eval calls: call-count, global?, fiber/self
-    define_graph_functions(vm, symbols);           // 3 eval calls: fn/dot-escape, fn/graph, fn/save-graph
+    define_graph_functions(vm, symbols);           // 4 eval calls: fn/cfg, fn/cfg-label, fn/cfg-dot, fn/cfg-mermaid
 }
 ```
 
@@ -324,7 +324,7 @@ via `PROPTEST_CASES` env var.
 
 None of the property tests use stdlib-defined functions (`map`, `filter`,
 `fold`, `call-count`, `global?`, `fiber/self`, `time/stopwatch`,
-`time/elapsed`, `fn/flow`, `fn/graph`, `fn/save-graph`, `fn/dot-escape`).
+`time/elapsed`, `fn/flow`, `fn/cfg`, `fn/cfg-label`, `fn/cfg-dot`, `fn/cfg-mermaid`).
 They use primitives and prelude macros only.
 
 ## Callers of `compile_all`
