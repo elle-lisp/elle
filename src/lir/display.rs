@@ -1,0 +1,435 @@
+//! Compact human-readable display for LIR instructions and terminators.
+//!
+//! The Debug format is verbose Rust struct syntax. This module provides
+//! a compact format designed for CFG visualization:
+//!   `Const { dst: Reg(0), value: Int(42) }` → `r0 ← 42`
+//!   `BinOp { dst: Reg(2), op: Add, lhs: Reg(0), rhs: Reg(1) }` → `r2 ← r0 + r1`
+
+use super::types::*;
+use std::fmt;
+
+// ── Reg and Label ───────────────────────────────────────────────────
+
+impl fmt::Display for Reg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "r{}", self.0)
+    }
+}
+
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "block{}", self.0)
+    }
+}
+
+// ── Operators ───────────────────────────────────────────────────────
+
+impl fmt::Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            BinOp::Add => "+",
+            BinOp::Sub => "-",
+            BinOp::Mul => "*",
+            BinOp::Div => "/",
+            BinOp::Rem => "%",
+            BinOp::BitAnd => "&",
+            BinOp::BitOr => "|",
+            BinOp::BitXor => "^",
+            BinOp::Shl => "<<",
+            BinOp::Shr => ">>",
+        })
+    }
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            UnaryOp::Neg => "-",
+            UnaryOp::Not => "!",
+            UnaryOp::BitNot => "~",
+        })
+    }
+}
+
+impl fmt::Display for CmpOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            CmpOp::Eq => "=",
+            CmpOp::Ne => "≠",
+            CmpOp::Lt => "<",
+            CmpOp::Le => "≤",
+            CmpOp::Gt => ">",
+            CmpOp::Ge => "≥",
+        })
+    }
+}
+
+// ── LirConst ────────────────────────────────────────────────────────
+
+impl fmt::Display for LirConst {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LirConst::Nil => f.write_str("nil"),
+            LirConst::EmptyList => f.write_str("()"),
+            LirConst::Bool(true) => f.write_str("true"),
+            LirConst::Bool(false) => f.write_str("false"),
+            LirConst::Int(n) => write!(f, "{}", n),
+            LirConst::Float(n) => write!(f, "{}", n),
+            LirConst::String(s) => write!(f, "\"{}\"", s),
+            LirConst::Symbol(sid) => write!(f, "sym({})", sid.0),
+            LirConst::Keyword(k) => write!(f, ":{}", k),
+        }
+    }
+}
+
+// ── LirInstr ────────────────────────────────────────────────────────
+
+/// Format helper: display a list of registers as comma-separated.
+fn fmt_regs(regs: &[Reg], f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    for (i, r) in regs.iter().enumerate() {
+        if i > 0 {
+            f.write_str(", ")?;
+        }
+        write!(f, "{}", r)?;
+    }
+    Ok(())
+}
+
+impl fmt::Display for LirInstr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // === Constants ===
+            LirInstr::Const { dst, value } => write!(f, "{} ← {}", dst, value),
+            LirInstr::ValueConst { dst, value } => write!(f, "{} ← val({})", dst, value),
+
+            // === Variables ===
+            LirInstr::LoadLocal { dst, slot } => write!(f, "{} ← local[{}]", dst, slot),
+            LirInstr::StoreLocal { slot, src } => write!(f, "local[{}] ← {}", slot, src),
+            LirInstr::LoadCapture { dst, index } => write!(f, "{} ← cap[{}]", dst, index),
+            LirInstr::LoadCaptureRaw { dst, index } => {
+                write!(f, "{} ← cap[{}] (raw)", dst, index)
+            }
+            LirInstr::StoreCapture { index, src } => write!(f, "cap[{}] ← {}", index, src),
+            LirInstr::LoadGlobal { dst, sym } => write!(f, "{} ← global({})", dst, sym.0),
+            LirInstr::StoreGlobal { sym, src } => write!(f, "global({}) ← {}", sym.0, src),
+
+            // === Closures ===
+            LirInstr::MakeClosure { dst, captures, .. } => {
+                write!(f, "{} ← closure(", dst)?;
+                fmt_regs(captures, f)?;
+                f.write_str(")")
+            }
+
+            // === Function Calls ===
+            LirInstr::Call { dst, func, args } => {
+                write!(f, "{} ← {}(", dst, func)?;
+                fmt_regs(args, f)?;
+                f.write_str(")")
+            }
+            LirInstr::TailCall { func, args } => {
+                write!(f, "tailcall {}(", func)?;
+                fmt_regs(args, f)?;
+                f.write_str(")")
+            }
+
+            // === Data Construction ===
+            LirInstr::Cons { dst, head, tail } => {
+                write!(f, "{} ← cons({}, {})", dst, head, tail)
+            }
+            LirInstr::MakeArray { dst, elements } => {
+                write!(f, "{} ← array(", dst)?;
+                fmt_regs(elements, f)?;
+                f.write_str(")")
+            }
+            LirInstr::Car { dst, pair } => write!(f, "{} ← car({})", dst, pair),
+            LirInstr::Cdr { dst, pair } => write!(f, "{} ← cdr({})", dst, pair),
+
+            // === Primitive Operations ===
+            LirInstr::BinOp { dst, op, lhs, rhs } => {
+                write!(f, "{} ← {} {} {}", dst, lhs, op, rhs)
+            }
+            LirInstr::UnaryOp { dst, op, src } => write!(f, "{} ← {}{}", dst, op, src),
+            LirInstr::Compare { dst, op, lhs, rhs } => {
+                write!(f, "{} ← {} {} {}", dst, lhs, op, rhs)
+            }
+
+            // === Type Checks ===
+            LirInstr::IsNil { dst, src } => write!(f, "{} ← nil?({})", dst, src),
+            LirInstr::IsPair { dst, src } => write!(f, "{} ← pair?({})", dst, src),
+            LirInstr::IsTuple { dst, src } => write!(f, "{} ← tuple?({})", dst, src),
+            LirInstr::IsArray { dst, src } => write!(f, "{} ← array?({})", dst, src),
+            LirInstr::IsStruct { dst, src } => write!(f, "{} ← struct?({})", dst, src),
+            LirInstr::IsTable { dst, src } => write!(f, "{} ← table?({})", dst, src),
+            LirInstr::ArrayLen { dst, src } => write!(f, "{} ← len({})", dst, src),
+
+            // === Cell Operations ===
+            LirInstr::MakeCell { dst, value } => write!(f, "{} ← cell({})", dst, value),
+            LirInstr::LoadCell { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
+            LirInstr::StoreCell { cell, value } => write!(f, "deref({}) ← {}", cell, value),
+
+            // === Control Flow Helpers ===
+            LirInstr::Move { dst, src } => write!(f, "{} ← {}", dst, src),
+            LirInstr::Dup { dst, src } => write!(f, "{} ← dup({})", dst, src),
+            LirInstr::Pop { src } => write!(f, "pop {}", src),
+
+            // === Destructuring (silent nil) ===
+            LirInstr::CarOrNil { dst, src } => write!(f, "{} ← car?({})", dst, src),
+            LirInstr::CdrOrNil { dst, src } => write!(f, "{} ← cdr?({})", dst, src),
+            LirInstr::ArrayRefOrNil { dst, src, index } => {
+                write!(f, "{} ← {}[{}]?", dst, src, index)
+            }
+            LirInstr::ArraySliceFrom { dst, src, index } => {
+                write!(f, "{} ← {}[{}..]", dst, src, index)
+            }
+            LirInstr::TableGetOrNil { dst, src, key } => {
+                write!(f, "{} ← {}.{}?", dst, src, key)
+            }
+
+            // === Coroutines ===
+            LirInstr::LoadResumeValue { dst } => write!(f, "{} ← resume-val", dst),
+
+            // === Runtime Eval ===
+            LirInstr::Eval { dst, expr, env } => {
+                write!(f, "{} ← eval({}, {})", dst, expr, env)
+            }
+
+            // === Splice Support ===
+            LirInstr::ArrayExtend { dst, array, source } => {
+                write!(f, "{} ← extend({}, {})", dst, array, source)
+            }
+            LirInstr::ArrayPush { dst, array, value } => {
+                write!(f, "{} ← push({}, {})", dst, array, value)
+            }
+            LirInstr::CallArray { dst, func, args } => {
+                write!(f, "{} ← {}(;{})", dst, func, args)
+            }
+            LirInstr::TailCallArray { func, args } => {
+                write!(f, "tailcall {}(;{})", func, args)
+            }
+
+            // === Allocation Regions ===
+            LirInstr::RegionEnter => f.write_str("region-enter"),
+            LirInstr::RegionExit => f.write_str("region-exit"),
+        }
+    }
+}
+
+// ── Terminator ──────────────────────────────────────────────────────
+
+impl fmt::Display for Terminator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Terminator::Return(reg) => write!(f, "return {}", reg),
+            Terminator::Jump(label) => write!(f, "jump → {}", label),
+            Terminator::Branch {
+                cond,
+                then_label,
+                else_label,
+            } => write!(f, "branch {} → {} / {}", cond, then_label, else_label),
+            Terminator::Yield {
+                value,
+                resume_label,
+            } => {
+                write!(f, "yield {} → {}", value, resume_label)
+            }
+            Terminator::Unreachable => f.write_str("unreachable"),
+        }
+    }
+}
+
+/// Return the kind of a terminator as a static string suitable for use as
+/// a keyword value in structured data (e.g., `:return`, `:branch`).
+pub fn terminator_kind(t: &Terminator) -> &'static str {
+    match t {
+        Terminator::Return(_) => "return",
+        Terminator::Jump(_) => "jump",
+        Terminator::Branch { .. } => "branch",
+        Terminator::Yield { .. } => "yield",
+        Terminator::Unreachable => "unreachable",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reg_display() {
+        assert_eq!(format!("{}", Reg(0)), "r0");
+        assert_eq!(format!("{}", Reg(42)), "r42");
+    }
+
+    #[test]
+    fn test_label_display() {
+        assert_eq!(format!("{}", Label(0)), "block0");
+        assert_eq!(format!("{}", Label(5)), "block5");
+    }
+
+    #[test]
+    fn test_binop_display() {
+        assert_eq!(format!("{}", BinOp::Add), "+");
+        assert_eq!(format!("{}", BinOp::Shl), "<<");
+    }
+
+    #[test]
+    fn test_cmpop_display() {
+        assert_eq!(format!("{}", CmpOp::Eq), "=");
+        assert_eq!(format!("{}", CmpOp::Le), "≤");
+    }
+
+    #[test]
+    fn test_const_display() {
+        assert_eq!(format!("{}", LirConst::Nil), "nil");
+        assert_eq!(format!("{}", LirConst::Int(42)), "42");
+        assert_eq!(format!("{}", LirConst::Keyword("lit".into())), ":lit");
+        assert_eq!(format!("{}", LirConst::String("hello".into())), "\"hello\"");
+    }
+
+    #[test]
+    fn test_instr_const() {
+        let instr = LirInstr::Const {
+            dst: Reg(0),
+            value: LirConst::Int(42),
+        };
+        assert_eq!(format!("{}", instr), "r0 ← 42");
+    }
+
+    #[test]
+    fn test_instr_binop() {
+        let instr = LirInstr::BinOp {
+            dst: Reg(2),
+            op: BinOp::Add,
+            lhs: Reg(0),
+            rhs: Reg(1),
+        };
+        assert_eq!(format!("{}", instr), "r2 ← r0 + r1");
+    }
+
+    #[test]
+    fn test_instr_call() {
+        let instr = LirInstr::Call {
+            dst: Reg(5),
+            func: Reg(3),
+            args: vec![Reg(4)],
+        };
+        assert_eq!(format!("{}", instr), "r5 ← r3(r4)");
+    }
+
+    #[test]
+    fn test_instr_call_multi_args() {
+        let instr = LirInstr::Call {
+            dst: Reg(5),
+            func: Reg(3),
+            args: vec![Reg(1), Reg(2)],
+        };
+        assert_eq!(format!("{}", instr), "r5 ← r3(r1, r2)");
+    }
+
+    #[test]
+    fn test_instr_tailcall() {
+        let instr = LirInstr::TailCall {
+            func: Reg(0),
+            args: vec![Reg(1), Reg(2)],
+        };
+        assert_eq!(format!("{}", instr), "tailcall r0(r1, r2)");
+    }
+
+    #[test]
+    fn test_instr_compare() {
+        let instr = LirInstr::Compare {
+            dst: Reg(3),
+            op: CmpOp::Lt,
+            lhs: Reg(1),
+            rhs: Reg(2),
+        };
+        assert_eq!(format!("{}", instr), "r3 ← r1 < r2");
+    }
+
+    #[test]
+    fn test_instr_type_check() {
+        let instr = LirInstr::IsTuple {
+            dst: Reg(1),
+            src: Reg(0),
+        };
+        assert_eq!(format!("{}", instr), "r1 ← tuple?(r0)");
+    }
+
+    #[test]
+    fn test_instr_move() {
+        let instr = LirInstr::Move {
+            dst: Reg(1),
+            src: Reg(0),
+        };
+        assert_eq!(format!("{}", instr), "r1 ← r0");
+    }
+
+    #[test]
+    fn test_instr_destructuring() {
+        assert_eq!(
+            format!(
+                "{}",
+                LirInstr::ArrayRefOrNil {
+                    dst: Reg(2),
+                    src: Reg(0),
+                    index: 1
+                }
+            ),
+            "r2 ← r0[1]?"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                LirInstr::TableGetOrNil {
+                    dst: Reg(3),
+                    src: Reg(0),
+                    key: LirConst::Keyword("name".into())
+                }
+            ),
+            "r3 ← r0.:name?"
+        );
+    }
+
+    #[test]
+    fn test_terminator_return() {
+        assert_eq!(format!("{}", Terminator::Return(Reg(0))), "return r0");
+    }
+
+    #[test]
+    fn test_terminator_branch() {
+        let term = Terminator::Branch {
+            cond: Reg(2),
+            then_label: Label(1),
+            else_label: Label(3),
+        };
+        assert_eq!(format!("{}", term), "branch r2 → block1 / block3");
+    }
+
+    #[test]
+    fn test_terminator_yield() {
+        let term = Terminator::Yield {
+            value: Reg(0),
+            resume_label: Label(5),
+        };
+        assert_eq!(format!("{}", term), "yield r0 → block5");
+    }
+
+    #[test]
+    fn test_terminator_kind() {
+        assert_eq!(terminator_kind(&Terminator::Return(Reg(0))), "return");
+        assert_eq!(terminator_kind(&Terminator::Jump(Label(0))), "jump");
+        assert_eq!(
+            terminator_kind(&Terminator::Branch {
+                cond: Reg(0),
+                then_label: Label(1),
+                else_label: Label(2)
+            }),
+            "branch"
+        );
+    }
+
+    #[test]
+    fn test_region_instructions() {
+        assert_eq!(format!("{}", LirInstr::RegionEnter), "region-enter");
+        assert_eq!(format!("{}", LirInstr::RegionExit), "region-exit");
+    }
+}

@@ -257,7 +257,7 @@ to the arena, but discovered during review. File separately.
 
 ### Expected impact
 
-Each macro expansion in `fn/graph` (3 nested `each` + `let*` + `->`) creates
+Each macro expansion in `fn/cfg-dot` (3 nested `each` + `let*` + `->`) creates
 ~30-50 `eval_syntax` calls, each generating hundreds of temporary cons cells,
 syntax objects, and closures. With mark/release, these are freed after each
 expansion. Memory usage for repeated `define_graph_functions` calls becomes
