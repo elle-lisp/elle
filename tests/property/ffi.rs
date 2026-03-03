@@ -21,7 +21,7 @@ use crate::property::strategies::{arb_flat_struct, arb_primitive_type, arb_struc
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(crate::common::proptest_cases(1000))]
 
     // Pointer roundtrip: any 47-bit address survives the Value round-trip
     #[test]
@@ -86,7 +86,7 @@ fn nil_is_not_pointer() {
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(500))]
+    #![proptest_config(crate::common::proptest_cases(500))]
 
     // i8 in-range: -128..127 accepted
     #[test]
@@ -216,7 +216,7 @@ fn marshal_ptr_nil_accepted() {
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     // i32 write-read roundtrip
     #[test]
@@ -319,7 +319,7 @@ proptest! {
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     // Alignment is always a power of 2 (for non-void types)
     #[test]
@@ -364,7 +364,7 @@ proptest! {
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(500))]
+    #![proptest_config(crate::common::proptest_cases(500))]
 
     // Any ASCII string without nulls marshals successfully
     #[test]
@@ -397,7 +397,7 @@ proptest! {
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     // Struct write-read roundtrip: write a struct, read it back, values match
     #[test]
@@ -501,7 +501,7 @@ proptest! {
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     // Writing with wrong number of fields fails
     #[test]
@@ -548,7 +548,7 @@ proptest! {
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     // Struct size >= sum of field sizes
     #[test]
@@ -653,7 +653,7 @@ proptest! {
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     // Array size = element_size * count
     #[test]
@@ -733,7 +733,7 @@ proptest! {
 // =========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     // FFIType structural equality
     #[test]

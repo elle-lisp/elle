@@ -33,7 +33,7 @@ fn escape_for_elle(s: &str) -> String {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     // =========================================================================
     // Slice/substring properties (used to test length-like behavior)

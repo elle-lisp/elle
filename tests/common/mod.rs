@@ -60,3 +60,19 @@ pub fn setup() -> (SymbolTable, VM) {
     init_stdlib(&mut vm, &mut symbols);
     (symbols, vm)
 }
+
+/// Create a proptest config that respects the PROPTEST_CASES env var.
+///
+/// When PROPTEST_CASES is set, its value overrides the given default.
+/// This lets CI and local development control case counts uniformly:
+///
+///   PROPTEST_CASES=8 cargo test    # fast smoke
+///   cargo test                     # use per-test defaults
+#[allow(dead_code)]
+pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
+    let cases = std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default);
+    proptest::prelude::ProptestConfig::with_cases(cases)
+}

@@ -1,5 +1,9 @@
 # Tests
 
+> **Comprehensive testing strategy**: See [`docs/testing.md`](../docs/testing.md)
+> for the decision tree on where to place new tests, the proptest case count
+> knob, CI tier structure, and migration plan.
+
 ## Directory structure
 
 ```
@@ -7,6 +11,8 @@ tests/
 ├── lib.rs              # Test harness — discovers all test modules
 ├── common/mod.rs       # Shared helpers (eval_source, setup)
 ├── fixtures/           # Static test data files (e.g., .lisp files for linter tests)
+├── elle/               # Elle test scripts (behavioral tests in Elle)
+│   └── *.lisp          # One file per feature area
 ├── property/           # Property-based tests (proptest)
 │   ├── mod.rs          # Module declarations
 │   ├── strategies.rs   # Shared proptest strategies for generating Values and types
@@ -33,7 +39,28 @@ In addition to the `tests/` directory:
   `cargo test --test '*'` runs them. They serve as both documentation and
   regression tests for the surface language.
 
+- **`tests/elle/`**: Elle test scripts that verify language behavior by running
+  Elle code directly. Each `.lisp` file is a self-contained test that imports
+  `examples/assertions.lisp` and exits non-zero on failure. Run via the
+  `integration::elle_scripts` harness. See `docs/testing.md` for the decision
+  tree on what goes here vs in Rust tests.
+
 ## When to use each category
+
+### Elle test scripts (`tests/elle/`)
+
+Use for **behavioral tests that evaluate Elle source and check values**. These
+are the Elle equivalent of `eval_source("(expr)") == Value::int(42)` tests.
+Anything that the decision tree in `docs/testing.md` routes to "Elle test
+script" goes here.
+
+Elle test scripts answer: "Does this Elle expression produce the expected value?"
+
+Do NOT put these in Elle scripts:
+- Tests that need Rust type inspection
+- Compile-time rejection tests (code that must not compile)
+- Error message substring matching
+- Property-based tests
 
 ### Property tests (`tests/property/`)
 
@@ -199,15 +226,15 @@ Some property test files define local strategies for their domain (e.g.,
    use elle::Value;
    use proptest::prelude::*;
 
-   proptest! {
-       #![proptest_config(ProptestConfig::with_cases(200))]
+    proptest! {
+        #![proptest_config(crate::common::proptest_cases(200))]
 
-       #[test]
-       fn my_invariant(n in -1000i64..1000) {
-           let result = eval_source(&format!("(my-fn {})", n)).unwrap();
-           prop_assert_eq!(result, Value::int(n));
-       }
-   }
+        #[test]
+        fn my_invariant(n in -1000i64..1000) {
+            let result = eval_source(&format!("(my-fn {})", n)).unwrap();
+            prop_assert_eq!(result, Value::int(n));
+        }
+    }
    ```
 
 ### Adding a unit test
@@ -262,10 +289,17 @@ Choose case counts based on the cost of each test case:
 |---------------|-------|---------|
 | Cheap (no eval, pure Rust) | 1000 | NaN-boxing roundtrips, effect combine laws |
 | Medium (single eval) | 200 | Arithmetic properties, reader roundtrips |
-| Expensive (multiple evals or recursion) | 50-100 | Bug regression, determinism, complex programs |
+| Expensive (multiple evals or recursion) | 10-50 | Bug regression, determinism, complex programs |
 
-Set via `#![proptest_config(ProptestConfig::with_cases(N))]` inside the
-`proptest!` block.
+Set via `#![proptest_config(crate::common::proptest_cases(N))]` inside the
+`proptest!` block. The `proptest_cases` helper respects the `PROPTEST_CASES`
+environment variable — when set, it overrides the given default. This allows
+uniform control of case counts:
+
+```bash
+PROPTEST_CASES=8 cargo test    # fast smoke (development)
+cargo test                     # use per-test defaults (CI thorough)
+```
 
 ### Writing new generators
 

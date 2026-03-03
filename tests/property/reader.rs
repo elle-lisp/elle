@@ -124,7 +124,7 @@ fn arb_roundtrippable_float() -> BoxedStrategy<String> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(500))]
+    #![proptest_config(crate::common::proptest_cases(500))]
 
     // =========================================================================
     // Roundtrip: read(display(read(s))) == read(s)

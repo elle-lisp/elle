@@ -15,7 +15,7 @@ use proptest::prelude::*;
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: let binding inside lambda preserves the bound value
     #[test]
@@ -101,7 +101,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: (defn f (x) body) is equivalent to (def f (fn (x) body))
     #[test]
@@ -188,7 +188,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: list of integers displays without ". ()"
     #[test]
@@ -294,7 +294,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     /// Property: or in recursive check function doesn't corrupt append arguments
     #[test]
@@ -334,7 +334,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     /// Property: define shorthand with let inside produces correct list display
     #[test]

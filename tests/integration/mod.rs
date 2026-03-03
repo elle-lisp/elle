@@ -80,9 +80,6 @@ mod ffi {
 mod bracket_syntax {
     include!("bracket_errors.rs");
 }
-mod booleans {
-    include!("booleans.rs");
-}
 mod dispatch {
     include!("dispatch.rs");
 }
@@ -124,6 +121,9 @@ mod arena {
 }
 mod escape {
     include!("escape.rs");
+}
+mod elle_scripts {
+    include!("elle_scripts.rs");
 }
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

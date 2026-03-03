@@ -18,6 +18,10 @@
 ##     Assert that val is not nil
 ##   - assert-string-eq(actual, expected, msg)
 ##     Assert that two strings are equal
+##   - assert-err(f, msg)
+##     Assert that thunk f raises any error
+##   - assert-err-kind(f, expected-kind, msg)
+##     Assert that thunk f raises an error with the given kind keyword
 ##
 ## All assertions crash with exit code 1 on failure, making examples
 ## act as contracts for the implementation.
@@ -113,3 +117,27 @@
         (display actual)
         (display "\n")
         (exit 1)))))
+
+## Assert that a thunk raises any error
+(def assert-err (fn (f msg)
+  "Assert that (f) raises an error"
+  (let (([ok? _] (protect (f))))
+    (if ok?
+      (begin
+        (display "FAIL: ")
+        (display msg)
+        (display "\n  Expected error, got success\n")
+        (exit 1))
+      true))))
+
+## Assert that a thunk raises an error with a specific kind keyword
+(def assert-err-kind (fn (f expected-kind msg)
+  "Assert that (f) raises an error with the given kind"
+  (let (([ok? err] (protect (f))))
+    (if ok?
+      (begin
+        (display "FAIL: ")
+        (display msg)
+        (display "\n  Expected error, got success\n")
+        (exit 1))
+      (assert-eq (get err 0) expected-kind msg)))))

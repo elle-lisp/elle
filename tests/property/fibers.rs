@@ -15,7 +15,7 @@ use proptest::prelude::*;
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn fiber_yield_resume_order(
@@ -70,7 +70,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn signal_mask_catch_behavior(
@@ -118,7 +118,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn cancel_delivers_value_to_new_fiber(payload in -100i64..100) {
@@ -196,7 +196,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
+    #![proptest_config(crate::common::proptest_cases(20))]
 
     #[test]
     fn propagate_rejects_dead_fibers(final_val in -100i64..100) {
@@ -239,7 +239,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
+    #![proptest_config(crate::common::proptest_cases(20))]
 
     #[test]
     fn cancel_rejects_dead_fibers(final_val in -100i64..100) {
@@ -301,7 +301,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn nested_fiber_resume_preserves_values(
@@ -337,7 +337,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn multi_frame_yield_chain(
@@ -382,7 +382,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn re_yield_at_different_depth(
@@ -443,7 +443,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
+    #![proptest_config(crate::common::proptest_cases(20))]
 
     #[test]
     fn error_during_multi_frame_resume(val in -50i64..50) {
@@ -479,7 +479,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
+    #![proptest_config(crate::common::proptest_cases(20))]
 
     #[test]
     fn three_level_nested_fiber_resume(

@@ -14,7 +14,7 @@ use proptest::prelude::*;
 // Note: The new pipeline uses polymorphic `length` instead of `string-length`
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn string_length_of_append_equals_sum(
@@ -73,7 +73,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     #[test]
     fn type_of_integer_returns_keyword(n in -1000i64..1000) {
@@ -172,7 +172,7 @@ proptest! {
 // and `table?`/`struct?` predicates are not yet registered.
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn table_get_after_put_returns_value(key in 1i64..100, value in -1000i64..1000) {
@@ -229,7 +229,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     #[test]
     fn match_variable_binding_int(n in -100i64..100) {
@@ -294,7 +294,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(10))]
+    #![proptest_config(crate::common::proptest_cases(10))]
 
     #[test]
     fn countdown_from_n(n in 1000u32..50000) {
@@ -347,7 +347,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn reverse_list_first_element(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
@@ -444,7 +444,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(30))]
+    #![proptest_config(crate::common::proptest_cases(30))]
 
     #[test]
     fn box_unbox_roundtrip_int(n in -1000i64..1000) {

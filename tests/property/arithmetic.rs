@@ -7,7 +7,7 @@ use elle::Value;
 use proptest::prelude::*;
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+    #![proptest_config(crate::common::proptest_cases(200))]
 
     // =========================================================================
     // Integer arithmetic laws
