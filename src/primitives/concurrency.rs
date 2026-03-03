@@ -381,43 +381,50 @@ pub fn prim_join(args: &[Value]) -> (SignalBits, Value) {
 /// Returns the ID of the current thread
 /// (current-thread-id)
 pub fn prim_current_thread_id(_args: &[Value]) -> (SignalBits, Value) {
-    let thread_id = std::thread::current().id();
-    (SIG_OK, Value::string(format!("{:?}", thread_id)))
+    let id = std::thread::current().id();
+    // ThreadId debug format is "ThreadId(N)" — extract the integer
+    let s = format!("{:?}", id);
+    let n: i64 = s
+        .trim_start_matches("ThreadId(")
+        .trim_end_matches(')')
+        .parse()
+        .unwrap_or(0);
+    (SIG_OK, Value::int(n))
 }
 
 /// Declarative primitive definitions for concurrency operations
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "os/spawn",
+        name: "sys/spawn",
         func: prim_spawn,
         effect: Effect::raises(),
         arity: Arity::Exact(1),
         doc: "Spawn a new thread that executes a closure with captured immutable values",
         params: &["closure"],
-        category: "os",
-        example: "(os/spawn (fn [] (+ 1 2)))",
-        aliases: &["spawn"],
+        category: "sys",
+        example: "(sys/spawn (fn [] (+ 1 2)))",
+        aliases: &["spawn", "os/spawn"],
     },
     PrimitiveDef {
-        name: "os/join",
+        name: "sys/join",
         func: prim_join,
         effect: Effect::raises(),
         arity: Arity::Exact(1),
         doc: "Wait for a thread to complete and return its result",
         params: &["thread-handle"],
-        category: "os",
-        example: "(os/join thread-handle)",
-        aliases: &["join"],
+        category: "sys",
+        example: "(sys/join thread-handle)",
+        aliases: &["join", "os/join"],
     },
     PrimitiveDef {
-        name: "os/thread-id",
+        name: "sys/thread-id",
         func: prim_current_thread_id,
         effect: Effect::none(),
         arity: Arity::Exact(0),
         doc: "Return the ID of the current thread",
         params: &[],
-        category: "os",
-        example: "(os/thread-id)",
-        aliases: &["current-thread-id"],
+        category: "sys",
+        example: "(sys/thread-id)",
+        aliases: &["current-thread-id", "os/thread-id"],
     },
 ];

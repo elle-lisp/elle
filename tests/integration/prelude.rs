@@ -358,6 +358,30 @@ fn test_if_let_multi_binding_second_falsy() {
     );
 }
 
+#[test]
+fn test_if_let_bracket_binding() {
+    assert_eq!(
+        eval_source("(if-let ([x 42]) x :else)").unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn test_if_let_bracket_binding_falsy() {
+    assert_eq!(
+        eval_source("(if-let ([x nil]) :then :else)").unwrap(),
+        Value::keyword("else")
+    );
+}
+
+#[test]
+fn test_if_let_bracket_multi_binding() {
+    assert_eq!(
+        eval_source("(if-let ([x 1] [y 2]) (+ x y) :else)").unwrap(),
+        Value::int(3)
+    );
+}
+
 // ============================================================================
 // SECTION 11: when-let — conditional binding without else
 // ============================================================================
@@ -380,6 +404,14 @@ fn test_when_let_multi_body() {
     assert_eq!(
         eval_source("(when-let ((x 1)) (+ x 1) (+ x 2))").unwrap(),
         Value::int(3)
+    );
+}
+
+#[test]
+fn test_when_let_bracket_binding() {
+    assert_eq!(
+        eval_source("(when-let ([x 42]) (+ x 1))").unwrap(),
+        Value::int(43)
     );
 }
 

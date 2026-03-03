@@ -1223,13 +1223,12 @@ fn test_current_thread_id_primitive() {
 
     let result = call_primitive(&thread_id, &[]);
     assert!(result.is_ok());
-    match result.unwrap() {
-        v if v.is_string() => {
-            let s = v.with_string(|s| s.to_string()).unwrap();
-            assert!(!s.is_empty());
-        }
-        _ => panic!("current-thread-id should return a string"),
-    }
+    let v = result.unwrap();
+    assert!(
+        v.as_int().is_some(),
+        "current-thread-id should return an integer"
+    );
+    assert!(v.as_int().unwrap() > 0);
 }
 
 #[test]

@@ -1,5 +1,10 @@
 # Compilation Pipeline Caching Plan
 
+> **Note**: This document describes the pre-consolidation architecture. Stdlib
+> functions are now defined in `stdlib.lisp` rather than individual
+> `init_stdlib` sub-functions. The `init_stdlib` function itself still exists
+> in `module_init.rs` but simply calls `eval_all` on the embedded `stdlib.lisp`.
+
 ## Problem
 
 Every `eval_source()` test call creates fresh VMs, Expanders, and PrimitiveMeta,

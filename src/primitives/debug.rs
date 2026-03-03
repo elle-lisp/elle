@@ -857,15 +857,15 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "coro?",
+        name: "coroutine?",
         func: crate::primitives::coroutines::prim_is_coroutine,
         effect: Effect::none(),
         arity: Arity::Exact(1),
         doc: "Returns true if value is a coroutine (fiber-based)",
         params: &["value"],
         category: "predicate",
-        example: "(coro? (coro/new (fn () 42)))",
-        aliases: &["coroutine?"],
+        example: "(coroutine? (coro/new (fn () 42)))",
+        aliases: &["coro?"],
     },
     PrimitiveDef {
         name: "fn/mutates-params?",
