@@ -70,6 +70,34 @@ pub fn prim_is_number(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].is_number()))
 }
 
+/// Check if value is an integer
+pub fn prim_is_integer(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("integer?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].is_int()))
+}
+
+/// Check if value is a float
+pub fn prim_is_float(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("float?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].is_float()))
+}
+
 /// Check if value is a symbol
 pub fn prim_is_symbol(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -308,6 +336,28 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
+        name: "integer?",
+        func: prim_is_integer,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is an integer.",
+        params: &["value"],
+        category: "predicate",
+        example: "(integer? 42) #=> true\n(integer? 3.14) #=> false",
+        aliases: &["int?"],
+    },
+    PrimitiveDef {
+        name: "float?",
+        func: prim_is_float,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a floating-point number.",
+        params: &["value"],
+        category: "predicate",
+        example: "(float? 3.14) #=> true\n(float? 42) #=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
         name: "symbol?",
         func: prim_is_symbol,
         effect: Effect::none(),
@@ -338,7 +388,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["value"],
         category: "predicate",
         example: "(boolean? true) #=> true\n(boolean? 42) #=> false",
-        aliases: &[],
+        aliases: &["bool?"],
     },
     PrimitiveDef {
         name: "keyword?",

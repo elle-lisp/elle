@@ -260,9 +260,10 @@ fn test_sleep_with_int() {
 
 #[test]
 fn test_current_thread_id() {
-    // Test that current-thread-id returns a string
+    // Test that current-thread-id returns an integer
     let result = eval_source("(current-thread-id)");
     assert!(result.is_ok());
+    assert!(result.unwrap().as_int().is_some());
 }
 
 #[test]

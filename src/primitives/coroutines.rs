@@ -171,7 +171,7 @@ pub fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("coro?: expected 1 argument, got {}", args.len()),
+                format!("coroutine?: expected 1 argument, got {}", args.len()),
             ),
         );
     }

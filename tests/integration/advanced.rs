@@ -23,14 +23,9 @@ fn test_import_file_integration() {
 
 #[test]
 fn test_spawn_and_thread_id() {
-    // Get current thread ID
     let result = eval_source("(current-thread-id)").unwrap();
-    if let Some(s) = result.with_string(|s| s.to_string()) {
-        assert!(!s.is_empty());
-        assert!(s.contains("ThreadId"));
-    } else {
-        panic!("Expected string thread ID");
-    }
+    assert!(result.as_int().is_some());
+    assert!(result.as_int().unwrap() > 0);
 }
 
 #[test]
@@ -81,11 +76,8 @@ fn test_memory_usage_integration() {
 
 #[test]
 fn test_concurrency_with_arithmetic() {
-    // Combine concurrency with normal operations
-    assert!(
-        eval_source("(+ (current-thread-id) \"suffix\")").is_ok()
-            || eval_source("(+ (current-thread-id) \"suffix\")").is_err()
-    );
+    // current-thread-id returns an integer, arithmetic with strings errors
+    assert!(eval_source("(+ (current-thread-id) 1)").is_ok());
 }
 
 #[test]
