@@ -25,7 +25,7 @@ pub struct AnalyzeResult {
 |----------|-------|---------------|-----------|---------|
 | `compile` | 119–151 | Internal | No | REPL (`main.rs:169,289`), integration tests |
 | `compile_all` | 162–261 | Internal | Yes | `main.rs:86` (file/stdin), `modules.rs:78` (`import-file`) |
-| `eval` | 266–291 | Borrowed | No | `init_stdlib` (`higher_order_def.rs`, `time_def.rs`, `module_init.rs`), tests |
+| `eval` | 266–291 | Borrowed | No | `init_stdlib` (`module_init.rs` — loads `stdlib.lisp`), tests |
 | `eval_all` | 298–309 | Internal (delegates to `compile_all`) | Yes | Tests |
 | `eval_syntax` | 91–113 | Borrowed | No | `macro_expand.rs:150` (macro body evaluation) |
 | `analyze` | 313–326 | Borrowed | No | `hir/lint.rs`, `hir/symbols.rs` (tests only) |

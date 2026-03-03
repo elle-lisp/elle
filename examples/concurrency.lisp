@@ -78,13 +78,13 @@
 # 4. Thread IDs
 # ========================================
 
-# Each thread has a distinct ID (returned as a string).
+# Each thread has a distinct ID (returned as an integer).
 (let* ([main-id (current-thread-id)]
        [spawned-id (join (spawn (fn [] (current-thread-id))))])
   (display "  main thread: ") (display main-id)
     (display "  spawned thread: ") (print spawned-id)
-  (assert-true (string? main-id) "thread ID is a string")
-  (assert-true (string? spawned-id) "spawned thread ID is a string")
+  (assert-true (integer? main-id) "thread ID is an integer")
+  (assert-true (integer? spawned-id) "spawned thread ID is an integer")
   (assert-true (not (= main-id spawned-id)) "threads have distinct IDs"))
 
 

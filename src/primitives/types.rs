@@ -338,7 +338,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["value"],
         category: "predicate",
         example: "(boolean? true) #=> true\n(boolean? 42) #=> false",
-        aliases: &[],
+        aliases: &["bool?"],
     },
     PrimitiveDef {
         name: "keyword?",

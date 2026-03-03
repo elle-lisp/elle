@@ -1,7 +1,7 @@
 //! Process-related primitives
 use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -71,29 +71,49 @@ pub fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
     (SIG_HALT, value)
 }
 
+/// Return command-line arguments as a tuple, excluding the interpreter
+/// and script path (argv[0] and argv[1]).
+///
+/// (sys/args) => ["arg1" "arg2" ...]
+pub fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {
+    let args: Vec<Value> = std::env::args().skip(2).map(Value::string).collect();
+    (SIG_OK, Value::tuple(args))
+}
+
 /// Declarative primitive definitions for process operations
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "os/exit",
+        name: "sys/exit",
         func: prim_exit,
         effect: Effect::raises(),
         arity: Arity::Range(0, 1),
         doc: "Exit the process with an optional exit code (0-255)",
         params: &["code"],
-        category: "os",
-        example: "(os/exit 0)",
-        aliases: &["exit"],
+        category: "sys",
+        example: "(sys/exit 0)",
+        aliases: &["exit", "os/exit"],
     },
     PrimitiveDef {
-        name: "os/halt",
+        name: "sys/halt",
         func: prim_halt,
         effect: Effect::halts(),
         arity: Arity::Range(0, 1),
         doc: "Halt the VM gracefully, returning a value to the host",
         params: &["value"],
-        category: "os",
-        example: "(os/halt 42)",
-        aliases: &["halt"],
+        category: "sys",
+        example: "(sys/halt 42)",
+        aliases: &["halt", "os/halt"],
+    },
+    PrimitiveDef {
+        name: "sys/args",
+        func: prim_sys_args,
+        effect: Effect::none(),
+        arity: Arity::Exact(0),
+        doc: "Return command-line arguments as a tuple (excluding interpreter and script path)",
+        params: &[],
+        category: "sys",
+        example: "(sys/args)",
+        aliases: &[],
     },
 ];
 

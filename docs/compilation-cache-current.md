@@ -1,5 +1,12 @@
 # Compilation Pipeline: Current State
 
+> **Note**: This document describes the pre-consolidation architecture. Stdlib
+> functions are now defined in `stdlib.lisp` rather than individual
+> `init_stdlib` sub-functions (`define_higher_order_functions`,
+> `define_time_functions`, `define_vm_query_wrappers`, `define_graph_functions`).
+> The `init_stdlib` function itself still exists in `module_init.rs` but simply
+> calls `eval_all` on the embedded `stdlib.lisp`.
+
 This document records how the compilation pipeline works *before* the caching
 changes. It serves as the baseline for understanding what changed and why.
 
