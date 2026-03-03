@@ -5,6 +5,34 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
+/// Coerce a value to i64 for bitwise operations.
+/// Accepts integers directly and truncates finite floats.
+/// Rejects NaN, infinity, and non-numeric types.
+fn coerce_to_int(val: &Value, name: &str) -> Result<i64, (SignalBits, Value)> {
+    if let Some(n) = val.as_int() {
+        return Ok(n);
+    }
+    if let Some(f) = val.as_float() {
+        if !f.is_finite() {
+            return Err((
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("{}: cannot convert non-finite float to integer", name),
+                ),
+            ));
+        }
+        return Ok(f as i64);
+    }
+    Err((
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("{}: expected number, got {}", name, val.type_name()),
+        ),
+    ))
+}
+
 /// Bitwise AND: fold all arguments with &
 pub fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 {
@@ -17,25 +45,15 @@ pub fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let Some(mut result) = args[0].as_int() else {
-        return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("bit/and: expected integer, got {}", args[0].type_name()),
-            ),
-        );
+    let mut result = match coerce_to_int(&args[0], "bit/and") {
+        Ok(n) => n,
+        Err(e) => return e,
     };
 
     for arg in &args[1..] {
-        let Some(n) = arg.as_int() else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("bit/and: expected integer, got {}", arg.type_name()),
-                ),
-            );
+        let n = match coerce_to_int(arg, "bit/and") {
+            Ok(n) => n,
+            Err(e) => return e,
         };
         result &= n;
     }
@@ -54,25 +72,15 @@ pub fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let Some(mut result) = args[0].as_int() else {
-        return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("bit/or: expected integer, got {}", args[0].type_name()),
-            ),
-        );
+    let mut result = match coerce_to_int(&args[0], "bit/or") {
+        Ok(n) => n,
+        Err(e) => return e,
     };
 
     for arg in &args[1..] {
-        let Some(n) = arg.as_int() else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("bit/or: expected integer, got {}", arg.type_name()),
-                ),
-            );
+        let n = match coerce_to_int(arg, "bit/or") {
+            Ok(n) => n,
+            Err(e) => return e,
         };
         result |= n;
     }
@@ -91,25 +99,15 @@ pub fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let Some(mut result) = args[0].as_int() else {
-        return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("bit/xor: expected integer, got {}", args[0].type_name()),
-            ),
-        );
+    let mut result = match coerce_to_int(&args[0], "bit/xor") {
+        Ok(n) => n,
+        Err(e) => return e,
     };
 
     for arg in &args[1..] {
-        let Some(n) = arg.as_int() else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("bit/xor: expected integer, got {}", arg.type_name()),
-                ),
-            );
+        let n = match coerce_to_int(arg, "bit/xor") {
+            Ok(n) => n,
+            Err(e) => return e,
         };
         result ^= n;
     }
@@ -128,15 +126,9 @@ pub fn prim_bit_not(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    match args[0].as_int() {
-        Some(n) => (SIG_OK, Value::int(!n)),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("bit/not: expected integer, got {}", args[0].type_name()),
-            ),
-        ),
+    match coerce_to_int(&args[0], "bit/not") {
+        Ok(n) => (SIG_OK, Value::int(!n)),
+        Err(e) => e,
     }
 }
 
@@ -152,20 +144,9 @@ pub fn prim_bit_shift_left(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let value = match args[0].as_int() {
-        Some(v) => v,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "bit/shift-left: expected integer, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+    let value = match coerce_to_int(&args[0], "bit/shift-left") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
 
     let shift = match args[1].as_int() {
@@ -208,20 +189,9 @@ pub fn prim_bit_shift_right(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let value = match args[0].as_int() {
-        Some(v) => v,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "bit/shift-right: expected integer, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+    let value = match coerce_to_int(&args[0], "bit/shift-right") {
+        Ok(v) => v,
+        Err(e) => return e,
     };
 
     let shift = match args[1].as_int() {
