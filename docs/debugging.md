@@ -9,7 +9,7 @@ instrumentation, then removing it afterward. This cycle is slow, wasteful,
 and error-prone. Timing primitives (`clock/monotonic`, `clock/realtime`, `clock/cpu`,
 `time/sleep`, `time/stopwatch`, `time/elapsed`) and closure introspection
 primitives (`closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?`,
-`raises?`, `arity`, `captures`, `bytecode-size`) have been implemented.
+`fn/errors?`, `arity`, `captures`, `bytecode-size`) have been implemented.
 
 This document specifies a debugging toolkit that lives *inside* the language.
 Once implemented, debugging and benchmarking happen from Elle source — no
@@ -85,13 +85,13 @@ Both require the closure to have a `lir_function`. If the closure has no LIR
 (e.g., it's a native fn or already lost its LIR), they return the value
 unchanged (for `jit`) or signal an error (for `jit!`).
 
-### 1.3 Exception tracking: `raises?`
+### 1.3 Exception tracking: `fn/errors?`
 
-> **Status: Implemented.** `raises?` is registered and works. It reads `closure.effect.may_raise()`, which checks `SIG_ERROR` in the effect's signal bits. No separate `Raises` effect extension was needed — the signal-bits-based `Effect` struct already tracks this.
+> **Status: Implemented.** `fn/errors?` is registered and works. It reads `closure.effect.may_raise()`, which checks `SIG_ERROR` in the effect's signal bits. No separate `Raises` effect extension was needed — the signal-bits-based `Effect` struct already tracks this.
 
 | Primitive | Signature | Returns | Notes |
 |-----------|-----------|---------|-------|
-| `raises?` | `(raises? value)` | `true` or `false` | Returns `true` if the closure may raise an exception, `false` if it is guaranteed not to. Returns `false` for non-closures. |
+| `fn/errors?` | `(fn/errors? value)` | `true` or `false` | Returns `true` if the closure may raise an error, `false` if it is guaranteed not to. Returns `false` for non-closures. |
 
 This is a boolean query. When we add specific exception type tracking in the
 future (§4.6), the return type will change to a list of exception type
@@ -324,9 +324,9 @@ with `may_raise = false` (optimistic) and iterate until stable.
 
 ### 4.5 Runtime query
 
-`(raises? value)` reads `closure.effect.may_raise()` (checks `SIG_ERROR`
-in the effect's signal bits). Returns `true` if the closure may raise, `false`
-otherwise.
+`(fn/errors? value)` reads `closure.effect.may_raise()` (checks `SIG_ERROR`
+in the effect's signal bits). Returns `true` if the closure may raise an error,
+`false` otherwise.
 
 When we add specific exception type tracking (§4.6), the return type will
 change to a list of exception type keywords (`:error`, `:type-error`,
@@ -338,7 +338,7 @@ that don't.
 Once the boolean tracking is proven correct, we can extend to
 `BTreeSet<u32>` tracking specific exception IDs. This would enable:
 - `try`/`catch` catching `error` to subtract error and its children
-- `raises?` returning a list of specific exception type keywords
+- `fn/errors?` returning a list of specific exception type keywords
 - Primitive annotations (e.g., `/` raises `:division-by-zero`)
 
 This is additive — the boolean version is a proper subset of the set version.
@@ -404,7 +404,7 @@ returned by `register_primitives` instead.
 | `time/sleep` | `Effect::raises()` | Registered |
 | `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?` | `Effect::none()` | Registered |
 | `arity`, `captures`, `bytecode-size` | `Effect::none()` | Registered |
-| `raises?` | `Effect::none()` | Registered |
+| `fn/errors?` | `Effect::none()` | Registered |
 | `jit`, `jit!` | `Effect::raises()` | Not yet implemented |
 | `call-count` | `Effect::none()` | Not yet implemented |
 | `global?` | `Effect::none()` | Not yet implemented |
@@ -424,7 +424,7 @@ Not yet created. Planned file: `tests/integration/debugging.rs`
 - Test each introspection primitive on known closures
 - Test clock primitives return valid floats
 - Test `jit` trigger on a simple pure function
-- Test `raises?` on functions with known throw patterns
+- Test `fn/errors?` on functions with known throw patterns
 
 ### 6.3 Property tests
 
@@ -453,7 +453,7 @@ Not yet created. Blocked on defmacro gensym expansion fix (§3).
 
 | File | Status | Content |
 |------|--------|---------|
-| `src/primitives/debugging.rs` | **Done** | Introspection primitives: `jit?`, `pure?`, `coro?`, `closure?`, `mutates-params?`, `arity`, `captures`, `bytecode-size`, `raises?`, `disbit`, `disjit`. |
+| `src/primitives/debugging.rs` | **Done** | Introspection primitives: `jit?`, `pure?`, `coro?`, `closure?`, `mutates-params?`, `arity`, `captures`, `bytecode-size`, `fn/errors?`, `disbit`, `disjit`. |
 | `src/primitives/debug.rs` | **Done** | `debug-print`, `trace`, `memory-usage`. `profile` removed. |
 | `src/primitives/time.rs` | **Done** | Clock primitives (`clock/monotonic`, `clock/realtime`, `clock/cpu`) and `time/sleep`. |
 | `src/primitives/time_def.rs` | **Done** | Elle definitions for `time/stopwatch` and `time/elapsed`. |

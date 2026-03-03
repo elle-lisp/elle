@@ -50,7 +50,7 @@ fn get_db<'a>(
     })
 }
 
-/// Extract a SQL string from args[1].
+/// Extract a SQL string from args\[1\].
 fn get_sql(args: &[Value], name: &str) -> Result<String, (SignalBits, Value)> {
     args[1].with_string(|s| s.to_string()).ok_or_else(|| {
         (
@@ -89,7 +89,7 @@ fn value_to_sql(
     }
 }
 
-/// Extract optional params from args[2] (a list or tuple) into boxed SQL params.
+/// Extract optional params from args\[2\] (a list or tuple) into boxed SQL params.
 fn extract_params(
     args: &[Value],
     name: &str,

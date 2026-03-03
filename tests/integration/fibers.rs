@@ -164,6 +164,79 @@ fn test_fiber_cancel_returns_error_value() {
     assert!(result.is_ok(), "Expected ok, got: {:?}", result);
 }
 
+// ── error macro arity ────────────────────────────────────────────
+
+#[test]
+fn test_error_no_args() {
+    // (error) with no args should default to nil
+    let result = eval_source(r#"(try (error) (catch e e))"#);
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(result.unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_error_with_value() {
+    // (error val) still works as before
+    let result = eval_source(r#"(try (error :boom) (catch e e))"#);
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    let val = result.unwrap();
+    assert!(val.is_keyword(), "Expected keyword, got {:?}", val);
+}
+
+#[test]
+fn test_error_too_many_args() {
+    // (error a b) should fail at compile time (macro arity)
+    let result = eval_source(r#"(error :a :b)"#);
+    assert!(
+        result.is_err(),
+        "Expected error for 2 args, got: {:?}",
+        result
+    );
+}
+
+// ── fiber/cancel default nil and cancel alias ───────────────────
+
+#[test]
+fn test_fiber_cancel_default_nil() {
+    // fiber/cancel with 1 arg should default error value to nil
+    let result = eval_source(
+        r#"
+        (let ((f (fiber/new (fn () 42) 1)))
+          (fiber/cancel f)
+          (fiber/value f))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(result.unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_cancel_alias_works() {
+    // cancel is an alias for fiber/cancel
+    let result = eval_source(
+        r#"
+        (let ((f (fiber/new (fn () 42) 1)))
+          (cancel f "stopped")
+          (fiber/value f))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+}
+
+#[test]
+fn test_cancel_alias_default_nil() {
+    // cancel with 1 arg defaults to nil
+    let result = eval_source(
+        r#"
+        (let ((f (fiber/new (fn () 42) 1)))
+          (cancel f)
+          (fiber/value f))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    assert_eq!(result.unwrap(), Value::NIL);
+}
+
 // ── Basic fiber resume still works ───────────────────────────────
 
 #[test]

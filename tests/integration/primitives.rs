@@ -636,3 +636,21 @@ fn test_empty_predicate_array() {
     assert_eq!(eval_source("(empty? @[])").unwrap(), Value::TRUE);
     assert_eq!(eval_source("(empty? @[1])").unwrap(), Value::FALSE);
 }
+
+// === fn/errors? introspection ===
+
+#[test]
+fn test_fn_errors_on_pure_closure() {
+    // Identity function cannot raise
+    assert_eq!(
+        eval_source("(fn/errors? (fn (x) x))").unwrap(),
+        Value::FALSE
+    );
+}
+
+#[test]
+fn test_fn_errors_on_non_closure() {
+    // Non-closure values return false
+    assert_eq!(eval_source("(fn/errors? 42)").unwrap(), Value::FALSE);
+    assert_eq!(eval_source("(fn/errors? \"hello\")").unwrap(), Value::FALSE);
+}

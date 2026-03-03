@@ -87,14 +87,14 @@ pub fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (raises? value) — true if closure may raise
+/// (fn/errors? value) — true if closure may raise an error
 pub fn prim_raises(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("raises?: expected 1 argument, got {}", args.len()),
+                format!("fn/errors?: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -791,15 +791,15 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &["mutates-params?"],
     },
     PrimitiveDef {
-        name: "fn/raises?",
+        name: "fn/errors?",
         func: prim_raises,
         effect: Effect::none(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure may raise an error",
         params: &["value"],
         category: "fn",
-        example: "(fn/raises? (fn (x) (/ 1 x)))",
-        aliases: &["raises?"],
+        example: "(fn/errors? (fn (x) (/ 1 x)))",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "fn/arity",

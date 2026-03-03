@@ -38,7 +38,7 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) arg_var_base: u32,
     /// Base index for locally-defined variable Cranelift variables
     /// These are variables for let-bindings inside the function body.
-    /// Layout: [num_captures..., params..., locally_defined...]
+    /// Layout: \[num_captures..., params..., locally_defined...\]
     /// In the JIT, locally_defined vars use Cranelift variables starting at this base.
     pub(crate) local_var_base: u32,
     /// Loop header block for self-tail-call jumps
