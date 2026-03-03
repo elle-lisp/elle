@@ -117,6 +117,8 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     // Closure introspection predicates → bool (canonical + aliases)
     "fn/mutates-params?",
     "mutates-params?",
+    "fn/raises?",
+    "raises?",
     "fn/errors?",
     "coroutine?",
     // Collection → int
