@@ -116,3 +116,11 @@
   (assert-eq (add3 ;(list 10 20 30)) 60 "splice list into closure call"))
 
 (assert-eq (+ ;(list)) 0 "splice empty list")
+
+# Splice with list (runtime error — lists are not indexed)
+# ============================================================================
+
+(begin
+  (def xs (list 1 2 3))
+  (let ([result (protect (+ ;xs))])
+    (assert-eq (get result 0) false "splice with list errors")))
