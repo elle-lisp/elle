@@ -488,10 +488,7 @@ fn test_type_of_list_consistency() {
     );
 
     // And that keyword should be :list
-    assert_eq!(
-        eval_source("(eq? (type-of ()) :list)").unwrap(),
-        Value::TRUE
-    );
+    assert_eq!(eval_source("(= (type-of ()) :list)").unwrap(), Value::TRUE);
 }
 
 // Math functions

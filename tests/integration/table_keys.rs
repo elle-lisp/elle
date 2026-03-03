@@ -73,7 +73,7 @@ fn test_keys_roundtrip_identity_fiber() {
         r#"(let ((f (fiber/new (fn () 1) 0)))
              (let ((t @{}))
                (put t f 1)
-               (eq? (first (keys t)) f)))"#,
+                (identical? (first (keys t)) f)))"#,
     )
     .unwrap();
     assert_eq!(result, Value::TRUE);
@@ -137,7 +137,7 @@ fn test_keys_roundtrip_identity_closure() {
         r#"(let ((c (fn () 1)))
              (let ((t @{}))
                (put t c 1)
-               (eq? (first (keys t)) c)))"#,
+                (identical? (first (keys t)) c)))"#,
     )
     .unwrap();
     assert_eq!(result, Value::TRUE);

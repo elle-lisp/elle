@@ -98,13 +98,13 @@ pub enum TableKey {
     /// Identity-compared key for reference types (fiber, closure, external).
     ///
     /// **Invariant**: Only constructed via `from_value()`. The stored `Value`
-    /// must be a type where `eq?` uses pointer identity (currently: fiber,
+    /// must be a type where `identical?` uses pointer identity (currently: fiber,
     /// closure, external). Storing a value-compared type here would silently
     /// use bit-pattern comparison instead of value comparison.
     ///
     /// Hash/Eq/Ord compare by `Value.0` (the raw NaN-boxed bits), which
     /// encodes the heap pointer. This gives the same identity semantics as
-    /// `eq?` for these types.
+    /// `identical?` for these types.
     Identity(Value),
 }
 

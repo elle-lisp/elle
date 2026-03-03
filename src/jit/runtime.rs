@@ -201,23 +201,42 @@ pub extern "C" fn elle_jit_bit_not(a: u64) -> u64 {
 // Comparison Operations
 // =============================================================================
 
-/// Equality comparison
-///
-/// Uses `Value::PartialEq` for structural equality on heap values
-/// (cons cells, strings, arrays, tables, structs, tuples).
+/// Equality comparison — numeric-aware.
+/// If both values are numbers, compares numerically (int 1 == float 1.0).
+/// Otherwise, uses structural equality (PartialEq).
 #[no_mangle]
 pub extern "C" fn elle_jit_eq(a: u64, b: u64) -> u64 {
     let a = unsafe { Value::from_bits(a) };
     let b = unsafe { Value::from_bits(b) };
-    Value::bool(a == b).to_bits()
+    // Fast path: bitwise identical
+    if a == b {
+        return Value::TRUE.to_bits();
+    }
+    // Numeric coercion: int 1 == float 1.0
+    if a.is_number() && b.is_number() {
+        if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
+            return Value::bool(x == y).to_bits();
+        }
+    }
+    Value::FALSE.to_bits()
 }
 
-/// Not equal comparison
+/// Not equal comparison — numeric-aware (inverse of elle_jit_eq).
 #[no_mangle]
 pub extern "C" fn elle_jit_ne(a: u64, b: u64) -> u64 {
     let a = unsafe { Value::from_bits(a) };
     let b = unsafe { Value::from_bits(b) };
-    Value::bool(a != b).to_bits()
+    // Fast path: bitwise identical → equal → not-equal is false
+    if a == b {
+        return Value::FALSE.to_bits();
+    }
+    // Numeric coercion
+    if a.is_number() && b.is_number() {
+        if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
+            return Value::bool(x != y).to_bits();
+        }
+    }
+    Value::TRUE.to_bits()
 }
 
 /// Less than comparison
