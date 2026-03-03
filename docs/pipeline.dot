@@ -1,0 +1,90 @@
+// Elle compilation pipeline
+//
+// Build: dot -Tsvg docs/pipeline.dot -o docs/pipeline.svg
+
+digraph pipeline {
+    rankdir=TB
+    bgcolor="transparent"
+    fontname="Helvetica"
+    nodesep=0.35
+    ranksep=0.45
+    node [fontname="Helvetica" fontsize=11 shape=box
+          style="rounded,filled" fillcolor="#fef7e0"
+          color="#333333" penwidth=1.2]
+    edge [fontname="Helvetica" fontsize=9 color="#666666"
+          fontcolor="#444444"]
+
+    // ── Stages ─────────────────────────────────────────────────────
+    //
+    // Each node is a pass. Intermediate representations are edge
+    // labels — they're outputs, not stages.
+
+    source  [label="Source" fillcolor="#e8f0fe"
+             shape=note]
+
+    reader  [label=<Reader<br/><font point-size="9" color="#666666">lexing, source locations</font>>]
+
+    expand  [label=<Expander<br/><font point-size="9" color="#666666">macro expansion, scope sets</font>>]
+
+    analyze [label=<Analyzer<br/><font point-size="9" color="#666666">bindings, effects, captures, mutations</font>>]
+
+    lower   [label=<Lowerer<br/><font point-size="9" color="#666666">escape analysis, region instructions</font>>]
+
+    emit    [label=<Emitter<br/><font point-size="9" color="#666666">register allocation, jump patching</font>>]
+
+    vm      [label=<VM<br/><font point-size="9" color="#666666">bytecode interpreter</font>>
+             fillcolor="#e0f0e8"]
+
+    // ── Main flow ──────────────────────────────────────────────────
+
+    source  -> reader                [label="text"]
+    reader  -> expand                [label="Syntax"]
+    expand  -> analyze               [label="Syntax"]
+    analyze -> lower                 [label="HIR"]
+    lower   -> emit                  [label="LIR"]
+    emit    -> vm                    [label="Bytecode"]
+
+    // ── Fixpoint loop ──────────────────────────────────────────────
+
+    analyze -> analyze [label=<fixpoint<br/><font point-size="8">(effects)</font>>
+                        style=dashed color="#cc6600"
+                        fontcolor="#cc6600" constraint=false]
+
+    // ── Macro expansion ────────────────────────────────────────────
+
+    subgraph cluster_macro {
+        label=<macro expansion<br/><font point-size="8">eval_syntax</font>>
+        labeljust=l fontsize=9 fontcolor="#888888"
+        color="#cccccc" style=dashed
+
+        m_analyze [label=<Analyzer> fontsize=10]
+        m_lower   [label=<Lowerer>  fontsize=10]
+        m_emit    [label=<Emitter>  fontsize=10]
+        m_vm      [label=<VM>       fontsize=10 fillcolor="#e0f0e8"]
+
+        m_analyze -> m_lower -> m_emit -> m_vm [arrowsize=0.7]
+    }
+
+    expand  -> m_analyze  [style=dashed color="#8855aa"
+                           fontcolor="#8855aa"]
+    m_vm    -> expand     [label="Value" style=dashed
+                           color="#8855aa" fontcolor="#8855aa"]
+
+    // ── JIT ────────────────────────────────────────────────────────
+
+    jit [label=<JIT<br/><font point-size="9" color="#666666">Cranelift, non-suspending fns</font>>
+         fillcolor="#fde8e8"]
+
+    vm  -> jit [label="!may_suspend()" style=dashed
+                color="#cc3333" fontcolor="#cc3333"]
+    jit -> vm  [label="native fn" style=dashed
+                color="#cc3333" fontcolor="#cc3333"]
+
+    // ── Plugins ────────────────────────────────────────────────────
+
+    plugin [label=<Plugin (.so)<br/><font point-size="9" color="#666666">Rust cdylib, PrimitiveDef</font>>
+            fillcolor="#e8e0f0"]
+
+    plugin -> vm [label="import-file" style=dashed
+                  color="#6644aa" fontcolor="#6644aa"]
+}
