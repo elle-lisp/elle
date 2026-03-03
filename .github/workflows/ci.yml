@@ -335,7 +335,7 @@ jobs:
 
   # Weekly toolchain compatibility check
   toolchain-check:
-    name: Toolchain Check (${{ matrix.rust }})
+    name: Toolchain Check
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
     strategy:
