@@ -59,7 +59,7 @@ pub fn prim_cons(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, crate::value::cons(args[0], args[1]))
 }
 
-/// Get the first element of a cons cell or syntax list
+/// Get the first element of a sequence (list, tuple, array, string)
 pub fn prim_first(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -70,13 +70,43 @@ pub fn prim_first(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
+    // Cons cell — the common case for lists
     if let Some(cons) = args[0].as_cons() {
         return (SIG_OK, cons.first);
     }
+    // Empty list → nil (matches destructuring silent-nil semantics)
+    if args[0].is_empty_list() {
+        return (SIG_OK, Value::NIL);
+    }
+    // Tuple
+    if let Some(elems) = args[0].as_tuple() {
+        return if elems.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, elems[0])
+        };
+    }
+    // Array
+    if let Some(arr) = args[0].as_array() {
+        let borrowed = arr.borrow();
+        return if borrowed.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, borrowed[0])
+        };
+    }
+    // String — first grapheme cluster
+    if let Some(result) = args[0].with_string(|s| match s.graphemes(true).next() {
+        Some(g) => (SIG_OK, Value::string(g)),
+        None => (SIG_OK, Value::NIL),
+    }) {
+        return result;
+    }
+    // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
         if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
             if items.is_empty() {
-                return (SIG_ERROR, error_val("error", "first: empty syntax list"));
+                return (SIG_OK, Value::NIL);
             }
             return (SIG_OK, Value::syntax(items[0].clone()));
         }
@@ -85,12 +115,15 @@ pub fn prim_first(args: &[Value]) -> (SignalBits, Value) {
         SIG_ERROR,
         error_val(
             "type-error",
-            format!("first: expected cons cell, got {}", args[0].type_name()),
+            format!(
+                "first: expected sequence (list, tuple, array, or string), got {}",
+                args[0].type_name()
+            ),
         ),
     )
 }
 
-/// Get the rest of a cons cell or syntax list
+/// Get the rest of a sequence (list, tuple, array, string)
 pub fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -101,13 +134,45 @@ pub fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
+    // Cons cell — the common case for lists
     if let Some(cons) = args[0].as_cons() {
         return (SIG_OK, cons.rest);
     }
+    // Empty list → empty list
+    if args[0].is_empty_list() {
+        return (SIG_OK, Value::EMPTY_LIST);
+    }
+    // Tuple — return tuple
+    if let Some(elems) = args[0].as_tuple() {
+        return if elems.len() <= 1 {
+            (SIG_OK, Value::tuple(vec![]))
+        } else {
+            (SIG_OK, Value::tuple(elems[1..].to_vec()))
+        };
+    }
+    // Array — return array
+    if let Some(arr) = args[0].as_array() {
+        let borrowed = arr.borrow();
+        return if borrowed.len() <= 1 {
+            (SIG_OK, Value::array(vec![]))
+        } else {
+            (SIG_OK, Value::array(borrowed[1..].to_vec()))
+        };
+    }
+    // String — skip first grapheme, return string
+    if let Some(result) = args[0].with_string(|s| {
+        let rest: String = s.graphemes(true).skip(1).collect();
+        (SIG_OK, Value::string(rest))
+    }) {
+        return result;
+    }
+    // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
         if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
             if items.is_empty() {
-                return (SIG_ERROR, error_val("error", "rest: empty syntax list"));
+                let empty =
+                    crate::syntax::Syntax::new(SyntaxKind::List(vec![]), syntax.span.clone());
+                return (SIG_OK, Value::syntax(empty));
             }
             let rest = crate::syntax::Syntax::new(
                 SyntaxKind::List(items[1..].to_vec()),
@@ -120,7 +185,10 @@ pub fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
         SIG_ERROR,
         error_val(
             "type-error",
-            format!("rest: expected cons cell, got {}", args[0].type_name()),
+            format!(
+                "rest: expected sequence (list, tuple, array, or string), got {}",
+                args[0].type_name()
+            ),
         ),
     )
 }
@@ -672,7 +740,7 @@ pub fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Reverse a list
+/// Reverse a sequence (list, tuple, array, string)
 pub fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -683,12 +751,38 @@ pub fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
+    // Array — return new array
+    if let Some(arr) = args[0].as_array() {
+        let mut vec = arr.borrow().to_vec();
+        vec.reverse();
+        return (SIG_OK, Value::array(vec));
+    }
+    // Tuple — return new tuple
+    if let Some(elems) = args[0].as_tuple() {
+        let mut vec = elems.to_vec();
+        vec.reverse();
+        return (SIG_OK, Value::tuple(vec));
+    }
+    // String — reverse grapheme clusters
+    if let Some(result) = args[0].with_string(|s| {
+        let reversed: String = s.graphemes(true).rev().collect();
+        (SIG_OK, Value::string(reversed))
+    }) {
+        return result;
+    }
+    // List — existing behavior (fallback via list_to_vec)
     let mut vec = match args[0].list_to_vec() {
         Ok(v) => v,
-        Err(e) => {
+        Err(_) => {
             return (
                 SIG_ERROR,
-                error_val("type-error", format!("reverse: {}", e)),
+                error_val(
+                    "type-error",
+                    format!(
+                        "reverse: expected sequence (list, tuple, array, or string), got {}",
+                        args[0].type_name()
+                    ),
+                ),
             )
         }
     };
@@ -857,10 +951,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_first,
         effect: Effect::none(),
         arity: Arity::Exact(1),
-        doc: "Get the first element (car) of a cons cell",
-        params: &["cell"],
+        doc: "Get the first element of a sequence (list, tuple, array, string). Returns nil for empty.",
+        params: &["sequence"],
         category: "list",
-        example: "(first (cons 1 2))",
+        example: "(first (list 1 2 3))",
         aliases: &[],
     },
     PrimitiveDef {
@@ -868,10 +962,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_rest,
         effect: Effect::none(),
         arity: Arity::Exact(1),
-        doc: "Get the rest (cdr) of a cons cell",
-        params: &["cell"],
+        doc: "Get the rest of a sequence. Returns type-preserving empty for empty input.",
+        params: &["sequence"],
         category: "list",
-        example: "(rest (cons 1 (cons 2 ())))",
+        example: "(rest (list 1 2 3))",
         aliases: &[],
     },
     PrimitiveDef {
@@ -934,8 +1028,8 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_reverse,
         effect: Effect::none(),
         arity: Arity::Exact(1),
-        doc: "Reverse a list",
-        params: &["list"],
+        doc: "Reverse a sequence (list, tuple, array, string). Returns same type.",
+        params: &["sequence"],
         category: "list",
         example: "(reverse (list 1 2 3))",
         aliases: &[],

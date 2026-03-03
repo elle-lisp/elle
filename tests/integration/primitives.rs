@@ -744,3 +744,200 @@ fn test_bit_and_neg_float() {
         eval_source("(bit/and -3 255)").unwrap()
     );
 }
+
+// === first polymorphism (#423) ===
+
+#[test]
+fn test_first_list() {
+    assert_eq!(eval_source("(first (list 1 2 3))").unwrap(), Value::int(1));
+}
+
+#[test]
+fn test_first_empty_list() {
+    assert_eq!(eval_source("(first (list))").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_first_tuple() {
+    assert_eq!(eval_source("(first [1 2 3])").unwrap(), Value::int(1));
+}
+
+#[test]
+fn test_first_empty_tuple() {
+    assert_eq!(eval_source("(first [])").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_first_array() {
+    assert_eq!(eval_source("(first @[1 2 3])").unwrap(), Value::int(1));
+}
+
+#[test]
+fn test_first_empty_array() {
+    assert_eq!(eval_source("(first @[])").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_first_string() {
+    assert_eq!(eval_source(r#"(first "abc")"#).unwrap(), Value::string("a"));
+}
+
+#[test]
+fn test_first_empty_string() {
+    assert_eq!(eval_source(r#"(first "")"#).unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_first_non_sequence_errors() {
+    let result = eval_source("(first 42)");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("type"));
+}
+
+// === rest polymorphism (#423) ===
+
+#[test]
+fn test_rest_list() {
+    // rest of (1 2 3) is (2 3)
+    assert_eq!(
+        eval_source("(first (rest (list 1 2 3)))").unwrap(),
+        Value::int(2)
+    );
+}
+
+#[test]
+fn test_rest_empty_list() {
+    assert_eq!(eval_source("(rest (list))").unwrap(), Value::EMPTY_LIST);
+}
+
+#[test]
+fn test_rest_single_list() {
+    assert_eq!(eval_source("(rest (list 1))").unwrap(), Value::EMPTY_LIST);
+}
+
+#[test]
+fn test_rest_tuple() {
+    // rest of [1 2 3] is [2 3] — a tuple
+    assert_eq!(
+        eval_source("(length (rest [1 2 3]))").unwrap(),
+        Value::int(2)
+    );
+    // verify it's a tuple by checking tuple?
+    assert_eq!(eval_source("(tuple? (rest [1 2 3]))").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_rest_empty_tuple() {
+    assert_eq!(eval_source("(tuple? (rest []))").unwrap(), Value::TRUE);
+    assert_eq!(eval_source("(length (rest []))").unwrap(), Value::int(0));
+}
+
+#[test]
+fn test_rest_array() {
+    // rest of @[1 2 3] is @[2 3] — an array
+    assert_eq!(
+        eval_source("(length (rest @[1 2 3]))").unwrap(),
+        Value::int(2)
+    );
+    assert_eq!(
+        eval_source("(array? (rest @[1 2 3]))").unwrap(),
+        Value::TRUE
+    );
+}
+
+#[test]
+fn test_rest_empty_array() {
+    assert_eq!(eval_source("(array? (rest @[]))").unwrap(), Value::TRUE);
+    assert_eq!(eval_source("(length (rest @[]))").unwrap(), Value::int(0));
+}
+
+#[test]
+fn test_rest_string() {
+    assert_eq!(eval_source(r#"(rest "abc")"#).unwrap(), Value::string("bc"));
+}
+
+#[test]
+fn test_rest_empty_string() {
+    assert_eq!(eval_source(r#"(rest "")"#).unwrap(), Value::string(""));
+}
+
+#[test]
+fn test_rest_single_string() {
+    assert_eq!(eval_source(r#"(rest "a")"#).unwrap(), Value::string(""));
+}
+
+#[test]
+fn test_rest_non_sequence_errors() {
+    let result = eval_source("(rest 42)");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("type"));
+}
+
+// === reverse polymorphism (#431) ===
+
+#[test]
+fn test_reverse_list() {
+    assert_eq!(
+        eval_source("(first (reverse (list 1 2 3)))").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_reverse_empty_list() {
+    assert_eq!(eval_source("(reverse (list))").unwrap(), Value::EMPTY_LIST);
+}
+
+#[test]
+fn test_reverse_tuple() {
+    assert_eq!(
+        eval_source("(tuple? (reverse [1 2 3]))").unwrap(),
+        Value::TRUE
+    );
+    assert_eq!(
+        eval_source("(get (reverse [1 2 3]) 0)").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_reverse_empty_tuple() {
+    assert_eq!(eval_source("(tuple? (reverse []))").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_reverse_array() {
+    assert_eq!(
+        eval_source("(array? (reverse @[1 2 3]))").unwrap(),
+        Value::TRUE
+    );
+    assert_eq!(
+        eval_source("(get (reverse @[1 2 3]) 0)").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_reverse_empty_array() {
+    assert_eq!(eval_source("(array? (reverse @[]))").unwrap(), Value::TRUE);
+}
+
+#[test]
+fn test_reverse_string() {
+    assert_eq!(
+        eval_source(r#"(reverse "abc")"#).unwrap(),
+        Value::string("cba")
+    );
+}
+
+#[test]
+fn test_reverse_empty_string() {
+    assert_eq!(eval_source(r#"(reverse "")"#).unwrap(), Value::string(""));
+}
+
+#[test]
+fn test_reverse_non_sequence_errors() {
+    let result = eval_source("(reverse 42)");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("type"));
+}
