@@ -72,7 +72,7 @@ pub fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Return command-line arguments as a tuple, excluding the interpreter
-/// and script path (argv[0] and argv[1]).
+/// and script path (argv\[0\] and argv\[1\]).
 ///
 /// (sys/args) => ["arg1" "arg2" ...]
 pub fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {

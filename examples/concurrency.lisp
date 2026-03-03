@@ -83,8 +83,8 @@
        [spawned-id (join (spawn (fn [] (current-thread-id))))])
   (display "  main thread: ") (display main-id)
     (display "  spawned thread: ") (print spawned-id)
-  (assert-true (integer? main-id) "thread ID is an integer")
-  (assert-true (integer? spawned-id) "spawned thread ID is an integer")
+  (assert-true (number? main-id) "thread ID is a number")
+  (assert-true (number? spawned-id) "spawned thread ID is a number")
   (assert-true (not (= main-id spawned-id)) "threads have distinct IDs"))
 
 

@@ -74,7 +74,7 @@ pub fn prim_first(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, cons.first);
     }
     if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) = &syntax.kind {
+        if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
             if items.is_empty() {
                 return (SIG_ERROR, error_val("error", "first: empty syntax list"));
             }
@@ -105,7 +105,7 @@ pub fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, cons.rest);
     }
     if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) = &syntax.kind {
+        if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
             if items.is_empty() {
                 return (SIG_ERROR, error_val("error", "rest: empty syntax list"));
             }
@@ -151,7 +151,7 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         };
         (SIG_OK, Value::int(vec.len() as i64))
     } else if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) = &syntax.kind {
+        if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
             (SIG_OK, Value::int(items.len() as i64))
         } else {
             (
@@ -255,7 +255,7 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
     }
 
     let result = if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) = &syntax.kind {
+        if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
             items.is_empty()
         } else {
             return (
