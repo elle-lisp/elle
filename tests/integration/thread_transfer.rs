@@ -332,7 +332,7 @@ fn test_spawned_closure_array_operations() {
 use proptest::prelude::*;
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(crate::common::proptest_cases(50))]
 
     /// Property: Closures compiled with location maps should have non-empty maps
     /// for any simple arithmetic expression.

@@ -17,7 +17,7 @@ use proptest::prelude::*;
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: (def {:k v} {:k X}) yields v == X for arbitrary integers
     #[test]
@@ -88,7 +88,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: fn param destructuring is equivalent to get in body
     #[test]
@@ -129,7 +129,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: let table destructuring
     #[test]
@@ -161,7 +161,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: nested table destructuring extracts inner values
     #[test]
@@ -193,7 +193,7 @@ proptest! {
 // ============================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(crate::common::proptest_cases(100))]
 
     /// Property: match table pattern extracts value on match
     #[test]
