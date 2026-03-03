@@ -101,6 +101,58 @@ fn region_emitted_for_nested_arithmetic() {
     ));
 }
 
+// ── Positive: immediate-returning primitive whitelist (Tier 1) ──────
+
+#[test]
+fn region_emitted_for_length_result() {
+    // length always returns int → immediate
+    assert!(has_region("(let ((x (list 1 2 3))) (length x))"));
+}
+
+#[test]
+fn region_emitted_for_empty_predicate() {
+    // empty? always returns bool → immediate
+    assert!(has_region("(let ((x (list 1 2 3))) (empty? x))"));
+}
+
+#[test]
+fn region_emitted_for_type_predicate() {
+    // string? always returns bool → immediate
+    assert!(has_region(r#"(let ((x "hello")) (string? x))"#));
+}
+
+#[test]
+fn region_emitted_for_type_of() {
+    // type returns keyword → immediate (interned, not heap)
+    assert!(has_region("(let ((x 42)) (type x))"));
+}
+
+#[test]
+fn region_emitted_for_abs() {
+    // abs returns int or float → immediate
+    assert!(has_region("(let ((x -5)) (abs x))"));
+}
+
+#[test]
+fn region_emitted_for_floor() {
+    // floor returns int → immediate
+    assert!(has_region("(let ((x 3.7)) (floor x))"));
+}
+
+#[test]
+fn region_emitted_for_has_key() {
+    // has-key? returns bool → immediate
+    assert!(has_region("(let ((t @{:a 1})) (has-key? t :a))"));
+}
+
+#[test]
+fn region_emitted_for_string_contains() {
+    // string/contains? returns bool → immediate
+    assert!(has_region(
+        r#"(let ((s "hello world")) (string/contains? s "world"))"#
+    ));
+}
+
 // ── Negative: scopes that must NOT emit RegionEnter/RegionExit ──────
 
 #[test]
@@ -116,9 +168,27 @@ fn no_region_when_result_is_string() {
 }
 
 #[test]
-fn no_region_when_result_is_call() {
-    // Non-intrinsic call → result unknown → unsafe
-    assert!(!has_region("(let ((x (list 1 2 3))) (length x))"));
+fn no_region_when_result_is_unknown_call() {
+    // Non-whitelisted function call → result unknown → unsafe
+    assert!(!has_region("(let ((x (list 1 2 3))) (first x))"));
+}
+
+#[test]
+fn no_region_when_result_is_number_to_string() {
+    // number->string returns a heap-allocated string → unsafe
+    assert!(!has_region("(let ((x 42)) (number->string x))"));
+}
+
+#[test]
+fn no_region_when_result_is_rest() {
+    // rest returns arbitrary value (list tail) → unsafe
+    assert!(!has_region("(let ((x (list 1 2 3))) (rest x))"));
+}
+
+#[test]
+fn no_region_when_result_is_reverse() {
+    // reverse returns a new list → heap-allocated → unsafe
+    assert!(!has_region("(let ((x (list 1 2 3))) (reverse x))"));
 }
 
 #[test]
@@ -316,6 +386,48 @@ fn correct_deeply_nested_scopes() {
         )
         .unwrap(),
         Value::int(6)
+    );
+}
+
+// ── Correctness: Tier 1 primitive whitelist produces correct results ─
+
+#[test]
+fn correct_length_in_scope() {
+    assert_eq!(
+        eval_source("(let ((x (list 1 2 3))) (length x))").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn correct_empty_in_scope() {
+    assert_eq!(
+        eval_source("(let ((x (list 1 2 3))) (empty? x))").unwrap(),
+        Value::FALSE
+    );
+}
+
+#[test]
+fn correct_type_in_scope() {
+    assert_eq!(
+        eval_source(r#"(let ((x "hello")) (type x))"#).unwrap(),
+        Value::keyword("string")
+    );
+}
+
+#[test]
+fn correct_abs_in_scope() {
+    assert_eq!(
+        eval_source("(let ((x -42)) (abs x))").unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn correct_floor_in_scope() {
+    assert_eq!(
+        eval_source("(let ((x 3.7)) (floor x))").unwrap(),
+        Value::int(3)
     );
 }
 

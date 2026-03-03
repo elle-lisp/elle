@@ -97,8 +97,8 @@ impl Lowerer {
         }
     }
 
-    /// Check if a function call is to a known intrinsic with the correct
-    /// arity, meaning its result is guaranteed to be an immediate.
+    /// Check if a function call is to a known intrinsic or immediate-returning
+    /// primitive, meaning its result is guaranteed to be an immediate.
     fn call_result_is_safe(&self, func: &Hir, args: &[CallArg]) -> bool {
         // Must be a variable reference to a global
         let HirKind::Var(binding) = &func.kind else {
@@ -117,16 +117,18 @@ impl Lowerer {
 
         let sym = binding.name();
 
-        // Look up in intrinsics map
-        let Some(op) = self.intrinsics.get(&sym) else {
-            return false;
-        };
-
-        // Verify arity matches what try_lower_intrinsic expects
-        match op {
-            IntrinsicOp::Binary(_) | IntrinsicOp::Compare(_) => args.len() == 2,
-            IntrinsicOp::Unary(_) => args.len() == 1,
+        // Check intrinsics map (BinOp, CmpOp, UnaryOp with correct arity)
+        if let Some(op) = self.intrinsics.get(&sym) {
+            return match op {
+                IntrinsicOp::Binary(_) | IntrinsicOp::Compare(_) => args.len() == 2,
+                IntrinsicOp::Unary(_) => args.len() == 1,
+            };
         }
+
+        // Check immediate-returning primitives whitelist.
+        // No arity check needed — wrong arity produces SIG_ERROR which
+        // propagates via the signal mechanism, never as a heap return value.
+        self.immediate_primitives.contains(&sym)
     }
 
     /// Check if a HIR body contains any `set!` to a binding that is NOT

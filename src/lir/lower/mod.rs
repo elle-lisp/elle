@@ -13,7 +13,7 @@ use super::types::*;
 use crate::hir::{Binding, BlockId, Hir, HirKind, HirPattern, PatternKey};
 use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 
 /// Tracks an active block during lowering so `break` can find its
@@ -54,6 +54,10 @@ pub struct Lowerer {
     /// Intrinsic operations for operator specialization.
     /// Maps global SymbolId to specialized LIR instruction.
     intrinsics: FxHashMap<SymbolId, IntrinsicOp>,
+    /// Primitives known to return NaN-boxed immediates.
+    /// Used by escape analysis (`result_is_safe`) to accept calls to
+    /// these primitives in scope-allocated let bodies.
+    immediate_primitives: FxHashSet<SymbolId>,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
     immutable_values: HashMap<Binding, Value>,
     /// Stack of active block contexts for `break` lowering
@@ -77,6 +81,7 @@ impl Lowerer {
             upvalue_bindings: std::collections::HashSet::new(),
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),
+            immediate_primitives: FxHashSet::default(),
             immutable_values: HashMap::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
@@ -86,6 +91,12 @@ impl Lowerer {
     /// Set intrinsic operations for operator specialization
     pub fn with_intrinsics(mut self, intrinsics: FxHashMap<SymbolId, IntrinsicOp>) -> Self {
         self.intrinsics = intrinsics;
+        self
+    }
+
+    /// Set the whitelist of primitives known to return immediates
+    pub fn with_immediate_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
+        self.immediate_primitives = set;
         self
     }
 

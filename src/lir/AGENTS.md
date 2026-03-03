@@ -155,14 +155,22 @@ Function bodies never get region instructions.
 2. Body cannot suspend (`may_suspend()`)
 3. Body result is provably a NaN-boxed immediate (`result_is_safe`)
 4. Body contains no `set` to bindings outside the scope
+5. Body contains no `break` (break carries a value past RegionExit)
 
-For `let`/`letrec`: all four conditions. `letrec` delegates to `let`.
+For `let`/`letrec`: all five conditions. `letrec` delegates to `let`.
 For `block`: conditions 1-4 plus no `break` nodes in the body.
 
 `result_is_safe` returns `true` for: literals (int, float, bool, nil,
 keyword, empty-list), `if`/`begin`/`cond`/`and`/`or` where all result
-positions are recursively safe, and calls to intrinsics (`BinOp`,
-`CmpOp`, `UnaryOp`) with correct arity.
+positions are recursively safe, calls to intrinsics (`BinOp`,
+`CmpOp`, `UnaryOp`) with correct arity, and calls to whitelisted
+immediate-returning primitives (Tier 1).
+
+**Tier 1 primitive whitelist** (in `intrinsics.rs`): `length`, `empty?`,
+`abs`, `floor`, `ceil`, `round`, `type`, `type-of`, and all type
+predicates (`nil?`, `pair?`, `string?`, `number?`, `array?`, etc.).
+These are primitives that always return int, float, bool, or keyword
+on success. Full list in `IMMEDIATE_PRIMITIVES` const.
 
 **Known limitation (E5/E6):** If the body passes a scope-allocated
 value to a function that stores it externally, the analysis cannot
@@ -206,7 +214,7 @@ No new bytecode instructions — break compiles to existing Move + Jump.
 |------|-------|---------|
 | `mod.rs` | 20 | Re-exports |
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
-| `intrinsics.rs` | ~55 | `IntrinsicOp` enum, maps primitive SymbolIds to specialized LIR instructions (BinOp, CmpOp, UnaryOp) |
+| `intrinsics.rs` | ~120 | `IntrinsicOp` enum, intrinsics map, `IMMEDIATE_PRIMITIVES` whitelist, `build_immediate_primitives()` |
 | `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point, `can_scope_allocate_*` analysis |
 | `lower/escape.rs` | ~340 | Escape analysis helpers: `result_is_safe`, `body_contains_outward_set`, `body_contains_break` |
 | `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |

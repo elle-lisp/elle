@@ -105,7 +105,10 @@ fn eval_inner(
 
     // Lower
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims);
     let lir_func = lowerer
         .lower(&analysis.hir)
         .map_err(|e| format!("eval: lowering failed: {}", e))?;

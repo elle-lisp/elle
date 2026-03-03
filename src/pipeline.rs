@@ -189,7 +189,10 @@ pub fn eval_syntax(
     mark_tail_calls(&mut analysis.hir);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
     let symbol_snapshot = symbols.all_names();
@@ -227,7 +230,10 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
 
     // Phase 4: Lower to LIR with intrinsic specialization
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
@@ -338,9 +344,12 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
 
     // Lower and emit all forms
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
     let mut results = Vec::new();
     for analysis in analysis_results {
-        let mut lowerer = Lowerer::new().with_intrinsics(intrinsics.clone());
+        let mut lowerer = Lowerer::new()
+            .with_intrinsics(intrinsics.clone())
+            .with_immediate_primitives(imm_prims.clone());
         let lir_func = lowerer.lower(&analysis.hir)?;
 
         let symbol_snapshot = symbols.all_names();
@@ -376,7 +385,10 @@ pub fn eval(
     mark_tail_calls(&mut analysis.hir);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
     let symbol_snapshot = symbols.all_names();
