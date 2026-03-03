@@ -422,10 +422,20 @@ fn no_region_for_block_with_break() {
 }
 
 #[test]
-fn no_region_for_block_with_set() {
-    // Block body with set to outer binding → outward mutation
-    assert!(!has_region(
+fn region_for_block_with_immediate_set() {
+    // Block body with set to outer binding, but value is immediate (42).
+    // Tier 8: outward set with immediate value is harmless → qualifies.
+    assert!(has_region(
         "(begin (var holder nil) (block :done (set holder 42) 0))"
+    ));
+}
+
+#[test]
+fn no_region_for_block_with_heap_set() {
+    // Block body with set to outer binding where value is heap-allocated.
+    // Even with Tier 8, this is dangerous → rejected.
+    assert!(!has_region(
+        "(begin (var holder nil) (block :done (set holder (list 1 2 3)) 0))"
     ));
 }
 
@@ -500,6 +510,121 @@ fn no_region_when_intrinsic_has_spliced_args() {
     // Spliced args to an intrinsic cause a CallArray (not intrinsic lowering),
     // so the result type is unknown → unsafe.
     assert!(!has_region("(let ((a @[1 2])) (+ ;a))"));
+}
+
+// ── Tier 8: outward-set refinement ──────────────────────────────────
+
+#[test]
+fn region_emitted_for_outward_set_with_immediate_value() {
+    // (set counter (+ counter 1)) sets an outer binding, but the value
+    // is an intrinsic call returning an immediate. Tier 8: harmless.
+    assert!(has_region(
+        "(begin (var counter 0) (let ((temp (list 1 2 3))) (set counter (+ counter 1)) (length temp)))"
+    ));
+}
+
+#[test]
+fn region_emitted_for_outward_set_with_bool_literal() {
+    // (set flag true) — immediate assignment to outer binding.
+    assert!(has_region(
+        "(begin (var flag false) (let ((temp (list 1 2 3))) (set flag true) (length temp)))"
+    ));
+}
+
+#[test]
+fn no_region_when_outward_set_assigns_scope_heap_var() {
+    // (set holder temp) where temp is a scope binding with heap init.
+    // The value is a Var referencing a scope binding whose init is (list ...) — unsafe.
+    assert!(!has_region(
+        "(begin (var holder nil) (let ((temp (list 1 2 3))) (set holder temp) 42))"
+    ));
+}
+
+#[test]
+fn no_region_when_outward_set_assigns_heap_call() {
+    // (set holder (list 4 5 6)) — the value is a non-intrinsic call.
+    assert!(!has_region(
+        "(begin (var holder nil) (let ((temp 1)) (set holder (list 4 5 6)) 42))"
+    ));
+}
+
+#[test]
+fn region_emitted_for_inner_let_set_to_inner_binding() {
+    // Inner let sets its own binding — not outward for the inner let.
+    // Tier 8: inner bindings are extended into scope_bindings.
+    assert!(has_region(
+        "(let ((x 1)) (let ((y 2)) (set y (+ y 1)) (+ x y)))"
+    ));
+}
+
+#[test]
+fn no_region_when_inner_let_sets_outer_with_heap_value() {
+    // Inner let sets outer binding with a heap value.
+    // Even with scope extension, the value is heap-allocated.
+    assert!(!has_region(
+        "(begin (var holder nil) (let ((x 1)) (let ((y (list 1))) (set holder y) 42)))"
+    ));
+}
+
+// ── Tier 8 correctness: programs with immediate outward set ─────────
+
+#[test]
+fn correct_outward_set_immediate_in_scope() {
+    // Verify the set! actually takes effect when scope-allocated.
+    let result = eval_source(
+        "(begin
+           (var counter 0)
+           (let ((temp (list 1 2 3)))
+             (set counter (+ counter 1))
+             (length temp))
+           counter)",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(1));
+}
+
+#[test]
+fn correct_outward_set_bool_in_scope() {
+    let result = eval_source(
+        "(begin
+           (var flag false)
+           (let ((temp (list 1 2 3)))
+             (set flag true)
+             (length temp))
+           flag)",
+    )
+    .unwrap();
+    assert_eq!(result, Value::TRUE);
+}
+
+#[test]
+fn correct_loop_with_outward_set_counter() {
+    // Loop where each iteration scope-allocates and sets an outer counter.
+    let result = eval_source(
+        "(begin
+           (var total 0)
+           (var i 0)
+           (while (< i 100)
+             (let ((temp @[1 2 3]))
+               (set total (+ total (length temp)))
+               (set i (+ i 1))))
+           total)",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(300));
+}
+
+#[test]
+fn correct_inner_let_set_own_binding() {
+    // Inner let sets its own binding — must work correctly.
+    let result = eval_source(
+        "(let ((x 10))
+           (let ((y 5))
+             (set y (+ y x))
+             (+ x y)))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(25));
 }
 
 // ── Correctness: programs with scope allocation produce correct results ─
@@ -757,8 +882,11 @@ fn regression_yielded_value_not_freed() {
 #[test]
 fn stress_loop_with_scope_allocation() {
     // Tight loop where each iteration scope-allocates and releases.
-    // Note: the let body does `(set i ...)` which is an outward set,
-    // so this let does NOT scope-allocate. But it exercises the path.
+    // Note: the let body does `(set i ...)` which is an outward set.
+    // The let itself does NOT scope-allocate (Set in result position is
+    // conservatively unsafe in result_is_safe). However, the implicit
+    // while-block DOES scope-allocate since Tier 8 recognizes the outward
+    // set value `(+ a b)` as immediate.
     let result = eval_source(
         "(var i 0)
          (while (< i 1000)

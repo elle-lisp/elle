@@ -291,7 +291,7 @@ impl Lowerer {
     // ── Escape analysis ────────────────────────────────────────────
     //
     // See `escape.rs` for helper functions (`result_is_safe`,
-    // `body_contains_outward_set`, `body_contains_break`).
+    // `body_contains_dangerous_outward_set`, `body_contains_break`).
 
     /// Determine if a `let` scope's allocations can be safely released
     /// at scope exit via `RegionEnter`/`RegionExit`.
@@ -300,7 +300,8 @@ impl Lowerer {
     /// 1. No binding is captured by a nested lambda
     /// 2. Body cannot suspend (yield/debug/polymorphic)
     /// 3. Body result is provably a NaN-boxed immediate
-    /// 4. Body contains no `set` to bindings outside this scope
+    /// 4. Body contains no dangerous outward `set` (set to outer binding
+    ///    with a value that could be heap-allocated)
     /// 5. Body contains no `break` (break carries a value past RegionExit)
     fn can_scope_allocate_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
         self.scope_stats.scopes_analyzed += 1;
@@ -317,17 +318,18 @@ impl Lowerer {
             return false;
         }
 
-        // Condition 3: result is immediate
+        // Build scope binding refs once — used by conditions 3 and 4
         let scope_binding_refs: Vec<(Binding, &Hir)> =
             bindings.iter().map(|(b, init)| (*b, init)).collect();
+
+        // Condition 3: result is immediate
         if !self.result_is_safe(body, &scope_binding_refs) {
             self.scope_stats.rejected_unsafe_result += 1;
             return false;
         }
 
-        // Condition 4: no outward mutation
-        let scope_bindings: Vec<Binding> = bindings.iter().map(|(b, _)| *b).collect();
-        if Self::body_contains_outward_set(body, &scope_bindings) {
+        // Condition 4: no dangerous outward mutation
+        if self.body_contains_dangerous_outward_set(body, &scope_binding_refs) {
             self.scope_stats.rejected_outward_set += 1;
             return false;
         }
@@ -382,9 +384,12 @@ impl Lowerer {
             return false;
         }
 
-        // Condition 4: no outward mutation (blocks have no own bindings,
-        // so any set! to a non-local is outward)
-        if body.iter().any(|e| Self::body_contains_outward_set(e, &[])) {
+        // Condition 4: no dangerous outward mutation (blocks have no own
+        // bindings, so any set! is outward — but harmless if value is immediate)
+        if body
+            .iter()
+            .any(|e| self.body_contains_dangerous_outward_set(e, &[]))
+        {
             self.scope_stats.rejected_outward_set += 1;
             return false;
         }

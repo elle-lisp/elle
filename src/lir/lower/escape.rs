@@ -15,8 +15,8 @@
 //! 1. No binding is captured by a nested lambda (`is_captured()`)
 //! 2. Body cannot suspend (`may_suspend()`)
 //! 3. Body result is provably a NaN-boxed immediate (`result_is_safe`)
-//! 4. Body contains no `set` to bindings outside this scope
-//!    (`body_contains_outward_set`)
+//! 4. Body contains no dangerous `set` to bindings outside this scope
+//!    (`body_contains_dangerous_outward_set`)
 //! 5. Body contains no `break` (`hir_contains_break`) — a break carries
 //!    a value past the compensating `RegionExit`
 //!
@@ -181,12 +181,17 @@ impl Lowerer {
         self.immediate_primitives.contains(&sym)
     }
 
-    /// Check if a HIR body contains any `set!` to a binding that is NOT
-    /// in the given set of scope-local bindings.
+    /// Check if a HIR body contains any dangerous `set!` to a binding
+    /// outside the scope.
     ///
-    /// An outward `set!` stores a value (possibly heap-allocated inside
-    /// the scope) into a binding that outlives the scope. After
-    /// `RegionExit`, that binding holds a dangling pointer.
+    /// A `set!` to an outer binding is dangerous only if the assigned
+    /// value could be heap-allocated inside the scope. If the value is
+    /// provably immediate (via `result_is_safe`), the outer binding
+    /// receives an immediate that won't dangle after `RegionExit`.
+    ///
+    /// `scope_bindings` contains both the binding identity AND init
+    /// expressions, used by `result_is_safe` when the assigned value
+    /// references a scope binding.
     ///
     /// Recursion rules:
     /// - Recurses into all sub-expressions.
@@ -194,18 +199,30 @@ impl Lowerer {
     ///   caught by condition 1).
     /// - DOES recurse into nested `Let`/`Letrec`/`Block` bodies (part of
     ///   the current execution flow).
-    pub(super) fn body_contains_outward_set(hir: &Hir, scope_bindings: &[Binding]) -> bool {
-        Self::walk_for_outward_set(hir, scope_bindings)
+    /// - When entering nested `Let`/`Letrec`, extends `scope_bindings`
+    ///   with the inner let's bindings so inner mutations are not
+    ///   treated as outward.
+    pub(super) fn body_contains_dangerous_outward_set(
+        &self,
+        hir: &Hir,
+        scope_bindings: &[(Binding, &Hir)],
+    ) -> bool {
+        self.walk_for_outward_set(hir, scope_bindings)
     }
 
-    fn walk_for_outward_set(hir: &Hir, scope_bindings: &[Binding]) -> bool {
+    fn walk_for_outward_set(&self, hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
         match &hir.kind {
             HirKind::Set { target, value } => {
                 // Check if target is outside our scope
-                if !scope_bindings.contains(target) {
-                    return true;
+                let in_scope = scope_bindings.iter().any(|(b, _)| b == target);
+                if !in_scope {
+                    // Outward set — only dangerous if value could be heap-allocated
+                    if !self.result_is_safe(value, scope_bindings) {
+                        return true;
+                    }
                 }
-                Self::walk_for_outward_set(value, scope_bindings)
+                // Recurse into value expression (it may contain further set!s)
+                self.walk_for_outward_set(value, scope_bindings)
             }
 
             // Do NOT recurse into lambda bodies
@@ -227,77 +244,88 @@ impl Lowerer {
                 then_branch,
                 else_branch,
             } => {
-                Self::walk_for_outward_set(cond, scope_bindings)
-                    || Self::walk_for_outward_set(then_branch, scope_bindings)
-                    || Self::walk_for_outward_set(else_branch, scope_bindings)
+                self.walk_for_outward_set(cond, scope_bindings)
+                    || self.walk_for_outward_set(then_branch, scope_bindings)
+                    || self.walk_for_outward_set(else_branch, scope_bindings)
             }
 
             HirKind::Begin(exprs) => exprs
                 .iter()
-                .any(|e| Self::walk_for_outward_set(e, scope_bindings)),
+                .any(|e| self.walk_for_outward_set(e, scope_bindings)),
 
             HirKind::Cond {
                 clauses,
                 else_branch,
             } => {
                 clauses.iter().any(|(cond, body)| {
-                    Self::walk_for_outward_set(cond, scope_bindings)
-                        || Self::walk_for_outward_set(body, scope_bindings)
+                    self.walk_for_outward_set(cond, scope_bindings)
+                        || self.walk_for_outward_set(body, scope_bindings)
                 }) || else_branch
                     .as_ref()
-                    .is_some_and(|b| Self::walk_for_outward_set(b, scope_bindings))
+                    .is_some_and(|b| self.walk_for_outward_set(b, scope_bindings))
             }
 
             HirKind::And(exprs) | HirKind::Or(exprs) => exprs
                 .iter()
-                .any(|e| Self::walk_for_outward_set(e, scope_bindings)),
+                .any(|e| self.walk_for_outward_set(e, scope_bindings)),
 
             HirKind::Call { func, args, .. } => {
-                Self::walk_for_outward_set(func, scope_bindings)
+                self.walk_for_outward_set(func, scope_bindings)
                     || args
                         .iter()
-                        .any(|a| Self::walk_for_outward_set(&a.expr, scope_bindings))
+                        .any(|a| self.walk_for_outward_set(&a.expr, scope_bindings))
             }
 
+            // Nested let/letrec: extend scope_bindings with inner bindings
+            // so mutations to inner bindings are not treated as outward.
+            // Init expressions are walked with the OUTER scope (inner bindings
+            // don't exist yet during init evaluation).
             HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                bindings
+                // Walk inits with current scope
+                if bindings
                     .iter()
-                    .any(|(_, init)| Self::walk_for_outward_set(init, scope_bindings))
-                    || Self::walk_for_outward_set(body, scope_bindings)
+                    .any(|(_, init)| self.walk_for_outward_set(init, scope_bindings))
+                {
+                    return true;
+                }
+                // Walk body with extended scope
+                let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
+                extended.extend(bindings.iter().map(|(b, init)| (*b, init)));
+                self.walk_for_outward_set(body, &extended)
             }
 
-            HirKind::Define { value, .. } => Self::walk_for_outward_set(value, scope_bindings),
+            HirKind::Define { value, .. } => self.walk_for_outward_set(value, scope_bindings),
 
             HirKind::While { cond, body } => {
-                Self::walk_for_outward_set(cond, scope_bindings)
-                    || Self::walk_for_outward_set(body, scope_bindings)
+                self.walk_for_outward_set(cond, scope_bindings)
+                    || self.walk_for_outward_set(body, scope_bindings)
             }
 
             HirKind::Block { body, .. } => body
                 .iter()
-                .any(|e| Self::walk_for_outward_set(e, scope_bindings)),
+                .any(|e| self.walk_for_outward_set(e, scope_bindings)),
 
-            HirKind::Break { value, .. } => Self::walk_for_outward_set(value, scope_bindings),
+            HirKind::Break { value, .. } => self.walk_for_outward_set(value, scope_bindings),
 
             HirKind::Match { value, arms } => {
-                Self::walk_for_outward_set(value, scope_bindings)
+                self.walk_for_outward_set(value, scope_bindings)
                     || arms.iter().any(|(_, guard, body)| {
                         guard
                             .as_ref()
-                            .is_some_and(|g| Self::walk_for_outward_set(g, scope_bindings))
-                            || Self::walk_for_outward_set(body, scope_bindings)
+                            .is_some_and(|g| self.walk_for_outward_set(g, scope_bindings))
+                            || self.walk_for_outward_set(body, scope_bindings)
                     })
             }
 
-            HirKind::Yield(expr) => Self::walk_for_outward_set(expr, scope_bindings),
+            HirKind::Yield(expr) => self.walk_for_outward_set(expr, scope_bindings),
 
             HirKind::Quote(_) => false,
 
-            HirKind::Destructure { value, .. } => Self::walk_for_outward_set(value, scope_bindings),
+            HirKind::Destructure { value, .. } => self.walk_for_outward_set(value, scope_bindings),
 
             HirKind::Eval { expr, env } => {
-                Self::walk_for_outward_set(expr, scope_bindings)
-                    || Self::walk_for_outward_set(env, scope_bindings)
+                self.walk_for_outward_set(expr, scope_bindings)
+                    || self.walk_for_outward_set(env, scope_bindings)
             }
         }
     }
