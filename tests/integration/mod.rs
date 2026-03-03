@@ -62,14 +62,8 @@ mod hygiene {
 mod destructuring {
     include!("destructuring.rs");
 }
-mod prelude {
-    include!("prelude.rs");
-}
 mod blocks {
     include!("blocks.rs");
-}
-mod eval {
-    include!("eval.rs");
 }
 mod primitives {
     include!("primitives.rs");
@@ -128,6 +122,7 @@ mod escape {
 mod elle_scripts {
     include!("elle_scripts.rs");
 }
+
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
 //     include!("fn_flow.rs");
