@@ -96,16 +96,28 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "pure?",
     "coro?",
     "box?",
+    // Comparison alias → bool (canonical `=` is in intrinsics map, but
+    // `eq?` gets its own SymbolId and misses the intrinsics lookup)
+    "eq?",
     // Collection predicates → bool
     "empty?",
     "has-key?",
-    // String predicates → bool
+    // String predicates → bool (canonical + aliases)
     "string/contains?",
+    "string-contains?",
     "string/starts-with?",
+    "string-starts-with?",
     "string/ends-with?",
+    "string-ends-with?",
     // Numeric predicates → bool
     "even?",
     "odd?",
+    // Closure introspection predicates → bool (canonical + aliases)
+    "fn/mutates-params?",
+    "mutates-params?",
+    "fn/raises?",
+    "raises?",
+    "coroutine?",
     // Collection → int
     "length",
     // Numeric → int or float

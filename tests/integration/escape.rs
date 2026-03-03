@@ -153,6 +153,13 @@ fn region_emitted_for_string_contains() {
     ));
 }
 
+#[test]
+fn region_emitted_for_eq_alias() {
+    // eq? is an alias of = with a different SymbolId.
+    // The intrinsics map only has =, so eq? must be in the whitelist.
+    assert!(has_region("(let ((x 1)) (eq? x 1))"));
+}
+
 // ── Negative: scopes that must NOT emit RegionEnter/RegionExit ──────
 
 #[test]
@@ -429,6 +436,25 @@ fn correct_floor_in_scope() {
         eval_source("(let ((x 3.7)) (floor x))").unwrap(),
         Value::int(3)
     );
+}
+
+#[test]
+fn correct_eq_alias_in_scope() {
+    assert_eq!(
+        eval_source("(let ((x 42)) (eq? x 42))").unwrap(),
+        Value::TRUE
+    );
+}
+
+#[test]
+fn wrong_arity_whitelisted_primitive_signals_error() {
+    // Calling a whitelisted primitive with wrong arity produces a
+    // runtime error via the signal mechanism, not a heap return value.
+    // Scope allocation is still safe — the error propagates, never
+    // reaching the RegionExit as a normal return.
+    let result = eval_source("(let ((x (list 1 2 3))) (length x 99))");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("arity"));
 }
 
 // ── Regression: unsafe patterns must produce correct results ────────
