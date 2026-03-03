@@ -17,10 +17,10 @@
 //! `RegionExit` pops the mark and calls `release()` to run destructors for
 //! objects allocated within the scope.
 //!
-//! The lowerer gates `RegionEnter`/`RegionExit` emission on escape analysis:
-//! only scopes where no allocated values can escape get region instructions.
-//! Currently the escape analysis is maximally conservative (nothing qualifies),
-//! so region instructions are not emitted and the scope mark stack stays empty.
+//! The lowerer gates `RegionEnter`/`RegionExit` emission on escape analysis
+//! (`src/lir/lower/escape.rs`): only scopes where no allocated values can
+//! escape get region instructions. The analysis checks: no captures, no
+//! suspension, result is immediate, no outward mutation.
 //!
 //! ## Active allocator pointer
 //!

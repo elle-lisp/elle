@@ -2,6 +2,7 @@
 
 mod binding;
 mod control;
+mod escape;
 mod expr;
 mod lambda;
 mod pattern;
@@ -190,28 +191,90 @@ impl Lowerer {
         self.region_depth -= 1;
     }
 
-    // ── Escape analysis stubs ─────────────────────────────────────
+    // ── Escape analysis ────────────────────────────────────────────
+    //
+    // See `escape.rs` for helper functions (`result_is_safe`,
+    // `body_contains_outward_set`, `body_contains_break`).
 
     /// Determine if a `let` scope's allocations can be safely released
-    /// at scope exit. Returns `false` if any binding's value might escape.
+    /// at scope exit via `RegionEnter`/`RegionExit`.
     ///
-    /// Current policy: maximally conservative (always returns `false`).
-    /// No scopes qualify for scope allocation until escape analysis is
-    /// implemented and validated.
-    fn can_scope_allocate_let(&self, _bindings: &[(Binding, Hir)], _body: &Hir) -> bool {
-        false
+    /// Returns `true` when ALL five conditions hold:
+    /// 1. No binding is captured by a nested lambda
+    /// 2. Body cannot suspend (yield/debug/polymorphic)
+    /// 3. Body result is provably a NaN-boxed immediate
+    /// 4. Body contains no `set` to bindings outside this scope
+    /// 5. Body contains no `break` (break carries a value past RegionExit)
+    fn can_scope_allocate_let(&self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
+        // Condition 1: no captures
+        if bindings.iter().any(|(b, _)| b.is_captured()) {
+            return false;
+        }
+
+        // Condition 2: no suspension
+        if body.effect.may_suspend() {
+            return false;
+        }
+
+        // Condition 3: result is immediate
+        if !self.result_is_safe(body) {
+            return false;
+        }
+
+        // Condition 4: no outward mutation
+        let scope_bindings: Vec<Binding> = bindings.iter().map(|(b, _)| *b).collect();
+        if Self::body_contains_outward_set(body, &scope_bindings) {
+            return false;
+        }
+
+        // Condition 5: no break (break value escapes via compensating RegionExit)
+        if Self::hir_contains_break(body) {
+            return false;
+        }
+
+        true
     }
 
     /// Determine if a `letrec` scope's allocations can be safely released.
-    /// Same conservative policy as `can_scope_allocate_let`.
-    fn can_scope_allocate_letrec(&self, _bindings: &[(Binding, Hir)], _body: &Hir) -> bool {
-        false
+    /// Identical analysis to `let` — letrec's mutual recursion and two-phase
+    /// initialization don't change the escape conditions.
+    fn can_scope_allocate_letrec(&self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
+        self.can_scope_allocate_let(bindings, body)
     }
 
     /// Determine if a `block` scope's allocations can be safely released.
-    /// Same conservative policy as above.
-    fn can_scope_allocate_block(&self, _body: &[Hir]) -> bool {
-        false
+    ///
+    /// Blocks don't introduce bindings but bracket a scope of allocations.
+    /// Conditions:
+    /// 1. No expression in body can suspend
+    /// 2. Body result is provably immediate
+    /// 3. No `break` in body (conservative — break values hard to check)
+    /// 4. No `set!` to non-local bindings (blocks have no own bindings)
+    fn can_scope_allocate_block(&self, body: &[Hir]) -> bool {
+        // Condition 1: no suspension
+        if body.iter().any(|e| e.effect.may_suspend()) {
+            return false;
+        }
+
+        // Condition 2: result is immediate (empty body → nil → safe)
+        if let Some(last) = body.last() {
+            if !self.result_is_safe(last) {
+                return false;
+            }
+        }
+
+        // Condition 3: no breaks
+        if Self::body_contains_break(body) {
+            return false;
+        }
+
+        // Condition 4: no outward mutation (blocks have no own bindings,
+        // so any set! to a non-local is outward)
+        if body.iter().any(|e| Self::body_contains_outward_set(e, &[])) {
+            return false;
+        }
+
+        true
     }
 }
 

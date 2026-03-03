@@ -297,28 +297,32 @@ fn count_in_bytecode(source: &str, needle: &str) -> usize {
 }
 
 #[test]
-fn test_let_no_region_instructions_conservative() {
-    // Conservative escape analysis: no scopes qualify for scope allocation.
-    // let* should NOT emit RegionEnter/RegionExit.
+fn test_let_no_region_when_result_is_var() {
+    // Body returns a variable → result_is_safe returns false.
+    // No scope allocation, no region instructions.
     assert!(!bytecode_contains("(let* ((x 1)) x)", "RegionEnter"));
     assert!(!bytecode_contains("(let* ((x 1)) x)", "RegionExit"));
 }
 
 #[test]
-fn test_nested_let_no_regions_conservative() {
-    // No region instructions emitted under conservative analysis
+fn test_nested_let_regions_for_safe_body() {
+    // Inner let: body is (+ x y) — intrinsic call, result is immediate.
+    // No captures, pure body → inner let qualifies for scope allocation.
+    // Outer let: body is the inner let — result_is_safe returns false
+    // for Let nodes (wildcard), so outer let does NOT scope-allocate.
     let source = "(let* ((x 1)) (let* ((y 2)) (+ x y)))";
     let enters = count_in_bytecode(source, "RegionEnter");
     let exits = count_in_bytecode(source, "RegionExit");
-    assert_eq!(enters, 0, "conservative: no RegionEnter");
-    assert_eq!(exits, 0, "conservative: no RegionExit");
+    assert_eq!(enters, 1, "inner let should emit RegionEnter");
+    assert_eq!(exits, 1, "inner let should emit RegionExit");
 }
 
 #[test]
-fn test_block_no_region_instructions_conservative() {
-    // Conservative: block should not emit region instructions
-    assert!(!bytecode_contains("(block :done 42)", "RegionEnter"));
-    assert!(!bytecode_contains("(block :done 42)", "RegionExit"));
+fn test_block_region_for_literal_body() {
+    // Block body is a literal → result is immediate, no suspension,
+    // no breaks, no outward set. Block qualifies for scope allocation.
+    assert!(bytecode_contains("(block :done 42)", "RegionEnter"));
+    assert!(bytecode_contains("(block :done 42)", "RegionExit"));
 }
 
 #[test]
