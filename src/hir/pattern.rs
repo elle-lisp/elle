@@ -68,7 +68,7 @@ pub enum PatternLiteral {
 }
 
 /// Key type in struct/table patterns: keyword (:foo) or symbol ('foo)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PatternKey {
     Keyword(String),
     Symbol(SymbolId),

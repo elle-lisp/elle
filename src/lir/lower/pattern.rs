@@ -2,7 +2,7 @@
 
 use super::decision::{AccessPath, Constructor, DecisionTree};
 use super::*;
-use crate::hir::{HirPattern, PatternLiteral};
+use crate::hir::{HirPattern, PatternKey, PatternLiteral};
 
 impl Lowerer {
     // ── Decision tree lowering ─────────────────────────────────────
@@ -264,10 +264,14 @@ impl Lowerer {
             AccessPath::Key(inner, key) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
+                let lir_key = match key {
+                    PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                    PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
+                };
                 self.emit(LirInstr::TableGetOrNil {
                     dst,
                     src: parent,
-                    key: LirConst::Keyword(key.clone()),
+                    key: lir_key,
                 });
                 Ok(dst)
             }
