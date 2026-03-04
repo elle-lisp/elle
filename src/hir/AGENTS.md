@@ -104,8 +104,10 @@ HIR (bindings are inline — no separate HashMap)
      for all bindings. No runtime type checks.
 
 12. **`HirPattern::Table` supports table/struct destructuring.**
-     `HirPattern::Table { entries: Vec<(String, HirPattern)> }` maps keyword
-     keys to sub-patterns. In binding forms (`def`, `var`, `let`, `fn` params),
+     `HirPattern::Table { entries: Vec<(PatternKey, HirPattern)> }` maps
+     keyword or symbol keys to sub-patterns. `PatternKey::Keyword(String)`
+     for `:foo` keys, `PatternKey::Symbol(SymbolId)` for `'foo` keys.
+     In binding forms (`def`, `var`, `let`, `fn` params),
      uses `TableGetOrNil` with silent nil. In `match` patterns, emits an
      `IsTable` type guard first so non-table values fall through to the next arm.
 

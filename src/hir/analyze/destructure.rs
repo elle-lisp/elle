@@ -1,7 +1,7 @@
 //! Destructuring: pattern analysis and helpers for binding forms.
 
 use super::*;
-use crate::hir::pattern::HirPattern;
+use crate::hir::pattern::{HirPattern, PatternKey};
 use crate::syntax::{ScopeId, Syntax, SyntaxKind};
 
 /// Parsed parameter list structure for lambda/fn parameter lists.
@@ -54,7 +54,10 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Recursively extract all symbol names from a syntax pattern (list, tuple, array, struct, or table).
-    fn extract_pattern_names<'s>(syntax: &'s Syntax, out: &mut Vec<(&'s str, &'s [ScopeId])>) {
+    pub(super) fn extract_pattern_names<'s>(
+        syntax: &'s Syntax,
+        out: &mut Vec<(&'s str, &'s [ScopeId])>,
+    ) {
         match &syntax.kind {
             SyntaxKind::Symbol(name)
                 if name == "_"
@@ -320,18 +323,16 @@ impl<'a> Analyzer<'a> {
                     scope
                 };
 
-                let binding = if in_function {
-                    // Check if pre-created by analyze_begin
+                let binding = if matches!(binding_scope, BindingScope::Global) {
+                    self.bind(name, &[], binding_scope)
+                } else {
+                    // Check if pre-created (by analyze_begin or letrec pass 1)
                     let name_scopes = syntax.scopes.as_slice();
                     if let Some(existing) = self.lookup_in_current_scope(name, name_scopes) {
                         existing
                     } else {
                         self.bind(name, name_scopes, binding_scope)
                     }
-                } else if matches!(binding_scope, BindingScope::Global) {
-                    self.bind(name, &[], binding_scope)
-                } else {
-                    self.bind(name, syntax.scopes.as_slice(), binding_scope)
                 };
 
                 if immutable {
@@ -380,18 +381,29 @@ impl<'a> Analyzer<'a> {
                 }
                 let mut entries = Vec::new();
                 for pair in items.chunks(2) {
-                    let key_name = match &pair[0].kind {
-                        SyntaxKind::Keyword(k) => k.clone(),
+                    let key = match &pair[0].kind {
+                        SyntaxKind::Keyword(k) => PatternKey::Keyword(k.clone()),
+                        SyntaxKind::Quote(inner) => match &inner.kind {
+                            SyntaxKind::Symbol(name) => {
+                                PatternKey::Symbol(self.symbols.intern(name))
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "{}: struct/table destructuring key must be a keyword or quoted symbol, got {}",
+                                    span, pair[0]
+                                ))
+                            }
+                        },
                         _ => {
                             return Err(format!(
-                                "{}: struct/table destructuring key must be a keyword, got {}",
+                                "{}: struct/table destructuring key must be a keyword or quoted symbol, got {}",
                                 span, pair[0]
                             ))
                         }
                     };
                     let pattern =
                         self.analyze_destructure_pattern(&pair[1], scope, immutable, span)?;
-                    entries.push((key_name, pattern));
+                    entries.push((key, pattern));
                 }
                 Ok(HirPattern::Struct { entries })
             }
