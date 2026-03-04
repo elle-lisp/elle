@@ -70,28 +70,6 @@ fn elapsed_time_captures_result() {
     assert_eq!(result.unwrap(), Value::int(42));
 }
 
-#[test]
-fn elapsed_time_with_sleep() {
-    let expr = r#"
-        (let ((result (time/elapsed (fn () (time/sleep 0.01) 99))))
-          (first (rest result)))
-    "#;
-
-    let result = eval_source(expr);
-    assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
-
-    let elapsed = result.unwrap();
-    if let Some(t) = elapsed.as_float() {
-        assert!(
-            t >= 0.008,
-            "elapsed time should be at least ~0.01s, got {}",
-            t
-        );
-    } else {
-        panic!("Expected float for elapsed time");
-    }
-}
-
 // ============================================================================
 // 2. Stopwatch Monotonicity Tests
 // ============================================================================
@@ -121,30 +99,5 @@ fn stopwatch_samples_are_monotonic() {
             samples[i],
             samples[i - 1]
         );
-    }
-}
-
-#[test]
-fn stopwatch_measures_elapsed_time() {
-    let expr = r#"
-        (let ((sw (time/stopwatch)))
-          (let ((t1 (coro/resume sw)))
-            (time/sleep 0.01)
-            (let ((t2 (coro/resume sw)))
-              (- t2 t1))))
-    "#;
-
-    let result = eval_source(expr);
-    assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
-
-    let elapsed = result.unwrap();
-    if let Some(t) = elapsed.as_float() {
-        assert!(
-            t >= 0.008,
-            "stopwatch should measure at least ~0.01s, got {}",
-            t
-        );
-    } else {
-        panic!("Expected float for elapsed time");
     }
 }

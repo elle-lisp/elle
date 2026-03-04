@@ -1,0 +1,759 @@
+# Integration tests for destructuring patterns in def, var, let, let*, fn, defn
+#
+# Migrated from tests/integration/destructuring.rs
+# Tests that check error messages stay in Rust (3 tests).
+
+(import-file "./examples/assertions.lisp")
+
+# Helper: assert that (thunk) raises an error
+(defn assert-err [thunk msg]
+  "Assert that (thunk) raises an error"
+  (let ([result (try (begin (thunk) :no-error)
+                  (catch (e) :got-error))])
+    (assert-eq result :got-error msg)))
+
+# ============================================================
+# def: list destructuring
+# ============================================================
+
+# test_def_list_basic
+(begin
+  (def (a b c) (list 1 2 3))
+  (assert-eq a 1 "def list basic: a")
+  (assert-eq b 2 "def list basic: b")
+  (assert-eq c 3 "def list basic: c"))
+
+# test_def_list_short_source — missing elements become nil
+(begin
+  (def (a b c) (list 1))
+  (assert-eq a 1 "def list short: a")
+  (assert-eq b nil "def list short: b is nil")
+  (assert-eq c nil "def list short: c is nil"))
+
+# test_def_list_empty_source
+(begin
+  (def (a b) (list))
+  (assert-eq a nil "def list empty: a is nil")
+  (assert-eq b nil "def list empty: b is nil"))
+
+# test_def_list_extra_elements_ignored
+(begin
+  (def (a b) (list 1 2 3 4))
+  (assert-eq a 1 "def list extra: a")
+  (assert-eq b 2 "def list extra: b"))
+
+# test_def_list_wrong_type_gives_nil
+(begin
+  (def (a b) 42)
+  (assert-eq a nil "def list wrong type: a is nil")
+  (assert-eq b nil "def list wrong type: b is nil"))
+
+# ============================================================
+# def: array/tuple destructuring
+# ============================================================
+
+# test_def_array_basic — [x y] destructures tuples and arrays
+(begin
+  (def [x y] [10 20])
+  (assert-eq x 10 "def array basic: x")
+  (assert-eq y 20 "def array basic: y"))
+
+# test_def_array_short_source
+(begin
+  (def [x y z] [10])
+  (assert-eq x 10 "def array short: x")
+  (assert-eq y nil "def array short: y is nil")
+  (assert-eq z nil "def array short: z is nil"))
+
+# test_def_array_wrong_type_gives_nil
+(begin
+  (def [a b] 42)
+  (assert-eq a nil "def array wrong type: a is nil"))
+
+# ============================================================
+# def: nested destructuring
+# ============================================================
+
+# test_def_nested_list
+(begin
+  (def ((a b) c) (list (list 1 2) 3))
+  (assert-eq a 1 "def nested list: a")
+  (assert-eq b 2 "def nested list: b")
+  (assert-eq c 3 "def nested list: c"))
+
+# test_def_nested_array_in_list
+(begin
+  (def ([x y] z) (list [10 20] 30))
+  (assert-eq x 10 "def nested array in list: x")
+  (assert-eq y 20 "def nested array in list: y")
+  (assert-eq z 30 "def nested array in list: z"))
+
+# ============================================================
+# var: mutable destructuring
+# ============================================================
+
+# test_var_list_basic
+(begin
+  (var (a b) (list 1 2))
+  (assert-eq a 1 "var list basic: a")
+  (assert-eq b 2 "var list basic: b"))
+
+# test_var_destructured_bindings_are_mutable
+(begin
+  (var (a b) (list 1 2))
+  (set a 10)
+  (assert-eq a 10 "var destructured mutable: a after set"))
+
+# ============================================================
+# let: destructuring in bindings
+# ============================================================
+
+# test_let_list_destructure
+(assert-eq (let (((a b) (list 10 20))) (+ a b)) 30
+  "let list destructure")
+
+# test_let_array_destructure
+(assert-eq (let (([x y] [3 4])) (+ x y)) 7
+  "let array destructure")
+
+# test_let_mixed_bindings
+(assert-eq (let ((a 1) ((b c) (list 2 3))) (+ a b c)) 6
+  "let mixed bindings")
+
+# test_let_nested_destructure
+(assert-eq (let ((((a b) c) (list (list 1 2) 3))) (+ a b c)) 6
+  "let nested destructure")
+
+# ============================================================
+# let*: sequential destructuring
+# ============================================================
+
+# test_let_star_destructure_basic
+(assert-eq (let* (((a b) (list 1 2)) (c (+ a b))) c) 3
+  "let* destructure basic")
+
+# test_let_star_destructure_sequential_reference
+(assert-eq (let* (((a b) (list 1 2)) ((c d) (list a b))) (+ c d)) 3
+  "let* destructure sequential reference")
+
+# test_let_star_mixed_simple_and_destructure
+(assert-eq (let* ((x 10) ((a b) (list x 20))) (+ a b)) 30
+  "let* mixed simple and destructure")
+
+# test_let_star_shadowing_with_destructure
+(assert-eq (let* ((a 1) ((a b) (list 10 20))) a) 10
+  "let* shadowing with destructure")
+
+# ============================================================
+# fn: parameter destructuring
+# ============================================================
+
+# test_fn_list_param
+(assert-eq ((fn ((a b)) (+ a b)) (list 3 4)) 7
+  "fn list param")
+
+# test_fn_array_param
+(assert-eq ((fn ([x y]) (+ x y)) [5 6]) 11
+  "fn array param")
+
+# test_fn_mixed_params
+(assert-eq ((fn (x (a b)) (+ x a b)) 10 (list 20 30)) 60
+  "fn mixed params")
+
+# test_fn_nested_param
+(assert-eq ((fn (((a b) c)) (+ a b c)) (list (list 1 2) 3)) 6
+  "fn nested param")
+
+# ============================================================
+# defn: destructuring in named function params
+# ============================================================
+
+# test_defn_with_destructured_param
+(begin
+  (defn f ((a b)) (+ a b))
+  (assert-eq (f (list 3 4)) 7 "defn with destructured param"))
+
+# test_defn_mixed_params
+(begin
+  (defn f2 (x (a b)) (+ x a b))
+  (assert-eq (f2 10 (list 20 30)) 60 "defn mixed params"))
+
+# ============================================================
+# Edge cases
+# ============================================================
+
+# test_destructure_single_element_list
+(begin
+  (def (a) (list 42))
+  (assert-eq a 42 "destructure single element list"))
+
+# test_destructure_single_element_array
+(begin
+  (def [a] [42])
+  (assert-eq a 42 "destructure single element array"))
+
+# test_destructure_string_values
+(begin
+  (def (a b) (list "hello" "world"))
+  (assert-string-eq a "hello" "destructure string values"))
+
+# test_destructure_boolean_values
+(begin
+  (def (a b) (list true false))
+  (assert-eq a true "destructure boolean: a is true")
+  (assert-eq b false "destructure boolean: b is false"))
+
+# test_destructure_nil_in_list
+(begin
+  (def (a b) (list nil 2))
+  (assert-eq a nil "destructure nil in list: a is nil")
+  (assert-eq b 2 "destructure nil in list: b"))
+
+# test_destructure_in_closure_capture
+(begin
+  (def (a b) (list 1 2))
+  (def f (fn () (+ a b)))
+  (assert-eq (f) 3 "destructure in closure capture"))
+
+# test_let_destructure_in_closure
+(assert-eq (let (((a b) (list 10 20))) ((fn () (+ a b)))) 30
+  "let destructure in closure")
+
+# ============================================================
+# Wildcard _
+# ============================================================
+
+# test_wildcard_list_basic
+(begin
+  (def (_ b) (list 1 2))
+  (assert-eq b 2 "wildcard list basic"))
+
+# test_wildcard_list_middle
+(begin
+  (def (a _ c) (list 1 2 3))
+  (assert-eq (+ a c) 4 "wildcard list middle"))
+
+# test_wildcard_array_basic
+(begin
+  (def [_ y] [10 20])
+  (assert-eq y 20 "wildcard array basic"))
+
+# test_wildcard_multiple
+(begin
+  (def (_ _ c) (list 1 2 3))
+  (assert-eq c 3 "wildcard multiple"))
+
+# test_wildcard_in_let
+(assert-eq (let (((_ b) (list 10 20))) b) 20
+  "wildcard in let")
+
+# test_wildcard_in_fn_param
+(assert-eq ((fn ((_ b)) b) (list 10 20)) 20
+  "wildcard in fn param")
+
+# test_wildcard_nested
+(begin
+  (def ((_ b) c) (list (list 1 2) 3))
+  (assert-eq (+ b c) 5 "wildcard nested"))
+
+# ============================================================
+# & rest: list destructuring
+# ============================================================
+
+# test_rest_list_basic
+(begin
+  (def (a & r) (list 1 2 3))
+  (assert-eq a 1 "rest list basic: a")
+  (assert-eq (first r) 2 "rest list basic: first r")
+  (assert-eq (first (rest r)) 3 "rest list basic: second r"))
+
+# test_rest_list_empty_rest
+(begin
+  (def (a b & r) (list 1 2))
+  (assert-true (empty? r) "rest list empty rest"))
+
+# test_rest_list_single_rest
+(begin
+  (def (a & r) (list 1))
+  (assert-true (empty? r) "rest list single rest"))
+
+# test_rest_list_all_rest
+(begin
+  (def (& r) (list 1 2 3))
+  (assert-eq (first r) 1 "rest list all rest"))
+
+# test_rest_list_in_let
+(assert-eq (let (((a & r) (list 10 20 30))) (+ a (first r))) 30
+  "rest list in let")
+
+# test_rest_list_in_fn_param
+(assert-eq ((fn ((a & r)) (+ a (first r))) (list 10 20)) 30
+  "rest list in fn param")
+
+# ============================================================
+# & rest: array destructuring
+# ============================================================
+
+# test_rest_array_basic
+(begin
+  (def [a & r] [1 2 3])
+  (assert-eq a 1 "rest array basic: a")
+  (assert-eq (get r 0) 2 "rest array basic: r[0]")
+  (assert-eq (get r 1) 3 "rest array basic: r[1]"))
+
+# test_rest_array_empty_rest
+(begin
+  (def [a b & r] [1 2])
+  (assert-eq (length r) 0 "rest array empty rest"))
+
+# test_rest_array_in_let
+(assert-eq (let (([a & r] [10 20 30])) (+ a (get r 0))) 30
+  "rest array in let")
+
+# ============================================================
+# Wildcard + rest combined
+# ============================================================
+
+# test_wildcard_with_rest
+(begin
+  (def (_ & r) (list 1 2 3))
+  (assert-eq (first r) 2 "wildcard with rest"))
+
+# test_wildcard_and_rest_array
+(begin
+  (def [_ & r] [10 20 30])
+  (assert-eq (get r 0) 20 "wildcard and rest array"))
+
+# ============================================================
+# Variadic & rest in fn/lambda parameters
+# ============================================================
+
+# test_variadic_fn_rest_only
+(assert-list-eq ((fn (& args) args) 1 2 3) (list 1 2 3)
+  "variadic fn rest only")
+
+# test_variadic_fn_rest_empty
+(assert-true (empty? ((fn (& args) args)))
+  "variadic fn rest empty")
+
+# test_variadic_fn_fixed_and_rest
+(assert-eq ((fn (a b & rest) (+ a b)) 10 20 30 40) 30
+  "variadic fn fixed and rest")
+
+# test_variadic_fn_rest_value
+(assert-list-eq ((fn (a & rest) rest) 1 2 3) (list 2 3)
+  "variadic fn rest value")
+
+# test_variadic_fn_rest_single_extra
+(assert-list-eq ((fn (a & rest) rest) 1 2) (list 2)
+  "variadic fn rest single extra")
+
+# test_variadic_fn_rest_no_extra
+(assert-true (empty? ((fn (a & rest) rest) 1))
+  "variadic fn rest no extra")
+
+# test_variadic_defn
+(begin
+  (defn my-list (& items) items)
+  (assert-list-eq (my-list 1 2 3) (list 1 2 3) "variadic defn"))
+
+# test_variadic_defn_fixed_and_rest
+(begin
+  (defn f3 (x & rest) (cons x rest))
+  (assert-list-eq (f3 1 2 3) (list 1 2 3) "variadic defn fixed and rest"))
+
+# test_variadic_let_binding
+(let ((f (fn (& args) args)))
+  (assert-list-eq (f 10 20) (list 10 20) "variadic let binding"))
+
+# test_variadic_recursive
+(begin
+  (defn my-len (& args)
+    (def lst (first args))
+    (if (empty? lst) 0
+        (+ 1 (my-len (rest lst)))))
+  (assert-eq (my-len (list 1 2 3)) 3 "variadic recursive"))
+
+# test_variadic_tail_call
+(begin
+  (defn sum-list (acc lst)
+    (if (empty? lst) acc
+        (sum-list (+ acc (first lst)) (rest lst))))
+  (defn sum-all (& nums)
+    (sum-list 0 nums))
+  (assert-eq (sum-all 1 2 3 4 5) 15 "variadic tail call"))
+
+# test_variadic_closure_capture
+(begin
+  (def x 100)
+  (defn add-to-x (& nums)
+    (+ x (first nums)))
+  (assert-eq (add-to-x 42) 142 "variadic closure capture"))
+
+# test_variadic_higher_order
+(begin
+  (defn apply-fn (f & args)
+    (f (first args)))
+  (assert-eq (apply-fn (fn (x) (+ x 1)) 10) 11 "variadic higher order"))
+
+# test_variadic_compile_time_arity_check
+(begin
+  (defn f4 (x & rest) x)
+  (assert-eq (f4 1) 1 "variadic compile time arity: ok with 1 arg")
+  (assert-err (fn () (eval '(begin (defn f5 (x & rest) x) (f5))))
+    "variadic compile time arity: 0 args fails"))
+
+# ============================================================
+# Table/struct destructuring
+# ============================================================
+
+# test_def_table_basic
+(begin
+  (def {:name n :age a} {:name "Alice" :age 30})
+  (assert-string-eq n "Alice" "def table basic: name")
+  (assert-eq a 30 "def table basic: age"))
+
+# test_def_table_missing_key
+(begin
+  (def {:missing m} {:other 42})
+  (assert-eq m nil "def table missing key"))
+
+# test_def_table_wrong_type
+(begin
+  (def {:x x} 42)
+  (assert-eq x nil "def table wrong type"))
+
+# test_table_missing_key_is_nil (duplicate coverage, kept for completeness)
+(begin
+  (def {:missing m2} {:other 42})
+  (assert-eq m2 nil "table missing key is nil"))
+
+# test_table_wrong_type_is_nil
+(begin
+  (def {:x x2} 42)
+  (assert-eq x2 nil "table wrong type is nil"))
+
+# test_table_empty_pattern
+(begin
+  (def {} {:x 1})
+  (assert-eq :ok :ok "table empty pattern"))
+
+# test_var_table
+(begin
+  (var {:x x3} {:x 99})
+  (assert-eq x3 99 "var table"))
+
+# test_let_table
+(assert-eq (let (({:x x :y y} {:x 10 :y 20})) (+ x y)) 30
+  "let table")
+
+# test_let_star_table
+(assert-eq (let* (({:x x} {:x 5}) ({:y y} {:y x})) (+ x y)) 10
+  "let* table")
+
+# test_fn_param_table
+(begin
+  (defn f6 ({:x x :y y}) (+ x y))
+  (assert-eq (f6 {:x 3 :y 4}) 7 "fn param table"))
+
+# test_table_nested
+(begin
+  (def {:point {:x px :y py}} {:point {:x 3 :y 4}})
+  (assert-eq (+ px py) 7 "table nested"))
+
+# test_table_with_mutable_table
+(begin
+  (def {:a a4} @{:a 99})
+  (assert-eq a4 99 "table with mutable table"))
+
+# test_table_in_match — bind match result to var (known bug workaround)
+(var match-circle
+  (match {:type :circle :radius 5}
+    ({:type :circle :radius r} r)
+    ({:type :square :side s} s)
+    (_ 0)))
+(assert-eq match-circle 5 "table in match: circle")
+
+# test_table_match_fallthrough
+(var match-square
+  (match {:type :square :side 7}
+    ({:type :circle :radius r} r)
+    ({:type :square :side s} s)
+    (_ 0)))
+(assert-eq match-square 7 "table match fallthrough: square")
+
+# test_table_match_wildcard_fallback
+(var match-fallback
+  (match 42
+    ({:x x} x)
+    (_ :no-match)))
+(assert-eq match-fallback :no-match "table match wildcard fallback")
+
+# test_table_expression_position
+(assert-eq (get {:a 1 :b 2} :a) 1 "table expression position")
+
+# test_table_empty
+(begin
+  (def {} {:x 1})
+  (assert-eq :ok :ok "table empty"))
+
+# test_table_mixed_with_list
+(begin
+  (def (a5 {:x x5}) (list 1 {:x 2}))
+  (assert-eq (+ a5 x5) 3 "table mixed with list"))
+
+# test_table_wildcard_value
+(begin
+  (def {:x _ :y y6} {:x 10 :y 20})
+  (assert-eq y6 20 "table wildcard value"))
+
+# ============================================================
+# Tuple destructuring
+# ============================================================
+
+# Helper: produce an error tuple via fiber
+(defn make-error-tuple []
+  "Trigger division-by-zero and capture the error tuple"
+  (let ([f (fiber/new (fn () (/ 1 0)) 1)])
+    (fiber/resume f nil)
+    (fiber/value f)))
+
+# test_let_destructure_tuple
+(let (([a b] (make-error-tuple)))
+  (assert-string-eq b "division by zero" "let destructure tuple: message"))
+
+# test_let_destructure_tuple_first
+(let (([a b] (make-error-tuple)))
+  (assert-eq a :division-by-zero "let destructure tuple: kind"))
+
+# test_match_tuple_pattern_matches_tuple
+(var match-tuple (match [1 2] ([a b] (+ a b)) (_ :no-match)))
+(assert-eq match-tuple 3 "match tuple pattern matches tuple")
+
+# test_match_tuple_pattern_does_not_match_array
+(var match-tuple-arr (match @[1 2] ([a b] (+ a b)) (_ :no-match)))
+(assert-eq match-tuple-arr :no-match "match tuple pattern does not match array")
+
+# test_match_array_pattern_matches_array
+(var match-arr (match @[1 2] (@[a b] (+ a b)) (_ :no-match)))
+(assert-eq match-arr 3 "match array pattern matches array")
+
+# test_match_array_pattern_does_not_match_tuple
+(var match-arr-tup (match [1 2] (@[a b] (+ a b)) (_ :no-match)))
+(assert-eq match-arr-tup :no-match "match array pattern does not match tuple")
+
+# test_match_struct_pattern_matches_struct
+(var match-struct (match {:a 1} ({:a x} x) (_ :no-match)))
+(assert-eq match-struct 1 "match struct pattern matches struct")
+
+# test_match_struct_pattern_does_not_match_table
+(var match-struct-tbl (match @{:a 1} ({:a x} x) (_ :no-match)))
+(assert-eq match-struct-tbl :no-match "match struct pattern does not match table")
+
+# test_match_table_pattern_matches_table
+(var match-tbl (match @{:a 1} (@{:a x} x) (_ :no-match)))
+(assert-eq match-tbl 1 "match table pattern matches table")
+
+# test_match_table_pattern_does_not_match_struct
+(var match-tbl-str (match {:a 1} (@{:a x} x) (_ :no-match)))
+(assert-eq match-tbl-str :no-match "match table pattern does not match struct")
+
+# test_destructure_non_sequential_gives_nil
+(assert-eq (let (([a b] 42)) a) nil "destructure non-sequential int gives nil")
+(assert-eq (let (([a b] "hello")) a) nil "destructure non-sequential string gives nil")
+
+# test_def_tuple_basic
+(begin
+  (def [a7 b7] (make-error-tuple))
+  (assert-eq a7 :division-by-zero "def tuple basic: kind")
+  (assert-string-eq b7 "division by zero" "def tuple basic: message"))
+
+# ============================================================
+# &opt optional parameters
+# ============================================================
+
+# test_opt_basic_provided
+(assert-eq ((fn (a &opt b) b) 1 2) 2 "opt basic provided")
+
+# test_opt_basic_missing
+(assert-eq ((fn (a &opt b) b) 1) nil "opt basic missing")
+
+# test_opt_multiple
+(assert-list-eq ((fn (a &opt b c) (list a b c)) 1)
+  (list 1 nil nil) "opt multiple: none provided")
+(assert-list-eq ((fn (a &opt b c) (list a b c)) 1 2)
+  (list 1 2 nil) "opt multiple: one provided")
+(assert-list-eq ((fn (a &opt b c) (list a b c)) 1 2 3)
+  (list 1 2 3) "opt multiple: all provided")
+
+# test_opt_too_many_args
+(assert-err (fn () (eval '((fn (a &opt b) a) 1 2 3)))
+  "opt too many args")
+
+# test_opt_too_few_args
+(assert-err (fn () (eval '((fn (a &opt b c) a))))
+  "opt too few args")
+
+# test_opt_with_rest
+(assert-list-eq ((fn (a &opt b & rest) (list a b rest)) 1)
+  (list 1 nil ()) "opt with rest: none")
+(assert-list-eq ((fn (a &opt b & rest) (list a b rest)) 1 2)
+  (list 1 2 ()) "opt with rest: opt only")
+(assert-list-eq ((fn (a &opt b & rest) (list a b rest)) 1 2 3 4)
+  (list 1 2 (list 3 4)) "opt with rest: opt and rest")
+
+# test_opt_defn
+(begin
+  (defn f7 (a &opt b) (list a b))
+  (assert-list-eq (f7 1) (list 1 nil) "opt defn: missing")
+  (assert-list-eq (f7 1 2) (list 1 2) "opt defn: provided"))
+
+# test_opt_compile_time_arity
+(assert-err (fn () (eval '(begin (defn f8 (a &opt b) a) (f8))))
+  "opt compile time arity: too few")
+(assert-err (fn () (eval '(begin (defn f9 (a &opt b) a) (f9 1 2 3))))
+  "opt compile time arity: too many")
+
+# test_opt_no_params_after
+(assert-err (fn () (eval '(fn (&opt) 1)))
+  "opt no params after &opt")
+
+# test_opt_after_rest_error
+(assert-err (fn () (eval '(fn (a & rest &opt b) 1)))
+  "opt after rest error")
+
+# test_opt_only
+(assert-list-eq ((fn (&opt a b) (list a b)))
+  (list nil nil) "opt only: none")
+(assert-list-eq ((fn (&opt a b) (list a b)) 1)
+  (list 1 nil) "opt only: one")
+(assert-list-eq ((fn (&opt a b) (list a b)) 1 2)
+  (list 1 2) "opt only: both")
+
+# ============================================================
+# &keys keyword arguments
+# ============================================================
+
+# test_keys_basic
+(assert-eq ((fn (a &keys opts) opts) 1 :x 10 :y 20)
+  {:x 10 :y 20} "keys basic")
+
+# test_keys_empty
+(assert-eq ((fn (a &keys opts) opts) 1)
+  {} "keys empty")
+
+# test_keys_destructure
+(assert-eq ((fn (a &keys {:x x :y y}) (+ x y)) 1 :x 10 :y 20) 30
+  "keys destructure")
+
+# test_keys_missing_key_destructure
+(assert-eq ((fn (a &keys {:x x :y y}) y) 1 :x 10) nil
+  "keys missing key destructure")
+
+# test_keys_with_opt
+(assert-list-eq ((fn (a &opt b &keys opts) (list a b opts)) 1)
+  (list 1 nil {}) "keys with opt: none")
+(assert-list-eq ((fn (a &opt b &keys opts) (list a b opts)) 1 2)
+  (list 1 2 {}) "keys with opt: opt only")
+(assert-list-eq ((fn (a &opt b &keys opts) (list a b opts)) 1 2 :x 10)
+  (list 1 2 {:x 10}) "keys with opt: opt and keys")
+
+# test_keys_odd_args_error
+(assert-err (fn () ((fn (a &keys opts) opts) 1 :x 10 :y))
+  "keys odd args error")
+
+# test_keys_non_keyword_key_error
+(assert-err (fn () ((fn (a &keys opts) opts) 1 42 10))
+  "keys non-keyword key error")
+
+# test_keys_and_rest_exclusive
+(assert-err (fn () (eval '(fn (a &keys opts & rest) 1)))
+  "keys and rest exclusive: keys then rest")
+(assert-err (fn () (eval '(fn (a & rest &keys opts) 1)))
+  "keys and rest exclusive: rest then keys")
+
+# test_keys_defn
+(begin
+  (defn f10 (a &keys opts) opts)
+  (assert-eq (f10 1 :host "db" :port 3306) {:host "db" :port 3306}
+    "keys defn"))
+
+# ============================================================
+# &named strict named parameters
+# ============================================================
+
+# test_named_basic
+(assert-list-eq ((fn (a &named host port) (list host port)) 1 :host "db" :port 3306)
+  (list "db" 3306) "named basic")
+
+# test_named_missing_key
+(assert-eq ((fn (a &named host port) port) 1 :host "db") nil
+  "named missing key")
+
+# test_named_unknown_key_error
+(assert-err (fn () ((fn (a &named host) host) 1 :host "db" :port 3306))
+  "named unknown key error")
+
+# test_named_with_opt
+(assert-list-eq ((fn (a &opt b &named host) (list a b host)) 1 :host "db")
+  (list 1 nil "db") "named with opt")
+
+# test_named_defn
+(begin
+  (defn connect (host &named port) (list host port))
+  (assert-list-eq (connect "db" :port 3306) (list "db" 3306) "named defn"))
+
+# test_named_odd_args_error
+(assert-err (fn () ((fn (a &named host) host) 1 :host))
+  "named odd args error")
+
+# test_named_and_keys_exclusive
+(assert-err (fn () (eval '(fn (a &keys opts &named host) 1)))
+  "named and keys exclusive: keys then named")
+(assert-err (fn () (eval '(fn (a &named host &keys opts) 1)))
+  "named and keys exclusive: named then keys")
+
+# test_named_no_params_error
+(assert-err (fn () (eval '(fn (a &named) 1)))
+  "named no params error")
+
+# test_named_non_symbol_error
+(assert-err (fn () (eval '(fn (a &named [x]) 1)))
+  "named non-symbol error")
+
+# ============================================================
+# Edge case tests
+# ============================================================
+
+# test_opt_destructuring_pattern
+(assert-list-eq ((fn (a &opt (b c)) (list a b c)) (list 1 2))
+  (list (list 1 2) nil nil) "opt destructuring pattern: not provided")
+(assert-list-eq ((fn (a &opt (b c)) (list a b c)) 1 (list 2 3))
+  (list 1 2 3) "opt destructuring pattern: provided")
+
+# test_keys_mutable_capture
+(assert-eq
+  ((fn (&keys opts)
+     (let ((f (fn () opts)))
+       (f)))
+   :x 10)
+  {:x 10}
+  "keys mutable capture")
+
+# test_keys_tail_call_error
+(assert-err
+  (fn ()
+    (begin
+      (defn f11 (a &keys opts) opts)
+      (defn g () (f11 1 :x))
+      (g)))
+  "keys tail call error")
+
+# test_opt_fiber_resume
+(let ([co (coro/new (fn (&opt a) (+ (or a 0) (yield a))))])
+  (coro/resume co)
+  (assert-eq (coro/resume co 42) 42 "opt fiber resume: no initial arg"))
+
+(let ([co (coro/new (fn (&opt a) (yield a) a))])
+  (coro/resume co 10)
+  (assert-eq (coro/resume co) 10 "opt fiber resume: with initial arg"))

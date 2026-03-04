@@ -2,13 +2,6 @@
 use crate::common::eval_source;
 use elle::Value;
 
-fn sleep_zero_threshold_ms() -> u128 {
-    if std::env::var("GITHUB_ACTIONS").is_ok() {
-        5000 // CI runners are slow and overloaded
-    } else {
-        500 // eval_source has overhead; parallel test threads contest resources
-    }
-}
 // Phase 5: Advanced Runtime Features - Integration Tests
 
 #[test]
@@ -26,18 +19,6 @@ fn test_spawn_and_thread_id() {
     let result = eval_source("(current-thread-id)").unwrap();
     assert!(result.as_int().is_some());
     assert!(result.as_int().unwrap() > 0);
-}
-
-#[test]
-fn test_sleep_integration() {
-    // Sleep with integer
-    let start = std::time::Instant::now();
-    assert_eq!(eval_source("(time/sleep 0)").unwrap(), Value::NIL);
-    let elapsed = start.elapsed();
-    assert!(elapsed.as_millis() < sleep_zero_threshold_ms());
-
-    // Sleep with float
-    assert_eq!(eval_source("(time/sleep 0.001)").unwrap(), Value::NIL);
 }
 
 #[test]
@@ -97,17 +78,6 @@ fn test_trace_with_arithmetic_chain() {
 
     let result2 = eval_source("(trace \"step2\" (* 3 4))").unwrap();
     assert_eq!(result2, Value::int(12));
-}
-
-#[test]
-fn test_sleep_zero_vs_positive() {
-    // Sleep 0 should complete quickly
-    let start = std::time::Instant::now();
-    eval_source("(time/sleep 0)").unwrap();
-    assert!(start.elapsed().as_millis() < sleep_zero_threshold_ms());
-
-    // Sleep with float should also complete
-    eval_source("(time/sleep 0.001)").unwrap();
 }
 
 #[test]

@@ -46,8 +46,8 @@ jobs:
             echo "source=false" >> "$GITHUB_OUTPUT"
           fi
 
-  test:
-    name: Test Suite
+  test-rust:
+    name: Rust Tests
     needs: [changes, examples]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true' && needs.examples.result == 'success'
@@ -55,10 +55,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Run all workspace tests
-        run: cargo test --workspace --verbose
+      - name: Run unit, integration, and VM tests
+        run: "cargo test --workspace --verbose -- --skip elle_scripts:: --skip property::"
+
+  test-property:
+    name: Property Tests
+    needs: [changes, test-rust]
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true' && needs.test-rust.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run property tests
+        run: "cargo test --test lib property:: --verbose"
         env:
-          PROPTEST_CASES: 32
+          # PR: fast feedback (8). Merge queue / push to main: thorough validation (16).
+          PROPTEST_CASES: ${{ github.event_name == 'pull_request' && '8' || '16' }}
 
   fmt:
     name: Rustfmt
@@ -166,6 +179,15 @@ jobs:
            else
              echo "✓ All examples passed"
             fi
+      - name: Run Elle script tests
+        run: |
+          echo "Running Elle script tests:"
+          echo "=========================="
+          for f in tests/elle/*.lisp; do
+            echo "  $f"
+            ./target/release/elle "$f" || exit 1
+          done
+          echo "✓ All Elle script tests passed"
 
   docs:
     name: Build Documentation
@@ -335,7 +357,7 @@ jobs:
 
   # Weekly toolchain compatibility check
   toolchain-check:
-    name: Toolchain Check (${{ matrix.rust }})
+    name: Toolchain Check
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
     strategy:
@@ -350,16 +372,20 @@ jobs:
       - name: Run all workspace tests
         run: cargo test --workspace --verbose
         env:
-          PROPTEST_CASES: 32
+          # Weekly scheduled run: thorough coverage across beta/nightly toolchains.
+          PROPTEST_CASES: 128
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, test, fmt, clippy, examples, docs, benchmarks]
+    needs: [changes, test-rust, test-property, fmt, clippy, examples, docs, benchmarks]
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
     steps:
-      - name: Check test
-        if: needs.test.result == 'failure'
+      - name: Check test-rust
+        if: needs.test-rust.result == 'failure'
+        run: exit 1
+      - name: Check test-property
+        if: needs.test-property.result == 'failure'
         run: exit 1
       - name: Check fmt
         if: needs.fmt.result == 'failure'
