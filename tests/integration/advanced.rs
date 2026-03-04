@@ -609,3 +609,38 @@ fn test_variadic_macro_when_multi_body() {
         Value::int(3)
     );
 }
+
+// === match: improper list patterns (a b . c) ===
+
+#[test]
+fn test_match_improper_list_pattern() {
+    // (a b . c) should match a list of 2+ elements, binding the rest to c
+    let result =
+        eval_source("(match (cons 1 (cons 2 3)) ((a b . c) (list a b c)) (_ :no))").unwrap();
+    // a=1, b=2, c=3
+    assert_eq!(result.to_string(), "(1 2 3)");
+}
+
+#[test]
+fn test_match_improper_list_pattern_longer() {
+    // (a b c . d) should match a list of 3+ elements
+    let result =
+        eval_source("(match (list 1 2 3 4 5) ((a b c . d) (list a b c d)) (_ :no))").unwrap();
+    // a=1, b=2, c=3, d=(4 5)
+    assert_eq!(result.to_string(), "(1 2 3 (4 5))");
+}
+
+#[test]
+fn test_match_improper_list_pattern_exact() {
+    // When the value has exactly the right number of elements for the dot pattern
+    let result = eval_source("(match (cons 1 2) ((a . b) (list a b)) (_ :no))").unwrap();
+    // This already works — regression guard
+    assert_eq!(result.to_string(), "(1 2)");
+}
+
+#[test]
+fn test_match_improper_list_pattern_too_short() {
+    // Value too short for the pattern — should fall through
+    let result = eval_source("(match (list 1) ((a b . c) :matched) (_ :no))").unwrap();
+    assert_eq!(result, Value::keyword("no"));
+}

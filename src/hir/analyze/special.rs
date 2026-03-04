@@ -112,6 +112,29 @@ impl<'a> Analyzer<'a> {
                         tail: Box::new(tail),
                     });
                 }
+                // Check for dot-rest pattern (a b ... . tail) — 4+ items with "." separator
+                if items.len() >= 4 {
+                    if let Some(dot_pos) = items.iter().position(|s| s.as_symbol() == Some(".")) {
+                        if items.iter().filter(|s| s.as_symbol() == Some(".")).count() > 1 {
+                            return Err(format!("{}: multiple '.' in pattern", syntax.span));
+                        }
+                        if dot_pos != items.len() - 2 {
+                            return Err(format!(
+                                "{}: '.' must be the second-to-last element in a dotted pattern",
+                                syntax.span
+                            ));
+                        }
+                        let fixed = &items[..dot_pos];
+                        let rest_syntax = &items[dot_pos + 1];
+                        let elements: Result<Vec<_>, _> =
+                            fixed.iter().map(|p| self.analyze_pattern(p)).collect();
+                        let rest = self.analyze_pattern(rest_syntax)?;
+                        return Ok(HirPattern::List {
+                            elements: elements?,
+                            rest: Some(Box::new(rest)),
+                        });
+                    }
+                }
                 // List pattern with optional & rest
                 let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
                 let elements: Result<Vec<_>, _> =
