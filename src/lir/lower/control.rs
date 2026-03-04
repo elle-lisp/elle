@@ -181,6 +181,9 @@ impl Lowerer {
             }
             IntrinsicOp::Compare(op) => {
                 if args.len() != 2 {
+                    // 0-1 args: fall through to generic call for arity error.
+                    // 3+ args: fall through to generic call — the primitive
+                    // handles chained comparison with short-circuit.
                     return Ok(None);
                 }
                 let lhs = self.lower_expr(args[0])?;

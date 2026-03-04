@@ -28,6 +28,7 @@ Does NOT:
 | `Reg` | Virtual register |
 | `Label` | Basic block identifier |
 | `Lowerer` | HIR → LIR |
+| `ScopeStats` | Compile-time scope allocation statistics |
 | `Emitter` | LIR → Bytecode + LocationMap |
 
 ## Data flow
@@ -154,15 +155,37 @@ Function bodies never get region instructions.
 1. No binding is captured by a nested lambda
 2. Body cannot suspend (`may_suspend()`)
 3. Body result is provably a NaN-boxed immediate (`result_is_safe`)
-4. Body contains no `set` to bindings outside the scope
+4. Body contains no dangerous `set` to bindings outside the scope
+   (`body_contains_dangerous_outward_set`) — Tier 8: an outward set is
+   dangerous only if the assigned value is not provably immediate
+5. Body contains no escaping `break` (`body_contains_escaping_break`) —
+   Tier 7: breaks targeting blocks inside the scope are safe (they don't
+   exit the scope's region); only breaks targeting outer blocks are dangerous
 
-For `let`/`letrec`: all four conditions. `letrec` delegates to `let`.
-For `block`: conditions 1-4 plus no `break` nodes in the body.
+For `let`/`letrec`: all five conditions. `letrec` delegates to `let`.
+For `block`: conditions 1-4 plus no escaping `break` in the body.
 
-`result_is_safe` returns `true` for: literals (int, float, bool, nil,
-keyword, empty-list), `if`/`begin`/`cond`/`and`/`or` where all result
-positions are recursively safe, and calls to intrinsics (`BinOp`,
-`CmpOp`, `UnaryOp`) with correct arity.
+`result_is_safe` takes `scope_bindings: &[(Binding, &Hir)]` — the
+bindings introduced by the let/letrec being analyzed. It returns
+`true` for: literals, `Var` referencing an outer binding (not in
+scope set), `Var` referencing a scope binding whose init is provably
+immediate (Tier 3), `if`/`begin`/`cond`/`and`/`or` where all result
+positions are recursively safe, calls to intrinsics (`BinOp`, `CmpOp`,
+`UnaryOp`) with correct arity (including unary `-` as `Neg`, Tier 2),
+calls to whitelisted immediate-returning primitives (Tier 1),
+nested `Let`/`Letrec`/`Block` where the inner result is recursively
+safe (Tier 4), `Match` where all arm bodies are recursively safe
+(Tier 5), and `While` which always returns nil (Tier 6). For nested
+let/letrec, scope_bindings is extended with the inner let's bindings
+before recursing (inner bindings are allocated within the outer
+scope's region). For blocks, `scope_bindings` is unchanged (blocks
+introduce no bindings).
+
+**Tier 1 primitive whitelist** (in `intrinsics.rs`): `length`, `empty?`,
+`abs`, `floor`, `ceil`, `round`, `type`, `type-of`, and all type
+predicates (`nil?`, `pair?`, `string?`, `number?`, `array?`, etc.).
+These are primitives that always return int, float, bool, or keyword
+on success. Full list in `IMMEDIATE_PRIMITIVES` const.
 
 **Known limitation (E5/E6):** If the body passes a scope-allocated
 value to a function that stores it externally, the analysis cannot
@@ -171,6 +194,13 @@ detect this. Requires interprocedural analysis. Accepted for Tier 0.
 `break` emits compensating `RegionExit` instructions for each region entered
 between the break site and the target block. The lowerer tracks `region_depth`
 and each `BlockLowerContext` records `region_depth_at_entry`.
+
+**Compile-time scope stats** (`ScopeStats`): The lowerer counts how many
+scopes were analyzed, how many qualified for scope allocation, and the
+first-failing condition for each rejected scope (captured, suspends,
+unsafe-result, outward-set, break). Access via `lowerer.scope_stats()`
+after `lower()` completes. Set `ELLE_SCOPE_STATS=1` to print stats to
+stderr during compilation.
 
 ## Yield as terminator
 
@@ -206,9 +236,9 @@ No new bytecode instructions — break compiles to existing Move + Jump.
 |------|-------|---------|
 | `mod.rs` | 20 | Re-exports |
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
-| `intrinsics.rs` | ~55 | `IntrinsicOp` enum, maps primitive SymbolIds to specialized LIR instructions (BinOp, CmpOp, UnaryOp) |
+| `intrinsics.rs` | ~120 | `IntrinsicOp` enum, intrinsics map, `IMMEDIATE_PRIMITIVES` whitelist, `build_immediate_primitives()` |
 | `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point, `can_scope_allocate_*` analysis |
-| `lower/escape.rs` | ~340 | Escape analysis helpers: `result_is_safe`, `body_contains_outward_set`, `body_contains_break` |
+| `lower/escape.rs` | ~469 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set`, `body_contains_escaping_break` |
 | `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
 | `lower/binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
 | `lower/lambda.rs` | ~250 | fn lowering, closure capture, cell wrapping |

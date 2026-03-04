@@ -519,9 +519,9 @@
 
 (def arena/allocs (fn (thunk)
   "Run thunk, return (result alloc-count) where alloc-count is net heap objects allocated."
-  (let* ((before (arena-count))
+  (let* ((before (arena/count))
          (result (thunk))
-         (after (arena-count)))
+         (after (arena/count)))
     (list result (- after before 1)))))
 
 ## ── Control flow graph rendering ────────────────────────────────────
