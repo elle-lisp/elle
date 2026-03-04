@@ -30,6 +30,28 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(struct/del (struct :a 1 :b 2) :a)",
         aliases: &["struct-del"],
     },
+    PrimitiveDef {
+        name: "freeze",
+        func: prim_freeze,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Convert a mutable table to an immutable struct",
+        params: &["table"],
+        category: "struct",
+        example: "(freeze @{:a 1 :b 2})",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "thaw",
+        func: prim_thaw,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Convert an immutable struct to a mutable table",
+        params: &["struct"],
+        category: "struct",
+        example: "(thaw {:a 1 :b 2})",
+        aliases: &[],
+    },
 ];
 
 /// Create an immutable struct from key-value pairs
@@ -336,4 +358,44 @@ pub fn prim_struct_length(args: &[Value]) -> (SignalBits, Value) {
     };
 
     (SIG_OK, Value::int(s.len() as i64))
+}
+
+/// Convert a mutable table to an immutable struct
+/// (freeze table)
+pub fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
+    let t = match args[0].as_table() {
+        Some(t) => t,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("freeze: expected table, got {}", args[0].type_name()),
+                ),
+            );
+        }
+    };
+
+    let map = t.borrow().clone();
+    (SIG_OK, Value::struct_from(map))
+}
+
+/// Convert an immutable struct to a mutable table
+/// (thaw struct)
+pub fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
+    let s = match args[0].as_struct() {
+        Some(s) => s,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("thaw: expected struct, got {}", args[0].type_name()),
+                ),
+            );
+        }
+    };
+
+    let map = s.clone();
+    (SIG_OK, Value::table_from(map))
 }

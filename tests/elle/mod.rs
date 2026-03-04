@@ -59,3 +59,8 @@ fn splice() {
 fn blocks() {
     run_elle_script("blocks");
 }
+
+#[test]
+fn functional() {
+    run_elle_script("functional");
+}
