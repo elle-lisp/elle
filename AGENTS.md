@@ -152,6 +152,12 @@ benchmarks (with regression reporting), rustdoc, elle-doc site generation.
 All must pass. Main-push runs coverage, benchmark publishing, docs generation,
 and Pages deployment.
 
+## Branch health
+
+Main is always green. If tests fail locally, the failure is caused by
+local changes, not by upstream breakage. Do not waste time investigating
+whether main is broken — it isn't. Fix your code.
+
 ## Invariants
 
 These must remain true. Violating them breaks the system:

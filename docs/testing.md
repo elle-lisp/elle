@@ -1,35 +1,23 @@
 # Testing Strategy
 
-This document defines where every test in Elle belongs. Follow it when writing
-new tests or migrating existing ones. When in doubt, apply the decision tree.
-
-## Status
-
-This document describes a target architecture. Some infrastructure exists
-today; some must be built. Each section is marked:
-
-- **Current** — exists and works today
-- **Proposed** — does not yet exist; must be built before use
-
-Until the proposed infrastructure is built, follow `tests/AGENTS.md` for
-current conventions. When a proposed item is implemented, update this
-document to mark it as current and update `tests/AGENTS.md` to match.
+This document describes where every test in Elle belongs and how to run them.
+Follow the decision tree when writing new tests.
 
 ## Test execution order
 
-Both locally and in CI, tests should run in this order. Fail fast: if a
-cheaper tier fails, skip the expensive ones.
+Both locally and in CI, tests run in this order. Fail fast: if a cheaper tier
+fails, skip the expensive ones.
 
-| Tier | What | Time | Purpose | Status |
-|------|------|------|---------|--------|
-| 1 | `examples/*.lisp` | ~2s | Smoke test across the whole language surface | current |
-| 2 | `tests/elle/*.lisp` | seconds–minutes | Behavioral tests | proposed |
-| 3 | `cargo test` with `PROPTEST_CASES=8` | ~2–5min | Rust unit/integration/property smoke | proposed |
-| 4 | `cargo test` with default case counts | ~30min | Thorough property sweep (merge gate only) | proposed |
+| Tier | What | Time | Purpose |
+|------|------|------|---------|
+| 1 | `examples/*.lisp` | ~2s | Smoke test across the whole language surface |
+| 2 | `tests/elle/*.lisp` | seconds–minutes | Behavioral tests (407 tests) |
+| 3 | `cargo test` (unit + integration) | ~5min | Rust tests (compile errors, error messages, type inspection) |
+| 4 | `cargo test property::` | ~10min | Property tests (102 proptest blocks) |
 
-Examples are the cheapest full-pipeline smoke test: reader, expander,
-analyzer, lowerer, emitter, VM, and a broad swath of primitives in ~2
-seconds. If an example fails, nothing else is worth running.
+Examples are the cheapest full-pipeline smoke test: reader, expander, analyzer,
+lowerer, emitter, VM, and a broad swath of primitives in ~2 seconds. If an
+example fails, nothing else is worth running.
 
 ## Decision tree
 
@@ -50,8 +38,8 @@ runs — undefined variables, break across function boundaries, invalid
 destructuring syntax, arity mismatches at known call sites.
 
 → **Rust integration test.** The code cannot be run as an Elle script because
-it does not compile. Use `compile(input, &mut symbols).unwrap_err()` or
-`eval_source(input).is_err()` and inspect the error message.
+it does not compile. Use `eval_source(input).is_err()` and inspect the error
+message.
 
 **3. Does the test assert that something fails at runtime and need to inspect
 the error message for specific content?**
@@ -67,10 +55,10 @@ Elle — use `protect` and check the error kind keyword.
 
 **4. Does the test evaluate Elle source and check the resulting value?**
 
-This is the vast majority of integration tests. The pattern is:
+This is the vast majority of tests. The pattern is:
 `assert_eq!(eval_source("(some-expr)").unwrap(), Value::int(42))`.
 
-→ **Elle test script** in `tests/elle/`. (Proposed — see below.) Translate to:
+→ **Elle test script** in `tests/elle/`. Translate to:
 `(assert-eq (some-expr) 42 "description")`.
 
 **5. Does the test verify a runtime error occurs (not a compile error)
@@ -86,12 +74,7 @@ Example: confirming division by zero raises an error with kind
 (assert-eq (get err 0) :division-by-zero "error kind")
 ```
 
-(The error kind `:division-by-zero` is verified — see
-`src/primitives/arithmetic.rs` and `src/vm/arithmetic.rs`.)
-
 ## Which Rust test category?
-
-**Current.** If the decision tree sends you to a Rust test:
 
 | Need | Location | When |
 |------|----------|------|
@@ -101,32 +84,22 @@ Example: confirming division by zero raises an error with kind
 | Compile-time rejection | `tests/integration/` | Code that must not compile |
 | Runtime error message inspection | `tests/integration/` | Substring matching on error strings |
 | VM internals (scope stack, frames) | `tests/vm/` | Below integration, above unit |
-| Invariants across generated inputs | `tests/property/` or `tests/integration/` | Property-based tests with proptest |
+| Invariants across generated inputs | `tests/property/` | Property-based tests with proptest |
 
 For Rust integration tests that don't call stdlib functions (map, filter,
 fold, etc.), prefer `eval_source_bare` over `eval_source` — it skips stdlib
 initialization and is faster. Prelude macros (defn, let*, ->, etc.) are
 still available with `eval_source_bare`.
 
-Note: property tests currently exist in both `tests/property/` (pure
-domain invariants) and `tests/integration/` (pipeline-level invariants like
-`pipeline_property.rs`, `new_pipeline_property.rs`, `time_property.rs`).
-Both locations are valid — the distinction is domain vs pipeline scope, not
-property vs example.
-
 ## Elle test scripts
 
-**Proposed.** This infrastructure does not yet exist.
-
-### Location
-
-`tests/elle/` — one `.lisp` file per feature area or theme.
+Elle test scripts live in `tests/elle/` — one `.lisp` file per feature area.
+Each file is a self-contained test that imports `examples/assertions.lisp`
+and exits non-zero on failure.
 
 ### Structure
 
-Every Elle test script follows this pattern:
-
-```
+```lisp
 (import-file "./examples/assertions.lisp")
 
 # Description of what this file tests
@@ -138,51 +111,28 @@ Every Elle test script follows this pattern:
 
 ### Assertion library
 
-Elle test scripts use the existing `examples/assertions.lisp` which provides:
+Elle test scripts use `examples/assertions.lisp` which provides:
 `assert-eq`, `assert-true`, `assert-false`, `assert-list-eq`,
 `assert-not-nil`, `assert-string-eq`.
 
-When tests need error-checking assertions, extend `examples/assertions.lisp`
-with these functions:
+For runtime error checking, use `protect`:
 
 ```lisp
-# Assert that a thunk raises any error
-(defn assert-err [f msg]
-  "Assert that (f) raises an error"
-  (def [ok? _] (protect (f)))
-  (if ok?
-    (begin (display "FAIL: ") (display msg) (display "\n  Expected error, got success\n") (exit 1))
-    true))
-
-# Assert that a thunk raises an error with a specific kind keyword
-(defn assert-err-kind [f expected-kind msg]
-  "Assert that (f) raises an error with the given kind"
-  (def [ok? err] (protect (f)))
-  (if ok?
-    (begin (display "FAIL: ") (display msg) (display "\n  Expected error, got success\n") (exit 1))
-    (assert-eq (get err 0) expected-kind msg)))
-```
-
-These take thunks (zero-argument functions) because `protect` is a macro
-that wraps its body. Usage in test scripts:
-
-```lisp
-(assert-err (fn [] (/ 1 0)) "division by zero should error")
-(assert-err-kind (fn [] (/ 1 0)) :division-by-zero "error kind check")
+(def [ok? err] (protect (/ 1 0)))
+(assert-false ok? "division by zero should error")
+(assert-eq (get err 0) :division-by-zero "error kind")
 ```
 
 ### Naming
 
-Files are named for the feature they test, matching the existing convention:
-`core.lisp`, `booleans.lisp`, `destructuring.lisp`, `blocks.lisp`,
-`closures.lisp`, etc.
+Files are named for the feature they test: `core.lisp`, `booleans.lisp`,
+`destructuring.lisp`, `blocks.lisp`, `closures.lisp`, etc.
 
 ### Granularity
 
 One file should cover a coherent feature area. A file can contain hundreds
-of assertions. Each `eval_source` call in the Rust tests becomes a single
-`assert-*` call in Elle. The overhead is one pipeline initialization per
-file instead of one per assertion.
+of assertions. The overhead is one pipeline initialization per file instead
+of one per assertion.
 
 ### Relationship to `examples/`
 
@@ -197,49 +147,23 @@ audiences, different goals:
 
 Do not merge test scripts into examples or vice versa.
 
-### Working directory assumption
-
-Elle test scripts use `import-file` with paths relative to the project
-root (e.g., `"./examples/assertions.lisp"`). This works because `cargo test`
-and `cargo run` both set the working directory to the project root.
-
 ### What NOT to put in Elle scripts
 
 - Tests that require Rust type inspection (see decision tree)
 - Compile-time rejection tests
-- Property-based tests (until Elle has its own property test library)
+- Property-based tests
 - Tests for the Rust API surface (`Value` methods, `SymbolTable` API)
-
-### Stdlib note
-
-Some existing Rust integration tests intentionally skip stdlib
-initialization (using `eval_source_bare` or a local `run()` helper that
-calls `eval` without `init_stdlib`). Elle test scripts run through the full
-interpreter, which always loads stdlib. This is fine — the prelude macros
-(defn, let*, ->, etc.) are loaded by the Expander regardless, and stdlib
-functions being available doesn't affect tests that don't call them.
 
 ## Property tests
 
+Property tests use proptest to verify invariants across generated inputs.
+They live in `tests/property/` and answer: "Does this invariant hold for
+*all* valid inputs?"
+
 ### The PROPTEST_CASES knob
 
-**Proposed.** Currently all ~100 `proptest!` blocks hardcode case counts via
-`ProptestConfig::with_cases(N)`, which ignores the `PROPTEST_CASES`
-environment variable. The CI sets `PROPTEST_CASES=32` but it has no effect.
-
-The fix: a shared helper in `tests/common/mod.rs`:
-
-```rust
-pub fn proptest_cases(default: u32) -> ProptestConfig {
-    let cases = std::env::var("PROPTEST_CASES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(default);
-    ProptestConfig::with_cases(cases)
-}
-```
-
-Usage in test files:
+All 102 `proptest!` blocks use the `proptest_cases()` helper from
+`tests/common/mod.rs`:
 
 ```rust
 proptest! {
@@ -252,25 +176,8 @@ proptest! {
 }
 ```
 
-The `default` parameter preserves the per-test tuning. The environment
-variable overrides all tests uniformly when set. This is a mechanical
-replacement across ~100 call sites.
-
-When this helper is implemented, update `tests/AGENTS.md` to document
-the new convention.
-
-### Running property tests
-
-```bash
-# Fast smoke (development, CI fast tier)
-PROPTEST_CASES=8 cargo test
-
-# Default case counts (CI thorough tier, pre-merge)
-cargo test
-
-# Targeted
-cargo test property::arithmetic
-```
+The `default` parameter (200 in this example) is the per-test tuning. The
+`PROPTEST_CASES` environment variable overrides all tests uniformly when set.
 
 ### Case count guidelines
 
@@ -280,127 +187,42 @@ cargo test property::arithmetic
 | Medium (single eval) | 200 | Arithmetic properties, reader roundtrips |
 | Expensive (multiple evals, fibers, coroutines) | 10–50 | Pipeline properties, fiber determinism |
 
-## Test runner
+### Running property tests
 
-### Rust-side harness (proposed)
+```bash
+# Fast smoke (development, CI fast tier)
+PROPTEST_CASES=8 cargo test property::
 
-A Rust integration test discovers and runs all Elle test scripts:
+# Default case counts (CI thorough tier, pre-merge)
+cargo test property::
 
-```rust
-// tests/integration/elle_scripts.rs
-#[test]
-fn run_elle_test_scripts() {
-    let test_dir = Path::new("tests/elle");
-    if !test_dir.exists() {
-        return; // No Elle tests yet
-    }
-    let mut failures = Vec::new();
-    for entry in fs::read_dir(test_dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_file()
-           && path.extension() == Some("lisp".as_ref()) {
-            let output = Command::new(env!("CARGO_BIN_EXE_elle"))
-                .arg(&path)
-                .output()
-                .unwrap();
-            if !output.status.success() {
-                failures.push(format!(
-                    "{}: {}",
-                    path.display(),
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-        }
-    }
-    assert!(failures.is_empty(),
-        "{} Elle test(s) failed:\n{}",
-        failures.len(),
-        failures.join("\n---\n"));
-}
+# Targeted
+cargo test property::arithmetic
 ```
-
-This runs all scripts and reports all failures, not just the first.
-Each script runs as a separate process. The `tests/elle/` directory is
-flat — just `.lisp` test files. Assertions come from
-`examples/assertions.lisp` via `import-file`.
 
 ## CI structure
 
-### Current
+| Job | Trigger | What | Proptest cases |
+|-----|---------|------|----------------|
+| examples | Always | All `.lisp` files in `examples/` | — |
+| test-rust | After examples | Unit + integration tests (skip property) | — |
+| test-property | After test-rust | All property tests | 8 (PR) / 16 (merge queue) |
+| toolchain-check | Weekly | Full suite on beta/nightly | 128 |
 
-The actual CI (`ci.yml`) has separate jobs: test, fmt, clippy, audit,
-examples, docs, benchmarks, toolchain-check, and all-checks. The test
-job sets `PROPTEST_CASES=32` which is currently ignored.
-
-### Target
-
-```yaml
-examples:
-  name: Examples (smoke)
-  # ... (already exists, runs in ~2s)
-
-test-fast:
-  name: Fast Tests
-  needs: examples
-  run: cargo test --workspace
-  env:
-    PROPTEST_CASES: 8
-
-test-thorough:
-  name: Thorough Property Tests
-  needs: test-fast
-  run: cargo test --workspace
-  # No override — uses per-test defaults
-```
-
-Examples gate everything. Fast tier: ~5 minutes, gives red/green on every
-push. Thorough tier: ~30 minutes, required for merge to main.
-
-## Migration path
-
-Migrating existing Rust integration tests to Elle scripts:
-
-1. **Pick a file** from `tests/integration/` (e.g., `booleans.rs`).
-2. **Apply the decision tree** to each test function in the file.
-3. **Tests that go to Elle**: translate to `assert-*` calls in the
-   corresponding `tests/elle/*.lisp` file.
-4. **Tests that stay in Rust**: leave them. If the file is mostly
-   emptied, the remaining Rust tests stay in place.
-5. **Delete the Rust test** after the Elle equivalent is verified.
-6. **Never duplicate** — a test exists in exactly one place.
-
-### Priority order for migration
-
-Start with files that are nearly 100% translatable:
-
-1. `booleans.rs` — trivial value assertions, fully translatable
-2. `core.rs` — ~95% translatable (keep error-message-inspection tests)
-3. `destructuring.rs` — ~90% translatable (keep compile-error tests)
-4. `blocks.rs` — ~85% translatable (keep compile-error tests)
-5. `prelude.rs` — mostly behavioral, high translation rate
-6. `splice.rs`, `dispatch.rs`, `eval.rs` — behavioral
-
-Leave these in Rust:
-- `effect_enforcement.rs` — inspects HIR/Effect types directly
-- `error_reporting.rs` — tests error infrastructure (Lexer, Reader,
-  error formatting, LocationMap, VM stack traces) via Rust APIs
-- `pipeline.rs`, `pipeline_property.rs`, `new_pipeline_property.rs` —
-  intermediate pipeline stages and pipeline-level property tests
-- `lsp.rs` — tests LSP protocol implementation
-- `jit.rs` — tests JIT internals
-- `ffi.rs` — tests FFI marshalling
+Examples gate everything. Fast tier (PR): ~5 minutes. Thorough tier (merge
+queue): ~30 minutes. Weekly: full coverage on beta/nightly.
 
 ## Local development workflow
 
 ```bash
 # Smoke test (what agents should run first)
-cargo run -- examples/basics.lisp  # or run all examples
+make smoke
 
-# Fast feedback
-PROPTEST_CASES=8 cargo test
+# Fast feedback (examples + elle scripts + unit tests)
+make smoke
 
-# Run only Elle scripts (once infrastructure exists)
-cargo test elle_scripts
+# Run only Elle scripts
+cargo test elle::
 
 # Run only property tests, reduced
 PROPTEST_CASES=8 cargo test property::
@@ -412,34 +234,171 @@ cargo run -- tests/elle/core.lisp
 cargo test --workspace
 ```
 
-## Implementation steps
+## What stays in Rust
 
-These must be completed to activate the proposed infrastructure:
+These tests cannot be expressed in Elle and must remain in Rust:
 
-1. **Create `tests/elle/` directory** with at least one test file
-   (start with `booleans.lisp` — the simplest migration candidate)
-2. **Add `assert-err` and `assert-err-kind` to
-   `examples/assertions.lisp`** for runtime error checking
-3. **Create `tests/integration/elle_scripts.rs`** with the Rust-side
-   harness (register in `tests/integration/mod.rs`)
-4. **Create `proptest_cases` helper** in `tests/common/mod.rs`
-5. **Mechanically replace** all `ProptestConfig::with_cases(N)` with
-   `crate::common::proptest_cases(N)` (~100 call sites)
-6. **Update `tests/AGENTS.md`** to reference this document and reflect
-   the new conventions
-7. **Update CI** to add examples as prerequisite and split test tiers
-8. **Migrate `booleans.rs`** as the proof-of-concept, delete the Rust
-   version once verified
+| Category | Files | Reason |
+|----------|-------|--------|
+| Compile-time errors | `core.rs` (17), `destructuring.rs` (3), `splice.rs` (6), `blocks.rs` (3) | Code that must not compile |
+| Error message inspection | `error_reporting.rs` | Substring matching on error strings |
+| CLI subprocess tests | `dispatch.rs` (7) | Testing exit codes and subprocess behavior |
+| Float precision | `core.rs` | Testing exact float values (NaN, Inf, precision) |
+| Type introspection | `effect_enforcement.rs`, `hir_debug.rs`, `lir_debug.rs` | Inspecting HIR/LIR/Effect types |
+| Pipeline internals | `pipeline.rs`, `pipeline_property.rs`, `new_pipeline_property.rs` | Intermediate pipeline stages |
+| LSP protocol | `lsp.rs` | Language server protocol implementation |
+| JIT internals | `jit.rs` | JIT compilation pipeline |
+| FFI marshalling | `ffi.rs` | FFI type/value roundtrips |
 
-## Checklist for new tests
+## Test helpers
 
-Before writing a test, run through this:
+### `common/mod.rs`
 
-- [ ] Applied the decision tree — I know whether this is Elle or Rust
-- [ ] If Elle: added to an existing `tests/elle/*.lisp` or created a new
-      file with the standard header
-- [ ] If Rust property test: used `crate::common::proptest_cases(N)`,
-      not `ProptestConfig::with_cases(N)` (once the helper exists)
-- [ ] If Rust integration: this test genuinely needs Rust (error
-      inspection, compile rejection, type introspection)
-- [ ] Test is in exactly one place — no duplication across tiers
+**`eval_source(input: &str) -> Result<Value, String>`** — The canonical test
+eval. Evaluates Elle source through the full pipeline with stdlib. Use this
+for any test that needs to run Elle code.
+
+```rust
+use crate::common::eval_source;
+let result = eval_source("(+ 1 2)").unwrap();
+assert_eq!(result, Value::int(3));
+```
+
+**`eval_source_bare(input: &str) -> Result<Value, String>`** — Same as
+`eval_source` but skips stdlib initialization. Use this for tests that never
+call stdlib functions. Prelude macros are still available.
+
+**`setup() -> (SymbolTable, VM)`** — Returns an initialized pair with
+primitives and stdlib registered. Use this when you need direct access to the
+VM or symbol table (e.g., calling `analyze()` or `compile()` directly).
+
+**`proptest_cases(default: u32) -> ProptestConfig`** — Create a proptest
+config that respects the `PROPTEST_CASES` environment variable. When set, it
+overrides the given default uniformly across all tests.
+
+### `property/strategies.rs`
+
+8 public strategies for generating Elle values and FFI types:
+
+| Strategy | Generates |
+|----------|-----------|
+| `arb_immediate()` | nil, empty_list, true, false, ints, floats, symbols |
+| `arb_value()` | Everything + strings, cons, arrays (depth 3) |
+| `arb_primitive_type()` | FFI primitive TypeDesc variants |
+| `arb_type_desc(depth)` | Primitive + compound types |
+| `arb_flat_struct()` | StructDesc with 1-6 primitive fields |
+| `arb_value_for_type(desc)` | Value matching a given TypeDesc |
+| `arb_typed_value()` | (TypeDesc, Value) pair |
+| `arb_struct_and_values()` | (StructDesc, Value::array) pair |
+
+## Running tests
+
+```bash
+# Full test suite
+cargo test --workspace
+
+# Just the main crate
+cargo test
+
+# Specific test by name
+cargo test test_name
+
+# All tests in a category
+cargo test property::          # All property tests
+cargo test integration::       # All integration tests
+cargo test unittests::         # All unit tests
+cargo test vm::                # All VM tests
+cargo test elle::              # All Elle script tests
+
+# Run all examples as tests
+cargo test --test '*'
+
+# Run with output
+cargo test test_name -- --nocapture
+
+# Run a single example file
+cargo run -- examples/closures.lisp
+
+# Run a single Elle script
+cargo run -- tests/elle/core.lisp
+```
+
+## Adding a new test
+
+### Elle test script
+
+1. Add assertions to an existing `tests/elle/*.lisp` or create a new file
+2. Import `examples/assertions.lisp` at the top
+3. Use `assert-eq`, `assert-true`, etc. from the library
+4. Run: `cargo run -- tests/elle/myfile.lisp`
+
+### Rust integration test
+
+1. Create `tests/integration/myfeature.rs`
+2. Add to `tests/integration/mod.rs`:
+   ```rust
+   mod myfeature {
+       include!("myfeature.rs");
+   }
+   ```
+3. Import `crate::common::eval_source` and write tests
+4. Run: `cargo test integration::myfeature`
+
+### Property test
+
+1. Create `tests/property/myfeature.rs`
+2. Add to `tests/property/mod.rs`:
+   ```rust
+   mod myfeature {
+       include!("myfeature.rs");
+   }
+   ```
+3. Use `proptest!` with `#![proptest_config(crate::common::proptest_cases(N))]`
+4. Run: `PROPTEST_CASES=8 cargo test property::myfeature`
+
+### Unit test
+
+1. Create `tests/unittests/mymodule.rs`
+2. Add to `tests/unittests/mod.rs`:
+   ```rust
+   mod mymodule {
+       include!("mymodule.rs");
+   }
+   ```
+3. Import Rust APIs directly — no `eval_source` needed
+4. Run: `cargo test unittests::mymodule`
+
+### Inline test
+
+Add a `#[cfg(test)]` module at the bottom of the `src/` file you're testing.
+This gives access to private items. No registration needed.
+
+## Naming conventions
+
+- Test files: lowercase, hyphenated concepts joined with underscores
+  (e.g., `closures_and_lambdas.rs`, `effect_enforcement.rs`)
+- Test functions: `test_` prefix for example-based, descriptive name for
+  property tests (e.g., `fn int_roundtrip(...)`, `fn add_commutative(...)`)
+- Property test names describe the invariant, not the implementation
+
+## Fixtures
+
+`tests/fixtures/` contains static data files used by tests:
+
+- `naming-good.lisp` — Elle source with correct kebab-case naming
+- `naming-bad.lisp` — Elle source with camelCase/PascalCase/snake_case naming
+
+Used by `integration/lint.rs` to test the linter against real files.
+
+## Failure triage
+
+| Failure | Symptom | Likely cause | Fix |
+|---------|---------|--------------|-----|
+| **elle-doc generation** | `docs` job fails on `./target/release/elle elle-doc/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check `elle-doc/generate.lisp` and `elle-doc/lib/`. |
+| **Examples fail** | `examples` job fails | Runtime error in `.lisp` file. Assertions use `assert-eq`, `assert-true`, etc. from `examples/assertions.lisp`. | Run `cargo run -- examples/failing.lisp` locally. Check assertion message. |
+| **Elle scripts fail** | `examples` job fails on Elle script tests | Runtime error in `tests/elle/*.lisp`. | Run `cargo run -- tests/elle/failing.lisp` locally. Check assertion message. |
+| **Property tests fail** | `test-property` job fails with shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check `proptest-regressions/` files. |
+| **Integration tests fail** | `test-rust` job fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
+| **Clippy** | `clippy` job fails | Any Rust warning. CI runs with `-D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. |
+| **Formatting** | `fmt` job fails | Unformatted Rust code. | Run `cargo fmt`. |
+| **Rustdoc** | `docs` job fails on `cargo doc` step | Broken intra-doc links or malformed doc comments. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` locally. |

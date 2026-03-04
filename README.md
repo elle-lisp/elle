@@ -1,5 +1,7 @@
 # Elle
 
+[![CI](https://github.com/elle-lisp/elle/actions/workflows/ci.yml/badge.svg)](https://github.com/elle-lisp/elle/actions/workflows/ci.yml)
+
 Elle is a Lisp that compiles to bytecode and runs on a register-based VM
 written in Rust. It takes heavy inspiration from
 [Janet](https://janet-lang.org) — fibers as the universal control flow

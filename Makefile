@@ -1,4 +1,4 @@
-.PHONY: all elle plugins docs test clean help
+.PHONY: all elle plugins docs test smoke clean help
 
 all: elle plugins docs  ## Build everything
 
@@ -23,6 +23,16 @@ docs/pipeline.svg: docs/pipeline.dot
 
 test:  ## Run all workspace tests
 	cargo test --workspace
+
+smoke:  ## Fast local smoke test (build + examples + elle scripts + unit tests)
+	cargo build --release -p elle
+	@for f in examples/*.lisp; do \
+		timeout 10s ./target/release/elle "$$f" || exit 1; \
+	done
+	@for f in tests/elle/*.lisp; do \
+		./target/release/elle "$$f" || exit 1; \
+	done
+	cargo test --workspace --lib
 
 # ── Clean ───────────────────────────────────────────────────────────
 
