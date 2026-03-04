@@ -740,3 +740,128 @@ fn test_or_pattern_in_tuple() {
         Value::keyword("x")
     );
 }
+
+// =========================================================================
+// Guard test coverage (Chunk 4)
+// =========================================================================
+
+#[test]
+fn test_guard_references_pattern_var() {
+    assert_eq!(
+        eval_source("(match 10 (x when (> x 5) :big) (x :small))").unwrap(),
+        Value::keyword("big")
+    );
+    assert_eq!(
+        eval_source("(match 3 (x when (> x 5) :big) (x :small))").unwrap(),
+        Value::keyword("small")
+    );
+}
+
+#[test]
+fn test_guard_fallthrough() {
+    assert_eq!(
+        eval_source("(match 5 (x when false :never) (x :always))").unwrap(),
+        Value::keyword("always")
+    );
+}
+
+#[test]
+fn test_guard_with_cons() {
+    assert_eq!(
+        eval_source("(match (cons 1 2) ((h . t) when (> h 0) (+ h t)) (_ 0))").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_guard_with_list() {
+    assert_eq!(
+        eval_source("(match (list 1 2 3) ((a b c) when (> (+ a b c) 5) :big) (_ :small))").unwrap(),
+        Value::keyword("big")
+    );
+}
+
+#[test]
+fn test_guard_with_tuple() {
+    assert_eq!(
+        eval_source("(match [1 2] ([a b] when (< a b) :ordered) (_ :no))").unwrap(),
+        Value::keyword("ordered")
+    );
+}
+
+#[test]
+fn test_guard_with_struct() {
+    assert_eq!(
+        eval_source("(match {:x 10 :y 20} ({:x x :y y} when (> y x) :valid) (_ :no))").unwrap(),
+        Value::keyword("valid")
+    );
+}
+
+#[test]
+fn test_guard_with_rest() {
+    assert_eq!(
+        eval_source("(match (list 1 2 3) ((a & rest) when (> a 0) rest) (_ :fail))").unwrap(),
+        eval_source("(list 2 3)").unwrap()
+    );
+}
+
+#[test]
+fn test_guard_fallthrough_to_wildcard() {
+    assert_eq!(
+        eval_source("(match 5 (x when false :a) (_ :fallback))").unwrap(),
+        Value::keyword("fallback")
+    );
+}
+
+#[test]
+fn test_guard_complex_body() {
+    assert_eq!(
+        eval_source("(match 10 (x when (> x 5) (let ((y (* x 2))) y)) (x x))").unwrap(),
+        Value::int(20)
+    );
+}
+
+#[test]
+fn test_guard_no_binding_leak() {
+    assert_eq!(
+        eval_source("(match 5 (x when false x) (y (+ y 1)))").unwrap(),
+        Value::int(6)
+    );
+}
+
+#[test]
+fn test_guard_middle_arm_matches() {
+    assert_eq!(
+        eval_source("(match 5 (x when (> x 10) :big) (x when (> x 3) :medium) (x :small))")
+            .unwrap(),
+        Value::keyword("medium")
+    );
+}
+
+#[test]
+fn test_or_pattern_guard_outer_var() {
+    assert_eq!(
+        eval_source(
+            "(let ((threshold 3)) (match 2 ((1 | 2 | 3) when (< threshold 5) :yes) (_ :no)))"
+        )
+        .unwrap(),
+        Value::keyword("yes")
+    );
+}
+
+#[test]
+fn test_or_pattern_binding_guard() {
+    assert_eq!(
+        eval_source("(match (cons 6 :x) (((a . _) | (_ . a)) when (> a 5) :big) (_ :small))")
+            .unwrap(),
+        Value::keyword("big")
+    );
+}
+
+#[test]
+fn test_or_pattern_guard_fallthrough() {
+    assert_eq!(
+        eval_source("(match 2 ((1 | 2 | 3) when false :never) (_ :fallback))").unwrap(),
+        Value::keyword("fallback")
+    );
+}
