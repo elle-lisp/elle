@@ -25,7 +25,9 @@
 //! - `throw` value, `yield` value
 //! - Match scrutinee and guards
 
-use super::expr::{Hir, HirKind};
+use std::collections::HashSet;
+
+use super::expr::{BlockId, Hir, HirKind};
 
 /// Mark tail calls in a HIR tree.
 ///
@@ -33,17 +35,21 @@ use super::expr::{Hir, HirKind};
 /// and sets `is_tail: true` on `Call` nodes that are in tail position.
 pub fn mark_tail_calls(hir: &mut Hir) {
     // Top-level expressions are not inside a lambda, so not in tail position
-    mark(hir, false);
+    mark(hir, false, &HashSet::new());
 }
 
 /// Recursively mark tail calls in a HIR node.
 ///
 /// `in_tail` indicates whether this node is in tail position.
-fn mark(hir: &mut Hir, in_tail: bool) {
+/// `tail_blocks` tracks which `BlockId`s are in tail position, so that
+/// `break` targeting one of these blocks can mark its value as tail.
+fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
     match &mut hir.kind {
-        // Lambda body is always in tail position
+        // Lambda body is always in tail position.
+        // Reset tail_blocks — a new function boundary means no enclosing
+        // blocks are reachable via tail call.
         HirKind::Lambda { body, .. } => {
-            mark(body, true);
+            mark(body, true, &HashSet::new());
         }
 
         // Call: mark as tail if in tail position, recurse into func/args
@@ -54,9 +60,9 @@ fn mark(hir: &mut Hir, in_tail: bool) {
         } => {
             *is_tail = in_tail;
             // Function and arguments are NOT in tail position
-            mark(func, false);
+            mark(func, false, tail_blocks);
             for arg in args {
-                mark(&mut arg.expr, false);
+                mark(&mut arg.expr, false, tail_blocks);
             }
         }
 
@@ -66,27 +72,27 @@ fn mark(hir: &mut Hir, in_tail: bool) {
             then_branch,
             else_branch,
         } => {
-            mark(cond, false);
-            mark(then_branch, in_tail);
-            mark(else_branch, in_tail);
+            mark(cond, false, tail_blocks);
+            mark(then_branch, in_tail, tail_blocks);
+            mark(else_branch, in_tail, tail_blocks);
         }
 
         // Begin: only the last expression inherits tail position
         HirKind::Begin(exprs) => {
             if let Some((last, rest)) = exprs.split_last_mut() {
                 for expr in rest {
-                    mark(expr, false);
+                    mark(expr, false, tail_blocks);
                 }
-                mark(last, in_tail);
+                mark(last, in_tail, tail_blocks);
             }
         }
 
         // Let/Letrec: binding values are not tail, body inherits tail position
         HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
             for (_, value) in bindings {
-                mark(value, false);
+                mark(value, false, tail_blocks);
             }
-            mark(body, in_tail);
+            mark(body, in_tail, tail_blocks);
         }
 
         // Cond: conditions are not tail, clause bodies and else inherit tail position
@@ -95,22 +101,22 @@ fn mark(hir: &mut Hir, in_tail: bool) {
             else_branch,
         } => {
             for (cond, body) in clauses {
-                mark(cond, false);
-                mark(body, in_tail);
+                mark(cond, false, tail_blocks);
+                mark(body, in_tail, tail_blocks);
             }
             if let Some(else_br) = else_branch {
-                mark(else_br, in_tail);
+                mark(else_br, in_tail, tail_blocks);
             }
         }
 
         // Match: scrutinee and guards are not tail, arm bodies inherit tail position
         HirKind::Match { value, arms } => {
-            mark(value, false);
+            mark(value, false, tail_blocks);
             for (_, guard, body) in arms {
                 if let Some(g) = guard {
-                    mark(g, false);
+                    mark(g, false, tail_blocks);
                 }
-                mark(body, in_tail);
+                mark(body, in_tail, tail_blocks);
             }
         }
 
@@ -118,55 +124,69 @@ fn mark(hir: &mut Hir, in_tail: bool) {
         HirKind::And(exprs) | HirKind::Or(exprs) => {
             if let Some((last, rest)) = exprs.split_last_mut() {
                 for expr in rest {
-                    mark(expr, false);
+                    mark(expr, false, tail_blocks);
                 }
-                mark(last, in_tail);
+                mark(last, in_tail, tail_blocks);
             }
         }
 
-        // Block: body is never in tail position because a `break` could
-        // override the result. Conservative but correct.
-        HirKind::Block { body, .. } => {
-            for expr in body {
-                mark(expr, false);
+        // Block: when in tail position, the last expression inherits tail
+        // and the block's ID is added to tail_blocks so that `break`
+        // targeting this block can also mark its value as tail.
+        HirKind::Block { block_id, body, .. } => {
+            if in_tail {
+                let mut child_tail_blocks = tail_blocks.clone();
+                child_tail_blocks.insert(*block_id);
+                if let Some((last, rest)) = body.split_last_mut() {
+                    for expr in rest {
+                        mark(expr, false, &child_tail_blocks);
+                    }
+                    mark(last, in_tail, &child_tail_blocks);
+                }
+            } else {
+                for expr in body {
+                    mark(expr, false, tail_blocks);
+                }
             }
         }
 
-        // Break: value is not in tail position (stored to result register, then jump)
-        HirKind::Break { value, .. } => {
-            mark(value, false);
+        // Break: value is in tail position if the target block is in
+        // tail_blocks (i.e., the block itself is in tail position).
+        HirKind::Break { block_id, value } => {
+            let break_in_tail = tail_blocks.contains(block_id);
+            mark(value, break_in_tail, tail_blocks);
         }
 
         // While: loop bodies are never in tail position
         HirKind::While { cond, body } => {
-            mark(cond, false);
-            mark(body, false);
+            mark(cond, false, tail_blocks);
+            mark(body, false, tail_blocks);
         }
 
         // Set: value is not in tail position
         HirKind::Set { value, .. } => {
-            mark(value, false);
+            mark(value, false, tail_blocks);
         }
 
         // Define: value is not in tail position
         HirKind::Define { value, .. } => {
-            mark(value, false);
+            mark(value, false, tail_blocks);
         }
 
         // Destructure: value is not in tail position
         HirKind::Destructure { value, .. } => {
-            mark(value, false);
+            mark(value, false, tail_blocks);
         }
 
         // Yield: value is not in tail position
         HirKind::Yield(expr) => {
-            mark(expr, false);
+            mark(expr, false, tail_blocks);
         }
 
         // Eval: neither expr nor env is in tail position (runs in its own context)
         HirKind::Eval { expr, env } => {
-            mark(expr, false);
-            mark(env, false);
+            mark(expr, false, tail_blocks);
+            mark(env, false, tail_blocks);
         }
 
         // Leaves: nothing to recurse into
