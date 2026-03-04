@@ -6,7 +6,7 @@ use crate::compiler::Bytecode;
 use crate::effects::Effect;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{AnalysisResult, Analyzer, Hir};
-use crate::lir::{Emitter, Lowerer};
+use crate::lir::{Emitter, Lowerer, ScopeStats};
 use crate::primitives::cached_primitive_meta;
 use crate::primitives::def::PrimitiveMeta;
 use crate::primitives::intern_primitive_names;
@@ -18,6 +18,28 @@ use crate::value::types::Arity;
 use crate::value::SymbolId;
 use crate::vm::VM;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+/// Tri-state for ELLE_SCOPE_STATS env var: unchecked, enabled, disabled.
+static SCOPE_STATS_ENABLED: AtomicU8 = AtomicU8::new(0); // 0=unchecked, 1=enabled, 2=disabled
+
+/// Check if compile-time scope stats should be printed to stderr.
+fn scope_stats_enabled() -> bool {
+    let state = SCOPE_STATS_ENABLED.load(Ordering::Relaxed);
+    if state != 0 {
+        return state == 1;
+    }
+    let enabled = std::env::var_os("ELLE_SCOPE_STATS").is_some();
+    SCOPE_STATS_ENABLED.store(if enabled { 1 } else { 2 }, Ordering::Relaxed);
+    enabled
+}
+
+/// Print scope stats to stderr if ELLE_SCOPE_STATS env var is set.
+fn report_scope_stats(stats: &ScopeStats) {
+    if scope_stats_enabled() && stats.scopes_analyzed > 0 {
+        eprint!("{}", stats);
+    }
+}
 
 /// Compilation result
 #[derive(Debug)]
@@ -189,7 +211,10 @@ pub fn eval_syntax(
     mark_tail_calls(&mut analysis.hir);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
     let symbol_snapshot = symbols.all_names();
@@ -227,8 +252,12 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
 
     // Phase 4: Lower to LIR with intrinsic specialization
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims);
     let lir_func = lowerer.lower(&analysis.hir)?;
+    report_scope_stats(lowerer.scope_stats());
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
     let symbol_snapshot = symbols.all_names();
@@ -338,10 +367,15 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
 
     // Lower and emit all forms
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
     let mut results = Vec::new();
+    let mut aggregate_stats = ScopeStats::default();
     for analysis in analysis_results {
-        let mut lowerer = Lowerer::new().with_intrinsics(intrinsics.clone());
+        let mut lowerer = Lowerer::new()
+            .with_intrinsics(intrinsics.clone())
+            .with_immediate_primitives(imm_prims.clone());
         let lir_func = lowerer.lower(&analysis.hir)?;
+        aggregate_stats.merge(lowerer.scope_stats());
 
         let symbol_snapshot = symbols.all_names();
         let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
@@ -352,6 +386,7 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
             warnings: Vec::new(),
         });
     }
+    report_scope_stats(&aggregate_stats);
 
     Ok(results)
 }
@@ -376,7 +411,10 @@ pub fn eval(
     mark_tail_calls(&mut analysis.hir);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let mut lowerer = Lowerer::new().with_intrinsics(intrinsics);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
     let symbol_snapshot = symbols.all_names();

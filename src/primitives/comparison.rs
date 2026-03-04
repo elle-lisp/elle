@@ -4,31 +4,96 @@ use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
+use std::cmp::Ordering;
 
-/// Equality comparison — numeric-aware.
-/// If both values are numbers, compares numerically (int 1 == float 1.0).
-/// Otherwise, uses structural equality (PartialEq).
-pub fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
+/// Chained comparison helper. Compares adjacent pairs with short-circuit.
+/// Supports numbers, strings, and keywords.
+fn chain_cmp(
+    name: &str,
+    args: &[Value],
+    cmp_int: fn(i64, i64) -> bool,
+    cmp_float: fn(f64, f64) -> bool,
+    cmp_ord: fn(Ordering) -> bool,
+) -> (SignalBits, Value) {
+    if args.len() < 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("=: expected 2 arguments, got {}", args.len()),
+                format!(
+                    "{}: expected at least 2 arguments, got {}",
+                    name,
+                    args.len()
+                ),
             ),
         );
     }
-    // Fast path: bitwise identical (covers same-type immediates)
-    if args[0] == args[1] {
-        return (SIG_OK, Value::TRUE);
-    }
-    // Numeric coercion: if both are numbers, compare as f64
-    if args[0].is_number() && args[1].is_number() {
-        if let (Some(a), Some(b)) = (args[0].as_number(), args[1].as_number()) {
-            return (SIG_OK, if a == b { Value::TRUE } else { Value::FALSE });
+    for i in 0..args.len() - 1 {
+        let result = match (args[i].as_int(), args[i + 1].as_int()) {
+            (Some(a), Some(b)) => cmp_int(a, b),
+            _ => match (args[i].as_number(), args[i + 1].as_number()) {
+                (Some(a), Some(b)) => cmp_float(a, b),
+                _ => {
+                    if let Some(ord) = args[i].compare_str(&args[i + 1]) {
+                        cmp_ord(ord)
+                    } else if let Some(ord) = args[i].compare_keyword(&args[i + 1]) {
+                        cmp_ord(ord)
+                    } else {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                format!(
+                                    "{}: expected number, string, or keyword, got {} and {}",
+                                    name,
+                                    args[i].type_name(),
+                                    args[i + 1].type_name()
+                                ),
+                            ),
+                        );
+                    }
+                }
+            },
+        };
+        if !result {
+            return (SIG_OK, Value::FALSE);
         }
     }
-    (SIG_OK, Value::FALSE)
+    (SIG_OK, Value::TRUE)
+}
+
+/// Equality comparison — numeric-aware and chained.
+/// If both values are numbers, compares numerically (int 1 == float 1.0).
+/// Otherwise, uses structural equality (PartialEq).
+/// Chained: (= a b c) means all pairs are equal.
+pub fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() < 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("=: expected at least 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    for i in 0..args.len() - 1 {
+        // Fast path: bitwise identical (covers same-type immediates)
+        if args[i] == args[i + 1] {
+            continue;
+        }
+        // Numeric coercion: if both are numbers, compare as f64
+        if args[i].is_number() && args[i + 1].is_number() {
+            if let (Some(a), Some(b)) = (args[i].as_number(), args[i + 1].as_number()) {
+                if a == b {
+                    continue;
+                } else {
+                    return (SIG_OK, Value::FALSE);
+                }
+            }
+        }
+        return (SIG_OK, Value::FALSE);
+    }
+    (SIG_OK, Value::TRUE)
 }
 
 /// Strict identity comparison — bitwise/structural equality with no coercion.
@@ -53,164 +118,24 @@ pub fn prim_identical(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Less than comparison
+/// Less than comparison (chained)
 pub fn prim_lt(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("<: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let result = match (args[0].as_int(), args[1].as_int()) {
-        (Some(a), Some(b)) => a < b,
-        _ => match (args[0].as_float(), args[1].as_float()) {
-            (Some(a), Some(b)) => a < b,
-            _ => {
-                if let Some(ord) = args[0].compare_str(&args[1]) {
-                    return (SIG_OK, Value::bool(ord.is_lt()));
-                }
-                if let Some(ord) = args[0].compare_keyword(&args[1]) {
-                    return (SIG_OK, Value::bool(ord.is_lt()));
-                }
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "<: expected number, string, or keyword, got {} and {}",
-                            args[0].type_name(),
-                            args[1].type_name()
-                        ),
-                    ),
-                );
-            }
-        },
-    };
-    (SIG_OK, if result { Value::TRUE } else { Value::FALSE })
+    chain_cmp("<", args, |a, b| a < b, |a, b| a < b, |ord| ord.is_lt())
 }
 
-/// Greater than comparison
+/// Greater than comparison (chained)
 pub fn prim_gt(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(">: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let result = match (args[0].as_int(), args[1].as_int()) {
-        (Some(a), Some(b)) => a > b,
-        _ => match (args[0].as_float(), args[1].as_float()) {
-            (Some(a), Some(b)) => a > b,
-            _ => {
-                if let Some(ord) = args[0].compare_str(&args[1]) {
-                    return (SIG_OK, Value::bool(ord.is_gt()));
-                }
-                if let Some(ord) = args[0].compare_keyword(&args[1]) {
-                    return (SIG_OK, Value::bool(ord.is_gt()));
-                }
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            ">: expected number, string, or keyword, got {} and {}",
-                            args[0].type_name(),
-                            args[1].type_name()
-                        ),
-                    ),
-                );
-            }
-        },
-    };
-    (SIG_OK, if result { Value::TRUE } else { Value::FALSE })
+    chain_cmp(">", args, |a, b| a > b, |a, b| a > b, |ord| ord.is_gt())
 }
 
-/// Less than or equal comparison
+/// Less than or equal comparison (chained)
 pub fn prim_le(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("<=: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let result = match (args[0].as_int(), args[1].as_int()) {
-        (Some(a), Some(b)) => a <= b,
-        _ => match (args[0].as_float(), args[1].as_float()) {
-            (Some(a), Some(b)) => a <= b,
-            _ => {
-                if let Some(ord) = args[0].compare_str(&args[1]) {
-                    return (SIG_OK, Value::bool(ord.is_le()));
-                }
-                if let Some(ord) = args[0].compare_keyword(&args[1]) {
-                    return (SIG_OK, Value::bool(ord.is_le()));
-                }
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "<=: expected number, string, or keyword, got {} and {}",
-                            args[0].type_name(),
-                            args[1].type_name()
-                        ),
-                    ),
-                );
-            }
-        },
-    };
-    (SIG_OK, if result { Value::TRUE } else { Value::FALSE })
+    chain_cmp("<=", args, |a, b| a <= b, |a, b| a <= b, |ord| ord.is_le())
 }
 
-/// Greater than or equal comparison
+/// Greater than or equal comparison (chained)
 pub fn prim_ge(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(">=: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let result = match (args[0].as_int(), args[1].as_int()) {
-        (Some(a), Some(b)) => a >= b,
-        _ => match (args[0].as_float(), args[1].as_float()) {
-            (Some(a), Some(b)) => a >= b,
-            _ => {
-                if let Some(ord) = args[0].compare_str(&args[1]) {
-                    return (SIG_OK, Value::bool(ord.is_ge()));
-                }
-                if let Some(ord) = args[0].compare_keyword(&args[1]) {
-                    return (SIG_OK, Value::bool(ord.is_ge()));
-                }
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            ">=: expected number, string, or keyword, got {} and {}",
-                            args[0].type_name(),
-                            args[1].type_name()
-                        ),
-                    ),
-                );
-            }
-        },
-    };
-    (SIG_OK, if result { Value::TRUE } else { Value::FALSE })
+    chain_cmp(">=", args, |a, b| a >= b, |a, b| a >= b, |ord| ord.is_ge())
 }
 
 /// Declarative primitive definitions for comparison functions.
@@ -219,12 +144,12 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "=",
         func: prim_eq,
         effect: Effect::none(),
-        arity: Arity::Exact(2),
-        doc: "Test equality. Numeric-aware: (= 1 1.0) is true. For strict identity, use identical?",
+        arity: Arity::AtLeast(2),
+        doc: "Test equality of values. Numeric-aware: (= 1 1.0) is true. Chained: (= a b c) means all are equal.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(= 1 1) #=> true\n(= 1 1.0) #=> true\n(= \"a\" \"a\") #=> true",
-        aliases: &[],
+        example: "(= 1 1) #=> true\n(= 1 1.0) #=> true\n(= 1 2 1) #=> false",
+        aliases: &["eq?"],
     },
     PrimitiveDef {
         name: "identical?",
@@ -241,44 +166,44 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "<",
         func: prim_lt,
         effect: Effect::none(),
-        arity: Arity::Exact(2),
-        doc: "Test if first value is less than second. Works on numbers, strings, and keywords (lexicographic). Both operands must be the same type.",
+        arity: Arity::AtLeast(2),
+        doc: "Test strictly ascending order. Chained: (< a b c) means a < b and b < c. Works on numbers, strings, and keywords.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(< 1 2) #=> true\n(< \"a\" \"b\") #=> true\n(< :apple :banana) #=> true",
+        example: "(< 1 2 3) #=> true\n(< \"a\" \"b\" \"c\") #=> true\n(< :apple :banana :cherry) #=> true",
         aliases: &[],
     },
     PrimitiveDef {
         name: ">",
         func: prim_gt,
         effect: Effect::none(),
-        arity: Arity::Exact(2),
-        doc: "Test if first value is greater than second. Works on numbers, strings, and keywords (lexicographic). Both operands must be the same type.",
+        arity: Arity::AtLeast(2),
+        doc: "Test strictly descending order. Chained: (> c b a) means c > b and b > a. Works on numbers, strings, and keywords.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(> 2 1) #=> true\n(> \"b\" \"a\") #=> true",
+        example: "(> 3 2 1) #=> true\n(> \"c\" \"b\" \"a\") #=> true\n(> :cherry :banana :apple) #=> true",
         aliases: &[],
     },
     PrimitiveDef {
         name: "<=",
         func: prim_le,
         effect: Effect::none(),
-        arity: Arity::Exact(2),
-        doc: "Test if first value is less than or equal to second. Works on numbers, strings, and keywords (lexicographic). Both operands must be the same type.",
+        arity: Arity::AtLeast(2),
+        doc: "Test non-descending order. Chained: (<= a b c) means a <= b and b <= c. Works on numbers, strings, and keywords.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(<= 1 2) #=> true\n(<= \"a\" \"a\") #=> true",
+        example: "(<= 1 2 2 3) #=> true\n(<= \"a\" \"b\" \"b\" \"c\") #=> true",
         aliases: &[],
     },
     PrimitiveDef {
         name: ">=",
         func: prim_ge,
         effect: Effect::none(),
-        arity: Arity::Exact(2),
-        doc: "Test if first value is greater than or equal to second. Works on numbers, strings, and keywords (lexicographic). Both operands must be the same type.",
+        arity: Arity::AtLeast(2),
+        doc: "Test non-ascending order. Chained: (>= c b a) means c >= b and b >= a. Works on numbers, strings, and keywords.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(>= 2 1) #=> true\n(>= \"a\" \"a\") #=> true",
+        example: "(>= 3 2 2 1) #=> true\n(>= \"c\" \"b\" \"b\" \"a\") #=> true",
         aliases: &[],
     },
 ];

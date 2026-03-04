@@ -120,8 +120,9 @@ impl VM {
     /// - (:"fiber/self" . _) — return the currently executing fiber, or nil
     /// - (:"list-primitives" . _) — return sorted list of all primitive names
     /// - (:"primitive-meta" . name) — return struct with primitive metadata
-    /// - (:"arena" . _) — return struct with heap arena :count and :capacity
-    /// - (:"arena-count" . _) — return heap arena object count as int (zero overhead)
+    /// - (:"arena/stats" . _) — return struct with heap arena :count and :capacity
+    /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
+    /// - (:"arena/scope-stats" . _) — return scope allocation stats {:enters N :dtors-run N}
     pub(crate) fn dispatch_query(&self, value: Value) -> (SignalBits, Value) {
         let cons = match value.as_cons() {
             Some(c) => c,
@@ -286,7 +287,7 @@ impl VM {
                     (SIG_OK, Value::NIL)
                 }
             }
-            "arena" => {
+            "arena/stats" => {
                 use crate::value::heap::{heap_arena_capacity, heap_arena_len, TableKey};
                 use std::collections::BTreeMap;
                 let mut fields = BTreeMap::new();
@@ -300,9 +301,27 @@ impl VM {
                 );
                 (SIG_OK, Value::struct_from(fields))
             }
-            "arena-count" => {
+            "arena/count" => {
                 use crate::value::heap::heap_arena_len;
                 (SIG_OK, Value::int(heap_arena_len() as i64))
+            }
+            "arena/scope-stats" => {
+                use crate::value::fiber_heap::with_current_heap_mut;
+                use crate::value::heap::TableKey;
+                use std::collections::BTreeMap;
+                let (enters, dtors_run) =
+                    with_current_heap_mut(|heap| (heap.scope_enters(), heap.scope_dtors_run()))
+                        .unwrap_or((0, 0));
+                let mut fields = BTreeMap::new();
+                fields.insert(
+                    TableKey::Keyword("enters".to_string()),
+                    Value::int(enters as i64),
+                );
+                fields.insert(
+                    TableKey::Keyword("dtors-run".to_string()),
+                    Value::int(dtors_run as i64),
+                );
+                (SIG_OK, Value::struct_from(fields))
             }
             _ => (
                 SIG_ERROR,

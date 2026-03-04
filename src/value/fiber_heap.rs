@@ -82,6 +82,10 @@ pub struct FiberHeap {
     /// allocator instead of the private bump. Set by `with_child_fiber`
     /// for yielding child fibers; nulled on swap-back.
     shared_alloc: *mut crate::value::shared_alloc::SharedAllocator,
+    /// Number of `RegionEnter` instructions executed (scope marks pushed).
+    scope_enters: usize,
+    /// Number of destructors run by `RegionExit` (objects freed at scope exit).
+    scope_dtors_run: usize,
 }
 
 impl FiberHeap {
@@ -94,6 +98,8 @@ impl FiberHeap {
             scope_marks: Vec::new(),
             owned_shared: Vec::new(),
             shared_alloc: std::ptr::null_mut(),
+            scope_enters: 0,
+            scope_dtors_run: 0,
         }
     }
 
@@ -167,6 +173,7 @@ impl FiberHeap {
     /// allocated within the scope.
     pub fn push_scope_mark(&mut self) {
         self.scope_marks.push(self.mark());
+        self.scope_enters += 1;
     }
 
     /// Pop the top scope mark and release objects allocated since it
@@ -182,7 +189,9 @@ impl FiberHeap {
             .scope_marks
             .pop()
             .expect("RegionExit without matching RegionEnter");
+        let dtors_before = self.dtors.len();
         self.release(mark);
+        self.scope_dtors_run += dtors_before - self.dtors.len();
     }
 
     /// Total number of objects allocated since last clear/release.
@@ -196,6 +205,16 @@ impl FiberHeap {
 
     pub fn capacity(&self) -> usize {
         self.bump.chunk_capacity()
+    }
+
+    /// Number of `RegionEnter` instructions executed (scope regions entered).
+    pub fn scope_enters(&self) -> usize {
+        self.scope_enters
+    }
+
+    /// Number of destructors run by `RegionExit` (objects freed at scope exit).
+    pub fn scope_dtors_run(&self) -> usize {
+        self.scope_dtors_run
     }
 
     /// Create a new shared allocator on this fiber's `owned_shared` list.
@@ -246,6 +265,8 @@ impl FiberHeap {
         self.dtors.clear();
         self.scope_marks.clear();
         self.alloc_count = 0;
+        self.scope_enters = 0;
+        self.scope_dtors_run = 0;
         self.bump.reset();
         // Reset to root bump in case scope-level redirection was active.
         if !self.active_allocator.is_null() {
@@ -462,6 +483,22 @@ mod tests {
         heap.clear();
         assert_eq!(heap.len(), 0);
         assert!(heap.is_empty());
+    }
+
+    #[test]
+    fn test_clear_resets_scope_counters() {
+        let mut heap = FiberHeap::new();
+        heap.init_active_allocator();
+        // Simulate a scope region with an allocation
+        heap.push_scope_mark();
+        heap.alloc(HeapObject::String("scoped".into()));
+        heap.pop_scope_mark_and_release();
+        assert_eq!(heap.scope_enters(), 1);
+        assert_eq!(heap.scope_dtors_run(), 1);
+        // clear() must zero both counters
+        heap.clear();
+        assert_eq!(heap.scope_enters(), 0);
+        assert_eq!(heap.scope_dtors_run(), 0);
     }
 
     #[test]

@@ -4,21 +4,21 @@ use elle::pipeline::compile;
 use elle::SymbolTable;
 use elle::Value;
 
-// ── vm/arena (struct form) ──────────────────────────────────────────
+// ── arena/stats (struct form) ───────────────────────────────────────
 
 #[test]
-fn test_vm_arena_returns_struct() {
-    let result = eval_source("(vm/arena)").unwrap();
+fn test_arena_stats_returns_struct() {
+    let result = eval_source("(arena/stats)").unwrap();
     assert!(
         result.as_struct().is_some(),
-        "vm/arena should return a struct"
+        "arena/stats should return a struct"
     );
 }
 
 #[test]
-fn test_vm_arena_has_count_and_capacity() {
+fn test_arena_stats_has_count_and_capacity() {
     let result = eval_source(
-        "(let* ((stats (vm/arena)))
+        "(let* ((stats (arena/stats)))
            (list (get stats :count) (get stats :capacity)))",
     )
     .unwrap();
@@ -33,35 +33,35 @@ fn test_vm_arena_has_count_and_capacity() {
 }
 
 #[test]
-fn test_vm_arena_via_vm_query() {
-    let result = eval_source("(vm/query :arena nil)").unwrap();
+fn test_arena_stats_via_vm_query() {
+    let result = eval_source(r#"(vm/query "arena/stats" nil)"#).unwrap();
     assert!(
         result.as_struct().is_some(),
-        "vm/query :arena should return a struct"
+        "vm/query arena/stats should return a struct"
     );
 }
 
-// ── arena-count (int form) ──────────────────────────────────────────
+// ── arena/count (int form) ──────────────────────────────────────────
 
 #[test]
 fn test_arena_count_returns_int() {
-    let result = eval_source("(arena-count)").unwrap();
+    let result = eval_source("(arena/count)").unwrap();
     assert!(
         result.as_int().is_some(),
-        "arena-count should return an int"
+        "arena/count should return an int"
     );
     assert!(
         result.as_int().unwrap() > 0,
-        "arena-count should be positive after init"
+        "arena/count should be positive after init"
     );
 }
 
 #[test]
 fn test_arena_count_increases_with_allocation() {
     let result = eval_source(
-        "(let* ((before (arena-count))
+        "(let* ((before (arena/count))
                 (_ (list 1 2 3 4 5))
-                (after (arena-count)))
+                (after (arena/count)))
            (> after before))",
     )
     .unwrap();
@@ -74,17 +74,17 @@ fn test_arena_count_increases_with_allocation() {
 
 #[test]
 fn test_arena_count_overhead_is_one() {
-    // Each arena-count call allocates exactly 1 cons (SIG_QUERY message)
+    // Each arena/count call allocates exactly 1 cons (SIG_QUERY message)
     let result = eval_source(
-        "(let* ((a (arena-count))
-                (b (arena-count)))
+        "(let* ((a (arena/count))
+                (b (arena/count)))
            (- b a))",
     )
     .unwrap();
     assert_eq!(
         result,
         Value::int(1),
-        "arena-count overhead should be exactly 1"
+        "arena/count overhead should be exactly 1"
     );
 }
 
@@ -131,12 +131,12 @@ fn test_arena_allocs_list() {
 
 #[test]
 fn test_child_fiber_has_own_arena() {
-    // Inside a child fiber, arena-count reports the child's FiberHeap,
+    // Inside a child fiber, arena/count reports the child's FiberHeap,
     // which starts empty. The child's count should be much smaller than
     // the parent's (which includes all stdlib/primitive allocations).
     let result = eval_source(
-        "(let* ((parent-count (arena-count))
-                (f (fiber/new (fn () (arena-count)) 1))
+        "(let* ((parent-count (arena/count))
+                (f (fiber/new (fn () (arena/count)) 1))
                 (child-count (fiber/resume f)))
            (< child-count parent-count))",
     )
@@ -150,10 +150,10 @@ fn test_child_fiber_has_own_arena() {
 
 #[test]
 fn test_child_fiber_arena_starts_near_zero() {
-    // A child fiber's FiberHeap starts empty. The arena-count inside
+    // A child fiber's FiberHeap starts empty. The arena/count inside
     // should be small (just overhead from the count query itself).
     let result = eval_source(
-        "(let* ((f (fiber/new (fn () (arena-count)) 1))
+        "(let* ((f (fiber/new (fn () (arena/count)) 1))
                 (child-count (fiber/resume f)))
            (< child-count 10))",
     )
@@ -167,16 +167,16 @@ fn test_child_fiber_arena_starts_near_zero() {
 
 #[test]
 fn test_parent_arena_restored_after_child() {
-    // After a child fiber completes, the parent's arena-count should
+    // After a child fiber completes, the parent's arena/count should
     // continue from where it left off (not include child allocations).
     let result = eval_source(
-        "(let* ((before (arena-count))
+        "(let* ((before (arena/count))
                 (f (fiber/new (fn ()
                       (list 1 2 3 4 5)
                       (list 6 7 8 9 10))
                     1))
                 (_ (fiber/resume f))
-                (after (arena-count)))
+                (after (arena/count)))
            # The difference should be small (just the fiber handle + overhead),
            # not include the 10 cons cells allocated in the child.
            (< (- after before) 10))",
@@ -195,9 +195,9 @@ fn test_child_fiber_allocations_tracked_separately() {
     // Verify by checking the count increases inside the child.
     let result = eval_source(
         "(let* ((f (fiber/new (fn ()
-                      (let* ((before (arena-count))
+                      (let* ((before (arena/count))
                              (_ (list 1 2 3 4 5))
-                             (after (arena-count)))
+                             (after (arena/count)))
                         (- after before)))
                     1)))
            (fiber/resume f))",
@@ -217,9 +217,9 @@ fn test_nested_fiber_heap_isolation() {
     // Three levels: root → outer fiber → inner fiber.
     // Each should have its own arena view.
     let result = eval_source(
-        "(let* ((inner (fiber/new (fn () (arena-count)) 1))
+        "(let* ((inner (fiber/new (fn () (arena/count)) 1))
                 (outer (fiber/new (fn ()
-                         (let* ((outer-count (arena-count))
+                         (let* ((outer-count (arena/count))
                                 (inner-count (fiber/resume inner)))
                            (list outer-count inner-count)))
                        1))
@@ -261,13 +261,13 @@ fn test_arena_eval_cost_is_constant() {
     // If ArenaGuard is broken, per-iter cost would grow.
     let result = eval_source(
         "(let* ((measure (fn (n)
-                  (let* ((before (arena-count)))
-                    (letrec ((loop (fn (i)
-                                     (when (< i n)
-                                       (eval '(defn temp (x) (+ x 1)))
-                                       (loop (+ i 1))))))
-                      (loop 0))
-                    (/ (- (arena-count) before 1) n))))
+                   (let* ((before (arena/count)))
+                     (letrec ((loop (fn (i)
+                                      (when (< i n)
+                                        (eval '(defn temp (x) (+ x 1)))
+                                        (loop (+ i 1))))))
+                       (loop 0))
+                     (/ (- (arena/count) before 1) n))))
                 (p10 (measure 10))
                 (p50 (measure 50)))
            (= p10 p50))",
@@ -297,24 +297,38 @@ fn count_in_bytecode(source: &str, needle: &str) -> usize {
 }
 
 #[test]
-fn test_let_no_region_when_result_is_var() {
-    // Body returns a variable → result_is_safe returns false.
-    // No scope allocation, no region instructions.
-    assert!(!bytecode_contains("(let* ((x 1)) x)", "RegionEnter"));
-    assert!(!bytecode_contains("(let* ((x 1)) x)", "RegionExit"));
+fn test_let_region_when_result_is_var_with_immediate_init() {
+    // Body returns scope binding whose init is immediate (1).
+    // Tier 3 recognizes this as safe → scope allocation fires.
+    assert!(bytecode_contains("(let* ((x 1)) x)", "RegionEnter"));
+    assert!(bytecode_contains("(let* ((x 1)) x)", "RegionExit"));
+}
+
+#[test]
+fn test_let_no_region_when_result_is_var_with_heap_init() {
+    // Body returns scope binding whose init is (list 1 2 3) — heap.
+    // result_is_safe returns false → no scope allocation.
+    assert!(!bytecode_contains(
+        "(let* ((x (list 1 2 3))) x)",
+        "RegionEnter"
+    ));
+    assert!(!bytecode_contains(
+        "(let* ((x (list 1 2 3))) x)",
+        "RegionExit"
+    ));
 }
 
 #[test]
 fn test_nested_let_regions_for_safe_body() {
     // Inner let: body is (+ x y) — intrinsic call, result is immediate.
     // No captures, pure body → inner let qualifies for scope allocation.
-    // Outer let: body is the inner let — result_is_safe returns false
-    // for Let nodes (wildcard), so outer let does NOT scope-allocate.
+    // Outer let: body is the inner let — Tier 4 recurses into its body,
+    // finds (+ x y) is safe, so outer let ALSO scope-allocates.
     let source = "(let* ((x 1)) (let* ((y 2)) (+ x y)))";
     let enters = count_in_bytecode(source, "RegionEnter");
     let exits = count_in_bytecode(source, "RegionExit");
-    assert_eq!(enters, 1, "inner let should emit RegionEnter");
-    assert_eq!(exits, 1, "inner let should emit RegionExit");
+    assert_eq!(enters, 2, "both lets should emit RegionEnter");
+    assert_eq!(exits, 2, "both lets should emit RegionExit");
 }
 
 #[test]

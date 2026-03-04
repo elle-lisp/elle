@@ -1,10 +1,10 @@
 # Arena Memory Tracking
 #
-# Demonstrates heap arena introspection via (arena-count)
+# Demonstrates heap arena introspection via (arena/count)
 # and (arena/allocs). These tools enable precise measurement
 # of heap allocation costs.
 #
-# (arena-count) returns the current arena object count as a bare
+# (arena/count) returns the current arena object count as a bare
 # integer with 1 object of overhead (the SIG_QUERY cons cell).
 # (arena/allocs thunk) compensates and returns net allocations.
 
@@ -15,13 +15,13 @@
 # ========================================
 (display "=== 1. Basic arena stats ===\n")
 
-(let ((stats (vm/arena)))
+(let ((stats (arena/stats)))
   (assert-true (>= (get stats :count) 0) "arena count is non-negative")
   (assert-true (>= (get stats :capacity) (get stats :count)) "capacity >= count"))
 
-(let ((c (arena-count)))
-  (assert-true (number? c) "arena-count returns a number")
-  (assert-true (> c 0) "arena-count is positive after stdlib init")
+(let ((c (arena/count)))
+  (assert-true (number? c) "arena/count returns a number")
+  (assert-true (> c 0) "arena/count is positive after stdlib init")
   (display "  arena has ") (display c) (display " objects\n"))
 
 (display "  ✓ basic stats work\n")
@@ -31,14 +31,14 @@
 # ========================================
 (display "\n=== 2. Measurement overhead ===\n")
 
-# Each (arena-count) call has 1 object of overhead (SIG_QUERY cons)
-(let* ((a (arena-count))
-       (b (arena-count))
-       (c (arena-count)))
-  (assert-eq (- b a) 1 "arena-count overhead is 1")
-  (assert-eq (- c b) 1 "arena-count overhead is stable"))
+# Each (arena/count) call has 1 object of overhead (SIG_QUERY cons)
+(let* ((a (arena/count))
+       (b (arena/count))
+       (c (arena/count)))
+  (assert-eq (- b a) 1 "arena/count overhead is 1")
+  (assert-eq (- c b) 1 "arena/count overhead is stable"))
 
-(display "  arena-count overhead: 1 object per call\n")
+(display "  arena/count overhead: 1 object per call\n")
 
 # arena/allocs compensates for this
 (let* ((m (arena/allocs (fn () nil)))
@@ -130,13 +130,13 @@
 # Per-iteration cost must be constant regardless of N.
 # If ArenaGuard is working, macro temps are freed each expansion.
 (defn measure-per-iter (n expr)
-  (let* ((before (arena-count)))
+  (let* ((before (arena/count)))
     (letrec ((loop (fn (i)
                      (when (< i n)
                        (eval expr)
                        (loop (+ i 1))))))
       (loop 0))
-    (/ (- (arena-count) before 1) n)))
+    (/ (- (arena/count) before 1) n)))
 
 (let* ((e '(let ((a 0)) (each x (list 1 2 3) (set a (+ a x))) a))
        (p10 (measure-per-iter 10 e))
