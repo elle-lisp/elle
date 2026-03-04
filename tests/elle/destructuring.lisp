@@ -858,3 +858,95 @@
     b)
   2
   "letrec wildcard destructure")
+
+# Table destructuring properties
+# Migrated from tests/property/destructuring.rs
+# ============================================================
+
+# def_table_roundtrip_int: (def {:a v} {:a X}) yields v == X
+(begin
+  (def {:a v} {:a 42})
+  (assert-eq v 42 "table destructure roundtrip: 42"))
+(begin
+  (def {:a v2} {:a -7})
+  (assert-eq v2 -7 "table destructure roundtrip: -7"))
+(begin
+  (def {:a v3} {:a 0})
+  (assert-eq v3 0 "table destructure roundtrip: 0"))
+
+# def_table_equiv_get: destructuring ≡ manual get
+(let ((t {:a 10 :b 20}))
+  (let (({:a a :b b} {:a 10 :b 20}))
+    (assert-eq (+ a b) (+ (get t :a) (get t :b))
+      "table destructure equiv get")))
+
+# def_table_multi_key
+(begin
+  (def {:x x :y y :z z} {:x 1 :y 2 :z 3})
+  (assert-eq (+ x (+ y z)) 6 "table destructure multi-key"))
+
+# def_table_missing_key_is_nil
+(begin
+  (def {:missing m} {:other 42})
+  (assert-true (nil? m) "table missing key is nil (property)"))
+
+# def_table_non_table_is_nil
+(begin
+  (def {:a a} 42)
+  (assert-true (nil? a) "table non-table gives nil (property)"))
+
+# fn_param_table_equiv_get
+(begin
+  (defn f-destr ({:a a :b b}) (+ a b))
+  (defn g-manual (t) (+ (get t :a) (get t :b)))
+  (assert-eq (f-destr {:a 10 :b 20}) (g-manual {:a 10 :b 20})
+    "fn param table equiv get"))
+
+# fn_param_table_mixed: table param + regular param
+(begin
+  (defn f-mixed ({:x x} y) (+ x y))
+  (assert-eq (f-mixed {:x 10} 20) 30 "fn param table mixed"))
+
+# let_table_destr
+(assert-eq (let (({:a a :b b} {:a 3 :b 7})) (+ a b)) 10
+  "let table destructure (property)")
+
+# let_star_table_forward_ref
+(assert-eq (let* (({:x v} {:x 5}) ({:y w} {:y v})) (+ v w)) 10
+  "let* table forward ref (property)")
+
+# nested_table_destr
+(begin
+  (def {:p {:x px :y py}} {:p {:x 3 :y 4}})
+  (assert-eq (+ px py) 7 "nested table destructure (property)"))
+
+# nested_table_missing_inner
+(begin
+  (def {:p {:missing m}} {:p {:x 42}})
+  (assert-true (nil? m) "nested table missing inner (property)"))
+
+# match_table_extracts
+(var mt-extract (match {:val 42} ({:val v} v) (_ :fail)))
+(assert-eq mt-extract 42 "match table extracts (property)")
+
+# match_table_rejects_non_table
+(var mt-reject (match 42 ({:a a} a) (_ :no-match)))
+(assert-eq mt-reject :no-match "match table rejects non-table (property)")
+
+# match_table_literal_key_discriminates
+(var mt-disc (match {:type :a :val 42}
+  ({:type :b :val v} (+ v 1000))
+  ({:type :a :val v} v)
+  (_ :fail)))
+(assert-eq mt-disc 42 "match table literal key discriminates (property)")
+
+# match_table_wrong_literal_falls_through
+(var mt-fall (match {:type :square :val 10}
+  ({:type :circle :val v} v)
+  ({:type :square :val v} (+ v 100))
+  (_ :fail)))
+(assert-eq mt-fall 110 "match table wrong literal falls through (property)")
+
+# match_mutable_table
+(var mt-mut (match @{:val 42} (@{:val v} v) (_ :fail)))
+(assert-eq mt-mut 42 "match mutable table (property)")

@@ -64,3 +64,43 @@ fn blocks() {
 fn functional() {
     run_elle_script("functional");
 }
+
+#[test]
+fn arithmetic() {
+    run_elle_script("arithmetic");
+}
+
+#[test]
+fn determinism() {
+    run_elle_script("determinism");
+}
+
+#[test]
+fn property_eval() {
+    run_elle_script("property-eval");
+}
+
+#[test]
+fn convert() {
+    run_elle_script("convert");
+}
+
+#[test]
+fn sequences() {
+    run_elle_script("sequences");
+}
+
+#[test]
+fn macros() {
+    run_elle_script("macros");
+}
+
+#[test]
+fn strings() {
+    run_elle_script("strings");
+}
+
+#[test]
+fn bugfixes() {
+    run_elle_script("bugfixes");
+}
