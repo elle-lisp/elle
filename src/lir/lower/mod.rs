@@ -2,6 +2,7 @@
 
 mod binding;
 mod control;
+pub(crate) mod decision;
 mod escape;
 mod expr;
 mod lambda;
@@ -19,7 +20,9 @@ use std::collections::HashMap;
 /// result register and exit label.
 struct BlockLowerContext {
     block_id: BlockId,
+    #[allow(dead_code)]
     result_reg: Reg,
+    result_slot: u16,
     exit_label: Label,
     /// The `region_depth` at the time this block was entered.
     /// `break` emits `(current_region_depth - region_depth_at_entry)`

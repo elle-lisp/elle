@@ -227,7 +227,7 @@ fn test_memory_usage_no_arguments() {
 fn test_match_syntax_parsing() {
     // Test that match syntax is properly parsed (not treated as function call)
     // Match expression should evaluate without errors
-    assert!(eval_source("(match 5 (5 \"five\"))").is_ok());
+    assert!(eval_source("(match 5 (5 \"five\") (_ nil))").is_ok());
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn test_match_wildcard_catches_any() {
 fn test_match_returns_result_expression() {
     // Match should return the value of the matched branch
     // Using literals to avoid variable binding complexity
-    match eval_source("(match 5 (5 42) (10 0))") {
+    match eval_source("(match 5 (5 42) (10 0) (_ nil))") {
         Ok(v) => {
             if let Some(n) = v.as_int() {
                 assert!(n > 0, "Should return a positive number");
@@ -256,7 +256,7 @@ fn test_match_returns_result_expression() {
 #[test]
 fn test_match_clause_ordering() {
     // First matching clause should be used
-    assert!(eval_source("(match 5 (5 true) (5 false))").is_ok());
+    assert!(eval_source("(match 5 (5 true) (5 false) (_ nil))").is_ok());
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn test_match_default_wildcard() {
 #[test]
 fn test_match_nil_pattern_parsing() {
     // Nil pattern should parse and work
-    assert!(eval_source("(match nil (nil \"empty\"))").is_ok());
+    assert!(eval_source("(match nil (nil \"empty\") (_ nil))").is_ok());
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn test_match_wildcard_pattern() {
 fn test_match_nil_pattern() {
     // Match nil
     assert_eq!(
-        eval_source("(match nil (nil \"empty\"))").unwrap(),
+        eval_source("(match nil (nil \"empty\") (_ nil))").unwrap(),
         Value::string("empty")
     );
     // nil pattern should NOT match empty list
@@ -311,11 +311,11 @@ fn test_match_default_case() {
 fn test_match_multiple_clauses_ordering() {
     // Test clause ordering - first matching clause wins
     assert_eq!(
-        eval_source("(match 2 (1 \"one\") (2 \"two\") (3 \"three\"))").unwrap(),
+        eval_source("(match 2 (1 \"one\") (2 \"two\") (3 \"three\") (_ nil))").unwrap(),
         Value::string("two")
     );
     assert_eq!(
-        eval_source("(match 1 (1 \"one\") (2 \"two\") (3 \"three\"))").unwrap(),
+        eval_source("(match 1 (1 \"one\") (2 \"two\") (3 \"three\") (_ nil))").unwrap(),
         Value::string("one")
     );
 }
@@ -324,10 +324,13 @@ fn test_match_multiple_clauses_ordering() {
 fn test_match_with_static_expressions() {
     // Matched expressions should be evaluated (without pattern variable binding)
     assert_eq!(
-        eval_source("(match 10 (10 (* 2 3)))").unwrap(),
+        eval_source("(match 10 (10 (* 2 3)) (_ nil))").unwrap(),
         Value::int(6)
     );
-    assert_eq!(eval_source("(match 5 (5 (+ 1 1)))").unwrap(), Value::int(2));
+    assert_eq!(
+        eval_source("(match 5 (5 (+ 1 1)) (_ nil))").unwrap(),
+        Value::int(2)
+    );
 }
 
 #[test]
@@ -426,7 +429,7 @@ fn test_match_array_literal() {
 #[test]
 fn test_match_array_binding() {
     assert_eq!(
-        eval_source("(match [10 20] ([a b] (+ a b)))").unwrap(),
+        eval_source("(match [10 20] ([a b] (+ a b)) (_ 0))").unwrap(),
         Value::int(30)
     );
 }
@@ -434,7 +437,7 @@ fn test_match_array_binding() {
 #[test]
 fn test_match_array_wrong_length() {
     assert_eq!(
-        eval_source("(match [1 2] ([a b c] \"three\") ([a b] \"two\"))").unwrap(),
+        eval_source("(match [1 2] ([a b c] \"three\") ([a b] \"two\") (_ nil))").unwrap(),
         Value::string("two")
     );
 }
@@ -459,7 +462,7 @@ fn test_match_array_empty() {
 fn test_match_array_rest() {
     // & rest captures remaining elements
     assert_eq!(
-        eval_source("(match [1 2 3 4] ([a & rest] (length rest)))").unwrap(),
+        eval_source("(match [1 2 3 4] ([a & rest] (length rest)) (_ 0))").unwrap(),
         Value::int(3)
     );
 }
@@ -467,7 +470,7 @@ fn test_match_array_rest() {
 #[test]
 fn test_match_array_nested() {
     assert_eq!(
-        eval_source("(match [1 [2 3]] ([a [b c]] (+ a (+ b c))))").unwrap(),
+        eval_source("(match [1 [2 3]] ([a [b c]] (+ a (+ b c))) (_ 0))").unwrap(),
         Value::int(6)
     );
 }
@@ -489,7 +492,7 @@ fn test_match_guard_basic() {
 #[test]
 fn test_match_guard_with_literal() {
     assert_eq!(
-        eval_source("(match 10 (10 when false \"nope\") (10 \"yes\"))").unwrap(),
+        eval_source("(match 10 (10 when false \"nope\") (10 \"yes\") (_ nil))").unwrap(),
         Value::string("yes")
     );
 }
@@ -499,7 +502,7 @@ fn test_match_guard_with_literal() {
 #[test]
 fn test_match_cons_pattern() {
     assert_eq!(
-        eval_source("(match (cons 1 2) ((h . t) (+ h t)))").unwrap(),
+        eval_source("(match (cons 1 2) ((h . t) (+ h t)) (_ 0))").unwrap(),
         Value::int(3)
     );
 }
@@ -517,7 +520,7 @@ fn test_match_cons_not_pair() {
 #[test]
 fn test_match_list_rest() {
     assert_eq!(
-        eval_source("(match (list 1 2 3) ((a & rest) a))").unwrap(),
+        eval_source("(match (list 1 2 3) ((a & rest) a) (_ nil))").unwrap(),
         Value::int(1)
     );
 }
@@ -526,7 +529,7 @@ fn test_match_list_rest() {
 fn test_match_list_exact_length() {
     // List pattern without rest must match exact length
     assert_eq!(
-        eval_source("(match (list 1 2 3) ((1 2) \"two\") ((1 2 3) \"three\"))").unwrap(),
+        eval_source("(match (list 1 2 3) ((1 2) \"two\") ((1 2 3) \"three\") (_ nil))").unwrap(),
         Value::string("three")
     );
 }
@@ -555,13 +558,15 @@ fn test_match_variable_binding() {
     );
 }
 
-// No-match returns nil
+// Non-exhaustive match is a compile-time error
 
 #[test]
-fn test_match_no_match_returns_nil() {
-    assert_eq!(
-        eval_source("(match 42 (1 \"one\") (2 \"two\"))").unwrap(),
-        Value::NIL
+fn test_match_non_exhaustive_is_error() {
+    let result = eval_source("(match 42 (1 \"one\") (2 \"two\"))");
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().contains("non-exhaustive"),
+        "error should mention non-exhaustive"
     );
 }
 
@@ -607,5 +612,513 @@ fn test_variadic_macro_when_multi_body() {
         eval_source("(begin (defmacro my-when (test & body) `(if ,test (begin ,;body) nil)) (my-when true 1 2 3))")
             .unwrap(),
         Value::int(3)
+    );
+}
+
+// === match: improper list patterns (a b . c) ===
+
+#[test]
+fn test_match_improper_list_pattern() {
+    // (a b . c) should match a list of 2+ elements, binding the rest to c
+    let result =
+        eval_source("(match (cons 1 (cons 2 3)) ((a b . c) (list a b c)) (_ :no))").unwrap();
+    // a=1, b=2, c=3
+    assert_eq!(result.to_string(), "(1 2 3)");
+}
+
+#[test]
+fn test_match_improper_list_pattern_longer() {
+    // (a b c . d) should match a list of 3+ elements
+    let result =
+        eval_source("(match (list 1 2 3 4 5) ((a b c . d) (list a b c d)) (_ :no))").unwrap();
+    // a=1, b=2, c=3, d=(4 5)
+    assert_eq!(result.to_string(), "(1 2 3 (4 5))");
+}
+
+#[test]
+fn test_match_improper_list_pattern_exact() {
+    // When the value has exactly the right number of elements for the dot pattern
+    let result = eval_source("(match (cons 1 2) ((a . b) (list a b)) (_ :no))").unwrap();
+    // This already works — regression guard
+    assert_eq!(result.to_string(), "(1 2)");
+}
+
+#[test]
+fn test_match_improper_list_pattern_too_short() {
+    // Value too short for the pattern — should fall through
+    let result = eval_source("(match (list 1) ((a b . c) :matched) (_ :no))").unwrap();
+    assert_eq!(result, Value::keyword("no"));
+}
+
+// === match: or-patterns (1 | 2 | 3) ===
+
+#[test]
+fn test_or_pattern_basic() {
+    assert_eq!(
+        eval_source("(match 2 ((1 | 2 | 3) :small) (_ :big))").unwrap(),
+        Value::keyword("small")
+    );
+}
+
+#[test]
+fn test_or_pattern_no_match() {
+    assert_eq!(
+        eval_source("(match 5 ((1 | 2 | 3) :small) (_ :big))").unwrap(),
+        Value::keyword("big")
+    );
+}
+
+#[test]
+fn test_or_pattern_keywords() {
+    assert_eq!(
+        eval_source("(match :b ((:a | :b | :c) :found) (_ :not))").unwrap(),
+        Value::keyword("found")
+    );
+}
+
+#[test]
+fn test_or_pattern_with_binding() {
+    assert_eq!(
+        eval_source("(match (cons 1 2) (((x . _) | (_ . x)) x) (_ 0))").unwrap(),
+        Value::int(1)
+    );
+}
+
+#[test]
+fn test_or_pattern_with_binding_second() {
+    assert_eq!(
+        eval_source("(match 99 (((x . _) | x) x) (_ 0))").unwrap(),
+        Value::int(99)
+    );
+}
+
+#[test]
+fn test_or_pattern_different_bindings_error() {
+    let result = eval_source("(match 1 (((x . y) | (x . _)) :ok) (_ :no))");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("different variables"));
+}
+
+#[test]
+fn test_or_pattern_with_guard() {
+    assert_eq!(
+        eval_source("(match 2 ((1 | 2 | 3) when true :yes) (_ :no))").unwrap(),
+        Value::keyword("yes")
+    );
+}
+
+#[test]
+fn test_or_pattern_nested_in_cons() {
+    assert_eq!(
+        eval_source("(match (cons 2 :x) (((1 | 2) . t) t) (_ :fail))").unwrap(),
+        Value::keyword("x")
+    );
+}
+
+#[test]
+fn test_or_pattern_multi_item_error() {
+    let result = eval_source("(match 1 ((a b | c d) :ok) (_ :no))");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("single pattern"));
+}
+
+#[test]
+fn test_or_pattern_two_alternatives() {
+    assert_eq!(
+        eval_source("(match :y ((:x | :y) :found) (_ :not))").unwrap(),
+        Value::keyword("found")
+    );
+}
+
+#[test]
+fn test_or_pattern_with_nil() {
+    assert_eq!(
+        eval_source("(match nil ((nil | 0) :empty) (_ :other))").unwrap(),
+        Value::keyword("empty")
+    );
+}
+
+#[test]
+fn test_or_pattern_in_tuple() {
+    assert_eq!(
+        eval_source("(match [2 :x] ([(1 | 2) y] y) (_ :fail))").unwrap(),
+        Value::keyword("x")
+    );
+}
+
+// =========================================================================
+// Guard test coverage (Chunk 4)
+// =========================================================================
+
+#[test]
+fn test_guard_references_pattern_var() {
+    assert_eq!(
+        eval_source("(match 10 (x when (> x 5) :big) (x :small))").unwrap(),
+        Value::keyword("big")
+    );
+    assert_eq!(
+        eval_source("(match 3 (x when (> x 5) :big) (x :small))").unwrap(),
+        Value::keyword("small")
+    );
+}
+
+#[test]
+fn test_guard_fallthrough() {
+    assert_eq!(
+        eval_source("(match 5 (x when false :never) (x :always))").unwrap(),
+        Value::keyword("always")
+    );
+}
+
+#[test]
+fn test_guard_with_cons() {
+    assert_eq!(
+        eval_source("(match (cons 1 2) ((h . t) when (> h 0) (+ h t)) (_ 0))").unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn test_guard_with_list() {
+    assert_eq!(
+        eval_source("(match (list 1 2 3) ((a b c) when (> (+ a b c) 5) :big) (_ :small))").unwrap(),
+        Value::keyword("big")
+    );
+}
+
+#[test]
+fn test_guard_with_tuple() {
+    assert_eq!(
+        eval_source("(match [1 2] ([a b] when (< a b) :ordered) (_ :no))").unwrap(),
+        Value::keyword("ordered")
+    );
+}
+
+#[test]
+fn test_guard_with_struct() {
+    assert_eq!(
+        eval_source("(match {:x 10 :y 20} ({:x x :y y} when (> y x) :valid) (_ :no))").unwrap(),
+        Value::keyword("valid")
+    );
+}
+
+#[test]
+fn test_guard_with_rest() {
+    assert_eq!(
+        eval_source("(match (list 1 2 3) ((a & rest) when (> a 0) rest) (_ :fail))").unwrap(),
+        eval_source("(list 2 3)").unwrap()
+    );
+}
+
+#[test]
+fn test_guard_fallthrough_to_wildcard() {
+    assert_eq!(
+        eval_source("(match 5 (x when false :a) (_ :fallback))").unwrap(),
+        Value::keyword("fallback")
+    );
+}
+
+#[test]
+fn test_guard_complex_body() {
+    assert_eq!(
+        eval_source("(match 10 (x when (> x 5) (let ((y (* x 2))) y)) (x x))").unwrap(),
+        Value::int(20)
+    );
+}
+
+#[test]
+fn test_guard_no_binding_leak() {
+    assert_eq!(
+        eval_source("(match 5 (x when false x) (y (+ y 1)))").unwrap(),
+        Value::int(6)
+    );
+}
+
+#[test]
+fn test_guard_middle_arm_matches() {
+    assert_eq!(
+        eval_source("(match 5 (x when (> x 10) :big) (x when (> x 3) :medium) (x :small))")
+            .unwrap(),
+        Value::keyword("medium")
+    );
+}
+
+#[test]
+fn test_or_pattern_guard_outer_var() {
+    assert_eq!(
+        eval_source(
+            "(let ((threshold 3)) (match 2 ((1 | 2 | 3) when (< threshold 5) :yes) (_ :no)))"
+        )
+        .unwrap(),
+        Value::keyword("yes")
+    );
+}
+
+#[test]
+fn test_or_pattern_binding_guard() {
+    assert_eq!(
+        eval_source("(match (cons 6 :x) (((a . _) | (_ . a)) when (> a 5) :big) (_ :small))")
+            .unwrap(),
+        Value::keyword("big")
+    );
+}
+
+#[test]
+fn test_or_pattern_guard_fallthrough() {
+    assert_eq!(
+        eval_source("(match 2 ((1 | 2 | 3) when false :never) (_ :fallback))").unwrap(),
+        Value::keyword("fallback")
+    );
+}
+
+// === Exhaustiveness tests ===
+
+#[test]
+fn test_exhaustive_match_with_wildcard() {
+    assert_eq!(
+        eval_source("(match 42 (1 :one) (_ :other))").unwrap(),
+        Value::keyword("other")
+    );
+}
+
+#[test]
+fn test_exhaustive_match_with_variable() {
+    assert_eq!(
+        eval_source("(match 42 (1 :one) (x x))").unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn test_non_exhaustive_match_error() {
+    let result = eval_source("(match 42 (1 :one) (2 :two))");
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().contains("non-exhaustive"),
+        "error should mention non-exhaustive"
+    );
+}
+
+#[test]
+fn test_exhaustive_match_booleans() {
+    assert_eq!(
+        eval_source("(match true (true :t) (false :f))").unwrap(),
+        Value::keyword("t")
+    );
+}
+
+#[test]
+fn test_exhaustive_or_pattern_booleans() {
+    assert_eq!(
+        eval_source("(match true ((true | false) :both))").unwrap(),
+        Value::keyword("both")
+    );
+}
+
+#[test]
+fn test_non_exhaustive_guard_on_last_arm() {
+    // A wildcard with a guard is NOT exhaustive
+    let result = eval_source("(match 42 (x when (> x 0) :pos))");
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().contains("non-exhaustive"),
+        "error should mention non-exhaustive"
+    );
+}
+
+// === Decision tree specific tests ===
+
+#[test]
+fn test_decision_tree_shared_prefix() {
+    // Two arms share a cons prefix — decision tree should check cons once
+    let result = eval_source(
+        "(match (list 1 2 3)
+           ((1 2 3) :exact)
+           ((1 2 _) :prefix)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("exact"));
+}
+
+#[test]
+fn test_decision_tree_shared_prefix_second_arm() {
+    let result = eval_source(
+        "(match (list 1 2 4)
+           ((1 2 3) :exact)
+           ((1 2 _) :prefix)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("prefix"));
+}
+
+#[test]
+fn test_decision_tree_multiple_constructors() {
+    // Different constructors in the same column
+    let result = eval_source(
+        "(match (list 1 2)
+           (nil :nil)
+           ((h . t) :pair)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("pair"));
+}
+
+#[test]
+fn test_decision_tree_literal_discrimination() {
+    // Multiple literal arms — decision tree switches on value
+    let result = eval_source(
+        "(match :c
+           (:a 1)
+           (:b 2)
+           (:c 3)
+           (:d 4)
+           (_ 0))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(3));
+}
+
+#[test]
+fn test_decision_tree_nested_tuple_match() {
+    let result = eval_source(
+        "(match [1 [2 3]]
+           ([1 [2 3]] :exact)
+           ([1 [2 _]] :partial)
+           ([_ _] :any-pair)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("exact"));
+}
+
+#[test]
+fn test_decision_tree_guard_fallthrough_to_next_constructor() {
+    // Guard fails, should try next arm even with different constructor
+    let result = eval_source(
+        "(match 5
+           (5 when false :guarded)
+           (5 :unguarded)
+           (_ :default))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("unguarded"));
+}
+
+#[test]
+fn test_decision_tree_or_pattern_with_shared_body() {
+    let result = eval_source(
+        "(match :b
+           ((:a | :b | :c) :first-group)
+           ((:d | :e | :f) :second-group)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("first-group"));
+}
+
+#[test]
+fn test_decision_tree_struct_key_discrimination() {
+    // Two struct patterns with overlapping keys
+    let result = eval_source(
+        "(match {:type :circle :radius 5}
+           ({:type :circle :radius r} r)
+           ({:type :square :side s} s)
+           (_ 0))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(5));
+}
+
+#[test]
+fn test_decision_tree_struct_key_discrimination_second() {
+    let result = eval_source(
+        "(match {:type :square :side 7}
+           ({:type :circle :radius r} r)
+           ({:type :square :side s} s)
+           (_ 0))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(7));
+}
+
+#[test]
+fn test_decision_tree_deeply_nested() {
+    let result = eval_source(
+        "(match (list 1 (list 2 (list 3)))
+           ((1 (2 (3))) :deep)
+           ((1 (2 _)) :medium)
+           ((1 _) :shallow)
+           (_ :none))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("deep"));
+}
+
+#[test]
+fn test_decision_tree_match_in_loop() {
+    // Match inside a loop — exercises repeated decision tree execution
+    let result = eval_source(
+        "(def result (list))
+         (each i (list 1 2 3)
+           (def result (cons (match i
+                               (1 :one)
+                               (2 :two)
+                               (3 :three)
+                               (_ :other))
+                             result)))
+         (reverse result)",
+    )
+    .unwrap();
+    assert_eq!(result, eval_source("(list :one :two :three)").unwrap());
+}
+
+#[test]
+fn test_decision_tree_boolean_exhaustive() {
+    // Boolean exhaustiveness — no wildcard needed
+    let result = eval_source(
+        "(match false
+           (true :yes)
+           (false :no))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("no"));
+}
+
+#[test]
+fn test_decision_tree_or_boolean_exhaustive() {
+    let result = eval_source(
+        "(match true
+           ((true | false) :bool))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("bool"));
+}
+
+#[test]
+fn test_or_pattern_decision_tree_shared() {
+    assert_eq!(
+        eval_source("(match (cons 1 :x) ((1 . t) t) ((2 . t) t) (((3 | 4) . t) t) (_ :fail))",)
+            .unwrap(),
+        Value::keyword("x")
+    );
+}
+
+#[test]
+fn test_or_pattern_nested_decision_tree() {
+    assert_eq!(
+        eval_source("(match [3 :y] ([(1 | 2 | 3) v] v) (_ :fail))").unwrap(),
+        Value::keyword("y")
+    );
+}
+
+#[test]
+fn test_or_pattern_guard_decision_tree() {
+    assert_eq!(
+        eval_source("(match 5 ((1 | 2 | 3) when true :small) ((4 | 5 | 6) :medium) (_ :big))",)
+            .unwrap(),
+        Value::keyword("medium")
     );
 }

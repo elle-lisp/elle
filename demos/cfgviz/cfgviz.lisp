@@ -45,7 +45,8 @@
              [dividend (eval-expr a)])
         (if (= divisor 0)
           (error [:division-by-zero "division by zero in expression"])
-          (/ dividend divisor))))))
+          (/ dividend divisor))))
+    (_ (error "unknown expression"))))
 
 # ── Render each function to DOT ─────────────────────────────────────
 

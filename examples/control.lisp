@@ -428,16 +428,19 @@
 (assert-eq m-list :exact "match: exact list")
 
 (var m-cons (match (list 1 2 3)
-  ((h . t) h)))
+  ((h . t) h)
+  (_ nil)))
 (assert-eq m-cons 1 "match: cons head")
 
 # --- Tuple, struct, guard ---
 (var m-tup (match [10 20]
-  ([a b] (+ a b))))
+  ([a b] (+ a b))
+  (_ 0)))
 (assert-eq m-tup 30 "match: tuple binding")
 
 (var m-struct (match {:x 1 :y 2}
-  ({:x x :y y} (+ x y))))
+  ({:x x :y y} (+ x y))
+  (_ 0)))
 (assert-eq m-struct 3 "match: struct binding")
 
 (defn abs-val [n]
@@ -467,7 +470,8 @@
              [dividend (eval-expr a)])
         (if (= divisor 0)
           (error [:division-by-zero "division by zero in expression"])
-          (/ dividend divisor))))))
+          (/ dividend divisor))))
+    (_ (error "unknown expression"))))
 
 # Simple expressions
 (assert-eq (eval-expr [:lit 42]) 42 "eval: literal")
@@ -500,13 +504,15 @@
 (var m-nested
   (match (list (list 1 2) (list 3 4))
     (((a b) (c d))
-      (+ a (* b (+ c d))))))
+      (+ a (* b (+ c d))))
+    (_ 0)))
 (assert-eq m-nested 15 "match: nested list")
 
 (var m-rest
   (match (list 1 2 3 4 5)
     ((a b & rest)
-      (+ a b (length rest)))))
+      (+ a b (length rest)))
+    (_ 0)))
 (assert-eq m-rest 6 "match: rest pattern")
 
 # Struct dispatch — tagged shapes
@@ -566,7 +572,8 @@
     ([:mul a b] (-> "(" (append (format-expr a)) (append " * ")
                         (append (format-expr b)) (append ")")))
     ([:div a b] (-> "(" (append (format-expr a)) (append " / ")
-                        (append (format-expr b)) (append ")")))))
+                        (append (format-expr b)) (append ")")))
+    (_ "?")))
 
 (assert-eq (format-expr [:lit 42]) "42" "format: literal")
 (assert-eq (format-expr [:add [:lit 3] [:lit 4]]) "(3 + 4)" "format: add")

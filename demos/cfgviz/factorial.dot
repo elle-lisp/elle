@@ -1,0 +1,12 @@
+digraph {
+  label="Recursive factorial — branching and self-call. arity:1 regs:12 locals:1";
+  node [shape=record fontname="monospace" fontsize=10];
+  block0 [color="#cc8800" label="{block0|r0 ← cap[0] @17:10\lr1 ← 2 @17:12\lr2 ← r0 \< r1 @17:12\l|branch r2 → block1 / block2}"];
+  block0 -> block1;
+  block0 -> block2;
+  block1 [color="#444444" label="{block1|r4 ← 1 @18:5\lr3 ← r4 @18:5\l|jump → block3}"];
+  block1 -> block3;
+  block2 [color="#444444" label="{block2|r5 ← cap[0] @19:8\lr6 ← cap[0] @19:24\lr7 ← 1 @19:26\lr8 ← r6 - r7 @19:26\lr9 ← global(469) @19:11\lr10 ← r9(r8) @19:11\lr11 ← r5 * r10 @19:11\lr3 ← r11 @19:11\l|jump → block3}"];
+  block2 -> block3;
+  block3 [color="#4444cc" label="{block3||return r3}"];
+}
