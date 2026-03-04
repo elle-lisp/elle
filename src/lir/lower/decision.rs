@@ -9,10 +9,8 @@
 //! produces a `DecisionTree` as output. No LIR dependencies — the tree
 //! is lowered to LIR in a separate step (Chunk 6b).
 
-// COUPLING: This module is consumed by `lower/control.rs` and
-// `lower/pattern.rs` in Chunk 6b. Until then, all public items
-// appear unused.
-#![allow(dead_code)]
+// COUPLING: This module is consumed by `lower/control.rs` (builds
+// the decision tree) and `lower/pattern.rs` (lowers it to LIR).
 
 use crate::hir::{Binding, Hir, HirPattern, PatternLiteral};
 use std::collections::HashSet;
@@ -33,6 +31,9 @@ pub enum AccessPath {
     Cdr(Box<AccessPath>),
     /// Element at index `i` of a tuple/array at the given path.
     Index(Box<AccessPath>, usize),
+    /// Slice from index `i` to end of a tuple/array at the given path.
+    /// Used for `& rest` patterns in tuple/array destructuring.
+    Slice(Box<AccessPath>, usize),
     /// Value at keyword key in a struct/table at the given path.
     Key(Box<AccessPath>, String),
 }
@@ -50,8 +51,12 @@ pub enum Constructor {
     EmptyList,
     /// Tuple of exactly `n` elements.
     Tuple(usize),
+    /// Tuple of at least `n` fixed elements (has `& rest`).
+    TupleRest(usize),
     /// Array of exactly `n` elements.
     Array(usize),
+    /// Array of at least `n` fixed elements (has `& rest`).
+    ArrayRest(usize),
     /// Struct with these keys (open match — presence, not exclusivity).
     Struct(Vec<String>),
     /// Table with these keys (open match).
@@ -65,6 +70,8 @@ impl Constructor {
             Constructor::Literal(_) | Constructor::Nil | Constructor::EmptyList => 0,
             Constructor::Cons => 2,
             Constructor::Tuple(n) | Constructor::Array(n) => *n,
+            // Rest variants include the rest element as an extra sub-pattern.
+            Constructor::TupleRest(n) | Constructor::ArrayRest(n) => *n + 1,
             Constructor::Struct(keys) | Constructor::Table(keys) => keys.len(),
         }
     }
@@ -177,8 +184,20 @@ fn pattern_constructor(pat: &HirPattern) -> Option<Constructor> {
                 Some(Constructor::Cons)
             }
         }
-        HirPattern::Tuple { elements, .. } => Some(Constructor::Tuple(elements.len())),
-        HirPattern::Array { elements, .. } => Some(Constructor::Array(elements.len())),
+        HirPattern::Tuple { elements, rest } => {
+            if rest.is_some() {
+                Some(Constructor::TupleRest(elements.len()))
+            } else {
+                Some(Constructor::Tuple(elements.len()))
+            }
+        }
+        HirPattern::Array { elements, rest } => {
+            if rest.is_some() {
+                Some(Constructor::ArrayRest(elements.len()))
+            } else {
+                Some(Constructor::Array(elements.len()))
+            }
+        }
         HirPattern::Struct { entries } => Some(Constructor::Struct(
             entries.iter().map(|(k, _)| k.clone()).collect(),
         )),
@@ -230,11 +249,9 @@ fn collect_pattern_bindings(
             }
             if let Some(rest_pat) = rest {
                 // Rest binds to a slice from index elements.len().
-                // Use Index with the start offset — the lowerer will
-                // handle this as ArraySliceFrom.
                 collect_pattern_bindings(
                     rest_pat,
-                    &AccessPath::Index(Box::new(access.clone()), elements.len()),
+                    &AccessPath::Slice(Box::new(access.clone()), elements.len()),
                     out,
                 );
             }
@@ -300,11 +317,16 @@ fn collect_constructor_strings(pat: &HirPattern, out: &mut HashSet<String>) {
 /// Collect distinct constructors in a column.
 ///
 /// Looks inside or-patterns to find their constituent constructors.
+/// Struct and Table constructors with different key sets are merged
+/// into a single constructor with the union of all keys, because
+/// struct/table patterns are "open" (a value can match multiple
+/// patterns with different key sets).
 fn collect_constructors(matrix: &PatternMatrix, col: usize) -> Vec<Constructor> {
     let mut seen = Vec::new();
     for row in &matrix.rows {
         collect_constructors_from_pattern(&row.patterns[col], &mut seen);
     }
+    merge_struct_table_constructors(&mut seen);
     seen
 }
 
@@ -317,6 +339,52 @@ fn collect_constructors_from_pattern(pat: &HirPattern, seen: &mut Vec<Constructo
         if !seen.iter().any(|s: &Constructor| s == &c) {
             seen.push(c);
         }
+    }
+}
+
+/// Merge all Struct constructors into one with the union of keys,
+/// and all Table constructors into one with the union of keys.
+///
+/// Struct/table patterns are "open" — they check for key presence,
+/// not exclusivity. Two struct patterns with different key sets can
+/// both match the same value, so they must be treated as the same
+/// constructor to avoid the decision tree committing to one branch
+/// and missing the other.
+fn merge_struct_table_constructors(ctors: &mut Vec<Constructor>) {
+    // Merge Struct keys
+    let mut struct_keys: Vec<String> = Vec::new();
+    let mut has_struct = false;
+    for ctor in ctors.iter() {
+        if let Constructor::Struct(keys) = ctor {
+            has_struct = true;
+            for k in keys {
+                if !struct_keys.contains(k) {
+                    struct_keys.push(k.clone());
+                }
+            }
+        }
+    }
+    if has_struct {
+        ctors.retain(|c| !matches!(c, Constructor::Struct(_)));
+        ctors.push(Constructor::Struct(struct_keys));
+    }
+
+    // Merge Table keys
+    let mut table_keys: Vec<String> = Vec::new();
+    let mut has_table = false;
+    for ctor in ctors.iter() {
+        if let Constructor::Table(keys) = ctor {
+            has_table = true;
+            for k in keys {
+                if !table_keys.contains(k) {
+                    table_keys.push(k.clone());
+                }
+            }
+        }
+    }
+    if has_table {
+        ctors.retain(|c| !matches!(c, Constructor::Table(_)));
+        ctors.push(Constructor::Table(table_keys));
     }
 }
 
@@ -360,11 +428,52 @@ fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<HirPattern>
                 vec![]
             }
         }
-        HirPattern::Tuple { elements, .. } | HirPattern::Array { elements, .. } => elements.clone(),
+        HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => {
+            let mut sub = elements.clone();
+            // For rest constructors, include the rest pattern as an extra sub-pattern.
+            if matches!(ctor, Constructor::TupleRest(_) | Constructor::ArrayRest(_)) {
+                sub.push(rest.as_deref().cloned().unwrap_or(HirPattern::Wildcard));
+            }
+            sub
+        }
         HirPattern::Struct { entries } | HirPattern::Table { entries } => {
-            entries.iter().map(|(_, p)| p.clone()).collect()
+            // The constructor carries the merged key set (union of all
+            // struct/table patterns in the column). Produce a sub-pattern
+            // for each key in the merged set: the pattern's sub-pattern
+            // for keys it mentions, Wildcard for keys it doesn't.
+            let merged_keys = match ctor {
+                Constructor::Struct(keys) | Constructor::Table(keys) => keys,
+                _ => return entries.iter().map(|(_, p)| p.clone()).collect(),
+            };
+            merged_keys
+                .iter()
+                .map(|key| {
+                    entries
+                        .iter()
+                        .find(|(k, _)| k == key)
+                        .map(|(_, p)| p.clone())
+                        .unwrap_or(HirPattern::Wildcard)
+                })
+                .collect()
         }
         _ => vec![],
+    }
+}
+
+// ── Constructor compatibility ───────────────────────────────────────
+
+/// Check if a pattern's constructor is compatible with a given constructor.
+///
+/// For most constructors, this is exact equality. For Struct and Table,
+/// any struct pattern is compatible with any Struct constructor (and
+/// similarly for Table), because struct/table patterns are "open" —
+/// they check key presence, not exclusivity. The merged constructor
+/// carries the union of all keys.
+fn constructor_compatible(pat_ctor: &Constructor, target: &Constructor) -> bool {
+    match (pat_ctor, target) {
+        (Constructor::Struct(_), Constructor::Struct(_)) => true,
+        (Constructor::Table(_), Constructor::Table(_)) => true,
+        _ => pat_ctor == target,
     }
 }
 
@@ -396,7 +505,11 @@ fn specialize(matrix: &PatternMatrix, col: usize, ctor: &Constructor) -> Pattern
             });
         } else if let HirPattern::Or(alts) = pat {
             for alt in alts {
-                if is_wildcard(alt) || pattern_constructor(alt).as_ref() == Some(ctor) {
+                if is_wildcard(alt)
+                    || pattern_constructor(alt)
+                        .as_ref()
+                        .is_some_and(|c| constructor_compatible(c, ctor))
+                {
                     let sub_patterns = extract_sub_patterns(alt, ctor);
                     let mut new_patterns = row.patterns[..col].to_vec();
                     new_patterns.extend(sub_patterns);
@@ -408,7 +521,10 @@ fn specialize(matrix: &PatternMatrix, col: usize, ctor: &Constructor) -> Pattern
                     });
                 }
             }
-        } else if pattern_constructor(pat).as_ref() == Some(ctor) {
+        } else if pattern_constructor(pat)
+            .as_ref()
+            .is_some_and(|c| constructor_compatible(c, ctor))
+        {
             let sub_patterns = extract_sub_patterns(pat, ctor);
             let mut new_patterns = row.patterns[..col].to_vec();
             new_patterns.extend(sub_patterns);
@@ -463,6 +579,13 @@ fn expand_access(col_access: &[AccessPath], col: usize, ctor: &Constructor) -> V
             for i in 0..*n {
                 new_access.push(AccessPath::Index(Box::new(base.clone()), i));
             }
+        }
+        Constructor::TupleRest(n) | Constructor::ArrayRest(n) => {
+            for i in 0..*n {
+                new_access.push(AccessPath::Index(Box::new(base.clone()), i));
+            }
+            // Extra access path for the rest slice.
+            new_access.push(AccessPath::Slice(Box::new(base.clone()), *n));
         }
         Constructor::Struct(keys) | Constructor::Table(keys) => {
             for key in keys {

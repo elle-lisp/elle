@@ -371,27 +371,70 @@ impl Lowerer {
         value: &Hir,
         arms: &[(HirPattern, Option<Hir>, Hir)],
     ) -> Result<Reg, String> {
-        // Evaluate the value to match
+        // Evaluate the scrutinee and store to a local slot
         let value_reg = self.lower_expr(value)?;
-
-        // Store the match value to a local slot so we can reload it for each arm.
-        // This is necessary because the stack-based emitter loses track of registers
-        // across control flow (jumps between match arms).
-        let match_value_slot = self.current_func.num_locals;
+        let scrutinee_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         self.emit(LirInstr::StoreLocal {
-            slot: match_value_slot,
+            slot: scrutinee_slot,
             src: value_reg,
         });
 
         // Allocate result register and result slot
         let result_reg = self.fresh_reg();
-        let match_result_slot = self.current_func.num_locals;
+        let result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
-
-        // Allocate done label
         let done_label = self.fresh_label();
 
+        // Guard effect safety valve: if any guard may suspend, the decision
+        // tree cannot safely backtrack past the guard (it may have yielded).
+        // Fall back to sequential matching which doesn't share tests.
+        let any_guard_yields = arms
+            .iter()
+            .any(|(_pat, guard, _body)| guard.as_ref().is_some_and(|g| g.effect.may_suspend()));
+
+        if any_guard_yields {
+            self.lower_match_sequential(arms, scrutinee_slot, result_slot, result_reg, done_label)?;
+            return Ok(result_reg);
+        }
+
+        // Build decision tree
+        use super::decision::{find_reachable_arms, AccessPath, PatternMatrix};
+        let matrix = PatternMatrix::from_arms(arms);
+        let tree = matrix.compile(vec![AccessPath::Root]);
+
+        // Check for unreachable arms (stopgap warning until lint integration)
+        let reachable = find_reachable_arms(&tree);
+        for (i, (_pat, _guard, body)) in arms.iter().enumerate() {
+            if !reachable.contains(&i) {
+                eprintln!("warning: unreachable match arm at {:?}", body.span);
+            }
+        }
+
+        // Lower decision tree
+        self.lower_decision_tree(&tree, arms, scrutinee_slot, result_slot, done_label)?;
+
+        // Done block: reload result
+        self.current_block = BasicBlock::new(done_label);
+        self.emit(LirInstr::LoadLocal {
+            dst: result_reg,
+            slot: result_slot,
+        });
+
+        Ok(result_reg)
+    }
+
+    /// Sequential match lowering: try each arm in order. Used as fallback
+    /// when guards may suspend (yield/debug/polymorphic), since the decision
+    /// tree cannot safely backtrack past a suspending guard.
+    fn lower_match_sequential(
+        &mut self,
+        arms: &[(HirPattern, Option<Hir>, Hir)],
+        scrutinee_slot: u16,
+        result_slot: u16,
+        result_reg: Reg,
+        done_label: Label,
+    ) -> Result<(), String> {
         // Pre-allocate labels for each arm
         let arm_labels: Vec<Label> = (0..arms.len()).map(|_| self.fresh_label()).collect();
         let no_match_label = self.fresh_label();
@@ -405,22 +448,18 @@ impl Lowerer {
             };
 
             // Reload the match value from the local slot for each arm.
-            // This ensures the value is available even after control flow jumps.
             let arm_value_reg = self.fresh_reg();
             self.emit(LirInstr::LoadLocal {
                 dst: arm_value_reg,
-                slot: match_value_slot,
+                slot: scrutinee_slot,
             });
 
             // Generate pattern matching code
-            // This will branch to next_arm_label if pattern doesn't match
             self.lower_pattern_match(pattern, arm_value_reg, next_arm_label)?;
 
-            // If we reach here, pattern matched
             // Check guard if present
             if let Some(guard_expr) = guard {
                 let guard_reg = self.lower_expr(guard_expr)?;
-                // If guard fails, go to next arm
                 let guard_pass_label = self.fresh_label();
                 self.terminate(Terminator::Branch {
                     cond: guard_reg,
@@ -434,7 +473,7 @@ impl Lowerer {
             // Lower body
             let body_reg = self.lower_expr(body)?;
             self.emit(LirInstr::StoreLocal {
-                slot: match_result_slot,
+                slot: result_slot,
                 src: body_reg,
             });
 
@@ -452,19 +491,19 @@ impl Lowerer {
         self.current_block = BasicBlock::new(no_match_label);
         let nil_reg = self.emit_const(LirConst::Nil)?;
         self.emit(LirInstr::StoreLocal {
-            slot: match_result_slot,
+            slot: result_slot,
             src: nil_reg,
         });
         self.terminate(Terminator::Jump(done_label));
         self.finish_block();
 
-        // Done block (continue here)
+        // Done block
         self.current_block = BasicBlock::new(done_label);
         self.emit(LirInstr::LoadLocal {
             dst: result_reg,
-            slot: match_result_slot,
+            slot: result_slot,
         });
 
-        Ok(result_reg)
+        Ok(())
     }
 }
