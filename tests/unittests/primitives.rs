@@ -1999,3 +1999,153 @@ fn test_doc_bare_symbol_macro() {
         s
     );
 }
+
+#[test]
+fn test_function_predicate() {
+    let (vm, mut symbols) = setup();
+    let fn_pred = get_primitive(&vm, &mut symbols, "function?");
+
+    // Native fn is a function
+    let native = get_primitive(&vm, &mut symbols, "+");
+    assert_eq!(
+        call_primitive(&fn_pred, &[native]).unwrap(),
+        Value::bool(true)
+    );
+
+    // Closure is a function
+    let closure = Value::closure(Closure {
+        bytecode: std::rc::Rc::new(vec![0u8]),
+        arity: elle::value::Arity::Exact(1),
+        env: std::rc::Rc::new(vec![]),
+        num_locals: 0,
+        num_captures: 0,
+        constants: std::rc::Rc::new(vec![]),
+        effect: elle::effects::Effect::none(),
+        cell_params_mask: 0,
+        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
+        jit_code: None,
+        lir_function: None,
+        doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 1,
+    });
+    assert_eq!(
+        call_primitive(&fn_pred, &[closure]).unwrap(),
+        Value::bool(true)
+    );
+
+    // Number is not a function
+    assert_eq!(
+        call_primitive(&fn_pred, &[Value::int(42)]).unwrap(),
+        Value::bool(false)
+    );
+}
+
+#[test]
+fn test_primitive_predicate() {
+    let (vm, mut symbols) = setup();
+    let prim_pred = get_primitive(&vm, &mut symbols, "primitive?");
+
+    // Native fn is a primitive
+    let native = get_primitive(&vm, &mut symbols, "+");
+    assert_eq!(
+        call_primitive(&prim_pred, &[native]).unwrap(),
+        Value::bool(true)
+    );
+
+    // Closure is not a primitive
+    let closure = Value::closure(Closure {
+        bytecode: std::rc::Rc::new(vec![0u8]),
+        arity: elle::value::Arity::Exact(1),
+        env: std::rc::Rc::new(vec![]),
+        num_locals: 0,
+        num_captures: 0,
+        constants: std::rc::Rc::new(vec![]),
+        effect: elle::effects::Effect::none(),
+        cell_params_mask: 0,
+        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
+        jit_code: None,
+        lir_function: None,
+        doc: None,
+        vararg_kind: elle::hir::VarargKind::List,
+        num_params: 1,
+    });
+    assert_eq!(
+        call_primitive(&prim_pred, &[closure]).unwrap(),
+        Value::bool(false)
+    );
+
+    // Number is not a primitive
+    assert_eq!(
+        call_primitive(&prim_pred, &[Value::int(42)]).unwrap(),
+        Value::bool(false)
+    );
+}
+
+#[test]
+fn test_zero_predicate() {
+    let (vm, mut symbols) = setup();
+    let zero_pred = get_primitive(&vm, &mut symbols, "zero?");
+
+    // Integer zero
+    assert_eq!(
+        call_primitive(&zero_pred, &[Value::int(0)]).unwrap(),
+        Value::bool(true)
+    );
+
+    // Float zero
+    assert_eq!(
+        call_primitive(&zero_pred, &[Value::float(0.0)]).unwrap(),
+        Value::bool(true)
+    );
+
+    // Non-zero integer
+    assert_eq!(
+        call_primitive(&zero_pred, &[Value::int(1)]).unwrap(),
+        Value::bool(false)
+    );
+
+    // Non-zero float
+    assert_eq!(
+        call_primitive(&zero_pred, &[Value::float(1.5)]).unwrap(),
+        Value::bool(false)
+    );
+
+    // Non-number returns false (not error)
+    assert_eq!(
+        call_primitive(&zero_pred, &[Value::NIL]).unwrap(),
+        Value::bool(false)
+    );
+
+    assert_eq!(
+        call_primitive(&zero_pred, &[Value::string("0")]).unwrap(),
+        Value::bool(false)
+    );
+}
+
+#[test]
+fn test_fn_alias() {
+    let (vm, mut symbols) = setup();
+
+    // fn? and function? should both resolve to native functions
+    let fn_pred = get_primitive(&vm, &mut symbols, "fn?");
+    let function_pred = get_primitive(&vm, &mut symbols, "function?");
+
+    // Both should be native fns
+    assert!(fn_pred.as_native_fn().is_some());
+    assert!(function_pred.as_native_fn().is_some());
+
+    // Both should give the same result
+    let native = get_primitive(&vm, &mut symbols, "+");
+    assert_eq!(
+        call_primitive(&fn_pred, &[native]).unwrap(),
+        call_primitive(&function_pred, &[native]).unwrap()
+    );
+
+    assert_eq!(
+        call_primitive(&fn_pred, &[Value::int(42)]).unwrap(),
+        call_primitive(&function_pred, &[Value::int(42)]).unwrap()
+    );
+}

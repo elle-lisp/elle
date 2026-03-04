@@ -290,6 +290,58 @@ pub fn prim_is_struct(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].as_struct().is_some()))
 }
 
+/// Check if value is a function (closure or primitive)
+pub fn prim_is_function(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("function?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (
+        SIG_OK,
+        Value::bool(args[0].is_closure() || args[0].is_native_fn()),
+    )
+}
+
+/// Check if value is a built-in primitive function
+pub fn prim_is_primitive(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("primitive?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].is_native_fn()))
+}
+
+/// Check if value is numerically zero
+pub fn prim_is_zero(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("zero?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let is_zero = if let Some(i) = args[0].as_int() {
+        i == 0
+    } else if let Some(f) = args[0].as_float() {
+        f == 0.0
+    } else {
+        false
+    };
+    (SIG_OK, Value::bool(is_zero))
+}
+
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "nil?",
@@ -498,6 +550,39 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["value"],
         category: "predicate",
         example: "(blob? (blob 1 2 3)) ;=> true",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "function?",
+        func: prim_is_function,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a function (closure or primitive).",
+        params: &["value"],
+        category: "predicate",
+        example: "(function? +) #=> true\n(function? 42) #=> false",
+        aliases: &["fn?"],
+    },
+    PrimitiveDef {
+        name: "primitive?",
+        func: prim_is_primitive,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is a built-in primitive function.",
+        params: &["value"],
+        category: "predicate",
+        example: "(primitive? +) #=> true\n(primitive? (fn (x) x)) #=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "zero?",
+        func: prim_is_zero,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is numerically zero.",
+        params: &["value"],
+        category: "predicate",
+        example: "(zero? 0) #=> true\n(zero? 0.0) #=> true\n(zero? 1) #=> false",
         aliases: &[],
     },
 ];
