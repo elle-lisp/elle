@@ -61,3 +61,57 @@ fn test_rest_list_truthiness() {
         eval_source(":truthy").unwrap()
     );
 }
+
+// === Bug #408 regression: multi-block expressions in call arguments ===
+
+#[test]
+fn test_match_in_call_arg_with_trailing_args() {
+    // Bug #408: match as call arg with more args after it
+    let result =
+        eval_source("(def f (fn [a b] a)) (f (match 42 (42 :found) (_ :nope)) :extra)").unwrap();
+    assert_eq!(result, Value::keyword("found"));
+}
+
+#[test]
+fn test_match_in_call_arg_not_first() {
+    let result =
+        eval_source("(def f (fn [a b] b)) (f :first (match 42 (42 :found) (_ :nope)))").unwrap();
+    assert_eq!(result, Value::keyword("found"));
+}
+
+#[test]
+fn test_match_in_call_arg_only_arg() {
+    // This already works — regression guard
+    let result = eval_source("(def f (fn [a] a)) (f (match 42 (42 :found) (_ :nope)))").unwrap();
+    assert_eq!(result, Value::keyword("found"));
+}
+
+#[test]
+fn test_cond_in_call_arg_with_trailing_args() {
+    let result =
+        eval_source("(def f (fn [a b] a)) (f (cond (true :yes) (false :no)) :extra)").unwrap();
+    assert_eq!(result, Value::keyword("yes"));
+}
+
+#[test]
+fn test_block_in_call_arg_with_trailing_args() {
+    let result =
+        eval_source("(def f (fn [a b] a)) (f (block :b (break :b :done)) :extra)").unwrap();
+    assert_eq!(result, Value::keyword("done"));
+}
+
+#[test]
+fn test_nested_match_in_call_arg() {
+    let result = eval_source(
+        "(def f (fn [a b] a)) (f (match 1 (1 (match 2 (2 :inner) (_ :no))) (_ :no)) :extra)",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("inner"));
+}
+
+#[test]
+fn test_match_three_args() {
+    let result =
+        eval_source("(def f (fn [a b c] a)) (f (match 42 (42 :found) (_ :nope)) :b :c)").unwrap();
+    assert_eq!(result, Value::keyword("found"));
+}
