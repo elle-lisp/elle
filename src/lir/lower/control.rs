@@ -384,8 +384,10 @@ impl Lowerer {
             src: value_reg,
         });
 
-        // Allocate result register
+        // Allocate result register and result slot
         let result_reg = self.fresh_reg();
+        let match_result_slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
 
         // Allocate done label
         let done_label = self.fresh_label();
@@ -431,8 +433,8 @@ impl Lowerer {
 
             // Lower body
             let body_reg = self.lower_expr(body)?;
-            self.emit(LirInstr::Move {
-                dst: result_reg,
+            self.emit(LirInstr::StoreLocal {
+                slot: match_result_slot,
                 src: body_reg,
             });
 
@@ -449,8 +451,8 @@ impl Lowerer {
         // No match block: return nil
         self.current_block = BasicBlock::new(no_match_label);
         let nil_reg = self.emit_const(LirConst::Nil)?;
-        self.emit(LirInstr::Move {
-            dst: result_reg,
+        self.emit(LirInstr::StoreLocal {
+            slot: match_result_slot,
             src: nil_reg,
         });
         self.terminate(Terminator::Jump(done_label));
@@ -458,6 +460,10 @@ impl Lowerer {
 
         // Done block (continue here)
         self.current_block = BasicBlock::new(done_label);
+        self.emit(LirInstr::LoadLocal {
+            dst: result_reg,
+            slot: match_result_slot,
+        });
 
         Ok(result_reg)
     }

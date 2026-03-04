@@ -240,6 +240,8 @@ impl Lowerer {
 
     fn lower_block(&mut self, block_id: &BlockId, body: &[Hir]) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
+        let block_result_slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
         let exit_label = self.fresh_label();
         let scoped = self.can_scope_allocate_block(body);
 
@@ -250,6 +252,7 @@ impl Lowerer {
         self.block_lower_contexts.push(BlockLowerContext {
             block_id: *block_id,
             result_reg,
+            result_slot: block_result_slot,
             exit_label,
             region_depth_at_entry: self.region_depth,
         });
@@ -257,8 +260,8 @@ impl Lowerer {
         // Lower body (same as lower_begin but simpler — body is typically a single Begin node)
         if body.is_empty() {
             let nil_reg = self.emit_const(LirConst::Nil)?;
-            self.emit(LirInstr::Move {
-                dst: result_reg,
+            self.emit(LirInstr::StoreLocal {
+                slot: block_result_slot,
                 src: nil_reg,
             });
         } else {
@@ -267,8 +270,8 @@ impl Lowerer {
                 self.emit(LirInstr::Pop { src: last_reg });
                 last_reg = self.lower_expr(expr)?;
             }
-            self.emit(LirInstr::Move {
-                dst: result_reg,
+            self.emit(LirInstr::StoreLocal {
+                slot: block_result_slot,
                 src: last_reg,
             });
         }
@@ -282,6 +285,10 @@ impl Lowerer {
         // Normal exit: jump to the exit label
         self.terminate(Terminator::Jump(exit_label));
         self.start_new_block(exit_label);
+        self.emit(LirInstr::LoadLocal {
+            dst: result_reg,
+            slot: block_result_slot,
+        });
 
         Ok(result_reg)
     }
@@ -295,16 +302,16 @@ impl Lowerer {
             .find(|ctx| ctx.block_id == *block_id)
             .ok_or_else(|| format!("Internal error: no block context for {:?}", block_id))?;
 
-        let target_result_reg = target.result_reg;
+        let target_result_slot = target.result_slot;
         let target_exit_label = target.exit_label;
         let target_region_depth = target.region_depth_at_entry;
 
         // Lower the value expression
         let value_reg = self.lower_expr(value)?;
 
-        // Move value to the block's result register
-        self.emit(LirInstr::Move {
-            dst: target_result_reg,
+        // Store value to the block's result slot
+        self.emit(LirInstr::StoreLocal {
+            slot: target_result_slot,
             src: value_reg,
         });
 
@@ -381,6 +388,8 @@ impl Lowerer {
         }
 
         let result_reg = self.fresh_reg();
+        let cond_result_slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
         let done_label = self.fresh_label();
 
         // Generate labels for each clause's body and the next test
@@ -417,8 +426,8 @@ impl Lowerer {
             // Body block
             self.current_block = BasicBlock::new(body_label);
             let body_reg = self.lower_expr(body)?;
-            self.emit(LirInstr::Move {
-                dst: result_reg,
+            self.emit(LirInstr::StoreLocal {
+                slot: cond_result_slot,
                 src: body_reg,
             });
             self.terminate(Terminator::Jump(done_label));
@@ -434,14 +443,14 @@ impl Lowerer {
         self.current_block = BasicBlock::new(else_label);
         if let Some(else_expr) = else_branch {
             let else_reg = self.lower_expr(else_expr)?;
-            self.emit(LirInstr::Move {
-                dst: result_reg,
+            self.emit(LirInstr::StoreLocal {
+                slot: cond_result_slot,
                 src: else_reg,
             });
         } else {
             let nil_reg = self.emit_const(LirConst::Nil)?;
-            self.emit(LirInstr::Move {
-                dst: result_reg,
+            self.emit(LirInstr::StoreLocal {
+                slot: cond_result_slot,
                 src: nil_reg,
             });
         }
@@ -450,6 +459,10 @@ impl Lowerer {
 
         // Done block (continue here)
         self.current_block = BasicBlock::new(done_label);
+        self.emit(LirInstr::LoadLocal {
+            dst: result_reg,
+            slot: cond_result_slot,
+        });
 
         Ok(result_reg)
     }
