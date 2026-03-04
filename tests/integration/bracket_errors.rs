@@ -75,7 +75,7 @@ fn cond_clause_bracket_else() {
 #[test]
 fn match_arm_bracket() {
     assert_eq!(
-        eval_source("(match 42 [42 \"yes\"])").unwrap(),
+        eval_source("(match 42 [42 \"yes\"] [_ nil])").unwrap(),
         Value::string("yes")
     );
 }

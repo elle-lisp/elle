@@ -236,10 +236,12 @@
   (run (fn ()
     (let ([me (self)]
           [ponger (spawn (fn ()
-                    (let ([msg (recv)])
-                      (match msg
-                        ([from :ping]
-                          (send from :pong))))))])
+                     (let ([msg (recv)])
+                       (match msg
+                         ([from :ping]
+                           (send from :pong))
+                         (_ nil)))))])
+
       (send ponger [me :ping])
       (let ([reply (recv)])
         (display "  ping-pong reply: ") (print reply)
@@ -319,7 +321,8 @@
           (display ", reason: ") (print (get msg 2))
           (match msg
             ([:EXIT pid reason]
-              (assert-eq pid worker-a "EXIT from worker-a")))))))))
+              (assert-eq pid worker-a "EXIT from worker-a"))
+            (_ nil))))))))
 
 
 # ========================================
@@ -340,7 +343,9 @@
             (assert-eq pid child "EXIT from child")
             (match reason
               ([:error _]
-                (assert-true true "got error reason"))))))))))
+                (assert-true true "got error reason"))
+              (_ nil)))
+          (_ nil)))))))
 
 
 # ========================================
@@ -358,7 +363,9 @@
             (assert-eq pid child "EXIT from child")
             (match reason
               ([:normal val]
-                (assert-eq val 42 "normal exit value is 42"))))))))))
+                (assert-eq val 42 "normal exit value is 42"))
+              (_ nil)))
+          (_ nil)))))))
 
 
 # ========================================

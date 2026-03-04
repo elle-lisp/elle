@@ -126,6 +126,28 @@ impl Emitter {
             self.reg_to_stack.clear();
         }
 
+        // Pre-allocate local slots at the start of the entry block.
+        //
+        // The VM shares a single stack for both local variable slots
+        // (addressed by StoreLocal/LoadLocal as frame_base + index) and
+        // the operand stack.  Without pre-allocation, StoreLocal can
+        // clobber operand values pushed by enclosing expressions (e.g.
+        // the `1` in `(+ 1 (match 2 ...))`).
+        //
+        // By emitting num_locals Nil instructions here, we reserve
+        // stack positions 0..num_locals for locals.  Operand values
+        // start above the reserved area and are never clobbered.
+        //
+        // The simulated stack does NOT track these reserved slots —
+        // all emitter operations (DupN, Pop, ensure_on_top) use
+        // offsets relative to the stack top, so the constant base
+        // offset is invisible to the simulation.
+        if block.label == func.entry && func.num_locals > 0 {
+            for _ in 0..func.num_locals {
+                self.bytecode.emit(Instruction::Nil);
+            }
+        }
+
         // Emit instructions
         for spanned in &block.instructions {
             // Record source location before emitting the instruction

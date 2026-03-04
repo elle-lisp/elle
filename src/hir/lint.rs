@@ -4,7 +4,7 @@
 //! legacy Expr-based linter but operates on the new pipeline's HIR.
 
 use crate::hir::expr::{Hir, HirKind};
-use crate::hir::pattern::{HirPattern, PatternLiteral};
+use crate::hir::pattern::is_exhaustive_match;
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::lint::rules;
 use crate::reader::SourceLoc;
@@ -205,40 +205,6 @@ impl HirLinter {
             HirKind::Quote(_) => {}
         }
     }
-}
-
-/// Check if a match expression's arms are exhaustive.
-///
-/// A match is considered exhaustive if:
-/// - The last arm's pattern is a wildcard or variable (always matches), OR
-/// - The arms cover both `true` and `false` boolean literals
-fn is_exhaustive_match(arms: &[(HirPattern, Option<Hir>, Hir)]) -> bool {
-    // Check if last arm is a catch-all (wildcard or variable without guard)
-    if let Some((pat, guard, _)) = arms.last() {
-        if guard.is_none() && matches!(pat, HirPattern::Wildcard | HirPattern::Var(_)) {
-            return true;
-        }
-    }
-
-    // Check if all boolean values are covered (without guards)
-    let mut has_true = false;
-    let mut has_false = false;
-    for (pat, guard, _) in arms {
-        if guard.is_none() {
-            if let HirPattern::Literal(PatternLiteral::Bool(b)) = pat {
-                if *b {
-                    has_true = true;
-                } else {
-                    has_false = true;
-                }
-            }
-        }
-    }
-    if has_true && has_false {
-        return true;
-    }
-
-    false
 }
 
 impl Default for HirLinter {
