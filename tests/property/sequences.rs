@@ -2,7 +2,7 @@
 // Verifies: first/rest/reverse preserve container types,
 // and reverse is an involution (reverse(reverse(x)) == x).
 
-use crate::common::eval_source;
+use crate::common::eval_reuse as eval_source;
 use elle::Value;
 use proptest::prelude::*;
 

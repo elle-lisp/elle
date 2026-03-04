@@ -141,15 +141,35 @@ Inline tests answer: "Does this private implementation detail work correctly?"
 
 ### `common/mod.rs`
 
-Two functions, both initialize a full VM with primitives and stdlib:
+Functions for evaluating Elle source in tests:
 
-**`eval_source(input: &str) -> Result<Value, String>`** — The canonical test
-eval. Evaluates Elle source through the full pipeline. Handles multi-form
-input via `eval_all`. Sets and clears thread-local VM/symbol-table context.
-Use this for any test that needs to run Elle code.
+**`eval_source(input: &str) -> Result<Value, String>`** — Evaluate Elle source
+through the full pipeline. Creates a fresh VM with primitives and stdlib on
+every call. Use this when you need a guaranteed-fresh VM (rare — prefer
+`eval_reuse` for property tests).
+
+**`eval_source_bare(input: &str) -> Result<Value, String>`** — Same as
+`eval_source` but without stdlib. Creates a fresh VM on every call. Prefer
+`eval_reuse_bare` for property tests.
+
+**`eval_reuse(input: &str) -> Result<Value, String>`** — Evaluate Elle source
+with a cached VM (primitives + stdlib). The VM is created once per thread and
+reused across calls. Between calls, the fiber is reset and globals are restored
+to their post-initialization snapshot. **Use this for property tests that need
+stdlib functions** (map, filter, reverse, etc.).
 
 ```rust
-use crate::common::eval_source;
+use crate::common::eval_reuse as eval_source;
+let result = eval_source("(reverse (list 1 2 3))").unwrap();
+```
+
+**`eval_reuse_bare(input: &str) -> Result<Value, String>`** — Evaluate Elle
+source with a cached VM (primitives only, no stdlib). Same caching behavior as
+`eval_reuse`. **Use this for property tests that don't need stdlib** — this is
+the common case. Most property test files alias this as `eval_source`:
+
+```rust
+use crate::common::eval_reuse_bare as eval_source;
 let result = eval_source("(+ 1 2)").unwrap();
 assert_eq!(result, Value::int(3));
 ```
@@ -157,8 +177,7 @@ assert_eq!(result, Value::int(3));
 **`setup() -> (SymbolTable, VM)`** — Returns an initialized (SymbolTable, VM)
 pair with primitives and stdlib registered. Sets the symbol table context but
 does NOT set VM context. Use this when you need direct access to the VM or
-symbol table (e.g., calling `analyze()` or `compile()` directly, or looking up
-primitives by name).
+symbol table (e.g., calling `analyze()` or `compile()` directly).
 
 ```rust
 use crate::common::setup;
@@ -221,21 +240,21 @@ Some property test files define local strategies for their domain (e.g.,
    }
    ```
 3. In the test file:
-   ```rust
-   use crate::common::eval_source;
-   use elle::Value;
-   use proptest::prelude::*;
+    ```rust
+    use crate::common::eval_reuse_bare as eval_source;
+    use elle::Value;
+    use proptest::prelude::*;
 
-    proptest! {
-        #![proptest_config(crate::common::proptest_cases(200))]
+     proptest! {
+         #![proptest_config(crate::common::proptest_cases(200))]
 
-        #[test]
-        fn my_invariant(n in -1000i64..1000) {
-            let result = eval_source(&format!("(my-fn {})", n)).unwrap();
-            prop_assert_eq!(result, Value::int(n));
-        }
-    }
-   ```
+         #[test]
+         fn my_invariant(n in -1000i64..1000) {
+             let result = eval_source(&format!("(my-fn {})", n)).unwrap();
+             prop_assert_eq!(result, Value::int(n));
+         }
+     }
+    ```
 
 ### Adding a unit test
 
