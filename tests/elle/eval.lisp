@@ -256,14 +256,14 @@
 
 # test_import_returns_last_value
 # Write a temp file, import it, check the returned struct
-(var import-test-path "/run/user/1000/elle-test-import.lisp")
+(var import-test-path "/tmp/elle-test-import.lisp")
 (spit import-test-path "(def internal 42)\n{:answer internal :double (* internal 2)}")
 (var import-result (import-file import-test-path))
 (assert-eq (get import-result :answer) 42 "import returns last value (:answer)")
 (assert-eq (get import-result :double) 84 "import returns last value (:double)")
 
 # test_import_destructuring
-(var import-destr-path "/run/user/1000/elle-test-import-destr.lisp")
+(var import-destr-path "/tmp/elle-test-import-destr.lisp")
 (spit import-destr-path "(def internal 42)\n{:answer internal :double (* internal 2)}")
 (let (({:answer a} (import-file import-destr-path)))
   (assert-eq a 42 "import destructuring"))
