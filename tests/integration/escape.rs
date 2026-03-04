@@ -150,6 +150,30 @@ fn region_emitted_for_string_contains() {
     // string/contains? returns bool → immediate
     assert!(has_region(
         r#"(let ((s "hello world")) (string/contains? s "world"))"#
+
+#[test]
+fn region_emitted_for_while_in_let() {
+    // while returns nil → result_is_safe → let qualifies
+    assert!(has_region("(let ((x 1)) (while false x) nil)"));
+}
+
+#[test]
+fn region_emitted_for_while_as_let_body() {
+    // while is the entire body of a let → result_is_safe(While) = true
+    assert!(has_region("(let ((x 1)) (while false x))"));
+}
+
+#[test]
+fn region_emitted_for_block_with_safe_break() {
+    // Block with break carrying an int → all break values safe → qualifies
+    assert!(has_region("(block :done (if true (break :done 42) 0))"));
+}
+
+#[test]
+fn region_emitted_for_block_with_multiple_safe_breaks() {
+    // Multiple breaks, all carrying immediates
+    assert!(has_region(
+        "(block :done (if true (break :done 1) (if false (break :done 2) 3)))"
     ));
 }
 
@@ -182,6 +206,11 @@ fn region_emitted_when_returning_outer_in_branches() {
     // Both branches of if return safe values (outer binding or intrinsic)
     assert!(has_region(
         "(let ((x 1)) (let ((y (list 1 2 3))) (if (empty? y) x (+ x 1))))"
+
+fn region_emitted_for_block_with_keyword_break() {
+    // Break carrying a keyword (NaN-boxed immediate)
+    assert!(has_region(
+        "(block :done (if true (break :done :found) :default))"
     ));
 }
 
@@ -205,6 +234,11 @@ fn region_emitted_for_nested_let_with_immediate_result() {
     // Outer let can scope-allocate.
     assert!(has_region(
         "(let ((x (list 1 2 3))) (let ((y (length x))) y))"
+
+fn region_emitted_for_let_with_break_to_inner_block() {
+    // Break targets a block INSIDE the let. Break value is immediate → safe.
+    assert!(has_region(
+        "(let ((x 1)) (block :inner (if true (break :inner 42) 0)))"
     ));
 }
 
@@ -313,6 +347,10 @@ fn correct_while_in_scope_returns_nil() {
     assert!(eval_source("(let ((x 1)) (while false 42))")
         .unwrap()
         .is_nil());
+
+fn region_emitted_for_block_containing_while() {
+    // Block body is a while → while returns nil → block result safe, no breaks
+    assert!(has_region("(block :b (while false 42))"));
 }
 
 // ── Negative: scopes that must NOT emit RegionEnter/RegionExit ──────
@@ -419,6 +457,10 @@ fn no_region_for_variadic_intrinsic() {
 fn no_region_for_block_with_break() {
     // Block with break targeting itself → break escapes the block's scope
     assert!(!has_region("(block :done (if true (break :done 42) 0))"));
+
+    // Block with break carrying an immediate → NOW qualifies for scope allocation
+    // (was: conservative rejection of all breaks)
+    assert!(has_region("(block :done (if true (break :done 42) 0))"));
 }
 
 // ── Tier 7: break target awareness ─────────────────────────────────────
@@ -502,6 +544,61 @@ fn no_region_fn_body() {
     assert!(!has_region("(fn (x) (+ x 1))"));
 }
 
+#[test]
+fn no_region_for_block_with_heap_break() {
+    // Break carries a string (heap-allocated) → unsafe
+    assert!(!has_region(
+        r#"(block :done (if true (break :done "heap") 0))"#
+    ));
+}
+
+#[test]
+fn no_region_for_block_with_mixed_breaks() {
+    // One break is safe (int), other is unsafe (string) → unsafe
+    assert!(!has_region(
+        r#"(block :done (if true (break :done 42) (break :done "heap")))"#
+    ));
+}
+
+#[test]
+fn no_region_for_block_with_var_break() {
+    // Break carries a variable (might be heap) → unsafe
+    assert!(!has_region(
+        "(let ((x (list 1 2 3))) (block :done (break :done x)))"
+    ));
+}
+
+#[test]
+fn no_region_for_let_with_break_carrying_heap_value() {
+    // Break carries a heap value past the let's scope
+    assert!(!has_region(
+        r#"(block :outer (let ((x 1)) (break :outer "heap") 42))"#
+    ));
+}
+
+#[test]
+fn no_region_for_block_with_lambda_break() {
+    // Break carries a lambda (heap-allocated closure) → unsafe
+    assert!(!has_region(
+        "(block :done (if true (break :done (fn () 1)) 0))"
+    ));
+}
+
+#[test]
+fn no_region_for_block_with_list_break() {
+    // Break carries a list (heap-allocated) → unsafe
+    assert!(!has_region(
+        "(block :done (if true (break :done (list 1 2)) 0))"
+    ));
+}
+
+#[test]
+fn no_region_for_while_with_heap_break() {
+    // while's implicit Block wraps the While node. A break targeting the
+    // while-block with a heap value must prevent scope allocation.
+    assert!(!has_region(r#"(while true (break :while "heap"))"#));
+}
+
 // ── Negative: bug regression tests ──────────────────────────────────────
 
 #[test]
@@ -518,6 +615,10 @@ fn no_region_when_break_in_nested_block_targets_outer() {
     // Bug 2: break inside a nested block targets the outer block.
     // walk_for_escaping_break must recurse into nested Block bodies.
     assert!(!has_region(
+
+    // Break inside nested block targets outer block, but value is immediate → safe.
+    // walk_for_break recursion still works; we just check values now, not mere presence.
+    assert!(has_region(
         "(block :outer (block :inner (break :outer 42) 0) 0)"
     ));
 }
@@ -1023,4 +1124,52 @@ fn correct_let_with_inner_break_returns_last_expr() {
     )
     .unwrap();
     assert_eq!(result, Value::int(15));
+}
+
+// ── Correctness of while/break with scope allocation ────────────────
+
+#[test]
+fn correct_while_in_scoped_let() {
+    let result = eval_source(
+        "(var sum 0)
+         (let ((x 10))
+           (while (> x 0)
+             (set sum (+ sum x))
+             (set x (- x 1)))
+           nil)
+         sum",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(55));
+}
+
+#[test]
+fn correct_block_with_safe_break_in_scope() {
+    let result = eval_source(
+        "(block :done
+           (if true (break :done 42) 0))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(42));
+}
+
+#[test]
+fn correct_block_with_while_and_break() {
+    let result = eval_source(
+        "(var i 0)
+         (block :loop
+           (while (< i 10)
+             (if (= i 5) (break :loop :found))
+             (set i (+ i 1)))
+           :not-found)",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("found"));
+}
+
+#[test]
+fn correct_while_as_let_body() {
+    // while is the entire let body — result is nil
+    let result = eval_source("(let ((x 1)) (while false x))").unwrap();
+    assert_eq!(result, Value::NIL);
 }

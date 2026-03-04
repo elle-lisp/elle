@@ -17,7 +17,9 @@
 //! 3. Body result is provably a NaN-boxed immediate (`result_is_safe`)
 //! 4. Body contains no dangerous `set` to bindings outside this scope
 //!    (`body_contains_dangerous_outward_set`)
-//! 5. Body contains no escaping `break` (`hir_contains_escaping_break`) —
+//! 5. All breaks in body carry safe immediate values
+//!    (`all_breaks_have_safe_values` / `all_break_values_safe`) — Tier 6
+//! 6. Body contains no escaping `break` (`hir_contains_escaping_break`) —
 //!    a break targeting an outer block carries a value past `RegionExit`.
 //!    Breaks targeting blocks inside the scope are safe (Tier 7).
 //!
@@ -338,6 +340,215 @@ impl Lowerer {
         }
     }
 
+    /// Check that every `Break` targeting `target_id` within the given body
+    /// has a value that is provably a NaN-boxed immediate.
+    ///
+    /// Recursion rules:
+    /// - Does NOT recurse into `Lambda` bodies (breaks can't cross fn boundaries).
+    /// - DOES recurse into nested `Block` bodies (a break inside a nested
+    ///   block may target the outer block). `BlockId`s are unique, so a
+    ///   nested block never shadows the target.
+    pub(super) fn all_break_values_safe(&self, body: &[Hir], target_id: BlockId) -> bool {
+        body.iter()
+            .all(|hir| self.hir_break_values_safe(hir, target_id))
+    }
+
+    fn hir_break_values_safe(&self, hir: &Hir, target_id: BlockId) -> bool {
+        match &hir.kind {
+            HirKind::Break { block_id, value } => {
+                if *block_id == target_id {
+                    self.result_is_safe(value, &[])
+                } else {
+                    // Targets a different block — still recurse into value
+                    // (value expr might contain a break targeting us)
+                    self.hir_break_values_safe(value, target_id)
+                }
+            }
+
+            // Do NOT recurse into lambdas
+            HirKind::Lambda { .. } => true,
+
+            // Terminals — no breaks possible
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_) => true,
+
+            // Recurse into sub-expressions
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.hir_break_values_safe(cond, target_id)
+                    && self.hir_break_values_safe(then_branch, target_id)
+                    && self.hir_break_values_safe(else_branch, target_id)
+            }
+
+            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => exprs
+                .iter()
+                .all(|e| self.hir_break_values_safe(e, target_id)),
+
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().all(|(c, b)| {
+                    self.hir_break_values_safe(c, target_id)
+                        && self.hir_break_values_safe(b, target_id)
+                }) && else_branch
+                    .as_deref()
+                    .is_none_or(|b| self.hir_break_values_safe(b, target_id))
+            }
+
+            HirKind::Call { func, args, .. } => {
+                self.hir_break_values_safe(func, target_id)
+                    && args
+                        .iter()
+                        .all(|a| self.hir_break_values_safe(&a.expr, target_id))
+            }
+
+            HirKind::Set { value, .. } | HirKind::Define { value, .. } => {
+                self.hir_break_values_safe(value, target_id)
+            }
+
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings
+                    .iter()
+                    .all(|(_, init)| self.hir_break_values_safe(init, target_id))
+                    && self.hir_break_values_safe(body, target_id)
+            }
+
+            HirKind::While { cond, body } => {
+                self.hir_break_values_safe(cond, target_id)
+                    && self.hir_break_values_safe(body, target_id)
+            }
+
+            HirKind::Block { body, .. } => body
+                .iter()
+                .all(|e| self.hir_break_values_safe(e, target_id)),
+
+            HirKind::Match { value, arms } => {
+                self.hir_break_values_safe(value, target_id)
+                    && arms.iter().all(|(_, guard, body)| {
+                        guard
+                            .as_ref()
+                            .is_none_or(|g| self.hir_break_values_safe(g, target_id))
+                            && self.hir_break_values_safe(body, target_id)
+                    })
+            }
+
+            HirKind::Yield(expr) => self.hir_break_values_safe(expr, target_id),
+
+            HirKind::Destructure { value, .. } => self.hir_break_values_safe(value, target_id),
+
+            HirKind::Eval { expr, env } => {
+                self.hir_break_values_safe(expr, target_id)
+                    && self.hir_break_values_safe(env, target_id)
+            }
+        }
+    }
+
+    /// Check that every `Break` node reachable from this HIR expression
+    /// has a value that is provably a NaN-boxed immediate.
+    ///
+    /// Used by `can_scope_allocate_let`: if a break carries a heap value
+    /// past the compensating RegionExit, the value dangles. If all break
+    /// values are immediates, breaks are harmless regardless of target.
+    ///
+    /// Recursion: same as hir_break_values_safe (skip lambdas, enter nested blocks).
+    pub(super) fn all_breaks_have_safe_values(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Break { value, .. } => self.result_is_safe(value, &[]),
+
+            // Do NOT recurse into lambda bodies
+            HirKind::Lambda { .. } => true,
+
+            // Terminals
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_) => true,
+
+            HirKind::Block { body, .. } => body.iter().all(|e| self.all_breaks_have_safe_values(e)),
+
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.all_breaks_have_safe_values(cond)
+                    && self.all_breaks_have_safe_values(then_branch)
+                    && self.all_breaks_have_safe_values(else_branch)
+            }
+
+            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => {
+                exprs.iter().all(|e| self.all_breaks_have_safe_values(e))
+            }
+
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().all(|(c, b)| {
+                    self.all_breaks_have_safe_values(c) && self.all_breaks_have_safe_values(b)
+                }) && else_branch
+                    .as_deref()
+                    .is_none_or(|b| self.all_breaks_have_safe_values(b))
+            }
+
+            HirKind::Call { func, args, .. } => {
+                self.all_breaks_have_safe_values(func)
+                    && args
+                        .iter()
+                        .all(|a| self.all_breaks_have_safe_values(&a.expr))
+            }
+
+            HirKind::Set { value, .. } | HirKind::Define { value, .. } => {
+                self.all_breaks_have_safe_values(value)
+            }
+
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings
+                    .iter()
+                    .all(|(_, init)| self.all_breaks_have_safe_values(init))
+                    && self.all_breaks_have_safe_values(body)
+            }
+
+            HirKind::While { cond, body } => {
+                self.all_breaks_have_safe_values(cond) && self.all_breaks_have_safe_values(body)
+            }
+
+            HirKind::Match { value, arms } => {
+                self.all_breaks_have_safe_values(value)
+                    && arms.iter().all(|(_, guard, body)| {
+                        guard
+                            .as_ref()
+                            .is_none_or(|g| self.all_breaks_have_safe_values(g))
+                            && self.all_breaks_have_safe_values(body)
+                    })
+            }
+
+            HirKind::Yield(expr) => self.all_breaks_have_safe_values(expr),
+
+            HirKind::Destructure { value, .. } => self.all_breaks_have_safe_values(value),
+
+            HirKind::Eval { expr, env } => {
+                self.all_breaks_have_safe_values(expr) && self.all_breaks_have_safe_values(env)
+            }
+        }
+    }
+
     /// Check if a HIR body (slice) contains a `Break` that escapes the scope.
     ///
     /// A break targeting a block INSIDE the body is safe — it stays within the
@@ -399,7 +610,6 @@ impl Lowerer {
             | HirKind::Var(_)
             | HirKind::Quote(_) => false,
 
-            // Recurse into sub-expressions
             HirKind::If {
                 cond,
                 then_branch,

@@ -243,7 +243,7 @@ impl Lowerer {
         let block_result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         let exit_label = self.fresh_label();
-        let scoped = self.can_scope_allocate_block(body);
+        let scoped = self.can_scope_allocate_block(block_id, body);
 
         if scoped {
             self.emit_region_enter();
