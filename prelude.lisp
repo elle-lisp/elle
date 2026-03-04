@@ -228,3 +228,15 @@
 (defmacro forever (& body)
   `(while true ,;body))
 
+## apply - call function with args spread from final list argument
+## (apply f args) => (f (splice args))
+## (apply f a b args) => (f a b (splice args))
+(defmacro apply (f & args)
+  (if (empty? args)
+    `(,f)
+    (let* ((last-arg (last args))
+           (init-args (butlast args)))
+      (if (empty? init-args)
+        `(,f (splice ,last-arg))
+        `(,f ,;init-args (splice ,last-arg))))))
+
