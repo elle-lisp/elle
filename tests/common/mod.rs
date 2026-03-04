@@ -76,3 +76,97 @@ pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
         .unwrap_or(default);
     proptest::prelude::ProptestConfig::with_cases(cases)
 }
+
+// ---------------------------------------------------------------------------
+// Cached eval helpers for property tests
+// ---------------------------------------------------------------------------
+//
+// These reuse a thread-local (VM, SymbolTable) pair across proptest cases,
+// eliminating per-case bootstrap cost (VM creation, primitive registration,
+// stdlib loading). Between cases the fiber is reset and globals are restored
+// to their post-initialization snapshot.
+//
+// Use `eval_reuse_bare` for tests that don't need stdlib (the common case).
+// Use `eval_reuse` for tests that need stdlib functions (map, filter, etc.).
+//
+// The old `eval_source` / `eval_source_bare` remain available for tests that
+// need a guaranteed-fresh VM (none currently do, but the option exists).
+
+use std::cell::RefCell;
+use std::thread::LocalKey;
+
+struct TestCache {
+    vm: VM,
+    symbols: SymbolTable,
+    globals_snapshot: Vec<Value>,
+}
+
+thread_local! {
+    static BARE_CACHE: RefCell<Option<TestCache>> = const { RefCell::new(None) };
+    static FULL_CACHE: RefCell<Option<TestCache>> = const { RefCell::new(None) };
+}
+
+fn eval_with_cache(
+    input: &str,
+    cache: &'static LocalKey<RefCell<Option<TestCache>>>,
+    init: fn(&mut VM, &mut SymbolTable),
+) -> Result<Value, String> {
+    cache.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let c = borrow.get_or_insert_with(|| {
+            let mut vm = VM::new();
+            let mut symbols = SymbolTable::new();
+            let _effects = register_primitives(&mut vm, &mut symbols);
+            // Context pointers needed during init (stdlib loading uses gensym).
+            set_vm_context(&mut vm as *mut VM);
+            set_symbol_table(&mut symbols as *mut SymbolTable);
+            init(&mut vm, &mut symbols);
+            let globals_snapshot = vm.globals.clone();
+            TestCache {
+                vm,
+                symbols,
+                globals_snapshot,
+            }
+        });
+
+        // Reset per-case state
+        c.vm.reset_fiber();
+        c.vm.jit_cache.clear();
+        c.vm.globals.truncate(c.globals_snapshot.len());
+        c.vm.globals.copy_from_slice(&c.globals_snapshot);
+
+        // Set context pointers (may have been cleared after previous eval)
+        set_vm_context(&mut c.vm as *mut VM);
+        set_symbol_table(&mut c.symbols as *mut SymbolTable);
+
+        let result = eval_all(input, &mut c.symbols, &mut c.vm);
+
+        set_vm_context(std::ptr::null_mut());
+
+        result
+    })
+}
+
+/// Evaluate Elle source with a cached VM (primitives only, no stdlib).
+///
+/// Drop-in replacement for `eval_source_bare` in property tests. The VM
+/// is created once per thread and reused across proptest cases. Between
+/// cases, the fiber is reset and globals are restored to their
+/// post-initialization values.
+#[allow(dead_code)]
+pub fn eval_reuse_bare(input: &str) -> Result<Value, String> {
+    eval_with_cache(input, &BARE_CACHE, |_, _| {})
+}
+
+/// Evaluate Elle source with a cached VM (primitives + stdlib).
+///
+/// Drop-in replacement for `eval_source` in property tests. The VM
+/// is created once per thread and reused across proptest cases. Between
+/// cases, the fiber is reset and globals are restored to their
+/// post-initialization values.
+#[allow(dead_code)]
+pub fn eval_reuse(input: &str) -> Result<Value, String> {
+    eval_with_cache(input, &FULL_CACHE, |vm, symbols| {
+        init_stdlib(vm, symbols);
+    })
+}
