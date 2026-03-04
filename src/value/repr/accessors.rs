@@ -263,6 +263,24 @@ impl Value {
         }
     }
 
+    /// Compare two string values lexicographically.
+    /// Returns None if either value is not a string.
+    /// Note: `with_string` returns None for keywords and buffers,
+    /// so this only matches string-string pairs.
+    pub fn compare_str(&self, other: &Value) -> Option<std::cmp::Ordering> {
+        self.with_string(|sa| other.with_string(|sb| sa.cmp(sb)))
+            .flatten()
+    }
+
+    /// Compare two keyword values lexicographically by name.
+    /// Returns None if either value is not a keyword.
+    pub fn compare_keyword(&self, other: &Value) -> Option<std::cmp::Ordering> {
+        match (self.as_keyword_name(), other.as_keyword_name()) {
+            (Some(a), Some(b)) => Some(a.cmp(b)),
+            _ => None,
+        }
+    }
+
     /// Extract as cons if this is a cons cell.
     #[inline]
     pub fn as_cons(&self) -> Option<&crate::value::heap::Cons> {
