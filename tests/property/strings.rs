@@ -1,7 +1,8 @@
 // Property tests for string operations.
 //
-// Covers unicode handling, string operation laws, and edge cases.
-// Existing tests only use [a-z] — these push into multi-byte territory.
+// Tests input-dependent behavior: boundary checking, unicode handling,
+// roundtrips, and error paths. Law-based tests (identity, associativity,
+// idempotence) have been migrated to Elle test scripts.
 
 use crate::common::eval_reuse_bare as eval_source;
 use elle::Value;
@@ -36,98 +37,8 @@ proptest! {
     #![proptest_config(crate::common::proptest_cases(200))]
 
     // =========================================================================
-    // Slice/substring properties (used to test length-like behavior)
+    // Slice/substring boundary checking
     // =========================================================================
-
-    #[test]
-    fn slice_full_range_is_identity(s in "[a-zA-Z0-9 ]{0,30}") {
-        // Slicing from 0 to the end should give back the original
-        let code = format!("(string/slice \"{}\" 0 {})", s, s.len());
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), s.clone(),
-            "full slice should be identity for {:?}", s);
-    }
-
-    #[test]
-    fn empty_string_slice(_dummy in 0..1i32) {
-        // Slicing empty string should work
-        let result = eval_source("(string/slice \"\" 0 0)").unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "");
-    }
-
-    #[test]
-    fn slice_at_zero_to_zero(s in "[a-zA-Z0-9]{0,30}") {
-        // Slice from 0 to 0 should be empty
-        let code = format!("(string/slice \"{}\" 0 0)", s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "");
-    }
-
-    // =========================================================================
-    // Append properties
-    // =========================================================================
-
-    #[test]
-    fn append_preserves_content(a in "[a-zA-Z]{0,15}", b in "[a-zA-Z]{0,15}") {
-        let code = format!(
-            "(append \"{}\" \"{}\")",
-            a, b
-        );
-        let result = eval_source(&code).unwrap();
-        let expected = format!("{}{}", a, b);
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), expected,
-            "append didn't preserve content for {:?} + {:?}", a, b);
-    }
-
-    #[test]
-    fn append_empty_is_identity(s in "[a-zA-Z0-9]{0,20}") {
-        let code = format!("(append \"{}\" \"\")", s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), s.clone(),
-            "appending empty string changed {:?}", s);
-
-        let code = format!("(append \"\" \"{}\")", s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), s.clone(),
-            "prepending empty string changed {:?}", s);
-    }
-
-    #[test]
-    fn append_associative(
-        a in "[a-z]{0,8}",
-        b in "[a-z]{0,8}",
-        c in "[a-z]{0,8}",
-    ) {
-        let r1 = eval_source(&format!(
-            "(append (append \"{}\" \"{}\") \"{}\")", a, b, c
-        )).unwrap();
-        let r2 = eval_source(&format!(
-            "(append \"{}\" (append \"{}\" \"{}\"))", a, b, c
-        )).unwrap();
-        prop_assert_eq!(r1, r2, "append not associative");
-    }
-
-    // =========================================================================
-    // Substring/Slice properties
-    // =========================================================================
-
-    #[test]
-    fn slice_full_is_identity(s in "[a-zA-Z0-9]{1,20}") {
-        let code = format!("(string/slice \"{}\" 0 (length \"{}\"))", s, s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), s.clone(),
-            "full slice changed {:?}", s);
-    }
-
-    #[test]
-    fn slice_empty_range(s in "[a-zA-Z0-9]{1,20}", i in 0usize..20) {
-        let len = s.len();
-        let i = i.min(len);
-        let code = format!("(string/slice \"{}\" {} {})", s, i, i);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "",
-            "empty range slice should be empty for {:?} at {}", s, i);
-    }
 
     #[test]
     fn slice_start_end_order(s in "[a-zA-Z0-9]{2,20}", start in 0usize..10, len in 1usize..5) {
@@ -146,10 +57,6 @@ proptest! {
             }
         }
     }
-
-    // =========================================================================
-    // Out-of-bounds slice returns nil (#339)
-    // =========================================================================
 
     #[test]
     fn slice_oob_end_returns_nil(s in "[a-zA-Z0-9]{0,20}", overshoot in 1usize..100) {
@@ -197,106 +104,6 @@ proptest! {
     }
 
     // =========================================================================
-    // Case conversion properties
-    // =========================================================================
-
-    #[test]
-    fn upcase_downcase_roundtrip(s in "[a-z]{1,20}") {
-        let code = format!("(string/downcase (string/upcase \"{}\"))", s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), s.clone(),
-            "upcase/downcase roundtrip failed for {:?}", s);
-    }
-
-    #[test]
-    fn upcase_idempotent(s in "[A-Z]{1,20}") {
-        let code = format!("(string/upcase (string/upcase \"{}\"))", s);
-        let result = eval_source(&code).unwrap();
-        let code2 = format!("(string/upcase \"{}\")", s);
-        let result2 = eval_source(&code2).unwrap();
-        prop_assert_eq!(result, result2, "upcase not idempotent for {:?}", s);
-    }
-
-    #[test]
-    fn downcase_idempotent(s in "[a-z]{1,20}") {
-        let code = format!("(string/downcase (string/downcase \"{}\"))", s);
-        let result = eval_source(&code).unwrap();
-        let code2 = format!("(string/downcase \"{}\")", s);
-        let result2 = eval_source(&code2).unwrap();
-        prop_assert_eq!(result, result2, "downcase not idempotent for {:?}", s);
-    }
-
-    #[test]
-    fn upcase_preserves_content_length(s in "[a-z]{1,20}") {
-        let code = format!("(string/upcase \"{}\")", s);
-        let result = eval_source(&code).unwrap();
-        let upcased = result.with_string(|s| s.to_string()).unwrap();
-        // Length should be preserved (same number of bytes)
-        prop_assert_eq!(upcased.len(), s.len(),
-            "upcase changed byte length of {:?}", s);
-    }
-
-    #[test]
-    fn downcase_preserves_content_length(s in "[A-Z]{1,20}") {
-        let code = format!("(string/downcase \"{}\")", s);
-        let result = eval_source(&code).unwrap();
-        let downcased = result.with_string(|s| s.to_string()).unwrap();
-        // Length should be preserved (same number of bytes)
-        prop_assert_eq!(downcased.len(), s.len(),
-            "downcase changed byte length of {:?}", s);
-    }
-
-    // =========================================================================
-    // Contains / starts-with / ends-with
-    // =========================================================================
-
-    #[test]
-    fn string_contains_self(s in "[a-z]{1,15}") {
-        let code = format!("(string/contains? \"{}\" \"{}\")", s, s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result, Value::TRUE,
-            "string doesn't contain itself: {:?}", s);
-    }
-
-    #[test]
-    fn string_contains_empty(s in "[a-z]{0,15}") {
-        let code = format!("(string/contains? \"{}\" \"\")", s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result, Value::TRUE,
-            "string doesn't contain empty string: {:?}", s);
-    }
-
-    #[test]
-    fn starts_with_self(s in "[a-z]{1,15}") {
-        let code = format!("(string/starts-with? \"{}\" \"{}\")", s, s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result, Value::TRUE);
-    }
-
-    #[test]
-    fn starts_with_empty(s in "[a-z]{0,15}") {
-        let code = format!("(string/starts-with? \"{}\" \"\")", s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result, Value::TRUE,
-            "string doesn't start with empty string: {:?}", s);
-    }
-
-    #[test]
-    fn ends_with_self(s in "[a-z]{1,15}") {
-        let code = format!("(string/ends-with? \"{}\" \"{}\")", s, s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result, Value::TRUE);
-    }
-
-    #[test]
-    fn ends_with_empty(s in "[a-z]{0,15}") {
-        let code = format!("(string/ends-with? \"{}\" \"\")", s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result, Value::TRUE,
-            "string doesn't end with empty string: {:?}", s);
-    }
-
-    // =========================================================================
     // Split / Join roundtrip
     // =========================================================================
 
@@ -322,59 +129,6 @@ proptest! {
         // Result should be a list (cons cell or empty list)
         prop_assert!(result.as_cons().is_some() || result == Value::EMPTY_LIST,
             "split should produce a list");
-    }
-
-    // =========================================================================
-    // Replace
-    // =========================================================================
-
-    #[test]
-    fn replace_with_self_is_identity(s in "[a-z]{1,15}", sub in "[a-z]{1,3}") {
-        let code = format!("(string/replace \"{}\" \"{}\" \"{}\")", s, sub, sub);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), s.clone(),
-            "replacing {:?} with itself changed {:?}", sub, s);
-    }
-
-    #[test]
-    fn replace_empty_old_errors(s in "[a-z]{1,15}") {
-        let code = format!("(string/replace \"{}\" \"\" \"x\")", s);
-        let result = eval_source(&code);
-        // Replacing empty string should error
-        prop_assert!(result.is_err(),
-            "replace with empty old should error");
-    }
-
-    // =========================================================================
-    // Trim
-    // =========================================================================
-
-    #[test]
-    fn trim_idempotent(s in "[a-z]{0,15}") {
-        let padded = format!("  {}  ", s);
-        let code = format!("(string/trim (string/trim \"{}\"))", padded);
-        let result = eval_source(&code).unwrap();
-        let code2 = format!("(string/trim \"{}\")", padded);
-        let result2 = eval_source(&code2).unwrap();
-        prop_assert_eq!(result, result2, "trim not idempotent");
-    }
-
-    #[test]
-    fn trim_of_trimmed_is_noop(s in "[a-zA-Z0-9]{1,15}") {
-        // String with no leading/trailing whitespace
-        let code = format!("(string/trim \"{}\")", s);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), s.clone(),
-            "trim changed non-whitespace string {:?}", s);
-    }
-
-    #[test]
-    fn trim_removes_whitespace(s in "[a-z]{1,10}") {
-        let padded = format!("   {}   ", s);
-        let code = format!("(string/trim \"{}\")", padded);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), s,
-            "trim didn't remove padding from {:?}", padded);
     }
 
     // =========================================================================
@@ -408,7 +162,7 @@ proptest! {
     }
 
     // =========================================================================
-    // Index/char-at operations
+    // Index/char-at operations (boundary checking)
     // =========================================================================
 
     #[test]
@@ -454,7 +208,7 @@ proptest! {
     }
 
     // =========================================================================
-    // Unicode-specific (basic coverage)
+    // Unicode-specific (multi-byte boundary handling)
     // =========================================================================
 
     #[test]
@@ -481,49 +235,5 @@ proptest! {
             prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), s,
                 "unicode upcase/downcase roundtrip failed");
         }
-    }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
-    #[test]
-    fn empty_string_operations(_dummy in 0..1i32) {
-        // append empty strings
-        let r2 = eval_source("(append \"\" \"\")").unwrap();
-        prop_assert_eq!(r2.with_string(|s| s.to_string()).unwrap(), "");
-
-        // upcase empty string
-        let r3 = eval_source("(string/upcase \"\")").unwrap();
-        prop_assert_eq!(r3.with_string(|s| s.to_string()).unwrap(), "");
-
-        // downcase empty string
-        let r4 = eval_source("(string/downcase \"\")").unwrap();
-        prop_assert_eq!(r4.with_string(|s| s.to_string()).unwrap(), "");
-
-        // trim empty string
-        let r5 = eval_source("(string/trim \"\")").unwrap();
-        prop_assert_eq!(r5.with_string(|s| s.to_string()).unwrap(), "");
-
-        // slice empty string
-        let r6 = eval_source("(string/slice \"\" 0 0)").unwrap();
-        prop_assert_eq!(r6.with_string(|s| s.to_string()).unwrap(), "");
-    }
-
-    #[test]
-    fn whitespace_only_string(_dummy in 0..1i32) {
-        let r = eval_source("(string/trim \"   \")").unwrap();
-        prop_assert_eq!(r.with_string(|s| s.to_string()).unwrap(), "");
-    }
-
-    #[test]
-    fn single_character_operations(c in "[a-z]") {
-        let code = format!("(length \"{}\")", c);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result, Value::int(1));
-
-        let code = format!("(string/char-at \"{}\" 0)", c);
-        let result = eval_source(&code).unwrap();
-        prop_assert_eq!(result.with_string(|s| s.to_string()).unwrap(), c);
     }
 }
