@@ -248,8 +248,12 @@ pub extern "C" fn elle_jit_lt(a: u64, b: u64) -> u64 {
         Value::bool(ai < bi).to_bits()
     } else if let (Some(af), Some(bf)) = (a.as_number(), b.as_number()) {
         Value::bool(af < bf).to_bits()
+    } else if let Some(ord) = a.compare_str(&b) {
+        Value::bool(ord.is_lt()).to_bits()
+    } else if let Some(ord) = a.compare_keyword(&b) {
+        Value::bool(ord.is_lt()).to_bits()
     } else {
-        elle_jit_type_error_str("number")
+        elle_jit_type_error_str("number, string, or keyword")
     }
 }
 
@@ -262,8 +266,12 @@ pub extern "C" fn elle_jit_le(a: u64, b: u64) -> u64 {
         Value::bool(ai <= bi).to_bits()
     } else if let (Some(af), Some(bf)) = (a.as_number(), b.as_number()) {
         Value::bool(af <= bf).to_bits()
+    } else if let Some(ord) = a.compare_str(&b) {
+        Value::bool(ord.is_le()).to_bits()
+    } else if let Some(ord) = a.compare_keyword(&b) {
+        Value::bool(ord.is_le()).to_bits()
     } else {
-        elle_jit_type_error_str("number")
+        elle_jit_type_error_str("number, string, or keyword")
     }
 }
 
@@ -276,8 +284,12 @@ pub extern "C" fn elle_jit_gt(a: u64, b: u64) -> u64 {
         Value::bool(ai > bi).to_bits()
     } else if let (Some(af), Some(bf)) = (a.as_number(), b.as_number()) {
         Value::bool(af > bf).to_bits()
+    } else if let Some(ord) = a.compare_str(&b) {
+        Value::bool(ord.is_gt()).to_bits()
+    } else if let Some(ord) = a.compare_keyword(&b) {
+        Value::bool(ord.is_gt()).to_bits()
     } else {
-        elle_jit_type_error_str("number")
+        elle_jit_type_error_str("number, string, or keyword")
     }
 }
 
@@ -290,8 +302,12 @@ pub extern "C" fn elle_jit_ge(a: u64, b: u64) -> u64 {
         Value::bool(ai >= bi).to_bits()
     } else if let (Some(af), Some(bf)) = (a.as_number(), b.as_number()) {
         Value::bool(af >= bf).to_bits()
+    } else if let Some(ord) = a.compare_str(&b) {
+        Value::bool(ord.is_ge()).to_bits()
+    } else if let Some(ord) = a.compare_keyword(&b) {
+        Value::bool(ord.is_ge()).to_bits()
     } else {
-        elle_jit_type_error_str("number")
+        elle_jit_type_error_str("number, string, or keyword")
     }
 }
 
@@ -476,5 +492,69 @@ mod tests {
             Some(false),
             "different strings must not be eq"
         );
+    }
+
+    #[test]
+    fn test_lt_strings() {
+        let a = Value::string("apple".to_string()).to_bits();
+        let b = Value::string("banana".to_string()).to_bits();
+        let result = unsafe { Value::from_bits(elle_jit_lt(a, b)) };
+        assert_eq!(result.as_bool(), Some(true));
+
+        let result = unsafe { Value::from_bits(elle_jit_lt(b, a)) };
+        assert_eq!(result.as_bool(), Some(false));
+
+        let result = unsafe { Value::from_bits(elle_jit_lt(a, a)) };
+        assert_eq!(result.as_bool(), Some(false));
+    }
+
+    #[test]
+    fn test_gt_strings() {
+        let a = Value::string("banana".to_string()).to_bits();
+        let b = Value::string("apple".to_string()).to_bits();
+        let result = unsafe { Value::from_bits(elle_jit_gt(a, b)) };
+        assert_eq!(result.as_bool(), Some(true));
+
+        let result = unsafe { Value::from_bits(elle_jit_gt(b, a)) };
+        assert_eq!(result.as_bool(), Some(false));
+    }
+
+    #[test]
+    fn test_le_strings() {
+        let a = Value::string("apple".to_string()).to_bits();
+        let b = Value::string("banana".to_string()).to_bits();
+        let result = unsafe { Value::from_bits(elle_jit_le(a, b)) };
+        assert_eq!(result.as_bool(), Some(true));
+
+        let result = unsafe { Value::from_bits(elle_jit_le(a, a)) };
+        assert_eq!(result.as_bool(), Some(true));
+
+        let result = unsafe { Value::from_bits(elle_jit_le(b, a)) };
+        assert_eq!(result.as_bool(), Some(false));
+    }
+
+    #[test]
+    fn test_ge_strings() {
+        let a = Value::string("banana".to_string()).to_bits();
+        let b = Value::string("apple".to_string()).to_bits();
+        let result = unsafe { Value::from_bits(elle_jit_ge(a, b)) };
+        assert_eq!(result.as_bool(), Some(true));
+
+        let result = unsafe { Value::from_bits(elle_jit_ge(a, a)) };
+        assert_eq!(result.as_bool(), Some(true));
+
+        let result = unsafe { Value::from_bits(elle_jit_ge(b, a)) };
+        assert_eq!(result.as_bool(), Some(false));
+    }
+
+    #[test]
+    fn test_lt_keywords() {
+        let a = Value::keyword("apple").to_bits();
+        let b = Value::keyword("banana").to_bits();
+        let result = unsafe { Value::from_bits(elle_jit_lt(a, b)) };
+        assert_eq!(result.as_bool(), Some(true));
+
+        let result = unsafe { Value::from_bits(elle_jit_lt(b, a)) };
+        assert_eq!(result.as_bool(), Some(false));
     }
 }

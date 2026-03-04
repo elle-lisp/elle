@@ -51,3 +51,6 @@ mod sequences {
 mod matching {
     include!("matching.rs");
 }
+mod comparison {
+    include!("comparison.rs");
+}
