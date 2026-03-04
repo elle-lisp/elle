@@ -12,7 +12,7 @@
 // COUPLING: This module is consumed by `lower/control.rs` (builds
 // the decision tree) and `lower/pattern.rs` (lowers it to LIR).
 
-use crate::hir::{Binding, Hir, HirPattern, PatternLiteral};
+use crate::hir::{Binding, Hir, HirPattern, PatternKey, PatternLiteral};
 use std::collections::HashSet;
 
 // ── Data types ─────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ pub enum AccessPath {
     /// Used for `& rest` patterns in tuple/array destructuring.
     Slice(Box<AccessPath>, usize),
     /// Value at keyword key in a struct/table at the given path.
-    Key(Box<AccessPath>, String),
+    Key(Box<AccessPath>, PatternKey),
 }
 
 /// A constructor represents the "shape" that a pattern tests for.
@@ -58,9 +58,9 @@ pub enum Constructor {
     /// Array of at least `n` fixed elements (has `& rest`).
     ArrayRest(usize),
     /// Struct with these keys (open match — presence, not exclusivity).
-    Struct(Vec<String>),
+    Struct(Vec<PatternKey>),
     /// Table with these keys (open match).
-    Table(Vec<String>),
+    Table(Vec<PatternKey>),
 }
 
 impl Constructor {
@@ -364,7 +364,7 @@ fn collect_constructors_from_pattern(pat: &HirPattern, seen: &mut Vec<Constructo
 /// and missing the other.
 fn merge_struct_table_constructors(ctors: &mut Vec<Constructor>) {
     // Merge Struct keys
-    let mut struct_keys: Vec<String> = Vec::new();
+    let mut struct_keys: Vec<PatternKey> = Vec::new();
     let mut has_struct = false;
     for ctor in ctors.iter() {
         if let Constructor::Struct(keys) = ctor {
@@ -382,7 +382,7 @@ fn merge_struct_table_constructors(ctors: &mut Vec<Constructor>) {
     }
 
     // Merge Table keys
-    let mut table_keys: Vec<String> = Vec::new();
+    let mut table_keys: Vec<PatternKey> = Vec::new();
     let mut has_table = false;
     for ctor in ctors.iter() {
         if let Constructor::Table(keys) = ctor {
@@ -1075,8 +1075,8 @@ mod tests {
                 PatternRow::new(
                     vec![HirPattern::Struct {
                         entries: vec![
-                            ("x".to_string(), HirPattern::Wildcard),
-                            ("y".to_string(), HirPattern::Wildcard),
+                            (PatternKey::Keyword("x".to_string()), HirPattern::Wildcard),
+                            (PatternKey::Keyword("y".to_string()), HirPattern::Wildcard),
                         ],
                     }],
                     None,
@@ -1090,7 +1090,10 @@ mod tests {
             DecisionTree::Switch { cases, .. } => {
                 assert_eq!(
                     cases[0].0,
-                    Constructor::Struct(vec!["x".to_string(), "y".to_string()])
+                    Constructor::Struct(vec![
+                        PatternKey::Keyword("x".to_string()),
+                        PatternKey::Keyword("y".to_string()),
+                    ])
                 );
             }
             _ => panic!("expected Switch"),
@@ -1131,8 +1134,18 @@ mod tests {
         assert_eq!(Constructor::Cons.arity(), 2);
         assert_eq!(Constructor::Tuple(3).arity(), 3);
         assert_eq!(Constructor::Array(2).arity(), 2);
-        assert_eq!(Constructor::Struct(vec!["a".into(), "b".into()]).arity(), 2);
-        assert_eq!(Constructor::Table(vec!["x".into()]).arity(), 1);
+        assert_eq!(
+            Constructor::Struct(vec![
+                PatternKey::Keyword("a".into()),
+                PatternKey::Keyword("b".into())
+            ])
+            .arity(),
+            2
+        );
+        assert_eq!(
+            Constructor::Table(vec![PatternKey::Keyword("x".into())]).arity(),
+            1
+        );
     }
 
     #[test]

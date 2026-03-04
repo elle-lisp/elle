@@ -419,7 +419,7 @@ impl Lowerer {
             }
             HirPattern::Struct { entries } => {
                 // Structs are immutable key-value maps, like tables
-                for (i, (key_name, sub_pattern)) in entries.iter().enumerate() {
+                for (i, (key, sub_pattern)) in entries.iter().enumerate() {
                     let is_last = i == entries.len() - 1;
                     let src = if is_last {
                         // Last entry: consume the struct directly
@@ -436,17 +436,21 @@ impl Lowerer {
                         src
                     };
                     let elem = self.fresh_reg();
+                    let lir_key = match key {
+                        PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
+                    };
                     self.emit(LirInstr::TableGetOrNil {
                         dst: elem,
                         src,
-                        key: LirConst::Keyword(key_name.clone()),
+                        key: lir_key,
                     });
                     self.lower_destructure(sub_pattern, elem)?;
                 }
                 Ok(())
             }
             HirPattern::Table { entries } => {
-                for (i, (key_name, sub_pattern)) in entries.iter().enumerate() {
+                for (i, (key, sub_pattern)) in entries.iter().enumerate() {
                     let is_last = i == entries.len() - 1;
                     let src = if is_last {
                         // Last entry: consume the table directly
@@ -463,10 +467,14 @@ impl Lowerer {
                         src
                     };
                     let elem = self.fresh_reg();
+                    let lir_key = match key {
+                        PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
+                    };
                     self.emit(LirInstr::TableGetOrNil {
                         dst: elem,
                         src,
-                        key: LirConst::Keyword(key_name.clone()),
+                        key: lir_key,
                     });
                     self.lower_destructure(sub_pattern, elem)?;
                 }

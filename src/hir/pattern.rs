@@ -42,13 +42,15 @@ pub enum HirPattern {
         rest: Option<Box<HirPattern>>,
     },
 
-    /// Match a struct {...} by keyword keys (emits IsStruct guard)
-    /// Each entry is (keyword_name, pattern_for_value)
-    Struct { entries: Vec<(String, HirPattern)> },
+    /// Match a struct {...} by keyword or symbol keys (emits IsStruct guard)
+    Struct {
+        entries: Vec<(PatternKey, HirPattern)>,
+    },
 
-    /// Match a table @{...} by keyword keys (emits IsTable guard)
-    /// Each entry is (keyword_name, pattern_for_value)
-    Table { entries: Vec<(String, HirPattern)> },
+    /// Match a table @{...} by keyword or symbol keys (emits IsTable guard)
+    Table {
+        entries: Vec<(PatternKey, HirPattern)>,
+    },
 
     /// Match any of the alternative patterns.
     /// All alternatives must bind the same set of variable names.
@@ -63,6 +65,13 @@ pub enum PatternLiteral {
     Float(f64),
     String(String),
     Keyword(String),
+}
+
+/// Key type in struct/table patterns: keyword (:foo) or symbol ('foo)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PatternKey {
+    Keyword(String),
+    Symbol(SymbolId),
 }
 
 /// Bindings introduced by a pattern
