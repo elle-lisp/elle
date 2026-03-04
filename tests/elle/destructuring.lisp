@@ -812,3 +812,49 @@
 (begin
   (def {'point {'x px 'y py}} (struct 'point (struct 'x 3 'y 4)))
   (assert-eq (+ px py) 7 "nested symbol key"))
+
+# ============================================================
+# letrec destructuring (#331)
+# ============================================================
+
+# test_letrec_list_destructure
+(assert-eq (letrec (((a b) (list 1 2))) (+ a b)) 3
+  "letrec list destructure")
+
+# test_letrec_struct_destructure
+(assert-eq (letrec (({:x x} {:x 42})) x) 42
+  "letrec struct destructure")
+
+# test_letrec_array_destructure
+(assert-eq (letrec (([a b] [10 20])) (+ a b)) 30
+  "letrec array destructure")
+
+# test_letrec_mixed_simple_and_destructure
+(assert-eq
+  (letrec ((f (fn (x) (+ x a)))
+           ((a b) (list 10 20)))
+    (f b))
+  30
+  "letrec mixed simple and destructure")
+
+# test_letrec_destructure_with_recursion
+(assert-eq
+  (letrec ((f (fn (n) (if (= n 0) base (f (- n 1)))))
+           ({:base base} {:base 42}))
+    (f 5))
+  42
+  "letrec destructure with recursion")
+
+# test_letrec_nested_destructure
+(assert-eq
+  (letrec ((((a b) c) (list (list 1 2) 3)))
+    (+ a b c))
+  6
+  "letrec nested destructure")
+
+# test_letrec_wildcard_destructure
+(assert-eq
+  (letrec (((_ b) (list 1 2)))
+    b)
+  2
+  "letrec wildcard destructure")

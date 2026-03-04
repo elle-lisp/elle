@@ -125,3 +125,10 @@ fn test_struct_destructure_rejects_non_key() {
         .unwrap_err()
         .contains("key must be a keyword or quoted symbol"));
 }
+
+#[test]
+fn test_letrec_destructure_requires_body() {
+    let result = eval_source("(letrec (((a b) (list 1 2))))");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("requires bindings and body"));
+}

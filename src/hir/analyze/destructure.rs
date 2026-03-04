@@ -54,7 +54,10 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Recursively extract all symbol names from a syntax pattern (list, tuple, array, struct, or table).
-    fn extract_pattern_names<'s>(syntax: &'s Syntax, out: &mut Vec<(&'s str, &'s [ScopeId])>) {
+    pub(super) fn extract_pattern_names<'s>(
+        syntax: &'s Syntax,
+        out: &mut Vec<(&'s str, &'s [ScopeId])>,
+    ) {
         match &syntax.kind {
             SyntaxKind::Symbol(name)
                 if name == "_"
@@ -320,18 +323,16 @@ impl<'a> Analyzer<'a> {
                     scope
                 };
 
-                let binding = if in_function {
-                    // Check if pre-created by analyze_begin
+                let binding = if matches!(binding_scope, BindingScope::Global) {
+                    self.bind(name, &[], binding_scope)
+                } else {
+                    // Check if pre-created (by analyze_begin or letrec pass 1)
                     let name_scopes = syntax.scopes.as_slice();
                     if let Some(existing) = self.lookup_in_current_scope(name, name_scopes) {
                         existing
                     } else {
                         self.bind(name, name_scopes, binding_scope)
                     }
-                } else if matches!(binding_scope, BindingScope::Global) {
-                    self.bind(name, &[], binding_scope)
-                } else {
-                    self.bind(name, syntax.scopes.as_slice(), binding_scope)
                 };
 
                 if immutable {
