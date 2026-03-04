@@ -199,6 +199,13 @@ impl Value {
         self.heap_tag() == Some(HeapTag::Syntax)
     }
 
+    /// Check if this is a native function.
+    #[inline]
+    pub fn is_native_fn(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::NativeFn)
+    }
+
     /// Check if this is a proper list (nil or cons ending in nil).
     pub fn is_list(&self) -> bool {
         let mut current = *self;
