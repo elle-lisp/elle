@@ -163,8 +163,22 @@ impl<'a> Analyzer<'a> {
 
         self.push_scope(false);
 
-        // First pass: bind all names (for mutual recursion)
-        let mut binding_handles = Vec::new();
+        // Pass 1: Classify each binding. Pre-bind ALL names for mutual
+        // visibility — simple symbols AND destructure leaf names.
+        // Destructure leaf names are pre-bound so that other initializers
+        // (e.g., recursive functions) can reference them.
+        //
+        // The double-binding problem: analyze_destructure_pattern in pass 2
+        // also calls self.bind() for the same names. To prevent creating
+        // duplicate Binding objects, analyze_destructure_pattern checks
+        // lookup_in_current_scope for the Local scope case, reusing
+        // pre-existing bindings.
+        enum LetrecEntry<'s> {
+            Simple(Binding, &'s Syntax),
+            Destructure(&'s Syntax, &'s Syntax),
+        }
+        let mut entries = Vec::new();
+
         for binding in bindings_syntax {
             let pair = binding
                 .as_list_or_tuple()
@@ -172,37 +186,87 @@ impl<'a> Analyzer<'a> {
             if pair.len() != 2 {
                 return Err(format!("{}: letrec binding must be (name value)", span));
             }
-            let name = pair[0]
-                .as_symbol()
-                .ok_or_else(|| format!("{}: letrec binding name must be a symbol", span))?;
-            let b = self.bind(name, pair[0].scopes.as_slice(), BindingScope::Local);
-            binding_handles.push(b);
+
+            if let Some(name) = pair[0].as_symbol() {
+                // Simple binding — bind immediately for mutual recursion
+                let b = self.bind(name, pair[0].scopes.as_slice(), BindingScope::Local);
+                entries.push(LetrecEntry::Simple(b, &pair[1]));
+            } else if Self::is_destructure_pattern(&pair[0]) {
+                // Destructure pattern — pre-bind leaf names for mutual visibility
+                let mut names = Vec::new();
+                Self::extract_pattern_names(&pair[0], &mut names);
+                for (name, name_scopes) in &names {
+                    if *name != "_" {
+                        self.bind(name, name_scopes, BindingScope::Local);
+                    }
+                }
+                entries.push(LetrecEntry::Destructure(&pair[0], &pair[1]));
+            } else {
+                return Err(format!(
+                    "{}: letrec binding name must be a symbol or destructure pattern",
+                    span
+                ));
+            }
         }
 
-        // Second pass: analyze values
+        // Second pass: analyze values and build the output.
+        // Simple bindings go into the Letrec node's bindings vec.
+        // Destructured bindings: the temp binding AND all leaf bindings
+        // go into the Letrec bindings vec (leaf bindings initialized to
+        // nil). This ensures the lowerer allocates slots for all bindings
+        // before lowering any lambda values — lambdas may capture
+        // destructured leaf bindings. Destructure nodes in the body then
+        // update the leaf binding slots.
         let mut bindings = Vec::new();
+        let mut destructures = Vec::new();
         let mut effect = Effect::none();
-        for (i, binding) in bindings_syntax.iter().enumerate() {
-            let pair = binding.as_list_or_tuple().unwrap();
-            let value = self.analyze_expr(&pair[1])?;
-            effect = effect.combine(value.effect);
-            // Track effect and arity for interprocedural analysis
-            // Note: For mutual recursion, effects may be incomplete at this point
-            // since later bindings haven't been analyzed yet. This is conservative.
-            if let HirKind::Lambda {
-                params: lambda_params,
-                num_required,
-                rest_param,
-                inferred_effect,
-                ..
-            } = &value.kind
-            {
-                self.effect_env.insert(binding_handles[i], *inferred_effect);
-                let arity =
-                    Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
-                self.arity_env.insert(binding_handles[i], arity);
+
+        for entry in &entries {
+            match entry {
+                LetrecEntry::Simple(binding, value_syntax) => {
+                    let value = self.analyze_expr(value_syntax)?;
+                    effect = effect.combine(value.effect);
+                    // Track effect and arity for interprocedural analysis
+                    if let HirKind::Lambda {
+                        params: lambda_params,
+                        num_required,
+                        rest_param,
+                        inferred_effect,
+                        ..
+                    } = &value.kind
+                    {
+                        self.effect_env.insert(*binding, *inferred_effect);
+                        let arity = Arity::for_lambda(
+                            rest_param.is_some(),
+                            *num_required,
+                            lambda_params.len(),
+                        );
+                        self.arity_env.insert(*binding, arity);
+                    }
+                    bindings.push((*binding, value));
+                }
+                LetrecEntry::Destructure(pattern_syntax, value_syntax) => {
+                    let value = self.analyze_expr(value_syntax)?;
+                    effect = effect.combine(value.effect);
+                    // Create a temp binding for the value in the Letrec bindings
+                    let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
+                    bindings.push((tmp, value));
+                    // Analyze the pattern (leaf bindings already exist from pass 1)
+                    let pattern = self.analyze_destructure_pattern(
+                        pattern_syntax,
+                        BindingScope::Local,
+                        false,
+                        &span,
+                    )?;
+                    // Add leaf bindings to the Letrec bindings vec (initialized
+                    // to nil) so the lowerer allocates slots for them before
+                    // lowering any lambda values that might capture them.
+                    for leaf_binding in &pattern.bindings().bindings {
+                        bindings.push((*leaf_binding, Hir::pure(HirKind::Nil, span.clone())));
+                    }
+                    destructures.push((pattern, tmp));
+                }
             }
-            bindings.push((binding_handles[i], value));
         }
 
         let body = self.analyze_body(&items[2..], span.clone())?;
@@ -210,10 +274,30 @@ impl<'a> Analyzer<'a> {
 
         self.pop_scope();
 
+        // If there are destructures, wrap the body with Destructure nodes
+        let final_body = if destructures.is_empty() {
+            body
+        } else {
+            let mut exprs: Vec<Hir> = destructures
+                .into_iter()
+                .map(|(pattern, tmp)| {
+                    Hir::pure(
+                        HirKind::Destructure {
+                            pattern,
+                            value: Box::new(Hir::pure(HirKind::Var(tmp), span.clone())),
+                        },
+                        span.clone(),
+                    )
+                })
+                .collect();
+            exprs.push(body);
+            Hir::new(HirKind::Begin(exprs), span.clone(), effect)
+        };
+
         Ok(Hir::new(
             HirKind::Letrec {
                 bindings,
-                body: Box::new(body),
+                body: Box::new(final_body),
             },
             span,
             effect,

@@ -757,3 +757,104 @@
 (let ([co (coro/new (fn (&opt a) (yield a) a))])
   (coro/resume co 10)
   (assert-eq (coro/resume co) 10 "opt fiber resume: with initial arg"))
+
+# ============================================================
+# Symbol keys in struct/table destructuring (#424)
+# ============================================================
+
+# test_def_struct_symbol_key
+(begin
+  (def {'a v} (struct 'a 42))
+  (assert-eq v 42 "def struct symbol key"))
+
+# test_let_struct_symbol_key
+(assert-eq (let (({'a v} (struct 'a 42))) v) 42
+  "let struct symbol key")
+
+# test_fn_param_struct_symbol_key
+(assert-eq ((fn ({'a v}) v) (struct 'a 42)) 42
+  "fn param struct symbol key")
+
+# test_mixed_keyword_and_symbol_keys
+(begin
+  (def {:k kv 'a sv} (struct :k 1 'a 2))
+  (assert-eq kv 1 "mixed keys: keyword")
+  (assert-eq sv 2 "mixed keys: symbol"))
+
+# test_symbol_key_missing_returns_nil
+(begin
+  (def {'missing m} (struct 'other 1))
+  (assert-eq m nil "symbol key missing returns nil"))
+
+# test_match_struct_symbol_key
+(var match-sym
+  (match (struct 'a 42)
+    ({'a v} v)
+    (_ :no-match)))
+(assert-eq match-sym 42 "match struct symbol key")
+
+# test_match_table_symbol_key
+(var match-tbl-sym
+  (match @{'a 42}
+    (@{'a v} v)
+    (_ :no-match)))
+(assert-eq match-tbl-sym 42 "match table symbol key")
+
+# test_match_struct_symbol_key_missing_gives_nil
+# Struct patterns match any struct (IsStruct guard); missing keys give nil
+(var match-sym-missing
+  (match (struct 'b 99)
+    ({'a v} v)
+    (_ :no-match)))
+(assert-eq match-sym-missing nil "match struct symbol key missing gives nil")
+
+# test_nested_symbol_key
+(begin
+  (def {'point {'x px 'y py}} (struct 'point (struct 'x 3 'y 4)))
+  (assert-eq (+ px py) 7 "nested symbol key"))
+
+# ============================================================
+# letrec destructuring (#331)
+# ============================================================
+
+# test_letrec_list_destructure
+(assert-eq (letrec (((a b) (list 1 2))) (+ a b)) 3
+  "letrec list destructure")
+
+# test_letrec_struct_destructure
+(assert-eq (letrec (({:x x} {:x 42})) x) 42
+  "letrec struct destructure")
+
+# test_letrec_array_destructure
+(assert-eq (letrec (([a b] [10 20])) (+ a b)) 30
+  "letrec array destructure")
+
+# test_letrec_mixed_simple_and_destructure
+(assert-eq
+  (letrec ((f (fn (x) (+ x a)))
+           ((a b) (list 10 20)))
+    (f b))
+  30
+  "letrec mixed simple and destructure")
+
+# test_letrec_destructure_with_recursion
+(assert-eq
+  (letrec ((f (fn (n) (if (= n 0) base (f (- n 1)))))
+           ({:base base} {:base 42}))
+    (f 5))
+  42
+  "letrec destructure with recursion")
+
+# test_letrec_nested_destructure
+(assert-eq
+  (letrec ((((a b) c) (list (list 1 2) 3)))
+    (+ a b c))
+  6
+  "letrec nested destructure")
+
+# test_letrec_wildcard_destructure
+(assert-eq
+  (letrec (((_ b) (list 1 2)))
+    b)
+  2
+  "letrec wildcard destructure")

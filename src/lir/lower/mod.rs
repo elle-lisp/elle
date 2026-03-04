@@ -10,7 +10,7 @@ mod pattern;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
-use crate::hir::{Binding, BlockId, Hir, HirKind, HirPattern};
+use crate::hir::{Binding, BlockId, Hir, HirKind, HirPattern, PatternKey};
 use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
 use rustc_hash::FxHashMap;

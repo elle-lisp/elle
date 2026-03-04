@@ -87,7 +87,7 @@ impl<'a> Analyzer<'a> {
 
         // Handle collector (& / &keys / &named)
         use super::destructure::CollectorParams;
-        use crate::hir::pattern::HirPattern;
+        use crate::hir::pattern::{HirPattern, PatternKey};
         use crate::hir::VarargKind;
         let (rest_param, vararg_kind) = match parsed.collector {
             Some(CollectorParams::Rest(rest_syn)) => {
@@ -139,7 +139,10 @@ impl<'a> Analyzer<'a> {
                     // Create a binding for each named param
                     let binding =
                         self.bind(name, sym_syntax.scopes.as_slice(), BindingScope::Local);
-                    entries.push((name.to_string(), HirPattern::Var(binding)));
+                    entries.push((
+                        PatternKey::Keyword(name.to_string()),
+                        HirPattern::Var(binding),
+                    ));
                 }
 
                 // Build struct destructure pattern: {:name1 name1 :name2 name2 ...}
