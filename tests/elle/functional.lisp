@@ -62,3 +62,84 @@
 (assert-list-eq (keep odd? (list 1 2 3 4 5)) (list 1 3 5) "keep: odd")
 (assert-list-eq (keep even? (list 1 2 3 4 5)) (list 2 4) "keep: even")
 (assert-list-eq (keep odd? ()) () "keep: empty")
+
+## ── identity ────────────────────────────────────────────────────────
+(assert-eq (identity 42) 42 "identity: number")
+(assert-eq (identity nil) nil "identity: nil")
+(assert-eq (identity true) true "identity: bool")
+(assert-list-eq (identity (list 1 2)) (list 1 2) "identity: list")
+
+## ── complement ──────────────────────────────────────────────────────
+(assert-true ((complement nil?) 42) "complement: not nil")
+(assert-false ((complement nil?) nil) "complement: nil")
+(assert-true ((complement even?) 3) "complement: not even")
+(assert-false ((complement even?) 4) "complement: even")
+
+## ── constantly ──────────────────────────────────────────────────────
+(assert-eq ((constantly 42) 1 2 3) 42 "constantly: ignores args")
+(assert-eq ((constantly 42)) 42 "constantly: no args")
+(assert-eq ((constantly nil) :a :b) nil "constantly: nil")
+
+## ── compose / comp ──────────────────────────────────────────────────
+(assert-eq ((compose) 42) 42 "compose: zero fns is identity")
+(assert-eq ((compose (fn (x) (+ x 1))) 5) 6 "compose: single fn")
+(assert-eq ((compose (fn (x) (* x 2)) (fn (x) (+ x 1))) 3) 8 "compose: f(g(x)) = (* 2 (+ 3 1))")
+(assert-eq ((comp (fn (x) (+ x 1)) (fn (x) (* x 2))) 3) 7 "comp: alias, (+ 1 (* 2 3))")
+
+## ── partial ─────────────────────────────────────────────────────────
+(assert-eq ((partial + 10) 5) 15 "partial: one bound arg")
+(assert-eq ((partial + 10 20) 5) 35 "partial: two bound args")
+(assert-eq ((partial * 2 3) 4) 24 "partial: multiply")
+(assert-list-eq ((partial list :a) :b :c) (list :a :b :c) "partial: variadic")
+
+## ── juxt ────────────────────────────────────────────────────────────
+(assert-list-eq ((juxt (fn (x) (* x 2)) (fn (x) (+ x 1))) 3)
+                (list 6 4)
+                "juxt: two fns")
+(assert-list-eq ((juxt even? odd?) 4)
+                (list true false)
+                "juxt: predicates")
+
+## ── all? ────────────────────────────────────────────────────────────
+(assert-true (all? even? (list 2 4 6)) "all?: all even list")
+(assert-false (all? even? (list 2 3 6)) "all?: not all even list")
+(assert-true (all? even? ()) "all?: empty is vacuously true")
+(assert-true (all? even? @[2 4 6]) "all?: array")
+(assert-false (all? even? @[2 3 6]) "all?: array not all")
+(assert-true (all? even? [2 4 6]) "all?: tuple")
+(assert-false (all? even? [2 3 6]) "all?: tuple not all")
+
+## ── any? ────────────────────────────────────────────────────────────
+(assert-true (any? even? (list 1 2 3)) "any?: has even list")
+(assert-false (any? even? (list 1 3 5)) "any?: no even list")
+(assert-false (any? even? ()) "any?: empty is false")
+(assert-true (any? even? @[1 2 3]) "any?: array")
+(assert-false (any? even? @[1 3 5]) "any?: array none")
+(assert-true (any? even? [1 2 3]) "any?: tuple")
+(assert-false (any? even? [1 3 5]) "any?: tuple none")
+
+## ── find ────────────────────────────────────────────────────────────
+(assert-eq (find even? (list 1 3 4 5)) 4 "find: first even in list")
+(assert-eq (find even? (list 1 3 5)) nil "find: not found returns nil")
+(assert-eq (find even? ()) nil "find: empty returns nil")
+(assert-eq (find even? @[1 3 4 5]) 4 "find: array")
+(assert-eq (find even? [1 3 4 5]) 4 "find: tuple")
+
+## ── find-index ──────────────────────────────────────────────────────
+(assert-eq (find-index even? (list 1 3 4 5)) 2 "find-index: list")
+(assert-eq (find-index even? (list 1 3 5)) nil "find-index: not found")
+(assert-eq (find-index even? ()) nil "find-index: empty")
+(assert-eq (find-index even? @[1 3 4 5]) 2 "find-index: array")
+(assert-eq (find-index even? [1 3 4 5]) 2 "find-index: tuple")
+
+## ── count ───────────────────────────────────────────────────────────
+(assert-eq (count even? (list 1 2 3 4 5 6)) 3 "count: list")
+(assert-eq (count even? ()) 0 "count: empty")
+(assert-eq (count even? @[1 2 3 4 5 6]) 3 "count: array")
+(assert-eq (count even? [1 2 3 4 5 6]) 3 "count: tuple")
+
+## ── nth ─────────────────────────────────────────────────────────────
+(assert-eq (nth 0 (list 10 20 30)) 10 "nth: first of list")
+(assert-eq (nth 2 (list 10 20 30)) 30 "nth: last of list")
+(assert-eq (nth 1 @[10 20 30]) 20 "nth: array")
+(assert-eq (nth 1 [10 20 30]) 20 "nth: tuple")

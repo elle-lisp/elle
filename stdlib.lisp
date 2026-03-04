@@ -42,6 +42,122 @@
 (def reduce fold)
 (def keep filter)
 
+## ── Functional combinators ──────────────────────────────────────────
+
+(def identity (fn (x) x))
+
+(def complement (fn (f)
+  (fn (& args) (not (f ;args)))))
+
+(def constantly (fn (x)
+  (fn (& _) x)))
+
+(def compose (fn (& fns)
+  (fold (fn (composed f)
+          (fn (& args) (composed (f ;args))))
+        identity
+        fns)))
+
+(def comp compose)
+
+(def partial (fn (f & bound)
+  (fn (& args) (f ;bound ;args))))
+
+(def juxt (fn (& fns)
+  (fn (& args)
+    (map (fn (f) (f ;args)) fns))))
+
+## ── Collection search & predicates ──────────────────────────────────
+
+(def all? (fn (pred coll)
+  (cond
+    ((or (pair? coll) (empty? coll))
+     (if (empty? coll)
+       true
+       (if (pred (first coll))
+         (all? pred (rest coll))
+         false)))
+    ((or (array? coll) (tuple? coll))
+     (letrec ((loop (fn (i)
+                      (if (>= i (length coll))
+                        true
+                        (if (pred (get coll i))
+                          (loop (+ i 1))
+                          false)))))
+       (loop 0)))
+    (true (error [:type-error "all?: not a sequence"])))))
+
+(def any? (fn (pred coll)
+  (cond
+    ((or (pair? coll) (empty? coll))
+     (if (empty? coll)
+       false
+       (if (pred (first coll))
+         true
+         (any? pred (rest coll)))))
+    ((or (array? coll) (tuple? coll))
+     (letrec ((loop (fn (i)
+                      (if (>= i (length coll))
+                        false
+                        (if (pred (get coll i))
+                          true
+                          (loop (+ i 1)))))))
+       (loop 0)))
+    (true (error [:type-error "any?: not a sequence"])))))
+
+(def find (fn (pred coll)
+  (cond
+    ((or (pair? coll) (empty? coll))
+     (if (empty? coll)
+       nil
+       (if (pred (first coll))
+         (first coll)
+         (find pred (rest coll)))))
+    ((or (array? coll) (tuple? coll))
+     (letrec ((loop (fn (i)
+                      (if (>= i (length coll))
+                        nil
+                        (if (pred (get coll i))
+                          (get coll i)
+                          (loop (+ i 1)))))))
+       (loop 0)))
+    (true (error [:type-error "find: not a sequence"])))))
+
+(def find-index (fn (pred coll)
+  (cond
+    ((or (pair? coll) (empty? coll))
+     (letrec ((go (fn (i l)
+                    (if (empty? l)
+                      nil
+                      (if (pred (first l))
+                        i
+                        (go (+ i 1) (rest l)))))))
+       (go 0 coll)))
+    ((or (array? coll) (tuple? coll))
+     (letrec ((loop (fn (i)
+                      (if (>= i (length coll))
+                        nil
+                        (if (pred (get coll i))
+                          i
+                          (loop (+ i 1)))))))
+       (loop 0)))
+    (true (error [:type-error "find-index: not a sequence"])))))
+
+(def count (fn (pred coll)
+  (cond
+    ((or (pair? coll) (empty? coll))
+     (fold (fn (n x) (if (pred x) (+ n 1) n)) 0 coll))
+    ((or (array? coll) (tuple? coll))
+     (letrec ((loop (fn (i n)
+                      (if (>= i (length coll))
+                        n
+                        (loop (+ i 1) (if (pred (get coll i)) (+ n 1) n))))))
+       (loop 0 0)))
+    (true (error [:type-error "count: not a sequence"])))))
+
+(def nth (fn (n coll)
+  (get coll n)))
+
 ## ── Time utilities ──────────────────────────────────────────────────
 
 (def time/stopwatch (fn ()
