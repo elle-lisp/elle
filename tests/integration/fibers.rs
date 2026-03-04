@@ -665,3 +665,80 @@ fn test_fiber_zero_param_closure_still_works() {
     assert!(result.is_ok(), "Expected ok, got: {:?}", result);
     assert_eq!(result.unwrap(), Value::int(42));
 }
+
+// ── Issue #415: letrec binding reads as nil after fiber yield/resume ──
+
+#[test]
+fn test_letrec_binding_survives_fiber_yield_resume() {
+    // letrec-bound recursive function should remain accessible across
+    // multiple fiber yield/resume cycles.
+    let result = eval_source(
+        r#"
+        (let* ((f (fiber/new (fn ()
+                        (letrec ((go (fn (n)
+                                    (fiber/signal 2 n)
+                                    (go (+ n 1)))))
+                          (go 0)))
+                    2)))
+            (list (fiber/resume f) (fiber/resume f) (fiber/resume f)))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    // Should yield 0, 1, 2 across three resumes
+    let list = result.unwrap();
+    let first = list.as_cons().expect("expected cons for first element");
+    assert_eq!(first.first, Value::int(0));
+    let second = first
+        .rest
+        .as_cons()
+        .expect("expected cons for second element");
+    assert_eq!(second.first, Value::int(1));
+    let third = second
+        .rest
+        .as_cons()
+        .expect("expected cons for third element");
+    assert_eq!(third.first, Value::int(2));
+}
+
+#[test]
+fn test_tail_call_then_signal_preserves_state() {
+    // A non-letrec variant: tail call into a helper that signals.
+    // Verifies that the tail-called function's env is saved, not the caller's.
+    let result = eval_source(
+        r#"
+        (defn helper (n)
+          (fiber/signal 2 n)
+          (helper (+ n 10)))
+        (let* ((f (fiber/new (fn () (helper 1)) 2)))
+          (list (fiber/resume f) (fiber/resume f) (fiber/resume f)))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    let list = result.unwrap();
+    let first = list.as_cons().expect("first");
+    assert_eq!(first.first, Value::int(1));
+    let second = first.rest.as_cons().expect("second");
+    assert_eq!(second.first, Value::int(11));
+    let third = second.rest.as_cons().expect("third");
+    assert_eq!(third.first, Value::int(21));
+}
+
+#[test]
+fn test_multiple_tail_calls_before_signal() {
+    // Chain of tail calls before signaling: a -> b -> signal.
+    // Ensures the deepest tail-called function's context is saved.
+    let result = eval_source(
+        r#"
+        (defn signaler (n) (fiber/signal 2 n) (signaler (+ n 1)))
+        (defn bouncer (n) (signaler n))
+        (let* ((f (fiber/new (fn () (bouncer 100)) 2)))
+          (list (fiber/resume f) (fiber/resume f)))
+        "#,
+    );
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    let list = result.unwrap();
+    let first = list.as_cons().expect("first");
+    assert_eq!(first.first, Value::int(100));
+    let second = first.rest.as_cons().expect("second");
+    assert_eq!(second.first, Value::int(101));
+}

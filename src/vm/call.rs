@@ -164,7 +164,7 @@ impl VM {
 
             // Execute the closure, saving/restoring the caller's stack.
             // Essential for fiber/signal propagation and yield-through-nested-calls.
-            let (bits, _ip) = self.execute_bytecode_saving_stack(
+            let result = self.execute_bytecode_saving_stack(
                 &closure.bytecode,
                 &closure.constants,
                 &new_env_rc,
@@ -172,6 +172,7 @@ impl VM {
 
             self.fiber.call_depth -= 1;
 
+            let bits = result.bits;
             match bits {
                 SIG_OK => {
                     let (_, value) = self.fiber.signal.take().unwrap();

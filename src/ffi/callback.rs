@@ -136,13 +136,12 @@ unsafe extern "C" fn trampoline_callback(
     let new_env_rc = Rc::new(new_env);
 
     vm.fiber.call_depth += 1;
-    let (bits, _ip) =
-        vm.execute_bytecode_saving_stack(&closure.bytecode, &closure.constants, &new_env_rc);
+    let exec = vm.execute_bytecode_saving_stack(&closure.bytecode, &closure.constants, &new_env_rc);
     vm.fiber.call_depth -= 1;
 
     // 4. Handle result
     use crate::value::fiber::{SIG_ERROR, SIG_OK};
-    match bits {
+    match exec.bits {
         SIG_OK => {
             let (_, value) = vm.fiber.signal.take().unwrap_or((SIG_OK, Value::NIL));
             write_return_value(result, &value, &sig.ret);
@@ -156,7 +155,7 @@ unsafe extern "C" fn trampoline_callback(
             // Yield or other signal inside a callback is not supported.
             set_callback_error(crate::value::error_val(
                 "ffi-error",
-                format!("callback: unexpected signal {} from closure", bits),
+                format!("callback: unexpected signal {} from closure", exec.bits),
             ));
             zero_result(result, &sig.ret);
         }

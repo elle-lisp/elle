@@ -312,24 +312,28 @@ impl VM {
             }
         };
 
-        let (bits, ip) =
+        let result =
             self.execute_bytecode_saving_stack(&closure.bytecode, &closure.constants, &env_rc);
 
         // If the fiber signaled (not normal completion), save context for resumption.
         // Only save if the yield instruction didn't already set up suspended frames.
         // SIG_HALT is non-resumable — no suspended frame needed.
-        if bits != SIG_OK && bits != SIG_HALT && self.fiber.suspended.is_none() {
+        //
+        // Use the active bytecode/constants/env from ExecResult, not the
+        // original closure fields — a tail call may have switched to a
+        // different function's bytecode before the signal occurred.
+        if result.bits != SIG_OK && result.bits != SIG_HALT && self.fiber.suspended.is_none() {
             self.fiber.suspended = Some(vec![SuspendedFrame {
-                bytecode: closure.bytecode.clone(),
-                constants: closure.constants.clone(),
-                env: env_rc,
-                ip,
+                bytecode: result.bytecode,
+                constants: result.constants,
+                env: result.env,
+                ip: result.ip,
                 stack: vec![],
                 active_allocator: crate::value::fiber_heap::save_active_allocator(),
             }]);
         }
 
-        bits
+        result.bits
     }
 
     /// Resume a Suspended fiber — continue from suspended frames.

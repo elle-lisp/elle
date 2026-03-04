@@ -5,18 +5,34 @@ use std::rc::Rc;
 
 use super::core::VM;
 
+/// Result of `execute_bytecode_saving_stack`.
+///
+/// Contains the signal, IP, and the active bytecode/constants/env at exit.
+/// When a tail call occurs before a signal, the active context differs from
+/// the original closure — callers that create `SuspendedFrame`s must use
+/// these fields, not the original closure's bytecode/constants.
+pub struct ExecResult {
+    pub bits: SignalBits,
+    pub ip: usize,
+    pub bytecode: Rc<Vec<u8>>,
+    pub constants: Rc<Vec<Value>>,
+    pub env: Rc<Vec<Value>>,
+}
+
 impl VM {
     /// Execute bytecode starting from a specific instruction pointer.
     /// Used for resuming fibers from where they suspended.
     ///
-    /// Returns `(SignalBits, ip)` — the signal and the IP at exit.
+    /// Returns `ExecResult` containing the signal, IP, and the active
+    /// bytecode/constants/env at exit. The active context may differ from
+    /// the input if a tail call occurred before the signal.
     pub fn execute_bytecode_from_ip(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
-    ) -> (SignalBits, usize) {
+    ) -> ExecResult {
         let mut current_bytecode = bytecode.clone();
         let mut current_constants = constants.clone();
         let mut current_env = closure_env.clone();
@@ -31,7 +47,13 @@ impl VM {
             );
 
             if bits != SIG_OK {
-                break (bits, ip);
+                break ExecResult {
+                    bits,
+                    ip,
+                    bytecode: current_bytecode,
+                    constants: current_constants,
+                    env: current_env,
+                };
             }
 
             if let Some((tail_bytecode, tail_constants, tail_env)) = self.pending_tail_call.take() {
@@ -40,7 +62,13 @@ impl VM {
                 current_env = tail_env;
                 current_ip = 0;
             } else {
-                break (bits, ip);
+                break ExecResult {
+                    bits,
+                    ip,
+                    bytecode: current_bytecode,
+                    constants: current_constants,
+                    env: current_env,
+                };
             }
         }
     }
@@ -51,13 +79,17 @@ impl VM {
     /// Saves/restores the caller's stack and the active allocator pointer
     /// around execution. Handles pending tail calls in a loop.
     ///
-    /// Returns `(SignalBits, ip)` — the signal and the IP at exit.
+    /// Returns `ExecResult` containing the signal, IP, and the active
+    /// bytecode/constants/env at exit. The active context may differ from
+    /// the input if a tail call occurred before the signal — callers that
+    /// create `SuspendedFrame`s must use the returned context, not the
+    /// original closure fields.
     pub fn execute_bytecode_saving_stack(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
-    ) -> (SignalBits, usize) {
+    ) -> ExecResult {
         // Save the caller's stack and active allocator (Package 4 plumbing;
         // the allocator pointer is write-only until Package 5 activates it).
         let saved_stack = std::mem::take(&mut self.fiber.stack);
@@ -76,7 +108,13 @@ impl VM {
             );
 
             if bits != SIG_OK {
-                break (bits, ip);
+                break ExecResult {
+                    bits,
+                    ip,
+                    bytecode: current_bytecode,
+                    constants: current_constants,
+                    env: current_env,
+                };
             }
 
             if let Some((tail_bytecode, tail_constants, tail_env)) = self.pending_tail_call.take() {
@@ -84,7 +122,13 @@ impl VM {
                 current_constants = tail_constants;
                 current_env = tail_env;
             } else {
-                break (bits, ip);
+                break ExecResult {
+                    bits,
+                    ip,
+                    bytecode: current_bytecode,
+                    constants: current_constants,
+                    env: current_env,
+                };
             }
         };
 

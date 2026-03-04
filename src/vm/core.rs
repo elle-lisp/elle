@@ -340,14 +340,14 @@ impl VM {
             // Push the value from the inner frame (or resume value for innermost)
             self.fiber.stack.push(current_value);
 
-            let (bits, ip) = self.execute_bytecode_from_ip(
+            let exec = self.execute_bytecode_from_ip(
                 &frame.bytecode,
                 &frame.constants,
                 &frame.env,
                 frame.ip,
             );
 
-            match bits {
+            match exec.bits {
                 SIG_OK => {
                     let (_, v) = self.fiber.signal.take().unwrap();
                     current_value = v;
@@ -357,19 +357,23 @@ impl VM {
                     // Save context for potential future resume if not already
                     // set (yield instruction sets it; fiber/signal does not).
                     // SIG_HALT is non-resumable — no suspended frame needed.
-                    if bits != SIG_HALT && self.fiber.suspended.is_none() {
+                    //
+                    // Use the active bytecode/constants/env from ExecResult,
+                    // not the original frame — a tail call may have switched
+                    // to a different function's bytecode before the signal.
+                    if exec.bits != SIG_HALT && self.fiber.suspended.is_none() {
                         self.fiber.suspended = Some(vec![SuspendedFrame {
-                            bytecode: frame.bytecode.clone(),
-                            constants: frame.constants.clone(),
-                            env: frame.env.clone(),
-                            ip,
+                            bytecode: exec.bytecode,
+                            constants: exec.constants,
+                            env: exec.env,
+                            ip: exec.ip,
                             stack: vec![],
                             active_allocator: crate::value::fiber_heap::save_active_allocator(),
                         }]);
                     }
 
                     // For yield signals, merge remaining outer frames
-                    if bits == SIG_YIELD && i + 1 < frames.len() {
+                    if exec.bits == SIG_YIELD && i + 1 < frames.len() {
                         if let Some(ref mut new_frames) = self.fiber.suspended {
                             for f in frames[i + 1..].iter() {
                                 new_frames.push(f.clone());
@@ -378,7 +382,7 @@ impl VM {
                     }
 
                     self.fiber.stack = saved_stack;
-                    return bits;
+                    return exec.bits;
                 }
             }
         }
