@@ -70,13 +70,23 @@ pub fn prim_lt(args: &[Value]) -> (SignalBits, Value) {
         _ => match (args[0].as_float(), args[1].as_float()) {
             (Some(a), Some(b)) => a < b,
             _ => {
+                if let Some(ord) = args[0].compare_str(&args[1]) {
+                    return (SIG_OK, Value::bool(ord.is_lt()));
+                }
+                if let Some(ord) = args[0].compare_keyword(&args[1]) {
+                    return (SIG_OK, Value::bool(ord.is_lt()));
+                }
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("<: expected number, got {}", args[0].type_name()),
+                        format!(
+                            "<: expected number, string, or keyword, got {} and {}",
+                            args[0].type_name(),
+                            args[1].type_name()
+                        ),
                     ),
-                )
+                );
             }
         },
     };
@@ -100,13 +110,23 @@ pub fn prim_gt(args: &[Value]) -> (SignalBits, Value) {
         _ => match (args[0].as_float(), args[1].as_float()) {
             (Some(a), Some(b)) => a > b,
             _ => {
+                if let Some(ord) = args[0].compare_str(&args[1]) {
+                    return (SIG_OK, Value::bool(ord.is_gt()));
+                }
+                if let Some(ord) = args[0].compare_keyword(&args[1]) {
+                    return (SIG_OK, Value::bool(ord.is_gt()));
+                }
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!(">: expected number, got {}", args[0].type_name()),
+                        format!(
+                            ">: expected number, string, or keyword, got {} and {}",
+                            args[0].type_name(),
+                            args[1].type_name()
+                        ),
                     ),
-                )
+                );
             }
         },
     };
@@ -130,13 +150,23 @@ pub fn prim_le(args: &[Value]) -> (SignalBits, Value) {
         _ => match (args[0].as_float(), args[1].as_float()) {
             (Some(a), Some(b)) => a <= b,
             _ => {
+                if let Some(ord) = args[0].compare_str(&args[1]) {
+                    return (SIG_OK, Value::bool(ord.is_le()));
+                }
+                if let Some(ord) = args[0].compare_keyword(&args[1]) {
+                    return (SIG_OK, Value::bool(ord.is_le()));
+                }
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("<=: expected number, got {}", args[0].type_name()),
+                        format!(
+                            "<=: expected number, string, or keyword, got {} and {}",
+                            args[0].type_name(),
+                            args[1].type_name()
+                        ),
                     ),
-                )
+                );
             }
         },
     };
@@ -160,13 +190,23 @@ pub fn prim_ge(args: &[Value]) -> (SignalBits, Value) {
         _ => match (args[0].as_float(), args[1].as_float()) {
             (Some(a), Some(b)) => a >= b,
             _ => {
+                if let Some(ord) = args[0].compare_str(&args[1]) {
+                    return (SIG_OK, Value::bool(ord.is_ge()));
+                }
+                if let Some(ord) = args[0].compare_keyword(&args[1]) {
+                    return (SIG_OK, Value::bool(ord.is_ge()));
+                }
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!(">=: expected number, got {}", args[0].type_name()),
+                        format!(
+                            ">=: expected number, string, or keyword, got {} and {}",
+                            args[0].type_name(),
+                            args[1].type_name()
+                        ),
                     ),
-                )
+                );
             }
         },
     };
@@ -202,10 +242,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_lt,
         effect: Effect::none(),
         arity: Arity::Exact(2),
-        doc: "Test if first number is less than second",
+        doc: "Test if first value is less than second. Works on numbers, strings, and keywords (lexicographic). Both operands must be the same type.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(< 1 2)",
+        example: "(< 1 2) #=> true\n(< \"a\" \"b\") #=> true\n(< :apple :banana) #=> true",
         aliases: &[],
     },
     PrimitiveDef {
@@ -213,10 +253,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_gt,
         effect: Effect::none(),
         arity: Arity::Exact(2),
-        doc: "Test if first number is greater than second",
+        doc: "Test if first value is greater than second. Works on numbers, strings, and keywords (lexicographic). Both operands must be the same type.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(> 2 1)",
+        example: "(> 2 1) #=> true\n(> \"b\" \"a\") #=> true",
         aliases: &[],
     },
     PrimitiveDef {
@@ -224,10 +264,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_le,
         effect: Effect::none(),
         arity: Arity::Exact(2),
-        doc: "Test if first number is less than or equal to second",
+        doc: "Test if first value is less than or equal to second. Works on numbers, strings, and keywords (lexicographic). Both operands must be the same type.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(<= 1 2)",
+        example: "(<= 1 2) #=> true\n(<= \"a\" \"a\") #=> true",
         aliases: &[],
     },
     PrimitiveDef {
@@ -235,10 +275,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_ge,
         effect: Effect::none(),
         arity: Arity::Exact(2),
-        doc: "Test if first number is greater than or equal to second",
+        doc: "Test if first value is greater than or equal to second. Works on numbers, strings, and keywords (lexicographic). Both operands must be the same type.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(>= 2 1)",
+        example: "(>= 2 1) #=> true\n(>= \"a\" \"a\") #=> true",
         aliases: &[],
     },
 ];

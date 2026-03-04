@@ -41,12 +41,20 @@ pub fn handle_lt(vm: &mut VM) {
                 }
             }
             _ => {
+                if let Some(ord) = a.compare_str(&b) {
+                    vm.fiber.stack.push(Value::bool(ord.is_lt()));
+                    return;
+                }
+                if let Some(ord) = a.compare_keyword(&b) {
+                    vm.fiber.stack.push(Value::bool(ord.is_lt()));
+                    return;
+                }
                 vm.fiber.signal = Some((
                     SIG_ERROR,
                     error_val(
                         "type-error",
                         format!(
-                            "<: expected numbers, got {} and {}",
+                            "<: expected number, string, or keyword, got {} and {}",
                             a.type_name(),
                             b.type_name()
                         ),
@@ -80,12 +88,20 @@ pub fn handle_gt(vm: &mut VM) {
                 }
             }
             _ => {
+                if let Some(ord) = a.compare_str(&b) {
+                    vm.fiber.stack.push(Value::bool(ord.is_gt()));
+                    return;
+                }
+                if let Some(ord) = a.compare_keyword(&b) {
+                    vm.fiber.stack.push(Value::bool(ord.is_gt()));
+                    return;
+                }
                 vm.fiber.signal = Some((
                     SIG_ERROR,
                     error_val(
                         "type-error",
                         format!(
-                            ">: expected numbers, got {} and {}",
+                            ">: expected number, string, or keyword, got {} and {}",
                             a.type_name(),
                             b.type_name()
                         ),
@@ -119,12 +135,20 @@ pub fn handle_le(vm: &mut VM) {
                 }
             }
             _ => {
+                if let Some(ord) = a.compare_str(&b) {
+                    vm.fiber.stack.push(Value::bool(ord.is_le()));
+                    return;
+                }
+                if let Some(ord) = a.compare_keyword(&b) {
+                    vm.fiber.stack.push(Value::bool(ord.is_le()));
+                    return;
+                }
                 vm.fiber.signal = Some((
                     SIG_ERROR,
                     error_val(
                         "type-error",
                         format!(
-                            "<=: expected numbers, got {} and {}",
+                            "<=: expected number, string, or keyword, got {} and {}",
                             a.type_name(),
                             b.type_name()
                         ),
@@ -158,12 +182,20 @@ pub fn handle_ge(vm: &mut VM) {
                 }
             }
             _ => {
+                if let Some(ord) = a.compare_str(&b) {
+                    vm.fiber.stack.push(Value::bool(ord.is_ge()));
+                    return;
+                }
+                if let Some(ord) = a.compare_keyword(&b) {
+                    vm.fiber.stack.push(Value::bool(ord.is_ge()));
+                    return;
+                }
                 vm.fiber.signal = Some((
                     SIG_ERROR,
                     error_val(
                         "type-error",
                         format!(
-                            ">=: expected numbers, got {} and {}",
+                            ">=: expected number, string, or keyword, got {} and {}",
                             a.type_name(),
                             b.type_name()
                         ),

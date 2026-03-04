@@ -136,7 +136,7 @@ variants directly.
 | `mod.rs` | ~40 | Re-exports |
 | `repr/mod.rs` | ~280 | NaN-boxed Value type, tag encoding |
 | `repr/constructors.rs` | ~250 | Value construction methods |
-| `repr/accessors.rs` | ~420 | Value field access and type checking |
+| `repr/accessors.rs` | ~670 | Value field access and type checking |
 | `repr/traits.rs` | ~150 | Display, Debug, Clone implementations |
 | `repr/tests.rs` | ~100 | NaN-boxing tests |
 | `types.rs` | ~150 | Arity, SymbolId, NativeFn, etc. |
