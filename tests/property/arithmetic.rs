@@ -3,7 +3,6 @@
 // Verifies that int/float promotion rules work correctly.
 
 use crate::common::eval_reuse_bare as eval_source;
-use elle::Value;
 use proptest::prelude::*;
 
 proptest! {
