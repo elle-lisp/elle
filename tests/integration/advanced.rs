@@ -925,3 +925,200 @@ fn test_non_exhaustive_guard_on_last_arm() {
         "error should mention non-exhaustive"
     );
 }
+
+// === Decision tree specific tests ===
+
+#[test]
+fn test_decision_tree_shared_prefix() {
+    // Two arms share a cons prefix — decision tree should check cons once
+    let result = eval_source(
+        "(match (list 1 2 3)
+           ((1 2 3) :exact)
+           ((1 2 _) :prefix)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("exact"));
+}
+
+#[test]
+fn test_decision_tree_shared_prefix_second_arm() {
+    let result = eval_source(
+        "(match (list 1 2 4)
+           ((1 2 3) :exact)
+           ((1 2 _) :prefix)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("prefix"));
+}
+
+#[test]
+fn test_decision_tree_multiple_constructors() {
+    // Different constructors in the same column
+    let result = eval_source(
+        "(match (list 1 2)
+           (nil :nil)
+           ((h . t) :pair)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("pair"));
+}
+
+#[test]
+fn test_decision_tree_literal_discrimination() {
+    // Multiple literal arms — decision tree switches on value
+    let result = eval_source(
+        "(match :c
+           (:a 1)
+           (:b 2)
+           (:c 3)
+           (:d 4)
+           (_ 0))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(3));
+}
+
+#[test]
+fn test_decision_tree_nested_tuple_match() {
+    let result = eval_source(
+        "(match [1 [2 3]]
+           ([1 [2 3]] :exact)
+           ([1 [2 _]] :partial)
+           ([_ _] :any-pair)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("exact"));
+}
+
+#[test]
+fn test_decision_tree_guard_fallthrough_to_next_constructor() {
+    // Guard fails, should try next arm even with different constructor
+    let result = eval_source(
+        "(match 5
+           (5 when false :guarded)
+           (5 :unguarded)
+           (_ :default))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("unguarded"));
+}
+
+#[test]
+fn test_decision_tree_or_pattern_with_shared_body() {
+    let result = eval_source(
+        "(match :b
+           ((:a | :b | :c) :first-group)
+           ((:d | :e | :f) :second-group)
+           (_ :other))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("first-group"));
+}
+
+#[test]
+fn test_decision_tree_struct_key_discrimination() {
+    // Two struct patterns with overlapping keys
+    let result = eval_source(
+        "(match {:type :circle :radius 5}
+           ({:type :circle :radius r} r)
+           ({:type :square :side s} s)
+           (_ 0))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(5));
+}
+
+#[test]
+fn test_decision_tree_struct_key_discrimination_second() {
+    let result = eval_source(
+        "(match {:type :square :side 7}
+           ({:type :circle :radius r} r)
+           ({:type :square :side s} s)
+           (_ 0))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(7));
+}
+
+#[test]
+fn test_decision_tree_deeply_nested() {
+    let result = eval_source(
+        "(match (list 1 (list 2 (list 3)))
+           ((1 (2 (3))) :deep)
+           ((1 (2 _)) :medium)
+           ((1 _) :shallow)
+           (_ :none))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("deep"));
+}
+
+#[test]
+fn test_decision_tree_match_in_loop() {
+    // Match inside a loop — exercises repeated decision tree execution
+    let result = eval_source(
+        "(def result (list))
+         (each i (list 1 2 3)
+           (def result (cons (match i
+                               (1 :one)
+                               (2 :two)
+                               (3 :three)
+                               (_ :other))
+                             result)))
+         (reverse result)",
+    )
+    .unwrap();
+    assert_eq!(result, eval_source("(list :one :two :three)").unwrap());
+}
+
+#[test]
+fn test_decision_tree_boolean_exhaustive() {
+    // Boolean exhaustiveness — no wildcard needed
+    let result = eval_source(
+        "(match false
+           (true :yes)
+           (false :no))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("no"));
+}
+
+#[test]
+fn test_decision_tree_or_boolean_exhaustive() {
+    let result = eval_source(
+        "(match true
+           ((true | false) :bool))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::keyword("bool"));
+}
+
+#[test]
+fn test_or_pattern_decision_tree_shared() {
+    assert_eq!(
+        eval_source("(match (cons 1 :x) ((1 . t) t) ((2 . t) t) (((3 | 4) . t) t) (_ :fail))",)
+            .unwrap(),
+        Value::keyword("x")
+    );
+}
+
+#[test]
+fn test_or_pattern_nested_decision_tree() {
+    assert_eq!(
+        eval_source("(match [3 :y] ([(1 | 2 | 3) v] v) (_ :fail))").unwrap(),
+        Value::keyword("y")
+    );
+}
+
+#[test]
+fn test_or_pattern_guard_decision_tree() {
+    assert_eq!(
+        eval_source("(match 5 ((1 | 2 | 3) when true :small) ((4 | 5 | 6) :medium) (_ :big))",)
+            .unwrap(),
+        Value::keyword("medium")
+    );
+}
