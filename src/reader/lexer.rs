@@ -213,6 +213,7 @@ impl<'a> Lexer<'a> {
                     token: Token::LeftParen,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some(')') => {
@@ -221,6 +222,7 @@ impl<'a> Lexer<'a> {
                     token: Token::RightParen,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some('[') => {
@@ -229,6 +231,7 @@ impl<'a> Lexer<'a> {
                     token: Token::LeftBracket,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some(']') => {
@@ -237,6 +240,7 @@ impl<'a> Lexer<'a> {
                     token: Token::RightBracket,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some('{') => {
@@ -245,6 +249,7 @@ impl<'a> Lexer<'a> {
                     token: Token::LeftBrace,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some('}') => {
@@ -253,6 +258,7 @@ impl<'a> Lexer<'a> {
                     token: Token::RightBrace,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some('\'') => {
@@ -261,6 +267,7 @@ impl<'a> Lexer<'a> {
                     token: Token::Quote,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some('`') => {
@@ -269,6 +276,7 @@ impl<'a> Lexer<'a> {
                     token: Token::Quasiquote,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some(',') => {
@@ -279,12 +287,14 @@ impl<'a> Lexer<'a> {
                         token: Token::UnquoteSplicing,
                         loc,
                         len: self.pos - start_pos,
+                        byte_offset: start_pos,
                     }))
                 } else {
                     Ok(Some(TokenWithLoc {
                         token: Token::Unquote,
                         loc,
                         len: self.pos - start_pos,
+                        byte_offset: start_pos,
                     }))
                 }
             }
@@ -294,6 +304,7 @@ impl<'a> Lexer<'a> {
                     token: Token::Splice,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some('@') => {
@@ -302,6 +313,7 @@ impl<'a> Lexer<'a> {
                     token: Token::ListSugar,
                     loc,
                     len: self.pos - start_pos,
+                    byte_offset: start_pos,
                 }))
             }
             Some(':') => {
@@ -316,13 +328,19 @@ impl<'a> Lexer<'a> {
                         token: Token::Keyword(keyword),
                         loc,
                         len: self.pos - start_pos,
+                        byte_offset: start_pos,
                     }))
                 }
             }
             Some('"') => {
                 let token = Token::String(self.read_string()?);
                 let len = self.pos - start_pos;
-                Ok(Some(TokenWithLoc { token, loc, len }))
+                Ok(Some(TokenWithLoc {
+                    token,
+                    loc,
+                    len,
+                    byte_offset: start_pos,
+                }))
             }
             Some(c) if c.is_ascii_digit() || c == '-' || c == '+' => {
                 // Check if it's a number or symbol
@@ -334,11 +352,17 @@ impl<'a> Lexer<'a> {
                             token: Token::Symbol(sym),
                             loc,
                             len: self.pos - start_pos,
+                            byte_offset: start_pos,
                         }))
                     } else {
                         let token = self.read_number()?;
                         let len = self.pos - start_pos;
-                        Ok(Some(TokenWithLoc { token, loc, len }))
+                        Ok(Some(TokenWithLoc {
+                            token,
+                            loc,
+                            len,
+                            byte_offset: start_pos,
+                        }))
                     }
                 } else if c == '-' || c == '+' {
                     let (start, end) = self.read_symbol();
@@ -347,11 +371,17 @@ impl<'a> Lexer<'a> {
                         token: Token::Symbol(sym),
                         loc,
                         len: self.pos - start_pos,
+                        byte_offset: start_pos,
                     }))
                 } else {
                     let token = self.read_number()?;
                     let len = self.pos - start_pos;
-                    Ok(Some(TokenWithLoc { token, loc, len }))
+                    Ok(Some(TokenWithLoc {
+                        token,
+                        loc,
+                        len,
+                        byte_offset: start_pos,
+                    }))
                 }
             }
 
@@ -364,24 +394,28 @@ impl<'a> Lexer<'a> {
                         token: Token::Nil,
                         loc,
                         len,
+                        byte_offset: start_pos,
                     }))
                 } else if sym == "true" {
                     Ok(Some(TokenWithLoc {
                         token: Token::Bool(true),
                         loc,
                         len,
+                        byte_offset: start_pos,
                     }))
                 } else if sym == "false" {
                     Ok(Some(TokenWithLoc {
                         token: Token::Bool(false),
                         loc,
                         len,
+                        byte_offset: start_pos,
                     }))
                 } else {
                     Ok(Some(TokenWithLoc {
                         token: Token::Symbol(sym),
                         loc,
                         len,
+                        byte_offset: start_pos,
                     }))
                 }
             }
