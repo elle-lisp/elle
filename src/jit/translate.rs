@@ -54,6 +54,8 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) self_sym: Option<SymbolId>,
     /// Counter for yield point indices
     pub(crate) yield_point_index: u32,
+    /// Counter for call site indices (for yield-through-call metadata)
+    pub(crate) call_site_index: u32,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -76,6 +78,7 @@ impl<'a> FunctionTranslator<'a> {
             global_load_map: HashMap::new(),
             self_sym: None,
             yield_point_index: 0,
+            call_site_index: 0,
         }
     }
 
@@ -439,6 +442,11 @@ impl<'a> FunctionTranslator<'a> {
                     )?;
                     builder.def_var(var(dst.0), resolved);
                     self.emit_exception_check_after_call(builder)?;
+                    if self.lir.effect.may_suspend() {
+                        let idx = self.call_site_index;
+                        self.call_site_index += 1;
+                        self.emit_yield_check_after_call(builder, idx)?;
+                    }
                 } else if args.is_empty() {
                     // No args - pass null pointer
                     let null_ptr = builder.ins().iconst(I64, 0);
@@ -447,6 +455,11 @@ impl<'a> FunctionTranslator<'a> {
                     builder.def_var(var(dst.0), result);
                     // Check for exception after call - if set, bail out to interpreter
                     self.emit_exception_check_after_call(builder)?;
+                    if self.lir.effect.may_suspend() {
+                        let idx = self.call_site_index;
+                        self.call_site_index += 1;
+                        self.emit_yield_check_after_call(builder, idx)?;
+                    }
                 } else {
                     // Create stack slot for args
                     let slot =
@@ -466,6 +479,11 @@ impl<'a> FunctionTranslator<'a> {
                     builder.def_var(var(dst.0), result);
                     // Check for exception after call - if set, bail out to interpreter
                     self.emit_exception_check_after_call(builder)?;
+                    if self.lir.effect.may_suspend() {
+                        let idx = self.call_site_index;
+                        self.call_site_index += 1;
+                        self.emit_yield_check_after_call(builder, idx)?;
+                    }
                 }
             }
 
@@ -1027,6 +1045,87 @@ impl<'a> FunctionTranslator<'a> {
         builder.ins().return_(&[nil]);
 
         // Continue block: normal execution continues
+        builder.switch_to_block(cont_block);
+        builder.seal_block(cont_block);
+
+        Ok(())
+    }
+
+    /// Emit yield check after a call instruction for yielding functions.
+    ///
+    /// Must be called AFTER emit_exception_check_after_call (which handles
+    /// error/halt by returning NIL). If we reach this check, the signal
+    /// is either absent or SIG_YIELD.
+    ///
+    /// On yield: spill live registers, call elle_jit_yield_through_call
+    /// to build the caller's SuspendedFrame, return YIELD_SENTINEL.
+    pub(crate) fn emit_yield_check_after_call(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        call_site_idx: u32,
+    ) -> Result<(), JitError> {
+        let vm = self.vm_ptr.ok_or_else(|| {
+            JitError::InvalidLir("emit_yield_check without vm pointer".to_string())
+        })?;
+        let self_bits = self.self_bits.ok_or_else(|| {
+            JitError::InvalidLir("emit_yield_check without self_bits".to_string())
+        })?;
+
+        // Check if any signal is pending (error/halt already handled above,
+        // so if truthy here it must be SIG_YIELD)
+        let has_sig = self.call_helper_unary(builder, self.helpers.has_signal, vm)?;
+        let shifted = builder.ins().ushr_imm(has_sig, 48);
+        let falsy_tag = builder.ins().iconst(I64, 0x7FF9_i64);
+        let is_truthy = builder.ins().icmp(IntCC::NotEqual, shifted, falsy_tag);
+
+        let yield_block = builder.create_block();
+        let cont_block = builder.create_block();
+        builder
+            .ins()
+            .brif(is_truthy, yield_block, &[], cont_block, &[]);
+
+        // Yield block: spill registers, call yield_through_call, return sentinel
+        builder.switch_to_block(yield_block);
+        builder.seal_block(yield_block);
+
+        // Read call site metadata from LIR
+        let call_site = self.lir.call_sites.get(call_site_idx as usize);
+        let (resume_ip, stack_regs) = match call_site {
+            Some(cs) => (cs.resume_ip, cs.stack_regs.as_slice()),
+            None => (0, &[] as &[crate::lir::Reg]),
+        };
+
+        let num_spilled = stack_regs.len();
+        let spilled_ptr = if num_spilled > 0 {
+            let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                (num_spilled * 8) as u32,
+                0,
+            ));
+            for (i, reg) in stack_regs.iter().enumerate() {
+                let val = builder.use_var(var(reg.0));
+                builder.ins().stack_store(val, slot, (i * 8) as i32);
+            }
+            builder.ins().stack_addr(I64, slot, 0)
+        } else {
+            builder.ins().iconst(I64, 0)
+        };
+
+        let num_spilled_val = builder.ins().iconst(I64, num_spilled as i64);
+        let resume_ip_val = builder.ins().iconst(I64, resume_ip as i64);
+
+        // Call elle_jit_yield_through_call(spilled, num_spilled, resume_ip, vm, self_bits)
+        let func_ref = self
+            .module
+            .declare_func_in_func(self.helpers.jit_yield_through_call, builder.func);
+        let call = builder.ins().call(
+            func_ref,
+            &[spilled_ptr, num_spilled_val, resume_ip_val, vm, self_bits],
+        );
+        let result = builder.inst_results(call)[0];
+        builder.ins().return_(&[result]);
+
+        // Continue block
         builder.switch_to_block(cont_block);
         builder.seal_block(cont_block);
 

@@ -87,9 +87,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) call_depth_enter: FuncId,
     pub(crate) call_depth_exit: FuncId,
     pub(crate) jit_yield: FuncId,
-    #[allow(dead_code)] // Used in Chunk 4 (post-call yield detection)
     pub(crate) jit_yield_through_call: FuncId,
-    #[allow(dead_code)] // Used in Chunk 4 (post-call yield detection)
     pub(crate) has_signal: FuncId,
 }
 
