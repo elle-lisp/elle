@@ -64,10 +64,13 @@ impl VM {
         constants: &[Value],
         closure_env: Option<&Rc<Vec<Value>>>,
     ) -> Result<Value, String> {
+        self.error_loc = None;
+
         let empty_env = Rc::new(vec![]);
         let mut current_bytecode = Rc::new(bytecode.to_vec());
         let mut current_constants = Rc::new(constants.to_vec());
         let mut current_env = closure_env.cloned().unwrap_or(empty_env);
+        let mut current_location_map = Rc::new(self.location_map.clone());
 
         loop {
             let (bits, _ip) = self.execute_bytecode_inner_impl(
@@ -75,12 +78,14 @@ impl VM {
                 &current_constants,
                 &current_env,
                 0,
+                &current_location_map,
             );
 
-            if let Some((tail_bytecode, tail_constants, tail_env)) = self.pending_tail_call.take() {
-                current_bytecode = tail_bytecode;
-                current_constants = tail_constants;
-                current_env = tail_env;
+            if let Some(tail) = self.pending_tail_call.take() {
+                current_bytecode = tail.bytecode;
+                current_constants = tail.constants;
+                current_env = tail.env;
+                current_location_map = tail.location_map;
             } else {
                 return match bits {
                     SIG_OK | SIG_HALT => {
@@ -92,7 +97,7 @@ impl VM {
                         // Extract the error from fiber.signal
                         let (_, err_value) =
                             self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-                        Err(crate::value::format_error(err_value))
+                        Err(self.format_error_with_location(err_value))
                     }
                     _ => {
                         panic!("VM bug: Unexpected signal: {}", bits);

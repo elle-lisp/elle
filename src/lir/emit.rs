@@ -295,6 +295,7 @@ impl Emitter {
                     doc: func.doc,
                     vararg_kind: func.vararg_kind.clone(),
                     num_params: func.num_params,
+                    name: func.name.clone().map(|s| Rc::from(s.as_str())),
                 };
 
                 // Add closure template to constants

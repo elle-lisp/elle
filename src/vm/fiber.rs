@@ -312,8 +312,12 @@ impl VM {
             }
         };
 
-        let result =
-            self.execute_bytecode_saving_stack(&closure.bytecode, &closure.constants, &env_rc);
+        let result = self.execute_bytecode_saving_stack(
+            &closure.bytecode,
+            &closure.constants,
+            &env_rc,
+            &closure.location_map,
+        );
 
         // If the fiber signaled (not normal completion), save context for resumption.
         // Only save if the yield instruction didn't already set up suspended frames.
@@ -330,6 +334,7 @@ impl VM {
                 ip: result.ip,
                 stack: vec![],
                 active_allocator: crate::value::fiber_heap::save_active_allocator(),
+                location_map: result.location_map,
             }]);
         }
 

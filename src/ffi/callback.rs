@@ -136,7 +136,12 @@ unsafe extern "C" fn trampoline_callback(
     let new_env_rc = Rc::new(new_env);
 
     vm.fiber.call_depth += 1;
-    let exec = vm.execute_bytecode_saving_stack(&closure.bytecode, &closure.constants, &new_env_rc);
+    let exec = vm.execute_bytecode_saving_stack(
+        &closure.bytecode,
+        &closure.constants,
+        &new_env_rc,
+        &closure.location_map,
+    );
     vm.fiber.call_depth -= 1;
 
     // 4. Handle result
@@ -444,6 +449,7 @@ mod tests {
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params: arity,
+            name: None,
         })
     }
 
@@ -539,6 +545,7 @@ mod tests {
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params: 1,
+            name: None,
         });
         let args = vec![Value::int(42)];
         let env = build_callback_env(&closure, &args);

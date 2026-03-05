@@ -4,6 +4,7 @@
 //! instructions to their handlers.
 
 use crate::compiler::bytecode::Instruction;
+use crate::error::LocationMap;
 use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
 use std::rc::Rc;
 
@@ -26,16 +27,21 @@ impl VM {
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
+        location_map: &Rc<LocationMap>,
     ) -> (SignalBits, usize) {
         let mut ip = start_ip;
+        let mut instr_ip = start_ip;
 
         // Deref to slices for instruction handlers
         let bc: &[u8] = bytecode;
         let consts: &[Value] = constants;
 
         loop {
-            // If an error or halt signal is pending, propagate immediately.
+            // Check for pre-existing error signal (e.g., from previous Call)
             if let Some((bits @ (SIG_ERROR | SIG_HALT), _)) = self.fiber.signal {
+                if self.error_loc.is_none() {
+                    self.error_loc = location_map.get(&instr_ip).cloned();
+                }
                 return (bits, ip);
             }
 
@@ -43,6 +49,7 @@ impl VM {
                 panic!("VM bug: Unexpected end of bytecode");
             }
 
+            instr_ip = ip; // save instruction start before reading opcode
             let instr_byte = bc[ip];
             ip += 1;
 
@@ -104,8 +111,14 @@ impl VM {
 
                 // Call instructions
                 Instruction::Call => {
-                    if let Some(bits) = self.handle_call(bytecode, constants, closure_env, &mut ip)
-                    {
+                    if let Some(bits) = self.handle_call(
+                        bytecode,
+                        constants,
+                        closure_env,
+                        &mut ip,
+                        instr_ip,
+                        location_map,
+                    ) {
                         return (bits, ip);
                     }
                 }
@@ -300,7 +313,7 @@ impl VM {
 
                 // Yield — capture suspended frame and suspend
                 Instruction::Yield => {
-                    return self.handle_yield(bytecode, constants, closure_env, ip);
+                    return self.handle_yield(bytecode, constants, closure_env, ip, location_map);
                 }
 
                 // Runtime eval — compile and execute a datum
@@ -314,9 +327,14 @@ impl VM {
                     data::handle_array_push(self);
                 }
                 Instruction::CallArray => {
-                    if let Some(bits) =
-                        self.handle_call_array(bytecode, constants, closure_env, &mut ip)
-                    {
+                    if let Some(bits) = self.handle_call_array(
+                        bytecode,
+                        constants,
+                        closure_env,
+                        &mut ip,
+                        instr_ip,
+                        location_map,
+                    ) {
                         return (bits, ip);
                     }
                 }
@@ -336,8 +354,11 @@ impl VM {
                 }
             }
 
-            // If an error or halt signal was set by the instruction, propagate.
+            // Check for error signal set by this instruction's handler
             if let Some((bits @ (SIG_ERROR | SIG_HALT), _)) = self.fiber.signal {
+                if self.error_loc.is_none() {
+                    self.error_loc = location_map.get(&instr_ip).cloned();
+                }
                 return (bits, ip);
             }
         }
@@ -354,6 +375,7 @@ impl VM {
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
         ip: usize,
+        location_map: &Rc<LocationMap>,
     ) -> (SignalBits, usize) {
         let yielded_value = self
             .fiber
@@ -370,6 +392,7 @@ impl VM {
             ip,
             stack: saved_stack,
             active_allocator: crate::value::fiber_heap::save_active_allocator(),
+            location_map: location_map.clone(),
         };
 
         self.fiber.signal = Some((SIG_YIELD, yielded_value));

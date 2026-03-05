@@ -121,9 +121,10 @@ fn eval_inner(
     // Execute
     let bc_rc = Rc::new(bytecode.instructions);
     let consts_rc = Rc::new(bytecode.constants);
+    let location_map_rc = Rc::new(bytecode.location_map);
     let empty_env = Rc::new(vec![]);
 
-    let result = vm.execute_bytecode_saving_stack(&bc_rc, &consts_rc, &empty_env);
+    let result = vm.execute_bytecode_saving_stack(&bc_rc, &consts_rc, &empty_env, &location_map_rc);
 
     match result.bits {
         SIG_OK => {
@@ -132,7 +133,7 @@ fn eval_inner(
         }
         SIG_ERROR => {
             let (_, err_value) = vm.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-            Err(crate::value::format_error(err_value))
+            Err(vm.format_error_with_location(err_value))
         }
         _ => Err(format!("eval: unexpected signal: {}", result.bits)),
     }

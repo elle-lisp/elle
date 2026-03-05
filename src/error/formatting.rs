@@ -6,6 +6,20 @@
 
 use crate::reader::SourceLoc;
 
+/// Load source code from a file for a given location
+///
+/// # Arguments
+/// * `loc` - The source location
+///
+/// # Returns
+/// The source code contents if the file exists and is readable, None otherwise
+pub fn load_source_for_loc(loc: &SourceLoc) -> Option<String> {
+    if loc.is_unknown() || loc.file.starts_with('<') {
+        return None;
+    }
+    std::fs::read_to_string(&loc.file).ok()
+}
+
 /// Format source context with line number and caret pointing to error column
 ///
 /// # Arguments

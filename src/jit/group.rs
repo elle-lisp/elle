@@ -251,6 +251,7 @@ mod tests {
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params: 0,
+            name: None,
         };
         Value::closure(closure)
     }
@@ -459,6 +460,7 @@ mod tests {
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params: 0,
+            name: None,
         };
 
         let mut globals = vec![Value::NIL; 10];

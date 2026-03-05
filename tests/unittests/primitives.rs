@@ -1167,6 +1167,7 @@ fn test_spawn_primitive() {
         doc: None,
         vararg_kind: elle::hir::VarargKind::List,
         num_params: 0,
+        name: None,
     });
 
     let result = call_primitive(&spawn, &[closure]);
@@ -1692,6 +1693,7 @@ fn test_json_serialize_errors() {
         doc: None,
         vararg_kind: elle::hir::VarargKind::List,
         num_params: 0,
+        name: None,
     });
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());
@@ -2032,6 +2034,7 @@ fn test_function_predicate() {
         doc: None,
         vararg_kind: elle::hir::VarargKind::List,
         num_params: 1,
+        name: None,
     });
     assert_eq!(
         call_primitive(&fn_pred, &[closure]).unwrap(),
@@ -2075,6 +2078,7 @@ fn test_primitive_predicate() {
         doc: None,
         vararg_kind: elle::hir::VarargKind::List,
         num_params: 1,
+        name: None,
     });
     assert_eq!(
         call_primitive(&prim_pred, &[closure]).unwrap(),

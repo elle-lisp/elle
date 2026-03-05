@@ -4,6 +4,7 @@
 //! call frames, and signal state. The VM dispatches into the current fiber;
 //! suspended fibers are stored as heap values.
 
+use crate::error::LocationMap;
 use crate::value::closure::Closure;
 use crate::value::Value;
 use smallvec::SmallVec;
@@ -137,6 +138,8 @@ pub struct SuspendedFrame {
     /// Null for root fiber (no FiberHeap installed). Package 4 writes this
     /// but nothing reads it yet; Package 5 will restore it on resume.
     pub active_allocator: *const bumpalo::Bump,
+    /// Location map for mapping bytecode offsets to source locations
+    pub location_map: Rc<LocationMap>,
 }
 
 /// Signal type bits. The first 16 are compiler-reserved.
@@ -213,9 +216,10 @@ pub struct Frame {
 /// while execution dispatch needs closure references.
 #[derive(Debug, Clone)]
 pub struct CallFrame {
-    pub name: String,
+    pub name: Rc<str>,
     pub ip: usize,
     pub frame_base: usize,
+    pub location_map: Rc<crate::error::LocationMap>,
 }
 
 /// The fiber: an independent execution context.
@@ -335,6 +339,7 @@ mod tests {
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params: 0,
+            name: None,
         })
     }
 

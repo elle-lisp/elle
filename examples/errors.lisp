@@ -27,17 +27,17 @@
 # with the error bound to the catch variable.
 
 (def result (try
-  (error [:demo "something went wrong"])
+  (error {:error :demo :message "something went wrong"})
   (catch e :caught)))
 (assert-eq result :caught "try/catch: error triggers catch")
 
-# The catch binding holds the error tuple [:kind "message"]
+# The catch binding holds the error struct {:error :kind :message "message"}
 (def err (try
-  (error [:bad-input "expected a number"])
+  (error {:error :bad-input :message "expected a number"})
   (catch e e)))
 (display "  caught error: ") (print err)
-(assert-eq (get err 0) :bad-input "error kind is a keyword")
-(assert-eq (get err 1) "expected a number" "error message is a string")
+(assert-eq (get err :error) :bad-input "error kind is a keyword")
+(assert-eq (get err :message) "expected a number" "error message is a string")
 
 # When no error occurs, try returns the body's result
 (def ok-result (try
@@ -62,18 +62,18 @@
 (def outer-result
   (try
     (try
-      (error [:inner "from inside"])
+      (error {:error :inner :message "from inside"})
       (catch e
         # Caught the inner error, now raise a new one
-        (error [:wrapped (string/join (list "wrapped: " (get e 1)) "")])))
+        (error {:error :wrapped :message (string/join (list "wrapped: " (get e :message)) "")})))
     (catch e e)))
 (display "  nested re-raise: ") (print outer-result)
-(assert-eq (get outer-result 0) :wrapped "nested: outer catches re-raised error")
+(assert-eq (get outer-result :error) :wrapped "nested: outer catches re-raised error")
 
 # Built-in errors (like division by zero) are also catchable
 (def div-err (try (/ 1 0) (catch e e)))
 (display "  division by zero: ") (print div-err)
-(assert-eq (get div-err 0) :division-by-zero "built-in error: division by zero")
+(assert-eq (get div-err :error) :division-by-zero "built-in error: division by zero")
 
 
 # ========================================
@@ -88,10 +88,10 @@
 (assert-eq val1 300 "protect: success value")
 
 # Error case:
-(def [ok2? val2] (protect (error [:boom "exploded"])))
+(def [ok2? val2] (protect (error {:error :boom :message "exploded"})))
 (display "  protect err: [") (display ok2?) (display " ") (display val2) (print "]")
 (assert-false ok2? "protect: error returns false")
-(assert-eq (get val2 0) :boom "protect: error kind preserved")
+(assert-eq (get val2 :error) :boom "protect: error kind preserved")
 
 # protect is useful for "try this, fall back to that" patterns
 (defn safe-parse [s]
@@ -189,11 +189,11 @@
 (defn validate-age [age]
   "Ensure age is a positive integer."
   (when (not (= (type age) :integer))
-    (error [:type-error "age must be an integer"]))
+    (error {:error :type-error :message "age must be an integer"}))
   (when (< age 0)
-    (error [:value-error "age must be non-negative"]))
+    (error {:error :value-error :message "age must be non-negative"}))
   (when (> age 150)
-    (error [:value-error "age is unreasonably large"]))
+    (error {:error :value-error :message "age is unreasonably large"}))
   age)
 
 (defn create-person [name age]
@@ -210,13 +210,13 @@
   (create-person "Bob" -5)
   (catch e e)))
 (display "  bad age: ") (print person-err)
-(assert-eq (get person-err 0) :value-error "propagation: error kind correct")
+(assert-eq (get person-err :error) :value-error "propagation: error kind correct")
 
 (def type-err (try
   (create-person "Charlie" "thirty")
   (catch e e)))
 (display "  bad type: ") (print type-err)
-(assert-eq (get type-err 0) :type-error "propagation: type error caught")
+(assert-eq (get type-err :error) :type-error "propagation: type error caught")
 
 
 # ========================================
@@ -229,7 +229,7 @@
   (def [ok? val] (protect (/ a b)))
   (if ok?
     [:ok val]
-    [:err (get val 1)]))
+    [:err (get val :message)]))
 
 (assert-eq (safe-divide 10 2) [:ok 5] "safe-divide: success")
 (assert-eq (get (safe-divide 1 0) 0) :err "safe-divide: division by zero")

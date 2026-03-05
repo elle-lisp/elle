@@ -41,6 +41,7 @@ pub fn handle_make_closure(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constan
         doc: template_closure.doc,
         vararg_kind: template_closure.vararg_kind.clone(),
         num_params: template_closure.num_params,
+        name: template_closure.name.clone(),
     };
 
     vm.fiber.stack.push(Value::closure(closure));
