@@ -2,7 +2,6 @@
 
 mod introspection;
 mod macro_expand;
-mod qualified;
 mod quasiquote;
 #[cfg(test)]
 mod tests;
@@ -91,18 +90,7 @@ impl Expander {
         vm: &mut VM,
     ) -> Result<Syntax, String> {
         match &syntax.kind {
-            SyntaxKind::Symbol(name) => {
-                // Resolve qualified symbols like string:upcase -> string-upcase
-                if let Some(resolved) = self.resolve_qualified_symbol(name) {
-                    Ok(Syntax::with_scopes(
-                        SyntaxKind::Symbol(resolved),
-                        syntax.span,
-                        syntax.scopes,
-                    ))
-                } else {
-                    Ok(syntax)
-                }
-            }
+            SyntaxKind::Symbol(_) => Ok(syntax),
             SyntaxKind::List(items) if !items.is_empty() => {
                 // Check if first element is a symbol
                 if let Some(name) = items[0].as_symbol() {
