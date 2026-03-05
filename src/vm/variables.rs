@@ -67,8 +67,10 @@ pub fn handle_store_global(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constan
             let idx = sym_id as usize;
             if idx >= vm.globals.len() {
                 vm.globals.resize(idx + 1, Value::UNDEFINED);
+                vm.defined_globals.resize(idx + 1, false);
             }
             vm.globals[idx] = val;
+            vm.defined_globals[idx] = true;
         } else if vm.scope_stack.depth() > 1 {
             // New variable in a local scope — define locally
             vm.scope_stack.define_local(sym_id, val);
@@ -77,8 +79,10 @@ pub fn handle_store_global(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constan
             let idx = sym_id as usize;
             if idx >= vm.globals.len() {
                 vm.globals.resize(idx + 1, Value::UNDEFINED);
+                vm.defined_globals.resize(idx + 1, false);
             }
             vm.globals[idx] = val;
+            vm.defined_globals[idx] = true;
         }
         vm.fiber.stack.push(val);
     } else {
@@ -205,8 +209,10 @@ pub fn handle_store_upvalue(
         let idx = sym as usize;
         if idx >= vm.globals.len() {
             vm.globals.resize(idx + 1, Value::UNDEFINED);
+            vm.defined_globals.resize(idx + 1, false);
         }
         vm.globals[idx] = val;
+        vm.defined_globals[idx] = true;
         vm.fiber.stack.push(val);
     } else {
         // If it's not a cell or symbol, we cannot mutate it

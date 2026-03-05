@@ -123,6 +123,7 @@ impl VM {
     /// - (:"arena/stats" . _) — return struct with heap arena :count and :capacity
     /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
     /// - (:"arena/scope-stats" . _) — return scope allocation stats {:enters N :dtors-run N}
+    /// - (:"environment" . _) — return global environment as struct
     pub(crate) fn dispatch_query(&self, value: Value) -> (SignalBits, Value) {
         let cons = match value.as_cons() {
             Some(c) => c,
@@ -321,6 +322,24 @@ impl VM {
                     TableKey::Keyword("dtors-run".to_string()),
                     Value::int(dtors_run as i64),
                 );
+                (SIG_OK, Value::struct_from(fields))
+            }
+            "environment" => {
+                use crate::value::heap::TableKey;
+                use std::collections::BTreeMap;
+                let mut fields = BTreeMap::new();
+                let st_ptr = unsafe { crate::context::get_symbol_table() };
+                if let Some(st_ptr) = st_ptr {
+                    let st = unsafe { &*st_ptr };
+                    for (idx, &defined) in self.defined_globals.iter().enumerate() {
+                        if !defined {
+                            continue;
+                        }
+                        if let Some(name) = st.name(crate::value::SymbolId(idx as u32)) {
+                            fields.insert(TableKey::Keyword(name.to_string()), self.globals[idx]);
+                        }
+                    }
+                }
                 (SIG_OK, Value::struct_from(fields))
             }
             _ => (

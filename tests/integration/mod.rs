@@ -128,6 +128,9 @@ mod comparison {
 mod allocator {
     include!("allocator.rs");
 }
+mod environment {
+    include!("environment.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
