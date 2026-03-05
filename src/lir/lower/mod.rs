@@ -402,8 +402,12 @@ impl Lowerer {
             }
         }
 
-        // Condition 3: all break values targeting this block are safe immediates
-        if !self.all_break_values_safe(body, *block_id) {
+        // Condition 3: all break values targeting this block are safe immediates.
+        // Pass empty scope_bindings — blocks have no bindings of their own,
+        // but `all_break_values_safe` extends scope_bindings as it recurses
+        // into nested let/letrec nodes, so break values referencing inner
+        // let bindings with heap inits are correctly rejected.
+        if !self.all_break_values_safe(body, *block_id, &[]) {
             self.scope_stats.rejected_break += 1;
             return false;
         }

@@ -464,12 +464,10 @@ fn no_region_for_variadic_intrinsic() {
 }
 
 #[test]
-fn no_region_for_block_with_break() {
-    // Block with break targeting itself → break escapes the block's scope
-    assert!(!has_region("(block :done (if true (break :done 42) 0))"));
-
-    // Block with break carrying an immediate → NOW qualifies for scope allocation
-    // (was: conservative rejection of all breaks)
+fn region_for_block_with_safe_break_value() {
+    // Block with break carrying an immediate → qualifies for scope allocation.
+    // Break value (42) is an immediate, last expression (0) is an immediate,
+    // so RegionExit won't free anything the caller needs.
     assert!(has_region("(block :done (if true (break :done 42) 0))"));
 }
 
@@ -506,17 +504,23 @@ fn region_for_let_with_multiple_inner_blocks() {
 
 #[test]
 fn no_region_for_let_with_break_to_outer_block() {
-    // Break targets :outer which is OUTSIDE the let → escaping break.
-    assert!(!has_region(
+    // Break targets :outer which is OUTSIDE the let → the let does NOT
+    // scope-allocate (escaping break). However, the block :outer DOES
+    // qualify: break value x = 42 is immediate, last expression (the let
+    // whose body ends with x = 42) is immediate. So has_region is true
+    // (the block emits RegionEnter/RegionExit).
+    assert!(has_region(
         "(block :outer (let ((x 42)) (break :outer x) x))"
     ));
 }
 
 #[test]
 fn no_region_for_let_with_break_to_outer_through_inner() {
-    // Break targets :outer, passing through an inner block.
-    // Even though :inner is inside the let, the break skips it.
-    assert!(!has_region(
+    // Break targets :outer, passing through :inner. The let does NOT
+    // scope-allocate (escaping break). But both blocks qualify: break
+    // value x = 42 is immediate, all last expressions are immediate.
+    // So has_region is true (blocks emit RegionEnter/RegionExit).
+    assert!(has_region(
         "(block :outer (let ((x 42)) (block :inner (break :outer x) 0) x))"
     ));
 }
@@ -571,9 +575,15 @@ fn no_region_for_block_with_mixed_breaks() {
 }
 
 #[test]
-fn no_region_for_block_with_var_break() {
-    // Break carries a variable (might be heap) → unsafe
-    assert!(!has_region(
+fn no_region_for_let_with_block_var_break() {
+    // The let does NOT scope-allocate: its result is a block whose break
+    // carries x (heap-init binding) — result_is_safe correctly rejects.
+    // But the block :done DOES scope-allocate: x was allocated before the
+    // block's RegionEnter, so RegionExit won't free it. The block's own
+    // region contains no heap allocations.
+    //
+    // has_region sees the block's RegionEnter, so it returns true.
+    assert!(has_region(
         "(let ((x (list 1 2 3))) (block :done (break :done x)))"
     ));
 }

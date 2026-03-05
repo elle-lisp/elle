@@ -129,12 +129,16 @@ impl Lowerer {
                 self.result_is_safe(body, &extended)
             }
 
-            // Nested block: the result is the last expression.
+            // Nested block: the result is either the last expression or a
+            // break value targeting this block. Both must be safe.
             // Blocks introduce no bindings, so scope_bindings is unchanged.
-            HirKind::Block { body, .. } => match body.last() {
-                Some(last) => self.result_is_safe(last, scope_bindings),
-                None => true, // empty block → nil → safe
-            },
+            HirKind::Block { block_id, body, .. } => {
+                let last_safe = match body.last() {
+                    Some(last) => self.result_is_safe(last, scope_bindings),
+                    None => true, // empty block → nil → safe
+                };
+                last_safe && self.all_break_values_safe(body, *block_id, scope_bindings)
+            }
 
             // Match: all arm bodies must produce safe results.
             // Exactly one arm executes, analogous to If/Cond.
@@ -148,8 +152,16 @@ impl Lowerer {
             // Destructure always returns nil (an immediate).
             HirKind::Destructure { .. } => true,
 
+            // Break transfers control to the target block — the expression
+            // itself never produces a value in the normal flow. The break
+            // value's safety is checked separately by `all_break_values_safe`
+            // or `all_breaks_have_safe_values`. Returning `true` here means
+            // "this expression won't produce a heap value that escapes via
+            // the normal return path."
+            HirKind::Break { .. } => true,
+
             // Everything else: conservatively unsafe
-            // String, Lambda, Yield, Quote, Eval, Set, Define, Break
+            // String, Lambda, Yield, Quote, Eval, Set, Define
             _ => false,
         }
     }
@@ -343,25 +355,44 @@ impl Lowerer {
     /// Check that every `Break` targeting `target_id` within the given body
     /// has a value that is provably a NaN-boxed immediate.
     ///
+    /// `scope_bindings` tracks bindings introduced by let/letrec nodes
+    /// between the block and the break site. This is critical for blocks:
+    /// a break value that references a let binding with a heap init is
+    /// unsafe even though the Var looks "outer" relative to the block
+    /// (which has no bindings of its own).
+    ///
     /// Recursion rules:
     /// - Does NOT recurse into `Lambda` bodies (breaks can't cross fn boundaries).
     /// - DOES recurse into nested `Block` bodies (a break inside a nested
     ///   block may target the outer block). `BlockId`s are unique, so a
     ///   nested block never shadows the target.
-    pub(super) fn all_break_values_safe(&self, body: &[Hir], target_id: BlockId) -> bool {
+    /// - When entering `Let`/`Letrec`, extends `scope_bindings` with the
+    ///   inner bindings so break values referencing them are checked against
+    ///   their init expressions.
+    pub(super) fn all_break_values_safe(
+        &self,
+        body: &[Hir],
+        target_id: BlockId,
+        scope_bindings: &[(Binding, &Hir)],
+    ) -> bool {
         body.iter()
-            .all(|hir| self.hir_break_values_safe(hir, target_id))
+            .all(|hir| self.hir_break_values_safe(hir, target_id, scope_bindings))
     }
 
-    fn hir_break_values_safe(&self, hir: &Hir, target_id: BlockId) -> bool {
+    fn hir_break_values_safe(
+        &self,
+        hir: &Hir,
+        target_id: BlockId,
+        scope_bindings: &[(Binding, &Hir)],
+    ) -> bool {
         match &hir.kind {
             HirKind::Break { block_id, value } => {
                 if *block_id == target_id {
-                    self.result_is_safe(value, &[])
+                    self.result_is_safe(value, scope_bindings)
                 } else {
                     // Targets a different block — still recurse into value
                     // (value expr might contain a break targeting us)
-                    self.hir_break_values_safe(value, target_id)
+                    self.hir_break_values_safe(value, target_id, scope_bindings)
                 }
             }
 
@@ -385,71 +416,80 @@ impl Lowerer {
                 then_branch,
                 else_branch,
             } => {
-                self.hir_break_values_safe(cond, target_id)
-                    && self.hir_break_values_safe(then_branch, target_id)
-                    && self.hir_break_values_safe(else_branch, target_id)
+                self.hir_break_values_safe(cond, target_id, scope_bindings)
+                    && self.hir_break_values_safe(then_branch, target_id, scope_bindings)
+                    && self.hir_break_values_safe(else_branch, target_id, scope_bindings)
             }
 
             HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => exprs
                 .iter()
-                .all(|e| self.hir_break_values_safe(e, target_id)),
+                .all(|e| self.hir_break_values_safe(e, target_id, scope_bindings)),
 
             HirKind::Cond {
                 clauses,
                 else_branch,
             } => {
                 clauses.iter().all(|(c, b)| {
-                    self.hir_break_values_safe(c, target_id)
-                        && self.hir_break_values_safe(b, target_id)
+                    self.hir_break_values_safe(c, target_id, scope_bindings)
+                        && self.hir_break_values_safe(b, target_id, scope_bindings)
                 }) && else_branch
                     .as_deref()
-                    .is_none_or(|b| self.hir_break_values_safe(b, target_id))
+                    .is_none_or(|b| self.hir_break_values_safe(b, target_id, scope_bindings))
             }
 
             HirKind::Call { func, args, .. } => {
-                self.hir_break_values_safe(func, target_id)
+                self.hir_break_values_safe(func, target_id, scope_bindings)
                     && args
                         .iter()
-                        .all(|a| self.hir_break_values_safe(&a.expr, target_id))
+                        .all(|a| self.hir_break_values_safe(&a.expr, target_id, scope_bindings))
             }
 
             HirKind::Set { value, .. } | HirKind::Define { value, .. } => {
-                self.hir_break_values_safe(value, target_id)
+                self.hir_break_values_safe(value, target_id, scope_bindings)
             }
 
+            // Nested let/letrec: extend scope_bindings with inner bindings.
+            // Init expressions are walked with the OUTER scope (inner bindings
+            // don't exist yet during init evaluation).
             HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                bindings
+                if !bindings
                     .iter()
-                    .all(|(_, init)| self.hir_break_values_safe(init, target_id))
-                    && self.hir_break_values_safe(body, target_id)
+                    .all(|(_, init)| self.hir_break_values_safe(init, target_id, scope_bindings))
+                {
+                    return false;
+                }
+                let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
+                extended.extend(bindings.iter().map(|(b, init)| (*b, init)));
+                self.hir_break_values_safe(body, target_id, &extended)
             }
 
             HirKind::While { cond, body } => {
-                self.hir_break_values_safe(cond, target_id)
-                    && self.hir_break_values_safe(body, target_id)
+                self.hir_break_values_safe(cond, target_id, scope_bindings)
+                    && self.hir_break_values_safe(body, target_id, scope_bindings)
             }
 
             HirKind::Block { body, .. } => body
                 .iter()
-                .all(|e| self.hir_break_values_safe(e, target_id)),
+                .all(|e| self.hir_break_values_safe(e, target_id, scope_bindings)),
 
             HirKind::Match { value, arms } => {
-                self.hir_break_values_safe(value, target_id)
+                self.hir_break_values_safe(value, target_id, scope_bindings)
                     && arms.iter().all(|(_, guard, body)| {
-                        guard
-                            .as_ref()
-                            .is_none_or(|g| self.hir_break_values_safe(g, target_id))
-                            && self.hir_break_values_safe(body, target_id)
+                        guard.as_ref().is_none_or(|g| {
+                            self.hir_break_values_safe(g, target_id, scope_bindings)
+                        }) && self.hir_break_values_safe(body, target_id, scope_bindings)
                     })
             }
 
-            HirKind::Yield(expr) => self.hir_break_values_safe(expr, target_id),
+            HirKind::Yield(expr) => self.hir_break_values_safe(expr, target_id, scope_bindings),
 
-            HirKind::Destructure { value, .. } => self.hir_break_values_safe(value, target_id),
+            HirKind::Destructure { value, .. } => {
+                self.hir_break_values_safe(value, target_id, scope_bindings)
+            }
 
             HirKind::Eval { expr, env } => {
-                self.hir_break_values_safe(expr, target_id)
-                    && self.hir_break_values_safe(env, target_id)
+                self.hir_break_values_safe(expr, target_id, scope_bindings)
+                    && self.hir_break_values_safe(env, target_id, scope_bindings)
             }
         }
     }
