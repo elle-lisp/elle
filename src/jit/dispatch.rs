@@ -318,15 +318,20 @@ pub extern "C" fn elle_jit_call(
             // Handle tail call sentinel
             if result_bits == TAIL_CALL_SENTINEL {
                 if let Some(tail) = vm.pending_tail_call.take() {
-                    match vm.execute_closure_bytecode(
+                    let (bits, val) = vm.execute_closure_bytecode(
                         &tail.bytecode,
                         &tail.constants,
                         &tail.env,
                         &tail.location_map,
-                    ) {
-                        Ok(val) => return val.to_bits(),
-                        Err(e) => {
-                            vm.fiber.signal = Some((SIG_ERROR, error_val("error", e)));
+                    );
+                    match bits {
+                        SIG_OK | SIG_HALT => return val.to_bits(),
+                        SIG_ERROR => {
+                            vm.fiber.signal = Some((SIG_ERROR, val));
+                            return TAG_NIL;
+                        }
+                        _ => {
+                            vm.fiber.signal = Some((bits, val));
                             return TAG_NIL;
                         }
                     }
@@ -344,7 +349,7 @@ pub extern "C" fn elle_jit_call(
         let new_env = build_closure_env_for_jit(closure, &args);
 
         vm.fiber.call_depth += 1;
-        let result = vm.execute_closure_bytecode(
+        let (bits, val) = vm.execute_closure_bytecode(
             &closure.bytecode,
             &closure.constants,
             &new_env,
@@ -352,10 +357,14 @@ pub extern "C" fn elle_jit_call(
         );
         vm.fiber.call_depth -= 1;
 
-        match result {
-            Ok(val) => val.to_bits(),
-            Err(e) => {
-                vm.fiber.signal = Some((SIG_ERROR, error_val("error", e)));
+        match bits {
+            SIG_OK | SIG_HALT => val.to_bits(),
+            SIG_ERROR => {
+                vm.fiber.signal = Some((SIG_ERROR, val));
+                TAG_NIL
+            }
+            _ => {
+                vm.fiber.signal = Some((bits, val));
                 TAG_NIL
             }
         }
@@ -382,15 +391,20 @@ pub extern "C" fn elle_jit_resolve_tail_call(result: u64, vm: *mut ()) -> u64 {
     }
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     if let Some(tail) = vm.pending_tail_call.take() {
-        match vm.execute_closure_bytecode(
+        let (bits, val) = vm.execute_closure_bytecode(
             &tail.bytecode,
             &tail.constants,
             &tail.env,
             &tail.location_map,
-        ) {
-            Ok(val) => val.to_bits(),
-            Err(e) => {
-                vm.fiber.signal = Some((SIG_ERROR, error_val("error", e)));
+        );
+        match bits {
+            SIG_OK | SIG_HALT => val.to_bits(),
+            SIG_ERROR => {
+                vm.fiber.signal = Some((SIG_ERROR, val));
+                TAG_NIL
+            }
+            _ => {
+                vm.fiber.signal = Some((bits, val));
                 TAG_NIL
             }
         }

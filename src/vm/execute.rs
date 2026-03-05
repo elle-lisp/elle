@@ -1,7 +1,7 @@
 //! Bytecode execution entry points and helpers.
 
 use crate::error::LocationMap;
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
+use crate::value::{SignalBits, Value, SIG_OK};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -159,15 +159,15 @@ impl VM {
     /// avoiding the `.to_vec()` copies that `execute_bytecode` performs.
     /// Used by JIT trampolines where the closure already owns Rc'd data.
     ///
-    /// Handles the tail-call loop and translates SignalBits to
-    /// `Result<Value, String>`.
+    /// Returns `(SignalBits, Value)` — the signal and the result value.
+    /// The caller is responsible for handling the signal and formatting errors.
     pub fn execute_closure_bytecode(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
         location_map: &Rc<LocationMap>,
-    ) -> Result<Value, String> {
+    ) -> (SignalBits, Value) {
         self.error_loc = None;
 
         let mut current_bytecode = bytecode.clone();
@@ -190,21 +190,13 @@ impl VM {
                 current_env = tail.env;
                 current_location_map = tail.location_map;
             } else {
-                return match bits {
-                    SIG_OK | SIG_HALT => {
-                        let (_, value) = self.fiber.signal.take().unwrap();
-                        Ok(value)
-                    }
-                    SIG_YIELD => Err("Unexpected yield outside coroutine context".to_string()),
-                    SIG_ERROR => {
-                        let (_, err_value) =
-                            self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-                        Err(crate::value::format_error(err_value))
-                    }
-                    _ => {
-                        panic!("VM bug: Unexpected signal: {}", bits);
-                    }
-                };
+                let value = self
+                    .fiber
+                    .signal
+                    .take()
+                    .map(|(_, v)| v)
+                    .unwrap_or(Value::NIL);
+                return (bits, value);
             }
         }
     }

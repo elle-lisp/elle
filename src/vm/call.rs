@@ -447,19 +447,24 @@ impl VM {
         // Check for pending tail call (JIT function did a TailCall)
         if result.to_bits() == TAIL_CALL_SENTINEL {
             if let Some(tail) = self.pending_tail_call.take() {
-                match self.execute_closure_bytecode(
+                let (bits, val) = self.execute_closure_bytecode(
                     &tail.bytecode,
                     &tail.constants,
                     &tail.env,
                     &tail.location_map,
-                ) {
-                    Ok(val) => {
+                );
+                match bits {
+                    SIG_OK | SIG_HALT => {
                         self.fiber.stack.push(val);
                         return None;
                     }
-                    Err(e) => {
-                        set_error(&mut self.fiber, "error", e);
+                    SIG_ERROR => {
+                        self.fiber.signal = Some((SIG_ERROR, val));
                         self.fiber.stack.push(Value::NIL);
+                        return None;
+                    }
+                    _ => {
+                        self.fiber.signal = Some((bits, val));
                         return None;
                     }
                 }
