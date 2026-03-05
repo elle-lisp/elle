@@ -52,6 +52,8 @@ pub enum JitError {
     UnsupportedInstruction(String),
     /// Function has polymorphic effect
     Polymorphic,
+    /// Function has yielding effect (rejected by batch compilation only)
+    Yielding,
     /// Cranelift compilation failed
     CompilationFailed(String),
     /// Invalid LIR structure
@@ -65,6 +67,7 @@ impl fmt::Display for JitError {
                 write!(f, "JIT: unsupported instruction: {}", name)
             }
             JitError::Polymorphic => write!(f, "JIT: function has polymorphic effect"),
+            JitError::Yielding => write!(f, "JIT: yielding functions cannot be batch-compiled"),
             JitError::CompilationFailed(msg) => write!(f, "JIT compilation failed: {}", msg),
             JitError::InvalidLir(msg) => write!(f, "JIT: invalid LIR: {}", msg),
         }

@@ -1144,15 +1144,23 @@ impl<'a> FunctionTranslator<'a> {
         let total_spilled = num_locals as usize + stack_regs.len();
 
         let num_spilled_val = builder.ins().iconst(I64, total_spilled as i64);
+        let num_locals_val = builder.ins().iconst(I64, num_locals as i64);
         let resume_ip_val = builder.ins().iconst(I64, resume_ip as i64);
 
-        // Call elle_jit_yield_through_call(spilled, num_spilled, resume_ip, vm, self_bits)
+        // Call elle_jit_yield_through_call(spilled, num_spilled, num_locals, resume_ip, vm, self_bits)
         let func_ref = self
             .module
             .declare_func_in_func(self.helpers.jit_yield_through_call, builder.func);
         let call = builder.ins().call(
             func_ref,
-            &[spilled_ptr, num_spilled_val, resume_ip_val, vm, self_bits],
+            &[
+                spilled_ptr,
+                num_spilled_val,
+                num_locals_val,
+                resume_ip_val,
+                vm,
+                self_bits,
+            ],
         );
         let result = builder.inst_results(call)[0];
         builder.ins().return_(&[result]);

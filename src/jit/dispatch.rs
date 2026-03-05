@@ -646,6 +646,12 @@ pub extern "C" fn elle_jit_yield(
 ///
 /// All parameters are u64 to match the Cranelift I64 calling convention.
 ///
+/// `num_locals` is passed explicitly so the helper can distinguish locals
+/// from operands in the spilled buffer. The total spilled count is
+/// `num_spilled` (locals + operands). This is tech debt: a follow-up
+/// should unify this with call site metadata lookup (like `elle_jit_yield`
+/// uses `YieldPointMeta`) instead of passing both counts as parameters.
+///
 /// # Safety
 /// `spilled_values` must point to `num_spilled` contiguous u64 values
 /// (or be null when num_spilled is 0).
@@ -653,10 +659,13 @@ pub extern "C" fn elle_jit_yield(
 pub extern "C" fn elle_jit_yield_through_call(
     spilled_values: u64, // *const u64 as u64
     num_spilled: u64,
+    num_locals: u64,
     caller_resume_ip: u64,
     vm: u64, // *mut () as u64
     closure_bits: u64,
 ) -> u64 {
+    let _num_locals = num_locals as usize; // Available for future use when
+                                           // SuspendedFrame needs locals/operands split.
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let closure_val = unsafe { Value::from_bits(closure_bits) };
 
@@ -712,8 +721,31 @@ pub extern "C" fn elle_jit_has_signal(vm: u64) -> u64 {
 // Environment Building
 // =============================================================================
 
+/// Push a parameter value into the environment buffer, wrapping in a
+/// LocalCell if the cell_params_mask indicates it's needed.
+#[inline]
+fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, val: Value) {
+    if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+        buf.push(Value::local_cell(val));
+    } else {
+        buf.push(val);
+    }
+}
+
+/// Collect values into an Elle list (cons chain terminated by EMPTY_LIST).
+fn args_to_list(args: &[Value]) -> Value {
+    let mut list = Value::EMPTY_LIST;
+    for arg in args.iter().rev() {
+        list = Value::cons(*arg, list);
+    }
+    list
+}
+
 /// Build a closure environment from captured variables and arguments.
-/// This is a copy of VM::build_closure_env but standalone for JIT use.
+///
+/// Mirrors `VM::populate_env` for the interpreter fallback path in JIT
+/// dispatch. Handles all arity variants including variadic (`AtLeast`)
+/// with rest-arg collection and `Range` with optional parameters.
 fn build_closure_env_for_jit(
     closure: &crate::value::Closure,
     args: &[Value],
@@ -721,12 +753,67 @@ fn build_closure_env_for_jit(
     let mut new_env = Vec::with_capacity(closure.env_capacity());
     new_env.extend((*closure.env).iter().cloned());
 
-    // Add parameters, wrapping in local cells if cell_params_mask indicates
-    for (i, arg) in args.iter().enumerate() {
-        if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
-            new_env.push(Value::local_cell(*arg));
-        } else {
-            new_env.push(*arg);
+    match closure.arity {
+        crate::value::Arity::Exact(_) => {
+            for (i, arg) in args.iter().enumerate() {
+                push_param(&mut new_env, closure, i, *arg);
+            }
+        }
+        crate::value::Arity::AtLeast(_) => {
+            // Total fixed slots = num_params - 1 (rest slot is last param)
+            let fixed_slots = closure.num_params - 1;
+
+            // Determine how many positional args to consume for fixed slots.
+            // For &keys/&named, keyword args should not fill optional slots.
+            let collects_keywords = matches!(
+                closure.vararg_kind,
+                crate::hir::VarargKind::Struct | crate::hir::VarargKind::StrictStruct(_)
+            );
+            let provided_fixed = if collects_keywords {
+                let min = closure.arity.fixed_params();
+                let mut count = args.len().min(min);
+                while count < fixed_slots && count < args.len() {
+                    if args[count].as_keyword_name().is_some() {
+                        break;
+                    }
+                    count += 1;
+                }
+                count
+            } else {
+                args.len().min(fixed_slots)
+            };
+
+            // Push args for fixed slots (required + optional)
+            for (i, arg) in args[..provided_fixed].iter().enumerate() {
+                push_param(&mut new_env, closure, i, *arg);
+            }
+            // Fill missing optional slots with nil
+            for i in provided_fixed..fixed_slots {
+                push_param(&mut new_env, closure, i, Value::NIL);
+            }
+
+            // Collect remaining args into rest slot.
+            // Note: Struct/StrictStruct vararg kinds require fiber access for
+            // error reporting, which is unavailable in the JIT dispatch context.
+            // Only List collection is supported here. Struct varargs are rare
+            // in JIT-eligible code (they require keyword argument parsing).
+            let rest_args = if args.len() > provided_fixed {
+                &args[provided_fixed..]
+            } else {
+                &[]
+            };
+            let collected = args_to_list(rest_args);
+            push_param(&mut new_env, closure, fixed_slots, collected);
+        }
+        crate::value::Arity::Range(_, max) => {
+            // All slots are fixed (no rest param)
+            for (i, arg) in args.iter().enumerate() {
+                push_param(&mut new_env, closure, i, *arg);
+            }
+            // Fill missing optional slots with nil
+            for i in args.len()..max {
+                push_param(&mut new_env, closure, i, Value::NIL);
+            }
         }
     }
 

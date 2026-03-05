@@ -672,8 +672,11 @@ impl VM {
         let results = match compiler.compile_batch(&members) {
             Ok(r) => r,
             Err(e) => match &e {
-                crate::jit::JitError::UnsupportedInstruction(_) => {
-                    // Some member has an instruction the JIT can't handle.
+                crate::jit::JitError::UnsupportedInstruction(_)
+                | crate::jit::JitError::Yielding => {
+                    // Some member has an instruction the JIT can't handle,
+                    // or a member has yielding effect (yield metadata not
+                    // propagated to shared JitCode).
                     // Fall through to solo compilation for the hot function.
                     return None;
                 }

@@ -279,9 +279,9 @@ impl JitCompiler {
         }
         yield_sig.returns.push(AbiParam::new(I64));
 
-        // elle_jit_yield_through_call: 5 params (spilled_ptr, num_spilled, resume_ip, vm, closure_bits)
+        // elle_jit_yield_through_call: 6 params (spilled_ptr, num_spilled, num_locals, resume_ip, vm, closure_bits)
         let mut ytc_sig = module.make_signature();
-        for _ in 0..5 {
+        for _ in 0..6 {
             ytc_sig.params.push(AbiParam::new(I64));
         }
         ytc_sig.returns.push(AbiParam::new(I64));
@@ -444,10 +444,17 @@ impl JitCompiler {
         mut self,
         members: &[BatchMember],
     ) -> Result<Vec<(SymbolId, JitCode)>, JitError> {
-        // Validate all members are non-polymorphic
+        // Validate all members are non-polymorphic and non-yielding.
+        // Yielding functions require per-function YieldPointMeta in JitCode,
+        // but compile_batch creates shared JitCode with empty yield_points.
+        // If a yielding function were batch-compiled, elle_jit_yield would
+        // panic on index-out-of-bounds when looking up yield point metadata.
         for member in members {
             if member.lir.effect.propagates != 0 {
                 return Err(JitError::Polymorphic);
+            }
+            if member.lir.effect.may_suspend() {
+                return Err(JitError::Yielding);
             }
         }
 
