@@ -19,6 +19,12 @@ impl<'a> Analyzer<'a> {
 
             // Variable reference
             SyntaxKind::Symbol(name) => {
+                // Qualified symbol: contains ':' but doesn't start with ':'
+                // e.g., obj:key -> (get obj :key), a:b:c -> (get (get a :b) :c)
+                if !name.starts_with(':') && name.contains(':') {
+                    return self.desugar_qualified_symbol(name, &span, syntax.scopes.as_slice());
+                }
+
                 match self.lookup(name, syntax.scopes.as_slice()) {
                     Some(binding) => Ok(Hir::pure(HirKind::Var(binding), span)),
                     None => {
@@ -589,5 +595,68 @@ impl<'a> Analyzer<'a> {
             span,
             effect,
         ))
+    }
+
+    /// Desugar a qualified symbol like `a:b:c` to nested `get` calls:
+    /// `(get (get a :b) :c)`.
+    ///
+    /// The first segment is resolved as a variable (local or global).
+    /// Each subsequent segment becomes a keyword argument to `get`.
+    /// All synthesized HIR nodes carry the original symbol's span.
+    ///
+    /// The `get` binding always resolves to the global primitive,
+    /// matching the pattern used for tuple/array/struct/table literal
+    /// desugaring (see SyntaxKind::Tuple/Array/Struct/Table arms above).
+    fn desugar_qualified_symbol(
+        &mut self,
+        name: &str,
+        span: &Span,
+        scopes: &[ScopeId],
+    ) -> Result<Hir, String> {
+        let segments: Vec<&str> = name.split(':').collect();
+        // Reader guarantees: no empty segments, no leading colon (checked above),
+        // at least 2 segments (contains ':' is true).
+
+        // First segment: resolve as variable
+        let first = segments[0];
+        let mut result = match self.lookup(first, scopes) {
+            Some(binding) => Hir::pure(HirKind::Var(binding), span.clone()),
+            None => {
+                let sym = self.symbols.intern(first);
+                let binding = Binding::new(sym, BindingScope::Global);
+                Hir::pure(HirKind::Var(binding), span.clone())
+            }
+        };
+
+        // Each subsequent segment: wrap in (get result :segment)
+        // Constructs Call nodes directly (not via analyze_call) because
+        // get is a pure primitive with known arity Range(2,3).
+        let get_sym = self.symbols.intern("get");
+        for segment in &segments[1..] {
+            let get_binding = Binding::new(get_sym, BindingScope::Global);
+            let get_func = Hir::pure(HirKind::Var(get_binding), span.clone());
+            let key = Hir::pure(HirKind::Keyword(segment.to_string()), span.clone());
+            let call_effect = result.effect;
+            result = Hir::new(
+                HirKind::Call {
+                    func: Box::new(get_func),
+                    args: vec![
+                        CallArg {
+                            expr: result,
+                            spliced: false,
+                        },
+                        CallArg {
+                            expr: key,
+                            spliced: false,
+                        },
+                    ],
+                    is_tail: false,
+                },
+                span.clone(),
+                call_effect,
+            );
+        }
+
+        Ok(result)
     }
 }

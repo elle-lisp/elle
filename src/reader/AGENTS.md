@@ -75,8 +75,8 @@ Syntax / Value tree
    to detect garbage after the expression.
 
 5. **Qualified symbols are single tokens.** `module:name` is lexed as one
-   token, not three. The Expander resolves qualified symbols to flat
-   primitive names at expansion time.
+   token, not three. The Analyzer desugars qualified symbols to nested
+   `get` calls during analysis.
 
 ## Files
 

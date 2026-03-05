@@ -109,24 +109,101 @@ fn test_expand_macro() {
 }
 
 // ============================================================================
-// 3. Module-Qualified Names
+// 3. Qualified Symbol Access
 // ============================================================================
-// Module-qualified names: The lexer parses `module:name` as a single symbol,
-// and the Expander resolves it to the flat primitive name at compile time.
-// For example: string:upcase -> string-upcase, math:abs -> abs
+// Qualified symbols: The lexer parses `obj:key` as a single symbol token.
+// The Analyzer desugars it to `(get obj :key)` — nested struct/table access.
+// Chained access like `a:b:c` becomes `(get (get a :b) :c)`.
 
 #[test]
-fn test_module_qualified_string_upcase() {
-    // Test module-qualified syntax: string:upcase
-    let result = eval_source("(string:upcase \"hello\")");
-    assert_eq!(result.unwrap(), Value::string("HELLO"));
+fn test_qualified_symbol_struct_access() {
+    // obj:key desugars to (get obj :key)
+    let result = eval_source(
+        r#"(let ((obj {:key 42}))
+             obj:key)"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
 }
 
 #[test]
-fn test_module_qualified_math_abs() {
-    // Test module-qualified syntax: math:abs
-    let result = eval_source("(math:abs -5)");
-    assert_eq!(result.unwrap(), Value::int(5));
+fn test_qualified_symbol_chained_access() {
+    // obj:inner:value desugars to (get (get obj :inner) :value)
+    let result = eval_source(
+        r#"(let ((obj {:inner {:value 99}}))
+             obj:inner:value)"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(99));
+}
+
+#[test]
+fn test_qualified_symbol_triple_chain() {
+    // a:b:c:d desugars to (get (get (get a :b) :c) :d)
+    let result = eval_source(
+        r#"(let ((a {:b {:c {:d 7}}}))
+             a:b:c:d)"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(7));
+}
+
+#[test]
+fn test_qualified_symbol_in_call_position() {
+    // (obj:method arg) desugars to ((get obj :method) arg)
+    let result = eval_source(
+        r#"(let ((obj {:add1 (fn (x) (+ x 1))}))
+             (obj:add1 41))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_qualified_symbol_nested_call() {
+    // (obj:inner:method arg) desugars to ((get (get obj :inner) :method) arg)
+    let result = eval_source(
+        r#"(let ((obj {:inner {:double (fn (x) (* x 2))}}))
+             (obj:inner:double 21))"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_qualified_symbol_missing_key_returns_nil() {
+    // Accessing a missing key returns nil (standard get behavior)
+    let result = eval_source(
+        r#"(let ((obj {:a 1}))
+             obj:missing)"#,
+    );
+    assert_eq!(result.unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_qualified_symbol_keyword_not_affected() {
+    // :foo is a keyword, not a qualified symbol
+    let result = eval_source(":foo");
+    assert_eq!(result.unwrap(), Value::keyword("foo"));
+}
+
+#[test]
+fn test_qualified_symbol_quoted_preserved() {
+    // 'foo:bar stays as a symbol, not desugared
+    let result = eval_source("'foo:bar");
+    assert!(result.unwrap().is_symbol());
+}
+
+#[test]
+fn test_qualified_symbol_with_table() {
+    // Works with tables too, not just structs
+    let result = eval_source(
+        r#"(let ((t @{:x 10}))
+             t:x)"#,
+    );
+    assert_eq!(result.unwrap(), Value::int(10));
+}
+
+#[test]
+fn test_qualified_symbol_unbound_first_segment() {
+    // Unbound first segment produces a runtime error
+    let result = eval_source("unbound:foo");
+    assert!(result.is_err());
 }
 
 // ============================================================================
