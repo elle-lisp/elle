@@ -10,7 +10,7 @@ mod pattern;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
-use crate::hir::{Binding, BlockId, Hir, HirKind, HirPattern, PatternKey};
+use crate::hir::{Binding, BlockId, Hir, HirKind, HirPattern};
 use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -298,13 +298,22 @@ impl Lowerer {
     /// Determine if a `let` scope's allocations can be safely released
     /// at scope exit via `RegionEnter`/`RegionExit`.
     ///
+    /// Performs escape analysis on the let body to check if all bindings
+    /// and intermediate values allocated within the scope can be freed
+    /// when the scope exits. This enables the lowerer to emit `RegionEnter`
+    /// and `RegionExit` instructions for automatic cleanup.
+    ///
     /// Returns `true` when ALL five conditions hold:
-    /// 1. No binding is captured by a nested lambda
-    /// 2. Body cannot suspend (yield/debug/polymorphic)
-    /// 3. Body result is provably a NaN-boxed immediate
+    /// 1. No binding is captured by a nested lambda (captured values escape)
+    /// 2. Body cannot suspend (yield/debug/polymorphic effects prevent cleanup)
+    /// 3. Body result is provably a NaN-boxed immediate (not heap-allocated)
     /// 4. Body contains no dangerous outward `set` (set to outer binding
-    ///    with a value that could be heap-allocated)
-    /// 5. Body contains no `break` (break carries a value past RegionExit)
+    ///    with a value that could be heap-allocated inside the scope)
+    /// 5. Body contains no `break` targeting outer blocks (break carries
+    ///    a value past RegionExit, causing use-after-free)
+    ///
+    /// Increments `scope_stats.scopes_analyzed` and updates rejection counters
+    /// for each failed condition (short-circuits on first failure).
     fn can_scope_allocate_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
         self.scope_stats.scopes_analyzed += 1;
 
