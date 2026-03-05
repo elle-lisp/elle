@@ -154,10 +154,10 @@ fn region_emitted_for_string_contains() {
 }
 
 #[test]
-fn region_emitted_for_eq_alias() {
-    // eq? is an alias of = with a different SymbolId.
-    // The intrinsics map only has =, so eq? must be in the whitelist.
-    assert!(has_region("(let ((x 1)) (eq? x 1))"));
+fn region_emitted_for_equality_check() {
+    // = is in the intrinsics map (BinOp::Eq), so result_is_safe
+    // recognises it as returning a bool immediate.
+    assert!(has_region("(let ((x 1)) (= x 1))"));
 }
 
 #[test]
@@ -797,11 +797,8 @@ fn correct_floor_in_scope() {
 }
 
 #[test]
-fn correct_eq_alias_in_scope() {
-    assert_eq!(
-        eval_source("(let ((x 42)) (eq? x 42))").unwrap(),
-        Value::TRUE
-    );
+fn correct_equality_check_in_scope() {
+    assert_eq!(eval_source("(let ((x 42)) (= x 42))").unwrap(), Value::TRUE);
 }
 
 #[test]

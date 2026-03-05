@@ -3,6 +3,7 @@
 //! This module implements the core value type for the Elle VM using NaN-boxing,
 //! a technique that encodes multiple types into a single 64-bit IEEE 754 double.
 
+pub mod allocator;
 pub mod closure;
 pub mod display;
 pub mod error;
@@ -44,6 +45,9 @@ pub use fiber::{
     SIG_CANCEL, SIG_DEBUG, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
     SIG_YIELD,
 };
+
+// Export custom allocator types
+pub use allocator::{AllocatorBox, ElleAllocator};
 
 // Export FFI types
 pub use ffi::LibHandle;

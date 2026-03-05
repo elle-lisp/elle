@@ -49,9 +49,34 @@
 //! `owned_shared` grows. Teardown happens on `clear()` or `Drop`.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
+use crate::value::allocator::AllocatorBox;
 use crate::value::heap::{ArenaMark, HeapObject, HeapTag};
 use crate::value::Value;
+
+/// Tracks objects allocated by a single `with-allocator` invocation.
+///
+/// # Safety invariant
+///
+/// The `ArenaMark.custom_ptrs_len` field records the position in this
+/// struct's `custom_ptrs` at `RegionEnter` time. This is safe because
+/// `with-allocator` desugars to `defer`, which wraps the body in a fiber —
+/// the body's scope marks live on the child fiber's `FiberHeap`, separate
+/// from the parent's. If anyone calls `%install-allocator`/`%uninstall-allocator`
+/// directly without a fiber boundary between install and scope marks,
+/// `RegionExit` may dealloc from a popped allocator (use-after-free).
+/// **These primitives must only be used via the `with-allocator` macro.**
+pub(crate) struct CustomAllocState {
+    /// The allocator trait object. `Rc` because the Elle `Value` also
+    /// holds an `Rc` (via `ExternalObject.data`), and we need the
+    /// allocator to outlive the form if cleanup happens during fiber death.
+    allocator: Rc<AllocatorBox>,
+    /// Objects allocated by this custom allocator.
+    /// Each entry is (ptr, size, align) matching the alloc() call.
+    /// Ordered by allocation time (oldest first).
+    custom_ptrs: Vec<(*mut u8, usize, usize)>,
+}
 
 pub struct FiberHeap {
     bump: bumpalo::Bump,
@@ -86,6 +111,9 @@ pub struct FiberHeap {
     scope_enters: usize,
     /// Number of destructors run by `RegionExit` (objects freed at scope exit).
     scope_dtors_run: usize,
+    /// Stack of custom allocators. The top is active.
+    /// Pushed by `%install-allocator`, popped by `%uninstall-allocator`.
+    custom_alloc_stack: Vec<CustomAllocState>,
 }
 
 impl FiberHeap {
@@ -100,6 +128,7 @@ impl FiberHeap {
             shared_alloc: std::ptr::null_mut(),
             scope_enters: 0,
             scope_dtors_run: 0,
+            custom_alloc_stack: Vec::new(),
         }
     }
 
@@ -130,6 +159,29 @@ impl FiberHeap {
         if !self.shared_alloc.is_null() {
             return unsafe { &mut *self.shared_alloc }.alloc(obj);
         }
+
+        // Custom allocator: try Rust trait object before bumpalo.
+        if let Some(state) = self.custom_alloc_stack.last_mut() {
+            let size = std::mem::size_of::<HeapObject>();
+            let align = std::mem::align_of::<HeapObject>();
+            let ptr = state.allocator.inner.alloc(size, align);
+            if !ptr.is_null() {
+                let typed = ptr as *mut HeapObject;
+                let drop = needs_drop(obj.tag());
+                // SAFETY: ptr is non-null, properly aligned (guaranteed by
+                // ElleAllocator contract), and has at least size bytes.
+                unsafe { std::ptr::write(typed, obj) };
+                state.custom_ptrs.push((ptr, size, align));
+                if drop {
+                    self.dtors.push(typed);
+                }
+                self.alloc_count += 1;
+                return Value::from_heap_ptr(typed as *const ());
+            }
+            // Fall through to bumpalo on null return
+        }
+
+        // Normal bumpalo path (unchanged)
         let needs_drop = needs_drop(obj.tag());
         let ptr: &mut HeapObject = self.bump.alloc(obj);
         let raw = ptr as *mut HeapObject;
@@ -141,14 +193,29 @@ impl FiberHeap {
     }
 
     pub fn mark(&self) -> ArenaMark {
-        ArenaMark::new_with_dtor_len(self.alloc_count, self.dtors.len())
+        let custom_ptrs_len = self
+            .custom_alloc_stack
+            .last()
+            .map_or(0, |s| s.custom_ptrs.len());
+        ArenaMark::new_full(self.alloc_count, self.dtors.len(), custom_ptrs_len)
     }
 
     /// Run destructors for objects allocated after the mark, then truncate
-    /// the destructor list. Does NOT reset the bump (no partial reset).
+    /// the destructor list. For custom-allocated objects, also calls dealloc
+    /// to return memory to the user's allocator.
     pub fn release(&mut self, mark: ArenaMark) {
         self.run_dtors(mark.dtor_len());
         self.dtors.truncate(mark.dtor_len());
+
+        // Dealloc custom-allocated objects from the exiting scope.
+        if let Some(state) = self.custom_alloc_stack.last_mut() {
+            let start = mark.custom_ptrs_len();
+            for &(ptr, size, align) in state.custom_ptrs[start..].iter().rev() {
+                state.allocator.inner.dealloc(ptr, size, align);
+            }
+            state.custom_ptrs.truncate(start);
+        }
+
         self.alloc_count = mark.position();
     }
 
@@ -217,6 +284,52 @@ impl FiberHeap {
         self.scope_dtors_run
     }
 
+    /// Push a custom allocator onto the stack. Allocations will route
+    /// to this allocator until it is popped.
+    pub fn push_custom_allocator(&mut self, allocator: Rc<AllocatorBox>) {
+        self.custom_alloc_stack.push(CustomAllocState {
+            allocator,
+            custom_ptrs: Vec::new(),
+        });
+    }
+
+    /// Pop the top custom allocator, run Drop for remaining custom objects
+    /// that are still in dtors, then dealloc all remaining custom memory.
+    ///
+    /// Returns `true` if an allocator was popped, `false` if the stack was empty.
+    pub fn pop_custom_allocator(&mut self) -> bool {
+        let state = match self.custom_alloc_stack.pop() {
+            Some(s) => s,
+            None => return false,
+        };
+
+        // For remaining custom objects (those not freed by RegionExit):
+        // 1. Run Drop for those still in dtors
+        // 2. Call dealloc for all of them
+        //
+        // We need to find which dtors point into our custom_ptrs set.
+        // Since dtors is ordered and custom_ptrs is ordered, and
+        // RegionExit already truncated both lists for scoped objects,
+        // the remaining custom_ptrs entries have corresponding dtors
+        // entries (if they need Drop) at the END of the dtors list.
+        //
+        // We walk custom_ptrs in reverse. For each, check if it appears
+        // in dtors (as a HeapObject pointer). If so, drop_in_place and
+        // remove from dtors.
+        for &(ptr, size, align) in state.custom_ptrs.iter().rev() {
+            let typed = ptr as *mut HeapObject;
+            // Check if this pointer is in dtors and run Drop if so.
+            if let Some(pos) = self.dtors.iter().rposition(|&d| d == typed) {
+                // SAFETY: The pointer is valid — it was allocated by the
+                // custom allocator and has not been freed yet.
+                unsafe { std::ptr::drop_in_place(typed) };
+                self.dtors.swap_remove(pos);
+            }
+            state.allocator.inner.dealloc(ptr, size, align);
+        }
+        true
+    }
+
     /// Create a new shared allocator on this fiber's `owned_shared` list.
     ///
     /// Returns a raw pointer to the shared allocator. The `Box` in the Vec
@@ -261,8 +374,21 @@ impl FiberHeap {
         self.owned_shared.clear();
         self.shared_alloc = std::ptr::null_mut();
 
+        // Run all destructors (Drop) first, then dealloc custom memory.
+        // Order matters: Drop may access the object's fields (Box<str>,
+        // Vec, Rc, etc.) which must still be valid during Drop.
         self.run_dtors(0);
         self.dtors.clear();
+
+        // Dealloc all custom-allocated objects. Drop has already run
+        // for those that needed it (via run_dtors above).
+        for state in self.custom_alloc_stack.drain(..) {
+            for &(ptr, size, align) in state.custom_ptrs.iter().rev() {
+                state.allocator.inner.dealloc(ptr, size, align);
+            }
+            // Rc<AllocatorBox> dropped here
+        }
+
         self.scope_marks.clear();
         self.alloc_count = 0;
         self.scope_enters = 0;
@@ -285,6 +411,12 @@ impl Drop for FiberHeap {
         // Without this, inner heap allocations (Vec buffers, Rc refcounts,
         // BTreeMap nodes, etc.) would leak when the bump is dropped.
         self.run_dtors(0);
+        // Dealloc custom-allocated objects. Drop has already run above.
+        for state in self.custom_alloc_stack.drain(..) {
+            for &(ptr, size, align) in state.custom_ptrs.iter().rev() {
+                state.allocator.inner.dealloc(ptr, size, align);
+            }
+        }
     }
 }
 

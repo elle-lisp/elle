@@ -4,14 +4,15 @@ use crate::vm::VM;
 
 use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
 use super::{
-    arithmetic, array, bitwise, buffer, bytes, cell, comparison, concurrency, convert, coroutines,
-    debug, display, ffi, fibers, fileio, json, list, logic, math, meta, modules, package, path,
-    process, read, sort, string, structs, table, time, types,
+    allocator, arithmetic, array, bitwise, buffer, bytes, cell, comparison, concurrency, convert,
+    coroutines, debug, display, ffi, fibers, fileio, json, list, logic, math, meta, modules,
+    package, path, process, read, sort, string, structs, table, time, types,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
 /// array; this list is the single place that enumerates them.
 pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
+    allocator::PRIMITIVES,
     arithmetic::PRIMITIVES,
     array::PRIMITIVES,
     bitwise::PRIMITIVES,

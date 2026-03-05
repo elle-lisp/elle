@@ -1,3 +1,4 @@
+pub mod allocator;
 pub mod arithmetic;
 pub mod array;
 pub mod bitwise;
