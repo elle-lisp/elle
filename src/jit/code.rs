@@ -33,6 +33,12 @@ pub struct JitCode {
     fn_ptr: *const u8,
     /// Keep the module alive so the code isn't freed
     _module: Arc<ModuleHolder>,
+    /// Yield point metadata for side-exit support.
+    /// Indexed by yield point index (u32 immediate in JIT code).
+    /// Empty for non-yielding functions.
+    /// Read by `elle_jit_yield` runtime helper (Chunk 2).
+    #[allow(dead_code)]
+    pub(crate) yield_points: Vec<super::dispatch::YieldPointMeta>,
 }
 
 // Safety: The function pointer points to immutable code that doesn't
@@ -42,10 +48,12 @@ unsafe impl Sync for JitCode {}
 
 impl JitCode {
     /// Create a new JitCode from a function pointer and module
+    #[allow(dead_code)]
     pub(crate) fn new(fn_ptr: *const u8, module: cranelift_jit::JITModule) -> Self {
         JitCode {
             fn_ptr,
             _module: Arc::new(ModuleHolder::new(module)),
+            yield_points: Vec::new(),
         }
     }
 
@@ -57,6 +65,20 @@ impl JitCode {
         JitCode {
             fn_ptr,
             _module: module,
+            yield_points: Vec::new(),
+        }
+    }
+
+    /// Create a new JitCode with yield point metadata
+    pub(crate) fn new_with_yield_points(
+        fn_ptr: *const u8,
+        module: cranelift_jit::JITModule,
+        yield_points: Vec<super::dispatch::YieldPointMeta>,
+    ) -> Self {
+        JitCode {
+            fn_ptr,
+            _module: Arc::new(ModuleHolder::new(module)),
+            yield_points,
         }
     }
 

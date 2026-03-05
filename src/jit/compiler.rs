@@ -309,8 +309,9 @@ impl JitCompiler {
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
     ) -> Result<JitCode, JitError> {
-        // JIT can't handle suspension (yield/debug) — only non-suspending functions
-        if lir.effect.may_suspend() {
+        // Only reject polymorphic effects (effect depends on arguments).
+        // Yielding functions are now supported via side-exit.
+        if lir.effect.propagates != 0 {
             return Err(JitError::NotPure);
         }
 
@@ -350,8 +351,22 @@ impl JitCompiler {
             .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
         let fn_ptr = self.module.get_finalized_function(func_id);
 
+        // Convert yield point metadata from LIR to JIT format
+        let yield_metas: Vec<super::dispatch::YieldPointMeta> = lir
+            .yield_points
+            .iter()
+            .map(|yp| super::dispatch::YieldPointMeta {
+                resume_ip: yp.resume_ip,
+                num_spilled: yp.stack_regs.len() as u16,
+            })
+            .collect();
+
         // Wrap in JitCode (module is moved to keep code alive)
-        Ok(JitCode::new(fn_ptr, self.module))
+        Ok(JitCode::new_with_yield_points(
+            fn_ptr,
+            self.module,
+            yield_metas,
+        ))
     }
 
     /// Build Cranelift IR for a LirFunction and return it as lines of text.
@@ -361,7 +376,7 @@ impl JitCompiler {
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
     ) -> Result<Vec<String>, JitError> {
-        if lir.effect.may_suspend() {
+        if lir.effect.propagates != 0 {
             return Err(JitError::NotPure);
         }
 
@@ -399,9 +414,9 @@ impl JitCompiler {
         mut self,
         members: &[BatchMember],
     ) -> Result<Vec<(SymbolId, JitCode)>, JitError> {
-        // Validate all members are non-suspending
+        // Validate all members are non-polymorphic
         for member in members {
-            if member.lir.effect.may_suspend() {
+            if member.lir.effect.propagates != 0 {
                 return Err(JitError::NotPure);
             }
         }
@@ -742,13 +757,24 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_non_pure() {
+    fn test_reject_polymorphic() {
         let mut lir = make_simple_lir();
-        lir.effect = Effect::yields();
+        lir.effect = Effect::polymorphic(0);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let result = compiler.compile(&lir, None);
         assert!(matches!(result, Err(JitError::NotPure)));
+    }
+
+    #[test]
+    fn test_accept_yielding() {
+        let mut lir = make_simple_lir();
+        lir.effect = Effect::yields();
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        // Should compile (no Yield terminators in this simple LIR)
+        let result = compiler.compile(&lir, None);
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -927,9 +953,9 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_batch_rejects_suspending() {
+    fn test_compile_batch_rejects_polymorphic() {
         let mut lir = make_simple_lir();
-        lir.effect = Effect::yields();
+        lir.effect = Effect::polymorphic(0);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let members = vec![BatchMember {

@@ -587,10 +587,11 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::MakeClosure { .. } => {
                 return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
             }
-            LirInstr::LoadResumeValue { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "LoadResumeValue".to_string(),
-                ));
+            LirInstr::LoadResumeValue { dst } => {
+                // Resume goes through the interpreter. This block is
+                // unreachable in JIT code. Emit NIL as dead code.
+                let nil = builder.ins().iconst(I64, TAG_NIL as i64);
+                builder.def_var(var(dst.0), nil);
             }
             LirInstr::CarOrNil { .. } => {
                 return Err(JitError::UnsupportedInstruction("CarOrNil".to_string()));
@@ -700,8 +701,15 @@ impl<'a> FunctionTranslator<'a> {
                     .brif(is_truthy, *then_block, &[], *else_block, &[]);
             }
 
-            Terminator::Yield { .. } => {
-                return Err(JitError::NotPure);
+            Terminator::Yield {
+                value,
+                resume_label: _,
+            } => {
+                // Placeholder — real implementation in a later chunk.
+                let _ = builder.use_var(var(value.0));
+                builder
+                    .ins()
+                    .trap(cranelift_codegen::ir::TrapCode::unwrap_user(0));
             }
 
             Terminator::Unreachable => {

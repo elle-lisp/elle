@@ -1,7 +1,8 @@
 //! JIT compilation for Elle
 //!
-//! This module provides JIT compilation of pure LIR functions to native code
-//! using Cranelift. Only `Effect::none()` functions are JIT candidates.
+//! This module provides JIT compilation of LIR functions to native code
+//! using Cranelift. Functions with `Effect::none()` or `Effect::yields()` are
+//! JIT candidates. Polymorphic functions remain excluded.
 //!
 //! ## Architecture
 //!
@@ -39,7 +40,7 @@ mod translate;
 
 pub use code::JitCode;
 pub use compiler::{BatchMember, JitCompiler};
-pub use dispatch::TAIL_CALL_SENTINEL;
+pub use dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 pub(crate) use group::discover_compilation_group;
 
 use std::fmt;

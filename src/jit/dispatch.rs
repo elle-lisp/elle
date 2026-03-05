@@ -57,6 +57,24 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
 /// The VM checks for this after call_jit returns.
 pub const TAIL_CALL_SENTINEL: u64 = 0xDEAD_BEEF_DEAD_BEEFu64;
 
+/// Sentinel value indicating a JIT function yielded (side-exited).
+/// The caller checks for this after a JIT call and propagates the yield.
+/// fiber.signal and fiber.suspended are already set by the JIT yield helper.
+pub const YIELD_SENTINEL: u64 = 0xDEAD_CAFE_DEAD_CAFEu64;
+
+/// Metadata for a single yield point in JIT-compiled code.
+/// Stored in `JitCode.yield_points`, indexed by yield point index.
+/// Read by `elle_jit_yield` runtime helper (Chunk 2).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct YieldPointMeta {
+    /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
+    pub resume_ip: usize,
+    /// Number of spilled values that constitute the operand stack.
+    /// Single source of truth — the JIT yield helper reads this, not a parameter.
+    pub num_spilled: u16,
+}
+
 // =============================================================================
 // Exception Checking
 // =============================================================================
