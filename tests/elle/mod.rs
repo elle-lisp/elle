@@ -114,3 +114,13 @@ fn fibers() {
 fn closures() {
     run_elle_script("closures");
 }
+
+#[test]
+fn coroutines() {
+    run_elle_script("coroutines");
+}
+
+#[test]
+fn tailcalls() {
+    run_elle_script("tailcalls");
+}
