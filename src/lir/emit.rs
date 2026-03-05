@@ -191,9 +191,16 @@ impl Emitter {
             }
 
             LirInstr::LoadCapture { dst, index } => {
-                self.bytecode.emit(Instruction::LoadUpvalue);
-                self.bytecode.emit_byte(0); // depth (currently unused)
-                self.bytecode.emit_byte(*index as u8);
+                if let Some(stack_slot) = Self::non_cell_local_slot(*index, func) {
+                    // Non-cell locally-defined variable: use stack
+                    self.bytecode.emit(Instruction::LoadLocal);
+                    self.bytecode.emit_byte(0); // depth 0
+                    self.bytecode.emit_byte(stack_slot as u8);
+                } else {
+                    self.bytecode.emit(Instruction::LoadUpvalue);
+                    self.bytecode.emit_byte(0); // depth (currently unused)
+                    self.bytecode.emit_byte(*index as u8);
+                }
                 self.push_reg(*dst);
             }
 
@@ -207,10 +214,17 @@ impl Emitter {
 
             LirInstr::StoreCapture { index, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::StoreUpvalue);
-                self.bytecode.emit_byte(0); // depth (currently unused)
-                self.bytecode.emit_byte(*index as u8);
-                // StoreCapture: VM pops value, stores in cell, pushes it back.
+                if let Some(stack_slot) = Self::non_cell_local_slot(*index, func) {
+                    // Non-cell locally-defined variable: use stack
+                    self.bytecode.emit(Instruction::StoreLocal);
+                    self.bytecode.emit_byte(0); // depth 0
+                    self.bytecode.emit_byte(stack_slot as u8);
+                } else {
+                    self.bytecode.emit(Instruction::StoreUpvalue);
+                    self.bytecode.emit_byte(0); // depth (currently unused)
+                    self.bytecode.emit_byte(*index as u8);
+                }
+                // Both StoreLocal and StoreUpvalue: pop value, store, push back.
                 // Net stack effect is 0, so don't adjust simulated stack.
             }
 
@@ -273,6 +287,7 @@ impl Emitter {
                     constants: Rc::new(nested_bytecode.constants),
                     effect: func.effect,
                     cell_params_mask: func.cell_params_mask,
+                    cell_locals_mask: func.cell_locals_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
                     location_map: Rc::new(nested_bytecode.location_map),
                     jit_code: None,
@@ -787,6 +802,34 @@ impl Emitter {
                 self.bytecode.emit(Instruction::Nil);
                 self.bytecode.emit(Instruction::Return);
             }
+        }
+    }
+
+    /// Check if an upvalue index refers to a non-cell locally-defined variable.
+    /// Returns `Some(stack_slot)` if it does, `None` otherwise.
+    ///
+    /// Environment layout: [captures... | params... | locals...]
+    /// Stack layout: [params... | locals...] (num_locals slots pre-allocated)
+    /// Conversion: stack_slot = env_index - num_captures
+    fn non_cell_local_slot(index: u16, func: &LirFunction) -> Option<u16> {
+        debug_assert!(
+            func.num_params <= u16::MAX as usize,
+            "num_params {} exceeds u16 range",
+            func.num_params
+        );
+        let locals_start = func.num_captures + func.num_params as u16;
+        if index >= locals_start {
+            let local_offset = index - locals_start;
+            // Beyond bit 63, the mask can't represent the local — be conservative
+            // and treat it as a cell local (use env/StoreUpvalue).
+            if local_offset < 64 && (func.cell_locals_mask & (1 << local_offset)) == 0 {
+                // Non-cell local: use stack slot
+                Some(index - func.num_captures)
+            } else {
+                None // Cell local (or beyond mask range): use env
+            }
+        } else {
+            None // Capture or parameter: use env
         }
     }
 
