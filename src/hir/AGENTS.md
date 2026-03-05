@@ -127,10 +127,20 @@ HIR (bindings are inline — no separate HashMap)
     context and caches the Expander on the VM for reuse.
 
 15. **Docstrings are extracted from leading string literals.**
-    `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer
-    extracts the first string literal in a function body and stores it
-    in `doc`. This field is threaded through LIR into `Closure.doc` and
-    used by the `(doc name)` primitive and LSP hover.
+     `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer
+     extracts the first string literal in a function body and stores it
+     in `doc`. This field is threaded through LIR into `Closure.doc` and
+     used by the `(doc name)` primitive and LSP hover.
+
+16. **Qualified symbols are desugared to nested `get` calls.**
+    `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to
+    `(get (get a :b) :c)`. The first segment is resolved as a variable
+    (local or global). Subsequent segments become keyword arguments to
+    `get`. This produces standard `HirKind::Call` nodes — no special
+    HIR variant. The `get` binding always resolves to the global
+    primitive, matching the pattern used for tuple/array/struct/table
+    literal desugaring. All synthesized nodes carry the original
+    symbol's span.
 
 ## Files
 

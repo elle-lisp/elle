@@ -24,7 +24,6 @@ Does NOT:
 | `ScopeId` | Unique scope identifier for hygiene |
 | `Expander` | Macro expansion engine |
 | `MacroDef` | Macro definition |
-| `resolve_qualified_symbol()` | Resolve `module:name` to flat primitive name |
 | `expand()` | Entry point: takes `&mut SymbolTable` and `&mut VM` |
 
 ## Data flow
@@ -43,7 +42,6 @@ Expander (with &mut SymbolTable, &mut VM)
     ├─► add expansion scope
      ├─► handle macro? (check registry, return true/false literal)
     ├─► handle expand-macro (expand quoted form, wrap in quote)
-    ├─► resolve module:name to flat primitives
     └─► recurse on result (with depth limit of 200)
     │
     ▼
@@ -86,9 +84,9 @@ Analyzer (hir)
    `pipeline::eval_syntax()`. The result Value is converted back to Syntax
    via `from_value()`. Macros must use quasiquote to return code templates.
 
-7. **Module-qualified names are resolved at expansion time.** `module:name`
-   is recognized by the lexer as a single token, then resolved by the
-   Expander to a flat primitive name (e.g., `string:upcase` → `string-upcase`).
+7. **Qualified symbols pass through expansion unchanged.** `module:name`
+   is recognized by the lexer as a single token. The Expander does not
+   transform it. The Analyzer desugars it to nested `get` calls.
 
 ## Hygiene
 
@@ -143,7 +141,6 @@ resolves at the call site. Used for anaphoric macros:
 | `expand/macro_expand.rs` | ~80 | VM-based macro expansion via `eval_syntax` |
 | `expand/quasiquote.rs` | ~200 | Quasiquote-to-code conversion |
 | `expand/introspection.rs` | ~100 | `macro?`, `expand-macro` |
-| `expand/qualified.rs` | ~100 | Module-qualified name resolution |
 | `expand/tests.rs` | ~537 | Expansion tests |
 | `convert.rs` | ~100 | `Syntax` ↔ `Value` conversion |
 | `display.rs` | ~100 | Pretty printing |
