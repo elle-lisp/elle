@@ -170,7 +170,7 @@ impl VM {
                     .clone()
                     .unwrap_or_else(|| Rc::from("<anonymous>")),
                 ip: instr_ip,
-                frame_base: self.fiber.stack.len(),
+                frame_base: 0, // Closures always execute with fresh stack via execute_bytecode_saving_stack
                 location_map: location_map.clone(),
             });
 
