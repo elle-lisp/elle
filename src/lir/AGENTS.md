@@ -162,8 +162,9 @@ Function bodies never get region instructions.
    Tier 7: breaks targeting blocks inside the scope are safe (they don't
    exit the scope's region); only breaks targeting outer blocks are dangerous
 
-For `let`/`letrec`: all five conditions. `letrec` delegates to `let`.
-For `block`: conditions 1-4 plus no escaping `break` in the body.
+For `let`/`letrec`: all six conditions. `letrec` delegates to `let`.
+For `block`: conditions 1-4 plus all break values targeting this block are
+safe immediates (Tier 6) and no escaping breaks (Tier 7).
 
 `result_is_safe` takes `scope_bindings: &[(Binding, &Hir)]` — the
 bindings introduced by the let/letrec being analyzed. It returns
@@ -238,7 +239,7 @@ No new bytecode instructions — break compiles to existing Move + Jump.
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
 | `intrinsics.rs` | ~120 | `IntrinsicOp` enum, intrinsics map, `IMMEDIATE_PRIMITIVES` whitelist, `build_immediate_primitives()` |
 | `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point, `can_scope_allocate_*` analysis |
-| `lower/escape.rs` | ~469 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set`, `body_contains_escaping_break` |
+| `lower/escape.rs` | ~693 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set`, `body_contains_escaping_break`, `all_break_values_safe`, `all_breaks_have_safe_values` |
 | `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
 | `lower/binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
 | `lower/lambda.rs` | ~250 | fn lowering, closure capture, cell wrapping |

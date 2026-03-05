@@ -243,7 +243,12 @@ impl Lowerer {
         let block_result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         let exit_label = self.fresh_label();
-        let scoped = self.can_scope_allocate_block(body);
+        let scoped = self.can_scope_allocate_block(block_id, body);
+
+        // Record region depth BEFORE emitting RegionEnter so that breaks
+        // targeting this block include the block's own region in their
+        // compensating RegionExit count.
+        let depth_before = self.region_depth;
 
         if scoped {
             self.emit_region_enter();
@@ -254,7 +259,7 @@ impl Lowerer {
             result_reg,
             result_slot: block_result_slot,
             exit_label,
-            region_depth_at_entry: self.region_depth,
+            region_depth_at_entry: depth_before,
         });
 
         // Lower body (same as lower_begin but simpler — body is typically a single Begin node)
