@@ -99,6 +99,7 @@ struct TestCache {
     vm: VM,
     symbols: SymbolTable,
     globals_snapshot: Vec<Value>,
+    defined_globals_snapshot: Vec<bool>,
 }
 
 thread_local! {
@@ -122,10 +123,12 @@ fn eval_with_cache(
             set_symbol_table(&mut symbols as *mut SymbolTable);
             init(&mut vm, &mut symbols);
             let globals_snapshot = vm.globals.clone();
+            let defined_globals_snapshot = vm.defined_globals.clone();
             TestCache {
                 vm,
                 symbols,
                 globals_snapshot,
+                defined_globals_snapshot,
             }
         });
 
@@ -134,6 +137,10 @@ fn eval_with_cache(
         c.vm.jit_cache.clear();
         c.vm.globals.truncate(c.globals_snapshot.len());
         c.vm.globals.copy_from_slice(&c.globals_snapshot);
+        c.vm.defined_globals
+            .truncate(c.defined_globals_snapshot.len());
+        c.vm.defined_globals
+            .copy_from_slice(&c.defined_globals_snapshot);
 
         // Set context pointers (may have been cleared after previous eval)
         set_vm_context(&mut c.vm as *mut VM);

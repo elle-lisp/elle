@@ -221,8 +221,10 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> 
                         let idx = *old_id as usize;
                         if idx >= vm.globals.len() {
                             vm.globals.resize(idx + 1, Value::UNDEFINED);
+                            vm.defined_globals.resize(idx + 1, false);
                         }
                         vm.globals[idx] = val;
+                        vm.defined_globals[idx] = true;
                     }
                 }
             }

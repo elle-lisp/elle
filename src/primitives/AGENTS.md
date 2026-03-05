@@ -106,7 +106,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
 | `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` |
 | `debugging.rs` | `closure?`, `jit?`, `pure?`, `coro?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `captures`, `bytecode-size`, `call-count`, `doc`, `global?`, `string->keyword`, `disbit`, `disjit`, `vm/list-primitives`, `vm/primitive-meta` |
-| `debug.rs` | `debug-print`, `trace`, `memory-usage`, `arena/count`, `arena/stats`, `arena/scope-stats` |
+| `debug.rs` | `debug-print`, `trace`, `memory-usage`, `arena/count`, `arena/stats`, `arena/scope-stats`, `environment` |
 | `process.rs` | `exit`, `halt` |
 
 ## Files

@@ -226,8 +226,10 @@ pub extern "C" fn elle_jit_store_global(sym_id: u64, value: u64, vm: *mut ()) ->
     let idx = sym as usize;
     if idx >= vm.globals.len() {
         vm.globals.resize(idx + 1, Value::UNDEFINED);
+        vm.defined_globals.resize(idx + 1, false);
     }
     vm.globals[idx] = val;
+    vm.defined_globals[idx] = true;
     TAG_NIL
 }
 

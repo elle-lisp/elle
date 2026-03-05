@@ -57,7 +57,7 @@ inner dispatch loop):
 - `SIG_RESUME` (8): VM-internal. Fiber primitive requests VM-side execution.
 - `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-raises caught signal.
 - `SIG_CANCEL` (64): VM-internal. `fiber/cancel` injects error into fiber.
-- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (e.g., call counts, global bindings, arena stats).
+- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (e.g., call counts, global bindings, arena stats, environment).
 - `SIG_HALT` (256): Graceful VM termination. Value in `fiber.signal`. Non-resumable; fiber is Dead.
 
 The public `execute_bytecode` method is the translation boundary — it converts
@@ -148,6 +148,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached NaN-boxed Value for current fiber (`None` for root) |
 | `globals` | `Vec<Value>` | Global bindings by SymbolId |
+| `defined_globals` | `Vec<bool>` | Tracks which global slots have been assigned (shadows `globals`) |
 | `jit_cache` | `FxHashMap<*const u8, Rc<JitCode>>` | JIT code cache (FxHash for pointer keys) |
 | `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
 | `scope_stack` | `ScopeStack` | Runtime scope stack |
