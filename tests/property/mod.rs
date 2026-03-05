@@ -9,9 +9,6 @@ mod fibers {
 mod nanboxing {
     include!("nanboxing.rs");
 }
-mod arithmetic {
-    include!("arithmetic.rs");
-}
 mod reader {
     include!("reader.rs");
 }

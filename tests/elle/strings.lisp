@@ -158,3 +158,35 @@
   "length of single char")
 (assert-string-eq (string/char-at "a" 0) "a"
   "char-at single char")
+
+# ============================================================================
+# String comparison laws (migrated from tests/property/comparison.rs)
+# ============================================================================
+
+# < and >= are complementary
+(assert-true (not (= (< "abc" "def") (>= "abc" "def")))
+  "lt/ge complementary: abc vs def")
+(assert-true (not (= (< "zzz" "aaa") (>= "zzz" "aaa")))
+  "lt/ge complementary: zzz vs aaa")
+(assert-true (not (= (< "same" "same") (>= "same" "same")))
+  "lt/ge complementary: same vs same")
+
+# > and <= are complementary
+(assert-true (not (= (> "abc" "def") (<= "abc" "def")))
+  "gt/le complementary: abc vs def")
+(assert-true (not (= (> "zzz" "aaa") (<= "zzz" "aaa")))
+  "gt/le complementary: zzz vs aaa")
+
+# Transitivity: if a < b and b < c then a < c
+(assert-true (if (and (< "abc" "def") (< "def" "ghi"))
+               (< "abc" "ghi")
+               true)
+  "lt transitive: abc < def < ghi")
+
+# <= is equivalent to (or (< a b) (= a b))
+(assert-eq (<= "abc" "def") (or (< "abc" "def") (= "abc" "def"))
+  "le = lt or eq: abc vs def")
+(assert-eq (<= "abc" "abc") (or (< "abc" "abc") (= "abc" "abc"))
+  "le = lt or eq: abc vs abc")
+(assert-eq (<= "def" "abc") (or (< "def" "abc") (= "def" "abc"))
+  "le = lt or eq: def vs abc")

@@ -109,3 +109,13 @@ fn bugfixes() {
 fn fibers() {
     run_elle_script("fibers");
 }
+
+#[test]
+fn matching() {
+    run_elle_script("matching");
+}
+
+#[test]
+fn coroutines() {
+    run_elle_script("coroutines");
+}
