@@ -50,6 +50,7 @@ pub mod plugin;
 pub mod primitives;
 pub mod reader;
 pub mod repl;
+pub mod rewrite;
 pub mod symbol;
 pub mod symbols;
 pub mod syntax;

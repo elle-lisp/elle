@@ -1,4 +1,4 @@
-// CLI dispatch tests for --lint and --lsp switches
+// CLI dispatch tests for lint and lsp subcommands
 
 use std::process::Command;
 
@@ -9,14 +9,14 @@ fn get_elle_binary() -> &'static str {
 #[test]
 fn test_lint_help_exits_zero() {
     let output = Command::new(get_elle_binary())
-        .args(["--lint", "--help"])
+        .args(["lint", "--help"])
         .output()
         .expect("Failed to run elle");
 
     assert_eq!(
         output.status.code().unwrap_or(-1),
         0,
-        "elle --lint --help should exit 0, stderr: {}",
+        "elle lint --help should exit 0, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -24,14 +24,14 @@ fn test_lint_help_exits_zero() {
 #[test]
 fn test_lint_good_file_exits_zero() {
     let output = Command::new(get_elle_binary())
-        .args(["--lint", "tests/fixtures/naming-good.lisp"])
+        .args(["lint", "tests/fixtures/naming-good.lisp"])
         .output()
         .expect("Failed to run elle");
 
     assert_eq!(
         output.status.code().unwrap_or(-1),
         0,
-        "elle --lint on clean file should exit 0, stderr: {}",
+        "elle lint on clean file should exit 0, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -39,14 +39,14 @@ fn test_lint_good_file_exits_zero() {
 #[test]
 fn test_lint_bad_file_exits_two() {
     let output = Command::new(get_elle_binary())
-        .args(["--lint", "tests/fixtures/naming-bad.lisp"])
+        .args(["lint", "tests/fixtures/naming-bad.lisp"])
         .output()
         .expect("Failed to run elle");
 
     assert_eq!(
         output.status.code().unwrap_or(-1),
         2,
-        "elle --lint on bad-naming file should exit 2 (warnings), stderr: {}",
+        "elle lint on bad-naming file should exit 2 (warnings), stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -54,12 +54,7 @@ fn test_lint_bad_file_exits_two() {
 #[test]
 fn test_lint_json_output() {
     let output = Command::new(get_elle_binary())
-        .args([
-            "--lint",
-            "--format",
-            "json",
-            "tests/fixtures/naming-bad.lisp",
-        ])
+        .args(["lint", "--format", "json", "tests/fixtures/naming-bad.lisp"])
         .output()
         .expect("Failed to run elle");
 
@@ -74,7 +69,7 @@ fn test_lint_json_output() {
 #[test]
 fn test_lint_nonexistent_file() {
     let output = Command::new(get_elle_binary())
-        .args(["--lint", "nonexistent-file-that-does-not-exist.lisp"])
+        .args(["lint", "nonexistent-file-that-does-not-exist.lisp"])
         .output()
         .expect("Failed to run elle");
 
@@ -82,7 +77,7 @@ fn test_lint_nonexistent_file() {
     assert_ne!(
         output.status.code().unwrap_or(-1),
         0,
-        "elle --lint on nonexistent file should not exit 0"
+        "elle lint on nonexistent file should not exit 0"
     );
 }
 
@@ -111,13 +106,24 @@ fn test_help_mentions_lint_and_lsp() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("--lint"),
-        "--help should mention --lint, got: {}",
+        stdout.contains("lint"),
+        "--help should mention lint, got: {}",
         stdout
     );
     assert!(
-        stdout.contains("--lsp"),
-        "--help should mention --lsp, got: {}",
+        stdout.contains("lsp"),
+        "--help should mention lsp, got: {}",
         stdout
     );
+}
+
+#[test]
+fn test_rewrite_help() {
+    let output = Command::new(get_elle_binary())
+        .args(["rewrite", "--help"])
+        .output()
+        .expect("Failed to execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("elle rewrite"));
 }

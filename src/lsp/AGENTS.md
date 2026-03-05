@@ -36,7 +36,7 @@ The LSP hover provider shows:
 `get_primitive_documentation()` was removed from `symbols/mod.rs`. The LSP now
 uses `vm.docs` via `CompilerState::docs()` for builtin documentation.
 
-Invoked via `elle --lsp`.
+Invoked via `elle lsp`.
 
 ## Files
 

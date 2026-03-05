@@ -301,8 +301,8 @@ Nothing is annotated. Everything is inferred.
 make                                          # build elle + plugins + docs
 ./target/release/elle examples/hello.lisp     # run a file
 ./target/release/elle                         # REPL
-./target/release/elle --lint file.lisp        # static analysis
-./target/release/elle --lsp                   # language server
+./target/release/elle lint file.lisp          # static analysis
+./target/release/elle lsp                     # language server
 ```
 
 The `examples/` directory is executable documentation. Each file
