@@ -33,6 +33,7 @@ fn test_closure_type_identification() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -62,6 +63,7 @@ fn test_closure_display() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -88,6 +90,7 @@ fn test_closure_clone() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -160,6 +163,7 @@ fn test_closure_empty_environment() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -185,6 +189,7 @@ fn test_closure_single_captured_variable() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -216,6 +221,7 @@ fn test_closure_multiple_captured_variables() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -244,6 +250,7 @@ fn test_closure_environment_sharing() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -263,6 +270,7 @@ fn test_closure_environment_sharing() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -295,6 +303,7 @@ fn test_closure_bytecode_storage() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -320,6 +329,7 @@ fn test_closure_constants_storage() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -345,6 +355,7 @@ fn test_closure_num_locals() {
 
             effect: Effect::none(),
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
@@ -373,6 +384,7 @@ fn test_closure_zero_parameters() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -397,6 +409,7 @@ fn test_closure_single_parameter() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -420,6 +433,7 @@ fn test_closure_multiple_parameters() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -445,6 +459,7 @@ fn test_closure_variadic_parameters() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -475,6 +490,7 @@ fn test_closures_never_equal() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -494,6 +510,7 @@ fn test_closures_never_equal() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -520,6 +537,7 @@ fn test_same_closure_reference_equality() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -556,6 +574,7 @@ fn test_closure_with_nested_captured_values() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -581,6 +600,7 @@ fn test_closure_with_closure_in_constants() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -600,6 +620,7 @@ fn test_closure_with_closure_in_constants() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -627,6 +648,7 @@ fn test_closure_with_many_upvalues() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -657,6 +679,7 @@ fn test_closure_as_method() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -689,6 +712,7 @@ fn test_closure_type_check() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -724,6 +748,7 @@ fn test_closure_environment_isolation() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -743,6 +768,7 @@ fn test_closure_environment_isolation() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -769,6 +795,7 @@ fn test_closure_local_variables_count() {
 
             effect: Effect::none(),
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
@@ -797,6 +824,7 @@ fn test_closure_with_empty_bytecode() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -822,6 +850,7 @@ fn test_closure_with_large_bytecode() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -849,6 +878,7 @@ fn test_closure_rc_reference_counting() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,
@@ -879,6 +909,7 @@ fn test_closure_debug_format() {
 
         effect: Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
         location_map: Rc::new(LocationMap::new()),
         jit_code: None,

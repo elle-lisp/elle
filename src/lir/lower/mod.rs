@@ -221,9 +221,11 @@ impl Lowerer {
         // But binding_to_slot needs the actual index in the environment
         let slot = if self.in_lambda {
             // Track which locally-defined variables need cells.
-            // Local index = num_locals - arity_params (0-based within locally-defined vars).
-            let arity_params = self.current_func.arity.fixed_params() as u16;
-            let local_index = self.current_func.num_locals - arity_params;
+            // Local index = num_locals - num_params (0-based within locally-defined vars).
+            // Must use num_params (not arity.fixed_params()) because num_params includes
+            // the rest parameter slot for variadic functions, matching the environment layout.
+            let num_params = self.current_func.num_params as u16;
+            let local_index = self.current_func.num_locals - num_params;
             if binding.needs_cell() && local_index < 64 {
                 self.current_func.cell_locals_mask |= 1 << local_index;
             }

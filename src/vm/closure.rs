@@ -33,6 +33,7 @@ pub fn handle_make_closure(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constan
         constants: template_closure.constants.clone(),
         effect: template_closure.effect,
         cell_params_mask: template_closure.cell_params_mask,
+        cell_locals_mask: template_closure.cell_locals_mask,
         symbol_names: template_closure.symbol_names.clone(),
         location_map: template_closure.location_map.clone(),
         jit_code: template_closure.jit_code.clone(),

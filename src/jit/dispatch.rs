@@ -524,9 +524,15 @@ fn build_closure_env_for_jit(
     };
     let num_locally_defined = closure.num_locals.saturating_sub(num_params);
 
-    // Add empty LocalCells for locally-defined variables
-    for _ in 0..num_locally_defined {
-        new_env.push(Value::local_cell(Value::NIL));
+    // Add slots for locally-defined variables.
+    // Cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
+    // Beyond index 63, conservatively use LocalCell.
+    for i in 0..num_locally_defined {
+        if i >= 64 || (closure.cell_locals_mask & (1 << i)) != 0 {
+            new_env.push(Value::local_cell(Value::NIL));
+        } else {
+            new_env.push(Value::NIL);
+        }
     }
 
     std::rc::Rc::new(new_env)

@@ -172,6 +172,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> 
 
     // Extract closure metadata needed for proper environment setup
     let num_locals = closure.num_locals;
+    let cell_locals_mask = closure.cell_locals_mask;
     let _num_captures = closure.num_captures;
     let arity = match closure.arity {
         crate::value::Arity::Exact(n) => n,
@@ -238,13 +239,17 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> 
             .map(|sv: SendValue| sv.into_value())
             .collect();
 
-        // Add LocalCell slots for locally-defined variables (let bindings etc.)
-        // This replicates the logic in the VM's Call handler that creates
-        // environment slots for variables defined inside the closure body.
+        // Add slots for locally-defined variables.
+        // Cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
+        // Beyond index 63, conservatively use LocalCell.
         let num_params = arity;
         let num_locally_defined = num_locals.saturating_sub(num_params);
-        for _ in 0..num_locally_defined {
-            env_values.push(Value::local_cell(Value::NIL));
+        for i in 0..num_locally_defined {
+            if i >= 64 || (cell_locals_mask & (1 << i)) != 0 {
+                env_values.push(Value::local_cell(Value::NIL));
+            } else {
+                env_values.push(Value::NIL);
+            }
         }
 
         let env_rc = Rc::new(env_values);

@@ -286,15 +286,21 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
         }
     }
 
-    // Add empty LocalCells for locally-defined variables
+    // Add slots for locally-defined variables.
+    // Cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
+    // Beyond index 63, conservatively use LocalCell.
     let num_param_slots = match closure.arity {
         crate::value::Arity::Exact(n) => n,
         crate::value::Arity::AtLeast(n) => n + 1,
         crate::value::Arity::Range(min, _) => min,
     };
     let num_locally_defined = closure.num_locals.saturating_sub(num_param_slots);
-    for _ in 0..num_locally_defined {
-        env.push(Value::local_cell(Value::NIL));
+    for i in 0..num_locally_defined {
+        if i >= 64 || (closure.cell_locals_mask & (1 << i)) != 0 {
+            env.push(Value::local_cell(Value::NIL));
+        } else {
+            env.push(Value::NIL);
+        }
     }
 
     env
@@ -430,6 +436,7 @@ mod tests {
             constants: Rc::new(vec![]),
             effect: Effect::none(),
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
@@ -524,6 +531,7 @@ mod tests {
             constants: Rc::new(vec![]),
             effect: Effect::none(),
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
@@ -538,7 +546,7 @@ mod tests {
         assert_eq!(env.len(), 3);
         assert_eq!(env[0].as_int(), Some(99)); // capture
         assert_eq!(env[1].as_int(), Some(42)); // param
-                                               // env[2] is a LocalCell(NIL) for the local variable
+                                               // env[2] is NIL for the non-cell local variable
     }
 
     #[test]

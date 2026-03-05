@@ -29,6 +29,10 @@ pub struct Closure {
     /// Bitmask indicating which parameters need cell wrapping.
     /// Bit i set means parameter i is mutated and needs a LocalCell.
     pub cell_params_mask: u64,
+    /// Bitmask indicating which locally-defined variables need cell wrapping.
+    /// Bit i set means locally-defined variable i needs a LocalCell.
+    /// Used by the emitter to decide StoreLocal vs StoreUpvalue.
+    pub cell_locals_mask: u64,
     /// Symbol ID → name mapping for cross-thread portability.
     /// When bytecode is sent to a new thread, symbol IDs may differ.
     /// This map allows remapping globals to the correct IDs.
@@ -75,6 +79,7 @@ impl PartialEq for Closure {
             && self.constants == other.constants
             && self.effect == other.effect
             && self.cell_params_mask == other.cell_params_mask
+            && self.cell_locals_mask == other.cell_locals_mask
             && self.symbol_names == other.symbol_names
             && self.location_map == other.location_map
             && self.doc == other.doc
@@ -100,6 +105,7 @@ mod tests {
             constants: Rc::new(vec![]),
             effect: Effect::none(),
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
@@ -123,6 +129,7 @@ mod tests {
             constants: Rc::new(vec![]),
             effect: Effect::none(),
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
@@ -144,6 +151,7 @@ mod tests {
             constants: Rc::new(vec![]),
             effect: Effect::none(),
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
@@ -165,6 +173,7 @@ mod tests {
             constants: Rc::new(vec![]),
             effect: Effect::none(),
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
