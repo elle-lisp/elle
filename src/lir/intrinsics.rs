@@ -96,9 +96,6 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "pure?",
     "coro?",
     "box?",
-    // Comparison alias → bool (canonical `=` is in intrinsics map, but
-    // `eq?` gets its own SymbolId and misses the intrinsics lookup)
-    "eq?",
     // Collection predicates → bool
     "empty?",
     "has-key?",

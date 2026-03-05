@@ -125,6 +125,9 @@ mod elle_scripts {
 mod comparison {
     include!("comparison.rs");
 }
+mod allocator {
+    include!("allocator.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

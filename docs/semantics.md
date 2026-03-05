@@ -96,7 +96,7 @@ The `if` special form evaluates the test expression and:
 
 ```lisp
 (= nil ())   # ⟹ false
-(eq? nil ()) # ⟹ false
+(identical? nil ()) # ⟹ false
 ```
 
 They have different NaN-boxed representations:

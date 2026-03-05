@@ -1,0 +1,65 @@
+//! Analysis pipeline: source -> HIR (no bytecode generation).
+
+use super::cache;
+use super::fixpoint;
+use super::scan;
+use super::AnalyzeResult;
+use crate::hir::Analyzer;
+use crate::reader::{read_syntax, read_syntax_all};
+use crate::symbol::SymbolTable;
+use crate::vm::VM;
+
+/// Analyze source code without generating bytecode.
+/// Used by linter and LSP which need HIR but not bytecode.
+pub fn analyze(
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+) -> Result<AnalyzeResult, String> {
+    let syntax = read_syntax(source)?;
+
+    let (mut expander, meta) = cache::get_cached_expander_and_meta();
+
+    let expanded = expander.expand(syntax, symbols, vm)?;
+    let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
+    let analysis = analyzer.analyze(&expanded)?;
+    Ok(AnalyzeResult { hir: analysis.hir })
+}
+
+/// Analyze multiple top-level forms without generating bytecode.
+/// Uses fixpoint iteration for effect inference (same as compile_all).
+pub fn analyze_all(
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+) -> Result<Vec<AnalyzeResult>, String> {
+    let syntaxes = read_syntax_all(source)?;
+
+    let (mut expander, meta) = cache::get_cached_expander_and_meta();
+
+    // Expand all forms first
+    let mut expanded_forms = Vec::new();
+    for syntax in syntaxes {
+        let expanded = expander.expand(syntax, symbols, vm)?;
+        expanded_forms.push(expanded);
+    }
+
+    let (global_effects, global_arities, immutable_globals) =
+        scan::prescan_forms(&expanded_forms, symbols);
+
+    let analysis_results = fixpoint::run_fixpoint(
+        &expanded_forms,
+        symbols,
+        &meta,
+        global_effects,
+        global_arities,
+        immutable_globals,
+        |_| {},
+    )?;
+
+    // Convert to AnalyzeResult
+    Ok(analysis_results
+        .into_iter()
+        .map(|a| AnalyzeResult { hir: a.hir })
+        .collect())
+}

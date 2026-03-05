@@ -402,11 +402,29 @@ thread_local! {
 pub struct ArenaMark {
     position: usize,
     dtor_len: usize,
+    /// Length of the active custom allocator's `custom_ptrs` at mark time.
+    /// Zero if no custom allocator is active.
+    ///
+    /// # Safety invariant
+    ///
+    /// This field records the position in the *current* (innermost) custom
+    /// allocator's `custom_ptrs` at `RegionEnter` time. This is safe because
+    /// `with-allocator` desugars to `defer`, which wraps the body in a fiber —
+    /// the body's scope marks live on the child fiber's `FiberHeap`, separate
+    /// from the parent's. If anyone calls `%install-allocator`/`%uninstall-allocator`
+    /// directly without a fiber boundary between install and scope marks,
+    /// `RegionExit` may dealloc from a popped allocator (use-after-free).
+    /// **These primitives must only be used via the `with-allocator` macro.**
+    custom_ptrs_len: usize,
 }
 
 impl ArenaMark {
-    pub(crate) fn new_with_dtor_len(position: usize, dtor_len: usize) -> Self {
-        ArenaMark { position, dtor_len }
+    pub(crate) fn new_full(position: usize, dtor_len: usize, custom_ptrs_len: usize) -> Self {
+        ArenaMark {
+            position,
+            dtor_len,
+            custom_ptrs_len,
+        }
     }
 
     pub(crate) fn position(&self) -> usize {
@@ -415,6 +433,10 @@ impl ArenaMark {
 
     pub(crate) fn dtor_len(&self) -> usize {
         self.dtor_len
+    }
+
+    pub(crate) fn custom_ptrs_len(&self) -> usize {
+        self.custom_ptrs_len
     }
 }
 
@@ -449,6 +471,7 @@ pub fn heap_arena_mark() -> ArenaMark {
     HEAP_ARENA.with(|arena| ArenaMark {
         position: arena.borrow().objects.len(),
         dtor_len: 0,
+        custom_ptrs_len: 0,
     })
 }
 

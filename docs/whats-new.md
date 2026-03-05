@@ -125,7 +125,7 @@ This is the critical distinction. Each predicate behaves differently:
 
 ```lisp
 (= nil ())   # ⟹ false
-(eq? nil ()) # ⟹ false
+(identical? nil ()) # ⟹ false
 ```
 
 ### List Construction

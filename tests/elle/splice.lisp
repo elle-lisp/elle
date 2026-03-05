@@ -116,3 +116,6 @@
   (assert-eq (add3 ;(list 10 20 30)) 60 "splice list into closure call"))
 
 (assert-eq (+ ;(list)) 0 "splice empty list")
+
+# Splice with list (runtime error — lists are not indexed)
+# ============================================================================

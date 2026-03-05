@@ -2,7 +2,17 @@
 
 Compilation entry points. Orchestrates Reader → Expander → Analyzer → Lowerer → Emitter.
 
-Single file: `src/pipeline.rs` (~415 lines of implementation, ~1350 lines of tests).
+Module: `src/pipeline/` (7 files, ~540 lines of implementation).
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `mod.rs` | 28 | Module declarations, re-exports, type definitions |
+| `cache.rs` | 92 | Thread-local compilation cache (VM, Expander, PrimitiveMeta) |
+| `scan.rs` | 97 | Pre-scanning for forward declarations (`prescan_forms`, `scan_define_lambda`, `scan_const_binding`) |
+| `fixpoint.rs` | 81 | Shared fixpoint loop (`run_fixpoint`) parameterized by post-analyze closure |
+| `compile.rs` | 115 | `compile()`, `compile_all()` |
+| `analyze.rs` | 65 | `analyze()`, `analyze_all()` |
+| `eval.rs` | 90 | `eval()`, `eval_all()`, `eval_syntax()` |
 
 ## Public API
 
@@ -102,22 +112,23 @@ the analyzer sees `f` before `g` exists. Without pre-scanning, `g` would be
 treated as an unknown global with `Polymorphic` effect, making `f` also
 `Polymorphic` — even if both are actually `Pure`.
 
-### Algorithm (lines 162–261 in `compile_all`, 330–413 in `analyze_all`)
+### Algorithm (in `src/pipeline/fixpoint.rs`)
 
 The algorithm has five phases (not to be confused with the max iteration
 count of 10 within phase 4):
 
-1. **Parse and expand** all forms upfront (lines 170–174). Expansion is
-   idempotent so this only happens once.
+1. **Parse and expand** all forms upfront. Expansion is idempotent so this
+   only happens once. (In `compile_all` and `analyze_all` before calling
+   `run_fixpoint`.)
 
-2. **Pre-scan for `(def name (fn ...))` patterns** (lines 176–186). For each
-   match, seed `global_effects` with `Effect::none()` (optimistic — assume
-   pure) and extract syntactic arity into `global_arities`.
+2. **Pre-scan for `(def name (fn ...))` patterns** via `prescan_forms()`.
+   For each match, seed `global_effects` with `Effect::none()` (optimistic —
+   assume pure) and extract syntactic arity into `global_arities`.
 
-3. **Pre-scan for `(def name ...)` patterns** (lines 188–195). Track all
+3. **Pre-scan for `(def name ...)` patterns** via `prescan_forms()`. Track all
    `def` bindings as immutable globals for cross-form immutability checking.
 
-4. **Fixpoint iteration** (lines 197–241, max 10 iterations):
+4. **Fixpoint iteration** (in `run_fixpoint()`, max 10 iterations):
    - Clear `analysis_results`
    - For each form, create a fresh `Analyzer` seeded with:
      - `global_effects` from previous iteration (or pre-scan)
@@ -129,7 +140,11 @@ count of 10 within phase 4):
    - If equal → converged, break
    - If different → update `global_effects`, re-analyze all forms
 
-5. **Lower and emit** (lines 243–258). Only after convergence.
+5. **Post-analysis callback** (parameterized by `post_analyze` closure):
+   - `compile_all` passes `|a| mark_tail_calls(&mut a.hir)` to mark tail calls
+   - `analyze_all` passes `|_| {}` (no-op, returns HIR as-is)
+
+6. **Lower and emit** (only in `compile_all`, after convergence).
 
 ### Convergence
 
@@ -139,20 +154,37 @@ The algorithm converges because effects form a lattice: `Pure` < `Yields` <
 reached. The max of 10 iterations is a safety bound — in practice, convergence
 happens in 1–3 iterations.
 
-### Duplication
+### Deduplication
 
-The fixpoint loop is duplicated between `compile_all` (lines 162–261) and
-`analyze_all` (lines 330–413). The logic is nearly identical; the only
-difference is that `compile_all` calls `mark_tail_calls` during iteration and
-then lowers/emits, while `analyze_all` skips tail call marking and returns
-`AnalyzeResult` directly.
+The fixpoint loop was previously duplicated between `compile_all` and
+`analyze_all`. It is now unified in `run_fixpoint()` (in `src/pipeline/fixpoint.rs`),
+parameterized by a `post_analyze` closure. This eliminates ~100 lines of
+duplicated logic and makes the algorithm easier to maintain.
 
-## Pre-scanning functions
+## Pre-scanning functions (in `src/pipeline/scan.rs`)
 
-### `scan_define_lambda` (lines 35–66)
+### `prescan_forms()`
 
 ```rust
-fn scan_define_lambda(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<(SymbolId, Option<Arity>)>
+pub(super) fn prescan_forms(
+    forms: &[Syntax],
+    symbols: &mut SymbolTable,
+) -> (HashMap<SymbolId, Effect>, HashMap<SymbolId, Arity>, HashSet<SymbolId>)
+```
+
+Unified pre-scan that processes all forms in a single pass, calling both
+`scan_define_lambda` and `scan_const_binding` for each form. Returns:
+- `global_effects`: `(def name (fn ...))` patterns seeded with `Effect::none()`
+- `global_arities`: syntactic arities from lambda parameter lists
+- `immutable_globals`: all `(def name ...)` patterns
+
+### `scan_define_lambda()`
+
+```rust
+pub(super) fn scan_define_lambda(
+    syntax: &Syntax,
+    symbols: &mut SymbolTable,
+) -> Option<(SymbolId, Option<Arity>)>
 ```
 
 Matches expanded syntax of the form `(var/def name (fn ...))`. Returns the
@@ -163,10 +195,13 @@ optimistic `Effect::none()` and known arities before analysis begins.
 This operates on **expanded** syntax — `defn` has already been desugared to
 `(def name (fn ...))` by the Expander.
 
-### `scan_const_binding` (lines 70–83)
+### `scan_const_binding()`
 
 ```rust
-fn scan_const_binding(syntax: &Syntax, symbols: &mut SymbolTable) -> Option<SymbolId>
+pub(super) fn scan_const_binding(
+    syntax: &Syntax,
+    symbols: &mut SymbolTable,
+) -> Option<SymbolId>
 ```
 
 Matches `(def name ...)` patterns (not `var`). Returns the `SymbolId`. Used to
@@ -187,15 +222,35 @@ Every compilation path follows the same five phases:
 
 `analyze` and `analyze_all` stop after phase 3 (no lowering or emission).
 
+## Compilation cache (in `src/pipeline/cache.rs`)
+
+The module uses a thread-local `CompilationCache` to avoid per-call costs of
+VM creation, primitive registration, and prelude loading.
+
+### `get_compilation_cache()`
+
+Returns `(*mut VM, Expander, PrimitiveMeta)` from the thread-local cache.
+The VM's fiber is always reset before use. The Expander is cloned so each
+pipeline call gets independent expansion state. Used by `compile` and
+`compile_all`.
+
+### `get_cached_expander_and_meta()`
+
+Returns `(Expander, PrimitiveMeta)` from the thread-local cache without
+borrowing the cached VM. Used by `eval`, `analyze`, and `analyze_all` which
+have their own VM.
+
+### Invariants
+
+- Prelude must be 100% defmacro (no runtime definitions)
+- Primitives must be registered before any pipeline function call
+- Pipeline functions are not re-entrant (no nested compile/compile_all)
+- Primitive registration order is deterministic (ALL_TABLES)
+
 ## Known issues
 
-**GitHub issue #375** tracks the plan for pipeline decomposition. Current
-structural problems:
-
-- The fixpoint loop is duplicated between `compile_all` and `analyze_all`
-- `CompileResult.warnings` is always empty (dead field)
-- Single-form functions (`compile`, `eval`, `analyze`) don't benefit from
-  cross-form effect inference — a file compiled via `compile` instead of
-  `compile_all` will treat all global calls as `Polymorphic`
-- The REPL uses `compile` (single-form), so REPL-defined functions don't
-  get cross-form effect inference
+`CompileResult.warnings` is always empty (dead field). Single-form functions
+(`compile`, `eval`, `analyze`) don't benefit from cross-form effect inference —
+a file compiled via `compile` instead of `compile_all` will treat all global
+calls as `Polymorphic`. The REPL uses `compile` (single-form), so REPL-defined
+functions don't get cross-form effect inference.
