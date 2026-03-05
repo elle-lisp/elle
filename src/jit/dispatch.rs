@@ -3,9 +3,9 @@
 //! These functions handle complex operations that interact with heap types
 //! or require VM access: data structures, cells, globals, and function calls.
 
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_OK, SIG_QUERY};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_OK, SIG_QUERY, SIG_YIELD};
 use crate::value::repr::TAG_NIL;
-use crate::value::{error_val, Value};
+use crate::value::{error_val, SuspendedFrame, Value};
 
 // =============================================================================
 // Primitive Signal Handling (for JIT dispatch)
@@ -13,11 +13,11 @@ use crate::value::{error_val, Value};
 
 /// Handle signal bits from a primitive call in JIT context.
 ///
-/// JIT-compiled code only runs non-suspending functions, so SIG_YIELD and
-/// SIG_RESUME should never appear here. SIG_ERROR sets the exception on
-/// the fiber for the JIT caller to check. SIG_QUERY is dispatched to the
-/// VM's query handler (for primitives like `list-primitives` and
-/// `primitive-meta` that read VM state).
+/// With the relaxed JIT gate, SIG_YIELD can now appear here from primitives
+/// like `fiber/resume`. SIG_RESUME should never appear (it's VM-internal).
+/// SIG_ERROR sets the exception on the fiber for the JIT caller to check.
+/// SIG_QUERY is dispatched to the VM's query handler (for primitives like
+/// `list-primitives` and `primitive-meta` that read VM state).
 fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: Value) -> u64 {
     match bits {
         SIG_OK => value.to_bits(),
@@ -35,13 +35,19 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
                 result.to_bits()
             }
         }
+        SIG_YIELD => {
+            // A primitive yielded (e.g., fiber/resume). fiber.signal is
+            // already set by the primitive. Return YIELD_SENTINEL so the
+            // JIT caller can side-exit.
+            YIELD_SENTINEL
+        }
         _ => {
             // Reaching here means the effect system has a bug: a suspending
             // primitive was called from JIT-compiled code, which should be
-            // impossible since the JIT gate rejects may_suspend() closures.
+            // impossible since the JIT gate rejects polymorphic closures.
             panic!(
                 "Effect system bug: signal {} reached JIT-compiled code. \
-                 Only SIG_OK, SIG_ERROR, SIG_HALT, and SIG_QUERY should appear in JIT context.",
+                 Only SIG_OK, SIG_ERROR, SIG_HALT, SIG_YIELD, and SIG_QUERY should appear in JIT context.",
                 bits
             );
         }
@@ -335,27 +341,29 @@ pub extern "C" fn elle_jit_call(
                 return TAG_NIL;
             }
 
+            // Check for yield from callee
+            if matches!(vm.fiber.signal, Some((SIG_YIELD, _))) {
+                return YIELD_SENTINEL;
+            }
+
             // Handle tail call sentinel
             if result_bits == TAIL_CALL_SENTINEL {
                 if let Some(tail) = vm.pending_tail_call.take() {
-                    let (bits, val) = vm.execute_closure_bytecode(
+                    let result = vm.execute_bytecode_saving_stack(
                         &tail.bytecode,
                         &tail.constants,
                         &tail.env,
                         &tail.location_map,
                     );
-                    match bits {
-                        SIG_OK | SIG_HALT => return val.to_bits(),
-                        SIG_ERROR => {
-                            vm.fiber.signal = Some((SIG_ERROR, val));
-                            return TAG_NIL;
-                        }
-                        _ => {
-                            vm.fiber.signal = Some((bits, val));
-                            return TAG_NIL;
-                        }
-                    }
+                    return exec_result_to_jit_bits(vm, result.bits);
                 }
+            }
+
+            // Check for YIELD_SENTINEL from callee (defensive — signal check
+            // above should catch this first, but the callee might have returned
+            // YIELD_SENTINEL without setting fiber.signal in a bug scenario)
+            if result_bits == YIELD_SENTINEL {
+                return YIELD_SENTINEL;
             }
 
             return result_bits;
@@ -369,7 +377,7 @@ pub extern "C" fn elle_jit_call(
         let new_env = build_closure_env_for_jit(closure, &args);
 
         vm.fiber.call_depth += 1;
-        let (bits, val) = vm.execute_closure_bytecode(
+        let result = vm.execute_bytecode_saving_stack(
             &closure.bytecode,
             &closure.constants,
             &new_env,
@@ -377,17 +385,7 @@ pub extern "C" fn elle_jit_call(
         );
         vm.fiber.call_depth -= 1;
 
-        match bits {
-            SIG_OK | SIG_HALT => val.to_bits(),
-            SIG_ERROR => {
-                vm.fiber.signal = Some((SIG_ERROR, val));
-                TAG_NIL
-            }
-            _ => {
-                vm.fiber.signal = Some((bits, val));
-                TAG_NIL
-            }
-        }
+        exec_result_to_jit_bits(vm, result.bits)
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -411,23 +409,13 @@ pub extern "C" fn elle_jit_resolve_tail_call(result: u64, vm: *mut ()) -> u64 {
     }
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     if let Some(tail) = vm.pending_tail_call.take() {
-        let (bits, val) = vm.execute_closure_bytecode(
+        let result = vm.execute_bytecode_saving_stack(
             &tail.bytecode,
             &tail.constants,
             &tail.env,
             &tail.location_map,
         );
-        match bits {
-            SIG_OK | SIG_HALT => val.to_bits(),
-            SIG_ERROR => {
-                vm.fiber.signal = Some((SIG_ERROR, val));
-                TAG_NIL
-            }
-            _ => {
-                vm.fiber.signal = Some((bits, val));
-                TAG_NIL
-            }
-        }
+        exec_result_to_jit_bits(vm, result.bits)
     } else {
         panic!(
             "VM bug: TAIL_CALL_SENTINEL returned but no pending_tail_call set. \
@@ -462,6 +450,23 @@ pub extern "C" fn elle_jit_call_depth_exit(vm: *mut ()) -> u64 {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     vm.fiber.call_depth -= 1;
     TAG_NIL
+}
+
+/// Convert an ExecResult from execute_bytecode_saving_stack to a JIT return value.
+/// Handles SIG_OK, SIG_HALT (both return the value), SIG_YIELD (returns
+/// YIELD_SENTINEL), and errors (signal already set, returns TAG_NIL).
+fn exec_result_to_jit_bits(vm: &mut crate::vm::VM, bits: SignalBits) -> u64 {
+    match bits {
+        SIG_OK | SIG_HALT => {
+            let (_, val) = vm.fiber.signal.take().unwrap();
+            val.to_bits()
+        }
+        SIG_YIELD => YIELD_SENTINEL,
+        _ => {
+            // SIG_ERROR — signal already set on fiber
+            TAG_NIL
+        }
+    }
 }
 
 /// Handle a non-self tail call from JIT code.
@@ -525,6 +530,15 @@ pub extern "C" fn elle_jit_tail_call(
                 return TAG_NIL;
             }
 
+            // Check for yield from callee
+            if matches!(vm.fiber.signal, Some((SIG_YIELD, _))) {
+                return YIELD_SENTINEL;
+            }
+
+            if result_bits == YIELD_SENTINEL {
+                return YIELD_SENTINEL;
+            }
+
             // Propagate result (including TAIL_CALL_SENTINEL) to caller
             return result_bits;
         }
@@ -551,6 +565,141 @@ pub extern "C" fn elle_jit_tail_call(
     ));
     TAG_NIL
 }
+
+// =============================================================================
+// Yield Side-Exit Helpers
+// =============================================================================
+
+/// JIT yield side-exit: build a SuspendedFrame and set fiber.signal.
+///
+/// Called from JIT code when a Yield terminator is reached.
+/// All parameters are u64 to match the Cranelift I64 calling convention.
+///
+/// # Safety
+/// `spilled_values` must point to `num_spilled` contiguous u64 values
+/// (or be null when num_spilled is 0).
+#[no_mangle]
+pub extern "C" fn elle_jit_yield(
+    yielded_value: u64,
+    spilled_values: u64, // *const u64 as u64
+    yield_index: u64,
+    vm: u64, // *mut () as u64
+    closure_bits: u64,
+) -> u64 {
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let yielded = unsafe { Value::from_bits(yielded_value) };
+    let closure_val = unsafe { Value::from_bits(closure_bits) };
+
+    let closure = closure_val
+        .as_closure()
+        .expect("VM bug: elle_jit_yield called with non-closure self_bits");
+
+    // Look up yield point metadata from JitCode
+    let bytecode_ptr = closure.bytecode.as_ptr();
+    let jit_code = vm
+        .jit_cache
+        .get(&bytecode_ptr)
+        .expect("VM bug: elle_jit_yield called but no JitCode in cache");
+    let yield_meta = &jit_code.yield_points[yield_index as usize];
+    let num_spilled = yield_meta.num_spilled as usize;
+
+    // Build the operand stack from spilled values
+    let spilled_ptr = spilled_values as *const u64;
+    let mut stack = Vec::with_capacity(num_spilled);
+    for i in 0..num_spilled {
+        let bits = unsafe { *spilled_ptr.add(i) };
+        stack.push(unsafe { Value::from_bits(bits) });
+    }
+
+    let frame = SuspendedFrame {
+        bytecode: closure.bytecode.clone(),
+        constants: closure.constants.clone(),
+        env: closure.env.clone(),
+        ip: yield_meta.resume_ip,
+        stack,
+        active_allocator: crate::value::fiber_heap::save_active_allocator(),
+        location_map: closure.location_map.clone(),
+    };
+
+    vm.fiber.signal = Some((SIG_YIELD, yielded));
+    vm.fiber.suspended = Some(vec![frame]);
+
+    YIELD_SENTINEL
+}
+
+/// JIT yield-through-call: append a caller frame to fiber.suspended.
+///
+/// Called from JIT code when a callee yields (detected by post-call
+/// signal check). Builds a caller SuspendedFrame and appends it to
+/// the existing suspended frame chain.
+///
+/// All parameters are u64 to match the Cranelift I64 calling convention.
+///
+/// # Safety
+/// `spilled_values` must point to `num_spilled` contiguous u64 values
+/// (or be null when num_spilled is 0).
+#[no_mangle]
+pub extern "C" fn elle_jit_yield_through_call(
+    spilled_values: u64, // *const u64 as u64
+    num_spilled: u64,
+    caller_resume_ip: u64,
+    vm: u64, // *mut () as u64
+    closure_bits: u64,
+) -> u64 {
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let closure_val = unsafe { Value::from_bits(closure_bits) };
+
+    let closure = closure_val
+        .as_closure()
+        .expect("VM bug: elle_jit_yield_through_call called with non-closure");
+
+    let spilled_ptr = spilled_values as *const u64;
+    let n = num_spilled as usize;
+    let mut stack = Vec::with_capacity(n);
+    for i in 0..n {
+        let bits = unsafe { *spilled_ptr.add(i) };
+        stack.push(unsafe { Value::from_bits(bits) });
+    }
+
+    let caller_frame = SuspendedFrame {
+        bytecode: closure.bytecode.clone(),
+        constants: closure.constants.clone(),
+        env: closure.env.clone(),
+        ip: caller_resume_ip as usize,
+        stack,
+        active_allocator: crate::value::fiber_heap::save_active_allocator(),
+        location_map: closure.location_map.clone(),
+    };
+
+    // Append caller frame to the existing suspended chain.
+    // The callee MUST have set fiber.suspended — if not, it's a VM bug.
+    let frames = vm.fiber.suspended.as_mut().expect(
+        "VM bug: elle_jit_yield_through_call called but fiber.suspended is None. \
+         The callee should have set fiber.suspended before returning YIELD_SENTINEL.",
+    );
+    frames.push(caller_frame);
+
+    YIELD_SENTINEL
+}
+
+/// Check if any signal (error, halt, or yield) is pending on the VM.
+/// Returns TRUE bits if set, FALSE bits otherwise.
+///
+/// This extends `elle_jit_has_exception` to also detect SIG_YIELD.
+/// Used after Call instructions in yielding functions.
+#[no_mangle]
+pub extern "C" fn elle_jit_has_signal(vm: u64) -> u64 {
+    let vm = unsafe { &*(vm as *const crate::vm::VM) };
+    Value::bool(matches!(
+        vm.fiber.signal,
+        Some((SIG_ERROR | SIG_HALT | SIG_YIELD, _))
+    ))
+    .to_bits()
+}
+
+// =============================================================================
+// Environment Building
+// =============================================================================
 
 /// Build a closure environment from captured variables and arguments.
 /// This is a copy of VM::build_closure_env but standalone for JIT use.

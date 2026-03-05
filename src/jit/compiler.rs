@@ -86,6 +86,12 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) resolve_tail_call: FuncId,
     pub(crate) call_depth_enter: FuncId,
     pub(crate) call_depth_exit: FuncId,
+    #[allow(dead_code)] // Used in Chunk 3 (Yield terminator translation)
+    pub(crate) jit_yield: FuncId,
+    #[allow(dead_code)] // Used in Chunk 4 (post-call yield detection)
+    pub(crate) jit_yield_through_call: FuncId,
+    #[allow(dead_code)] // Used in Chunk 4 (post-call yield detection)
+    pub(crate) has_signal: FuncId,
 }
 
 impl JitCompiler {
@@ -196,6 +202,15 @@ impl JitCompiler {
             "elle_jit_call_depth_exit",
             dispatch::elle_jit_call_depth_exit as *const u8,
         );
+        builder.symbol("elle_jit_yield", dispatch::elle_jit_yield as *const u8);
+        builder.symbol(
+            "elle_jit_yield_through_call",
+            dispatch::elle_jit_yield_through_call as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_has_signal",
+            dispatch::elle_jit_has_signal as *const u8,
+        );
 
         let mut module = JITModule::new(builder);
 
@@ -260,6 +275,20 @@ impl JitCompiler {
                     .map_err(|e| JitError::CompilationFailed(e.to_string()))
             };
 
+        // elle_jit_yield: 5 params (yielded, spilled_ptr, yield_index, vm, closure_bits)
+        let mut yield_sig = module.make_signature();
+        for _ in 0..5 {
+            yield_sig.params.push(AbiParam::new(I64));
+        }
+        yield_sig.returns.push(AbiParam::new(I64));
+
+        // elle_jit_yield_through_call: 5 params (spilled_ptr, num_spilled, resume_ip, vm, closure_bits)
+        let mut ytc_sig = module.make_signature();
+        for _ in 0..5 {
+            ytc_sig.params.push(AbiParam::new(I64));
+        }
+        ytc_sig.returns.push(AbiParam::new(I64));
+
         Ok(RuntimeHelpers {
             add: declare(module, "elle_jit_add", &binary_sig)?,
             sub: declare(module, "elle_jit_sub", &binary_sig)?,
@@ -300,6 +329,9 @@ impl JitCompiler {
             resolve_tail_call: declare(module, "elle_jit_resolve_tail_call", &binary_sig)?,
             call_depth_enter: declare(module, "elle_jit_call_depth_enter", &unary_sig)?,
             call_depth_exit: declare(module, "elle_jit_call_depth_exit", &unary_sig)?,
+            jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
+            jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
+            has_signal: declare(module, "elle_jit_has_signal", &unary_sig)?,
         })
     }
 
