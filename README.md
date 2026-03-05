@@ -235,6 +235,14 @@ groups are discovered and compiled as a batch, with direct native calls
 between peers. Integer arithmetic gets inline fast paths — a type-tag
 check, then native machine operations, with a fallback for mixed types.
 
+## Source-to-Source Rewriting
+
+Elle includes a source-to-source rewriting tool for automated code
+transformation. The `rewrite` subcommand applies pattern-based rules to
+Elle source files, enabling refactoring, migration, and code generation
+tasks. Rules are defined as pattern-action pairs that match syntax trees
+and produce transformed output.
+
 ## Macros
 
 Elle's macros are hygienic. The expander uses scope sets (Racket-style)
@@ -298,16 +306,24 @@ Nothing is annotated. Everything is inferred.
 ## Getting Started
 
 ```bash
-make                                          # build elle + plugins + docs
-./target/release/elle examples/hello.lisp     # run a file
-./target/release/elle                         # REPL
-./target/release/elle lint file.lisp          # static analysis
-./target/release/elle lsp                     # language server
+make                                              # build elle + plugins + docs
+./target/release/elle examples/hello.lisp         # run a file
+./target/release/elle                             # REPL
+./target/release/elle lint [options] <file|dir>  # static analysis
+./target/release/elle lsp                         # language server
+./target/release/elle rewrite [options] <file>   # source-to-source rewriting
 ```
 
 The `examples/` directory is executable documentation. Each file
 demonstrates a feature and asserts its own correctness — they run as
 part of CI.
+
+### Subcommands
+
+- **`elle [file...]`** — Run Elle files or start the REPL if no files given
+- **`elle lint [options] <file|dir>...`** — Static analysis and linting
+- **`elle lsp`** — Start the language server protocol server
+- **`elle rewrite [options] <file...>`** — Source-to-source rewriting with rules
 
 ## License
 
