@@ -43,7 +43,6 @@ pub struct VM {
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
     pub pending_tail_call: Option<TailCallInfo>,
-    pub current_source_loc: Option<crate::reader::SourceLoc>,
     /// Source location of the instruction that produced the current error.
     /// Resolved by the dispatch loop using the current closure's LocationMap.
     /// Reset to None at each translation boundary entry.
@@ -106,7 +105,6 @@ impl VM {
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
-            current_source_loc: None,
             error_loc: None,
             jit_cache: FxHashMap::default(),
             docs: HashMap::new(),
@@ -135,7 +133,6 @@ impl VM {
         self.current_fiber_handle = None;
         self.current_fiber_value = None;
         self.pending_tail_call = None;
-        self.current_source_loc = None;
         self.error_loc = None;
         self.scope_stack = ScopeStack::new();
         self.closure_call_counts.clear();
@@ -167,15 +164,6 @@ impl VM {
     }
 
     /// Set the current source location for error reporting
-    pub fn set_current_source_loc(&mut self, loc: Option<crate::reader::SourceLoc>) {
-        self.current_source_loc = loc;
-    }
-
-    /// Get the current source location
-    pub fn get_current_source_loc(&self) -> Option<&crate::reader::SourceLoc> {
-        self.current_source_loc.as_ref()
-    }
-
     /// Format a runtime error value with source location.
     pub(crate) fn format_error_with_location(&self, err_value: Value) -> String {
         let base_msg = crate::value::format_error(err_value);
@@ -256,12 +244,6 @@ impl VM {
             }
             trace
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn with_stack_trace(&self, msg: String) -> String {
-        let trace = self.format_stack_trace();
-        format!("{}\nStack trace:\n{}", msg, trace)
     }
 
     /// Capture current call stack as trace frames
