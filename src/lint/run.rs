@@ -1,9 +1,9 @@
-//! CLI entry point for `elle --lint`.
+//! CLI entry point for `elle lint`.
 
 use crate::lint::cli::{LintConfig, Linter, OutputFormat};
 use crate::lint::diagnostics::Severity;
 
-/// Run the linter with the given arguments (everything after `--lint`).
+/// Run the linter with the given arguments (everything after `lint`).
 /// Returns an exit code: 0 = clean, 1 = errors, 2 = warnings only.
 pub fn run(args: &[String]) -> i32 {
     let mut format = OutputFormat::Human;
@@ -108,9 +108,9 @@ fn lint_directory(linter: &mut Linter, dir: &str) {
 }
 
 fn print_help() {
-    println!("elle --lint - Opinionated linter for Elle Lisp");
+    println!("elle lint - Opinionated linter for Elle Lisp");
     println!();
-    println!("Usage: elle --lint [OPTIONS] <file|dir>...");
+    println!("Usage: elle lint [OPTIONS] <file|dir>...");
     println!();
     println!("Options:");
     println!("  --format <format>     Output format: text (default), json");
@@ -118,7 +118,7 @@ fn print_help() {
     println!("  --help, -h            Show this help message");
     println!();
     println!("Examples:");
-    println!("  elle --lint script.lisp");
-    println!("  elle --lint src/ --format json");
-    println!("  elle --lint script.l --level error");
+    println!("  elle lint script.lisp");
+    println!("  elle lint src/ --format json");
+    println!("  elle lint script.l --level error");
 }

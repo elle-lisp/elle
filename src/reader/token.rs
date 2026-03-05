@@ -67,6 +67,8 @@ pub struct TokenWithLoc<'a> {
     /// multi-digit integers and floats) or bolted onto individual variants
     /// like `Bool(bool, usize)`.
     pub len: usize,
+    /// Byte offset in source where this token starts.
+    pub byte_offset: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]

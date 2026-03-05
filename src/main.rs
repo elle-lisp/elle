@@ -27,9 +27,15 @@ fn print_error_context(input: &str, _msg: &str, line: usize, col: usize) {
 }
 
 fn print_help() {
-    println!();
+    println!("Elle v1.0.0\n");
+    println!("Usage: elle [file...]                    Run files or start REPL");
+    println!("       elle lint [options] <file|dir>... Static analysis");
+    println!("       elle lsp                          Start language server");
+    println!("       elle rewrite [options] <file...>  Source-to-source rewriting\n");
+    println!("Options:");
+    println!("  -h, --help    Show this help");
+    println!("  -             Read from stdin\n");
     print!("{}", elle::primitives::help_text());
-    println!();
 }
 
 /// Format a runtime error with symbol resolution
@@ -348,63 +354,51 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Mode switches — dispatch before VM setup
-    if args.iter().any(|a| a == "--lint") {
-        let lint_args: Vec<String> = args[1..]
-            .iter()
-            .filter(|a| a.as_str() != "--lint")
-            .cloned()
-            .collect();
-        let exit_code = elle::lint::run::run(&lint_args);
-        std::process::exit(exit_code);
+    // Subcommand dispatch — no VM setup needed for these
+    match args.get(1).map(|s| s.as_str()) {
+        Some("lint") => {
+            let sub_args: Vec<String> = args[2..].to_vec();
+            let exit_code = elle::lint::run::run(&sub_args);
+            std::process::exit(exit_code);
+        }
+        Some("lsp") => {
+            let exit_code = elle::lsp::run::run();
+            std::process::exit(exit_code);
+        }
+        Some("rewrite") => {
+            let sub_args: Vec<String> = args[2..].to_vec();
+            let exit_code = elle::rewrite::run::run(&sub_args);
+            std::process::exit(exit_code);
+        }
+        _ => {}
     }
 
-    if args.iter().any(|a| a == "--lsp") {
-        let exit_code = elle::lsp::run::run();
-        std::process::exit(exit_code);
+    // Interpreter mode — needs VM setup
+
+    // Check for --help/-h first (before VM init)
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_help();
+        return;
     }
 
-    // VM setup — only reached for interpreter mode
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
 
-    // Register primitive functions (effects map not needed in main)
     let _effects = register_primitives(&mut vm, &mut symbols);
 
-    // Set symbol table context before stdlib init so that macros using
-    // gensym (each, ffi/defbind) work during init_stdlib's eval() calls.
     set_symbol_table(&mut symbols as *mut SymbolTable);
     set_length_symbol_table(&mut symbols as *mut SymbolTable);
 
-    // Initialize standard library modules
     init_stdlib(&mut vm, &mut symbols);
 
-    // Set VM context for FFI primitives
     set_vm_context(&mut vm as *mut VM);
-
-    // Check for --help/-h first
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("Elle v1.0.0\n");
-        println!("Usage: elle [options] [file...]");
-        println!("       elle --lint [options] <file|dir>...");
-        println!("       elle --lsp\n");
-        println!("Options:");
-        println!("  -h, --help    Show this help");
-        println!("  -              Read from stdin");
-        println!("  --lint         Run linter");
-        println!("  --lsp          Start language server\n");
-        print!("{}", elle::primitives::help_text());
-        return;
-    }
 
     let mut had_errors = false;
     let mut files = Vec::new();
     let mut read_stdin = false;
 
-    // Parse flags and files
     for arg in &args[1..] {
         if arg == "-" {
-            // `-` means read from stdin
             read_stdin = true;
         } else if !arg.starts_with('-') {
             files.push(arg.as_str());
@@ -412,34 +406,27 @@ fn main() {
     }
 
     if read_stdin {
-        // Read from stdin (piped input)
         if let Err(e) = run_stdin(&mut vm, &mut symbols) {
             eprintln!("Error: {}", e);
             had_errors = true;
         }
     } else if !files.is_empty() {
-        // Run file(s)
         for filename in files {
             if let Err(e) = run_file(filename, &mut vm, &mut symbols) {
                 eprintln!("Error: {}", e);
                 had_errors = true;
             }
         }
-    } else if args.len() == 1 {
-        // Run REPL
-        if run_repl(&mut vm, &mut symbols) {
-            had_errors = true;
-        }
+    } else if args.len() == 1 && run_repl(&mut vm, &mut symbols) {
+        had_errors = true;
     }
 
-    // Clear VM context
     clear_vm_context();
 
     if args.len() == 1 {
         println!();
     }
 
-    // Exit with appropriate status code
     if had_errors {
         std::process::exit(1);
     }

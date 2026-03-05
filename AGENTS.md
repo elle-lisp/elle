@@ -99,7 +99,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 
 | Product | Path | Purpose |
 |---------|------|---------|
-| elle | `src/` | Interpreter/compiler (includes `--lint` and `--lsp` modes) |
+| elle | `src/` | Interpreter/compiler (includes `lint`, `lsp`, and `rewrite` subcommands) |
 | elle-doc | `elle-doc/` | Documentation site generator (written in Elle) |
 
 ## Directories
