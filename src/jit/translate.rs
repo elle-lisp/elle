@@ -52,6 +52,8 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) global_load_map: HashMap<Reg, SymbolId>,
     /// SymbolId of the function being compiled (for self-call detection)
     pub(crate) self_sym: Option<SymbolId>,
+    /// Counter for yield point indices
+    pub(crate) yield_point_index: u32,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -73,6 +75,7 @@ impl<'a> FunctionTranslator<'a> {
             scc_peers: HashMap::new(),
             global_load_map: HashMap::new(),
             self_sym: None,
+            yield_point_index: 0,
         }
     }
 
@@ -705,11 +708,55 @@ impl<'a> FunctionTranslator<'a> {
                 value,
                 resume_label: _,
             } => {
-                // Placeholder — real implementation in a later chunk.
-                let _ = builder.use_var(var(value.0));
-                builder
-                    .ins()
-                    .trap(cranelift_codegen::ir::TrapCode::unwrap_user(0));
+                let yielded_val = builder.use_var(var(value.0));
+                let vm = self
+                    .vm_ptr
+                    .ok_or_else(|| JitError::InvalidLir("Yield without vm pointer".to_string()))?;
+                let self_bits = self
+                    .self_bits
+                    .ok_or_else(|| JitError::InvalidLir("Yield without self_bits".to_string()))?;
+
+                let yield_index = self.yield_point_index;
+                self.yield_point_index += 1;
+
+                // Read the stack_regs for this yield point from the LIR
+                let stack_regs = self
+                    .lir
+                    .yield_points
+                    .get(yield_index as usize)
+                    .map(|yp| yp.stack_regs.as_slice())
+                    .unwrap_or(&[]);
+                let num_spilled = stack_regs.len();
+
+                // Spill registers to a stack slot
+                let spilled_ptr = if num_spilled > 0 {
+                    let slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            (num_spilled * 8) as u32,
+                            0,
+                        ));
+                    for (i, reg) in stack_regs.iter().enumerate() {
+                        let val = builder.use_var(var(reg.0));
+                        builder.ins().stack_store(val, slot, (i * 8) as i32);
+                    }
+                    builder.ins().stack_addr(I64, slot, 0)
+                } else {
+                    builder.ins().iconst(I64, 0) // null pointer
+                };
+
+                let yield_idx_val = builder.ins().iconst(I64, yield_index as i64);
+
+                // Call elle_jit_yield(yielded, spilled_ptr, yield_index, vm, self_bits)
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.jit_yield, builder.func);
+                let call = builder.ins().call(
+                    func_ref,
+                    &[yielded_val, spilled_ptr, yield_idx_val, vm, self_bits],
+                );
+                let result = builder.inst_results(call)[0];
+                builder.ins().return_(&[result]);
             }
 
             Terminator::Unreachable => {

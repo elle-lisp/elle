@@ -86,7 +86,6 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) resolve_tail_call: FuncId,
     pub(crate) call_depth_enter: FuncId,
     pub(crate) call_depth_exit: FuncId,
-    #[allow(dead_code)] // Used in Chunk 3 (Yield terminator translation)
     pub(crate) jit_yield: FuncId,
     #[allow(dead_code)] // Used in Chunk 4 (post-call yield detection)
     pub(crate) jit_yield_through_call: FuncId,
@@ -996,5 +995,54 @@ mod tests {
         }];
         let result = compiler.compile_batch(&members);
         assert!(matches!(result, Err(JitError::NotPure)));
+    }
+
+    #[test]
+    fn test_compile_yielding_function() {
+        use crate::lir::YieldPointInfo;
+
+        let mut func = LirFunction::new(Arity::Exact(0));
+        func.num_regs = 2;
+        func.num_captures = 0;
+        func.effect = Effect::yields();
+
+        let mut b0 = BasicBlock::new(Label(0));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(0),
+                value: crate::lir::LirConst::Int(42),
+            },
+            Span::synthetic(),
+        ));
+        b0.terminator = SpannedTerminator::new(
+            Terminator::Yield {
+                value: Reg(0),
+                resume_label: Label(1),
+            },
+            Span::synthetic(),
+        );
+
+        let mut b1 = BasicBlock::new(Label(1));
+        b1.instructions.push(SpannedInstr::new(
+            LirInstr::LoadResumeValue { dst: Reg(1) },
+            Span::synthetic(),
+        ));
+        b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), Span::synthetic());
+
+        func.blocks = vec![b0, b1];
+        func.entry = Label(0);
+        func.yield_points = vec![YieldPointInfo {
+            resume_ip: 5,
+            stack_regs: vec![],
+        }];
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let result = compiler.compile(&func, None);
+        assert!(
+            result.is_ok(),
+            "Yielding function should compile: {:?}",
+            result.err()
+        );
+        assert_eq!(result.unwrap().yield_points.len(), 1);
     }
 }
