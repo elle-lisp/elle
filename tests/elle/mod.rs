@@ -104,3 +104,8 @@ fn strings() {
 fn bugfixes() {
     run_elle_script("bugfixes");
 }
+
+#[test]
+fn fibers() {
+    run_elle_script("fibers");
+}
