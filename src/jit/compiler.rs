@@ -279,9 +279,9 @@ impl JitCompiler {
         }
         yield_sig.returns.push(AbiParam::new(I64));
 
-        // elle_jit_yield_through_call: 6 params (spilled_ptr, num_spilled, num_locals, resume_ip, vm, closure_bits)
+        // elle_jit_yield_through_call: 4 params (spilled_ptr, call_site_index, vm, closure_bits)
         let mut ytc_sig = module.make_signature();
-        for _ in 0..6 {
+        for _ in 0..4 {
             ytc_sig.params.push(AbiParam::new(I64));
         }
         ytc_sig.returns.push(AbiParam::new(I64));
@@ -391,11 +391,23 @@ impl JitCompiler {
             })
             .collect();
 
+        // Convert call site metadata from LIR to JIT format
+        let call_site_metas: Vec<super::dispatch::CallSiteMeta> = lir
+            .call_sites
+            .iter()
+            .map(|cs| super::dispatch::CallSiteMeta {
+                resume_ip: cs.resume_ip,
+                num_spilled: cs.num_locals + cs.stack_regs.len() as u16,
+                num_locals: cs.num_locals,
+            })
+            .collect();
+
         // Wrap in JitCode (module is moved to keep code alive)
-        Ok(JitCode::new_with_yield_points(
+        Ok(JitCode::new_with_metadata(
             fn_ptr,
             self.module,
             yield_metas,
+            call_site_metas,
         ))
     }
 
@@ -630,6 +642,11 @@ impl JitCompiler {
         // These are let-bindings inside the function body
         if num_locally_defined > 0 {
             translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
+        }
+
+        // Allocate shared spill slot for yield/call sites (if any)
+        if lir.effect.may_suspend() {
+            translator.allocate_shared_spill_slot(&mut builder);
         }
 
         builder.ins().jump(loop_header, &[]);

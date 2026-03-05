@@ -56,6 +56,10 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) yield_point_index: u32,
     /// Counter for call site indices (for yield-through-call metadata)
     pub(crate) call_site_index: u32,
+    /// Shared stack slot for spilling locals + operands at yield/call sites.
+    /// Sized to the maximum spill requirement across all yield points and
+    /// call sites. `None` if the function has no spill points.
+    pub(crate) shared_spill_slot: Option<cranelift_codegen::ir::StackSlot>,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -79,6 +83,7 @@ impl<'a> FunctionTranslator<'a> {
             self_sym: None,
             yield_point_index: 0,
             call_site_index: 0,
+            shared_spill_slot: None,
         }
     }
 
@@ -772,7 +777,40 @@ impl<'a> FunctionTranslator<'a> {
         Ok(())
     }
 
-    /// Spill local variables and operand stack registers to a stack slot.
+    /// Allocate the shared spill slot sized to the maximum spill requirement
+    /// across all yield points and call sites. Called once during function setup.
+    pub(crate) fn allocate_shared_spill_slot(&mut self, builder: &mut FunctionBuilder) {
+        let num_locals = self.lir.num_locals as usize;
+
+        // Compute max operand stack size across all yield points and call sites
+        let max_yield_operands = self
+            .lir
+            .yield_points
+            .iter()
+            .map(|yp| yp.stack_regs.len())
+            .max()
+            .unwrap_or(0);
+        let max_call_operands = self
+            .lir
+            .call_sites
+            .iter()
+            .map(|cs| cs.stack_regs.len())
+            .max()
+            .unwrap_or(0);
+        let max_operands = std::cmp::max(max_yield_operands, max_call_operands);
+        let max_total = num_locals + max_operands;
+
+        if max_total > 0 {
+            let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                (max_total * 8) as u32,
+                0,
+            ));
+            self.shared_spill_slot = Some(slot);
+        }
+    }
+
+    /// Spill local variables and operand stack registers to the shared stack slot.
     ///
     /// The interpreter's stack layout at yield/call is:
     /// `[param_0, ..., param_{arity-1}, local_0, ..., local_n, operand_0, ..., operand_m]`
@@ -797,11 +835,9 @@ impl<'a> FunctionTranslator<'a> {
             return Ok(builder.ins().iconst(I64, 0)); // null pointer
         }
 
-        let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-            (total * 8) as u32,
-            0,
-        ));
+        let slot = self
+            .shared_spill_slot
+            .expect("JIT bug: spill_locals_and_operands called but no shared spill slot allocated");
 
         let mut offset: i32 = 0;
 
@@ -1133,35 +1169,23 @@ impl<'a> FunctionTranslator<'a> {
 
         // Read call site metadata from LIR
         let call_site = self.lir.call_sites.get(call_site_idx as usize);
-        let (resume_ip, stack_regs) = match call_site {
-            Some(cs) => (cs.resume_ip, cs.stack_regs.as_slice()),
-            None => (0, &[] as &[crate::lir::Reg]),
+        let stack_regs = match call_site {
+            Some(cs) => cs.stack_regs.as_slice(),
+            None => &[] as &[crate::lir::Reg],
         };
 
         // Spill locals + operand stack to match interpreter layout
         let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
-        let num_locals = self.lir.num_locals;
-        let total_spilled = num_locals as usize + stack_regs.len();
 
-        let num_spilled_val = builder.ins().iconst(I64, total_spilled as i64);
-        let num_locals_val = builder.ins().iconst(I64, num_locals as i64);
-        let resume_ip_val = builder.ins().iconst(I64, resume_ip as i64);
+        let call_site_idx_val = builder.ins().iconst(I64, call_site_idx as i64);
 
-        // Call elle_jit_yield_through_call(spilled, num_spilled, num_locals, resume_ip, vm, self_bits)
+        // Call elle_jit_yield_through_call(spilled, call_site_index, vm, self_bits)
         let func_ref = self
             .module
             .declare_func_in_func(self.helpers.jit_yield_through_call, builder.func);
-        let call = builder.ins().call(
-            func_ref,
-            &[
-                spilled_ptr,
-                num_spilled_val,
-                num_locals_val,
-                resume_ip_val,
-                vm,
-                self_bits,
-            ],
-        );
+        let call = builder
+            .ins()
+            .call(func_ref, &[spilled_ptr, call_site_idx_val, vm, self_bits]);
         let result = builder.inst_results(call)[0];
         builder.ins().return_(&[result]);
 

@@ -39,6 +39,12 @@ pub struct JitCode {
     /// Read by `elle_jit_yield` runtime helper (Chunk 2).
     #[allow(dead_code)]
     pub(crate) yield_points: Vec<super::dispatch::YieldPointMeta>,
+    /// Call site metadata for yield-through-call support.
+    /// Indexed by call site index (u32 immediate in JIT code).
+    /// Empty for non-yielding functions.
+    /// Read by `elle_jit_yield_through_call` runtime helper.
+    #[allow(dead_code)]
+    pub(crate) call_sites: Vec<super::dispatch::CallSiteMeta>,
 }
 
 // Safety: The function pointer points to immutable code that doesn't
@@ -54,6 +60,7 @@ impl JitCode {
             fn_ptr,
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points: Vec::new(),
+            call_sites: Vec::new(),
         }
     }
 
@@ -66,19 +73,22 @@ impl JitCode {
             fn_ptr,
             _module: module,
             yield_points: Vec::new(),
+            call_sites: Vec::new(),
         }
     }
 
-    /// Create a new JitCode with yield point metadata
-    pub(crate) fn new_with_yield_points(
+    /// Create a new JitCode with yield point and call site metadata
+    pub(crate) fn new_with_metadata(
         fn_ptr: *const u8,
         module: cranelift_jit::JITModule,
         yield_points: Vec<super::dispatch::YieldPointMeta>,
+        call_sites: Vec<super::dispatch::CallSiteMeta>,
     ) -> Self {
         JitCode {
             fn_ptr,
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
+            call_sites,
         }
     }
 
@@ -107,6 +117,30 @@ impl JitCode {
         let f: unsafe extern "C" fn(*const u64, *const u64, u32, *mut (), u64) -> u64 =
             std::mem::transmute(self.fn_ptr);
         f(env, args, nargs, vm, self_bits)
+    }
+}
+
+#[cfg(test)]
+impl JitCode {
+    /// Create a JitCode with yield points but no real compiled code.
+    /// For testing `elle_jit_yield` without Cranelift compilation.
+    pub(crate) fn test_with_yield_points(
+        yield_points: Vec<super::dispatch::YieldPointMeta>,
+    ) -> Self {
+        use cranelift_jit::{JITBuilder, JITModule};
+        let flag_builder = cranelift_codegen::settings::builder();
+        let isa_builder = cranelift_native::builder().unwrap();
+        let isa = isa_builder
+            .finish(cranelift_codegen::settings::Flags::new(flag_builder))
+            .unwrap();
+        let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        let module = JITModule::new(builder);
+        JitCode {
+            fn_ptr: std::ptr::null(),
+            _module: Arc::new(ModuleHolder::new(module)),
+            yield_points,
+            call_sites: Vec::new(),
+        }
     }
 }
 
