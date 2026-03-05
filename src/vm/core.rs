@@ -1,6 +1,7 @@
 use crate::error::{LocationMap, StackFrame};
 use crate::ffi::FFISubsystem;
 use crate::primitives::def::Doc;
+use crate::reader::SourceLoc;
 use crate::value::fiber::CallFrame;
 use crate::value::{
     Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_OK, SIG_YIELD,
@@ -43,6 +44,13 @@ pub struct VM {
     pub env_cache: Vec<Value>,
     pub pending_tail_call: Option<TailCallInfo>,
     pub current_source_loc: Option<crate::reader::SourceLoc>,
+    /// Source location of the instruction that produced the current error.
+    /// Resolved by the dispatch loop using the current closure's LocationMap.
+    /// Reset to None at each translation boundary entry.
+    /// Guarded by is_none() — innermost (origin) location wins over outer
+    /// call sites. This also protects against fiber error propagation
+    /// overwriting the child fiber's error origin.
+    pub(crate) error_loc: Option<SourceLoc>,
     /// JIT code cache: bytecode pointer → compiled native code.
     pub jit_cache: FxHashMap<*const u8, Rc<JitCode>>,
     /// Documentation for all named forms (primitives, special forms, macros).
@@ -99,6 +107,7 @@ impl VM {
             env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
             current_source_loc: None,
+            error_loc: None,
             jit_cache: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
@@ -127,6 +136,7 @@ impl VM {
         self.current_fiber_value = None;
         self.pending_tail_call = None;
         self.current_source_loc = None;
+        self.error_loc = None;
         self.scope_stack = ScopeStack::new();
         self.closure_call_counts.clear();
         self.location_map = LocationMap::new();

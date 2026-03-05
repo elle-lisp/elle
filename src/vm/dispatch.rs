@@ -30,14 +30,18 @@ impl VM {
         location_map: &Rc<LocationMap>,
     ) -> (SignalBits, usize) {
         let mut ip = start_ip;
+        let mut instr_ip = start_ip;
 
         // Deref to slices for instruction handlers
         let bc: &[u8] = bytecode;
         let consts: &[Value] = constants;
 
         loop {
-            // If an error or halt signal is pending, propagate immediately.
+            // Check for pre-existing error signal (e.g., from previous Call)
             if let Some((bits @ (SIG_ERROR | SIG_HALT), _)) = self.fiber.signal {
+                if self.error_loc.is_none() {
+                    self.error_loc = location_map.get(&instr_ip).cloned();
+                }
                 return (bits, ip);
             }
 
@@ -45,6 +49,7 @@ impl VM {
                 panic!("VM bug: Unexpected end of bytecode");
             }
 
+            instr_ip = ip; // save instruction start before reading opcode
             let instr_byte = bc[ip];
             ip += 1;
 
@@ -338,8 +343,11 @@ impl VM {
                 }
             }
 
-            // If an error or halt signal was set by the instruction, propagate.
+            // Check for error signal set by this instruction's handler
             if let Some((bits @ (SIG_ERROR | SIG_HALT), _)) = self.fiber.signal {
+                if self.error_loc.is_none() {
+                    self.error_loc = location_map.get(&instr_ip).cloned();
+                }
                 return (bits, ip);
             }
         }
