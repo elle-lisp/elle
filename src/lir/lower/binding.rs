@@ -1,6 +1,7 @@
 //! Binding-related lowering: let, letrec, define, set
 
 use super::*;
+use crate::hir::PatternKey;
 
 impl Lowerer {
     pub(super) fn lower_let(
