@@ -139,6 +139,7 @@ impl VM {
     ///
     /// Dispatches native functions, executes closures with environment setup,
     /// handles yield-through-calls and JIT compilation.
+    #[allow(clippy::too_many_arguments)]
     fn call_inner(
         &mut self,
         func: Value,
