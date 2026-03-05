@@ -109,3 +109,8 @@ fn bugfixes() {
 fn fibers() {
     run_elle_script("fibers");
 }
+
+#[test]
+fn closures() {
+    run_elle_script("closures");
+}

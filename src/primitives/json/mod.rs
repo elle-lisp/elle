@@ -405,6 +405,7 @@ mod tests {
             constants: Rc::new(vec![]),
             effect: crate::effects::Effect::none(),
             cell_params_mask: 0,
+            cell_locals_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
             jit_code: None,

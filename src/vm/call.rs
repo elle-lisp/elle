@@ -718,10 +718,19 @@ impl VM {
             }
         }
 
-        // Add empty LocalCells for locally-defined variables
+        // Add slots for locally-defined variables.
+        // Cell-wrapped locals (captured by nested closures) get LocalCell(NIL).
+        // Non-cell locals get bare NIL — they use stack slots via StoreLocal/LoadLocal
+        // and the env slot is never accessed.
+        // Beyond index 63, the mask can't represent the local — conservatively
+        // use LocalCell (matches the emitter's fallback to StoreUpvalue).
         let num_locally_defined = closure.num_locals.saturating_sub(closure.num_params);
-        for _ in 0..num_locally_defined {
-            buf.push(Value::local_cell(Value::NIL));
+        for i in 0..num_locally_defined {
+            if i >= 64 || (closure.cell_locals_mask & (1 << i)) != 0 {
+                buf.push(Value::local_cell(Value::NIL));
+            } else {
+                buf.push(Value::NIL);
+            }
         }
 
         true

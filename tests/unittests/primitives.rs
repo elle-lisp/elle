@@ -1159,6 +1159,7 @@ fn test_spawn_primitive() {
 
         effect: elle::effects::Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
         jit_code: None,
@@ -1683,6 +1684,7 @@ fn test_json_serialize_errors() {
 
         effect: elle::effects::Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
         jit_code: None,
@@ -2022,6 +2024,7 @@ fn test_function_predicate() {
         constants: std::rc::Rc::new(vec![]),
         effect: elle::effects::Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
         jit_code: None,
@@ -2064,6 +2067,7 @@ fn test_primitive_predicate() {
         constants: std::rc::Rc::new(vec![]),
         effect: elle::effects::Effect::none(),
         cell_params_mask: 0,
+        cell_locals_mask: 0,
         symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
         location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
         jit_code: None,
