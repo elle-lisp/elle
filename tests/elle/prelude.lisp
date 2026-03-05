@@ -40,11 +40,11 @@
 (assert-eq (try (/ 1 0) (catch e 1 2 :caught)) :caught "try multi-handler returns last")
 
 # Destructured error — kind
-(assert-eq (try (/ 1 0) (catch [kind msg] kind)) :division-by-zero
+(assert-eq (try (/ 1 0) (catch {:error kind :message msg} kind)) :division-by-zero
   "try destructured error kind")
 
 # Destructured error — message
-(assert-string-eq (try (/ 1 0) (catch [kind msg] msg)) "division by zero"
+(assert-string-eq (try (/ 1 0) (catch {:error kind :message msg} msg)) "division by zero"
   "try destructured error message")
 
 # ============================================================================

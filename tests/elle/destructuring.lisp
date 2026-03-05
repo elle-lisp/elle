@@ -511,19 +511,19 @@
 # Tuple destructuring
 # ============================================================
 
-# Helper: produce an error tuple via fiber
-(defn make-error-tuple []
-  "Trigger division-by-zero and capture the error tuple"
+# Helper: produce an error struct via fiber
+(defn make-error-struct []
+  "Trigger division-by-zero and capture the error struct"
   (let ([f (fiber/new (fn () (/ 1 0)) 1)])
     (fiber/resume f nil)
     (fiber/value f)))
 
 # test_let_destructure_tuple
-(let (([a b] (make-error-tuple)))
+(let (({:error a :message b} (make-error-struct)))
   (assert-string-eq b "division by zero" "let destructure tuple: message"))
 
 # test_let_destructure_tuple_first
-(let (([a b] (make-error-tuple)))
+(let (({:error a :message b} (make-error-struct)))
   (assert-eq a :division-by-zero "let destructure tuple: kind"))
 
 # test_match_tuple_pattern_matches_tuple
@@ -564,7 +564,7 @@
 
 # test_def_tuple_basic
 (begin
-  (def [a7 b7] (make-error-tuple))
+  (def {:error a7 :message b7} (make-error-struct))
   (assert-eq a7 :division-by-zero "def tuple basic: kind")
   (assert-string-eq b7 "division by zero" "def tuple basic: message"))
 

@@ -413,6 +413,7 @@ mod tests {
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params: 0,
+            name: None,
         });
         assert!(serialize_value(&closure).is_err());
 

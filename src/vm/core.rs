@@ -1,6 +1,7 @@
 use crate::error::{LocationMap, StackFrame};
 use crate::ffi::FFISubsystem;
 use crate::primitives::def::Doc;
+use crate::reader::SourceLoc;
 use crate::value::fiber::CallFrame;
 use crate::value::{
     Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_OK, SIG_YIELD,
@@ -12,7 +13,12 @@ use std::rc::Rc;
 
 use crate::jit::JitCode;
 
-type TailCallInfo = (Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>);
+pub struct TailCallInfo {
+    pub bytecode: Rc<Vec<u8>>,
+    pub constants: Rc<Vec<Value>>,
+    pub env: Rc<Vec<Value>>,
+    pub location_map: Rc<LocationMap>,
+}
 
 pub struct VM {
     /// The current fiber holding all per-execution state:
@@ -37,7 +43,13 @@ pub struct VM {
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
     pub pending_tail_call: Option<TailCallInfo>,
-    pub current_source_loc: Option<crate::reader::SourceLoc>,
+    /// Source location of the instruction that produced the current error.
+    /// Resolved by the dispatch loop using the current closure's LocationMap.
+    /// Reset to None at each translation boundary entry.
+    /// Guarded by is_none() — innermost (origin) location wins over outer
+    /// call sites. This also protects against fiber error propagation
+    /// overwriting the child fiber's error origin.
+    pub(crate) error_loc: Option<SourceLoc>,
     /// JIT code cache: bytecode pointer → compiled native code.
     pub jit_cache: FxHashMap<*const u8, Rc<JitCode>>,
     /// Documentation for all named forms (primitives, special forms, macros).
@@ -72,6 +84,7 @@ fn root_closure() -> Rc<Closure> {
         doc: None,
         vararg_kind: crate::hir::VarargKind::List,
         num_params: 0,
+        name: None,
     })
 }
 
@@ -94,7 +107,7 @@ impl VM {
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
-            current_source_loc: None,
+            error_loc: None,
             jit_cache: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
@@ -122,7 +135,7 @@ impl VM {
         self.current_fiber_handle = None;
         self.current_fiber_value = None;
         self.pending_tail_call = None;
-        self.current_source_loc = None;
+        self.error_loc = None;
         self.scope_stack = ScopeStack::new();
         self.closure_call_counts.clear();
         self.location_map = LocationMap::new();
@@ -153,13 +166,56 @@ impl VM {
     }
 
     /// Set the current source location for error reporting
-    pub fn set_current_source_loc(&mut self, loc: Option<crate::reader::SourceLoc>) {
-        self.current_source_loc = loc;
-    }
+    /// Format a runtime error value with source location.
+    pub(crate) fn format_error_with_location(&self, err_value: Value) -> String {
+        let base_msg = crate::value::format_error(err_value);
+        let mut result = base_msg;
 
-    /// Get the current source location
-    pub fn get_current_source_loc(&self) -> Option<&crate::reader::SourceLoc> {
-        self.current_source_loc.as_ref()
+        if let Some(loc) = &self.error_loc {
+            result.push_str(&format!("\n  at {}", loc));
+
+            // Add source context if available
+            if let Some(source) = crate::error::formatting::load_source_for_loc(loc) {
+                if let Some(line) = crate::error::formatting::extract_source_line(&source, loc.line)
+                {
+                    let truncated = if line.len() > 120 {
+                        format!("{}...", &line[..117])
+                    } else {
+                        line.to_string()
+                    };
+                    result.push_str(&format!("\n   {} | {}", loc.line, truncated));
+
+                    let caret = crate::error::formatting::highlight_column(&line, loc.col);
+                    result.push_str(&format!(
+                        "\n   {} | {}",
+                        " ".repeat(loc.line.to_string().len()),
+                        caret
+                    ));
+                }
+            }
+        }
+
+        // Add stack trace
+        let trace = self.capture_stack_trace();
+        if !trace.is_empty() {
+            const MAX_TRACE_DEPTH: usize = 20;
+            for frame in trace.iter().take(MAX_TRACE_DEPTH) {
+                if let Some(name) = &frame.function_name {
+                    result.push_str(&format!("\n  in {}", name));
+                    if let Some(loc) = &frame.location {
+                        result.push_str(&format!(" at {}", loc));
+                    }
+                }
+            }
+            if trace.len() > MAX_TRACE_DEPTH {
+                result.push_str(&format!(
+                    "\n  ... {} more frames",
+                    trace.len() - MAX_TRACE_DEPTH
+                ));
+            }
+        }
+
+        result
     }
 
     /// Record a closure call and return whether it's "hot" (called 10+ times)
@@ -197,22 +253,35 @@ impl VM {
             .unwrap_or(0)
     }
 
-    pub fn push_call_frame(&mut self, name: String, ip: usize) {
+    pub fn push_call_frame(
+        &mut self,
+        name: String,
+        ip: usize,
+        location_map: Rc<crate::error::LocationMap>,
+    ) {
         let frame_base = self.fiber.stack.len();
         self.fiber.call_depth += 1;
         self.fiber.call_stack.push(CallFrame {
-            name,
+            name: Rc::from(name.as_str()),
             ip,
             frame_base,
+            location_map,
         });
     }
 
-    pub fn push_call_frame_with_base(&mut self, name: String, ip: usize, frame_base: usize) {
+    pub fn push_call_frame_with_base(
+        &mut self,
+        name: String,
+        ip: usize,
+        frame_base: usize,
+        location_map: Rc<crate::error::LocationMap>,
+    ) {
         self.fiber.call_depth += 1;
         self.fiber.call_stack.push(CallFrame {
-            name,
+            name: Rc::from(name.as_str()),
             ip,
             frame_base,
+            location_map,
         });
     }
 
@@ -235,12 +304,6 @@ impl VM {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn with_stack_trace(&self, msg: String) -> String {
-        let trace = self.format_stack_trace();
-        format!("{}\nStack trace:\n{}", msg, trace)
-    }
-
     /// Capture current call stack as trace frames
     pub fn capture_stack_trace(&self) -> Vec<StackFrame> {
         self.fiber
@@ -248,9 +311,9 @@ impl VM {
             .iter()
             .rev()
             .map(|frame| {
-                let location = self.location_map.get(&frame.ip).cloned();
+                let location = frame.location_map.get(&frame.ip).cloned();
                 StackFrame {
-                    function_name: Some(frame.name.clone()),
+                    function_name: Some(frame.name.to_string()),
                     location,
                 }
             })
@@ -346,6 +409,7 @@ impl VM {
                 &frame.constants,
                 &frame.env,
                 frame.ip,
+                &frame.location_map,
             );
 
             match exec.bits {
@@ -370,6 +434,7 @@ impl VM {
                             ip: exec.ip,
                             stack: vec![],
                             active_allocator: crate::value::fiber_heap::save_active_allocator(),
+                            location_map: exec.location_map,
                         }]);
                     }
 
@@ -420,11 +485,13 @@ mod tests {
 
     #[test]
     fn test_capture_stack_trace() {
+        use std::collections::HashMap;
         let mut vm = VM::new();
+        let empty_map = Rc::new(HashMap::new());
 
-        vm.push_call_frame("function_a".to_string(), 10);
-        vm.push_call_frame("function_b".to_string(), 20);
-        vm.push_call_frame("function_c".to_string(), 30);
+        vm.push_call_frame("function_a".to_string(), 10, empty_map.clone());
+        vm.push_call_frame("function_b".to_string(), 20, empty_map.clone());
+        vm.push_call_frame("function_c".to_string(), 30, empty_map.clone());
 
         let trace = vm.capture_stack_trace();
 
@@ -436,10 +503,12 @@ mod tests {
 
     #[test]
     fn test_wrap_error_with_trace() {
+        use std::collections::HashMap;
         let mut vm = VM::new();
+        let empty_map = Rc::new(HashMap::new());
 
-        vm.push_call_frame("outer".to_string(), 5);
-        vm.push_call_frame("inner".to_string(), 15);
+        vm.push_call_frame("outer".to_string(), 5, empty_map.clone());
+        vm.push_call_frame("inner".to_string(), 15, empty_map.clone());
 
         let error_msg = "Something went wrong".to_string();
         let wrapped = vm.wrap_error(error_msg);

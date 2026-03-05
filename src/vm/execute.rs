@@ -1,6 +1,7 @@
 //! Bytecode execution entry points and helpers.
 
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
+use crate::error::LocationMap;
+use crate::value::{SignalBits, Value, SIG_OK};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -17,6 +18,7 @@ pub struct ExecResult {
     pub bytecode: Rc<Vec<u8>>,
     pub constants: Rc<Vec<Value>>,
     pub env: Rc<Vec<Value>>,
+    pub location_map: Rc<LocationMap>,
 }
 
 impl VM {
@@ -32,10 +34,12 @@ impl VM {
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
+        location_map: &Rc<LocationMap>,
     ) -> ExecResult {
         let mut current_bytecode = bytecode.clone();
         let mut current_constants = constants.clone();
         let mut current_env = closure_env.clone();
+        let mut current_location_map = location_map.clone();
         let mut current_ip = start_ip;
 
         loop {
@@ -44,6 +48,7 @@ impl VM {
                 &current_constants,
                 &current_env,
                 current_ip,
+                &current_location_map,
             );
 
             if bits != SIG_OK {
@@ -53,13 +58,15 @@ impl VM {
                     bytecode: current_bytecode,
                     constants: current_constants,
                     env: current_env,
+                    location_map: current_location_map,
                 };
             }
 
-            if let Some((tail_bytecode, tail_constants, tail_env)) = self.pending_tail_call.take() {
-                current_bytecode = tail_bytecode;
-                current_constants = tail_constants;
-                current_env = tail_env;
+            if let Some(tail) = self.pending_tail_call.take() {
+                current_bytecode = tail.bytecode;
+                current_constants = tail.constants;
+                current_env = tail.env;
+                current_location_map = tail.location_map;
                 current_ip = 0;
             } else {
                 break ExecResult {
@@ -68,6 +75,7 @@ impl VM {
                     bytecode: current_bytecode,
                     constants: current_constants,
                     env: current_env,
+                    location_map: current_location_map,
                 };
             }
         }
@@ -89,6 +97,7 @@ impl VM {
         bytecode: &Rc<Vec<u8>>,
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
+        location_map: &Rc<LocationMap>,
     ) -> ExecResult {
         // Save the caller's stack and active allocator (Package 4 plumbing;
         // the allocator pointer is write-only until Package 5 activates it).
@@ -98,6 +107,7 @@ impl VM {
         let mut current_bytecode = bytecode.clone();
         let mut current_constants = constants.clone();
         let mut current_env = closure_env.clone();
+        let mut current_location_map = location_map.clone();
 
         let result = loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -105,6 +115,7 @@ impl VM {
                 &current_constants,
                 &current_env,
                 0,
+                &current_location_map,
             );
 
             if bits != SIG_OK {
@@ -114,13 +125,15 @@ impl VM {
                     bytecode: current_bytecode,
                     constants: current_constants,
                     env: current_env,
+                    location_map: current_location_map,
                 };
             }
 
-            if let Some((tail_bytecode, tail_constants, tail_env)) = self.pending_tail_call.take() {
-                current_bytecode = tail_bytecode;
-                current_constants = tail_constants;
-                current_env = tail_env;
+            if let Some(tail) = self.pending_tail_call.take() {
+                current_bytecode = tail.bytecode;
+                current_constants = tail.constants;
+                current_env = tail.env;
+                current_location_map = tail.location_map;
             } else {
                 break ExecResult {
                     bits,
@@ -128,6 +141,7 @@ impl VM {
                     bytecode: current_bytecode,
                     constants: current_constants,
                     env: current_env,
+                    location_map: current_location_map,
                 };
             }
         };
@@ -145,17 +159,21 @@ impl VM {
     /// avoiding the `.to_vec()` copies that `execute_bytecode` performs.
     /// Used by JIT trampolines where the closure already owns Rc'd data.
     ///
-    /// Handles the tail-call loop and translates SignalBits to
-    /// `Result<Value, String>`.
+    /// Returns `(SignalBits, Value)` — the signal and the result value.
+    /// The caller is responsible for handling the signal and formatting errors.
     pub fn execute_closure_bytecode(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
-    ) -> Result<Value, String> {
+        location_map: &Rc<LocationMap>,
+    ) -> (SignalBits, Value) {
+        self.error_loc = None;
+
         let mut current_bytecode = bytecode.clone();
         let mut current_constants = constants.clone();
         let mut current_env = closure_env.clone();
+        let mut current_location_map = location_map.clone();
 
         loop {
             let (bits, _ip) = self.execute_bytecode_inner_impl(
@@ -163,28 +181,22 @@ impl VM {
                 &current_constants,
                 &current_env,
                 0,
+                &current_location_map,
             );
 
-            if let Some((tail_bytecode, tail_constants, tail_env)) = self.pending_tail_call.take() {
-                current_bytecode = tail_bytecode;
-                current_constants = tail_constants;
-                current_env = tail_env;
+            if let Some(tail) = self.pending_tail_call.take() {
+                current_bytecode = tail.bytecode;
+                current_constants = tail.constants;
+                current_env = tail.env;
+                current_location_map = tail.location_map;
             } else {
-                return match bits {
-                    SIG_OK | SIG_HALT => {
-                        let (_, value) = self.fiber.signal.take().unwrap();
-                        Ok(value)
-                    }
-                    SIG_YIELD => Err("Unexpected yield outside coroutine context".to_string()),
-                    SIG_ERROR => {
-                        let (_, err_value) =
-                            self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-                        Err(crate::value::format_error(err_value))
-                    }
-                    _ => {
-                        panic!("VM bug: Unexpected signal: {}", bits);
-                    }
-                };
+                let value = self
+                    .fiber
+                    .signal
+                    .take()
+                    .map(|(_, v)| v)
+                    .unwrap_or(Value::NIL);
+                return (bits, value);
             }
         }
     }
