@@ -133,7 +133,7 @@ fn eval_inner(
         }
         SIG_ERROR => {
             let (_, err_value) = vm.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-            Err(crate::value::format_error(err_value))
+            Err(vm.format_error_with_location(err_value))
         }
         _ => Err(format!("eval: unexpected signal: {}", result.bits)),
     }

@@ -64,6 +64,8 @@ impl VM {
         constants: &[Value],
         closure_env: Option<&Rc<Vec<Value>>>,
     ) -> Result<Value, String> {
+        self.error_loc = None;
+
         let empty_env = Rc::new(vec![]);
         let mut current_bytecode = Rc::new(bytecode.to_vec());
         let mut current_constants = Rc::new(constants.to_vec());
@@ -95,7 +97,7 @@ impl VM {
                         // Extract the error from fiber.signal
                         let (_, err_value) =
                             self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-                        Err(crate::value::format_error(err_value))
+                        Err(self.format_error_with_location(err_value))
                     }
                     _ => {
                         panic!("VM bug: Unexpected signal: {}", bits);

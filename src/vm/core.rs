@@ -176,6 +176,15 @@ impl VM {
         self.current_source_loc.as_ref()
     }
 
+    /// Format a runtime error value with source location.
+    pub(crate) fn format_error_with_location(&self, err_value: Value) -> String {
+        let base_msg = crate::value::format_error(err_value);
+        match &self.error_loc {
+            Some(loc) => format!("{}\n  at {}", base_msg, loc),
+            None => base_msg,
+        }
+    }
+
     /// Record a closure call and return whether it's "hot" (called 10+ times)
     pub fn record_closure_call(&mut self, bytecode_ptr: *const u8) -> bool {
         let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);

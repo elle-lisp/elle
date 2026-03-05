@@ -168,6 +168,8 @@ impl VM {
         closure_env: &Rc<Vec<Value>>,
         location_map: &Rc<LocationMap>,
     ) -> Result<Value, String> {
+        self.error_loc = None;
+
         let mut current_bytecode = bytecode.clone();
         let mut current_constants = constants.clone();
         let mut current_env = closure_env.clone();
