@@ -5,9 +5,9 @@ use crate::vm::VM;
 use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
 use super::{
     allocator, arithmetic, array, bitwise, buffer, bytes, cell, chan, comparison, concurrency,
-    convert, coroutines, debug, display, ffi, fibers, fileio, json, list, logic, math, meta,
-    modules, package, parameters, path, ports, process, read, sort, string, structs, table, time,
-    types,
+    convert, coroutines, debug, display, ffi, fibers, fileio, format, json, list, logic, math,
+    meta, modules, package, parameters, path, ports, process, read, sort, string, structs, table,
+    time, types,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
@@ -30,6 +30,7 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     ffi::PRIMITIVES,
     fibers::PRIMITIVES,
     fileio::PRIMITIVES,
+    format::PRIMITIVES,
     json::PRIMITIVES,
     list::PRIMITIVES,
     logic::PRIMITIVES,

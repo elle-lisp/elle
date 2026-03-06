@@ -288,3 +288,127 @@
   "upcase/downcase roundtrip: abc")
 (assert-string-eq (string/downcase (string/upcase "xyz")) "xyz"
   "upcase/downcase roundtrip: xyz")
+
+# ============================================================================
+# string/format — positional interpolation
+# ============================================================================
+
+(assert-string-eq (string/format "{} + {} = {}" 1 2 3) "1 + 2 = 3"
+  "format positional basic")
+
+(assert-string-eq (string/format "Hello, {}!" "Alice") "Hello, Alice!"
+  "format positional with string")
+
+(assert-string-eq (string/format "{}" 42) "42"
+  "format positional single")
+
+(assert-string-eq (string/format "no placeholders") "no placeholders"
+  "format no placeholders")
+
+(assert-string-eq (string/format "literal {{braces}}") "literal {braces}"
+  "format escaped braces")
+
+# ============================================================================
+# string/format — named interpolation
+# ============================================================================
+
+(assert-string-eq (string/format "{name} is {age}" :name "Alice" :age 30)
+  "Alice is 30"
+  "format named basic")
+
+(assert-string-eq (string/format "{greeting}, {name}!" :greeting "Hello" :name "Bob")
+  "Hello, Bob!"
+  "format named multiple")
+
+# ============================================================================
+# string/format — format specs
+# ============================================================================
+
+(assert-string-eq (string/format "{:.2f}" 3.14159) "3.14"
+  "format float precision")
+
+(assert-string-eq (string/format "{:>10}" "hello") "     hello"
+  "format right align")
+
+(assert-string-eq (string/format "{:<10}" "hello") "hello     "
+  "format left align")
+
+(assert-string-eq (string/format "{:^10}" "hello") "  hello   "
+  "format center align")
+
+(assert-string-eq (string/format "{:05d}" 42) "00042"
+  "format zero padding")
+
+(assert-string-eq (string/format "{:x}" 255) "ff"
+  "format hex lowercase")
+
+(assert-string-eq (string/format "{:X}" 255) "FF"
+  "format hex uppercase")
+
+(assert-string-eq (string/format "{:o}" 8) "10"
+  "format octal")
+
+(assert-string-eq (string/format "{:b}" 10) "1010"
+  "format binary")
+
+(assert-string-eq (string/format "{:e}" 1000.0) "1e3"
+  "format scientific")
+
+(assert-string-eq (string/format "{:*^10}" "hi") "****hi****"
+  "format custom fill center")
+
+(assert-string-eq (string/format "{:>10d}" 42) "        42"
+  "format right align integer")
+
+# Default alignment: numbers right-align, strings left-align
+(assert-string-eq (string/format "{:10}" 42) "        42"
+  "format default align integer (right)")
+(assert-string-eq (string/format "{:10}" "hi") "hi        "
+  "format default align string (left)")
+
+# Named with format specs
+(assert-string-eq (string/format "{val:.2f}" :val 3.14159) "3.14"
+  "format named with spec")
+
+# ============================================================================
+# string/format — error cases
+# ============================================================================
+
+# Positional arg count mismatch
+(assert-err (fn [] (string/format "{} {}" 1))
+  "format positional too few args")
+
+(assert-err (fn [] (string/format "{}" 1 2))
+  "format positional too many args")
+
+# Named arg missing
+(assert-err (fn [] (string/format "{name}" :other "value"))
+  "format named missing key")
+
+# Named arg extra
+(assert-err (fn [] (string/format "{name}" :name "Alice" :extra "Bob"))
+  "format named extra key")
+
+# Mixed positional and named
+(assert-err (fn [] (string/format "{} {name}" 1 :name "Alice"))
+  "format mixed positional and named")
+
+# Odd keyword args
+(assert-err (fn [] (string/format "{name}" :name))
+  "format odd keyword args")
+
+# Non-keyword in named position
+(assert-err (fn [] (string/format "{name}" 42 "Alice"))
+  "format non-keyword in named position")
+
+# Template not a string
+(assert-err (fn [] (string/format 42))
+  "format template not string")
+
+# Invalid format spec
+(assert-err (fn [] (string/format "{:z}" 42))
+  "format invalid spec")
+
+# Type mismatch: string with integer spec
+(assert-err (fn [] (string/format "{:d}" "hello"))
+  "format type mismatch string as d")
