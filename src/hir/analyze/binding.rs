@@ -1,4 +1,4 @@
-//! Binding forms: let, letrec, define, set
+//! Binding forms: let, letrec, define, set, file-letrec
 
 use super::*;
 use crate::syntax::{ScopeId, Syntax, SyntaxKind};
@@ -471,6 +471,267 @@ impl<'a> Analyzer<'a> {
                 span,
                 Effect::none(),
             ))
+        }
+    }
+
+    /// Analyze a list of top-level forms as a synthetic letrec.
+    ///
+    /// Each form is classified as `Def` (immutable), `Var` (mutable), or
+    /// `Expr` (gensym-named dummy binding). Two-pass analysis:
+    /// - Pass 1: pre-bind all names (enables mutual recursion)
+    /// - Pass 2: analyze initializers sequentially
+    ///
+    /// Returns a single `HirKind::Letrec` node. The body is a reference
+    /// to the last binding (the file's return value).
+    pub(crate) fn analyze_file_letrec(
+        &mut self,
+        forms: Vec<FileForm>,
+        span: Span,
+    ) -> Result<Hir, String> {
+        if forms.is_empty() {
+            return Ok(Hir::pure(HirKind::Nil, span));
+        }
+
+        self.push_scope(false);
+
+        // Classify each form and collect binding info for pass 1.
+        enum PreBound<'s> {
+            Simple {
+                binding: Binding,
+                value_syntax: &'s Syntax,
+            },
+            Destructure {
+                pattern_syntax: &'s Syntax,
+                value_syntax: &'s Syntax,
+                immutable: bool,
+            },
+        }
+
+        let mut entries: Vec<PreBound> = Vec::new();
+        let mut gensym_counter = 0u32;
+
+        // Pass 1: pre-bind all names for mutual visibility.
+        for form in &forms {
+            match form {
+                FileForm::Def(name_syntax, value_syntax) => {
+                    if let Some(name) = name_syntax.as_symbol() {
+                        let binding =
+                            self.bind(name, name_syntax.scopes.as_slice(), BindingScope::Local);
+                        binding.mark_prebound();
+                        binding.mark_immutable();
+
+                        // Seed effect_env and arity_env for lambda forms
+                        if Self::is_lambda_syntax(value_syntax) {
+                            self.effect_env.insert(binding, Effect::none());
+                            if let Some(list) = value_syntax.as_list() {
+                                if let Some(params_syn) =
+                                    list.get(1).and_then(|s| s.as_list_or_tuple())
+                                {
+                                    self.arity_env.insert(
+                                        binding,
+                                        Self::arity_from_syntax_params(params_syn),
+                                    );
+                                }
+                            }
+                        }
+
+                        entries.push(PreBound::Simple {
+                            binding,
+                            value_syntax,
+                        });
+                    } else if Self::is_destructure_pattern(name_syntax) {
+                        // Pre-bind leaf names for mutual visibility
+                        let mut names = Vec::new();
+                        Self::extract_pattern_names(name_syntax, &mut names);
+                        for (name, name_scopes) in &names {
+                            if *name != "_" {
+                                let b = self.bind(name, name_scopes, BindingScope::Local);
+                                b.mark_prebound();
+                                b.mark_immutable();
+                            }
+                        }
+                        entries.push(PreBound::Destructure {
+                            pattern_syntax: name_syntax,
+                            value_syntax,
+                            immutable: true,
+                        });
+                    } else {
+                        return Err(format!(
+                            "{}: def name must be a symbol or destructure pattern",
+                            name_syntax.span
+                        ));
+                    }
+                }
+                FileForm::Var(name_syntax, value_syntax) => {
+                    if let Some(name) = name_syntax.as_symbol() {
+                        let binding =
+                            self.bind(name, name_syntax.scopes.as_slice(), BindingScope::Local);
+                        binding.mark_prebound();
+                        // var is mutable — do NOT mark_immutable
+
+                        // Seed effect_env and arity_env for lambda forms
+                        if Self::is_lambda_syntax(value_syntax) {
+                            self.effect_env.insert(binding, Effect::none());
+                            if let Some(list) = value_syntax.as_list() {
+                                if let Some(params_syn) =
+                                    list.get(1).and_then(|s| s.as_list_or_tuple())
+                                {
+                                    self.arity_env.insert(
+                                        binding,
+                                        Self::arity_from_syntax_params(params_syn),
+                                    );
+                                }
+                            }
+                        }
+
+                        entries.push(PreBound::Simple {
+                            binding,
+                            value_syntax,
+                        });
+                    } else if Self::is_destructure_pattern(name_syntax) {
+                        let mut names = Vec::new();
+                        Self::extract_pattern_names(name_syntax, &mut names);
+                        for (name, name_scopes) in &names {
+                            if *name != "_" {
+                                let b = self.bind(name, name_scopes, BindingScope::Local);
+                                b.mark_prebound();
+                                // var — mutable
+                            }
+                        }
+                        entries.push(PreBound::Destructure {
+                            pattern_syntax: name_syntax,
+                            value_syntax,
+                            immutable: false,
+                        });
+                    } else {
+                        return Err(format!(
+                            "{}: var name must be a symbol or destructure pattern",
+                            name_syntax.span
+                        ));
+                    }
+                }
+                FileForm::Expr(expr_syntax) => {
+                    let gensym_name = format!("__file_expr_{}", gensym_counter);
+                    gensym_counter += 1;
+                    let binding = self.bind(&gensym_name, &[], BindingScope::Local);
+                    binding.mark_prebound();
+                    entries.push(PreBound::Simple {
+                        binding,
+                        value_syntax: expr_syntax,
+                    });
+                }
+            }
+        }
+
+        // Pass 2: analyze all initializers sequentially.
+        let mut bindings = Vec::new();
+        let mut effect = Effect::none();
+        let mut last_binding: Option<Binding> = None;
+
+        for entry in &entries {
+            match entry {
+                PreBound::Simple {
+                    binding,
+                    value_syntax,
+                    ..
+                } => {
+                    let value = self.analyze_expr(value_syntax)?;
+                    effect = effect.combine(value.effect);
+
+                    // Update effect_env and arity_env with actual inferred values
+                    if let HirKind::Lambda {
+                        params: lambda_params,
+                        num_required,
+                        rest_param,
+                        inferred_effect,
+                        ..
+                    } = &value.kind
+                    {
+                        self.effect_env.insert(*binding, *inferred_effect);
+                        let arity = Arity::for_lambda(
+                            rest_param.is_some(),
+                            *num_required,
+                            lambda_params.len(),
+                        );
+                        self.arity_env.insert(*binding, arity);
+                    }
+
+                    bindings.push((*binding, value));
+                    last_binding = Some(*binding);
+                }
+                PreBound::Destructure {
+                    pattern_syntax,
+                    value_syntax,
+                    immutable,
+                } => {
+                    let value = self.analyze_expr(value_syntax)?;
+                    effect = effect.combine(value.effect);
+
+                    // Create a temp binding for the value in the Letrec bindings
+                    let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
+                    bindings.push((tmp, value));
+
+                    // Analyze the pattern (leaf bindings already exist from pass 1)
+                    let pattern = self.analyze_destructure_pattern(
+                        pattern_syntax,
+                        BindingScope::Local,
+                        *immutable,
+                        &span,
+                    )?;
+
+                    // Add leaf bindings to the Letrec bindings vec (initialized
+                    // to nil) so the lowerer allocates slots for them.
+                    for leaf_binding in &pattern.bindings().bindings {
+                        bindings.push((*leaf_binding, Hir::pure(HirKind::Nil, span.clone())));
+                        last_binding = Some(*leaf_binding);
+                    }
+
+                    // Emit the destructure inline as a gensym binding whose
+                    // initializer is the Destructure node. This ensures the
+                    // destructure runs in sequence with other initializers,
+                    // not deferred to the body (which would be too late for
+                    // subsequent initializers that reference the leaf bindings).
+                    let destructure_hir = Hir::pure(
+                        HirKind::Destructure {
+                            pattern,
+                            value: Box::new(Hir::pure(HirKind::Var(tmp), span.clone())),
+                        },
+                        span.clone(),
+                    );
+                    let destr_gensym = format!("__file_destr_{}", gensym_counter);
+                    gensym_counter += 1;
+                    let destr_binding = self.bind(&destr_gensym, &[], BindingScope::Local);
+                    bindings.push((destr_binding, destructure_hir));
+                }
+            }
+        }
+
+        // Body: reference to the last binding (the file's return value).
+        let body = match last_binding {
+            Some(binding) => Hir::pure(HirKind::Var(binding), span.clone()),
+            None => Hir::pure(HirKind::Nil, span.clone()),
+        };
+
+        self.pop_scope();
+
+        Ok(Hir::new(
+            HirKind::Letrec {
+                bindings,
+                body: Box::new(body),
+            },
+            span,
+            effect,
+        ))
+    }
+
+    /// Check if a syntax node is a lambda form: `(fn ...)`.
+    fn is_lambda_syntax(syntax: &Syntax) -> bool {
+        if let Some(list) = syntax.as_list() {
+            list.first()
+                .and_then(|s| s.as_symbol())
+                .is_some_and(|s| s == "fn")
+        } else {
+            false
         }
     }
 

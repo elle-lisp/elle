@@ -94,3 +94,16 @@ pub fn eval_all(
     }
     Ok(last_value)
 }
+
+/// Compile and execute a file as a single synthetic letrec.
+///
+/// Returns the value of the last expression. Primitives are pre-bound
+/// as immutable Global bindings.
+pub fn eval_file(
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+) -> Result<crate::value::Value, String> {
+    let result = super::compile::compile_file(source, symbols)?;
+    vm.execute(&result.bytecode).map_err(|e| e.to_string())
+}

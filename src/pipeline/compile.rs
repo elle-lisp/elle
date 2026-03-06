@@ -5,11 +5,12 @@ use super::fixpoint;
 use super::scan;
 use super::CompileResult;
 use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::Analyzer;
+use crate::hir::{Analyzer, FileForm};
 use crate::lir::{Emitter, Lowerer};
 use crate::primitives::intern_primitive_names;
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
+use crate::syntax::{Span, Syntax, SyntaxKind};
 
 /// Compile source code to bytecode.
 ///
@@ -118,4 +119,86 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
     }
 
     Ok(results)
+}
+
+/// Classify an expanded top-level form into a `FileForm`.
+///
+/// - `(def name value)` → `FileForm::Def(name, value)`
+/// - `(var name value)` → `FileForm::Var(name, value)`
+/// - anything else → `FileForm::Expr(syntax)`
+pub(super) fn classify_form(syntax: &Syntax) -> FileForm<'_> {
+    if let SyntaxKind::List(items) = &syntax.kind {
+        if items.len() == 3 {
+            if let Some(head) = items[0].as_symbol() {
+                match head {
+                    "def" => return FileForm::Def(&items[1], &items[2]),
+                    "var" => return FileForm::Var(&items[1], &items[2]),
+                    _ => {}
+                }
+            }
+        }
+    }
+    FileForm::Expr(syntax)
+}
+
+/// Compile a file as a single synthetic letrec.
+///
+/// All top-level forms are analyzed together, enabling mutual recursion.
+/// Returns a single `CompileResult`. Primitives are pre-bound as immutable
+/// Global bindings in an outer scope.
+pub fn compile_file(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String> {
+    intern_primitive_names(symbols);
+
+    let syntaxes = read_syntax_all(source)?;
+
+    let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();
+    // SAFETY: The cached VM is thread-local and pipeline functions are not
+    // re-entrant. The RefCell borrow was released by get_compilation_cache.
+    let macro_vm = unsafe { &mut *macro_vm_ptr };
+
+    // Expand all forms
+    let mut expanded_forms = Vec::new();
+    for syntax in syntaxes {
+        let expanded = expander.expand(syntax, symbols, macro_vm)?;
+        expanded_forms.push(expanded);
+    }
+
+    // Classify each form
+    let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
+
+    // Compute span covering all forms (or synthetic for empty)
+    let span = if expanded_forms.is_empty() {
+        Span::synthetic()
+    } else {
+        expanded_forms[0]
+            .span
+            .merge(&expanded_forms[expanded_forms.len() - 1].span)
+    };
+
+    // Analyze
+    let mut analyzer =
+        Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+    analyzer.bind_primitives(&meta);
+    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
+
+    // Mark tail calls
+    mark_tail_calls(&mut hir);
+
+    // Lower to LIR
+    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let mut lowerer = Lowerer::new()
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims);
+    let lir_func = lowerer.lower(&hir)?;
+
+    // Emit bytecode
+    let symbol_snapshot = symbols.all_names();
+    let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
+    let bytecode = emitter.emit(&lir_func);
+
+    Ok(CompileResult {
+        bytecode,
+        warnings: Vec::new(),
+    })
 }

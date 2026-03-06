@@ -17,7 +17,7 @@ mod pattern;
 pub mod symbols;
 pub mod tailcall;
 
-pub use analyze::{AnalysisResult, Analyzer};
+pub use analyze::{AnalysisResult, Analyzer, FileForm};
 pub use binding::{Binding, CaptureInfo, CaptureKind};
 pub use expr::{BlockId, CallArg, Hir, HirKind, VarargKind};
 pub use lint::HirLinter;

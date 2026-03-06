@@ -24,12 +24,26 @@ mod special;
 use super::binding::{Binding, CaptureInfo, CaptureKind};
 use super::expr::{BlockId, Hir, HirKind};
 use crate::effects::Effect;
+use crate::primitives::def::PrimitiveMeta;
 use crate::symbol::SymbolTable;
-use crate::syntax::{ScopeId, Span};
+use crate::syntax::{ScopeId, Span, Syntax};
 use crate::value::heap::BindingScope;
 use crate::value::types::Arity;
 use crate::value::SymbolId;
 use std::collections::{HashMap, HashSet};
+
+/// A classified top-level form for file-as-letrec compilation.
+///
+/// The pipeline classifies each expanded top-level form into one of
+/// these variants before passing them to `Analyzer::analyze_file_letrec`.
+pub enum FileForm<'a> {
+    /// `(def name value)` or `(def pattern value)` — immutable binding
+    Def(&'a Syntax, &'a Syntax),
+    /// `(var name value)` or `(var pattern value)` — mutable binding
+    Var(&'a Syntax, &'a Syntax),
+    /// Bare expression — gets a gensym name
+    Expr(&'a Syntax),
+}
 
 /// Tracks an active block for `break` targeting.
 struct BlockContext {
@@ -227,6 +241,28 @@ impl<'a> Analyzer<'a> {
         Ok(AnalysisResult { hir })
     }
 
+    /// Bind all registered primitives as immutable Global bindings in the
+    /// analyzer's initial scope.
+    ///
+    /// Called before `analyze_file_letrec` so that primitives are in scope
+    /// during file analysis. Primitives are `BindingScope::Global` with
+    /// `mark_immutable()` set. File-level `def` bindings shadow primitives
+    /// because `analyze_file_letrec` pushes a new scope.
+    ///
+    /// The lowerer emits `LoadGlobal` for these bindings (same as today),
+    /// but compile-time checks (e.g., `(set + 42)` is an error) use the
+    /// `Binding` identity.
+    pub fn bind_primitives(&mut self, meta: &PrimitiveMeta) {
+        for (&sym_id, &effect) in &meta.effects {
+            let binding = self.bind_by_sym(sym_id, BindingScope::Global);
+            binding.mark_immutable();
+            self.effect_env.insert(binding, effect);
+            if let Some(&arity) = meta.arities.get(&sym_id) {
+                self.arity_env.insert(binding, arity);
+            }
+        }
+    }
+
     // === Scope Management ===
 
     fn push_scope(&mut self, is_function: bool) {
@@ -254,6 +290,35 @@ impl<'a> Analyzer<'a> {
                 .or_default()
                 .push(ScopedBinding {
                     scopes: scopes.to_vec(),
+                    binding,
+                });
+            if matches!(scope, BindingScope::Local) {
+                scope_frame.next_local += 1;
+            }
+        }
+
+        binding
+    }
+
+    /// Bind a symbol by its already-interned SymbolId.
+    ///
+    /// Used by `bind_primitives` where we already have SymbolIds from
+    /// PrimitiveMeta and need to resolve the name for scope registration.
+    fn bind_by_sym(&mut self, sym: SymbolId, scope: BindingScope) -> Binding {
+        let name = self
+            .symbols
+            .name(sym)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("sym#{}", sym.0));
+        let binding = Binding::new(sym, scope);
+
+        if let Some(scope_frame) = self.scopes.last_mut() {
+            scope_frame
+                .bindings
+                .entry(name)
+                .or_default()
+                .push(ScopedBinding {
+                    scopes: Vec::new(), // primitives have empty scopes (visible everywhere)
                     binding,
                 });
             if matches!(scope, BindingScope::Local) {
