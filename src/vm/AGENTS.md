@@ -151,7 +151,6 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `defined_globals` | `Vec<bool>` | Tracks which global slots have been assigned (shadows `globals`) |
 | `jit_cache` | `FxHashMap<*const u8, Rc<JitCode>>` | JIT code cache (FxHash for pointer keys) |
 | `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
-| `scope_stack` | `ScopeStack` | Runtime scope stack |
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for `handle_tail_call` env building |
@@ -325,7 +324,7 @@ to see parent-established parameter bindings.
 | `data.rs` | ~100 | Cons, Car, Cdr, MakeVector |
 | `literals.rs` | ~18 | Nil, EmptyList, True, False literal handlers |
 | `eval.rs` | ~180 | Runtime eval: compile+execute datum, env wrapping |
-| `scope/` | ~200 | Runtime scope stack (legacy) |
+| `cell.rs` | ~70 | Cell operations: MakeCell, UnwrapCell, UpdateCell |
 
 ## Truthiness
 

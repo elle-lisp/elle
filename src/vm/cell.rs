@@ -1,57 +1,5 @@
-use super::ScopeType;
 use crate::value::Value;
 use crate::vm::core::VM;
-
-/// Handle PushScope instruction
-pub fn handle_push_scope(vm: &mut VM, scope_type_byte: u8) {
-    // Convert byte to ScopeType
-    let scope_type = match scope_type_byte {
-        0 => ScopeType::Global,
-        1 => ScopeType::Function,
-        2 => ScopeType::Block,
-        3 => ScopeType::Loop,
-        4 => ScopeType::Let,
-        _ => panic!("VM bug: Invalid scope type: {}", scope_type_byte),
-    };
-
-    vm.scope_stack.push(scope_type);
-}
-
-/// Handle PopScope instruction
-pub fn handle_pop_scope(vm: &mut VM) {
-    if !vm.scope_stack.pop() {
-        panic!("VM bug: Cannot pop global scope");
-    }
-}
-
-/// Handle DefineLocal instruction
-pub fn handle_define_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
-    // Read symbol index from bytecode
-    let high = bytecode[*ip] as u16;
-    let low = bytecode[*ip + 1] as u16;
-    *ip += 2;
-    let sym_idx = (high << 8) | low;
-
-    // Pop value from stack
-    let value = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on DefineLocal");
-
-    // Get the symbol ID from constants
-    let sym_id = constants[sym_idx as usize]
-        .as_symbol()
-        .expect("VM bug: Expected symbol in constants for DefineLocal");
-
-    // Define in current scope
-    // Note: ScopeStack always has at least the global scope, so we don't need to check
-    vm.scope_stack.define_local(sym_id, value);
-
-    // Push the value back on the stack to maintain expression semantics
-    // This way (var x 10) returns 10, allowing it to be used in expression contexts
-    vm.fiber.stack.push(value);
-}
 
 /// Handle MakeCell instruction - wraps a value in a cell for shared mutable access
 /// Pops value from stack, wraps it in a cell, pushes the cell
