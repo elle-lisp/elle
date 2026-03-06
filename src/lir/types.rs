@@ -62,6 +62,57 @@ pub struct LirFunction {
     /// Total number of parameter slots (required + optional + rest if present).
     /// Used by VM populate_env to know how many fixed slots to fill.
     pub num_params: usize,
+    /// Yield point metadata, populated during bytecode emission.
+    /// Indexed by yield point order (0, 1, 2, ...).
+    /// Empty for non-yielding functions.
+    pub yield_points: Vec<YieldPointInfo>,
+    /// Call site metadata, populated during bytecode emission.
+    /// Only populated for functions where `effect.may_suspend()`.
+    /// Indexed by call instruction order (0, 1, 2, ...).
+    pub call_sites: Vec<CallSiteInfo>,
+}
+
+/// Metadata about a yield point, collected during bytecode emission.
+/// The JIT reads this to know how to spill registers and where to
+/// resume in the interpreter.
+#[derive(Debug, Clone)]
+pub struct YieldPointInfo {
+    /// Bytecode IP to resume at (the instruction after the Yield opcode).
+    /// This is the IP stored in the SuspendedFrame so the interpreter
+    /// can resume from the correct point.
+    pub resume_ip: usize,
+    /// Registers on the operand stack at the yield point, bottom-to-top.
+    /// The JIT spills these Cranelift variables in this order to
+    /// reconstruct the interpreter's operand stack on resume.
+    pub stack_regs: Vec<Reg>,
+    /// Number of local variable slots (params + locally-defined).
+    /// The interpreter stores locals at `[frame_base, frame_base + num_locals)`.
+    /// The JIT must spill local values first, then operand stack registers,
+    /// so the SuspendedFrame stack matches the interpreter's layout.
+    pub num_locals: u16,
+}
+
+/// Metadata about a call site, collected during bytecode emission.
+/// The JIT reads this to know the bytecode IP at each call instruction,
+/// which is needed to build SuspendedFrames for yield-through-call.
+///
+/// Only populated for functions where `effect.may_suspend()`.
+#[derive(Debug, Clone)]
+pub struct CallSiteInfo {
+    /// Bytecode IP after the Call instruction and its operands.
+    /// This is the IP the interpreter would store in SuspendedFrame.ip
+    /// when yield propagates through this call.
+    pub resume_ip: usize,
+    /// Registers on the operand stack at the call site, after popping
+    /// func and args but before pushing the result. This matches the
+    /// interpreter's stack state when yield propagates through a call
+    /// (call_inner line 192: `self.fiber.stack.drain(..).collect()`).
+    pub stack_regs: Vec<Reg>,
+    /// Number of local variable slots (params + locally-defined).
+    /// The interpreter stores locals at `[frame_base, frame_base + num_locals)`.
+    /// The JIT must spill local values first, then operand stack registers,
+    /// so the SuspendedFrame stack matches the interpreter's layout.
+    pub num_locals: u16,
 }
 
 impl LirFunction {
@@ -81,6 +132,8 @@ impl LirFunction {
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params: 0,
+            yield_points: Vec::new(),
+            call_sites: Vec::new(),
         }
     }
 }

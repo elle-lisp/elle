@@ -116,7 +116,7 @@ fn eval_inner(
     // Emit
     let symbol_snapshot = symbols.all_names();
     let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
-    let bytecode = emitter.emit(&lir_func);
+    let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
 
     // Execute
     let bc_rc = Rc::new(bytecode.instructions);
