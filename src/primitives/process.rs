@@ -85,7 +85,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/exit",
         func: prim_exit,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Range(0, 1),
         doc: "Exit the process with an optional exit code (0-255)",
         params: &["code"],

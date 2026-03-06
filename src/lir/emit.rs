@@ -27,6 +27,16 @@ pub struct Emitter {
     /// When a block ends with Terminator::Yield, the stack state is saved here
     /// so the resume block can start with the correct simulation state.
     yield_stack_state: HashMap<Label, (Vec<Reg>, HashMap<Reg, usize>)>,
+    /// Yield point metadata collected during emission.
+    yield_points: Vec<YieldPointInfo>,
+    /// Call site metadata collected during emission.
+    call_sites: Vec<CallSiteInfo>,
+    /// Whether the current function may suspend (gates call site recording).
+    current_func_may_suspend: bool,
+    /// Number of local variable slots in the current function.
+    /// Recorded in yield points and call sites so the JIT can spill
+    /// local values into the SuspendedFrame stack.
+    current_func_num_locals: u16,
 }
 
 impl Emitter {
@@ -39,6 +49,10 @@ impl Emitter {
             reg_to_stack: HashMap::new(),
             symbol_names: HashMap::new(),
             yield_stack_state: HashMap::new(),
+            yield_points: Vec::new(),
+            call_sites: Vec::new(),
+            current_func_may_suspend: false,
+            current_func_num_locals: 0,
         }
     }
 
@@ -52,11 +66,18 @@ impl Emitter {
             reg_to_stack: HashMap::new(),
             symbol_names,
             yield_stack_state: HashMap::new(),
+            yield_points: Vec::new(),
+            call_sites: Vec::new(),
+            current_func_may_suspend: false,
+            current_func_num_locals: 0,
         }
     }
 
     /// Emit bytecode from a LIR function
-    pub fn emit(&mut self, func: &LirFunction) -> Bytecode {
+    pub fn emit(
+        &mut self,
+        func: &LirFunction,
+    ) -> (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>) {
         let mut bytecode = Bytecode::new();
         // Copy symbol names to the new bytecode for cross-thread portability
         bytecode.symbol_names = self.symbol_names.clone();
@@ -66,6 +87,10 @@ impl Emitter {
         self.stack.clear();
         self.reg_to_stack.clear();
         self.yield_stack_state.clear();
+        self.yield_points.clear();
+        self.call_sites.clear();
+        self.current_func_may_suspend = func.effect.may_suspend();
+        self.current_func_num_locals = func.num_locals;
 
         // First pass: record label offsets (simplified - emit all blocks in order)
         // Second pass handled inline since we emit sequentially
@@ -88,11 +113,18 @@ impl Emitter {
             }
         }
 
-        std::mem::take(&mut self.bytecode)
+        (
+            std::mem::take(&mut self.bytecode),
+            std::mem::take(&mut self.yield_points),
+            std::mem::take(&mut self.call_sites),
+        )
     }
 
     /// Emit bytecode from a nested LIR function (for closures)
-    fn emit_nested_function(&mut self, func: &LirFunction) -> Bytecode {
+    fn emit_nested_function(
+        &mut self,
+        func: &LirFunction,
+    ) -> (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>) {
         // Save current state
         let saved_bytecode = std::mem::take(&mut self.bytecode);
         let saved_label_offsets = std::mem::take(&mut self.label_offsets);
@@ -100,6 +132,9 @@ impl Emitter {
         let saved_stack = std::mem::take(&mut self.stack);
         let saved_reg_to_stack = std::mem::take(&mut self.reg_to_stack);
         let saved_yield_stack_state = std::mem::take(&mut self.yield_stack_state);
+        let saved_yield_points = std::mem::take(&mut self.yield_points);
+        let saved_call_sites = std::mem::take(&mut self.call_sites);
+        let saved_may_suspend = self.current_func_may_suspend;
 
         // Emit the nested function
         let result = self.emit(func);
@@ -111,6 +146,9 @@ impl Emitter {
         self.stack = saved_stack;
         self.reg_to_stack = saved_reg_to_stack;
         self.yield_stack_state = saved_yield_stack_state;
+        self.yield_points = saved_yield_points;
+        self.call_sites = saved_call_sites;
+        self.current_func_may_suspend = saved_may_suspend;
 
         result
     }
@@ -271,7 +309,11 @@ impl Emitter {
                 }
 
                 // Recursively emit the nested function
-                let nested_bytecode = self.emit_nested_function(func);
+                let (nested_bytecode, nested_yield_points, nested_call_sites) =
+                    self.emit_nested_function(func);
+                let mut nested_lir = func.as_ref().clone();
+                nested_lir.yield_points = nested_yield_points;
+                nested_lir.call_sites = nested_call_sites;
 
                 // Create closure template
                 let closure = Closure {
@@ -287,7 +329,7 @@ impl Emitter {
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
                     location_map: Rc::new(nested_bytecode.location_map),
                     jit_code: None,
-                    lir_function: Some(Rc::new(func.as_ref().clone())),
+                    lir_function: Some(Rc::new(nested_lir)),
                     doc: func.doc,
                     vararg_kind: func.vararg_kind.clone(),
                     num_params: func.num_params,
@@ -340,11 +382,27 @@ impl Emitter {
 
                 self.bytecode.emit(Instruction::Call);
                 self.bytecode.emit_byte(args.len() as u8);
-                // Pop func and args, push result
+                let call_resume_ip = self.bytecode.current_pos();
+
+                // Pop func and args from simulated stack
                 self.pop(); // func
                 for _ in args {
                     self.pop();
                 }
+
+                // Record call site metadata AFTER popping func/args, BEFORE
+                // pushing result. This matches the interpreter's stack state
+                // when yield propagates through a call: the Call instruction
+                // has consumed its operands, the callee yielded, and the
+                // interpreter saves the remaining stack.
+                if self.current_func_may_suspend {
+                    self.call_sites.push(CallSiteInfo {
+                        resume_ip: call_resume_ip,
+                        stack_regs: self.stack.clone(),
+                        num_locals: self.current_func_num_locals,
+                    });
+                }
+
                 self.push_reg(*dst);
             }
 
@@ -703,6 +761,26 @@ impl Emitter {
                 self.bytecode.emit(Instruction::RegionExit);
                 // No stack effect
             }
+
+            LirInstr::PushParamFrame { pairs } => {
+                // Push all param/value pairs onto the stack
+                for (param, value) in pairs {
+                    self.ensure_on_top(*param);
+                    self.ensure_on_top(*value);
+                }
+                self.bytecode.emit(Instruction::PushParamFrame);
+                self.bytecode.emit_byte(pairs.len() as u8);
+                // All pairs consumed from stack
+                for _ in pairs {
+                    self.pop(); // value
+                    self.pop(); // param
+                }
+            }
+
+            LirInstr::PopParamFrame => {
+                self.bytecode.emit(Instruction::PopParamFrame);
+                // No stack effect
+            }
         }
     }
 
@@ -774,6 +852,21 @@ impl Emitter {
                 self.bytecode.emit(Instruction::Yield);
                 // Pop the yielded value from the simulated stack
                 self.pop();
+
+                // The resume IP is the current bytecode position (right after
+                // the Yield opcode byte). This is what the interpreter stores
+                // in SuspendedFrame.ip.
+                let resume_ip = self.bytecode.current_pos();
+
+                // Record yield point metadata for JIT.
+                // num_locals is needed so the JIT can spill local variable
+                // values into the SuspendedFrame stack, matching the
+                // interpreter's layout: [locals..., operands...].
+                self.yield_points.push(YieldPointInfo {
+                    resume_ip,
+                    stack_regs: self.stack.clone(),
+                    num_locals: self.current_func_num_locals,
+                });
 
                 // Save stack state for the resume block.
                 // The resume block will start with this stack state,
@@ -971,7 +1064,7 @@ mod tests {
         func.blocks.push(block);
         func.entry = Label(0);
 
-        let bytecode = emitter.emit(&func);
+        let (bytecode, _, _) = emitter.emit(&func);
         assert!(!bytecode.instructions.is_empty());
     }
 
@@ -1028,12 +1121,64 @@ mod tests {
 
         func.entry = Label(0);
 
-        let bytecode = emitter.emit(&func);
+        let (bytecode, _, _) = emitter.emit(&func);
         assert!(!bytecode.instructions.is_empty());
         // Should have Jump instructions for control flow
         assert!(bytecode
             .instructions
             .iter()
             .any(|&b| b == Instruction::Jump as u8 || b == Instruction::JumpIfFalse as u8));
+    }
+
+    #[test]
+    fn test_yield_point_info_collected() {
+        let mut emitter = Emitter::new();
+
+        // fn() { yield 42; resume_value }
+        let mut func = LirFunction::new(Arity::Exact(0));
+        func.num_regs = 2;
+        func.effect = crate::effects::Effect::yields();
+
+        let mut b0 = BasicBlock::new(Label(0));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Int(42),
+            },
+            synthetic_span(),
+        ));
+        b0.terminator = SpannedTerminator::new(
+            Terminator::Yield {
+                value: Reg(0),
+                resume_label: Label(1),
+            },
+            synthetic_span(),
+        );
+
+        let mut b1 = BasicBlock::new(Label(1));
+        b1.instructions.push(SpannedInstr::new(
+            LirInstr::LoadResumeValue { dst: Reg(1) },
+            synthetic_span(),
+        ));
+        b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), synthetic_span());
+
+        func.blocks = vec![b0, b1];
+        func.entry = Label(0);
+
+        let (bytecode, yield_points, _call_sites) = emitter.emit(&func);
+        assert!(!bytecode.instructions.is_empty());
+        assert_eq!(yield_points.len(), 1);
+        assert!(yield_points[0].resume_ip > 0);
+        // stack_regs should be empty — only Reg(0) was on stack, but it was
+        // popped by the Yield. The remaining stack is empty.
+        assert!(yield_points[0].stack_regs.is_empty());
+    }
+
+    #[test]
+    fn test_yield_sentinel_distinct() {
+        use crate::jit::dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
+        use crate::value::repr::TAG_NIL;
+        assert_ne!(YIELD_SENTINEL, TAIL_CALL_SENTINEL);
+        assert_ne!(YIELD_SENTINEL, TAG_NIL);
     }
 }

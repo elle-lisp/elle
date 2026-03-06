@@ -78,6 +78,7 @@ impl Lowerer {
 
             HirKind::Match { value, arms } => self.lower_match(value, arms),
             HirKind::Eval { expr, env } => self.lower_eval(expr, env),
+            HirKind::Parameterize { bindings, body } => self.lower_parameterize(bindings, body),
         }
     }
 
@@ -243,7 +244,12 @@ impl Lowerer {
         let block_result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         let exit_label = self.fresh_label();
-        let scoped = self.can_scope_allocate_block(body);
+        let scoped = self.can_scope_allocate_block(block_id, body);
+
+        // Record region depth BEFORE emitting RegionEnter so that breaks
+        // targeting this block include the block's own region in their
+        // compensating RegionExit count.
+        let depth_before = self.region_depth;
 
         if scoped {
             self.emit_region_enter();
@@ -254,7 +260,7 @@ impl Lowerer {
             result_reg,
             result_slot: block_result_slot,
             exit_label,
-            region_depth_at_entry: self.region_depth,
+            region_depth_at_entry: depth_before,
         });
 
         // Lower body (same as lower_begin but simpler — body is typically a single Begin node)
@@ -462,6 +468,42 @@ impl Lowerer {
         self.emit(LirInstr::LoadLocal {
             dst: result_reg,
             slot: cond_result_slot,
+        });
+
+        Ok(result_reg)
+    }
+
+    fn lower_parameterize(&mut self, bindings: &[(Hir, Hir)], body: &Hir) -> Result<Reg, String> {
+        // Lower all param/value pairs
+        let mut pairs = Vec::new();
+        for (param, value) in bindings {
+            let param_reg = self.lower_expr(param)?;
+            let value_reg = self.lower_expr(value)?;
+            pairs.push((param_reg, value_reg));
+        }
+
+        // Emit PushParamFrame
+        self.emit(LirInstr::PushParamFrame { pairs });
+
+        // Lower body
+        let body_reg = self.lower_expr(body)?;
+
+        // Store result in a local slot so PopParamFrame doesn't interfere
+        let result_reg = self.fresh_reg();
+        let result_slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
+        self.emit(LirInstr::StoreLocal {
+            slot: result_slot,
+            src: body_reg,
+        });
+
+        // Emit PopParamFrame
+        self.emit(LirInstr::PopParamFrame);
+
+        // Reload result
+        self.emit(LirInstr::LoadLocal {
+            dst: result_reg,
+            slot: result_slot,
         });
 
         Ok(result_reg)

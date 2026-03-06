@@ -101,9 +101,6 @@ mod regex {
 mod glob {
     include!("glob.rs");
 }
-mod docstrings {
-    include!("docstrings.rs");
-}
 mod fn_flow {
     include!("fn_flow.rs");
 }
@@ -122,9 +119,6 @@ mod escape {
 mod elle_scripts {
     include!("elle_scripts.rs");
 }
-mod comparison {
-    include!("comparison.rs");
-}
 mod allocator {
     include!("allocator.rs");
 }
@@ -133,6 +127,15 @@ mod environment {
 }
 mod file_scope {
     include!("file_scope.rs");
+}
+mod parameters {
+    include!("parameters.rs");
+}
+mod ports {
+    include!("ports.rs");
+}
+mod jit_yield {
+    include!("jit_yield.rs");
 }
 
 // Temporarily disabled while sorting out compilation caching.

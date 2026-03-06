@@ -6,7 +6,6 @@ use crate::value::fiber::CallFrame;
 use crate::value::{
     Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_OK, SIG_YIELD,
 };
-use crate::vm::scope::ScopeStack;
 use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -41,7 +40,6 @@ pub struct VM {
     pub defined_globals: Vec<bool>,
     pub ffi: FFISubsystem,
     pub loaded_modules: HashSet<String>,
-    pub scope_stack: ScopeStack,
     pub closure_call_counts: FxHashMap<*const u8, usize>,
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
@@ -110,7 +108,6 @@ impl VM {
             defined_globals: vec![false; 256],
             ffi: FFISubsystem::new(),
             loaded_modules: HashSet::new(),
-            scope_stack: ScopeStack::new(),
             closure_call_counts: FxHashMap::default(),
             location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),
@@ -129,7 +126,7 @@ impl VM {
     /// Preserves: globals (primitives), docs, ffi, jit_cache,
     /// eval_expander, env_cache, tail_call_env_cache, fiber heap Box
     /// (reused for pointer stability).
-    /// Resets: fiber, call state, scope stack, location map,
+    /// Resets: fiber, call state, location map,
     /// loaded modules, closure call counts.
     pub fn reset_fiber(&mut self) {
         // Extract and clear the heap Box so the thread-local pointer stays valid.
@@ -146,7 +143,6 @@ impl VM {
         self.current_fiber_value = None;
         self.pending_tail_call = None;
         self.error_loc = None;
-        self.scope_stack = ScopeStack::new();
         self.closure_call_counts.clear();
         self.location_map = LocationMap::new();
         self.loaded_modules.clear();
@@ -180,9 +176,29 @@ impl VM {
     /// Set the current source location for error reporting
     /// Format a runtime error value with source location.
     pub(crate) fn format_error_with_location(&self, err_value: Value) -> String {
-        let base_msg = crate::value::format_error(err_value);
-        let mut result = base_msg;
+        let mut result = format!("{}", err_value);
 
+        // Add stack trace (shallowest frame first, drilling down to error origin)
+        let trace = self.capture_stack_trace();
+        if !trace.is_empty() {
+            const MAX_TRACE_DEPTH: usize = 20;
+            for frame in trace.iter().rev().take(MAX_TRACE_DEPTH) {
+                if let Some(name) = &frame.function_name {
+                    result.push_str(&format!("\n  in {}", name));
+                    if let Some(loc) = &frame.location {
+                        result.push_str(&format!(" at {}", loc));
+                    }
+                }
+            }
+            if trace.len() > MAX_TRACE_DEPTH {
+                result.push_str(&format!(
+                    "\n  ... {} more frames",
+                    trace.len() - MAX_TRACE_DEPTH
+                ));
+            }
+        }
+
+        // Error location and source context come last (the exact error origin)
         if let Some(loc) = &self.error_loc {
             result.push_str(&format!("\n  at {}", loc));
 
@@ -204,26 +220,6 @@ impl VM {
                         caret
                     ));
                 }
-            }
-        }
-
-        // Add stack trace
-        let trace = self.capture_stack_trace();
-        if !trace.is_empty() {
-            const MAX_TRACE_DEPTH: usize = 20;
-            for frame in trace.iter().take(MAX_TRACE_DEPTH) {
-                if let Some(name) = &frame.function_name {
-                    result.push_str(&format!("\n  in {}", name));
-                    if let Some(loc) = &frame.location {
-                        result.push_str(&format!(" at {}", loc));
-                    }
-                }
-            }
-            if trace.len() > MAX_TRACE_DEPTH {
-                result.push_str(&format!(
-                    "\n  ... {} more frames",
-                    trace.len() - MAX_TRACE_DEPTH
-                ));
             }
         }
 

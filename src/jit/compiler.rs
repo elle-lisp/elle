@@ -86,6 +86,9 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) resolve_tail_call: FuncId,
     pub(crate) call_depth_enter: FuncId,
     pub(crate) call_depth_exit: FuncId,
+    pub(crate) jit_yield: FuncId,
+    pub(crate) jit_yield_through_call: FuncId,
+    pub(crate) has_signal: FuncId,
 }
 
 impl JitCompiler {
@@ -196,6 +199,15 @@ impl JitCompiler {
             "elle_jit_call_depth_exit",
             dispatch::elle_jit_call_depth_exit as *const u8,
         );
+        builder.symbol("elle_jit_yield", dispatch::elle_jit_yield as *const u8);
+        builder.symbol(
+            "elle_jit_yield_through_call",
+            dispatch::elle_jit_yield_through_call as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_has_signal",
+            dispatch::elle_jit_has_signal as *const u8,
+        );
 
         let mut module = JITModule::new(builder);
 
@@ -260,6 +272,20 @@ impl JitCompiler {
                     .map_err(|e| JitError::CompilationFailed(e.to_string()))
             };
 
+        // elle_jit_yield: 5 params (yielded, spilled_ptr, yield_index, vm, closure_bits)
+        let mut yield_sig = module.make_signature();
+        for _ in 0..5 {
+            yield_sig.params.push(AbiParam::new(I64));
+        }
+        yield_sig.returns.push(AbiParam::new(I64));
+
+        // elle_jit_yield_through_call: 4 params (spilled_ptr, call_site_index, vm, closure_bits)
+        let mut ytc_sig = module.make_signature();
+        for _ in 0..4 {
+            ytc_sig.params.push(AbiParam::new(I64));
+        }
+        ytc_sig.returns.push(AbiParam::new(I64));
+
         Ok(RuntimeHelpers {
             add: declare(module, "elle_jit_add", &binary_sig)?,
             sub: declare(module, "elle_jit_sub", &binary_sig)?,
@@ -300,6 +326,9 @@ impl JitCompiler {
             resolve_tail_call: declare(module, "elle_jit_resolve_tail_call", &binary_sig)?,
             call_depth_enter: declare(module, "elle_jit_call_depth_enter", &unary_sig)?,
             call_depth_exit: declare(module, "elle_jit_call_depth_exit", &unary_sig)?,
+            jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
+            jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
+            has_signal: declare(module, "elle_jit_has_signal", &unary_sig)?,
         })
     }
 
@@ -309,9 +338,10 @@ impl JitCompiler {
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
     ) -> Result<JitCode, JitError> {
-        // JIT can't handle suspension (yield/debug) — only non-suspending functions
-        if lir.effect.may_suspend() {
-            return Err(JitError::NotPure);
+        // Only reject polymorphic effects (effect depends on arguments).
+        // Yielding functions are now supported via side-exit.
+        if lir.effect.propagates != 0 {
+            return Err(JitError::Polymorphic);
         }
 
         // Create function signature
@@ -350,8 +380,35 @@ impl JitCompiler {
             .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
         let fn_ptr = self.module.get_finalized_function(func_id);
 
+        // Convert yield point metadata from LIR to JIT format
+        let yield_metas: Vec<super::dispatch::YieldPointMeta> = lir
+            .yield_points
+            .iter()
+            .map(|yp| super::dispatch::YieldPointMeta {
+                resume_ip: yp.resume_ip,
+                num_spilled: yp.stack_regs.len() as u16,
+                num_locals: yp.num_locals,
+            })
+            .collect();
+
+        // Convert call site metadata from LIR to JIT format
+        let call_site_metas: Vec<super::dispatch::CallSiteMeta> = lir
+            .call_sites
+            .iter()
+            .map(|cs| super::dispatch::CallSiteMeta {
+                resume_ip: cs.resume_ip,
+                num_spilled: cs.num_locals + cs.stack_regs.len() as u16,
+                num_locals: cs.num_locals,
+            })
+            .collect();
+
         // Wrap in JitCode (module is moved to keep code alive)
-        Ok(JitCode::new(fn_ptr, self.module))
+        Ok(JitCode::new_with_metadata(
+            fn_ptr,
+            self.module,
+            yield_metas,
+            call_site_metas,
+        ))
     }
 
     /// Build Cranelift IR for a LirFunction and return it as lines of text.
@@ -361,8 +418,8 @@ impl JitCompiler {
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
     ) -> Result<Vec<String>, JitError> {
-        if lir.effect.may_suspend() {
-            return Err(JitError::NotPure);
+        if lir.effect.propagates != 0 {
+            return Err(JitError::Polymorphic);
         }
 
         let sig = self.make_jit_signature();
@@ -399,10 +456,17 @@ impl JitCompiler {
         mut self,
         members: &[BatchMember],
     ) -> Result<Vec<(SymbolId, JitCode)>, JitError> {
-        // Validate all members are non-suspending
+        // Validate all members are non-polymorphic and non-yielding.
+        // Yielding functions require per-function YieldPointMeta in JitCode,
+        // but compile_batch creates shared JitCode with empty yield_points.
+        // If a yielding function were batch-compiled, elle_jit_yield would
+        // panic on index-out-of-bounds when looking up yield point metadata.
         for member in members {
+            if member.lir.effect.propagates != 0 {
+                return Err(JitError::Polymorphic);
+            }
             if member.lir.effect.may_suspend() {
-                return Err(JitError::NotPure);
+                return Err(JitError::Yielding);
             }
         }
 
@@ -580,6 +644,11 @@ impl JitCompiler {
             translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
         }
 
+        // Allocate shared spill slot for yield/call sites (if any)
+        if lir.effect.may_suspend() {
+            translator.allocate_shared_spill_slot(&mut builder);
+        }
+
         builder.ins().jump(loop_header, &[]);
 
         // Loop header: merge point for self-tail-calls
@@ -595,7 +664,6 @@ impl JitCompiler {
         for bb in &lir.blocks {
             let cl_block = block_map[&bb.label];
             builder.switch_to_block(cl_block);
-            builder.seal_block(cl_block);
 
             // Translate instructions
             let mut block_terminated = false;
@@ -617,8 +685,11 @@ impl JitCompiler {
             }
         }
 
-        // NOW seal loop_header — all self-tail-call back-edges have been emitted
-        builder.seal_block(loop_header);
+        // Seal all blocks at once — LIR can have back-edges (e.g. while loops)
+        // so we cannot seal LIR blocks eagerly during translation.
+        // Blocks created and sealed inside translate_instr/translate_terminator
+        // (exception, yield, fastpath blocks) are skipped since already sealed.
+        builder.seal_all_blocks();
 
         builder.finalize();
         Ok(())
@@ -742,13 +813,24 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_non_pure() {
+    fn test_reject_polymorphic() {
+        let mut lir = make_simple_lir();
+        lir.effect = Effect::polymorphic(0);
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let result = compiler.compile(&lir, None);
+        assert!(matches!(result, Err(JitError::Polymorphic)));
+    }
+
+    #[test]
+    fn test_accept_yielding() {
         let mut lir = make_simple_lir();
         lir.effect = Effect::yields();
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
+        // Should compile (no Yield terminators in this simple LIR)
         let result = compiler.compile(&lir, None);
-        assert!(matches!(result, Err(JitError::NotPure)));
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -927,9 +1009,9 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_batch_rejects_suspending() {
+    fn test_compile_batch_rejects_polymorphic() {
         let mut lir = make_simple_lir();
-        lir.effect = Effect::yields();
+        lir.effect = Effect::polymorphic(0);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let members = vec![BatchMember {
@@ -937,6 +1019,56 @@ mod tests {
             lir: &lir,
         }];
         let result = compiler.compile_batch(&members);
-        assert!(matches!(result, Err(JitError::NotPure)));
+        assert!(matches!(result, Err(JitError::Polymorphic)));
+    }
+
+    #[test]
+    fn test_compile_yielding_function() {
+        use crate::lir::YieldPointInfo;
+
+        let mut func = LirFunction::new(Arity::Exact(0));
+        func.num_regs = 2;
+        func.num_captures = 0;
+        func.effect = Effect::yields();
+
+        let mut b0 = BasicBlock::new(Label(0));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(0),
+                value: crate::lir::LirConst::Int(42),
+            },
+            Span::synthetic(),
+        ));
+        b0.terminator = SpannedTerminator::new(
+            Terminator::Yield {
+                value: Reg(0),
+                resume_label: Label(1),
+            },
+            Span::synthetic(),
+        );
+
+        let mut b1 = BasicBlock::new(Label(1));
+        b1.instructions.push(SpannedInstr::new(
+            LirInstr::LoadResumeValue { dst: Reg(1) },
+            Span::synthetic(),
+        ));
+        b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), Span::synthetic());
+
+        func.blocks = vec![b0, b1];
+        func.entry = Label(0);
+        func.yield_points = vec![YieldPointInfo {
+            resume_ip: 5,
+            stack_regs: vec![],
+            num_locals: 0,
+        }];
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let result = compiler.compile(&func, None);
+        assert!(
+            result.is_ok(),
+            "Yielding function should compile: {:?}",
+            result.err()
+        );
+        assert_eq!(result.unwrap().yield_points.len(), 1);
     }
 }

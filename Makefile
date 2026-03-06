@@ -1,4 +1,4 @@
-.PHONY: all elle plugins docs test smoke clean help
+.PHONY: all elle plugins docs docgen examples test smoke clean help
 
 all: elle plugins docs  ## Build everything
 
@@ -8,7 +8,7 @@ elle:  ## Build the Elle binary (release)
 	cargo build --release -p elle
 
 plugins:  ## Build all native plugins (.so)
-	@for p in regex sqlite crypto random mermaid selkie sugiyama fdg dagre; do \
+	@for p in regex sqlite crypto random selkie; do \
 		cargo build --release -p elle-$$p; \
 	done
 
@@ -18,6 +18,16 @@ docs: docs/pipeline.svg  ## Generate documentation assets
 
 docs/pipeline.svg: docs/pipeline.dot
 	dot -Tsvg $< -o $@
+
+docgen: elle  ## Generate documentation site (Rust docs + Elle site)
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+	./target/release/elle demos/docgen/generate.lisp
+
+examples: elle  ## Run all examples
+	@for f in examples/*.lisp; do \
+		echo "  $$f"; \
+		timeout 10s ./target/release/elle "$$f" || exit 1; \
+	done
 
 # ── Test ────────────────────────────────────────────────────────────
 

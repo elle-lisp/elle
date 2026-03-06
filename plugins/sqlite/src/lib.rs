@@ -267,7 +267,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sqlite/open",
         func: prim_sqlite_open,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Open a SQLite database. Use \":memory:\" for in-memory.",
         params: &["path"],
@@ -289,7 +289,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sqlite/execute",
         func: prim_sqlite_execute,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Range(2, 3),
         doc: "Execute SQL that doesn't return rows. Returns rows affected.",
         params: &["db", "sql", "params?"],
@@ -300,7 +300,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sqlite/query",
         func: prim_sqlite_query,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Range(2, 3),
         doc: "Execute a query and return results as a list of structs.",
         params: &["db", "sql", "params?"],

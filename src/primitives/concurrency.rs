@@ -1,4 +1,5 @@
 use crate::effects::Effect;
+use crate::error::{LError, LResult};
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::registration::register_primitives;
 use crate::symbol::SymbolTable;
@@ -120,34 +121,37 @@ fn is_value_sendable(value: &Value) -> bool {
 
         // External objects are not sendable (contain Rc<dyn Any>)
         HeapObject::External(_) => false,
+
+        // Parameters are not sendable (fiber-local state)
+        HeapObject::Parameter { .. } => false,
     }
 }
 
 /// Helper function to spawn a closure in a new thread
 /// Extracts closure data, validates sendability, and executes in a fresh VM
-fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> {
+fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
     use crate::value::SendValue;
     use std::collections::HashMap;
 
     // Check that all captured values are sendable
     for (i, captured) in closure.env.iter().enumerate() {
         if !is_value_sendable(captured) {
-            return Err(format!(
+            return Err(LError::generic(format!(
                 "spawn: closure captures mutable or unsafe value at position {} ({})",
                 i,
                 captured.type_name()
-            ));
+            )));
         }
     }
 
     // Also check constants for sendability
     for (i, constant) in closure.constants.iter().enumerate() {
         if !is_value_sendable(constant) {
-            return Err(format!(
+            return Err(LError::generic(format!(
                 "spawn: closure has non-sendable constant at position {} ({})",
                 i,
                 constant.type_name()
-            ));
+            )));
         }
     }
 
@@ -157,15 +161,16 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> Result<Value, String> 
         .iter()
         .map(|v| SendValue::from_value(*v))
         .collect();
-    let env_send = env_send.map_err(|e| format!("spawn: failed to copy environment: {}", e))?;
+    let env_send = env_send
+        .map_err(|e| LError::generic(format!("spawn: failed to copy environment: {}", e)))?;
 
     let constants_send: Result<Vec<SendValue>, String> = closure
         .constants
         .iter()
         .map(|v| SendValue::from_value(*v))
         .collect();
-    let constants_send =
-        constants_send.map_err(|e| format!("spawn: failed to copy constants: {}", e))?;
+    let constants_send = constants_send
+        .map_err(|e| LError::generic(format!("spawn: failed to copy constants: {}", e)))?;
 
     // Extract the closure bytecode for thread safety
     let bytecode_data: Vec<u8> = (*closure.bytecode).clone();
@@ -404,7 +409,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/spawn",
         func: prim_spawn,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Spawn a new thread that executes a closure with captured immutable values",
         params: &["closure"],
@@ -415,7 +420,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/join",
         func: prim_join,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Wait for a thread to complete and return its result",
         params: &["thread-handle"],

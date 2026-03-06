@@ -55,7 +55,7 @@ inner dispatch loop):
 - `SIG_ERROR` (1): Error. Error tuple in `fiber.signal` as `[:keyword "message"]`.
 - `SIG_YIELD` (2): Fiber yield. Value in `fiber.signal`, suspended frames in `fiber.suspended`.
 - `SIG_RESUME` (8): VM-internal. Fiber primitive requests VM-side execution.
-- `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-raises caught signal.
+- `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-signals caught signal.
 - `SIG_CANCEL` (64): VM-internal. `fiber/cancel` injects error into fiber.
 - `SIG_QUERY` (128): VM-internal. Primitive reads VM state (e.g., call counts, global bindings, arena stats, environment).
 - `SIG_HALT` (256): Graceful VM termination. Value in `fiber.signal`. Non-resumable; fiber is Dead.
@@ -151,7 +151,6 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `defined_globals` | `Vec<bool>` | Tracks which global slots have been assigned (shadows `globals`) |
 | `jit_cache` | `FxHashMap<*const u8, Rc<JitCode>>` | JIT code cache (FxHash for pointer keys) |
 | `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
-| `scope_stack` | `ScopeStack` | Runtime scope stack |
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for `handle_tail_call` env building |
@@ -160,7 +159,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 ### Key Fiber fields (on `vm.fiber`)
 
 | Field | Type | Purpose |
-|-------|-------|---------|
+|-------|------|---------|
 | `stack` | `SmallVec<[Value; 256]>` | Operand stack |
 | `call_stack` | `Vec<CallFrame>` | For stack traces |
 | `call_depth` | `usize` | Stack overflow detection |
@@ -168,6 +167,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
 | `heap` | `Box<FiberHeap>` | Per-fiber arena for heap allocation (installed as thread-local during child execution) |
 | `signal_mask` | `SignalBits` | Which signals this fiber catches |
+| `param_frames` | `Vec<Vec<(Value, Value)>>` | Parameter binding frames (stack of frames, each frame is vec of (param, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
 | `parent_value` | `Option<Value>` | Cached NaN-boxed Value for parent (identity-preserving) |
 | `child` | `Option<FiberHandle>` | Strong pointer to child fiber |
@@ -286,6 +286,22 @@ swap-back. Old shared allocators accumulate in `owned_shared` until the owner's
 nulls the child's `shared_alloc` pointer. The shared allocator data remains
 alive in the owner's `owned_shared` Vec.
 
+## Parameter resolution
+
+When a parameter is called (invoked as a function with no arguments), the VM
+searches the parameter frame stack from top (most recent `parameterize`) to
+bottom. If a binding is found, its value is returned. Otherwise, the parameter's
+default value is returned.
+
+**Frame structure**: `param_frames: Vec<Vec<(Value, Value)>>` is a stack of frames.
+Each frame is a vector of (parameter, value) pairs. `PushParamFrame` pushes a new
+frame; `PopParamFrame` pops the current frame. When a parameter is called, the VM
+iterates from the top frame downward, searching for a matching parameter.
+
+**Inheritance**: Child fibers inherit parent parameter frames. When a child fiber
+is created, it copies the parent's `param_frames` stack. This allows child code
+to see parent-established parameter bindings.
+
 ## Files
 
 | File | Lines | Content |
@@ -299,6 +315,7 @@ alive in the owner's `owned_shared` Vec.
 | `core.rs` | ~456 | VM struct, `resume_suspended`, stack trace helpers |
 | `stack.rs` | ~100 | Stack operations: LoadConst, Pop, Dup |
 | `variables.rs` | ~150 | LoadGlobal, StoreGlobal, LoadUpvalue, etc. |
+| `parameters.rs` | ~50 | Parameter resolution: `resolve_parameter` helper |
 | `control.rs` | ~100 | Jump, JumpIfFalse, Return |
 | `closure.rs` | ~100 | MakeClosure |
 | `arithmetic.rs` | ~150 | Add, Sub, Mul, Div |
@@ -307,7 +324,7 @@ alive in the owner's `owned_shared` Vec.
 | `data.rs` | ~100 | Cons, Car, Cdr, MakeVector |
 | `literals.rs` | ~18 | Nil, EmptyList, True, False literal handlers |
 | `eval.rs` | ~180 | Runtime eval: compile+execute datum, env wrapping |
-| `scope/` | ~200 | Runtime scope stack (legacy) |
+| `cell.rs` | ~70 | Cell operations: MakeCell, UnwrapCell, UpdateCell |
 
 ## Truthiness
 

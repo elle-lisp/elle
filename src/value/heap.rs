@@ -58,6 +58,7 @@ pub enum HeapTag {
     Bytes = 22,
     Blob = 23,
     External = 24,
+    Parameter = 25,
 }
 
 /// All heap-allocated value types.
@@ -144,6 +145,11 @@ pub enum HeapObject {
     /// Opaque external object from a plugin.
     /// Holds an arbitrary Rust value with a type name for Elle-side identity.
     External(ExternalObject),
+
+    /// Dynamic parameter (Racket-style). Each parameter has a unique id
+    /// (for lookup in the fiber's param_frames stack) and a default value
+    /// (returned when no parameterize binding is active).
+    Parameter { id: u32, default: Value },
 }
 
 /// Internal binding metadata, heap-allocated behind the Value pointer.
@@ -249,6 +255,7 @@ impl HeapObject {
             HeapObject::FFIType(_) => HeapTag::FFIType,
             HeapObject::ManagedPointer(_) => HeapTag::ManagedPointer,
             HeapObject::External(_) => HeapTag::External,
+            HeapObject::Parameter { .. } => HeapTag::Parameter,
         }
     }
 
@@ -277,6 +284,7 @@ impl HeapObject {
             HeapObject::FFIType(_) => "ffi-type",
             HeapObject::ManagedPointer(_) => "pointer",
             HeapObject::External(ext) => ext.type_name,
+            HeapObject::Parameter { .. } => "parameter",
         }
     }
 }
@@ -355,6 +363,7 @@ impl std::fmt::Debug for HeapObject {
                 None => write!(f, "<freed-pointer>"),
             },
             HeapObject::External(ext) => write!(f, "#<{}>", ext.type_name),
+            HeapObject::Parameter { id, .. } => write!(f, "<parameter:{}>", id),
         }
     }
 }

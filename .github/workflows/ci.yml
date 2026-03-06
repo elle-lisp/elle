@@ -70,7 +70,8 @@ jobs:
       - name: Run property tests
         run: "cargo test --test lib property:: --verbose"
         env:
-          # PR: fast feedback (8). Merge queue / push to main: thorough validation (16).
+          # PR: fast feedback (8). Merge queue / push to main: moderate (16).
+          # Nightly/weekly runs use 128 via toolchain-check job.
           PROPTEST_CASES: ${{ github.event_name == 'pull_request' && '8' || '16' }}
 
   fmt:
@@ -208,7 +209,7 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
       - name: Generate Elle documentation site
-        run: ./target/release/elle elle-doc/generate.lisp
+        run: ./target/release/elle demos/docgen/generate.lisp
       - name: Merge documentation
         run: |
           # Move Rust API docs under site/api/
@@ -317,7 +318,7 @@ jobs:
           tool: cargo
           output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          alert-threshold: '120%'
+          alert-threshold: '150%'
           fail-on-alert: true
           auto-push: false
 

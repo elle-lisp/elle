@@ -318,7 +318,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "coro/resume",
         func: prim_coroutine_resume,
-        effect: Effect::yields_raises(),
+        effect: Effect::yields_errors(),
         arity: Arity::Range(1, 2),
         doc: "Resume a coroutine, optionally delivering a value",
         params: &["coroutine", "value"],

@@ -19,7 +19,7 @@ Does NOT:
 
 | Type | Purpose |
 |------|---------|
-| `LirFunction` | Compilation unit: blocks, constants, metadata, docstring |
+| `LirFunction` | Compilation unit: blocks, constants, metadata, docstring, yield/call-site info |
 | `BasicBlock` | Instructions + terminator |
 | `LirInstr` | Individual operation |
 | `SpannedInstr` | `LirInstr` + `Span` for source tracking |
@@ -27,9 +27,11 @@ Does NOT:
 | `Terminator` | How block exits: `Return`, `Jump`, `Branch`, `Yield` |
 | `Reg` | Virtual register |
 | `Label` | Basic block identifier |
+| `YieldPointInfo` | Metadata for a yield point: resume IP and live registers |
+| `CallSiteInfo` | Metadata for a call site: resume IP and live registers (for yield-through-call) |
 | `Lowerer` | HIR → LIR |
 | `ScopeStats` | Compile-time scope allocation statistics |
-| `Emitter` | LIR → Bytecode + LocationMap |
+| `Emitter` | LIR → (Bytecode, yield_points, call_sites) |
 
 ## Data flow
 
@@ -52,10 +54,17 @@ Emitter
     ├─► simulate stack for register→stack translation
     ├─► patch jump offsets
     ├─► emit Instruction bytes
-    └─► build LocationMap from SpannedInstr spans
+    ├─► build LocationMap from SpannedInstr spans
+    ├─► collect YieldPointInfo (resume IP + live registers at each yield)
+    └─► collect CallSiteInfo (resume IP + live registers at each call in may_suspend functions)
     │
     ▼
-Bytecode + LocationMap
+(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)
+    │
+    ├─► Bytecode + LocationMap → VM execution
+    │
+    └─► YieldPointInfo + CallSiteInfo → LirFunction.yield_points/call_sites
+        → JIT compilation (for side-exit code generation)
 ```
 
 The lowerer reads binding metadata directly from `Binding` objects (via
@@ -117,6 +126,17 @@ stored in `Closure.location_map` and used by the VM for error reporting.
     `HirKind::Lambda.doc` during lowering. The emitter preserves it into
     `Closure.doc` without encoding it in bytecode.
 
+9. **Yield point metadata is collected during emission.** `Emitter::emit()`
+    returns `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller
+    must attach these to `LirFunction.yield_points` and `LirFunction.call_sites`
+    before storing the function on a `Closure`. The JIT reads this metadata
+    to generate side-exit code.
+
+10. **Call site metadata is only populated for may_suspend functions.**
+    `Emitter.current_func_may_suspend` gates call site recording. For
+    non-suspending functions, `call_sites` is empty. This avoids overhead
+    for pure functions that can never yield.
+
 ## Key instructions
 
 | Instruction | Stack effect | Notes |
@@ -137,8 +157,30 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 | `IsTable` | value → bool | Type check: is value a table or struct? (for pattern matching) |
 | `ArrayLen` | array → int | Get array length (for pattern matching) |
 | `TableGetOrNil` | table → value | Get key from table/struct, or nil if missing/wrong type (u16 const_idx operand) |
+| `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
+| `PopParamFrame` | (none) | Pop the current parameter binding frame |
 | `RegionEnter` | (none) | Push scope mark on FiberHeap (no-op for root fiber) |
 | `RegionExit` | (none) | Pop scope mark and release scoped objects (no-op for root fiber) |
+
+## Yield and Call Site Metadata
+
+The emitter collects two types of metadata during bytecode emission:
+
+### YieldPointInfo
+
+Recorded when a `Terminator::Yield` is emitted:
+- `resume_ip: usize` — Bytecode offset to resume at (the instruction after the Yield opcode)
+- `stack_regs: Vec<Reg>` — Virtual registers on the operand stack at yield time, bottom-to-top
+
+The JIT uses this to spill live registers to a stack slot and call the yield runtime helper.
+
+### CallSiteInfo
+
+Recorded when a `LirInstr::Call` is emitted in a function where `effect.may_suspend()`:
+- `resume_ip: usize` — Bytecode offset after the Call instruction (where the interpreter resumes if the callee yields)
+- `stack_regs: Vec<Reg>` — Virtual registers on the operand stack after popping func/args but before pushing the result
+
+This matches the interpreter's stack state when yield propagates through a call. The JIT uses this to build the caller's `SuspendedFrame` when a callee yields (yield-through-call).
 
 ## Allocation regions
 
@@ -162,8 +204,9 @@ Function bodies never get region instructions.
    Tier 7: breaks targeting blocks inside the scope are safe (they don't
    exit the scope's region); only breaks targeting outer blocks are dangerous
 
-For `let`/`letrec`: all five conditions. `letrec` delegates to `let`.
-For `block`: conditions 1-4 plus no escaping `break` in the body.
+For `let`/`letrec`: all six conditions. `letrec` delegates to `let`.
+For `block`: conditions 1-4 plus all break values targeting this block are
+safe immediates (Tier 6) and no escaping breaks (Tier 7).
 
 `result_is_safe` takes `scope_bindings: &[(Binding, &Hir)]` — the
 bindings introduced by the let/letrec being analyzed. It returns
@@ -215,6 +258,15 @@ The emitter preserves stack state across the yield boundary via
 `yield_stack_state`. This ensures intermediate values computed before yield
 (e.g., the `1` in `(+ 1 (yield 2) 3)`) survive into the resume block.
 
+**Yield point metadata:** When the emitter encounters a `Terminator::Yield`,
+it records a `YieldPointInfo` containing:
+- `resume_ip`: Bytecode offset to resume at (the instruction after Yield)
+- `stack_regs`: Virtual registers on the operand stack at yield time
+
+This metadata is collected in `Emitter.yield_points` and returned alongside
+the bytecode. The JIT uses this to generate side-exit code that spills live
+registers and calls the yield runtime helper.
+
 ## Block/Break lowering
 
 `HirKind::Block` lowers to a result register + exit label pattern:
@@ -238,7 +290,7 @@ No new bytecode instructions — break compiles to existing Move + Jump.
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
 | `intrinsics.rs` | ~120 | `IntrinsicOp` enum, intrinsics map, `IMMEDIATE_PRIMITIVES` whitelist, `build_immediate_primitives()` |
 | `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point, `can_scope_allocate_*` analysis |
-| `lower/escape.rs` | ~469 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set`, `body_contains_escaping_break` |
+| `lower/escape.rs` | ~693 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set`, `body_contains_escaping_break`, `all_break_values_safe`, `all_breaks_have_safe_values` |
 | `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
 | `lower/binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
 | `lower/lambda.rs` | ~250 | fn lowering, closure capture, cell wrapping |

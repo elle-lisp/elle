@@ -1,8 +1,8 @@
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
+(import-file "tests/elle/assert.lisp")
 
 # Helper for asserting errors
 (defn assert-err [thunk msg]
-  "Assert that (thunk) raises an error"
+  "Assert that (thunk) signals an error"
   (let ([result (try (begin (thunk) :no-error)
                   (catch (e) :got-error))])
     (assert-eq result :got-error msg)))
@@ -66,3 +66,27 @@
 # any_to_string
 # (any->string val) should convert any value to string representation
 (assert-string-eq (any->string nil) "nil" "any->string(nil) == \"nil\"")
+
+# ============================================================================
+# string variadic (Issue #495)
+# ============================================================================
+
+# Zero arguments returns empty string
+(assert-string-eq (string) "" "string() == \"\"")
+
+# Single argument backward compatibility
+(assert-string-eq (string 42) "42" "string(42) == \"42\" (backward compat)")
+(assert-string-eq (string "hello") "hello" "string(\"hello\") == \"hello\" (backward compat)")
+(assert-string-eq (string true) "true" "string(true) (backward compat)")
+
+# Multiple arguments concatenate
+(assert-string-eq (string "count: " 42) "count: 42"
+  "string multi: string + int")
+(assert-string-eq (string "hello" " " "world") "hello world"
+  "string multi: three strings")
+(assert-string-eq (string 1 " + " 2 " = " 3) "1 + 2 = 3"
+  "string multi: mixed types")
+(assert-string-eq (string "bool: " true ", nil: " nil) "bool: true, nil: nil"
+  "string multi: bool and nil")
+(assert-string-eq (string "kw: " :hello) "kw: :hello"
+  "string multi: keyword")

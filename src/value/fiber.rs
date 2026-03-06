@@ -9,7 +9,6 @@ use crate::value::closure::Closure;
 use crate::value::Value;
 use smallvec::SmallVec;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 // ---------------------------------------------------------------------------
@@ -254,8 +253,9 @@ pub struct Fiber {
     pub child_value: Option<Value>,
     /// The closure this fiber was created from
     pub closure: Rc<Closure>,
-    /// Dynamic bindings (fiber-scoped state)
-    pub env: Option<HashMap<u32, Value>>,
+    /// Parameter binding frames. Each `parameterize` pushes a frame;
+    /// exiting pops it. Lookup walks frames from top to bottom.
+    pub param_frames: Vec<Vec<(u32, Value)>>,
     /// Signal value from this fiber. Canonical location for both
     /// signal payloads and normal return values.
     /// - On signal: (bits, payload) before suspending
@@ -293,7 +293,7 @@ impl Fiber {
             child: None,
             child_value: None,
             closure,
-            env: None,
+            param_frames: Vec::new(),
             signal: None,
             suspended: None,
             call_depth: 0,
@@ -320,6 +320,7 @@ mod tests {
     use crate::effects::Effect;
     use crate::error::LocationMap;
     use crate::value::types::Arity;
+    use std::collections::HashMap;
 
     fn test_closure() -> Rc<Closure> {
         Rc::new(Closure {
@@ -352,7 +353,7 @@ mod tests {
         assert!(fiber.frames.is_empty());
         assert!(fiber.parent.is_none());
         assert!(fiber.child.is_none());
-        assert!(fiber.env.is_none());
+        assert!(fiber.param_frames.is_empty());
         assert!(fiber.signal.is_none());
     }
 

@@ -43,8 +43,8 @@ impl Effect {
         }
     }
 
-    /// May raise an error (most primitives: arity/type errors).
-    pub const fn raises() -> Self {
+    /// May error (most primitives: arity/type errors).
+    pub const fn errors() -> Self {
         Effect {
             bits: SIG_ERROR,
             propagates: 0,
@@ -59,8 +59,8 @@ impl Effect {
         }
     }
 
-    /// May yield and may raise.
-    pub const fn yields_raises() -> Self {
+    /// May yield and may error.
+    pub const fn yields_errors() -> Self {
         Effect {
             bits: SIG_YIELD | SIG_ERROR,
             propagates: 0,
@@ -83,9 +83,9 @@ impl Effect {
         }
     }
 
-    /// Calls foreign code and may raise (SIG_FFI | SIG_ERROR).
+    /// Calls foreign code and may error (SIG_FFI | SIG_ERROR).
     /// Used for FFI primitives that validate arguments before calling C.
-    pub const fn ffi_raises() -> Self {
+    pub const fn ffi_errors() -> Self {
         Effect {
             bits: SIG_FFI | SIG_ERROR,
             propagates: 0,
@@ -100,8 +100,8 @@ impl Effect {
         }
     }
 
-    /// Polymorphic: effect depends on a single parameter (may raise).
-    pub const fn polymorphic_raises(param: usize) -> Self {
+    /// Polymorphic: effect depends on a single parameter (may error).
+    pub const fn polymorphic_errors(param: usize) -> Self {
         Effect {
             bits: SIG_ERROR,
             propagates: 1 << param,
@@ -143,8 +143,8 @@ impl Effect {
         self.bits & SIG_YIELD != 0
     }
 
-    /// Can this function raise an error?
-    pub const fn may_raise(&self) -> bool {
+    /// Can this function error?
+    pub const fn may_error(&self) -> bool {
         self.bits & SIG_ERROR != 0
     }
 
@@ -179,9 +179,9 @@ impl Effect {
         Self::none()
     }
 
-    /// Alias for `raises()`. Deprecated — use `raises()` directly.
-    pub const fn pure_raises() -> Self {
-        Self::raises()
+    /// Alias for `errors()`. Deprecated — use `errors()` directly.
+    pub const fn pure_errors() -> Self {
+        Self::errors()
     }
 
     /// Deprecated — use `!may_suspend()` or check specific capabilities.
@@ -207,7 +207,7 @@ impl fmt::Display for Effect {
         // Append capability flags
         let mut flags = Vec::new();
         if self.bits & SIG_ERROR != 0 {
-            flags.push("raises");
+            flags.push("errors");
         }
         if self.bits & SIG_HALT != 0 {
             flags.push("halts");
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn test_may_suspend() {
         assert!(!Effect::none().may_suspend());
-        assert!(!Effect::raises().may_suspend());
+        assert!(!Effect::errors().may_suspend());
         assert!(Effect::yields().may_suspend());
         assert!(Effect::polymorphic(0).may_suspend());
         assert!(Effect {
@@ -301,19 +301,19 @@ mod tests {
     fn test_may_yield() {
         assert!(!Effect::none().may_yield());
         assert!(Effect::yields().may_yield());
-        assert!(!Effect::raises().may_yield());
+        assert!(!Effect::errors().may_yield());
     }
 
     #[test]
-    fn test_may_raise() {
-        assert!(!Effect::none().may_raise());
-        assert!(Effect::raises().may_raise());
-        assert!(!Effect::yields().may_raise());
-        assert!(Effect::yields_raises().may_raise());
+    fn test_may_error() {
+        assert!(!Effect::none().may_error());
+        assert!(Effect::errors().may_error());
+        assert!(!Effect::yields().may_error());
+        assert!(Effect::yields_errors().may_error());
 
-        // Combining raises
-        let combined = Effect::none().combine(Effect::raises());
-        assert!(combined.may_raise());
+        // Combining errors
+        let combined = Effect::none().combine(Effect::errors());
+        assert!(combined.may_error());
         assert!(!combined.may_suspend());
     }
 
@@ -321,14 +321,14 @@ mod tests {
     fn test_may_ffi() {
         assert!(!Effect::none().may_ffi());
         assert!(Effect::ffi().may_ffi());
-        assert!(Effect::ffi_raises().may_ffi());
+        assert!(Effect::ffi_errors().may_ffi());
     }
 
     #[test]
-    fn test_ffi_raises() {
-        let e = Effect::ffi_raises();
+    fn test_ffi_errors() {
+        let e = Effect::ffi_errors();
         assert!(e.may_ffi());
-        assert!(e.may_raise());
+        assert!(e.may_error());
         assert!(!e.may_yield());
         assert!(!e.may_suspend());
         assert!(!e.is_polymorphic());
@@ -344,15 +344,15 @@ mod tests {
     fn test_effect_display() {
         assert_eq!(format!("{}", Effect::none()), "none");
         assert_eq!(format!("{}", Effect::yields()), "yields");
-        assert_eq!(format!("{}", Effect::raises()), "none+raises");
-        assert_eq!(format!("{}", Effect::yields_raises()), "yields+raises");
+        assert_eq!(format!("{}", Effect::errors()), "none+errors");
+        assert_eq!(format!("{}", Effect::yields_errors()), "yields+errors");
         assert_eq!(format!("{}", Effect::polymorphic(0)), "polymorphic(0)");
         assert_eq!(
-            format!("{}", Effect::polymorphic_raises(0)),
-            "polymorphic(0)+raises"
+            format!("{}", Effect::polymorphic_errors(0)),
+            "polymorphic(0)+errors"
         );
         assert_eq!(format!("{}", Effect::ffi()), "none+ffi");
-        assert_eq!(format!("{}", Effect::ffi_raises()), "none+raises+ffi");
+        assert_eq!(format!("{}", Effect::ffi_errors()), "none+errors+ffi");
     }
 
     #[test]
@@ -375,12 +375,12 @@ mod tests {
     #[test]
     fn test_deprecated_aliases() {
         assert_eq!(Effect::pure(), Effect::none());
-        assert_eq!(Effect::pure_raises(), Effect::raises());
+        assert_eq!(Effect::pure_errors(), Effect::errors());
         assert_eq!(Effect::PURE, Effect::none());
         assert_eq!(Effect::YIELDS, Effect::yields());
         // is_pure() = !may_suspend()
         assert!(Effect::none().is_pure());
-        assert!(Effect::raises().is_pure()); // raises doesn't suspend
+        assert!(Effect::errors().is_pure()); // errors doesn't suspend
         assert!(!Effect::yields().is_pure());
         assert!(!Effect::polymorphic(0).is_pure());
     }

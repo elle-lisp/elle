@@ -9,19 +9,19 @@
 #   defer            — guaranteed cleanup after body
 #   with             — resource management (acquire / use / release)
 #   Error propagation — errors bubble through call stacks
+#   Fiber error handling — mask, terminal vs resumable, fiber/cancel
 #   Practical patterns — safe wrappers, validation, error inspection
 
 (def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
-# Errors in Elle are values signaled via fibers. By convention, a tuple
-# [:keyword "message"] is used, but any value works. (error val) is a
-# prelude macro that expands to (fiber/signal 1 val).
-
-
 # ========================================
 # 1. Raising and catching errors
 # ========================================
+
+# Errors in Elle are values signaled via fibers. By convention, a tuple
+# [:keyword "message"] is used, but any value works. (error val) is a
+# prelude macro that expands to (fiber/signal 1 val).
 
 # try/catch runs the body; if an error occurs, the catch handler runs
 # with the error bound to the catch variable.
@@ -220,7 +220,80 @@
 
 
 # ========================================
-# 7. Practical patterns
+# 7. Fiber error handling — mask and resumption
+# ========================================
+
+# A fiber's mask determines whether errors are terminal or resumable.
+# mask=0: errors propagate to parent, fiber enters :error (terminal)
+# mask=1: parent catches errors, fiber stays :suspended (resumable)
+
+# Fiber with mask=0: error propagates to parent
+(def f0 (fiber/new (fn [] (error {:error :boom :message "kaboom"})) 0))
+
+# The error propagates to us, so we must catch it to survive.
+(def [ok? err] (protect (fiber/resume f0)))
+(display "  mask=0 fiber errored: ") (print err)
+(assert-false ok? "mask=0: error propagates to parent")
+(assert-eq (get err :error) :boom "mask=0: error kind preserved")
+
+(def status0 (fiber/status f0))
+(display "  fiber status: ") (print status0)
+(assert-eq status0 :error "mask=0: fiber is in :error status")
+
+# Attempting to resume an errored fiber fails
+(def [ok2? err2] (protect (fiber/resume f0)))
+(display "  resume errored fiber: ") (print err2)
+(assert-false ok2? "resume errored: raises an error")
+(assert-eq (get err2 :error) :error "resume errored: error kind is :error")
+
+# The fiber is still in :error — nothing changed.
+(assert-eq (fiber/status f0) :error "fiber still :error after failed resume")
+
+
+# Fiber with mask=1: errors are caught, fiber stays :suspended
+(def f1 (fiber/new (fn [] (error {:error :caught-boom :message "handled"})) 1))
+(fiber/resume f1 nil)
+
+(def status1 (fiber/status f1))
+(def value1 (fiber/value f1))
+(display "  mask=1 fiber status: ") (print status1)
+(display "  mask=1 fiber value: ") (print value1)
+(assert-eq status1 :suspended "mask=1: fiber is :suspended, not :error")
+(assert-eq (get value1 :error) :caught-boom "mask=1: error value accessible")
+
+# A suspended fiber can be resumed (though it has nothing left to do).
+(fiber/resume f1 nil)
+(def status1b (fiber/status f1))
+(display "  mask=1 after second resume: ") (print status1b)
+(assert-eq status1b :dead "mask=1: fiber completes on second resume")
+
+
+# ========================================
+# 8. fiber/cancel — injecting errors
+# ========================================
+
+# fiber/cancel injects an error into a suspended fiber, making it
+# terminal (:error) regardless of its mask.
+
+(def f2 (fiber/new (fn [] (yield :waiting) :done) 3))
+(fiber/resume f2 nil)
+(assert-eq (fiber/status f2) :suspended "cancel target: starts suspended")
+(assert-eq (fiber/value f2) :waiting "cancel target: yielded value")
+
+(fiber/cancel f2 {:error :cancelled :message "externally cancelled"})
+(def status2 (fiber/status f2))
+(display "  cancelled fiber status: ") (print status2)
+(assert-eq status2 :error "cancel: fiber is :error")
+
+# Resuming a cancelled fiber fails the same way as any errored fiber.
+(def [ok3? err3] (protect (fiber/resume f2)))
+(display "  resume cancelled fiber: ") (print err3)
+(assert-false ok3? "resume cancelled: raises an error")
+(assert-eq (get err3 :error) :error "resume cancelled: error kind is :error")
+
+
+# ========================================
+# 9. Practical patterns
 # ========================================
 
 # Pattern: safe division with error recovery

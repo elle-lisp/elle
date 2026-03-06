@@ -9,7 +9,7 @@
 ## - List display (no `. ()` terminator)
 ## - or expression return value corruption in recursive calls
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Bug 1: StoreCapture stack mismatch (let bindings inside lambdas)

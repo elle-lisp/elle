@@ -116,6 +116,11 @@ fn closures() {
 }
 
 #[test]
+fn matching() {
+    run_elle_script("matching");
+}
+
+#[test]
 fn coroutines() {
     run_elle_script("coroutines");
 }
@@ -123,4 +128,19 @@ fn coroutines() {
 #[test]
 fn tailcalls() {
     run_elle_script("tailcalls");
+}
+
+#[test]
+fn parameters() {
+    run_elle_script("parameters");
+}
+
+#[test]
+fn ports() {
+    run_elle_script("ports");
+}
+
+#[test]
+fn chan() {
+    run_elle_script("chan");
 }

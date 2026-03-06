@@ -3,6 +3,22 @@
 This document captures the design of Elle's unified effect and signal system.
 It records not just decisions but the reasoning, alternatives, and open
 questions that led to them. Future readers should be able to understand the
+
+## Contents
+
+- [Motivation](#motivation)
+- [Prior Art](#prior-art)
+- [Terminology](#terminology)
+- [The Core Insight](#the-core-insight)
+- [Capabilities Down, Signals Up](#capabilities-down-signals-up)
+- [The Signal Protocol](#the-signal-protocol)
+- [The Effect System](#the-effect-system)
+- [JIT Integration](#jit-integration)
+- [Surface Syntax](#surface-syntax)
+- [Migration Status](#migration-status)
+- [Non-Unwinding Recovery](#non-unwinding-recovery)
+- [Open Questions](#open-questions)
+- [Resolved Questions](#resolved-questions)
 trade-offs and pick up where we left off.
 
 
@@ -10,7 +26,7 @@ trade-offs and pick up where we left off.
 
 Elle previously had separate mechanisms for coroutines (continuation
 capture/replay), exception handling (handler stack with unwind semantics),
-and effect inference (boolean fields for yields and raises). The JIT could
+and effect inference (boolean fields for yields and errors). The JIT could
 only compile pure functions.
 
 These have been unified into a single mechanism: **fibers with signals**.
@@ -460,15 +476,15 @@ simple Copy pair.
 
 The programmer can declare effects on functions:
 
-```lisp
+```janet
 (def (query db sql)
-  (declare (effects :io :raises))
+  (declare (effects :io :errors))
   ...)
 ```
 
 And effect bounds on parameters:
 
-```lisp
+```janet
 (def (fast-map f xs)
   (declare (param-effects f (not :yields :io)))
   ...)
@@ -495,7 +511,7 @@ signal, specifically).
 ### The Current Problem
 
 The JIT can only compile pure functions because it can't handle yields or
-raises — it would need to save and restore the native stack, which is
+errors — it would need to save and restore the native stack, which is
 complex and platform-specific.
 
 ### The Solution
@@ -534,7 +550,7 @@ The compiler's effect information guides JIT decisions:
 
 ### Fiber Primitives
 
-```lisp
+```janet
 ;# === Creation and control ===
 
 ;# Create a fiber from a closure with a signal mask
@@ -582,7 +598,7 @@ The compiler's effect information guides JIT decisions:
 
 ### Sugar and Aliases
 
-```lisp
+```janet
 ;# try/catch/finally
 (try body
   (catch e handler)
@@ -602,13 +618,13 @@ The compiler's effect information guides JIT decisions:
 
 ### Effect Declarations
 
-```lisp
+```janet
 (def (pure-add x y)
   (declare (effects))           ;# no effects — pure
   (+ x y))
 
 (def (may-fail x)
-  (declare (effects :raises))   ;# may raise, nothing else
+  (declare (effects :errors))   ;# may error, nothing else
   (/ 1 x))
 
 (def (callback-must-be-pure f xs)
@@ -692,7 +708,7 @@ don't resume. No special syntax or VM support is needed.
 
 ### Example
 
-```lisp
+```janet
 ;# The callee: signals with available recovery options
 (def (safe-divide a b)
   (if (= b 0)

@@ -9,6 +9,24 @@ lexical scoping with closure capture analysis, and we have an effect system.
 You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
 
+## Contents
+
+- [Architecture](#architecture)
+- [Products](#products)
+- [Directories](#directories)
+- [Verification](#verification)
+- [Branch health](#branch-health)
+- [Invariants](#invariants)
+- [Intentional oddities](#intentional-oddities)
+- [Conventions](#conventions)
+- [Blast radius](#blast-radius)
+- [Maintaining documentation](#maintaining-documentation)
+- [docgen: the documentation site generator](#docgen-the-documentation-site-generator)
+- [Failure triage](#failure-triage)
+- [What not to do](#what-not-to-do)
+- [Where to start](#where-to-start)
+- [Agent specs](#agent-specs)
+
 ## Architecture
 
 ```
@@ -90,6 +108,7 @@ representation. Create values via methods like `Value::int()`, `Value::cons()`,
 - `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>` + `doc: Option<Value>`
 - `Cell` / `LocalCell` - mutable cells for captured variables
 - `Fiber` - independent execution context with stack, frames, signal mask, and per-fiber `FiberHeap`
+- `Parameter` - dynamic binding with default value (id, default), looked up at runtime from parameter frame stack
 - `External` - opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
 
 All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
@@ -100,7 +119,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 | Product | Path | Purpose |
 |---------|------|---------|
 | elle | `src/` | Interpreter/compiler (includes `lint`, `lsp`, and `rewrite` subcommands) |
-| elle-doc | `elle-doc/` | Documentation site generator (written in Elle) |
+| docgen | `demos/docgen/` | Documentation site generator (written in Elle) |
 
 ## Directories
 
@@ -141,14 +160,14 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -- examples/closures.lisp
 
 # Generate documentation site (this runs Elle code — catches runtime bugs)
-cargo build --release && ./target/release/elle elle-doc/generate.lisp
+cargo build --release && ./target/release/elle demos/docgen/generate.lisp
 
 # Rust API docs with warnings as errors
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
 CI runs on PRs: tests (stable/beta/nightly), fmt, clippy, examples,
-benchmarks (with regression reporting), rustdoc, elle-doc site generation.
+benchmarks (with regression reporting), rustdoc, docgen site generation.
 All must pass. Main-push runs coverage, benchmark publishing, docs generation,
 and Pages deployment.
 
@@ -200,7 +219,7 @@ Things that look wrong but aren't:
 - Lists are `EMPTY_LIST`-terminated, not `NIL`-terminated. `(rest (list 1))`
   returns `EMPTY_LIST`. Use `empty?` (not `nil?`) to check for end-of-list.
   `nil?` only matches `Value::NIL`. This distinction matters in recursive
-  list functions and affects `elle-doc/` and `examples/`.
+  list functions and affects `demos/docgen/` and `examples/`.
 - Signal bits are partitioned: Bits 0-2 are user-facing (error, yield, debug),
   Bits 3-8 are VM-internal (resume, FFI, propagate, cancel, query, halt),
   Bits 9-15 are reserved, and Bits 16-31 are for user-defined signal types.
@@ -297,6 +316,13 @@ Things that look wrong but aren't:
   and into `Closure.doc`. The `(doc name)` primitive checks closure doc fields
   on globals before falling back to builtin docs. LSP hover shows user-defined
   docstrings and builtin docs via `vm.docs`.
+- `parameterize` is a special form that creates a dynamic binding frame.
+  Unlike lexical bindings (`let`, `fn` params), parameters are looked up at
+  runtime from a stack of frames. `(make-parameter default)` creates a parameter;
+  calling it reads the current value. `(parameterize ((p1 v1) (p2 v2) ...) body ...)`
+  pushes a frame, executes the body, then pops the frame. Child fibers inherit
+  parent parameter frames. Parameters are useful for simulating I/O ports,
+  configuration, and other dynamic context.
 
 ## Conventions
 
@@ -475,16 +501,16 @@ AGENTS.md and README.md files exist throughout the codebase. Keep them current:
 
 Documentation debt compounds. A few minutes now saves hours of confusion later.
 
-## elle-doc: the documentation site generator
+## docgen: the documentation site generator
 
-`elle-doc/generate.lisp` is an Elle program that generates the documentation
-site. CI builds it with `./target/release/elle elle-doc/generate.lisp` as part
+`demos/docgen/generate.lisp` is an Elle program that generates the documentation
+site. CI builds it with `./target/release/elle demos/docgen/generate.lisp` as part
 of the docs job. Because it's written in Elle, it exercises the runtime — any
 change to the language semantics (value representation, list operations,
 string handling) can break it.
 
-When the docs CI job fails, check `elle-doc/generate.lisp` and its library
-files in `elle-doc/lib/`. Common failure: using `nil?` instead of `empty?`
+When the docs CI job fails, check `demos/docgen/generate.lisp` and its library
+files in `demos/docgen/lib/`. Common failure: using `nil?` instead of `empty?`
 for list termination.
 
 ## Failure triage
@@ -493,7 +519,7 @@ When CI fails or tests break, use this to find the cause fast.
 
 | Failure | Symptom | Likely cause | Fix |
 |---------|---------|--------------|-----|
-| **elle-doc generation** | `docs` job fails on `./target/release/elle elle-doc/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. `nil?` only matches `Value::NIL`. | Use `empty?` for list termination checks. Check `elle-doc/generate.lisp` and `elle-doc/lib/` for recursive list functions. Also check: string operations, `get` on tables returning nil for missing keys (line 603 pattern: `(if (nil? existing) (list) existing)`). |
+| **docgen generation** | `docs` job fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. `nil?` only matches `Value::NIL`. | Use `empty?` for list termination checks. Check `demos/docgen/generate.lisp` and `demos/docgen/lib/` for recursive list functions. Also check: string operations, `get` on tables returning nil for missing keys (line 603 pattern: `(if (nil? existing) (list) existing)`). |
 | **Clippy** | `clippy` job fails | Any Rust warning. CI runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. Common hits: unused imports, unused variables, redundant clones, missing `#[allow(...)]` on intentionally dead code. |
 | **Property tests** | `test` job fails with `proptest` output showing a shrunk counterexample | The shrunk output shows the *minimal* failing input. Read the `Minimal failing input:` line — it gives concrete values for each `in` clause in the `proptest!` block. | Reproduce with the exact shrunk values as a unit test. Check `proptest-regressions/` files — proptest persists failing seeds there. The strategies live in `tests/property/strategies.rs`. |
 | **Integration tests** | `test` job fails in `tests/integration/` | Tests use `eval_source()` from `tests/common/mod.rs`, which runs the full pipeline: VM + primitives + stdlib + symbol table. Failures mean the pipeline produces wrong results or panics. | Read the assertion: `eval_source("(expr)")` returns `Result<Value, String>`. Check whether the test expects `.unwrap()` (success) or `.is_err()` (compile/runtime error). Common trap: `Value::EMPTY_LIST` is truthy, `Value::NIL` is falsy. |
@@ -511,6 +537,10 @@ When CI fails or tests break, use this to find the cause fast.
 - Do not add features "for the future." Build what's needed now.
 - Do not silently swallow errors. Propagate or log with context.
 - Do not bypass the type system with excessive use of `Any` or downcasting.
+- Do not leave behind research notes, analysis summaries, plan drafts, or any
+  other working files in the repository. The codebase is not a scratch pad.
+  Temporary artifacts belong in `/run/user/1000/` or similar — never committed,
+  never left untracked in the working tree.
 
 ## Where to start
 

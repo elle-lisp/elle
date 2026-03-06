@@ -664,7 +664,7 @@ fn test_jit_branch_integer_truthy() {
 // =============================================================================
 
 #[test]
-fn test_jit_rejects_yielding() {
+fn test_jit_accepts_yielding() {
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
@@ -684,7 +684,11 @@ fn test_jit_rejects_yielding() {
 
     let compiler = JitCompiler::new().unwrap();
     let result = compiler.compile(&func, None);
-    assert!(matches!(result, Err(JitError::NotPure)));
+    assert!(
+        result.is_ok(),
+        "JIT should accept yielding functions via side-exit: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -1813,45 +1817,14 @@ fn test_jit_not_empty_list() {
 // =============================================================================
 
 #[test]
-fn test_jit_rejects_yields_raises_effect() {
-    // Effect::yields_raises() has may_suspend() = true.
-    // The JIT gate must reject this — fiber/resume and fiber/signal
-    // propagate this effect to their callers.
+fn test_jit_accepts_yields_errors_effect() {
+    // Effect::yields_errors() has may_suspend() = true.
+    // The JIT gate now accepts this via side-exit — yielding functions
+    // can be JIT-compiled and will side-exit to the interpreter on yield.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::yields_raises();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(42),
-        },
-        span(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), span());
-    func.blocks.push(entry);
-    func.entry = Label(0);
-
-    let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None);
-    assert!(
-        matches!(result, Err(JitError::NotPure)),
-        "JIT should reject yields_raises effect: {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_jit_accepts_raises_only_effect() {
-    // Effect::raises() has may_suspend() = false.
-    // The JIT gate should accept this — fiber/new, fiber/status, etc.
-    // have this effect and are safe to call from JIT code.
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.num_regs = 1;
-    func.num_captures = 0;
-    func.effect = Effect::raises();
+    func.effect = Effect::yields_errors();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -1869,7 +1842,38 @@ fn test_jit_accepts_raises_only_effect() {
     let result = compiler.compile(&func, None);
     assert!(
         result.is_ok(),
-        "JIT should accept raises-only effect: {:?}",
+        "JIT should accept yields_errors effect via side-exit: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_jit_accepts_errors_only_effect() {
+    // Effect::errors() has may_suspend() = false.
+    // The JIT gate should accept this — fiber/new, fiber/status, etc.
+    // have this effect and are safe to call from JIT code.
+    let mut func = LirFunction::new(Arity::Exact(0));
+    func.num_regs = 1;
+    func.num_captures = 0;
+    func.effect = Effect::errors();
+
+    let mut entry = BasicBlock::new(Label(0));
+    entry.instructions.push(SpannedInstr::new(
+        LirInstr::Const {
+            dst: Reg(0),
+            value: LirConst::Int(42),
+        },
+        span(),
+    ));
+    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), span());
+    func.blocks.push(entry);
+    func.entry = Label(0);
+
+    let compiler = JitCompiler::new().unwrap();
+    let result = compiler.compile(&func, None);
+    assert!(
+        result.is_ok(),
+        "JIT should accept errors-only effect: {:?}",
         result
     );
 }

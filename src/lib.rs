@@ -47,6 +47,7 @@ pub mod lsp;
 pub mod path;
 pub mod pipeline;
 pub mod plugin;
+pub mod port;
 pub mod primitives;
 pub mod reader;
 pub mod repl;

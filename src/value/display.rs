@@ -144,6 +144,11 @@ impl fmt::Display for Value {
             return write!(f, "#<syntax:{}>", s.as_ref());
         }
 
+        // Parameter
+        if let Some((id, _)) = self.as_parameter() {
+            return write!(f, "<parameter:{}>", id);
+        }
+
         // Binding
         if self.is_binding() {
             return write!(f, "#<binding>");
@@ -224,6 +229,14 @@ impl fmt::Display for Value {
         // Library handle
         if let Some(id) = self.as_lib_handle() {
             return write!(f, "<lib-handle:{}>", id);
+        }
+
+        // External object — delegate to type-specific Display if available
+        if let Some(port) = self.as_external::<crate::port::Port>() {
+            return write!(f, "{}", port);
+        }
+        if let Some(name) = self.external_type_name() {
+            return write!(f, "#<{}>", name);
         }
 
         // Default for unknown heap types

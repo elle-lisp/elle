@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use super::core::VM;
 use super::{
-    arithmetic, closure, comparison, control, data, literals, scope, stack, types, variables,
+    arithmetic, cell, closure, comparison, control, data, literals, stack, types, variables,
 };
 
 impl VM {
@@ -287,28 +287,27 @@ impl VM {
                     literals::handle_false(self);
                 }
 
-                // Scope management
+                // Dead instructions — never emitted by the LIR emitter.
+                // Panic immediately if encountered (indicates bytecode bug).
                 Instruction::PushScope => {
-                    let scope_type_byte = bc[ip];
-                    ip += 1;
-                    scope::handle_push_scope(self, scope_type_byte);
+                    panic!("VM bug: PushScope is a dead instruction — never emitted");
                 }
                 Instruction::PopScope => {
-                    scope::handle_pop_scope(self);
+                    panic!("VM bug: PopScope is a dead instruction — never emitted");
                 }
                 Instruction::DefineLocal => {
-                    scope::handle_define_local(self, bc, &mut ip, consts);
+                    panic!("VM bug: DefineLocal is a dead instruction — never emitted");
                 }
 
                 // Cell operations
                 Instruction::MakeCell => {
-                    scope::handle_make_cell(self);
+                    cell::handle_make_cell(self);
                 }
                 Instruction::UnwrapCell => {
-                    scope::handle_unwrap_cell(self);
+                    cell::handle_unwrap_cell(self);
                 }
                 Instruction::UpdateCell => {
-                    scope::handle_update_cell(self);
+                    cell::handle_update_cell(self);
                 }
 
                 // Yield — capture suspended frame and suspend
@@ -351,6 +350,56 @@ impl VM {
                 }
                 Instruction::RegionExit => {
                     crate::value::fiber_heap::region_exit();
+                }
+
+                // Dynamic parameter frame management
+                Instruction::PushParamFrame => {
+                    let count = bc[ip] as usize;
+                    ip += 1;
+                    let mut frame = Vec::with_capacity(count);
+                    // Stack has pairs pushed as [param1, val1, param2, val2, ...]
+                    // We need to pop them in reverse order (last pair first)
+                    // First collect all pairs from the stack
+                    let mut raw_pairs = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        let val = self
+                            .fiber
+                            .stack
+                            .pop()
+                            .expect("VM bug: stack underflow in PushParamFrame");
+                        let param = self
+                            .fiber
+                            .stack
+                            .pop()
+                            .expect("VM bug: stack underflow in PushParamFrame");
+                        raw_pairs.push((param, val));
+                    }
+                    // Process in reverse to restore original order
+                    for (param, val) in raw_pairs.into_iter().rev() {
+                        if let Some((id, _default)) = param.as_parameter() {
+                            frame.push((id, val));
+                        } else {
+                            use crate::value::error_val;
+                            self.fiber.signal = Some((
+                                SIG_ERROR,
+                                error_val(
+                                    "type-error",
+                                    format!(
+                                        "parameterize: {} is not a parameter",
+                                        param.type_name()
+                                    ),
+                                ),
+                            ));
+                            self.fiber.stack.push(Value::NIL);
+                            break;
+                        }
+                    }
+                    if self.fiber.signal.is_none() {
+                        self.fiber.param_frames.push(frame);
+                    }
+                }
+                Instruction::PopParamFrame => {
+                    self.fiber.param_frames.pop();
                 }
             }
 

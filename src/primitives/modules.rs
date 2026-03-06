@@ -157,7 +157,7 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
 pub const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
     name: "module/import",
     func: prim_import_file,
-    effect: Effect::raises(),
+    effect: Effect::errors(),
     arity: Arity::Exact(1),
     doc: "Import a module file and execute it in the current context",
     params: &["path"],

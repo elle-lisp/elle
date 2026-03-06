@@ -52,6 +52,14 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) global_load_map: HashMap<Reg, SymbolId>,
     /// SymbolId of the function being compiled (for self-call detection)
     pub(crate) self_sym: Option<SymbolId>,
+    /// Counter for yield point indices
+    pub(crate) yield_point_index: u32,
+    /// Counter for call site indices (for yield-through-call metadata)
+    pub(crate) call_site_index: u32,
+    /// Shared stack slot for spilling locals + operands at yield/call sites.
+    /// Sized to the maximum spill requirement across all yield points and
+    /// call sites. `None` if the function has no spill points.
+    pub(crate) shared_spill_slot: Option<cranelift_codegen::ir::StackSlot>,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -73,6 +81,9 @@ impl<'a> FunctionTranslator<'a> {
             scc_peers: HashMap::new(),
             global_load_map: HashMap::new(),
             self_sym: None,
+            yield_point_index: 0,
+            call_site_index: 0,
+            shared_spill_slot: None,
         }
     }
 
@@ -436,6 +447,11 @@ impl<'a> FunctionTranslator<'a> {
                     )?;
                     builder.def_var(var(dst.0), resolved);
                     self.emit_exception_check_after_call(builder)?;
+                    if self.lir.effect.may_suspend() {
+                        let idx = self.call_site_index;
+                        self.call_site_index += 1;
+                        self.emit_yield_check_after_call(builder, idx)?;
+                    }
                 } else if args.is_empty() {
                     // No args - pass null pointer
                     let null_ptr = builder.ins().iconst(I64, 0);
@@ -444,6 +460,11 @@ impl<'a> FunctionTranslator<'a> {
                     builder.def_var(var(dst.0), result);
                     // Check for exception after call - if set, bail out to interpreter
                     self.emit_exception_check_after_call(builder)?;
+                    if self.lir.effect.may_suspend() {
+                        let idx = self.call_site_index;
+                        self.call_site_index += 1;
+                        self.emit_yield_check_after_call(builder, idx)?;
+                    }
                 } else {
                     // Create stack slot for args
                     let slot =
@@ -463,6 +484,11 @@ impl<'a> FunctionTranslator<'a> {
                     builder.def_var(var(dst.0), result);
                     // Check for exception after call - if set, bail out to interpreter
                     self.emit_exception_check_after_call(builder)?;
+                    if self.lir.effect.may_suspend() {
+                        let idx = self.call_site_index;
+                        self.call_site_index += 1;
+                        self.emit_yield_check_after_call(builder, idx)?;
+                    }
                 }
             }
 
@@ -587,10 +613,11 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::MakeClosure { .. } => {
                 return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
             }
-            LirInstr::LoadResumeValue { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "LoadResumeValue".to_string(),
-                ));
+            LirInstr::LoadResumeValue { dst } => {
+                // Resume goes through the interpreter. This block is
+                // unreachable in JIT code. Emit NIL as dead code.
+                let nil = builder.ins().iconst(I64, TAG_NIL as i64);
+                builder.def_var(var(dst.0), nil);
             }
             LirInstr::CarOrNil { .. } => {
                 return Err(JitError::UnsupportedInstruction("CarOrNil".to_string()));
@@ -648,6 +675,11 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::RegionEnter | LirInstr::RegionExit => {
                 // No-op in JIT (allocation regions not yet active)
             }
+            LirInstr::PushParamFrame { .. } | LirInstr::PopParamFrame => {
+                return Err(JitError::UnsupportedInstruction(
+                    "PushParamFrame/PopParamFrame".to_string(),
+                ));
+            }
         }
         Ok(false)
     }
@@ -695,8 +727,45 @@ impl<'a> FunctionTranslator<'a> {
                     .brif(is_truthy, *then_block, &[], *else_block, &[]);
             }
 
-            Terminator::Yield { .. } => {
-                return Err(JitError::NotPure);
+            Terminator::Yield {
+                value,
+                resume_label: _,
+            } => {
+                let yielded_val = builder.use_var(var(value.0));
+                let vm = self
+                    .vm_ptr
+                    .ok_or_else(|| JitError::InvalidLir("Yield without vm pointer".to_string()))?;
+                let self_bits = self
+                    .self_bits
+                    .ok_or_else(|| JitError::InvalidLir("Yield without self_bits".to_string()))?;
+
+                let yield_index = self.yield_point_index;
+                self.yield_point_index += 1;
+
+                // Read the stack_regs for this yield point from the LIR
+                let stack_regs = self
+                    .lir
+                    .yield_points
+                    .get(yield_index as usize)
+                    .map(|yp| yp.stack_regs.as_slice())
+                    .unwrap_or(&[]);
+
+                // Spill locals + operand stack to match interpreter layout:
+                // [param_0, ..., param_{arity-1}, local_0, ..., local_n, operand_0, ..., operand_m]
+                let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
+
+                let yield_idx_val = builder.ins().iconst(I64, yield_index as i64);
+
+                // Call elle_jit_yield(yielded, spilled_ptr, yield_index, vm, self_bits)
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.jit_yield, builder.func);
+                let call = builder.ins().call(
+                    func_ref,
+                    &[yielded_val, spilled_ptr, yield_idx_val, vm, self_bits],
+                );
+                let result = builder.inst_results(call)[0];
+                builder.ins().return_(&[result]);
             }
 
             Terminator::Unreachable => {
@@ -706,6 +775,94 @@ impl<'a> FunctionTranslator<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Allocate the shared spill slot sized to the maximum spill requirement
+    /// across all yield points and call sites. Called once during function setup.
+    pub(crate) fn allocate_shared_spill_slot(&mut self, builder: &mut FunctionBuilder) {
+        let num_locals = self.lir.num_locals as usize;
+
+        // Compute max operand stack size across all yield points and call sites
+        let max_yield_operands = self
+            .lir
+            .yield_points
+            .iter()
+            .map(|yp| yp.stack_regs.len())
+            .max()
+            .unwrap_or(0);
+        let max_call_operands = self
+            .lir
+            .call_sites
+            .iter()
+            .map(|cs| cs.stack_regs.len())
+            .max()
+            .unwrap_or(0);
+        let max_operands = std::cmp::max(max_yield_operands, max_call_operands);
+        let max_total = num_locals + max_operands;
+
+        if max_total > 0 {
+            let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                (max_total * 8) as u32,
+                0,
+            ));
+            self.shared_spill_slot = Some(slot);
+        }
+    }
+
+    /// Spill local variables and operand stack registers to the shared stack slot.
+    ///
+    /// The interpreter's stack layout at yield/call is:
+    /// `[param_0, ..., param_{arity-1}, local_0, ..., local_n, operand_0, ..., operand_m]`
+    ///
+    /// The JIT stores params in arg variables and locals in local variables
+    /// (Cranelift variables, i.e., CPU registers). This method spills them
+    /// all into a contiguous buffer matching the interpreter's layout.
+    ///
+    /// Returns a Cranelift value pointing to the spilled buffer, or a null
+    /// pointer constant if there's nothing to spill.
+    fn spill_locals_and_operands(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        stack_regs: &[Reg],
+    ) -> Result<cranelift_codegen::ir::Value, JitError> {
+        let arity = self.lir.arity.fixed_params() as u16;
+        let num_locals = self.lir.num_locals;
+        let num_locally_defined = num_locals.saturating_sub(arity);
+        let total = num_locals as usize + stack_regs.len();
+
+        if total == 0 {
+            return Ok(builder.ins().iconst(I64, 0)); // null pointer
+        }
+
+        let slot = self
+            .shared_spill_slot
+            .expect("JIT bug: spill_locals_and_operands called but no shared spill slot allocated");
+
+        let mut offset: i32 = 0;
+
+        // 1. Spill parameters (from arg variables)
+        for i in 0..arity as u32 {
+            let val = builder.use_var(var(self.arg_var_base + i));
+            builder.ins().stack_store(val, slot, offset * 8);
+            offset += 1;
+        }
+
+        // 2. Spill locally-defined variables
+        for i in 0..num_locally_defined as u32 {
+            let val = builder.use_var(var(self.local_var_base + i));
+            builder.ins().stack_store(val, slot, offset * 8);
+            offset += 1;
+        }
+
+        // 3. Spill operand stack registers
+        for reg in stack_regs {
+            let val = builder.use_var(var(reg.0));
+            builder.ins().stack_store(val, slot, offset * 8);
+            offset += 1;
+        }
+
+        Ok(builder.ins().stack_addr(I64, slot, 0))
     }
 
     /// Translate a constant to a Cranelift value
@@ -967,6 +1124,72 @@ impl<'a> FunctionTranslator<'a> {
         builder.ins().return_(&[nil]);
 
         // Continue block: normal execution continues
+        builder.switch_to_block(cont_block);
+        builder.seal_block(cont_block);
+
+        Ok(())
+    }
+
+    /// Emit yield check after a call instruction for yielding functions.
+    ///
+    /// Must be called AFTER emit_exception_check_after_call (which handles
+    /// error/halt by returning NIL). If we reach this check, the signal
+    /// is either absent or SIG_YIELD.
+    ///
+    /// On yield: spill live registers, call elle_jit_yield_through_call
+    /// to build the caller's SuspendedFrame, return YIELD_SENTINEL.
+    pub(crate) fn emit_yield_check_after_call(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        call_site_idx: u32,
+    ) -> Result<(), JitError> {
+        let vm = self.vm_ptr.ok_or_else(|| {
+            JitError::InvalidLir("emit_yield_check without vm pointer".to_string())
+        })?;
+        let self_bits = self.self_bits.ok_or_else(|| {
+            JitError::InvalidLir("emit_yield_check without self_bits".to_string())
+        })?;
+
+        // Check if any signal is pending (error/halt already handled above,
+        // so if truthy here it must be SIG_YIELD)
+        let has_sig = self.call_helper_unary(builder, self.helpers.has_signal, vm)?;
+        let shifted = builder.ins().ushr_imm(has_sig, 48);
+        let falsy_tag = builder.ins().iconst(I64, 0x7FF9_i64);
+        let is_truthy = builder.ins().icmp(IntCC::NotEqual, shifted, falsy_tag);
+
+        let yield_block = builder.create_block();
+        let cont_block = builder.create_block();
+        builder
+            .ins()
+            .brif(is_truthy, yield_block, &[], cont_block, &[]);
+
+        // Yield block: spill registers, call yield_through_call, return sentinel
+        builder.switch_to_block(yield_block);
+        builder.seal_block(yield_block);
+
+        // Read call site metadata from LIR
+        let call_site = self.lir.call_sites.get(call_site_idx as usize);
+        let stack_regs = match call_site {
+            Some(cs) => cs.stack_regs.as_slice(),
+            None => &[] as &[crate::lir::Reg],
+        };
+
+        // Spill locals + operand stack to match interpreter layout
+        let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
+
+        let call_site_idx_val = builder.ins().iconst(I64, call_site_idx as i64);
+
+        // Call elle_jit_yield_through_call(spilled, call_site_index, vm, self_bits)
+        let func_ref = self
+            .module
+            .declare_func_in_func(self.helpers.jit_yield_through_call, builder.func);
+        let call = builder
+            .ins()
+            .call(func_ref, &[spilled_ptr, call_site_idx_val, vm, self_bits]);
+        let result = builder.inst_results(call)[0];
+        builder.ins().return_(&[result]);
+
+        // Continue block
         builder.switch_to_block(cont_block);
         builder.seal_block(cont_block);
 

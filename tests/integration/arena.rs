@@ -376,13 +376,14 @@ fn test_scoped_execution_results_unchanged() {
 
 #[test]
 fn test_break_no_compensating_exits_conservative() {
-    // Under conservative escape analysis, no region instructions are emitted,
-    // so break has no compensating exits to emit either.
+    // Tier 6: the block qualifies for scope allocation because the break
+    // value (42) is an immediate. The break emits one compensating
+    // RegionExit, and the normal exit path emits another.
     let source = "(block :done (let* ((x 1)) (break :done 42)))";
     let exits = count_in_bytecode(source, "RegionExit");
     assert_eq!(
-        exits, 0,
-        "conservative: no RegionExit emitted, so no compensating exits"
+        exits, 2,
+        "block scope-allocates: 1 compensating + 1 normal RegionExit"
     );
 }
 
@@ -659,7 +660,7 @@ fn test_yield_star_with_shared_alloc() {
 
 #[test]
 fn test_error_in_child_with_shared_alloc() {
-    // Child fiber raises an error. The error value (a struct/tuple)
+    // Child fiber signals an error. The error value (a struct/tuple)
     // is in shared space. Parent catches and reads the error message.
     let result = eval_source(
         "(let* ((f (fiber/new (fn () (error \"test error\")) 1)))

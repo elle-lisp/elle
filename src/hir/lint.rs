@@ -217,6 +217,14 @@ impl HirLinter {
                 self.check(env, symbols);
             }
 
+            HirKind::Parameterize { bindings, body } => {
+                for (param, value) in bindings {
+                    self.check(param, symbols);
+                    self.check(value, symbols);
+                }
+                self.check(body, symbols);
+            }
+
             HirKind::And(exprs) | HirKind::Or(exprs) => {
                 for e in exprs {
                     self.check(e, symbols);

@@ -5,7 +5,7 @@
 ## Tests mathematical properties like commutativity, associativity, identity,
 ## and distributivity with a mix of positive, negative, zero, and boundary values.
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # add_commutative: (+ a b) == (+ b a)
@@ -99,7 +99,7 @@
 (assert-eq (/ (* 100 -4) -4) 100 "div_inverse_of_mul: negative divisor")
 
 # ============================================================================
-# div_by_zero_is_error: division by zero raises an error
+# div_by_zero_is_error: division by zero signals an error
 # ============================================================================
 
 (assert-err (fn [] (/ 0 0)) "div_by_zero_is_error: zero divided by zero")

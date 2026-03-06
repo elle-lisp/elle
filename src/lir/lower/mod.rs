@@ -10,7 +10,7 @@ mod pattern;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
-use crate::hir::{Binding, BlockId, Hir, HirKind, HirPattern, PatternKey};
+use crate::hir::{Binding, BlockId, Hir, HirKind, HirPattern};
 use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -311,21 +311,31 @@ impl Lowerer {
     // ── Escape analysis ────────────────────────────────────────────
     //
     // See `escape.rs` for helper functions (`result_is_safe`,
-    // `body_contains_dangerous_outward_set`, `body_contains_escaping_break`).
+    // `body_contains_dangerous_outward_set`, `body_contains_escaping_break`,
+    // `all_break_values_safe`, `all_breaks_have_safe_values`).
 
     /// Determine if a `let` scope's allocations can be safely released
     /// at scope exit via `RegionEnter`/`RegionExit`.
     ///
-    /// Returns `true` when ALL five conditions hold:
-    /// 1. No binding is captured by a nested lambda
-    /// 2. Body cannot suspend (yield/debug/polymorphic)
-    /// 3. Body result is provably a NaN-boxed immediate
+    /// Performs escape analysis on the let body to check if all bindings
+    /// and intermediate values allocated within the scope can be freed
+    /// when the scope exits. This enables the lowerer to emit `RegionEnter`
+    /// and `RegionExit` instructions for automatic cleanup.
+    ///
+    /// Returns `true` when ALL six conditions hold:
+    /// 1. No binding is captured by a nested lambda (captured values escape)
+    /// 2. Body cannot suspend (yield/debug/polymorphic effects prevent cleanup)
+    /// 3. Body result is provably a NaN-boxed immediate (not heap-allocated)
     /// 4. Body contains no dangerous outward `set` (set to outer binding
-    ///    with a value that could be heap-allocated)
-    /// 5. Body contains no `break` (break carries a value past RegionExit)
+    ///    with a value that could be heap-allocated inside the scope)
+    /// 5. All breaks in body carry safe immediate values
+    /// 6. Body contains no `break` targeting outer blocks (break carries
+    ///    a value past RegionExit, causing use-after-free)
+    ///
+    /// Increments `scope_stats.scopes_analyzed` and updates rejection counters
+    /// for each failed condition (short-circuits on first failure).
     fn can_scope_allocate_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
         self.scope_stats.scopes_analyzed += 1;
-
         // Condition 1: no captures
         if bindings.iter().any(|(b, _)| b.is_captured()) {
             self.scope_stats.rejected_captured += 1;
@@ -354,7 +364,21 @@ impl Lowerer {
             return false;
         }
 
-        // Condition 5: no escaping break (breaks targeting inner blocks are safe)
+        // Condition 5: all breaks carry safe immediate values.
+        // A break inside the let body emits compensating RegionExits that pop
+        // the let's region mark. If the break value is heap-allocated inside
+        // the scope, the RegionExit frees it → use-after-free. If the break
+        // value is an immediate, the RegionExit doesn't affect it → safe.
+        if !self.all_breaks_have_safe_values(body) {
+            self.scope_stats.rejected_break += 1;
+            return false;
+        }
+
+        // Condition 6: no escaping break. A break targeting a block outside
+        // this let jumps past the let's RegionExit. While compensating exits
+        // handle cleanup, the conservative approach avoids scope allocation
+        // entirely when breaks escape. Breaks targeting blocks defined inside
+        // the let body are safe — they stay within the scope's region.
         if Self::hir_contains_escaping_break(body) {
             self.scope_stats.rejected_break += 1;
             return false;
@@ -374,15 +398,13 @@ impl Lowerer {
     /// Determine if a `block` scope's allocations can be safely released.
     ///
     /// Blocks don't introduce bindings but bracket a scope of allocations.
-    /// Four conditions (independent of the let/letrec conditions):
-    /// B1. No expression in body can suspend
-    /// B2. Body result is provably immediate
-    /// B3. No escaping break (breaks targeting inner blocks are safe)
-    /// B4. No dangerous outward mutation (value must be immediate)
-    fn can_scope_allocate_block(&mut self, body: &[Hir]) -> bool {
-        self.scope_stats.scopes_analyzed += 1;
-
-        // B1: no suspension
+    /// Conditions:
+    /// 1. No expression in body can suspend
+    /// 2. Body result is provably immediate
+    /// 3. All break values targeting this block are safe immediates
+    /// 4. No `set!` to non-local bindings (blocks have no own bindings)
+    fn can_scope_allocate_block(&mut self, block_id: &BlockId, body: &[Hir]) -> bool {
+        // Condition 1: no suspension
         if body.iter().any(|e| e.effect.may_suspend()) {
             self.scope_stats.rejected_suspends += 1;
             return false;
@@ -398,13 +420,17 @@ impl Lowerer {
             }
         }
 
-        // B3: no escaping breaks (breaks targeting inner blocks are safe)
-        if Self::body_contains_escaping_break(body) {
+        // Condition 3: all break values targeting this block are safe immediates.
+        // Pass empty scope_bindings — blocks have no bindings of their own,
+        // but `all_break_values_safe` extends scope_bindings as it recurses
+        // into nested let/letrec nodes, so break values referencing inner
+        // let bindings with heap inits are correctly rejected.
+        if !self.all_break_values_safe(body, *block_id, &[]) {
             self.scope_stats.rejected_break += 1;
             return false;
         }
 
-        // B4: no dangerous outward mutation (blocks have no own bindings,
+        // Condition 4: no dangerous outward mutation (blocks have no own bindings,
         // so any set is outward — but harmless if value is immediate)
         if body
             .iter()

@@ -2,18 +2,18 @@
 #
 # Migrated from tests/integration/eval.rs (46 tests)
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
+(import-file "tests/elle/assert.lisp")
 
 # Helper: assert that an expression errors (wraps in try/catch)
-(defn assert-raises [thunk msg]
-  "Assert that (thunk) raises an error"
+(defn assert-err [thunk msg]
+  "Assert that (thunk) signals an error"
   (let ([result (try (begin (thunk) :no-error)
                   (catch (e) :got-error))])
     (assert-eq result :got-error msg)))
 
 # Helper: assert that an expression errors and the message contains a substring
 (defn assert-err-contains [thunk substring msg]
-  "Assert that (thunk) raises an error containing substring"
+  "Assert that (thunk) signals an error containing substring"
   (let ([result (try (begin (thunk) nil)
                   (catch (e) e))])
     (assert-true (string? (string/repr result))
@@ -61,10 +61,10 @@
 (assert-eq (eval '(+ 1 2) (table)) 3 "eval with empty table env")
 
 # test_eval_env_invalid_type
-(assert-raises (fn () (eval '42 "bad")) "eval env invalid type (string)")
+(assert-err (fn () (eval '42 "bad")) "eval env invalid type (string)")
 
 # test_eval_env_integer_invalid
-(assert-raises (fn () (eval '42 123)) "eval env invalid type (integer)")
+(assert-err (fn () (eval '42 123)) "eval env invalid type (integer)")
 
 # ============================================================
 # Prelude macros in eval'd code
@@ -129,13 +129,13 @@
 # ============================================================
 
 # test_eval_compilation_error
-(assert-raises (fn () (eval '(if))) "eval compilation error (if with no args)")
+(assert-err (fn () (eval '(if))) "eval compilation error (if with no args)")
 
 # test_eval_runtime_error_in_evald_code
-(assert-raises (fn () (eval '(/ 1 0))) "eval runtime error (division by zero)")
+(assert-err (fn () (eval '(/ 1 0))) "eval runtime error (division by zero)")
 
 # test_eval_undefined_variable
-(assert-raises (fn () (eval 'undefined_var)) "eval undefined variable")
+(assert-err (fn () (eval 'undefined_var)) "eval undefined variable")
 
 # ============================================================
 # Sequential evals (expander caching)
@@ -257,13 +257,13 @@
 # test_import_returns_last_value
 # Write a temp file, import it, check the returned struct
 (var import-test-path "/tmp/elle-test-import.lisp")
-(spit import-test-path "(def internal 42)\n(fn [] {:answer internal :double (* internal 2)})")
-(var import-result ((import-file import-test-path)))
+(spit import-test-path "(def internal 42)\n{:answer internal :double (* internal 2)}")
+(var import-result (import-file import-test-path))
 (assert-eq (get import-result :answer) 42 "import returns last value (:answer)")
 (assert-eq (get import-result :double) 84 "import returns last value (:double)")
 
 # test_import_destructuring
 (var import-destr-path "/tmp/elle-test-import-destr.lisp")
-(spit import-destr-path "(def internal 42)\n(fn [] {:answer internal :double (* internal 2)})")
-(let (({:answer a} ((import-file import-destr-path))))
+(spit import-destr-path "(def internal 42)\n{:answer internal :double (* internal 2)}")
+(let (({:answer a} (import-file import-destr-path)))
   (assert-eq a 42 "import destructuring"))

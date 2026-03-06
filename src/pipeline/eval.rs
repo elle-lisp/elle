@@ -39,7 +39,7 @@ pub fn eval_syntax(
 
     let symbol_snapshot = symbols.all_names();
     let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
-    let bytecode = emitter.emit(&lir_func);
+    let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
 
     vm.execute(&bytecode).map_err(|e| e.to_string())
 }
@@ -72,7 +72,7 @@ pub fn eval(
 
     let symbol_snapshot = symbols.all_names();
     let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
-    let bytecode = emitter.emit(&lir_func);
+    let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
 
     vm.execute(&bytecode).map_err(|e| e.to_string())
 }

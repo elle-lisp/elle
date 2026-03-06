@@ -21,7 +21,7 @@ use std::rc::Rc;
 
 use super::core::VM;
 
-use crate::jit::{JitCode, JitCompiler, TAIL_CALL_SENTINEL};
+use crate::jit::{JitCode, JitCompiler, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 
 /// Helper: set an error signal on the fiber.
 fn set_error(fiber: &mut crate::value::Fiber, kind: &str, msg: impl Into<String>) {
@@ -156,6 +156,21 @@ impl VM {
             return self.handle_primitive_signal(bits, value, bytecode, constants, closure_env, ip);
         }
 
+        if let Some((id, default)) = func.as_parameter() {
+            if !args.is_empty() {
+                set_error(
+                    &mut self.fiber,
+                    "arity-error",
+                    format!("parameter call: expected 0 arguments, got {}", args.len()),
+                );
+                self.fiber.stack.push(Value::NIL);
+                return None;
+            }
+            let value = self.resolve_parameter(id, default);
+            self.fiber.stack.push(value);
+            return None;
+        }
+
         if let Some(closure) = func.as_closure() {
             self.fiber.call_depth += 1;
             if self.fiber.call_depth > 1000 {
@@ -182,12 +197,38 @@ impl VM {
                 return None;
             }
 
-            // JIT compilation and dispatch — only for non-suspending closures
-            // Suspending closures can never be JIT-compiled, so skip profiling overhead
-            if !closure.effect.may_suspend() {
+            // JIT compilation and dispatch.
+            // Polymorphic closures are rejected by the JIT compiler itself.
+            // Skip profiling for primitives (no LIR means not JIT-compilable).
+            if closure.lir_function.is_some() {
                 if let Some(bits) = self.try_jit_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
-                    return bits;
+                    match bits {
+                        Some(SIG_YIELD) => {
+                            // JIT function yielded. fiber.signal and fiber.suspended
+                            // are set by the JIT yield helpers. Build the interpreter-
+                            // level caller frame (same logic as lines 189-205 below).
+                            if let Some(mut frames) = self.fiber.suspended.take() {
+                                let (_, value) = self.fiber.signal.take().unwrap();
+                                let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+                                let caller_frame = SuspendedFrame {
+                                    bytecode: bytecode.clone(),
+                                    constants: constants.clone(),
+                                    env: closure_env.clone(),
+                                    ip: *ip,
+                                    stack: caller_stack,
+                                    active_allocator:
+                                        crate::value::fiber_heap::save_active_allocator(),
+                                    location_map: location_map.clone(),
+                                };
+                                frames.push(caller_frame);
+                                self.fiber.signal = Some((SIG_YIELD, value));
+                                self.fiber.suspended = Some(frames);
+                            }
+                            return Some(SIG_YIELD);
+                        }
+                        other => return other,
+                    }
                 }
             }
 
@@ -250,7 +291,7 @@ impl VM {
                 }
                 _ => {
                     // Other signal (error, etc.) — propagate to caller.
-                    // DO NOT pop the call frame on error — preserve it for stack traces
+                    // The call frame is preserved on error for stack traces.
                     return Some(bits);
                 }
             }
@@ -353,6 +394,20 @@ impl VM {
             return Some(self.handle_primitive_signal_tail(bits, value));
         }
 
+        if let Some((id, default)) = func.as_parameter() {
+            if !args.is_empty() {
+                set_error(
+                    &mut self.fiber,
+                    "arity-error",
+                    format!("parameter call: expected 0 arguments, got {}", args.len()),
+                );
+                return Some(SIG_ERROR);
+            }
+            let value = self.resolve_parameter(id, default);
+            self.fiber.signal = Some((SIG_OK, value));
+            return Some(SIG_OK);
+        }
+
         if let Some(closure) = func.as_closure() {
             // Validate argument count
             if !self.check_arity(&closure.arity, args.len()) {
@@ -442,11 +497,12 @@ impl VM {
                                 // MakeClosure and other instructions not yet in JIT.
                                 // Fall back to interpreter — the function still works.
                             }
+                            crate::jit::JitError::Polymorphic => {
+                                // Polymorphic — fall through to interpreter
+                            }
                             _ => {
                                 panic!(
-                                    "JIT compilation failed for pure function: {}. \
-                                     This is a bug — pure functions should be JIT-compilable. \
-                                     Error: {}",
+                                    "JIT compilation failed for function: {}. Error: {}",
                                     closure
                                         .lir_function
                                         .as_ref()
@@ -486,27 +542,39 @@ impl VM {
             return None; // Let the dispatch loop's signal check deal with it
         }
 
+        // Check for yield sentinel (JIT function yielded directly)
+        if result.to_bits() == YIELD_SENTINEL {
+            // fiber.signal and fiber.suspended are already set by the JIT
+            // yield helpers. Return Some(SIG_YIELD) to call_inner, which
+            // will build the interpreter-level caller frame.
+            return Some(SIG_YIELD);
+        }
+
         // Check for pending tail call (JIT function did a TailCall)
         if result.to_bits() == TAIL_CALL_SENTINEL {
             if let Some(tail) = self.pending_tail_call.take() {
-                let (bits, val) = self.execute_closure_bytecode(
+                let exec_result = self.execute_bytecode_saving_stack(
                     &tail.bytecode,
                     &tail.constants,
                     &tail.env,
                     &tail.location_map,
                 );
-                match bits {
+                match exec_result.bits {
                     SIG_OK | SIG_HALT => {
+                        let (_, val) = self.fiber.signal.take().unwrap();
                         self.fiber.stack.push(val);
                         return None;
                     }
-                    SIG_ERROR => {
-                        self.fiber.signal = Some((SIG_ERROR, val));
-                        self.fiber.stack.push(Value::NIL);
-                        return None;
+                    SIG_YIELD => {
+                        // Yield propagated through the tail-called function.
+                        // fiber.signal and fiber.suspended are set.
+                        // Return Some(SIG_YIELD) so call_inner builds the
+                        // interpreter-level caller frame.
+                        return Some(SIG_YIELD);
                     }
                     _ => {
-                        self.fiber.signal = Some((bits, val));
+                        // SIG_ERROR — signal already set on fiber
+                        self.fiber.stack.push(Value::NIL);
                         return None;
                     }
                 }
@@ -604,8 +672,11 @@ impl VM {
         let results = match compiler.compile_batch(&members) {
             Ok(r) => r,
             Err(e) => match &e {
-                crate::jit::JitError::UnsupportedInstruction(_) => {
-                    // Some member has an instruction the JIT can't handle.
+                crate::jit::JitError::UnsupportedInstruction(_)
+                | crate::jit::JitError::Yielding => {
+                    // Some member has an instruction the JIT can't handle,
+                    // or a member has yielding effect (yield metadata not
+                    // propagated to shared JitCode).
                     // Fall through to solo compilation for the hot function.
                     return None;
                 }

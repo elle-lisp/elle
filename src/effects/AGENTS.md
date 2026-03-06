@@ -14,13 +14,13 @@ debug, ffi) and which parameter indices propagate their callee's effects.
 |---------------|---------|
 | `Effect` | `{ bits: SignalBits, propagates: u32 }` — Copy, const fn constructors |
 | `Effect::none()` | No effects |
-| `Effect::raises()` | May raise (SIG_ERROR) |
+| `Effect::errors()` | May error (SIG_ERROR) |
 | `Effect::yields()` | May yield (SIG_YIELD) |
-| `Effect::yields_raises()` | May yield and raise |
+| `Effect::yields_errors()` | May yield and error |
 | `Effect::ffi()` | Calls foreign code (SIG_FFI) |
 | `Effect::halts()` | May halt (SIG_HALT) |
 | `Effect::polymorphic(n)` | Effect depends on parameter n |
-| `Effect::polymorphic_raises(n)` | Polymorphic + may raise |
+| `Effect::polymorphic_errors(n)` | Polymorphic + may error |
 
 
 ## Predicates
@@ -42,7 +42,7 @@ Each predicate asks a specific question. No vague "is_pure".
 | Deprecated | Use instead |
 |------------|-------------|
 | `Effect::pure()` | `Effect::none()` |
-| `Effect::pure_raises()` | `Effect::raises()` |
+| `Effect::pure_errors()` | `Effect::errors()` |
 | `effect.is_pure()` | `!effect.may_suspend()` |
 
 ## Interprocedural Effect Tracking

@@ -124,14 +124,19 @@ pub enum Instruction {
     True,
     False,
 
-    /// Scope management instructions (Phase 2)
-    /// Push a new scope (scope_type u8)
+    /// Dead instruction — never emitted. Retained to preserve repr(u8)
+    /// byte values of subsequent variants. The VM panics if encountered.
+    /// Operands: scope_type u8
     PushScope,
 
-    /// Pop the current scope
+    /// Dead instruction — never emitted. Retained to preserve repr(u8)
+    /// byte values of subsequent variants. The VM panics if encountered.
+    /// Operands: none
     PopScope,
 
-    /// Define local variable (symbol_idx u16)
+    /// Dead instruction — never emitted. Retained to preserve repr(u8)
+    /// byte values of subsequent variants. The VM panics if encountered.
+    /// Operands: symbol_idx u16
     DefineLocal,
 
     /// Wrap value in a cell for shared mutable access (Phase 4)
@@ -202,6 +207,16 @@ pub enum Instruction {
     /// No operands. Pops scope mark and releases scoped objects.
     /// No-op for the root fiber (no FiberHeap installed).
     RegionExit,
+
+    /// Push a parameter frame onto the fiber's param_frames stack.
+    /// Operand: u8 count (number of (param, value) pairs on the stack).
+    /// Stack: [param1, val1, param2, val2, ...] → [] (all consumed).
+    /// Validates each param is a Parameter; signals error if not.
+    PushParamFrame,
+
+    /// Pop the top parameter frame from the fiber's param_frames stack.
+    /// No operands, no stack effect.
+    PopParamFrame,
 }
 
 /// Inline cache entry for function lookups
@@ -424,6 +439,16 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 // No operands (arg count is dynamic, determined by array length)
             }
             Instruction::RegionEnter | Instruction::RegionExit => {
+                // No operands
+            }
+            Instruction::PushParamFrame => {
+                if i < instructions.len() {
+                    let count = instructions[i];
+                    line.push_str(&format!(" (count={})", count));
+                    i += 1;
+                }
+            }
+            Instruction::PopParamFrame => {
                 // No operands
             }
             _ => {}

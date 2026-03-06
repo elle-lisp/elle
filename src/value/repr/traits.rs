@@ -95,6 +95,11 @@ impl PartialEq for Value {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
+                // Parameter comparison (by identity — same heap object)
+                (HeapObject::Parameter { .. }, HeapObject::Parameter { .. }) => {
+                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
+                }
+
                 // Bytes comparison (compare contents)
                 (HeapObject::Bytes(b1), HeapObject::Bytes(b2)) => b1 == b2,
 

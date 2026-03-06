@@ -1,5 +1,6 @@
 pub mod arithmetic;
 pub mod call;
+pub mod cell;
 pub mod closure;
 pub mod comparison;
 pub mod control;
@@ -10,7 +11,7 @@ pub mod eval;
 pub mod execute;
 pub mod fiber;
 pub mod literals;
-pub mod scope;
+pub mod parameters;
 pub mod signal;
 pub mod stack;
 pub mod types;
