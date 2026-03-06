@@ -5,9 +5,9 @@
 
 (import-file "./examples/assertions.lisp")
 
-# Helper: assert that (thunk) raises an error
+# Helper: assert that (thunk) signals an error
 (defn assert-err [thunk msg]
-  "Assert that (thunk) raises an error"
+  "Assert that (thunk) signals an error"
   (let ([result (try (begin (thunk) :no-error)
                   (catch (e) :got-error))])
     (assert-eq result :got-error msg)))

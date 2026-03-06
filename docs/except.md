@@ -136,7 +136,7 @@ Errors propagate up the fiber chain until caught:
 3. At the root fiber: uncaught error becomes `Err(String)` via
    `format_error`
 
-The `fiber/propagate` primitive re-raises a caught signal, preserving the
+The `fiber/propagate` primitive re-signals a caught signal, preserving the
 child chain for stack traces.
 
 The `fiber/cancel` primitive injects an error into a suspended fiber,

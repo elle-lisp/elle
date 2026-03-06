@@ -407,7 +407,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/spawn",
         func: prim_spawn,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Spawn a new thread that executes a closure with captured immutable values",
         params: &["closure"],
@@ -418,7 +418,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/join",
         func: prim_join,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Wait for a thread to complete and return its result",
         params: &["thread-handle"],

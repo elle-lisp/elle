@@ -279,7 +279,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "regex/compile",
         func: prim_regex_compile,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Compile a regular expression pattern",
         params: &["pattern"],
@@ -290,7 +290,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "regex/match?",
         func: prim_regex_match,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Test if a regex matches a string",
         params: &["regex", "text"],
@@ -301,7 +301,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "regex/find",
         func: prim_regex_find,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Find the first match in a string. Returns a struct with :match, :start, :end or nil.",
         params: &["regex", "text"],
@@ -312,7 +312,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "regex/find-all",
         func: prim_regex_find_all,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Find all matches in a string. Returns a list of match structs.",
         params: &["regex", "text"],
@@ -323,7 +323,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "regex/captures",
         func: prim_regex_captures,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Capture groups from first match. Returns a struct with numbered and named groups, or nil.",
         params: &["regex", "text"],

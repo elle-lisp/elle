@@ -1082,7 +1082,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/native",
         func: prim_ffi_native,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Load a shared library. Pass nil for the current process.",
         params: &["path"],
@@ -1093,7 +1093,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/lookup",
         func: prim_ffi_lookup,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::Exact(2),
         doc: "Look up a symbol in a loaded library.",
         params: &["lib", "name"],
@@ -1104,7 +1104,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/signature",
         func: prim_ffi_signature,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Range(2, 3),
         doc: "Create a reified function signature. Optional third arg for variadic functions.",
         params: &["return-type", "arg-types", "fixed-args"],
@@ -1115,7 +1115,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/call",
         func: prim_ffi_call,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::AtLeast(2),
         doc: "Call a C function through libffi.",
         params: &["fn-ptr", "sig"],
@@ -1126,7 +1126,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/size",
         func: prim_ffi_size,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Get the size of a C type in bytes.",
         params: &["type"],
@@ -1137,7 +1137,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/align",
         func: prim_ffi_align,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Get the alignment of a C type in bytes.",
         params: &["type"],
@@ -1148,7 +1148,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/malloc",
         func: prim_ffi_malloc,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Allocate C memory.",
         params: &["size"],
@@ -1159,7 +1159,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/free",
         func: prim_ffi_free,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Free C memory.",
         params: &["ptr"],
@@ -1170,7 +1170,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/read",
         func: prim_ffi_read,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::Exact(2),
         doc: "Read a typed value from C memory.",
         params: &["ptr", "type"],
@@ -1181,7 +1181,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/write",
         func: prim_ffi_write,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::Exact(3),
         doc: "Write a typed value to C memory.",
         params: &["ptr", "type", "value"],
@@ -1192,7 +1192,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/string",
         func: prim_ffi_string,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::Range(1, 2),
         doc: "Read a null-terminated C string from a pointer.",
         params: &["ptr", "max-len"],
@@ -1203,7 +1203,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/struct",
         func: prim_ffi_struct,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Create a struct type descriptor from field types.",
         params: &["fields"],
@@ -1214,7 +1214,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/array",
         func: prim_ffi_array,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Create an array type descriptor from element type and count.",
         params: &["elem-type", "count"],
@@ -1225,7 +1225,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/callback",
         func: prim_ffi_callback,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::Exact(2),
         doc: "Create a C function pointer from an Elle closure. Returns a pointer.",
         params: &["sig", "closure"],
@@ -1236,7 +1236,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/callback-free",
         func: prim_ffi_callback_free,
-        effect: Effect::ffi_raises(),
+        effect: Effect::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Free a callback created by ffi/callback.",
         params: &["ptr"],

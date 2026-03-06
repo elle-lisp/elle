@@ -10,7 +10,7 @@ trade-offs and pick up where we left off.
 
 Elle previously had separate mechanisms for coroutines (continuation
 capture/replay), exception handling (handler stack with unwind semantics),
-and effect inference (boolean fields for yields and raises). The JIT could
+and effect inference (boolean fields for yields and errors). The JIT could
 only compile pure functions.
 
 These have been unified into a single mechanism: **fibers with signals**.
@@ -462,7 +462,7 @@ The programmer can declare effects on functions:
 
 ```lisp
 (def (query db sql)
-  (declare (effects :io :raises))
+  (declare (effects :io :errors))
   ...)
 ```
 
@@ -495,7 +495,7 @@ signal, specifically).
 ### The Current Problem
 
 The JIT can only compile pure functions because it can't handle yields or
-raises — it would need to save and restore the native stack, which is
+errors — it would need to save and restore the native stack, which is
 complex and platform-specific.
 
 ### The Solution
@@ -608,7 +608,7 @@ The compiler's effect information guides JIT decisions:
   (+ x y))
 
 (def (may-fail x)
-  (declare (effects :raises))   ;# may raise, nothing else
+  (declare (effects :errors))   ;# may error, nothing else
   (/ 1 x))
 
 (def (callback-must-be-pure f xs)

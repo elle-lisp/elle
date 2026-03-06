@@ -249,7 +249,7 @@ SmallVec handlers, pre-allocated envs, inline jump elimination).
 | New pipeline skips Expr | Syntax → HIR directly. No reason to generate Expr. |
 | TCO via trampoline | `pending_tail_call` on VM. Works for mutual recursion. |
 | JIT always enabled | Cranelift required. No feature gate. |
-| Conservative raises tracking | `bool` not `BTreeSet`. Correct first. |
+| Conservative error tracking | `bool` not `BTreeSet`. Correct first. |
 | Debugging from Elle, not Rust | No recompilation for instrumentation. |
 | 500-line file target, not 300 | 300 too aggressive for a compiler. 66/130 files violated it. |
 

@@ -20,7 +20,7 @@ pub struct PrimitiveDef {
     pub name: &'static str,
     /// The Rust implementation.
     pub func: NativeFn,
-    /// Signal effects (raises, yields, etc.).
+    /// Signal effects (errors, yields, etc.).
     pub effect: Effect,
     /// Argument count constraint.
     pub arity: Arity,

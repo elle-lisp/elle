@@ -64,7 +64,7 @@ This is the vast majority of tests. The pattern is:
 **5. Does the test verify a runtime error occurs (not a compile error)
 and only needs to check the error kind, not the full message?**
 
-Example: confirming division by zero raises an error with kind
+Example: confirming division by zero signals an error with kind
 `:division-by-zero`.
 
 → **Elle test script.** Use `protect`:

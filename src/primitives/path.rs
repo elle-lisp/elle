@@ -322,7 +322,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/absolute",
         func: prim_path_absolute,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Compute absolute path (does not require path to exist)",
         params: &["path"],
@@ -333,7 +333,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/canonicalize",
         func: prim_path_canonicalize,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Resolve path through filesystem (symlinks resolved, must exist)",
         params: &["path"],
@@ -388,7 +388,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/cwd",
         func: prim_path_cwd,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(0),
         doc: "Get current working directory",
         params: &[],

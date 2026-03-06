@@ -19,9 +19,9 @@
 ##   - assert-string-eq(actual, expected, msg)
 ##     Assert that two strings are equal
 ##   - assert-err(f, msg)
-##     Assert that thunk f raises any error
+##     Assert that thunk f signals any error
 ##   - assert-err-kind(f, expected-kind, msg)
-##     Assert that thunk f raises an error with the given kind keyword
+##     Assert that thunk f signals an error with the given kind keyword
 ##
 ## All assertions crash with exit code 1 on failure, making examples
 ## act as contracts for the implementation.
@@ -109,9 +109,9 @@
         (display "\n")
         (exit 1)))))
 
-## Assert that a thunk raises any error
+## Assert that a thunk signals any error
 (def assert-err (fn (f msg)
-  "Assert that (f) raises an error"
+  "Assert that (f) signals an error"
   (let (([ok? _] (protect (f))))
     (if ok?
       (begin
@@ -121,9 +121,9 @@
         (exit 1))
       true))))
 
-## Assert that a thunk raises an error with a specific kind keyword
+## Assert that a thunk signals an error with a specific kind keyword
 (def assert-err-kind (fn (f expected-kind msg)
-  "Assert that (f) raises an error with the given kind"
+  "Assert that (f) signals an error with the given kind"
   (let (([ok? err] (protect (f))))
     (if ok?
       (begin

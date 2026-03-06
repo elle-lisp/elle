@@ -243,7 +243,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/open",
         func: prim_port_open,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Open a file as a text (UTF-8) port.",
         params: &["path", "mode"],
@@ -254,7 +254,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/open-bytes",
         func: prim_port_open_bytes,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Open a file as a binary port.",
         params: &["path", "mode"],
@@ -265,7 +265,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/close",
         func: prim_port_close,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Close a port. Idempotent.",
         params: &["port"],
@@ -320,7 +320,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/open?",
         func: prim_is_port_open,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Check if a port is open. Raises :type-error on non-port.",
         params: &["port"],

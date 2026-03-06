@@ -514,7 +514,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/resume",
         func: prim_fiber_resume,
-        effect: Effect::yields_raises(),
+        effect: Effect::yields_errors(),
         arity: Arity::Range(1, 2),
         doc: "Resume a fiber, optionally delivering a value",
         params: &["fiber", "value"],
@@ -525,7 +525,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/signal",
         func: prim_fiber_signal,
-        effect: Effect::yields_raises(),
+        effect: Effect::yields_errors(),
         arity: Arity::Exact(2),
         doc: "Emit a signal from the current fiber",
         params: &["bits", "value"],
@@ -613,7 +613,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/propagate",
         func: prim_fiber_propagate,
-        effect: Effect::yields_raises(),
+        effect: Effect::yields_errors(),
         arity: Arity::Exact(1),
         doc: "Re-raise a caught signal from a child fiber, preserving the child chain",
         params: &["fiber"],
@@ -624,7 +624,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/cancel",
         func: prim_fiber_cancel,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Range(1, 2),
         doc: "Inject an error into a suspended fiber. Error value defaults to nil.",
         params: &["fiber", "error?"],

@@ -347,7 +347,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fdg/layout",
         func: prim_fdg_layout,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Compute force-directed graph layout positions",
         params: &["nodes", "edges"],
@@ -358,7 +358,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fdg/render",
         func: prim_fdg_render,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Compute force-directed graph layout and render to SVG",
         params: &["nodes", "edges"],
