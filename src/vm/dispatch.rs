@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use super::core::VM;
 use super::{
-    arithmetic, closure, comparison, control, data, literals, scope, stack, types, variables,
+    arithmetic, cell, closure, comparison, control, data, literals, scope, stack, types, variables,
 };
 
 impl VM {
@@ -302,13 +302,13 @@ impl VM {
 
                 // Cell operations
                 Instruction::MakeCell => {
-                    scope::handle_make_cell(self);
+                    cell::handle_make_cell(self);
                 }
                 Instruction::UnwrapCell => {
-                    scope::handle_unwrap_cell(self);
+                    cell::handle_unwrap_cell(self);
                 }
                 Instruction::UpdateCell => {
-                    scope::handle_update_cell(self);
+                    cell::handle_update_cell(self);
                 }
 
                 // Yield — capture suspended frame and suspend

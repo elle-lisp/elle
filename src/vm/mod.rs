@@ -1,5 +1,6 @@
 pub mod arithmetic;
 pub mod call;
+pub mod cell;
 pub mod closure;
 pub mod comparison;
 pub mod control;
