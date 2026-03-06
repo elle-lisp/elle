@@ -125,3 +125,6 @@
         (append acc (render-section section)))
       ""
       sections)))
+
+## Module exports
+(fn [] {:render-paragraph render-paragraph :render-code render-code :render-list render-list :render-blockquote render-blockquote :render-table render-table :render-note render-note :render-block render-block :render-section render-section :render-sections render-sections})

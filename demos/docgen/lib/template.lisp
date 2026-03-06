@@ -44,3 +44,6 @@
         (append "  </main>\n")
         (append "</body>\n")
         (append "</html>\n")))))
+
+## Module exports
+(fn [] {:generate-nav generate-nav :generate-page generate-page}))
