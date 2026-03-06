@@ -172,7 +172,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "time/sleep",
         func: prim_sleep,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Sleep for the specified number of seconds",
         params: &["seconds"],

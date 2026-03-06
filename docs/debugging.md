@@ -142,7 +142,7 @@ Use it when you need to distinguish computation time from I/O wait.
 
 | Primitive | Signature | Returns | Effect | Implementation |
 |-----------|-----------|---------|--------|----------------|
-| `time/sleep` | `(time/sleep seconds)` | nil | `Effect::raises()` | `std::thread::sleep` (Rust primitive) |
+| `time/sleep` | `(time/sleep seconds)` | nil | `Effect::errors()` | `std::thread::sleep` (Rust primitive) |
 | `time/stopwatch` | `(time/stopwatch)` | coroutine | yields | Elle: coroutine over `clock/monotonic` |
 | `time/elapsed` | `(time/elapsed thunk)` | `(result seconds)` | polymorphic | Elle: wraps thunk with clock reads |
 
@@ -277,60 +277,60 @@ pub struct Effect {
 }
 ```
 
-Constructors: `Effect::none()`, `Effect::raises()`, `Effect::yields()`,
-`Effect::yields_raises()`, `Effect::ffi()`, `Effect::polymorphic(n)`,
-`Effect::polymorphic_raises(n)`.
+Constructors: `Effect::none()`, `Effect::errors()`, `Effect::yields()`,
+`Effect::yields_errors()`, `Effect::ffi()`, `Effect::polymorphic(n)`,
+`Effect::polymorphic_errors(n)`.
 
-Predicates: `may_raise()`, `may_yield()`, `may_suspend()`, `may_ffi()`,
+Predicates: `may_error()`, `may_yield()`, `may_suspend()`, `may_ffi()`,
 `is_polymorphic()`.
 
 We do NOT attempt to track specific exception types in this iteration. Any
-`throw` is conservatively marked as "raises." Specific type tracking (which
+`throw` is conservatively marked as "errors." Specific type tracking (which
 would let `try`/`catch` subtract known types) is a future refinement.
 
 ### 4.2 Inference rules
 
-| Form | Raises |
+| Form | Errors |
 |------|--------|
 | `(throw expr)` | `true` — always, regardless of argument |
 | `(try body (catch exception e ...))` | `false` — exception is the root type, catches everything |
-| `(try body (catch error e ...))` | body.raises — catching a subtype doesn't guarantee all exceptions are caught |
-| `(begin a b)` | a.raises ∨ b.raises |
-| `(if c t e)` | c.raises ∨ t.raises ∨ e.raises |
-| `(f args...)` | args.raises ∨ f.may_raise |
+| `(try body (catch error e ...))` | body.errors — catching a subtype doesn't guarantee all exceptions are caught |
+| `(begin a b)` | a.errors ∨ b.errors |
+| `(if c t e)` | c.errors ∨ t.errors ∨ e.errors |
+| `(f args...)` | args.errors ∨ f.may_error |
 | literal | `false` |
-| primitive call | Uses the primitive's registered `may_raise` flag (see §5) |
+| primitive call | Uses the primitive's registered `may_error` flag (see §5) |
 
 ### 4.3 Key principle: conservative and correct
 
 Every `throw` is an unknown exception. We don't peek into the argument to
 determine the type — `(throw (error "x"))` and `(throw some-variable)` both
-produce `raises = true`.
+produce `errors = true`.
 
-The only way to clear `raises` is `try`/`catch` catching `exception` (ID 1),
+The only way to clear `errors` is `try`/`catch` catching `exception` (ID 1),
 which is the root of the hierarchy and catches everything. Catching a specific
-subtype like `error` does NOT clear `raises` because the throw could be a
+subtype like `error` does NOT clear `errors` because the throw could be a
 `warning` or any other type.
 
 This is genuinely useful: it tells you which functions are **guaranteed** to
-never throw. The set of non-raising functions is exactly the set where every
-code path avoids `throw` and calls only non-raising functions.
+never error. The set of non-erroring functions is exactly the set where every
+code path avoids `throw` and calls only non-erroring functions.
 
 ### 4.4 Propagation during fixpoint iteration
 
-Raises effects propagate exactly like yield effects during the cross-form
+Error effects propagate exactly like yield effects during the cross-form
 fixpoint iteration in `compile_all`. Self-recursive functions start
-with `may_raise = false` (optimistic) and iterate until stable.
+with `may_error = false` (optimistic) and iterate until stable.
 
 ### 4.5 Runtime query
 
-`(fn/errors? value)` reads `closure.effect.may_raise()` (checks `SIG_ERROR`
-in the effect's signal bits). Returns `true` if the closure may raise an error,
+`(fn/errors? value)` reads `closure.effect.may_error()` (checks `SIG_ERROR`
+in the effect's signal bits). Returns `true` if the closure may error,
 `false` otherwise.
 
 When we add specific exception type tracking (§4.6), the return type will
 change to a list of exception type keywords (`:error`, `:type-error`,
-`:division-by-zero`, etc.) for closures that may raise, and `false` for those
+`:division-by-zero`, etc.) for closures that may error, and `false` for those
 that don't.
 
 ### 4.6 Future: specific exception types
@@ -339,7 +339,7 @@ Once the boolean tracking is proven correct, we can extend to
 `BTreeSet<u32>` tracking specific exception IDs. This would enable:
 - `try`/`catch` catching `error` to subtract error and its children
 - `fn/errors?` returning a list of specific exception type keywords
-- Primitive annotations (e.g., `/` raises `:division-by-zero`)
+- Primitive annotations (e.g., `/` signals `:division-by-zero`)
 
 This is additive — the boolean version is a proper subset of the set version.
 
@@ -366,29 +366,29 @@ Every primitive declares its full effect at registration time.
 
 ### 5.2 Effect values for primitives
 
-Most primitives use `Effect::raises()` (may raise on arity/type errors).
+Most primitives use `Effect::errors()` (may error on arity/type errors).
 Type predicates and constants use `Effect::none()`. The naming convention
-uses `none()`/`raises()` rather than the deprecated `pure()`/`pure_raises()`
+uses `none()`/`errors()` rather than the deprecated `pure()`/`pure_errors()`
 aliases:
 
 ```rust
-// The common case: may raise
-register_fn(vm, symbols, &mut effects, "first", prim_first, Effect::raises());
+// The common case: may error
+register_fn(vm, symbols, &mut effects, "first", prim_first, Effect::errors());
 
 // Type predicates: no effects
 register_fn(vm, symbols, &mut effects, "nil?", prim_is_nil, Effect::none());
 
-// Division: may raise (division by zero)
-register_fn(vm, symbols, &mut effects, "/", prim_div_vm, Effect::raises());
+// Division: may error (division by zero)
+register_fn(vm, symbols, &mut effects, "/", prim_div_vm, Effect::errors());
 ```
 
 Constructors on `Effect`:
 - `Effect::none()` — no effects (preferred over deprecated `Effect::pure()`)
-- `Effect::raises()` — may raise (preferred over deprecated `Effect::pure_raises()`)
-- `Effect::yields()` — may yield, does not raise
-- `Effect::yields_raises()` — may yield, may raise
-- `Effect::polymorphic(n)` — effect depends on param n, does not raise
-- `Effect::polymorphic_raises(n)` — effect depends on param n, may raise
+- `Effect::errors()` — may error (preferred over deprecated `Effect::pure_errors()`)
+- `Effect::yields()` — may yield, does not error
+- `Effect::yields_errors()` — may yield, may error
+- `Effect::polymorphic(n)` — effect depends on param n, does not error
+- `Effect::polymorphic_errors(n)` — effect depends on param n, may error
 
 ### 5.3 Remaining migration
 
@@ -401,11 +401,11 @@ returned by `register_primitives` instead.
 | Primitive | Effect | Status |
 |-----------|--------|--------|
 | `clock/monotonic`, `clock/realtime`, `clock/cpu` | `Effect::none()` | Registered |
-| `time/sleep` | `Effect::raises()` | Registered |
+| `time/sleep` | `Effect::errors()` | Registered |
 | `closure?`, `jit?`, `pure?`, `coro?`, `mutates-params?` | `Effect::none()` | Registered |
 | `arity`, `captures`, `bytecode-size` | `Effect::none()` | Registered |
 | `fn/errors?` | `Effect::none()` | Registered |
-| `jit`, `jit!` | `Effect::raises()` | Not yet implemented |
+| `jit`, `jit!` | `Effect::errors()` | Not yet implemented |
 | `call-count` | `Effect::none()` | Not yet implemented |
 | `global?` | `Effect::none()` | Not yet implemented |
 

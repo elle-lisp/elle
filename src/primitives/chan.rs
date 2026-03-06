@@ -415,7 +415,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "chan/new",
         func: prim_chan_new,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Range(0, 1),
         doc: "Create a channel. Returns [sender receiver]. Optional capacity for bounded channel.",
         params: &["&opt capacity"],
@@ -426,7 +426,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "chan/send",
         func: prim_chan_send,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Non-blocking send. Returns [:ok], [:full], or [:disconnected].",
         params: &["sender", "msg"],
@@ -437,7 +437,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "chan/recv",
         func: prim_chan_recv,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Non-blocking receive. Returns [:ok msg], [:empty], or [:disconnected].",
         params: &["receiver"],
@@ -448,7 +448,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "chan/clone",
         func: prim_chan_clone,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Clone a sender. Multiple senders can feed the same channel.",
         params: &["sender"],
@@ -459,7 +459,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "chan/close",
         func: prim_chan_close,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Close a sender. Receivers will get :disconnected after buffered messages drain.",
         params: &["sender"],
@@ -470,7 +470,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "chan/close-recv",
         func: prim_chan_close_recv,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Close a receiver. Senders will get :disconnected on next send.",
         params: &["receiver"],
@@ -481,7 +481,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "chan/select",
         func: prim_chan_select,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Range(1, 2),
         doc: "Block until one receiver has a message. Returns [index msg] or [:timeout].",
         params: &["receivers", "&opt timeout-ms"],

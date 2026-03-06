@@ -247,7 +247,7 @@ When a signal is caught:
 
 ### `propagate` — Preserving the Chain
 
-The `propagate` operation re-raises a signal from a caught child while
+The `propagate` operation re-signals a signal from a caught child while
 preserving the child fiber link:
 
 ```
@@ -313,11 +313,11 @@ error value and the fiber (for stack trace inspection).
 ```
 
 Uses `:ti` (catch termination signals + inherit environment). The cleanup form
-runs unconditionally. If the body errored, `propagate` re-raises after cleanup.
+runs unconditionally. If the body errored, `propagate` re-signals after cleanup.
 
 **Design note**: There is no `finally` keyword, no special VM support for
 cleanup. `defer` is a macro that creates a fiber, catches its termination,
-runs cleanup, and re-raises. This is the payoff of the unified model — complex
+runs cleanup, and re-signals. This is the payoff of the unified model — complex
 control flow patterns emerge from composition of the single primitive.
 
 ### `with`

@@ -210,13 +210,13 @@ go through `elle_jit_call` as before.
 The effect system and JIT side-exit mechanism enable fibers and JIT to coexist:
 
 - **JIT-safe fiber primitives**: `fiber/new`, `fiber/status`, `fiber/value`,
-  `fiber/bits`, `fiber/mask` have `Effect::raises()` — `may_suspend()` is
+  `fiber/bits`, `fiber/mask` have `Effect::errors()` — `may_suspend()` is
   false, so closures calling them can be JIT-compiled. `fiber?` has
   `Effect::none()`. These all return `SIG_OK` or `SIG_ERROR`, which
   `jit_handle_primitive_signal` handles.
 
 - **JIT-excluded fiber primitives**: `fiber/resume` and `fiber/signal` have
-  `Effect::yields_raises()` — `may_suspend()` is true. Any closure calling
+  `Effect::yields_errors()` — `may_suspend()` is true. Any closure calling
   them transitively inherits this effect, so the JIT gate rejects them.
 
 - **Yield side-exit**: When a JIT-compiled function reaches a `Yield` terminator,

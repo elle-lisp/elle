@@ -55,7 +55,7 @@ inner dispatch loop):
 - `SIG_ERROR` (1): Error. Error tuple in `fiber.signal` as `[:keyword "message"]`.
 - `SIG_YIELD` (2): Fiber yield. Value in `fiber.signal`, suspended frames in `fiber.suspended`.
 - `SIG_RESUME` (8): VM-internal. Fiber primitive requests VM-side execution.
-- `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-raises caught signal.
+- `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-signals caught signal.
 - `SIG_CANCEL` (64): VM-internal. `fiber/cancel` injects error into fiber.
 - `SIG_QUERY` (128): VM-internal. Primitive reads VM state (e.g., call counts, global bindings, arena stats, environment).
 - `SIG_HALT` (256): Graceful VM termination. Value in `fiber.signal`. Non-resumable; fiber is Dead.

@@ -91,12 +91,12 @@
       "content": [
         {
           "type": "text",
-          "text": "If a spawned thread produces an error, join re-raises that error in the calling thread:"
+          "text": "If a spawned thread produces an error, join re-signals that error in the calling thread:"
         },
         {
           "type": "code",
           "language": "lisp",
-          "code": "; Error in spawned thread\n(try\n  (let ((handle (spawn (lambda () (/ 1 0)))))\n    (join handle))  ; re-raises division by zero error\n  (catch (e)\n    (display \"Caught error: \")\n    (display e)))"
+          "code": "; Error in spawned thread\n(try\n  (let ((handle (spawn (lambda () (/ 1 0)))))\n    (join handle))  ; re-signals division by zero error\n  (catch (e)\n    (display \"Caught error: \")\n    (display e)))"
         }
       ]
     },

@@ -6,14 +6,14 @@
 
 # Helper: assert that an expression errors (wraps in try/catch)
 (defn assert-err [thunk msg]
-  "Assert that (thunk) raises an error"
+  "Assert that (thunk) signals an error"
   (let ([result (try (begin (thunk) :no-error)
                   (catch (e) :got-error))])
     (assert-eq result :got-error msg)))
 
 # Helper: assert that an expression errors and the message contains a substring
 (defn assert-err-contains [thunk substring msg]
-  "Assert that (thunk) raises an error containing substring"
+  "Assert that (thunk) signals an error containing substring"
   (let ([result (try (begin (thunk) nil)
                   (catch (e) e))])
     (assert-true (string? (string/repr result))

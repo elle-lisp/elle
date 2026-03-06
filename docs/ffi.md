@@ -389,13 +389,13 @@ Integer arguments are range-checked: passing 256 as `:i8` signals an
 
 ## Effect System
 
-FFI primitives carry the `Effect::ffi_raises()` effect, which is
+FFI primitives carry the `Effect::ffi_errors()` effect, which is
 `SIG_FFI | SIG_ERROR`. This means:
 
 - The effect system knows these functions call foreign code (`SIG_FFI`)
-- They may also raise errors (`SIG_ERROR`)
+- They may also error (`SIG_ERROR`)
 - Pure primitives like `ffi/signature`, `ffi/struct`, `ffi/array`,
-  `ffi/size`, `ffi/align` carry `Effect::raises()` (just `SIG_ERROR`)
+  `ffi/size`, `ffi/align` carry `Effect::errors()` (just `SIG_ERROR`)
 
 `SIG_FFI` is bit 4 (value 16) in the signal bitmask. It is used by the
 effect system for compile-time tracking but is not a runtime signal — FFI

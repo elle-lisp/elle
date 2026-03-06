@@ -32,7 +32,7 @@
 
 (def [ok2? err2] (protect (fiber/resume f0)))
 (display "  resume errored fiber: ") (print err2)
-(assert-false ok2? "resume errored: raises an error")
+(assert-false ok2? "resume errored: signals an error")
 (assert-eq (get err2 :error) :error "resume errored: error kind is :error")
 
 # The fiber is still in :error — nothing changed.
@@ -75,7 +75,7 @@
 # Resuming a cancelled fiber fails the same way as any errored fiber.
 (def [ok3? err3] (protect (fiber/resume f2)))
 (display "  resume cancelled fiber: ") (print err3)
-(assert-false ok3? "resume cancelled: raises an error")
+(assert-false ok3? "resume cancelled: signals an error")
 (assert-eq (get err3 :error) :error "resume cancelled: error kind is :error")
 
 (print "")

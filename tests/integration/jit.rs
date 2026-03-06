@@ -665,8 +665,6 @@ fn test_jit_branch_integer_truthy() {
 
 #[test]
 fn test_jit_accepts_yielding() {
-    // Yielding functions are now accepted by the JIT gate (side-exit support).
-    // Only polymorphic effects (propagates != 0) are rejected.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
@@ -688,34 +686,9 @@ fn test_jit_accepts_yielding() {
     let result = compiler.compile(&func, None);
     assert!(
         result.is_ok(),
-        "JIT should accept yielding functions: {:?}",
-        result.err()
+        "JIT should accept yielding functions via side-exit: {:?}",
+        result
     );
-}
-
-#[test]
-fn test_jit_rejects_polymorphic() {
-    // Polymorphic effects (propagates != 0) are rejected by the JIT gate.
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.num_regs = 1;
-    func.num_captures = 0;
-    func.effect = Effect::polymorphic(0);
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(42),
-        },
-        span(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), span());
-    func.blocks.push(entry);
-    func.entry = Label(0);
-
-    let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None);
-    assert!(matches!(result, Err(JitError::Polymorphic)));
 }
 
 #[test]
@@ -1844,13 +1817,14 @@ fn test_jit_not_empty_list() {
 // =============================================================================
 
 #[test]
-fn test_jit_accepts_yields_raises_effect() {
-    // Effect::yields_raises() has propagates == 0 (not polymorphic).
-    // The JIT gate now accepts yielding functions via side-exit support.
+fn test_jit_accepts_yields_errors_effect() {
+    // Effect::yields_errors() has may_suspend() = true.
+    // The JIT gate now accepts this via side-exit — yielding functions
+    // can be JIT-compiled and will side-exit to the interpreter on yield.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::yields_raises();
+    func.effect = Effect::yields_errors();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -1868,20 +1842,20 @@ fn test_jit_accepts_yields_raises_effect() {
     let result = compiler.compile(&func, None);
     assert!(
         result.is_ok(),
-        "JIT should accept yields_raises effect: {:?}",
-        result.err()
+        "JIT should accept yields_errors effect via side-exit: {:?}",
+        result
     );
 }
 
 #[test]
-fn test_jit_accepts_raises_only_effect() {
-    // Effect::raises() has may_suspend() = false.
+fn test_jit_accepts_errors_only_effect() {
+    // Effect::errors() has may_suspend() = false.
     // The JIT gate should accept this — fiber/new, fiber/status, etc.
     // have this effect and are safe to call from JIT code.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.effect = Effect::raises();
+    func.effect = Effect::errors();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -1899,7 +1873,7 @@ fn test_jit_accepts_raises_only_effect() {
     let result = compiler.compile(&func, None);
     assert!(
         result.is_ok(),
-        "JIT should accept raises-only effect: {:?}",
+        "JIT should accept errors-only effect: {:?}",
         result
     );
 }

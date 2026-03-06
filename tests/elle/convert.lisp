@@ -2,7 +2,7 @@
 
 # Helper for asserting errors
 (defn assert-err [thunk msg]
-  "Assert that (thunk) raises an error"
+  "Assert that (thunk) signals an error"
   (let ([result (try (begin (thunk) :no-error)
                   (catch (e) :got-error))])
     (assert-eq result :got-error msg)))

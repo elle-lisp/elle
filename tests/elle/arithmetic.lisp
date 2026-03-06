@@ -99,7 +99,7 @@
 (assert-eq (/ (* 100 -4) -4) 100 "div_inverse_of_mul: negative divisor")
 
 # ============================================================================
-# div_by_zero_is_error: division by zero raises an error
+# div_by_zero_is_error: division by zero signals an error
 # ============================================================================
 
 (assert-err (fn [] (/ 0 0)) "div_by_zero_is_error: zero divided by zero")

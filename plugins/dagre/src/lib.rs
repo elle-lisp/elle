@@ -436,7 +436,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "dagre/layout",
         func: prim_dagre_layout,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Compute hierarchical graph layout positions using dagre",
         params: &["nodes", "edges"],
@@ -447,7 +447,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "dagre/render",
         func: prim_dagre_render,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Compute hierarchical graph layout and render to SVG string using dagre",
         params: &["nodes", "edges"],

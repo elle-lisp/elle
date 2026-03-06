@@ -158,7 +158,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "mermaid/render",
         func: prim_mermaid_render,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(1),
         doc: "Render a Mermaid diagram to SVG",
         params: &["diagram"],
@@ -169,7 +169,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "mermaid/render-to-file",
         func: prim_mermaid_render_to_file,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Render a Mermaid diagram to an SVG file",
         params: &["diagram", "path"],

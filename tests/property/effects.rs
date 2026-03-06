@@ -94,12 +94,12 @@ proptest! {
     }
 
     #[test]
-    fn polymorphic_raises_has_error_bit(param in 0usize..8) {
-        let effect = Effect::polymorphic_raises(param);
-        prop_assert!(effect.may_raise(),
-            "Polymorphic_raises should have error bit");
+    fn polymorphic_errors_has_error_bit(param in 0usize..8) {
+        let effect = Effect::polymorphic_errors(param);
+        prop_assert!(effect.may_error(),
+            "Polymorphic_errors should have error bit");
         prop_assert!(effect.is_polymorphic(),
-            "Polymorphic_raises should be polymorphic");
+            "Polymorphic_errors should be polymorphic");
     }
 
     // =========================================================================
@@ -110,7 +110,7 @@ proptest! {
     fn none_effect_is_not_yielding(_x in 0u32..1) {
         let effect = Effect::none();
         prop_assert!(!effect.may_yield());
-        prop_assert!(!effect.may_raise());
+        prop_assert!(!effect.may_error());
         prop_assert!(!effect.may_suspend());
     }
 
@@ -122,17 +122,17 @@ proptest! {
     }
 
     #[test]
-    fn raises_effect_may_raise(_x in 0u32..1) {
-        let effect = Effect::raises();
-        prop_assert!(effect.may_raise());
+    fn errors_effect_may_error(_x in 0u32..1) {
+        let effect = Effect::errors();
+        prop_assert!(effect.may_error());
         prop_assert!(!effect.may_yield());
     }
 
     #[test]
-    fn yields_raises_has_both(_x in 0u32..1) {
-        let effect = Effect::yields_raises();
+    fn yields_errors_has_both(_x in 0u32..1) {
+        let effect = Effect::yields_errors();
         prop_assert!(effect.may_yield());
-        prop_assert!(effect.may_raise());
+        prop_assert!(effect.may_error());
         prop_assert!(effect.may_suspend());
     }
 
@@ -146,6 +146,6 @@ proptest! {
     fn halts_effect_may_halt(_x in 0u32..1) {
         let effect = Effect::halts();
         prop_assert!(effect.may_halt());
-        prop_assert!(effect.may_raise());
+        prop_assert!(effect.may_error());
     }
 }

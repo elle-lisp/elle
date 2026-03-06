@@ -408,7 +408,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sugiyama/layout",
         func: prim_sugiyama_layout,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Compute hierarchical graph layout positions",
         params: &["nodes", "edges"],
@@ -419,7 +419,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sugiyama/render",
         func: prim_sugiyama_render,
-        effect: Effect::raises(),
+        effect: Effect::errors(),
         arity: Arity::Exact(2),
         doc: "Compute hierarchical graph layout and render to SVG string",
         params: &["nodes", "edges"],

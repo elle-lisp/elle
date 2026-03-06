@@ -660,7 +660,7 @@ fn test_yield_star_with_shared_alloc() {
 
 #[test]
 fn test_error_in_child_with_shared_alloc() {
-    // Child fiber raises an error. The error value (a struct/tuple)
+    // Child fiber signals an error. The error value (a struct/tuple)
     // is in shared space. Parent catches and reads the error message.
     let result = eval_source(
         "(let* ((f (fiber/new (fn () (error \"test error\")) 1)))
