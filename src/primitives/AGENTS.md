@@ -93,6 +93,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `array.rs` | `tuple`, `array`, `array/new`, `push`, `pop`, `popn`, `insert`, `remove` |
 | `buffer.rs` | `buffer`, `string->buffer`, `buffer->string` |
 | `string.rs` | `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/char-at`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
+| `format.rs` | `string/format` |
 | `table.rs` | `table`, `get`, `put`, `del`, `keys`, `values`, `has-key?` |
 | `structs.rs` | `struct` |
 | `fileio.rs` | `slurp`, `spit` |
@@ -112,6 +113,96 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `debug.rs` | `debug-print`, `trace`, `memory-usage`, `arena/count`, `arena/stats`, `arena/scope-stats`, `environment` |
 | `process.rs` | `exit`, `halt` |
 
+## string/format primitive
+
+**Location:** `src/primitives/format.rs`
+
+**Signature:** `(string/format template [args...])` or `(string/format template :key val ...)`
+
+**Purpose:** Format a template string with positional or named arguments, supporting format specifications for alignment, padding, and numeric bases.
+
+### Modes
+
+**Positional mode:** Arguments are substituted in order.
+```lisp
+(string/format "{} + {} = {}" 1 2 3)  #=> "1 + 2 = 3"
+(string/format "Hello, {}!" "Alice")  #=> "Hello, Alice!"
+```
+
+**Named mode:** Arguments are keyword-value pairs, substituted by name.
+```lisp
+(string/format "{name} is {age}" :name "Alice" :age 30)  #=> "Alice is 30"
+(string/format "{greeting}, {name}!" :greeting "Hello" :name "Bob")  #=> "Hello, Bob!"
+```
+
+Cannot mix positional and named in the same template — error if both `{}` and `{name}` appear.
+
+### Format specifications
+
+Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`.
+
+**Alignment:** `<` (left), `>` (right), `^` (center). Default: right for numbers, left for strings.
+
+**Fill character:** Any char before alignment. Default: space. Example: `{:*^10}` → center with `*` padding.
+
+**Width:** Minimum field width. Example: `{:10}` → pad to 10 chars.
+
+**Precision:** For floats, decimal places. For strings, max chars. Example: `{:.2f}` → 2 decimal places.
+
+**Type:** `d` (decimal), `x` (hex lowercase), `X` (hex uppercase), `o` (octal), `b` (binary), `f` (float), `e` (scientific), `s` (string).
+
+**Examples:**
+- `{:.2f}` — float with 2 decimal places
+- `{:>10}` — right-align to 10 chars
+- `{:<10}` — left-align to 10 chars
+- `{:^10}` — center to 10 chars
+- `{:05d}` — zero-pad integer to 5 digits
+- `{:x}` — hex lowercase
+- `{:X}` — hex uppercase
+- `{:o}` — octal
+- `{:b}` — binary
+- `{:e}` — scientific notation
+- `{:*^10}` — center with `*` fill to 10 chars
+
+### Brace escaping
+
+`{{` → `{`, `}}` → `}`. Escaping is processed in literal segments (outside placeholders).
+
+```lisp
+(string/format "literal {{braces}}")  #=> "literal {braces}"
+```
+
+### Error cases
+
+| Condition | Error kind | Message |
+|-----------|-----------|---------|
+| Template not string | `type-error` | `"string/format: template must be string, got {type}"` |
+| Unmatched `{` | `format-error` | `"string/format: unmatched '{' in template"` |
+| Unmatched `}` | `format-error` | `"string/format: unmatched '}' in template"` |
+| Positional arg count mismatch | `format-error` | `"string/format: expected N arguments, got M"` |
+| Mixed positional/named | `format-error` | `"string/format: cannot mix positional and named arguments"` |
+| Odd keyword args | `format-error` | `"string/format: odd number of keyword arguments"` |
+| Non-keyword in named position | `type-error` | `"string/format: expected keyword, got {type}"` |
+| Missing named key | `format-error` | `"string/format: missing key '{name}'"` |
+| Extra named key | `format-error` | `"string/format: unexpected key '{name}'"` |
+| Invalid format spec | `format-error` | `"string/format: invalid format spec '{spec}'"` |
+| Type mismatch in format | `format-error` | `"string/format: cannot format {type} with spec '{char}'"` |
+
+### Implementation details
+
+- **Template parsing:** `parse_placeholders()` extracts `{...}` placeholders, handling `{{` and `}}` escapes.
+- **Format spec parsing:** `parse_format_spec()` parses alignment, fill, width, precision, and type.
+- **Value formatting:** `format_value()` applies spec to value, `format_raw()` produces unpadded string, `apply_width_align()` adds padding.
+- **Mode dispatch:** `format_positional()` for `{}` placeholders, `format_named()` for `{name}` placeholders.
+- **Output building:** `build_output()` reconstructs template with formatted values, `unescape_into()` handles brace escaping.
+
+### Invariants
+
+1. **No mixing modes.** Positional and named placeholders cannot coexist in the same template.
+2. **Arity enforcement.** Positional mode requires exactly as many args as placeholders. Named mode requires even args (key-value pairs).
+3. **Type safety.** Format specs are validated against value types (e.g., `d` requires integer, `f` requires number).
+4. **Brace escaping.** `{{` and `}}` are unescaped only in literal segments, not inside placeholders.
+
 ## Files
 
 | File | Lines | Content |
@@ -120,4 +211,5 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `registration.rs` | ~1390 | `register_primitives`, `register_fn` |
 | `module_init.rs` | ~170 | `init_stdlib`, module initialization |
 | `chan.rs` | varies | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
+| `format.rs` | ~967 | `string/format` with positional/named modes, format specs, brace escaping |
 | (others) | varies | Individual primitive implementations |

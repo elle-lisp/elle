@@ -93,20 +93,37 @@ pub fn prim_to_float(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Convert to string
+/// Convert to string (variadic: 0 args → "", 1 arg → convert, N args → concatenate)
 pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("to-string: expected 1 argument, got {}", args.len()),
-            ),
-        );
+    match args.len() {
+        0 => (SIG_OK, Value::string("")),
+        1 => prim_to_string_single(args[0]),
+        _ => {
+            let mut result = String::new();
+            for arg in args {
+                let (sig, val) = prim_to_string_single(*arg);
+                if sig != SIG_OK {
+                    return (sig, val);
+                }
+                if let Some(s) = val.with_string(|s| s.to_string()) {
+                    result.push_str(&s);
+                } else {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "error",
+                            "to-string: internal conversion failure".to_string(),
+                        ),
+                    );
+                }
+            }
+            (SIG_OK, Value::string(result))
+        }
     }
+}
 
-    let val = args[0];
-
+/// Single-value string conversion (original behavior).
+fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
     // Handle immediate types
     if val.is_string() {
         return (SIG_OK, val);
@@ -147,8 +164,6 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
 
     // Handle heap types (Cons, Array, etc.)
     if let Some(_cons) = val.as_cons() {
-        // Format as list "(1 2 3)"
-        // Lists are EMPTY_LIST-terminated, not NIL-terminated.
         let mut items = Vec::new();
         let mut current = val;
         loop {
@@ -159,7 +174,6 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
                 items.push(c.first);
                 current = c.rest;
             } else {
-                // Improper list - add the tail
                 items.push(current);
                 break;
             }
@@ -167,7 +181,7 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
 
         let mut formatted_items = Vec::new();
         for v in items {
-            let (sig, result) = prim_to_string(&[v]);
+            let (sig, result) = prim_to_string_single(v);
             if sig != SIG_OK {
                 return (sig, result);
             }
@@ -189,11 +203,10 @@ pub fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
     }
 
     if let Some(vec_ref) = val.as_array() {
-        // Format as "[1, 2, 3]"
         let vec = vec_ref.borrow();
         let mut formatted_items = Vec::new();
         for v in vec.iter() {
-            let (sig, result) = prim_to_string(&[*v]);
+            let (sig, result) = prim_to_string_single(*v);
             if sig != SIG_OK {
                 return (sig, result);
             }
@@ -426,11 +439,11 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "string",
         func: prim_to_string,
         effect: Effect::none(),
-        arity: Arity::Exact(1),
-        doc: "Convert value to string representation.",
-        params: &["x"],
+        arity: Arity::AtLeast(0),
+        doc: "Convert values to string. Multiple arguments are concatenated.",
+        params: &["values"],
         category: "conversion",
-        example: "(string 42) #=> \"42\"\n(string (list 1 2)) #=> \"(1 2)\"",
+        example: "(string \"count: \" 42) #=> \"count: 42\"",
         aliases: &[],
     },
 ];

@@ -66,3 +66,27 @@
 # any_to_string
 # (any->string val) should convert any value to string representation
 (assert-string-eq (any->string nil) "nil" "any->string(nil) == \"nil\"")
+
+# ============================================================================
+# string variadic (Issue #495)
+# ============================================================================
+
+# Zero arguments returns empty string
+(assert-string-eq (string) "" "string() == \"\"")
+
+# Single argument backward compatibility
+(assert-string-eq (string 42) "42" "string(42) == \"42\" (backward compat)")
+(assert-string-eq (string "hello") "hello" "string(\"hello\") == \"hello\" (backward compat)")
+(assert-string-eq (string true) "true" "string(true) (backward compat)")
+
+# Multiple arguments concatenate
+(assert-string-eq (string "count: " 42) "count: 42"
+  "string multi: string + int")
+(assert-string-eq (string "hello" " " "world") "hello world"
+  "string multi: three strings")
+(assert-string-eq (string 1 " + " 2 " = " 3) "1 + 2 = 3"
+  "string multi: mixed types")
+(assert-string-eq (string "bool: " true ", nil: " nil) "bool: true, nil: nil"
+  "string multi: bool and nil")
+(assert-string-eq (string "kw: " :hello) "kw: :hello"
+  "string multi: keyword")
