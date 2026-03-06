@@ -214,8 +214,7 @@ marshalling, no serialization boundary:
 (re:find-all pat "a1b2c3")  # => ({:match "1" ...} {:match "2" ...} ...)
 ```
 
-Nine plugins ship with Elle: regex, sqlite, crypto, random, mermaid,
-selkie, sugiyama, fdg, and dagre.
+Five plugins ship with Elle: regex, sqlite, crypto, random, and selkie.
 
 Because `import-file` is an ordinary primitive, the module system is
 user-replaceable. You can wrap it with caching, path resolution, or
