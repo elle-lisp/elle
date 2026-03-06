@@ -6,7 +6,7 @@ use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
 use super::{
     allocator, arithmetic, array, bitwise, buffer, bytes, cell, comparison, concurrency, convert,
     coroutines, debug, display, ffi, fibers, fileio, json, list, logic, math, meta, modules,
-    package, parameters, path, process, read, sort, string, structs, table, time, types,
+    package, parameters, path, ports, process, read, sort, string, structs, table, time, types,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
@@ -37,6 +37,7 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     package::PRIMITIVES,
     parameters::PRIMITIVES,
     path::PRIMITIVES,
+    ports::PRIMITIVES,
     process::PRIMITIVES,
     read::PRIMITIVES,
     string::PRIMITIVES,

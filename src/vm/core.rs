@@ -171,9 +171,29 @@ impl VM {
     /// Set the current source location for error reporting
     /// Format a runtime error value with source location.
     pub(crate) fn format_error_with_location(&self, err_value: Value) -> String {
-        let base_msg = crate::value::format_error(err_value);
-        let mut result = base_msg;
+        let mut result = format!("{}", err_value);
 
+        // Add stack trace (shallowest frame first, drilling down to error origin)
+        let trace = self.capture_stack_trace();
+        if !trace.is_empty() {
+            const MAX_TRACE_DEPTH: usize = 20;
+            for frame in trace.iter().rev().take(MAX_TRACE_DEPTH) {
+                if let Some(name) = &frame.function_name {
+                    result.push_str(&format!("\n  in {}", name));
+                    if let Some(loc) = &frame.location {
+                        result.push_str(&format!(" at {}", loc));
+                    }
+                }
+            }
+            if trace.len() > MAX_TRACE_DEPTH {
+                result.push_str(&format!(
+                    "\n  ... {} more frames",
+                    trace.len() - MAX_TRACE_DEPTH
+                ));
+            }
+        }
+
+        // Error location and source context come last (the exact error origin)
         if let Some(loc) = &self.error_loc {
             result.push_str(&format!("\n  at {}", loc));
 
@@ -195,26 +215,6 @@ impl VM {
                         caret
                     ));
                 }
-            }
-        }
-
-        // Add stack trace
-        let trace = self.capture_stack_trace();
-        if !trace.is_empty() {
-            const MAX_TRACE_DEPTH: usize = 20;
-            for frame in trace.iter().take(MAX_TRACE_DEPTH) {
-                if let Some(name) = &frame.function_name {
-                    result.push_str(&format!("\n  in {}", name));
-                    if let Some(loc) = &frame.location {
-                        result.push_str(&format!(" at {}", loc));
-                    }
-                }
-            }
-            if trace.len() > MAX_TRACE_DEPTH {
-                result.push_str(&format!(
-                    "\n  ... {} more frames",
-                    trace.len() - MAX_TRACE_DEPTH
-                ));
             }
         }
 
