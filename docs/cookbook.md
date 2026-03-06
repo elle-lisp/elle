@@ -4,6 +4,15 @@ Step-by-step recipes for the most common additions to the Elle codebase.
 Each recipe lists the exact files to modify, in order, with the types and
 functions involved.
 
+## Contents
+
+- [Adding a New Primitive Function](#1-adding-a-new-primitive-function)
+- [Adding a New Heap Type](#2-adding-a-new-heap-type)
+- [Adding a New Bytecode Instruction](#3-adding-a-new-bytecode-instruction)
+- [Adding a New Special Form](#4-adding-a-new-special-form)
+- [Adding a New Lint Rule](#5-adding-a-new-lint-rule)
+- [Adding a New Prelude Macro](#6-adding-a-new-prelude-macro)
+
 ---
 
 ## 1. Adding a New Primitive Function

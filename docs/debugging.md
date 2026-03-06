@@ -1,5 +1,12 @@
 # Elle Debugging Toolkit
 
+## Contents
+
+- [Overview](#overview)
+- [1. Introspection Primitives](#1-introspection-primitives)
+- [2. Time API](#2-time-api)
+- [3. Effect System: Raises](#3-effect-system-raises)
+
 ## Overview
 
 Elle provides a comprehensive debugging toolkit that lives *inside* the language.

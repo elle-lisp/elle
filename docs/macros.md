@@ -3,6 +3,18 @@
 This document describes Elle's macro system — what exists today and
 the remaining work for full hygiene.
 
+## Contents
+
+- [Current State](#current-state)
+- [Architecture](#architecture)
+- [The Hygiene Problem](#the-hygiene-problem)
+- [Implemented: Sets-of-Scopes Hygiene (PR 3)](#implemented-sets-of-scopes-hygiene-pr-3)
+- [What This Unblocks](#what-this-unblocks)
+- [Files](#files)
+- [Resolved Questions](#resolved-questions)
+- [Hygiene Escape Hatch: `datum->syntax`](#hygiene-escape-hatch-datum-syntax)
+- [Open Questions](#open-questions)
+
 
 ## Current State
 

@@ -3,6 +3,15 @@
 This document defines the authoritative semantics for Elle. When tests, code,
 or documentation contradict this document, **this document is correct**.
 
+## Contents
+
+- [Truthiness](#truthiness)
+- [Lists](#lists)
+- [Conditional Evaluation](#conditional-evaluation)
+- [Equality](#equality)
+- [Destructuring](#destructuring)
+- [Maintaining This Document](#maintaining-this-document)
+
 ## Truthiness
 
 Elle has exactly two falsy values:

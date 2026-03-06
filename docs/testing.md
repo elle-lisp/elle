@@ -3,6 +3,23 @@
 This document describes where every test in Elle belongs and how to run them.
 Follow the decision tree when writing new tests.
 
+## Contents
+
+- [Test execution order](#test-execution-order)
+- [Decision tree](#decision-tree)
+- [Which Rust test category?](#which-rust-test-category)
+- [Elle test scripts](#elle-test-scripts)
+- [Property tests](#property-tests)
+- [CI structure](#ci-structure)
+- [Local development workflow](#local-development-workflow)
+- [What stays in Rust](#what-stays-in-rust)
+- [Test helpers](#test-helpers)
+- [Running tests](#running-tests)
+- [Adding a new test](#adding-a-new-test)
+- [Naming conventions](#naming-conventions)
+- [Fixtures](#fixtures)
+- [Failure triage](#failure-triage)
+
 ## Test execution order
 
 Both locally and in CI, tests run in this order. Fail fast: if a cheaper tier

@@ -3,6 +3,23 @@
 Elle's FFI enables calling C functions from Elle code. The design is inspired
 by Janet's FFI: keyword-based type descriptors, reified signatures, and
 explicit marshalling. The backend uses the `libffi` crate (middle-level API)
+
+## Contents
+
+- [Quick Start](#quick-start)
+- [Type Descriptors](#type-descriptors)
+- [Compound Types](#compound-types)
+- [Signatures](#signatures)
+- [Calling C Functions](#calling-c-functions)
+- [Memory Management](#memory-management)
+- [Callbacks](#callbacks)
+- [The `ffi/defbind` Macro](#the-ffidefbind-macro)
+- [Value::pointer()](#valuepointer)
+- [CIF Caching](#cif-caching)
+- [Error Handling](#error-handling)
+- [Effect System](#effect-system)
+- [Struct Marshalling](#struct-marshalling)
+- [Invariants](#invariants)
 for calling convention correctness across platforms.
 
 This document describes the implemented system.

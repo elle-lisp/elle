@@ -3,6 +3,22 @@
 This document captures the design of Elle's unified effect and signal system.
 It records not just decisions but the reasoning, alternatives, and open
 questions that led to them. Future readers should be able to understand the
+
+## Contents
+
+- [Motivation](#motivation)
+- [Prior Art](#prior-art)
+- [Terminology](#terminology)
+- [The Core Insight](#the-core-insight)
+- [Capabilities Down, Signals Up](#capabilities-down-signals-up)
+- [The Signal Protocol](#the-signal-protocol)
+- [The Effect System](#the-effect-system)
+- [JIT Integration](#jit-integration)
+- [Surface Syntax](#surface-syntax)
+- [Migration Status](#migration-status)
+- [Non-Unwinding Recovery](#non-unwinding-recovery)
+- [Open Questions](#open-questions)
+- [Resolved Questions](#resolved-questions)
 trade-offs and pick up where we left off.
 
 

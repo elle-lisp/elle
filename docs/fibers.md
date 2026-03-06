@@ -3,6 +3,21 @@
 Fibers are Elle's unified control-flow mechanism. A fiber is an independent
 execution context with its own stack, call frames, and signal state. All
 non-local control flow — errors, yields, coroutines, cancellation — is
+
+## Contents
+
+- [The Fiber](#the-fiber)
+- [Signals](#signals)
+- [Suspension and Resumption](#suspension-and-resumption)
+- [Rc Threading](#rc-threading)
+- [The VM](#the-vm)
+- [Parent/Child Chain](#parentchild-chain)
+- [Fiber Primitives](#fiber-primitives)
+- [Coroutines](#coroutines)
+- [Error Handling](#error-handling)
+- [Terminal vs. Resumable Signals](#terminal-vs-resumable-signals)
+- [Effect System Integration](#effect-system-integration)
+- [What's Not Implemented Yet](#whats-not-implemented-yet)
 implemented as signals propagating through a fiber chain.
 
 This document describes the implemented system.

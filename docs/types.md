@@ -3,6 +3,16 @@
 This document defines the authoritative type system for Elle. When code or
 other documentation contradicts this document, **this document is correct**.
 
+## Contents
+
+- [Design principle: the mutable/immutable split](#design-principle-the-mutableimmutable-split)
+- [All types](#all-types)
+- [Type predicates](#type-predicates)
+- [Display format](#display-format)
+- [Truthiness](#truthiness)
+- [Equality](#equality)
+- [Mutability summary](#mutability-summary)
+
 ## Design principle: the mutable/immutable split
 
 Elle follows Janet's approach to collection types: every collection has an
