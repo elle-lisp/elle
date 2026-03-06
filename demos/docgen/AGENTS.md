@@ -45,7 +45,7 @@ The generator is written in Elle and exercises the runtime:
 
 This distinction is essential for recursive list functions:
 
-```lisp
+```janet
 (def sum-list (fn (lst)
   (if (empty? lst)  ;; Check for EMPTY_LIST, not nil
     0

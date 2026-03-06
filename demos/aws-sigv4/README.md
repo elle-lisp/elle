@@ -30,7 +30,7 @@ The signing process has four main steps:
 
 ### Component 1: DateTime Functions
 
-```lisp
+```janet
 (defn pad-int (n width)
   "Pad integer to width with leading zeros"
   (letrec ((pad (fn (s)
@@ -73,7 +73,7 @@ The signing process has four main steps:
 
 The canonical request normalizes the HTTP request into a standard format:
 
-```lisp
+```janet
 (defn canonical-headers-string (headers)
   "Format headers as lowercase name:value pairs"
   (string-join
@@ -104,7 +104,7 @@ The canonical request normalizes the HTTP request into a standard format:
 
 The string to sign is a hash of the canonical request:
 
-```lisp
+```janet
 (defn string-to-sign (datetime scope canonical-req)
   (string-join (list "AWS4-HMAC-SHA256" "\n"
                      datetime "\n"
@@ -117,7 +117,7 @@ The string to sign is a hash of the canonical request:
 
 The signing key is derived through a chain of HMAC-SHA256 operations:
 
-```lisp
+```janet
 (defn derive-signing-key (secret-key date region service)
   "Derive the signing key: kSecret -> kDate -> kRegion -> kService -> kSigning"
   (let* ((k-secret (string-join (list "AWS4" secret-key) ""))
@@ -136,7 +136,7 @@ This ensures that:
 
 ### Component 5: Final Signature
 
-```lisp
+```janet
 (defn compute-signature (signing-key string-to-sign)
   (bytes->hex (crypto/hmac-sha256 signing-key string-to-sign)))
 ```
@@ -230,7 +230,7 @@ cargo run --release -- demos/aws-sigv4/sigv4.lisp
 ```
 
 This demo uses Elle's native crypto plugin (`libelle_crypto.so`), a dynamically-loaded Rust module that provides cryptographic primitives. The plugin is loaded via:
-```lisp
+```janet
 (import-file "target/debug/libelle_crypto.so")
 ```
 

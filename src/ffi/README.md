@@ -31,7 +31,7 @@ FFI supports marshalling between Elle and C for:
 
 ## Example
 
-```lisp
+```janet
 (import-file "libm.so")
 (ffi/call "sin" 1.57)  ; Call C's sin() function
 ```

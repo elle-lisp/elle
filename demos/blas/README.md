@@ -19,7 +19,7 @@ The demo exercises four key linear algebra operations:
 
 ### Loading Libraries
 
-```lisp
+```janet
 (def cblas (ffi/native "libcblas.so.3"))
 (def lapacke (ffi/native "liblapacke.so.3"))
 ```
@@ -29,7 +29,7 @@ The demo exercises four key linear algebra operations:
 ### Helper Functions
 
 **`alloc-and-write-doubles`** — Allocate C memory and write an Elle array to it
-```lisp
+```janet
 (defn alloc-and-write-doubles (lst)
   (let* ((n (length lst))
          (arr-type (ffi/array :double n))
@@ -47,7 +47,7 @@ This:
 5. Returns the C pointer
 
 **`read-doubles`** — Read N doubles from C memory into an Elle array
-```lisp
+```janet
 (defn read-doubles (ptr n)
   (let* ((arr-type (ffi/array :double n))
          (result (ffi/read ptr arr-type)))
@@ -55,14 +55,14 @@ This:
 ```
 
 **`free-ptr`** — Free C memory
-```lisp
+```janet
 (defn free-ptr (ptr)
   (ffi/free ptr))
 ```
 
 ### CBLAS Constants
 
-```lisp
+```janet
 (def CblasRowMajor 101)
 (def CblasNoTrans 111)
 ```
@@ -71,7 +71,7 @@ These are CBLAS enum values that control matrix layout and transposition.
 
 ### Operation 1: DDOT (Dot Product)
 
-```lisp
+```janet
 (let* ((x (list 1.0 2.0 3.0))
        (y (list 4.0 5.0 6.0))
        (n 3)
@@ -91,7 +91,7 @@ The call computes: `x·y = 1*4 + 2*5 + 3*6 = 32`
 
 ### Operation 2: DGEMV (Matrix-Vector Multiply)
 
-```lisp
+```janet
 (let* ((m 2) (n 3) (alpha 1.0) (beta 0.0)
        (a (list 1.0 2.0 3.0 4.0 5.0 6.0))  # 2×3 matrix
        (x (list 1.0 2.0 3.0))               # 3-element vector
@@ -111,7 +111,7 @@ Computes: `y = A*x`
 
 ### Operation 3: DGEMM (Matrix-Matrix Multiply)
 
-```lisp
+```janet
 (let* ((m 2) (n 2) (k 3) (alpha 1.0) (beta 0.0)
        (a (list 1.0 2.0 3.0 4.0 5.0 6.0))  # 2×3
        (b (list 1.0 2.0 3.0 4.0 5.0 6.0))  # 3×2
@@ -131,7 +131,7 @@ Computes: `C = A*B`
 
 ### Operation 4: DGESV (Linear System Solve)
 
-```lisp
+```janet
 (let* ((n 2) (nrhs 1)
        (a (list 2.0 1.0 1.0 2.0))  # 2×2 matrix
        (b (list 3.0 3.0))          # 2-element RHS

@@ -19,7 +19,7 @@ It demonstrates eight tiers of escape analysis, each recognizing a wider class o
 
 Some primitives are known to return immediates (non-heap values). If a `let` binding allocates temporary data and returns only the result of a whitelisted primitive, the binding qualifies for scope allocation:
 
-```lisp
+```janet
 (let ((data @[1 2 3 4 5]))
   (length data))  # length returns an immediate (integer)
 ```
@@ -30,7 +30,7 @@ The `data` array can be freed when the `let` exits, not when the fiber exits.
 
 When a `let` body returns a variable from *outside* the let, the result is safe (allocated before the scope's RegionEnter):
 
-```lisp
+```janet
 (let ((outer-val 0))
   (while (< i 10000)
     (let ((temp @[1 2 3]))
@@ -43,7 +43,7 @@ When a `let` body returns a variable from *outside* the let, the result is safe 
 
 Both the outer and inner `let` qualify. The inner let's bindings are part of the outer scope's region:
 
-```lisp
+```janet
 (let ((xs @[10 20 30]))
   (let ((n (length xs)))
     (+ n 1)))  # Returns arithmetic result (immediate)
@@ -53,7 +53,7 @@ Both the outer and inner `let` qualify. The inner let's bindings are part of the
 
 All match arms return keywords or integers → result is safe:
 
-```lisp
+```janet
 (let ((tag (mod i 3)))
   (match tag
     (0 :zero)
@@ -65,7 +65,7 @@ All match arms return keywords or integers → result is safe:
 
 An outward `set` with a provably immediate value is harmless:
 
-```lisp
+```janet
 (var counter 0)
 (while (< counter 10000)
   (let ((tmp @[1 2 3]))
@@ -80,7 +80,7 @@ The `while` block can scope-allocate because the only outward effect is setting 
 The demo uses three primitives:
 
 **`arena/count`** — Returns the number of live heap objects
-```lisp
+```janet
 (var before (arena/count))
 (var i 0)
 (while (< i 10000)
@@ -94,7 +94,7 @@ The demo uses three primitives:
 - `:enters` — Number of scope regions created
 - `:dtors-run` — Number of destructors run (objects freed early)
 
-```lisp
+```janet
 (let ((stats (arena/scope-stats)))
   (display "Enters: ")
   (display (get stats :enters))
@@ -106,7 +106,7 @@ The demo uses three primitives:
 
 Each tier runs a tight loop that allocates temporary objects:
 
-```lisp
+```janet
 (var tier1-scoped
   (run (fn []
     (var before (arena/count))
@@ -120,7 +120,7 @@ Each tier runs a tight loop that allocates temporary objects:
 
 The `run` helper executes the workload in a non-yielding child fiber:
 
-```lisp
+```janet
 (defn run [thunk]
   "Execute thunk in a non-yielding child fiber."
   (fiber/resume (fiber/new thunk 1)))

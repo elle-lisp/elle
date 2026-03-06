@@ -48,7 +48,7 @@ cargo build --release
 ## Loading plugins
 
 From Elle code:
-```lisp
+```janet
 (import "target/release/libelle_crypto.so")
 (sha256 "hello")
 ```

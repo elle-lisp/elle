@@ -92,7 +92,7 @@ The `if` special form evaluates the test expression and:
 - If the result is **falsy** (`false` or `nil`), evaluates the else branch
 - If the result is **truthy** (anything else), evaluates the then branch
 
-```lisp
+```janet
 (if ()  "yes" "no")  # ⟹ "yes" (empty list is truthy)
 (if nil "yes" "no")  # ⟹ "no"  (nil is falsy)
 (if 0   "yes" "no")  # ⟹ "yes" (0 is truthy)
@@ -103,7 +103,7 @@ The `if` special form evaluates the test expression and:
 
 `nil` and `()` are **not equal**:
 
-```lisp
+```janet
 (= nil ())   # ⟹ false
 (identical? nil ()) # ⟹ false
 ```

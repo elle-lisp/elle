@@ -24,7 +24,7 @@ JSON serialization and deserialization primitives for Elle. Converts between Ell
 
 ## Examples
 
-```lisp
+```janet
 (json/stringify {:name "Alice" :age 30})
 ;; => "{\"name\":\"Alice\",\"age\":30}"
 

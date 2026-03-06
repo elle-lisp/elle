@@ -51,7 +51,7 @@ Syntax (expanded)
 
 Each macro expansion creates a fresh `ScopeId`. Identifiers introduced by the macro carry this scope. Identifiers from the call site don't. The Analyzer uses scope-set subset matching to prevent accidental capture:
 
-```lisp
+```janet
 (defmacro swap (a b)
   `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
 
@@ -124,7 +124,7 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
 
 `(datum->syntax context datum)` creates a syntax object with the context's scope set and `scope_exempt: true`. This prevents `add_scope_recursive` from adding the intro scope, so the datum resolves at the call site. Used for anaphoric macros:
 
-```lisp
+```janet
 (defmacro aif (test then else)
   `(let ((,(datum->syntax test 'it) ,test))
      (if ,(datum->syntax test 'it) ,then ,else)))

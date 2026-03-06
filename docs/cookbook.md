@@ -591,7 +591,7 @@ That's it. No Rust changes needed.
 
 **Step 1:** Add the macro to `prelude.lisp` (at the project root):
 
-```lisp
+```janet
 ## my-form - description of what it does
 ## (my-form arg body...) => expansion
 (defmacro my-form (arg & body)
@@ -616,7 +616,7 @@ That's it. No Rust changes needed.
 
 ### Macro syntax reference
 
-```lisp
+```janet
 (defmacro name (param1 param2 & rest-params)
   template)
 ```

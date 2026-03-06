@@ -28,7 +28,7 @@ The algorithm places queens row by row, left to right. For each row, it tries ea
 The solver uses three mutually recursive functions:
 
 **`check-safe-helper`** — Validates a column placement
-```lisp
+```janet
 (defn check-safe-helper (col remaining row-offset)
   (if (empty? remaining)
     true
@@ -45,13 +45,13 @@ This walks through previously placed queens (stored as a list of column indices)
 - Otherwise, check the next queen
 
 **`safe?`** — Public interface to check-safe-helper
-```lisp
+```janet
 (defn safe? (col queens)
   (check-safe-helper col queens 1))
 ```
 
 **`try-cols-helper`** — Tries each column in the current row
-```lisp
+```janet
 (defn try-cols-helper (n col queens row)
   (if (= col n)
     (list)
@@ -65,7 +65,7 @@ This walks through previously placed queens (stored as a list of column indices)
 If the current column is safe, place a queen there and recurse to the next row. Then try the next column. If not safe, skip to the next column.
 
 **`solve-helper`** — Main recursive solver
-```lisp
+```janet
 (defn solve-helper (n row queens)
   (if (= row n)
     (list (reverse queens))
@@ -121,7 +121,7 @@ cargo run --release -- demos/nqueens/nqueens.lisp
 ```
 
 To solve for a different N, edit the last line:
-```lisp
+```janet
 (benchmark 8)   # Solve for N=8 (92 solutions)
 (benchmark 10)  # Solve for N=10 (724 solutions)
 (benchmark 12)  # Solve for N=12 (14,200 solutions)

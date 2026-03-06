@@ -27,7 +27,7 @@ This document describes the implemented system.
 
 ## Quick Start
 
-```lisp
+```janet
 ;# Load a library
 (def libc (ffi/native nil))              # current process (dlopen(NULL))
 (def libm (ffi/native "libm.so.6"))      # or a specific .so
@@ -83,7 +83,7 @@ C types are described by keywords at the Elle level. The `TypeDesc` enum in
 
 ### Type introspection
 
-```lisp
+```janet
 (ffi/size :i32)     # => 4
 (ffi/size :double)  # => 8
 (ffi/size :void)    # => nil
@@ -100,7 +100,7 @@ C types are described by keywords at the Elle level. The `TypeDesc` enum in
 Fields are positional (unnamed) and follow C struct layout rules: alignment
 padding between fields, tail padding to the struct's alignment.
 
-```lisp
+```janet
 ;# struct { int32_t x# double y# }
 (def point-type (ffi/struct [:i32 :double]))
 
@@ -117,7 +117,7 @@ array elements are written into a properly aligned buffer at the computed
 field offsets. When reading from C, the buffer is read back into an Elle
 array.
 
-```lisp
+```janet
 ;# Write a struct to memory
 (def buf (ffi/malloc (ffi/size point-type)))
 (ffi/write buf point-type [42 1.5])
@@ -136,7 +136,7 @@ Constraints:
 
 `ffi/array` creates a fixed-size array type descriptor.
 
-```lisp
+```janet
 ;# int32_t[10]
 (def arr-type (ffi/array :i32 10))
 
@@ -154,7 +154,7 @@ A signature describes a C function's calling convention, return type, and
 argument types. Created by `ffi/signature` and stored as a first-class
 Elle value (`HeapObject::FFISignature`).
 
-```lisp
+```janet
 ;# Non-variadic: (return-type [arg-types...])
 (def sig (ffi/signature :int [:int :int]))
 
@@ -175,13 +175,13 @@ Signatures accept both keywords (`:i32`) and compound type values (from
 
 `ffi/call` takes a function pointer, a signature, and the arguments:
 
-```lisp
+```janet
 (ffi/call fn-ptr sig arg1 arg2 ...)
 ```
 
 The number of arguments must match the signature's argument count exactly.
 
-```lisp
+```janet
 (def libc (ffi/native nil))
 (def abs-ptr (ffi/lookup libc "abs"))
 (def abs-sig (ffi/signature :int [:int]))
@@ -218,7 +218,7 @@ C return values are converted back to Elle values:
 
 Manual memory management for C interop:
 
-```lisp
+```janet
 (def ptr (ffi/malloc 100))       # allocate 100 bytes
 (ffi/write ptr :i32 42)          # write an i32
 (ffi/read ptr :i32)              # => 42
@@ -238,7 +238,7 @@ optional second argument, it reads at most that many bytes (stopping at the
 first null byte within that range). Returns nil for null pointers. Signals
 an error for non-UTF-8 data.
 
-```lisp
+```janet
 (def ptr (ffi/malloc 16))
 ;# ... write "hello\0" to ptr ...
 (ffi/string ptr)      # => "hello"
@@ -253,7 +253,7 @@ an error for non-UTF-8 data.
 functions to be passed to C APIs that expect function pointer arguments
 (e.g., `qsort` comparators, iteration callbacks).
 
-```lisp
+```janet
 (def cmp-sig (ffi/signature :int [:ptr :ptr]))
 (def cmp-fn (fn (a b)
   (let ((va (ffi/read a :int))
@@ -311,7 +311,7 @@ argument count. Exact arity must match# `AtLeast(n)` requires
 binding. It looks up the symbol, creates a signature, and defines a
 wrapper function — all at definition time.
 
-```lisp
+```janet
 ;# Usage: (ffi/defbind name lib "c-name" return-type [arg-types...])
 
 (def libc (ffi/native nil))
@@ -328,7 +328,7 @@ wrapper function — all at definition time.
 
 `(ffi/defbind abs libc "abs" :int [:int])` expands to:
 
-```lisp
+```janet
 (def abs
   (let ((ptr__ (ffi/lookup libc "abs"))
         (sig__ (ffi/signature :int [:int])))

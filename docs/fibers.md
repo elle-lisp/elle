@@ -108,7 +108,7 @@ The mask on a fiber determines which of its signals the parent catches.
 Set at creation time, immutable after. The **caller** decides what to
 handle, not the callee.
 
-```lisp
+```janet
 ;# Create a fiber that catches errors from its closure
 (fiber/new my-fn 1)  # mask = SIG_ERROR
 
@@ -266,7 +266,7 @@ switch.
 A coroutine is a usage pattern, not a type. It's a fiber whose closure
 yields:
 
-```lisp
+```janet
 (def gen (fiber/new (fn () (yield 1) (yield 2) (yield 3)) 2))
 (fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 1
 (fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 2

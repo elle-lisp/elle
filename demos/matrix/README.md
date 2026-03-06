@@ -16,7 +16,7 @@ The simulation starts with a single hot cell in the center and shows how heat di
 ### Matrix Representation
 
 Matrices are represented as tuples of tuples (immutable, row-major):
-```lisp
+```janet
 (defn make-matrix [rows cols initial-value]
   "Create an m×n matrix (tuple of tuples, row-major)."
   (tuple ;(map (fn [_] (tuple ;(map (fn [_] initial-value) (range cols))))
@@ -33,13 +33,13 @@ A 3×3 matrix of zeros:
 ### Matrix Operations
 
 **`matrix-ref`** — Get element at (i, j)
-```lisp
+```janet
 (defn matrix-ref [m i j]
   (get (get m i) j))
 ```
 
 **`matrix-set`** — Return a new matrix with element at (i, j) changed
-```lisp
+```janet
 (defn matrix-set [m i j val]
   (let* ([row (get m i)]
          [new-row (tuple ;(map (fn [k v] (if (= k j) val v)) (range (length row)) row))]
@@ -50,7 +50,7 @@ A 3×3 matrix of zeros:
 This uses `map` with index tracking to rebuild the matrix with one element changed.
 
 **`matrix-map`** — Apply a function to every element
-```lisp
+```janet
 (defn matrix-map [f m]
   (tuple ;(map (fn [row]
                  (tuple ;(map f row)))
@@ -58,7 +58,7 @@ This uses `map` with index tracking to rebuild the matrix with one element chang
 ```
 
 **`matrix-add`** — Element-wise addition
-```lisp
+```janet
 (defn matrix-add [m1 m2]
   (tuple ;(map (fn [r1 r2]
                  (tuple ;(map + r1 r2)))
@@ -78,7 +78,7 @@ Where:
 - `alpha` is the diffusion coefficient (controls how fast heat spreads)
 - Boundary cells are fixed at 0 (cold walls)
 
-```lisp
+```janet
 (defn diffuse-step [m alpha]
   (let* ([rows (matrix-rows m)]
          [cols (matrix-cols m)]
@@ -99,7 +99,7 @@ Where:
 ### Visualization
 
 Temperature is mapped to a 10-character gradient:
-```lisp
+```janet
 (defn temperature-to-char [temp]
   (let* ([scaled (math/floor (* temp 9.0))]
          [clamped (if (> scaled 9) 9 scaled)]
@@ -203,7 +203,7 @@ cargo run --release -- demos/matrix.lisp
 ```
 
 To modify the simulation, edit the parameters at the bottom:
-```lisp
+```janet
 (let* ([rows 16]      # Grid height
        [cols 16]      # Grid width
        [alpha 0.2]    # Diffusion coefficient (0 < alpha < 0.25)

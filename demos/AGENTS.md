@@ -62,7 +62,7 @@ Each demo should have:
 
 ### Example structure
 
-```lisp
+```janet
 ;; N-Queens: Find all valid placements of N queens on an NxN chessboard
 ;; Tests: recursion, list operations, backtracking
 

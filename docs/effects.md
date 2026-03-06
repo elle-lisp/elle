@@ -476,7 +476,7 @@ simple Copy pair.
 
 The programmer can declare effects on functions:
 
-```lisp
+```janet
 (def (query db sql)
   (declare (effects :io :errors))
   ...)
@@ -484,7 +484,7 @@ The programmer can declare effects on functions:
 
 And effect bounds on parameters:
 
-```lisp
+```janet
 (def (fast-map f xs)
   (declare (param-effects f (not :yields :io)))
   ...)
@@ -550,7 +550,7 @@ The compiler's effect information guides JIT decisions:
 
 ### Fiber Primitives
 
-```lisp
+```janet
 ;# === Creation and control ===
 
 ;# Create a fiber from a closure with a signal mask
@@ -598,7 +598,7 @@ The compiler's effect information guides JIT decisions:
 
 ### Sugar and Aliases
 
-```lisp
+```janet
 ;# try/catch/finally
 (try body
   (catch e handler)
@@ -618,7 +618,7 @@ The compiler's effect information guides JIT decisions:
 
 ### Effect Declarations
 
-```lisp
+```janet
 (def (pure-add x y)
   (declare (effects))           ;# no effects — pure
   (+ x y))
@@ -708,7 +708,7 @@ don't resume. No special syntax or VM support is needed.
 
 ### Example
 
-```lisp
+```janet
 ;# The callee: signals with available recovery options
 (def (safe-divide a b)
   (if (= b 0)

@@ -17,7 +17,7 @@ The output is an SVG file (`docs/logo.svg`) showing a stylized "Y" shape (the El
 
 The demo defines basic 2D vector operations:
 
-```lisp
+```janet
 (defn v+ [a b]
   "Add two 2D vectors."
   [(+ (get a 0) (get b 0))
@@ -47,7 +47,7 @@ A cubic Bézier curve is defined by four control points (p0, p1, p2, p3) and a p
 B(t) = (1-t)³·p0 + 3(1-t)²t·p1 + 3(1-t)t²·p2 + t³·p3
 ```
 
-```lisp
+```janet
 (defn bezier-eval [seg t]
   "Evaluate cubic bezier at parameter t ∈ [0,1]."
   (let* ([u  (- 1.0 t)]
@@ -71,7 +71,7 @@ The tangent vector (derivative) is:
 B'(t) = 3(1-t)²(p1-p0) + 6(1-t)t(p2-p1) + 3t²(p3-p2)
 ```
 
-```lisp
+```janet
 (defn bezier-tangent [seg t]
   "Tangent vector of cubic bezier at parameter t."
   (let* ([u  (- 1.0 t)]
@@ -91,7 +91,7 @@ B'(t) = 3(1-t)²(p1-p0) + 6(1-t)t(p2-p1) + 3t²(p3-p2)
 
 The normal vector (perpendicular to the tangent) is used to offset the curve for stroke width:
 
-```lisp
+```janet
 (defn normal-at [seg t]
   "Unit normal (perpendicular to tangent, pointing left) at parameter t."
   (let* ([tang (bezier-tangent seg t)]
@@ -114,7 +114,7 @@ The normal vector (perpendicular to the tangent) is used to offset the curve for
 
 The demo renders multiple parallel "fibers" (strokes) offset from the centerline:
 
-```lisp
+```janet
 (defn fiber-path-data [segments dist nsteps]
   "Generate SVG path data string for a single fiber."
   (var path-str "")
@@ -147,7 +147,7 @@ Each fiber is sampled at `nsteps` points per segment, with the offset distance t
 
 The logo is a stylized "Y" shape with three strokes meeting at a junction:
 
-```lisp
+```janet
 (def junction [120.0 435.0])
 
 (def diagonal @[
@@ -171,7 +171,7 @@ The logo is a stylized "Y" shape with three strokes meeting at a junction:
 
 ### Fiber Configuration
 
-```lisp
+```janet
 (def num-fibers 7)
 (def fiber-spread 66.0)    # total width of the fiber bundle
 (def fiber-width 8.0)      # stroke width per fiber
@@ -191,7 +191,7 @@ The logo is a stylized "Y" shape with three strokes meeting at a junction:
 
 The demo generates SVG `<path>` elements for each fiber and combines them into a complete SVG document:
 
-```lisp
+```janet
 (defn svg-path [path-data color opacity width]
   "Generate an SVG <path> element string."
   (-> "  <path d=\""

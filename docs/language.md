@@ -39,7 +39,7 @@ Elle's type system provides a rich set of data types for different programming n
 
 ### Nil and Booleans
 
-```lisp
+```janet
 nil          # The null/empty value
 true         # True
 false        # False
@@ -47,7 +47,7 @@ false        # False
 
 Use `nil?` to test for null values and `boolean?` to test for boolean values.
 
-```lisp
+```janet
 (nil? nil)       ⟹ true
 (nil? false)     ⟹ false
 (boolean? true)  ⟹ true
@@ -58,7 +58,7 @@ Use `nil?` to test for null values and `boolean?` to test for boolean values.
 
 Elle supports both integers and floating-point numbers:
 
-```lisp
+```janet
 42             # Integer
 3.14           # Float
 -17            # Negative numbers
@@ -67,7 +67,7 @@ Elle supports both integers and floating-point numbers:
 
 Use `number?` to test for numeric values. Use `type-of` to get the type name:
 
-```lisp
+```janet
 (number? 42)     ⟹ true
 (number? "hello")⟹ false
 (type-of 42)     ⟹ :integer
@@ -78,7 +78,7 @@ Use `number?` to test for numeric values. Use `type-of` to get the type name:
 
 Strings are immutable sequences of characters:
 
-```lisp
+```janet
 "hello"                    # String literal
 "line 1\nline 2"          # Escape sequences: \n, \t, \", \\
 (length "hello")          ⟹ 5
@@ -88,7 +88,7 @@ Strings are immutable sequences of characters:
 
 Common string operations:
 
-```lisp
+```janet
 (string-upcase "hello")           ⟹ "HELLO"
 (string-downcase "HELLO")         ⟹ "hello"
 (string-trim "  hello  ")         ⟹ "hello"
@@ -101,7 +101,7 @@ Common string operations:
 
 Symbols are identifiers used in code:
 
-```lisp
+```janet
 'symbol      # Symbol (quote prevents evaluation)
 :keyword     # Keyword (self-evaluating)
 (symbol? 'hello)  ⟹ true
@@ -112,7 +112,7 @@ Symbols are identifiers used in code:
 
 Linked lists are the fundamental collection type in Lisp:
 
-```lisp
+```janet
 (list 1 2 3)          ⟹ (1 2 3)
 (cons 1 (list 2 3))   ⟹ (1 2 3)
 (first (list 1 2 3))  ⟹ 1
@@ -127,7 +127,7 @@ Linked lists are the fundamental collection type in Lisp:
 
 Arrays are ordered collections optimized for random access:
 
-```lisp
+```janet
 [1 2 3]             # Array literal
 (array 1 2 3)       # Create array
 (length [1 2 3]) ⟹ 3
@@ -139,7 +139,7 @@ Arrays are ordered collections optimized for random access:
 
 Tables are mutable hash maps:
 
-```lisp
+```janet
 (table)                    # Empty table
 (table "x" 10 "y" 20)     # Table with entries
 (get tbl "x")             # Get value by key
@@ -155,7 +155,7 @@ Tables are mutable hash maps:
 
 Structs are immutable hash maps:
 
-```lisp
+```janet
 (struct)                   # Empty struct
 (struct "x" 10 "y" 20)    # Struct with entries
 (struct-get s "x")        # Get value by key (returns default-val if missing)
@@ -175,7 +175,7 @@ Structs are immutable hash maps:
 
 Elle provides predicate functions for type testing (all end with `?`):
 
-```lisp
+```janet
 (nil? x)          # Is x nil?
 (boolean? x)      # Is x a boolean?
 (number? x)       # Is x a number?
@@ -193,7 +193,7 @@ Elle provides predicate functions for type testing (all end with `?`):
 
 `var` creates a global mutable binding:
 
-```lisp
+```janet
 (var x 42)
 (var message "Hello, Elle!")
 (var my-list (list 1 2 3))
@@ -204,7 +204,7 @@ message ⟹ "Hello, Elle!"
 
 Once defined, you can modify a variable with `set`:
 
-```lisp
+```janet
 (set x 100)
 x ⟹ 100
 ```
@@ -213,7 +213,7 @@ x ⟹ 100
 
 `def` creates a global immutable binding:
 
-```lisp
+```janet
 (def x 42)
 (set x 100) ⟹ Error: immutable binding
 ```
@@ -222,7 +222,7 @@ x ⟹ 100
 
 `let` creates local variables scoped to an expression:
 
-```lisp
+```janet
 (let ((x 10)
       (y 20))
   (+ x y))
@@ -231,7 +231,7 @@ x ⟹ 100
 
 Variables bound by `let` shadow outer bindings within the expression:
 
-```lisp
+```janet
 (var x 5)
 (let ((x 10))
   x)    ⟹ 10
@@ -242,7 +242,7 @@ x      ⟹ 5
 
 `let*` allows later bindings to reference earlier ones:
 
-```lisp
+```janet
 (let* ((x 5)
        (y (* x 2)))
   (+ x y))
@@ -251,7 +251,7 @@ x      ⟹ 5
 
 This is different from `let`, where all bindings are in parallel:
 
-```lisp
+```janet
 (let ((x 5)
       (y (* x 2)))  # x is still unbound here
   (+ x y))
@@ -266,7 +266,7 @@ Destructuring extracts values from lists and arrays into multiple bindings in a 
 
 Use a list pattern `(a b c)` on the left-hand side:
 
-```lisp
+```janet
 (def (a b c) (list 1 2 3))
 a ⟹ 1
 b ⟹ 2
@@ -275,7 +275,7 @@ c ⟹ 3
 
 Missing elements become `nil` (no error):
 
-```lisp
+```janet
 (def (x y z) (list 1))
 x ⟹ 1
 y ⟹ nil
@@ -284,7 +284,7 @@ z ⟹ nil
 
 Extra elements are silently ignored:
 
-```lisp
+```janet
 (def (a b) (list 1 2 3 4))
 a ⟹ 1
 b ⟹ 2
@@ -294,7 +294,7 @@ b ⟹ 2
 
 Use brackets `[a b]` for arrays:
 
-```lisp
+```janet
 (def [x y] [10 20])
 x ⟹ 10
 y ⟹ 20
@@ -304,7 +304,7 @@ y ⟹ 20
 
 Patterns nest arbitrarily:
 
-```lisp
+```janet
 (def ((a b) c) (list (list 1 2) 3))
 a ⟹ 1
 b ⟹ 2
@@ -320,7 +320,7 @@ z ⟹ 30
 
 Use `_` to skip elements you don't need:
 
-```lisp
+```janet
 (def (_ b _) (list 1 2 3))
 b ⟹ 2
 
@@ -332,7 +332,7 @@ y ⟹ 20
 
 Use `& name` to collect remaining elements:
 
-```lisp
+```janet
 # List rest — collects as a list
 (def (head & tail) (list 1 2 3 4))
 head ⟹ 1
@@ -350,7 +350,7 @@ r ⟹ ()
 
 #### Destructuring in `let` and `let*`
 
-```lisp
+```janet
 (let (((a b) (list 10 20)))
   (+ a b))
 ⟹ 30
@@ -365,7 +365,7 @@ r ⟹ ()
 
 Destructuring patterns in parameter lists extract values from arguments:
 
-```lisp
+```janet
 (defn add-pair ((a b)) (+ a b))
 (add-pair (list 3 4)) ⟹ 7
 
@@ -379,7 +379,7 @@ Destructuring patterns in parameter lists extract values from arguments:
 
 `var` creates mutable bindings; `def` creates immutable ones:
 
-```lisp
+```janet
 (var (a b) (list 1 2))
 (set a 100)
 a ⟹ 100
@@ -392,7 +392,7 @@ a ⟹ 100
 
 `set` updates an existing binding:
 
-```lisp
+```janet
 (var counter 0)
 (set counter (+ counter 1))
 counter ⟹ 1
@@ -410,7 +410,7 @@ Elle Lisp implements proper lexical scoping with support for global, function, b
 
 Variables defined at the top level are global and accessible everywhere.
 
-```lisp
+```janet
 (var global-x 100)
 
 (var my-function (lambda ()
@@ -423,7 +423,7 @@ Variables defined at the top level are global and accessible everywhere.
 
 Function parameters are local to the function and shadow outer variables.
 
-```lisp
+```janet
 (var x 100)
 
 (var add-one (lambda (x)
@@ -437,7 +437,7 @@ x             # Still 100
 
 Block scopes are created by `block` expressions. The `block` form creates a new lexical scope where bindings don't leak out.
 
-```lisp
+```janet
 (var x 100)
 
 (block
@@ -449,7 +449,7 @@ Block scopes are created by `block` expressions. The `block` form creates a new 
 
 You can optionally name a block and use `break` to exit early with a value:
 
-```lisp
+```janet
 (var result (block :my-block
   (var x 10)
   (if (> x 5)
@@ -463,7 +463,7 @@ result  # ⟹ "early exit"
 
 Let-bindings create local variables with scope isolation.
 
-```lisp
+```janet
 (let ((x 5)
       (y 10))
   (display (+ x y)))  # x and y are local
@@ -480,7 +480,7 @@ When a variable is referenced, Elle searches for it in this order:
 3. **Global scope** - Finally check global variables
 4. **Error** - If not found anywhere
 
-```lisp
+```janet
 (var global-x 1)
 
 (var outer-function (lambda (param-x)
@@ -495,7 +495,7 @@ When a variable is referenced, Elle searches for it in this order:
 
 Inner scopes can shadow (hide) outer scope variables:
 
-```lisp
+```janet
 (var x 100)
 
 (lambda (x)  # Parameter x shadows global x
@@ -506,7 +506,7 @@ Inner scopes can shadow (hide) outer scope variables:
 
 This is usually clear when variables have descriptive names:
 
-```lisp
+```janet
 (var total 1000)
 
 (lambda (total)  # OK: parameter total shadows global total
@@ -515,7 +515,7 @@ This is usually clear when variables have descriptive names:
 
 But can be confusing with poor naming:
 
-```lisp
+```janet
 (var x 100)
 
 (lambda (x)  # Confusing: hides outer x
@@ -527,7 +527,7 @@ But can be confusing with poor naming:
 
 The `set` operator modifies existing variables:
 
-```lisp
+```janet
 (var counter 0)
 
 (lambda ()
@@ -537,7 +537,7 @@ The `set` operator modifies existing variables:
 
 `set` searches the scope chain to find where a variable is defined:
 
-```lisp
+```janet
 (var outer-var 100)
 
 (lambda ()
@@ -551,7 +551,7 @@ The `set` operator modifies existing variables:
 
 Use let-bindings for temporary calculations:
 
-```lisp
+```janet
 (let ((temp-result (* x y))
       (temp-sum (+ a b)))
   (+ temp-result temp-sum))
@@ -561,7 +561,7 @@ Use let-bindings for temporary calculations:
 
 Create functions with captured variables:
 
-```lisp
+```janet
 (var make-multiplier (lambda (factor)
   (lambda (x)
     (* x factor))))
@@ -577,7 +577,7 @@ Create functions with captured variables:
 
 Use a global or let-bound accumulator with loops:
 
-```lisp
+```janet
 (let ((sum 0))
   (for item (list 1 2 3 4 5)
     (set sum (+ sum item)))
@@ -588,7 +588,7 @@ Use a global or let-bound accumulator with loops:
 
 Inner functions access outer scope:
 
-```lisp
+```janet
 (var make-adder (lambda (base)
   (lambda (x)
     (+ base x))))  # Can access base from outer scope
@@ -601,19 +601,19 @@ Inner functions access outer scope:
 
 #### Undefined Variable
 
-```lisp
+```janet
 (display undefined-var)  # ERROR: Undefined global variable
 ```
 
 **Fix**: Define the variable first:
-```lisp
+```janet
 (var undefined-var 42)
 (display undefined-var)  # OK
 ```
 
 #### Variable Out of Scope
 
-```lisp
+```janet
 (let ((x 5))
   (display x))  # OK - inside let
 
@@ -621,7 +621,7 @@ Inner functions access outer scope:
 ```
 
 **Fix**: Use the variable inside its scope:
-```lisp
+```janet
 (let ((x 5))
   (display x))
 ```
@@ -634,7 +634,7 @@ Inner functions access outer scope:
 
 Functions are defined with `fn` and named with `defn`:
 
-```lisp
+```janet
 # Anonymous function
 (fn (x y) (+ x y))
 
@@ -649,7 +649,7 @@ Functions are defined with `fn` and named with `defn`:
 
 `defn` supports destructured parameters:
 
-```lisp
+```janet
 (defn sum-pair ((a b)) (+ a b))
 (sum-pair (list 3 4)) ⟹ 7
 ```
@@ -660,7 +660,7 @@ Note: `lambda` is available as an alias for `fn`.
 
 Functions close over their definition environment:
 
-```lisp
+```janet
 (defn make-adder (n)
   (fn (x) (+ x n)))
 
@@ -671,7 +671,7 @@ Functions close over their definition environment:
 
 Each closure has its own captured variables:
 
-```lisp
+```janet
 (defn make-counter ()
   (var count 0)
   (fn ()
@@ -695,7 +695,7 @@ Each closure has its own captured variables:
 
 `map` applies a function to each element of a list:
 
-```lisp
+```janet
 (map (fn (x) (* x 2)) (list 1 2 3))
 ⟹ (2 4 6)
 
@@ -707,7 +707,7 @@ Each closure has its own captured variables:
 
 `filter` selects elements that satisfy a predicate:
 
-```lisp
+```janet
 (filter (fn (x) (> x 2)) (list 1 2 3 4))
 ⟹ (3 4)
 
@@ -719,7 +719,7 @@ Each closure has its own captured variables:
 
 `fold` (also called reduce) accumulates a result:
 
-```lisp
+```janet
 (fold (fn (acc x) (+ acc x)) 0 (list 1 2 3 4))
 ⟹ 10
 
@@ -731,7 +731,7 @@ Each closure has its own captured variables:
 
 `apply` calls a function with a list of arguments:
 
-```lisp
+```janet
 (apply + (list 1 2 3))
 ⟹ 6
 
@@ -748,7 +748,7 @@ Each closure has its own captured variables:
 
 `if` is the fundamental conditional:
 
-```lisp
+```janet
 (if (> 10 5)
   "10 is greater"
   "5 is greater")
@@ -762,7 +762,7 @@ Each closure has its own captured variables:
 
 The else branch is optional:
 
-```lisp
+```janet
 (if (> 5 10)
   (display "5 is greater"))
 ```
@@ -771,7 +771,7 @@ The else branch is optional:
 
 `cond` is like a chain of if-else:
 
-```lisp
+```janet
 (var x 15)
 (cond
   ((> x 20) "x is large")
@@ -787,7 +787,7 @@ The final clause `(true ...)` acts as a catch-all.
 
 `begin` sequences multiple expressions, returning the value of the last. It does NOT create a new scope—bindings defined inside `begin` go into the enclosing scope.
 
-```lisp
+```janet
 (begin
   (display "First expression")
   (newline)
@@ -803,7 +803,7 @@ Inside a function body, `begin` performs a two-pass analysis for mutual recursio
 
 `block` sequences expressions within a new lexical scope. Bindings defined inside `block` don't leak out. You can optionally name a block and use `break` to exit early with a value.
 
-```lisp
+```janet
 # Simple block
 (block
   (var x 10)
@@ -826,7 +826,7 @@ result  # ⟹ "early exit"
 
 `while` executes a body repeatedly as long as a condition is truthy:
 
-```lisp
+```janet
 (var counter 0)
 (while (< counter 5)
   (begin
@@ -845,7 +845,7 @@ result  # ⟹ "early exit"
 
 `forever` creates an infinite loop that must be exited via `break` or exception:
 
-```lisp
+```janet
 (forever body...)
 ```
 
@@ -853,7 +853,7 @@ result  # ⟹ "early exit"
 
 **Examples:**
 
-```lisp
+```janet
 # Simple infinite loop (would need break to exit)
 (forever
   (display "Running...")
@@ -879,7 +879,7 @@ result  # ⟹ "early exit"
 
 Elle uses functional iteration rather than imperative loops. Use higher-order functions to process collections:
 
-```lisp
+```janet
 # Process each element
 (map (fn (x) (* x 2)) (list 1 2 3))
 ⟹ (2 4 6)
@@ -901,7 +901,7 @@ Elle uses functional iteration rather than imperative loops. Use higher-order fu
 
 `try` evaluates code and `catch` handles exceptions:
 
-```lisp
+```janet
 (try
   (/ 10 0)
   (catch (e)
@@ -915,7 +915,7 @@ The catch block receives the error value.
 
 `finally` runs regardless of success or failure:
 
-```lisp
+```janet
 (try
   (display "Attempting operation")
   (newline)
@@ -940,7 +940,7 @@ Cleanup code runs here
 
 Use `exception` to create exception values and `throw` to raise them:
 
-```lisp
+```janet
 (var my-error (exception "Invalid input" (table "code" 42)))
 (throw my-error)
 
@@ -950,7 +950,7 @@ Use `exception` to create exception values and `throw` to raise them:
 
 Get information from exceptions:
 
-```lisp
+```janet
 (var e (exception "Test error" (table "context" "validation")))
 (exception-message e) ⟹ "Test error"
 (exception-data e)    ⟹ #<table String("context")="validation">
@@ -964,7 +964,7 @@ Get information from exceptions:
 
 Common list operations:
 
-```lisp
+```janet
 # Construction
 (list 1 2 3)           ⟹ (1 2 3)
 (cons 1 (list 2 3))    ⟹ (1 2 3)
@@ -991,7 +991,7 @@ Common list operations:
 
 Tables are mutable:
 
-```lisp
+```janet
 # Creation
 (var t (table))
 (var t2 (table "x" 10 "y" 20))
@@ -1015,7 +1015,7 @@ Tables are mutable:
 
 Structs are immutable:
 
-```lisp
+```janet
 # Creation
 (var s (struct "a" 1 "b" 2))
 
@@ -1044,7 +1044,7 @@ Structs are immutable:
 
 ### Arithmetic
 
-```lisp
+```janet
 (+ 1 2 3)          ⟹ 6
 (- 10 3)           ⟹ 7
 (* 2 3 4)          ⟹ 24
@@ -1060,7 +1060,7 @@ Structs are immutable:
 
 ### Math Functions
 
-```lisp
+```janet
 (sqrt 16)          ⟹ 4.0
 (pow 2 8)          ⟹ 256
 (exp 1)            ⟹ 2.71828...
@@ -1077,7 +1077,7 @@ e                  ⟹ 2.71828...
 
 ### String Operations
 
-```lisp
+```janet
 (length "hello")                   ⟹ 5
 (string-append "hello" " " "world")⟹ "hello world"
 (string-upcase "hello")            ⟹ "HELLO"
@@ -1100,7 +1100,7 @@ e                  ⟹ 2.71828...
 
 ### File I/O
 
-```lisp
+```janet
 (slurp "path/to/file.txt")         # Read entire file as string
 (spit "path/to/file.txt" "content")# Write to file (overwrites)
 (append-file "path/to/file.txt" "\nmore") # Append to file
@@ -1127,7 +1127,7 @@ e                  ⟹ 2.71828...
 
 ### JSON Operations
 
-```lisp
+```janet
 (json-parse "{\"x\": 42, \"y\": \"hello\"}")
 ⟹ #<table String("x")=42 String("y")="hello">
 
@@ -1140,7 +1140,7 @@ e                  ⟹ 2.71828...
 
 ### Type Conversions
 
-```lisp
+```janet
 (int "42")        ⟹ 42
 (float "3.14")    ⟹ 3.14
 (string 42)       ⟹ "42"
@@ -1149,7 +1149,7 @@ e                  ⟹ 2.71828...
 
 ### Concurrency
 
-```lisp
+```janet
 (spawn (fn () (display "Hello from thread") (newline)))
 # Creates a new thread and runs the function
 
@@ -1170,7 +1170,7 @@ e                  ⟹ 2.71828...
 
 Quote prevents evaluation:
 
-```lisp
+```janet
 '(+ 1 2)       ⟹ (+ 1 2)    # Not evaluated
 (+ 1 2)        ⟹ 3          # Evaluated
 
@@ -1179,7 +1179,7 @@ Quote prevents evaluation:
 
 Quasiquote allows selective evaluation with unquote:
 
-```lisp
+```janet
 (var x 5)
 `(the value is ,x)  ⟹ (the value is 5)
 `(a ,x b)           ⟹ (a 5 b)
@@ -1189,7 +1189,7 @@ Quasiquote allows selective evaluation with unquote:
 
 Pattern matching destructures data:
 
-```lisp
+```janet
 (match (list 1 2 3)
   ((list a b c) (+ a b c))
   (_ "no match"))
@@ -1205,7 +1205,7 @@ Pattern matching destructures data:
 
 Macros transform code at compile time:
 
-```lisp
+```janet
 (var-macro when
   (fn (test body)
     `(if ,test ,body nil)))
@@ -1219,7 +1219,7 @@ Macros transform code at compile time:
 
 Load external files as modules:
 
-```lisp
+```janet
 (import-file "lib/helpers.elle")
 
 # Add custom search paths:
@@ -1234,7 +1234,7 @@ Load external files as modules:
 
 Prefer `let` and `let*` over global definitions for local work:
 
-```lisp
+```janet
 # Good
 (let ((x 10) (y 20))
   (+ x y))
@@ -1249,7 +1249,7 @@ Prefer `let` and `let*` over global definitions for local work:
 
 Use `struct` instead of `table` when you don't need mutation:
 
-```lisp
+```janet
 # Better for functional style
 (var-constant user (struct "id" 1 "name" "Alice"))
 
@@ -1262,7 +1262,7 @@ Use `struct` instead of `table` when you don't need mutation:
 
 Use `map`, `filter`, and `fold` for clear data transformations:
 
-```lisp
+```janet
 # Clear intent
 (map (fn (x) (+ x 1)) (list 1 2 3))
 
@@ -1274,7 +1274,7 @@ Use `map`, `filter`, and `fold` for clear data transformations:
 
 Use try-catch for expected error cases:
 
-```lisp
+```janet
 (try
   (risky-operation)
   (catch (e)
@@ -1287,7 +1287,7 @@ Use try-catch for expected error cases:
 
 Instead of nested `if`:
 
-```lisp
+```janet
 # Good
 (cond
   ((nil? x) "empty")
@@ -1309,7 +1309,7 @@ Instead of nested `if`:
 
 Prefer `map`, `filter`, and `fold` for processing collections:
 
-```lisp
+```janet
 # Good: Clear intent, composable
 (var doubled (map (fn (x) (* x 2)) (list 1 2 3)))
 (var evens (filter even? (list 1 2 3 4 5 6)))
@@ -1326,7 +1326,7 @@ Prefer `map`, `filter`, and `fold` for processing collections:
 
 Chain functional operations for clarity:
 
-```lisp
+```janet
 # Get square of all positive even numbers
 (map (fn (x) (* x x))
   (filter even?
@@ -1339,7 +1339,7 @@ Chain functional operations for clarity:
 
 Make it clear which outer variables a function uses:
 
-```lisp
+```janet
 (var make-adder (lambda (base)
   (lambda (x)
     (+ base x))))  # Captures: base

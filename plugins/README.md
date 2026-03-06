@@ -33,7 +33,7 @@ cargo build --release
 
 From Elle code:
 
-```lisp
+```janet
 (import-file "target/release/libelle_crypto.so")
 (bytes->hex (crypto/sha256 "hello"))
 ```

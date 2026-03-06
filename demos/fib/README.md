@@ -17,7 +17,7 @@ The Fibonacci sequence is defined recursively:
 - `fib(1) = 1`
 - `fib(n) = fib(n-1) + fib(n-2)` for n ≥ 2
 
-```lisp
+```janet
 (defn fib (n)
   (if (< n 2) n
     (+ (fib (- n 1)) (fib (- n 2)))))

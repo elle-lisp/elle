@@ -6,7 +6,7 @@ Tests written in Elle itself, executed by the test harness. These tests verify E
 
 Each `.lisp` file in this directory is a test. Tests use assertions from [`assertions.lisp`](assertions.lisp):
 
-```lisp
+```janet
 (assert-eq (+ 1 2) 3)
 (assert-true (> 5 3))
 (assert-false (< 5 3))
@@ -35,7 +35,7 @@ cargo test --test elle -- --nocapture
 
 Example test file:
 
-```lisp
+```janet
 ;; Test list operations
 (assert-eq (length '(1 2 3)) 3)
 (assert-eq (first '(a b c)) 'a)

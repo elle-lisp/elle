@@ -30,7 +30,7 @@ cargo build --release
 
 ## Loading
 
-```lisp
+```janet
 (import "target/release/libelle_glob.so")
 (glob/match "*.lisp" "hello.lisp")  ; => true
 (glob/glob "examples/*.lisp")       ; => array of matching paths

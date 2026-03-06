@@ -117,7 +117,7 @@ The generator (`generate.lisp`) uses these modules in sequence:
 
 Content blocks often use `fold` to accumulate rendered items:
 
-```lisp
+```janet
 (fold
   (fn (acc item)
     (-> acc (append "<li>") (append (html-escape item)) (append "</li>")))
@@ -134,13 +134,13 @@ This pattern:
 
 The `->` macro threads values through function calls:
 
-```lisp
+```janet
 (-> "<p>" (append (format-inline text)) (append "</p>"))
 ```
 
 Expands to:
 
-```lisp
+```janet
 (append (append "<p>" (format-inline text)) "</p>")
 ```
 

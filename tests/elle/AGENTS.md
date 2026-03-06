@@ -18,7 +18,7 @@ Does NOT:
 
 Each Elle script follows this pattern:
 
-```lisp
+```janet
 #!/usr/bin/env elle
 ## Test description
 
@@ -104,7 +104,7 @@ If the script exits with code 0, the test passes. If it exits with code 1, the t
    }
    ```
 3. Write the script:
-   ```lisp
+   ```janet
    #!/usr/bin/env elle
    ## My feature test
 

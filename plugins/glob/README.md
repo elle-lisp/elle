@@ -20,7 +20,7 @@ The compiled plugin will be at `target/release/libelle_glob.so`.
 
 Load the plugin in Elle:
 
-```lisp
+```janet
 (import "target/release/libelle_glob.so")
 ```
 
@@ -28,7 +28,7 @@ Load the plugin in Elle:
 
 Test if a path matches a glob pattern:
 
-```lisp
+```janet
 (glob/match "*.lisp" "hello.lisp")      ; => true
 (glob/match "src/**/*.rs" "src/vm/mod.rs") ; => true
 (glob/match "*.txt" "hello.lisp")       ; => false
@@ -38,7 +38,7 @@ Test if a path matches a glob pattern:
 
 Expand a glob pattern to matching paths:
 
-```lisp
+```janet
 (glob/glob "examples/*.lisp")
 ; => #array["examples/closures.lisp" "examples/recursion.lisp" ...]
 

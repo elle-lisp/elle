@@ -8,7 +8,7 @@ or external resources.
 
 Primitives are automatically available after VM initialization:
 
-```lisp
+```janet
 (+ 1 2 3)           ; Arithmetic
 (car '(a b c))      ; List operations
 (string-length "hi") ; String operations

@@ -33,7 +33,7 @@ CFGs are used for:
 
 Elle provides the `fn/cfg` primitive to extract a function's CFG:
 
-```lisp
+```janet
 (defn render-cfg (f name)
   "Render a function's CFG to a DOT file."
   (let* ((dot (fn/cfg f :dot))
@@ -56,7 +56,7 @@ The `:dot` format is the DOT language used by Graphviz.
 
 ### Example: Factorial
 
-```lisp
+```janet
 (defn factorial (n)
   "Recursive factorial — branching and self-call."
   (if (< n 2)
@@ -73,7 +73,7 @@ The CFG shows:
 
 ### Example: Eval-Expr
 
-```lisp
+```janet
 (defn eval-expr (expr)
   "Evaluate an arithmetic expression tree."
   (match expr

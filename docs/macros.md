@@ -24,7 +24,7 @@ compiled and executed in the real VM via `pipeline::eval_syntax()`.
 The full language is available in macro bodies: `if`, `let`, closures,
 list operations, recursion — everything.
 
-```lisp
+```janet
 (defmacro my-when (test body)
   `(if ,test ,body nil))
 
@@ -303,7 +303,7 @@ with the lexical context of `context`. The result is marked
 not override the context's scopes. This enables anaphoric macros —
 macros that intentionally introduce bindings visible at the call site.
 
-```lisp
+```janet
 (defmacro aif (test then else)
   `(let ((,(datum->syntax test 'it) ,test))
      (if ,(datum->syntax test 'it) ,then ,else)))

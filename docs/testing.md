@@ -143,7 +143,7 @@ and exits non-zero on failure.
 
 ### Structure
 
-```lisp
+```janet
 (import-file "./examples/assertions.lisp")
 
 # Description of what this file tests
@@ -161,7 +161,7 @@ Elle test scripts use `examples/assertions.lisp` which provides:
 
 For runtime error checking, use `protect`:
 
-```lisp
+```janet
 (def [ok? err] (protect (/ 1 0)))
 (assert-false ok? "division by zero should error")
 (assert-eq (get err 0) :division-by-zero "error kind")

@@ -27,7 +27,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **A sound effect system, inferred not declared.** Every function is automatically classified as `Pure`, `Yields`, or `Polymorphic`. The compiler enforces this: a pure context cannot call a yielding function. No annotations required. This is what makes the fiber/concurrency story coherent — the compiler knows which functions can suspend.
   <details><summary>Example: Effect System</summary>
 
-  ```lisp
+  ```janet
   # Pure function — inferred automatically
   (defn add (a b) (+ a b))
 
@@ -47,7 +47,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Fully hygienic macros that operate on syntax objects, not text or s-expressions.** Macros receive and return `Syntax` objects carrying scope information (Racket-style scope sets). Name capture is structurally impossible, not just conventionally avoided. This is stronger than Janet's macros, which are s-expression templates.
   <details><summary>Example: Hygienic Macros</summary>
 
-  ```lisp
+  ```janet
   (defmacro my-swap (a b)
     `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
 
@@ -68,7 +68,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Structured concurrency via fibers with per-fiber memory.** Each fiber has its own heap arena. When a fiber finishes, its memory is reclaimed in O(1) — no GC pause, no reference counting. The compiler's escape analysis drives scope-level reclamation within fibers.
   <details><summary>Example: Fibers and Coroutines</summary>
 
-  ```lisp
+  ```janet
   (defn make-producer []
     (coro/new (fn []
       (each i in (range 5)
@@ -93,7 +93,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Collection literals with mutable/immutable split.** Bare delimiters are immutable: `[1 2 3]` (tuple), `{:key val}` (struct), `"hello"` (string). `@`-prefixed are mutable: `@[1 2 3]` (array), `@{:key val}` (table), `@"hello"` (buffer).
   <details><summary>Example: Collections</summary>
 
-  ```lisp
+  ```janet
   # Immutable
   (def t [1 2 3])           # tuple
   (def s {:name "Bob"})     # struct
@@ -113,7 +113,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Destructuring in all binding positions.** `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values become `nil`, wrong types become `nil`.
   <details><summary>Example: Destructuring</summary>
 
-  ```lisp
+  ```janet
   (def (head & tail) (list 1 2 3 4))
   (def [x _ z] [10 20 30])
   (def {:name n :age a} {:name "Bob" :age 25})
@@ -125,7 +125,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Closures with automatic capture analysis.** The compiler tracks which variables each closure captures. Mutable captures use cells automatically. Enables escape analysis for scope-level memory reclamation.
   <details><summary>Example: Closures</summary>
 
-  ```lisp
+  ```janet
   (defn make-counter [start]
     (var n start)
     (fn []
@@ -143,7 +143,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Splice operator for array spreading.** `;expr` marks a value for spreading at call sites and in data constructors. `(splice expr)` is the long form.
   <details><summary>Example: Splice</summary>
 
-  ```lisp
+  ```janet
   (def args @[2 3])
   (+ 1 ;args)  # => 6, same as (+ 1 2 3)
 
@@ -157,7 +157,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Parameters for dynamic binding.** `make-parameter` creates a parameter, `parameterize` sets it in a scope, child fibers inherit parent parameter frames.
   <details><summary>Example: Parameters</summary>
 
-  ```lisp
+  ```janet
   (def *port* (make-parameter :stdout))
 
   (parameterize ((*port* :stderr))
@@ -172,7 +172,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Conditionals: `if`, `cond`, `when`, `unless`, `case`.** `if` is the primitive, others are macros or sugar.
   <details><summary>Example: Conditionals</summary>
 
-  ```lisp
+  ```janet
   (if (> x 0) "positive" "non-positive")
 
   (cond
@@ -190,7 +190,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Pattern matching with `match`.** Type guards, element extraction, nested patterns, wildcard `_`.
   <details><summary>Example: Pattern Matching</summary>
 
-  ```lisp
+  ```janet
   (match value
     ([a b] (+ a b))
     ({:x x :y y} (+ x y))
@@ -202,7 +202,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Error handling: `try`/`catch`, `protect`, `defer`.** Built on fibers and signals, not exceptions.
   <details><summary>Example: Error Handling</summary>
 
-  ```lisp
+  ```janet
   (try
     (if (< x 0) (error "negative"))
     (+ x 1)
@@ -221,7 +221,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Loops: `while`, `forever`, `break`.** `while` is the primitive, `forever` is a macro, `break` exits a block.
   <details><summary>Example: Loops</summary>
 
-  ```lisp
+  ```janet
   (while (< i 10)
     (print i)
     (set i (+ i 1)))
@@ -251,7 +251,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Call C without ceremony.** Load a library, bind a symbol, call it.
   <details><summary>Example: Basic FFI</summary>
 
-  ```lisp
+  ```janet
   (def libc (ffi/native nil))
   (ffi/defbind sqrt libc "sqrt" :double @[:double])
   (sqrt 2.0)  # => 1.4142135623730951
@@ -261,7 +261,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Struct marshalling, variadic calls, callbacks, manual memory management all work.**
   <details><summary>Example: Advanced FFI</summary>
 
-  ```lisp
+  ```janet
   (def point-type (ffi/struct @[:double :double]))
   (def p (ffi/malloc (ffi/size point-type)))
   (ffi/write p point-type @[1.5 2.5])
@@ -292,7 +292,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Source modules return their last expression.** A module that defines functions via `def` makes them available as globals; a module that ends with a struct or function hands that value back to the caller.
   <details><summary>Example: Parametric Modules</summary>
 
-  ```lisp
+  ```janet
   # math.lisp
   (fn (scale)
     {:add (fn (a b) (* (+ a b) scale))
@@ -307,7 +307,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Native plugins are Rust cdylib crates.** Link against `elle`, export an init function. Plugins register primitives through the same `PrimitiveDef` mechanism as builtins — same effect declarations, same doc strings, same arity checking. Work directly with `Value`. No intermediate serialization format, no separate process, no generated bindings.
   <details><summary>Example: Plugin Usage</summary>
 
-  ```lisp
+  ```janet
   (def re (import-file "target/release/libelle_regex.so"))
   (def pat (re:compile "\\d+"))
   (re:find-all pat "a1b2c3")
@@ -326,7 +326,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Static linter catches errors at compile time.** Wrong arity, unused bindings, effect violations, type mismatches in patterns, duplicate pattern variables.
   <details><summary>Example: Static Analysis and Linting</summary>
 
-  ```lisp
+  ```janet
   # Compile-time errors caught by elle lint:
   (defn foo (x y) (+ x))  # Error: missing argument y
   (let ((unused 42)) 100) # Warning: unused binding
