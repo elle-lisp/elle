@@ -6,9 +6,6 @@ mod unittests {
 mod integration {
     include!("integration/mod.rs");
 }
-mod vm {
-    include!("vm/mod.rs");
-}
 mod property {
     include!("property/mod.rs");
 }

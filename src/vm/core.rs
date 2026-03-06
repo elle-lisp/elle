@@ -6,7 +6,6 @@ use crate::value::fiber::CallFrame;
 use crate::value::{
     Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_OK, SIG_YIELD,
 };
-use crate::vm::scope::ScopeStack;
 use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -41,7 +40,6 @@ pub struct VM {
     pub defined_globals: Vec<bool>,
     pub ffi: FFISubsystem,
     pub loaded_modules: HashSet<String>,
-    pub scope_stack: ScopeStack,
     pub closure_call_counts: FxHashMap<*const u8, usize>,
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
@@ -106,7 +104,6 @@ impl VM {
             defined_globals: vec![false; 256],
             ffi: FFISubsystem::new(),
             loaded_modules: HashSet::new(),
-            scope_stack: ScopeStack::new(),
             closure_call_counts: FxHashMap::default(),
             location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),
@@ -124,7 +121,7 @@ impl VM {
     /// Preserves: globals (primitives), docs, ffi, jit_cache,
     /// eval_expander, env_cache, tail_call_env_cache, fiber heap Box
     /// (reused for pointer stability).
-    /// Resets: fiber, call state, scope stack, location map,
+    /// Resets: fiber, call state, location map,
     /// loaded modules, closure call counts.
     pub fn reset_fiber(&mut self) {
         // Extract and clear the heap Box so the thread-local pointer stays valid.
@@ -141,7 +138,6 @@ impl VM {
         self.current_fiber_value = None;
         self.pending_tail_call = None;
         self.error_loc = None;
-        self.scope_stack = ScopeStack::new();
         self.closure_call_counts.clear();
         self.location_map = LocationMap::new();
         self.loaded_modules.clear();

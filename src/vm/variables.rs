@@ -4,30 +4,18 @@ use crate::value::{error_val, Value, SIG_ERROR};
 pub fn handle_load_global(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
     let idx = vm.read_u16(bytecode, ip) as usize;
     if let Some(sym_id) = constants[idx].as_symbol() {
-        // First, check if variable exists in current scope (scope-aware lookup)
-        if let Some(val) = vm.scope_stack.get(sym_id) {
-            // Don't automatically unwrap cells - closures need to capture the cell
-            // for shared mutable captures. Unwrapping happens at use sites.
-            vm.fiber.stack.push(val);
-            return;
-        }
-
-        // Fall back to global scope
         if let Some(val) = vm
             .globals
             .get(sym_id as usize)
             .filter(|v| !v.is_undefined())
         {
-            // Don't automatically unwrap cells in global scope
-            // Cells created by the box primitive should remain as cells
             vm.fiber.stack.push(*val);
         } else {
-            // Signal undefined-variable exception
             let name = crate::context::resolve_symbol_name(sym_id)
                 .unwrap_or_else(|| format!("symbol #{}", sym_id));
             let msg = format!("undefined variable: {}", name);
             vm.fiber.signal = Some((SIG_ERROR, error_val("undefined-variable", msg)));
-            vm.fiber.stack.push(Value::NIL); // Push placeholder
+            vm.fiber.stack.push(Value::NIL);
         }
     } else {
         panic!("VM bug: LoadGlobal expects symbol constant");
@@ -42,48 +30,13 @@ pub fn handle_store_global(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constan
         .pop()
         .expect("VM bug: Stack underflow on StoreGlobal");
     if let Some(sym_id) = constants[idx].as_symbol() {
-        // Check scope stack first (for proper shadowing)
-        if let Some(existing) = vm.scope_stack.get(sym_id) {
-            // Check if the existing value is a cell (for shared mutable captures)
-            if existing.is_cell() {
-                // Update the cell's contents instead of replacing the cell itself
-                if let Some(cell_ref) = existing.as_cell() {
-                    let mut cell_mut = cell_ref.borrow_mut();
-                    *cell_mut = val;
-                }
-            } else {
-                // Regular variable - update it directly
-                if !vm.scope_stack.set(sym_id, val) {
-                    // Shouldn't happen if get() succeeded
-                    vm.scope_stack.define_local(sym_id, val);
-                }
-            }
-        } else if vm
-            .globals
-            .get(sym_id as usize)
-            .is_some_and(|v| !v.is_undefined())
-        {
-            // Exists in global scope — update there
-            let idx = sym_id as usize;
-            if idx >= vm.globals.len() {
-                vm.globals.resize(idx + 1, Value::UNDEFINED);
-                vm.defined_globals.resize(idx + 1, false);
-            }
-            vm.globals[idx] = val;
-            vm.defined_globals[idx] = true;
-        } else if vm.scope_stack.depth() > 1 {
-            // New variable in a local scope — define locally
-            vm.scope_stack.define_local(sym_id, val);
-        } else {
-            // New variable at global scope
-            let idx = sym_id as usize;
-            if idx >= vm.globals.len() {
-                vm.globals.resize(idx + 1, Value::UNDEFINED);
-                vm.defined_globals.resize(idx + 1, false);
-            }
-            vm.globals[idx] = val;
-            vm.defined_globals[idx] = true;
+        let slot = sym_id as usize;
+        if slot >= vm.globals.len() {
+            vm.globals.resize(slot + 1, Value::UNDEFINED);
+            vm.defined_globals.resize(slot + 1, false);
         }
+        vm.globals[slot] = val;
+        vm.defined_globals[slot] = true;
         vm.fiber.stack.push(val);
     } else {
         panic!("VM bug: StoreGlobal expects symbol constant");
