@@ -682,12 +682,18 @@
                           (append " ")
                           (append cls)
                           (append "\n"))))
-          # Emit edges
-          (each edge edges
-            (set result (-> result
-                          (append "  block")
-                          (append lbl)
-                          (append " --> block")
-                          (append (string edge))
-                          (append "\n"))))))
-      result)))
+           # Emit edges
+           (each edge edges
+             (set result (-> result
+                           (append "  block")
+                           (append lbl)
+                           (append " --> block")
+                           (append (string edge))
+                           (append "\n"))))))
+       result)))
+
+## ── Standard port parameters ────────────────────────────────────────
+
+(def *stdin*  (make-parameter (port/stdin)))
+(def *stdout* (make-parameter (port/stdout)))
+(def *stderr* (make-parameter (port/stderr)))

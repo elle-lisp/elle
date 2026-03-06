@@ -134,3 +134,8 @@ fn tailcalls() {
 fn parameters() {
     run_elle_script("parameters");
 }
+
+#[test]
+fn ports() {
+    run_elle_script("ports");
+}
