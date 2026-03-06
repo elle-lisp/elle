@@ -13,15 +13,16 @@
       ""
       (if (not (string? str))
         (string str)
-        (string-replace
-          (string-replace
-            (string-replace
-              (string-replace
-                (string-replace str "&" "&amp;")
-                "<" "&lt;")
-              ">" "&gt;")
-            (string 34) "&quot;")
-          "'" "&#39;")))))
+        (fold
+          (fn (s pair)
+            (string-replace s (first pair) (first (rest pair))))
+          str
+          (list
+            (list "&" "&amp;")
+            (list "<" "&lt;")
+            (list ">" "&gt;")
+            (list (string 34) "&quot;")
+            (list "'" "&#39;")))))))
 
 ## Find delimiter in text starting from character position
 (def find-closing-helper (fn (text pos tlen delimiter dlen)

@@ -5,6 +5,3 @@
     (var s3 (string-replace s2 ">" "&gt;"))
     (var s4 (string-replace s3 "\"" "&quot;"))
     (string-replace s4 "'" "&#39;")))
-
-(display (html-escape "test"))
-(newline)
