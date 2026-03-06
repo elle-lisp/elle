@@ -48,7 +48,7 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
     let symbol_snapshot = symbols.all_names();
     let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
-    let bytecode = emitter.emit(&lir_func);
+    let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
 
     Ok(CompileResult {
         bytecode,
@@ -109,7 +109,7 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
 
         let symbol_snapshot = symbols.all_names();
         let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
-        let bytecode = emitter.emit(&lir_func);
+        let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
 
         results.push(CompileResult {
             bytecode,

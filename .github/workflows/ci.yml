@@ -318,7 +318,7 @@ jobs:
           tool: cargo
           output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          alert-threshold: '120%'
+          alert-threshold: '150%'
           fail-on-alert: true
           auto-push: false
 

@@ -141,7 +141,6 @@ fn has_unsupported_instructions(lir: &LirFunction) -> bool {
         for spanned in &bb.instructions {
             match &spanned.instr {
                 LirInstr::MakeClosure { .. }
-                | LirInstr::LoadResumeValue { .. }
                 | LirInstr::CarOrNil { .. }
                 | LirInstr::CdrOrNil { .. }
                 | LirInstr::ArrayRefOrNil { .. }

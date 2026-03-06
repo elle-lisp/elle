@@ -1,7 +1,8 @@
 //! JIT compilation for Elle
 //!
-//! This module provides JIT compilation of pure LIR functions to native code
-//! using Cranelift. Only `Effect::none()` functions are JIT candidates.
+//! This module provides JIT compilation of LIR functions to native code
+//! using Cranelift. Functions with `Effect::none()` or `Effect::yields()` are
+//! JIT candidates. Polymorphic functions remain excluded.
 //!
 //! ## Architecture
 //!
@@ -39,7 +40,7 @@ mod translate;
 
 pub use code::JitCode;
 pub use compiler::{BatchMember, JitCompiler};
-pub use dispatch::TAIL_CALL_SENTINEL;
+pub use dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 pub(crate) use group::discover_compilation_group;
 
 use std::fmt;
@@ -49,8 +50,10 @@ use std::fmt;
 pub enum JitError {
     /// Instruction not supported by JIT
     UnsupportedInstruction(String),
-    /// Function is not pure (may yield)
-    NotPure,
+    /// Function has polymorphic effect
+    Polymorphic,
+    /// Function has yielding effect (rejected by batch compilation only)
+    Yielding,
     /// Cranelift compilation failed
     CompilationFailed(String),
     /// Invalid LIR structure
@@ -63,7 +66,8 @@ impl fmt::Display for JitError {
             JitError::UnsupportedInstruction(name) => {
                 write!(f, "JIT: unsupported instruction: {}", name)
             }
-            JitError::NotPure => write!(f, "JIT: function is not pure (may yield)"),
+            JitError::Polymorphic => write!(f, "JIT: function has polymorphic effect"),
+            JitError::Yielding => write!(f, "JIT: yielding functions cannot be batch-compiled"),
             JitError::CompilationFailed(msg) => write!(f, "JIT compilation failed: {}", msg),
             JitError::InvalidLir(msg) => write!(f, "JIT: invalid LIR: {}", msg),
         }
