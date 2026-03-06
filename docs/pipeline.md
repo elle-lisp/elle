@@ -4,6 +4,17 @@ Compilation entry points. Orchestrates Reader → Expander → Analyzer → Lowe
 
 Module: `src/pipeline/` (7 files, ~540 lines of implementation).
 
+## Contents
+
+- [Public API](#public-api)
+- [VM ownership patterns](#vm-ownership-patterns)
+- [Expander lifecycle](#expander-lifecycle)
+- [The fixpoint loop](#the-fixpoint-loop)
+- [Pre-scanning functions](#pre-scanning-functions-in-srcpipelinescanrs)
+- [Compilation phases (single-form)](#compilation-phases-single-form)
+- [Compilation cache](#compilation-cache-in-srcpipelinecachersrs)
+- [Known issues](#known-issues)
+
 | File | Lines | Purpose |
 |------|-------|---------|
 | `mod.rs` | 28 | Module declarations, re-exports, type definitions |

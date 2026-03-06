@@ -1,0 +1,91 @@
+{
+  "title": "Elle Programming Language",
+  "description": "A modern Lisp interpreter with bytecode compilation, pattern matching, and FFI",
+  "sections": [
+    {
+      "heading": "Welcome to Elle",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Elle is a **modern Lisp interpreter** designed for clarity, performance, and expressiveness. It combines the elegance of Lisp with practical features like bytecode compilation, pattern matching, and seamless FFI integration."
+        },
+        {
+          "type": "paragraph",
+          "text": "Whether you're building command-line tools, data processing pipelines, or exploring functional programming, Elle provides a clean, powerful foundation."
+        }
+      ]
+    },
+    {
+      "heading": "Key Features",
+      "level": 2,
+      "content": [
+        {
+          "type": "list",
+          "items": [
+            "**Bytecode Compilation** — Programs are compiled to bytecode for efficient execution",
+            "**Lisp Syntax** — Elegant, homoiconic syntax with full metaprogramming support",
+            "**First-Class Functions** — Closures, higher-order functions, and functional composition",
+            "**Pattern Matching** — Powerful destructuring with `match` expressions",
+            "**Immutable Data Structures** — Lists, vectors, and persistent data structures",
+            "**Mutable Collections** — Tables and structs for when you need state",
+            "**File I/O** — Comprehensive file and directory operations",
+            "**JSON Support** — Native JSON parsing and serialization",
+            "**Exception Handling** — `try/catch/finally` for robust error handling",
+            "**Module System** — Load and compose code with `import-file`"
+          ],
+          "ordered": false
+        }
+      ]
+    },
+    {
+      "heading": "Quick Example",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Here's a simple Elle program that demonstrates core features:"
+        },
+        {
+          "type": "code",
+          "language": "lisp",
+          "text": ";; Define a function to calculate factorial\n(define factorial\n  (lambda (n)\n    (if (<= n 1)\n      1\n      (* n (factorial (- n 1))))))\n\n;; Use it\n(display \"5! = \")\n(display (factorial 5))\n(newline)"
+        },
+        {
+          "type": "paragraph",
+          "text": "This program defines a recursive factorial function and prints the result. Elle handles the recursion efficiently with tail-call optimization."
+        }
+      ]
+    },
+    {
+      "heading": "Getting Started",
+      "level": 2,
+      "content": [
+        {
+          "type": "paragraph",
+          "text": "Ready to dive in? Start with the [Getting Started](getting-started.html) guide to install Elle and write your first program."
+        },
+        {
+          "type": "paragraph",
+          "text": "Then explore the [Language Guide](language-guide.html) to learn about Elle's data types, control flow, and advanced features."
+        }
+      ]
+    },
+    {
+      "heading": "Documentation",
+      "level": 2,
+      "content": [
+        {
+          "type": "list",
+          "items": [
+            "[Getting Started](getting-started.html) — Installation and first steps",
+            "[Language Guide](language-guide.html) — Data types, functions, and control flow",
+            "[Standard Library Reference](stdlib-reference.html) — Built-in functions and operations",
+            "[Examples](examples.html) — Real-world code examples"
+          ],
+          "ordered": false
+        }
+      ]
+    }
+  ]
+}

@@ -8,6 +8,7 @@
 //! Plugins must be compiled against the same version of Elle. There is no
 //! stable ABI — version skew will crash.
 
+use crate::error::{LError, LResult};
 use crate::primitives::def::{Doc, PrimitiveDef};
 use crate::symbol::SymbolTable;
 use crate::value::Value;
@@ -51,14 +52,16 @@ pub type PluginInitFn = unsafe extern "C" fn(ctx: &mut PluginContext) -> Value;
 /// The caller is responsible for deduplication (e.g., via `is_module_loaded`).
 /// Calling this twice with the same path will register primitives twice and
 /// leak a second library handle.
-pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<Value, String> {
+pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResult<Value> {
     // Load the shared library
     let lib = unsafe { libloading::Library::new(path) }
-        .map_err(|e| format!("failed to load plugin '{}': {}", path, e))?;
+        .map_err(|e| LError::generic(format!("failed to load plugin '{}': {}", path, e)))?;
 
     // Look up the init function
     let init_fn: libloading::Symbol<PluginInitFn> = unsafe { lib.get(b"elle_plugin_init") }
-        .map_err(|e| format!("plugin '{}' missing elle_plugin_init: {}", path, e))?;
+        .map_err(|e| {
+            LError::generic(format!("plugin '{}' missing elle_plugin_init: {}", path, e))
+        })?;
 
     // Call init to collect primitive definitions
     let mut ctx = PluginContext::new();

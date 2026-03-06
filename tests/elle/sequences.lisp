@@ -3,7 +3,7 @@
 ## Migrated from tests/property/sequences.rs
 ## Type preservation and involution properties hold for all values.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 ## reverse_involution_list
 ## Verify that reversing a list twice returns the original list

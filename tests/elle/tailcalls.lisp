@@ -8,7 +8,7 @@
 # - Fiber tail position tests
 # - Coroutine tail position tests
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Basic tail recursion (existing patterns)

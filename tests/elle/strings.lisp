@@ -7,7 +7,7 @@
 ## Boundary tests, unicode, and roundtrip tests remain as property tests
 ## in tests/property/strings.rs.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Slice properties
@@ -203,11 +203,11 @@
 (assert-string-eq (string/join (string/split "one|two|three" "|") "|") "one|two|three"
   "split/join roundtrip: pipe")
 
-# split_produces_list: split produces a list
-(assert-true (pair? (string/split "a,b" ","))
-  "split produces a cons cell")
-(assert-true (pair? (string/split "hello" "l"))
-  "split produces a cons cell (hello)")
+# split_produces_tuple: split produces a tuple
+(assert-true (tuple? (string/split "a,b" ","))
+  "split produces a tuple")
+(assert-true (tuple? (string/split "hello" "l"))
+  "split produces a tuple (hello)")
 
 # ============================================================================
 # Conversion roundtrips (migrated from property tests)

@@ -1,4 +1,4 @@
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 ## ── sort ────────────────────────────────────────────────────────────
 (assert-list-eq (sort (list 3 1 2)) (list 1 2 3) "sort: list")

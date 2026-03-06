@@ -29,14 +29,11 @@ fn test_value_equality() {
     assert_ne!(Value::int(0), Value::NIL);
 }
 
-// ============================================================================
-// TRUTHINESS SEMANTICS - DO NOT CHANGE WITHOUT UNDERSTANDING THE DESIGN
-// ============================================================================
-// nil is FALSY (represents absence, logical false)
-// () (empty list) is TRUTHY (it's a list, just empty - distinct from nil)
-// false is FALSY (explicit boolean false)
-// 0 is TRUTHY (numbers are always truthy)
-// ============================================================================
+// Truthiness semantics:
+// - nil is FALSY (represents absence, logical false)
+// - () (empty list) is TRUTHY (it's a list, just empty - distinct from nil)
+// - false is FALSY (explicit boolean false)
+// - 0 is TRUTHY (numbers are always truthy)
 
 #[test]
 fn test_truthiness() {
