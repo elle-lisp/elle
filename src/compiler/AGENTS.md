@@ -44,6 +44,18 @@ Bytecode instruction definitions and debug formatting.
 | `bytecode.rs` | ~200 | Instruction enum, Bytecode struct |
 | `bytecode_debug.rs` | ~150 | Debug formatting |
 
+## Parameter instructions
+
+`PushParamFrame` and `PopParamFrame` manage dynamic parameter binding frames:
+
+- `PushParamFrame(count: u8)` — Push a new parameter frame with `count` bindings
+- `PopParamFrame` — Pop the current parameter frame
+
+These are emitted by the lowerer for `parameterize` special forms. The VM
+maintains a stack of parameter frames on the fiber. When a parameter is called,
+the VM searches from the top of the stack downward for a binding, falling back
+to the parameter's default value if no binding is found.
+
 ## Allocation region instructions
 
 `RegionEnter` and `RegionExit` are scope boundary markers for the allocator.

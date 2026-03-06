@@ -707,6 +707,26 @@ impl Emitter {
                 self.bytecode.emit(Instruction::RegionExit);
                 // No stack effect
             }
+
+            LirInstr::PushParamFrame { pairs } => {
+                // Push all param/value pairs onto the stack
+                for (param, value) in pairs {
+                    self.ensure_on_top(*param);
+                    self.ensure_on_top(*value);
+                }
+                self.bytecode.emit(Instruction::PushParamFrame);
+                self.bytecode.emit_byte(pairs.len() as u8);
+                // All pairs consumed from stack
+                for _ in pairs {
+                    self.pop(); // value
+                    self.pop(); // param
+                }
+            }
+
+            LirInstr::PopParamFrame => {
+                self.bytecode.emit(Instruction::PopParamFrame);
+                // No stack effect
+            }
         }
     }
 

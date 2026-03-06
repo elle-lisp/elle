@@ -129,3 +129,8 @@ fn coroutines() {
 fn tailcalls() {
     run_elle_script("tailcalls");
 }
+
+#[test]
+fn parameters() {
+    run_elle_script("parameters");
+}

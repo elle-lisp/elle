@@ -90,6 +90,7 @@ representation. Create values via methods like `Value::int()`, `Value::cons()`,
 - `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>` + `doc: Option<Value>`
 - `Cell` / `LocalCell` - mutable cells for captured variables
 - `Fiber` - independent execution context with stack, frames, signal mask, and per-fiber `FiberHeap`
+- `Parameter` - dynamic binding with default value (id, default), looked up at runtime from parameter frame stack
 - `External` - opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
 
 All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
@@ -276,6 +277,13 @@ Things that look wrong but aren't:
   and into `Closure.doc`. The `(doc name)` primitive checks closure doc fields
   on globals before falling back to builtin docs. LSP hover shows user-defined
   docstrings and builtin docs via `vm.docs`.
+- `parameterize` is a special form that creates a dynamic binding frame.
+  Unlike lexical bindings (`let`, `fn` params), parameters are looked up at
+  runtime from a stack of frames. `(make-parameter default)` creates a parameter;
+  calling it reads the current value. `(parameterize ((p1 v1) (p2 v2) ...) body ...)`
+  pushes a frame, executes the body, then pops the frame. Child fibers inherit
+  parent parameter frames. Parameters are useful for simulating I/O ports,
+  configuration, and other dynamic context.
 
 ## Conventions
 

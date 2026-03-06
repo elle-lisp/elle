@@ -349,6 +349,19 @@ impl Value {
         }))
     }
 
+    /// Create a dynamic parameter value.
+    ///
+    /// Each parameter gets a unique id from a global counter.
+    /// The default value is returned when no `parameterize` binding is active.
+    #[inline]
+    pub fn parameter(default: Value) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT_ID: AtomicU32 = AtomicU32::new(0);
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        alloc(HeapObject::Parameter { id, default })
+    }
+
     /// Create a binding value (compile-time only).
     #[inline]
     pub fn binding(

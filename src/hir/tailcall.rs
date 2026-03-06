@@ -189,6 +189,16 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
             mark(env, false, tail_blocks);
         }
 
+        // Parameterize: bindings are not tail, body is NOT tail
+        // (PopParamFrame must execute after body completes)
+        HirKind::Parameterize { bindings, body } => {
+            for (param, value) in bindings {
+                mark(param, false, tail_blocks);
+                mark(value, false, tail_blocks);
+            }
+            mark(body, false, tail_blocks);
+        }
+
         // Leaves: nothing to recurse into
         HirKind::Nil
         | HirKind::EmptyList
@@ -302,6 +312,13 @@ mod tests {
             HirKind::Eval { expr, env } => {
                 collect_calls(expr, calls);
                 collect_calls(env, calls);
+            }
+            HirKind::Parameterize { bindings, body } => {
+                for (param, value) in bindings {
+                    collect_calls(param, calls);
+                    collect_calls(value, calls);
+                }
+                collect_calls(body, calls);
             }
             HirKind::Block { body, .. } => {
                 for expr in body {

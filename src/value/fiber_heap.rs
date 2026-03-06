@@ -455,6 +455,8 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::FFISignature => true,
         HeapTag::FFIType => true,
         HeapTag::External => true,
+        // Parameter contains a Value (Copy) — no inner heap allocations
+        HeapTag::Parameter => false,
     }
 }
 

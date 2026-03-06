@@ -210,6 +210,19 @@ impl fmt::Display for LirInstr {
             // === Allocation Regions ===
             LirInstr::RegionEnter => f.write_str("region-enter"),
             LirInstr::RegionExit => f.write_str("region-exit"),
+
+            // === Dynamic Parameters ===
+            LirInstr::PushParamFrame { pairs } => {
+                write!(f, "push-param-frame(")?;
+                for (i, (param, value)) in pairs.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}={}", param, value)?;
+                }
+                write!(f, ")")
+            }
+            LirInstr::PopParamFrame => f.write_str("pop-param-frame"),
         }
     }
 }
