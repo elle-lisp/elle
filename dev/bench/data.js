@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772776756650,
+  "lastUpdate": 1772783107180,
   "repoUrl": "https://github.com/elle-lisp/elle",
   "entries": {
     "Elle Benchmarks": [
@@ -1019,6 +1019,210 @@ window.BENCHMARK_DATA = {
             "name": "memory_operations/list_to_vec",
             "value": 109,
             "range": "± 1",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "disruptek@users.noreply.github.com",
+            "name": "Smooth Operator",
+            "username": "disruptek"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "30e9fe6a363b2f487ea791de1ad533e968e710e1",
+          "message": "jit: support suspending closures via side-exit (#465)\n\n* jit: add YieldPointInfo metadata collection to emitter\n\nExtend emit() to return yield point and call site metadata alongside\nbytecode. This metadata will be used by the JIT to generate side-exit\ncode at yield points. Part of #461.\n\n* jit: relax may_suspend gate and add yield translate stubs\n\nRelax the JIT compilation gate from may_suspend() to propagates != 0,\nallowing yielding (but not polymorphic) functions to be JIT-compiled.\nAdd dead-code stubs for LoadResumeValue and trap stubs for Yield\nterminator in translate.rs. Update tests to match new acceptance\ncriteria. Part of #461.\n\n* jit: add yield runtime helpers and signal handling\n\nImplement elle_jit_yield (direct yield side-exit), elle_jit_yield_through_call\n(yield propagation through call chains), and elle_jit_has_signal (post-call\nyield detection). Replace execute_closure_bytecode with\nexecute_bytecode_saving_stack in JIT dispatch paths to support yield\npropagation. Add SIG_YIELD handling to jit_handle_primitive_signal.\nPart of #461.\n\n* jit: translate Yield terminator as side-exit\n\nReplace the Yield trap stub with real side-exit code generation: spill\nlive registers to a stack slot, call elle_jit_yield runtime helper,\nreturn YIELD_SENTINEL. LoadResumeValue remains a dead-code stub since\nresume goes through the interpreter. Part of #461.\n\n* jit: implement yield-through-call and VM integration\n\nAdd post-call yield checks in JIT-compiled call sites that detect when\na callee yields, spill live registers, and propagate YIELD_SENTINEL.\nAdd yield handling in call_inner for the JIT path to build interpreter-\nlevel caller frames. Add 6 integration tests covering yield propagation,\nresume values, multiple yields, stack preservation, nested calls, and\ncaptures. Closes #461.\n\n* fix(jit): preserve local variables across yield/resume\n\nLocal variables (parameters and let-bindings) were lost when yielding from\nJIT-compiled code and resuming. The JIT now spills locals into the\nSuspendedFrame stack in the same layout the interpreter expects, ensuring\ncorrect restoration on resume.\n\nChanges:\n- src/lir/types.rs: Add num_locals to YieldPointInfo and CallSiteInfo\n- src/lir/emit.rs: Track and record num_locals in yield/call metadata\n- src/jit/dispatch.rs: Add num_locals to YieldPointMeta; update\n  elle_jit_yield to spill locals+operands\n- src/jit/translate.rs: New spill_locals_and_operands helper; update\n  Yield terminator and post-call yield check\n- src/jit/compiler.rs: Pass num_locals to YieldPointMeta construction\n- tests/integration/jit_yield.rs: Add 2 regression tests\n\nFixes #461\n\n* jit: fix pre-merge issues from architectural review\n\n1. Add num_locals parameter to elle_jit_yield_through_call so the helper\n   can distinguish locals from operands in the spilled buffer. Document\n   as tech debt to be unified with call site metadata lookup.\n\n2. Add explicit guard in compile_batch to reject yielding functions\n   (effect.may_suspend()). Yield metadata is not propagated to shared\n   JitCode, so batch-compiled yielding functions would panic. Add\n   JitError::Yielding variant for graceful fallback.\n\n3. Fix build_closure_env_for_jit to handle variadic arity (AtLeast).\n   Replicate rest-arg collection logic from VM::populate_env. Fixes\n   potential environment corruption if JIT falls back to interpreter\n   for variadic functions.\n\n* jit: complete follow-up improvements for yield support\n\n1. Normalize signal helper parameter types: both elle_jit_has_exception\n   and elle_jit_has_signal now use u64 for vm parameter.\n\n2. Store call site metadata on JitCode: add CallSiteMeta struct and\n   call_sites field. Convert CallSiteInfo to CallSiteMeta during\n   compilation. Update elle_jit_yield_through_call to take call_site_index\n   and look up metadata from JitCode, matching elle_jit_yield pattern.\n\n3. Single shared spill slot per function: allocate one stack slot sized\n   to max spill requirement across all yield/call sites. Reuse at every\n   spill point instead of allocating per-point. Reduces frame size.\n\n4. Add layout invariant unit tests: verify JIT spill output matches\n   interpreter frame layout (params, locals, operands order). Tests\n   cover edge cases and value type preservation.\n\n* test: migrate behavioral property tests from proptest to Elle scripts\n\nMove 42 behavioral property tests that were using proptest for simple\nvalue checking into Elle test scripts. These tests don't need random\ninput generation — they're checking behavior, not algebraic invariants.\n\nMigrated:\n- matching.rs (4 tests) → tests/elle/matching.lisp\n- strings.rs (16 tests) → tests/elle/strings.lisp (appended)\n- fibers.rs (14 tests) → tests/elle/fibers.lisp\n- coroutines.rs (7 proptest blocks) → tests/elle/coroutines.lisp\n\nKept in Rust (true property tests): arithmetic, comparison, effects,\npath, reader, nanboxing, ffi (120 tests total).\n\nNet: −1,137 lines Rust proptest, +490 lines Elle test scripts.\n\n* fix: handle SIG_RESUME/SIG_PROPAGATE/SIG_CANCEL in JIT primitive signal dispatch\n\nThe JIT's jit_handle_primitive_signal panicked on signal 8 (SIG_RESUME)\nbecause it only handled SIG_OK/SIG_ERROR/SIG_HALT/SIG_YIELD/SIG_QUERY.\nWith the relaxed JIT gate allowing yielding closures, primitives like\nfiber/resume and coro/resume can now be called from JIT context and\nreturn VM-internal signals.\n\nAdd JIT-context fiber signal handlers (handle_fiber_resume_signal_jit,\nhandle_fiber_propagate_signal_jit, handle_fiber_cancel_signal_jit) to\nvm/fiber.rs that mirror the interpreter handlers but return u64 instead\nof pushing to fiber.stack. Wire them into jit_handle_primitive_signal.\n\nFixes #461\n\n* fix: use seal_all_blocks to handle LIR back-edges in JIT\n\nLIR can contain back-edges (e.g. while loops jump back to the condition\nblock). Eagerly sealing each LIR block on entry caused Cranelift to panic\nwhen a later block jumped to an already-sealed target. Replace per-block\nsealing with seal_all_blocks() after all blocks are translated.\n\n* perf: skip JIT profiling for primitives, bump CI threshold to 1.5\n\nPrimitives (closures without lir_function) can't be JIT-compiled, so\nprofiling them is pure overhead. Add guard to skip try_jit_call for\nprimitives. This eliminates the 20-30% regression on int_add and\nsymbol_interning benchmarks.\n\nAlso bump CI benchmark alert threshold from 1.2x to 1.5x to reduce\nnoise from minor fluctuations.",
+          "timestamp": "2026-03-06T06:50:10Z",
+          "tree_id": "afc8c4e7798046409554da0da3f750d6ee034b04",
+          "url": "https://github.com/elle-lisp/elle/commit/30e9fe6a363b2f487ea791de1ad533e968e710e1"
+        },
+        "date": 1772783106055,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parsing/simple_number",
+            "value": 143,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/list_literal",
+            "value": 1226,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/nested_expr",
+            "value": 2099,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/deep_nesting",
+            "value": 1271,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/large_list_100",
+            "value": 23014,
+            "range": "± 289",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/first_intern",
+            "value": 61,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/repeat_intern",
+            "value": 8,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/many_unique",
+            "value": 20000,
+            "range": "± 92",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/simple_arithmetic",
+            "value": 284252,
+            "range": "± 20831",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/conditional",
+            "value": 368013,
+            "range": "± 21814",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/nested_arithmetic",
+            "value": 421854,
+            "range": "± 26956",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/int_add",
+            "value": 708,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/mixed_arithmetic",
+            "value": 444,
+            "range": "± 54",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/comparison",
+            "value": 278,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/cons",
+            "value": 1060,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/first",
+            "value": 943,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/if_true",
+            "value": 702,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/nested_if",
+            "value": 5577,
+            "range": "± 591",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/simple",
+            "value": 534007,
+            "range": "± 17283",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/complex",
+            "value": 554716,
+            "range": "± 27213",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/10",
+            "value": 1669,
+            "range": "± 740",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/10",
+            "value": 890,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/50",
+            "value": 28256,
+            "range": "± 2150",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/50",
+            "value": 20207,
+            "range": "± 2625",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/100",
+            "value": 54243,
+            "range": "± 5591",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/100",
+            "value": 28520,
+            "range": "± 5722",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/500",
+            "value": 218134,
+            "range": "± 26145",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/500",
+            "value": 123144,
+            "range": "± 21074",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/value_clone",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/list_to_vec",
+            "value": 123,
+            "range": "± 0",
             "unit": "ns/iter"
           }
         ]
