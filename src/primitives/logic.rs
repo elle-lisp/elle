@@ -154,7 +154,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "assert",
         func: prim_assert,
-        effect: Effect::ffi_raises(),
+        effect: Effect::errors(),
         arity: Arity::Range(1, 2),
         doc: "Assert that value is truthy. Signals {:error :failed-assertion :message msg} if not. Returns value if truthy.",
         params: &["value", "message?"],
