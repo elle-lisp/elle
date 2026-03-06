@@ -23,9 +23,6 @@ tests/
 ├── unittests/          # Unit tests for individual modules
 │   ├── mod.rs          # Module declarations
 │   └── *.rs            # One file per module under test
-└── vm/                 # VM-specific tests (scope management, runtime behavior)
-    ├── mod.rs          # Module declarations
-    └── scope_test.rs   # ScopeStack and RuntimeScope tests
 ```
 
 In addition to the `tests/` directory:
@@ -113,22 +110,12 @@ APIs directly without going through the full compilation pipeline:
 
 Unit tests answer: "Does this Rust API behave correctly?"
 
-### VM tests (`tests/vm/`)
-
-Use for **VM runtime internals** that are below the integration level but above
-individual module unit tests:
-
-- `scope_test.rs` — ScopeStack push/pop, variable define/lookup/set,
-  shadowing, isolation, scope types
-
-VM tests answer: "Does the VM's internal machinery work correctly?"
-
 ### Inline tests (`src/**/mod.rs` with `#[cfg(test)]`)
 
 Use for **tests tightly coupled to implementation details**. These live next to
 the code they test and have access to private items. 58 modules have inline
 tests covering: lexer, parser, syntax conversion, expander, analyzer, lowerer,
-emitter, VM core, VM arithmetic, scope management, value representation,
+emitter, VM core, VM arithmetic, value representation,
 closures, fibers, effects, FFI (marshal, callback, loader, types, call),
 primitives (fibers, coroutines, FFI, process, JSON), JIT (compiler, dispatch,
 group, runtime), LSP (completion, definition, hover, references, rename,
@@ -361,7 +348,6 @@ cargo test test_name
 cargo test property::          # All property tests
 cargo test integration::       # All integration tests
 cargo test unittests::         # All unit tests
-cargo test vm::                # All VM tests
 
 # All tests in a specific file
 cargo test property::arithmetic::    # All arithmetic property tests
