@@ -5,6 +5,7 @@ pub mod bitwise;
 pub mod buffer;
 pub mod bytes;
 pub mod cell;
+pub mod chan;
 pub mod comparison;
 pub mod concurrency;
 pub mod convert;
