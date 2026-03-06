@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772783107180,
+  "lastUpdate": 1772810831816,
   "repoUrl": "https://github.com/elle-lisp/elle",
   "entries": {
     "Elle Benchmarks": [
@@ -1222,6 +1222,210 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_operations/list_to_vec",
             "value": 123,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "disruptek@users.noreply.github.com",
+            "name": "Smooth Operator",
+            "username": "disruptek"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5a897af2a4b543a8fa98748baf1860fd6baa64c",
+          "message": "Add chan/* primitives (crossbeam-channel wrapper for inter-fiber messaging) (#491)\n\n* Add chan/* primitives wrapping crossbeam-channel for inter-fiber messaging\n\n* docs: update AGENTS.md to document chan/* primitives\n\n* Migrate chan integration tests from Rust to Elle\n\nMove chan tests from tests/integration/chan.rs to tests/elle/chan.lisp,\nupdating test module registrations accordingly. This improves test\nmaintainability by keeping channel semantics tests in Elle itself.",
+          "timestamp": "2026-03-06T14:29:46Z",
+          "tree_id": "2c6b94669d469aeae8d7205bb6ce3a9eb31c5cab",
+          "url": "https://github.com/elle-lisp/elle/commit/a5a897af2a4b543a8fa98748baf1860fd6baa64c"
+        },
+        "date": 1772810831069,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parsing/simple_number",
+            "value": 159,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/list_literal",
+            "value": 1295,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/nested_expr",
+            "value": 2217,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/deep_nesting",
+            "value": 1349,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/large_list_100",
+            "value": 25112,
+            "range": "± 85",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/first_intern",
+            "value": 75,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/repeat_intern",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/many_unique",
+            "value": 17875,
+            "range": "± 298",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/simple_arithmetic",
+            "value": 256118,
+            "range": "± 35989",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/conditional",
+            "value": 307670,
+            "range": "± 28094",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/nested_arithmetic",
+            "value": 334113,
+            "range": "± 10831",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/int_add",
+            "value": 589,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/mixed_arithmetic",
+            "value": 457,
+            "range": "± 23",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/comparison",
+            "value": 288,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/cons",
+            "value": 1003,
+            "range": "± 36",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/first",
+            "value": 870,
+            "range": "± 26",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/if_true",
+            "value": 562,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/nested_if",
+            "value": 2655,
+            "range": "± 733",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/simple",
+            "value": 464094,
+            "range": "± 26146",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/complex",
+            "value": 508514,
+            "range": "± 36243",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/10",
+            "value": 1763,
+            "range": "± 79",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/10",
+            "value": 799,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/50",
+            "value": 22957,
+            "range": "± 4808",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/50",
+            "value": 9577,
+            "range": "± 639",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/100",
+            "value": 48277,
+            "range": "± 8762",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/100",
+            "value": 20196,
+            "range": "± 2697",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/500",
+            "value": 185867,
+            "range": "± 28155",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/500",
+            "value": 115441,
+            "range": "± 16806",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/value_clone",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/list_to_vec",
+            "value": 102,
             "range": "± 0",
             "unit": "ns/iter"
           }
