@@ -185,6 +185,13 @@ impl VM {
                     .and_then(|val| val.as_closure().cloned())
                     .and_then(|closure| closure.doc)
                     .and_then(|doc_val| doc_val.with_string(|s| s.to_string()));
+                // If not found in globals, check file-level locals (letrec model)
+                let user_doc = user_doc.or_else(|| {
+                    self.get_local_value_by_name(&name)
+                        .and_then(|val| val.as_closure().cloned())
+                        .and_then(|closure| closure.doc)
+                        .and_then(|doc_val| doc_val.with_string(|s| s.to_string()))
+                });
                 if let Some(doc_str) = user_doc {
                     (SIG_OK, Value::string(doc_str))
                 } else if let Some(doc) = self.docs.get(&name) {
@@ -340,6 +347,15 @@ impl VM {
                         }
                     }
                 }
+                // Also include file-level locals (letrec model)
+                let frame_base = self.current_frame_base();
+                for (&slot, name) in &self.local_names {
+                    let abs_idx = frame_base + slot as usize;
+                    if abs_idx < self.fiber.stack.len() {
+                        let val = self.unwrap_local_cell(self.fiber.stack[abs_idx]);
+                        fields.insert(TableKey::Keyword(name.clone()), val);
+                    }
+                }
                 (SIG_OK, Value::struct_from(fields))
             }
             _ => (
@@ -350,5 +366,33 @@ impl VM {
                 ),
             ),
         }
+    }
+
+    /// Look up a file-level local variable by name.
+    ///
+    /// Uses `self.local_names` (slot → name mapping from `compile_file`)
+    /// to find the slot, then reads the value from the stack. Unwraps
+    /// `LocalCell` for mutable bindings.
+    fn get_local_value_by_name(&self, name: &str) -> Option<Value> {
+        let frame_base = self.current_frame_base();
+        for (&slot, slot_name) in &self.local_names {
+            if slot_name == name {
+                let abs_idx = frame_base + slot as usize;
+                if abs_idx < self.fiber.stack.len() {
+                    return Some(self.unwrap_local_cell(self.fiber.stack[abs_idx]));
+                }
+            }
+        }
+        None
+    }
+
+    /// Unwrap a `LocalCell` to get the inner value, or return as-is.
+    fn unwrap_local_cell(&self, val: Value) -> Value {
+        if val.is_local_cell() {
+            if let Some(cell) = val.as_cell() {
+                return *cell.borrow();
+            }
+        }
+        val
     }
 }

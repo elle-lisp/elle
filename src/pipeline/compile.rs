@@ -192,10 +192,14 @@ pub fn compile_file(source: &str, symbols: &mut SymbolTable) -> Result<CompileRe
         .with_immediate_primitives(imm_prims);
     let lir_func = lowerer.lower(&hir)?;
 
+    // Extract local names before emitting (lowerer still has binding_to_slot)
+    let local_names = lowerer.local_names(symbols);
+
     // Emit bytecode
     let symbol_snapshot = symbols.all_names();
     let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
-    let bytecode = emitter.emit(&lir_func);
+    let mut bytecode = emitter.emit(&lir_func);
+    bytecode.local_names = local_names;
 
     Ok(CompileResult {
         bytecode,

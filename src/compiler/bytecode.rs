@@ -224,6 +224,10 @@ pub struct Bytecode {
     /// Bytecode offset → source location mapping for error reporting.
     /// Maps instruction offsets to their source locations.
     pub location_map: LocationMap,
+    /// Local slot index → variable name mapping.
+    /// Populated by `compile_file` for file-level letrec bindings.
+    /// Used by `(doc)` and `(environment)` to find locals by name.
+    pub local_names: std::collections::HashMap<u16, String>,
 }
 
 impl Bytecode {
@@ -234,6 +238,7 @@ impl Bytecode {
             inline_caches: std::collections::HashMap::new(),
             symbol_names: std::collections::HashMap::new(),
             location_map: LocationMap::new(),
+            local_names: std::collections::HashMap::new(),
         }
     }
 

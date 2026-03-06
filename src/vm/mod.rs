@@ -26,6 +26,7 @@ use std::rc::Rc;
 impl VM {
     pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
         self.location_map = bytecode.location_map.clone();
+        self.local_names = bytecode.local_names.clone();
         self.execute_bytecode(&bytecode.instructions, &bytecode.constants, None)
     }
 

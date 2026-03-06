@@ -1066,9 +1066,9 @@ fn test_decision_tree_deeply_nested() {
 fn test_decision_tree_match_in_loop() {
     // Match inside a loop — exercises repeated decision tree execution
     let result = eval_source(
-        "(def result (list))
+        "(var result (list))
          (each i (list 1 2 3)
-           (def result (cons (match i
+           (set result (cons (match i
                                (1 :one)
                                (2 :two)
                                (3 :three)
