@@ -314,6 +314,7 @@
 
 # Destructuring works on any compound type
 (def [a b c] [10 20 30])            # unpack a tuple into bindings
+(/ 1 0)
 (display "  [10 20 30] → a=") (display a) (display " b=") (display b) (display " c=") (print c)
 (assert-eq a 10 "tuple destructure: first")
 (assert-eq c 30 "tuple destructure: third")

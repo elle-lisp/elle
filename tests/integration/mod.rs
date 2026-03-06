@@ -134,6 +134,9 @@ mod environment {
 mod parameters {
     include!("parameters.rs");
 }
+mod ports {
+    include!("ports.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
