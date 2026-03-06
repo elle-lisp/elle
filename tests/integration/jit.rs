@@ -684,7 +684,7 @@ fn test_jit_rejects_yielding() {
 
     let compiler = JitCompiler::new().unwrap();
     let result = compiler.compile(&func, None);
-    assert!(matches!(result, Err(JitError::NotPure)));
+    assert!(matches!(result, Err(JitError::Yielding)));
 }
 
 #[test]
@@ -1837,7 +1837,7 @@ fn test_jit_rejects_yields_errors_effect() {
     let compiler = JitCompiler::new().unwrap();
     let result = compiler.compile(&func, None);
     assert!(
-        matches!(result, Err(JitError::NotPure)),
+        matches!(result, Err(JitError::Yielding)),
         "JIT should reject yields_errors effect: {:?}",
         result
     );
