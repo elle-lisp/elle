@@ -64,8 +64,8 @@ pub use lint::{
     diagnostics::{Diagnostic, Severity},
 };
 pub use pipeline::{
-    analyze, analyze_all, analyze_file, compile, compile_all, compile_file, eval, eval_all,
-    eval_file, AnalyzeResult, CompileResult,
+    analyze, analyze_file, compile, compile_file, eval, eval_all, eval_file, AnalyzeResult,
+    CompileResult,
 };
 pub use primitives::{init_stdlib, register_primitives};
 pub use reader::{read_str, Lexer, Reader};

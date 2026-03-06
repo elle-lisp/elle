@@ -79,7 +79,7 @@ bytecode. Error messages include file:line:col information.
 | `formatter` | Code formatting for Elle source |
 | `plugin` | Dynamic plugin loading for Rust cdylib primitives |
 | `path` | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
-| `pipeline` | Compilation entry points. Single-form: `compile`, `analyze`, `eval`. File-level (PRIMARY, Chunk 3): `compile_file`, `analyze_file`, `eval_file`. Deprecated (Chunk 3, removal in Chunk 6): `compile_all`, `analyze_all`, `eval_all`. See [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md). |
+| `pipeline` | Compilation entry points. Single-form: `compile`, `analyze`, `eval`. File-level: `compile_file`, `analyze_file`, `eval_file`. Multi-form convenience: `eval_all` (delegates to `compile_file`). See [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md). |
 | `error` | `LocationMap` for bytecode offset → source location mapping |
 
 ### The Value type

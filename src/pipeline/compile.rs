@@ -1,8 +1,6 @@
 //! Compilation pipeline: source -> bytecode.
 
 use super::cache;
-use super::fixpoint;
-use super::scan;
 use super::CompileResult;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, FileForm};
@@ -57,18 +55,14 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
     })
 }
 
-/// Compile multiple top-level forms with fixpoint effect inference.
+/// Compile multiple top-level forms sequentially.
 ///
-/// Uses fixpoint iteration to correctly infer effects for mutually recursive
-/// top-level defines. The algorithm:
-/// 1. Pre-scan all forms for `(def name (fn ...))` patterns
-/// 2. Seed `global_effects` with `Effect::none()` for all such defines (optimistic)
-/// 3. Analyze all forms, collecting actual inferred effects
-/// 4. If any effect changed, re-analyze with corrected effects
-/// 5. Repeat until stable (max 10 iterations)
-pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<CompileResult>, String> {
-    // Ensure caller's SymbolTable has primitive names interned so that
-    // SymbolIds match the cached PrimitiveMeta.
+/// Each form is compiled independently. Used internally by `init_stdlib`
+/// to load stdlib definitions as globals.
+pub(crate) fn compile_all(
+    source: &str,
+    symbols: &mut SymbolTable,
+) -> Result<Vec<CompileResult>, String> {
     intern_primitive_names(symbols);
 
     let syntaxes = read_syntax_all(source)?;
@@ -85,23 +79,15 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
         expanded_forms.push(expanded);
     }
 
-    let (global_effects, global_arities, immutable_globals) =
-        scan::prescan_forms(&expanded_forms, symbols);
-
-    let analysis_results = fixpoint::run_fixpoint(
-        &expanded_forms,
-        symbols,
-        &meta,
-        global_effects,
-        global_arities,
-        immutable_globals,
-        |a| mark_tail_calls(&mut a.hir),
-    )?;
-
-    // Lower and emit all forms
+    // Compile each form independently
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let mut results = Vec::new();
-    for analysis in analysis_results {
+    for form in &expanded_forms {
+        let mut analyzer =
+            Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+        let mut analysis = analyzer.analyze(form)?;
+        mark_tail_calls(&mut analysis.hir);
+
         let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
         let mut lowerer = Lowerer::new()
             .with_intrinsics(intrinsics.clone())

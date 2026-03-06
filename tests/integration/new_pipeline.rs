@@ -5,8 +5,7 @@
 
 use crate::common::eval_source;
 use elle::pipeline::compile;
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, VM};
+use elle::SymbolTable;
 
 /// Helper that compiles but doesn't execute (for testing compilation only)
 fn compiles(input: &str) -> bool {
@@ -328,24 +327,6 @@ fn test_bytecode_has_return() {
     assert!(last_instr.is_some(), "Bytecode should have instructions");
 }
 
-#[test]
-fn test_compile_all_multiple_forms() {
-    let mut symbols = SymbolTable::new();
-    let result = elle::compile_all("1 2 3", &mut symbols);
-    assert!(result.is_ok());
-    let compiled = result.unwrap();
-    assert_eq!(compiled.len(), 3);
-}
-
-#[test]
-fn test_compile_all_single_form() {
-    let mut symbols = SymbolTable::new();
-    let result = elle::compile_all("42", &mut symbols);
-    assert!(result.is_ok());
-    let compiled = result.unwrap();
-    assert_eq!(compiled.len(), 1);
-}
-
 // ============ Error Handling Tests ============
 
 #[test]
@@ -539,32 +520,14 @@ fn test_trace_vm_execution() {
     println!("Result: {:?}", result);
 
     // Also try with the non-begin version to compare
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-
-    // Define process
-    let code2a = r#"(def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))"#;
-    let results = elle::compile_all(code2a, &mut symbols).expect("compile failed");
-    for r in &results {
-        vm.execute(&r.bytecode).expect("exec failed");
-    }
-
-    // Define my-fold
-    let code2b = r#"(def my-fold (fn (f init lst)
+    let code2 = r#"
+        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
+        (def my-fold (fn (f init lst)
             (if (nil? lst)
                 init
-                (my-fold f (f init (first lst)) (rest lst)))))"#;
-    let results = elle::compile_all(code2b, &mut symbols).expect("compile failed");
-    for r in &results {
-        vm.execute(&r.bytecode).expect("exec failed");
-    }
-
-    // Call it
-    let code2c = r#"(my-fold process 0 (list 1))"#;
-    let results = elle::compile_all(code2c, &mut symbols).expect("compile failed");
-    for r in &results {
-        let res = vm.execute(&r.bytecode);
-        println!("Multi-form result: {:?}", res);
-    }
+                (my-fold f (f init (first lst)) (rest lst)))))
+        (my-fold process 0 (list 1))
+    "#;
+    let result2 = eval_source(code2);
+    println!("Multi-form result: {:?}", result2);
 }

@@ -1,6 +1,6 @@
 use elle::context::{clear_symbol_table, set_symbol_table};
 use elle::hir::HirKind;
-use elle::pipeline::{analyze, analyze_all, compile, compile_all, eval};
+use elle::pipeline::{analyze, compile, compile_file, eval};
 use elle::{register_primitives, SymbolTable, Value, VM};
 
 fn setup() -> (SymbolTable, VM) {
@@ -110,15 +110,6 @@ fn test_compile_cond() {
     let (mut symbols, _) = setup();
     let result = compile("(cond (true 1) (else 2))", &mut symbols);
     assert!(result.is_ok());
-}
-
-#[test]
-fn test_compile_all() {
-    let (mut symbols, _) = setup();
-    let result = compile_all("1 2 3", &mut symbols);
-    assert!(result.is_ok());
-    let compiled = result.unwrap();
-    assert_eq!(compiled.len(), 3);
 }
 
 #[test]
@@ -708,18 +699,6 @@ fn test_analyze_lambda() {
 }
 
 #[test]
-fn test_analyze_all_multiple_forms() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze_all("1 2 3", &mut symbols, &mut vm);
-    assert!(result.is_ok());
-    let analyses = result.unwrap();
-    assert_eq!(analyses.len(), 3);
-    assert!(matches!(analyses[0].hir.kind, HirKind::Int(1)));
-    assert!(matches!(analyses[1].hir.kind, HirKind::Int(2)));
-    assert!(matches!(analyses[2].hir.kind, HirKind::Int(3)));
-}
-
-#[test]
 fn test_analyze_with_let() {
     let (mut symbols, mut vm) = setup();
     let result = analyze("(let ((x 1) (y 2)) (+ x y))", &mut symbols, &mut vm);
@@ -738,12 +717,8 @@ fn test_mutual_recursion_effect_inference() {
 (def f (fn (x) (if (= x 0) 1 (g (- x 1)))))
 (def g (fn (x) (if (= x 0) 2 (f (- x 1)))))
 "#;
-    let results = compile_all(source, &mut symbols);
-    assert!(results.is_ok(), "Compilation should succeed");
-    let results = results.unwrap();
-    assert_eq!(results.len(), 2, "Should have 2 compiled forms");
-    // Both forms should compile successfully
-    // The key test is that they don't fail due to effect issues
+    let result = compile_file(source, &mut symbols);
+    assert!(result.is_ok(), "Compilation should succeed");
 }
 
 #[test]
@@ -755,17 +730,13 @@ fn test_mutual_recursion_execution() {
 (def g (fn (x) (if (= x 0) 2 (f (- x 1)))))
 (f 5)
 "#;
-    let results = compile_all(source, &mut symbols);
-    assert!(results.is_ok(), "Compilation should succeed");
-    let results = results.unwrap();
-
-    // Execute all forms
-    for result in &results {
-        let _ = vm.execute(&result.bytecode);
-    }
+    let result = compile_file(source, &mut symbols);
+    assert!(result.is_ok(), "Compilation should succeed");
+    let result = result.unwrap();
 
     // f(5) -> g(4) -> f(3) -> g(2) -> f(1) -> g(0) -> 2
-    // The last result should be 2
+    let val = vm.execute(&result.bytecode).unwrap();
+    assert_eq!(val, Value::int(2));
 }
 
 #[test]
@@ -776,21 +747,18 @@ fn test_mutual_recursion_effects_are_pure() {
 (def f (fn (x) (if (= x 0) 1 (g (- x 1)))))
 (def g (fn (x) (if (= x 0) 2 (f (- x 1)))))
 "#;
-    let results = compile_all(source, &mut symbols);
-    assert!(results.is_ok(), "Compilation should succeed");
-    let results = results.unwrap();
+    let result = compile_file(source, &mut symbols);
+    assert!(result.is_ok(), "Compilation should succeed");
+    let result = result.unwrap();
 
     // Check that the closures don't suspend
-    for (i, result) in results.iter().enumerate() {
-        for constant in &result.bytecode.constants {
-            if let Some(closure) = constant.as_closure() {
-                assert!(
-                    !closure.effect.may_suspend(),
-                    "Form {} closure should not suspend, got {:?}",
-                    i,
-                    closure.effect
-                );
-            }
+    for constant in &result.bytecode.constants {
+        if let Some(closure) = constant.as_closure() {
+            assert!(
+                !closure.effect.may_suspend(),
+                "Closure should not suspend, got {:?}",
+                closure.effect
+            );
         }
     }
 }
@@ -830,23 +798,20 @@ fn test_nqueens_functions_are_pure() {
       (list (reverse queens))
       (try-cols-helper n 0 queens row))))
 "#;
-    let results = compile_all(source, &mut symbols);
-    assert!(results.is_ok(), "Compilation should succeed");
-    let results = results.unwrap();
+    let result = compile_file(source, &mut symbols);
+    assert!(result.is_ok(), "Compilation should succeed");
+    let result = result.unwrap();
 
     // Check that all closures don't suspend
     let mut found_closures = 0;
-    for (i, result) in results.iter().enumerate() {
-        for constant in &result.bytecode.constants {
-            if let Some(closure) = constant.as_closure() {
-                found_closures += 1;
-                assert!(
-                    !closure.effect.may_suspend(),
-                    "Form {} closure should not suspend, got {:?}",
-                    i,
-                    closure.effect
-                );
-            }
+    for constant in &result.bytecode.constants {
+        if let Some(closure) = constant.as_closure() {
+            found_closures += 1;
+            assert!(
+                !closure.effect.may_suspend(),
+                "Closure should not suspend, got {:?}",
+                closure.effect
+            );
         }
     }
     assert_eq!(found_closures, 4, "Should have 4 closures");
@@ -1036,7 +1001,7 @@ fn test_const_function_set_error() {
 #[test]
 fn test_const_cross_form_set_error() {
     let (mut symbols, _) = setup();
-    let result = compile_all("(def x 42)\n(set x 99)", &mut symbols);
+    let result = compile_file("(def x 42)\n(set x 99)", &mut symbols);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("immutable"));
 }
@@ -1044,12 +1009,10 @@ fn test_const_cross_form_set_error() {
 #[test]
 fn test_const_cross_form_reference() {
     let (mut symbols, mut vm) = setup();
-    let results = compile_all("(def x 42)\n(+ x 1)", &mut symbols);
-    assert!(results.is_ok());
-    let results = results.unwrap();
-    for result in &results {
-        let _ = vm.execute(&result.bytecode);
-    }
+    let result = compile_file("(def x 42)\n(+ x 1)", &mut symbols);
+    assert!(result.is_ok());
+    let result = result.unwrap();
+    let _ = vm.execute(&result.bytecode);
 }
 
 #[test]

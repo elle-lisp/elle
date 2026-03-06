@@ -120,20 +120,10 @@ pub struct Analyzer<'a> {
     /// Maps SymbolId -> Effect for primitive functions
     /// Built from `register_primitive_effects` and passed in at construction
     primitive_effects: HashMap<SymbolId, Effect>,
-    /// Maps SymbolId -> Effect for user-defined global functions from previous forms.
-    /// This enables cross-form effect tracking in compile_all.
-    global_effects: HashMap<SymbolId, Effect>,
-    /// Effects of globally-defined functions in this form (for cross-form tracking)
-    /// Populated during analysis, extracted after analysis completes.
-    defined_global_effects: HashMap<SymbolId, Effect>,
     /// Arity environment: maps local function bindings to their arity.
     arity_env: HashMap<Binding, Arity>,
     /// Known arities of primitive functions, from PrimitiveMeta.
     primitive_arities: HashMap<SymbolId, Arity>,
-    /// Known arities of global functions, from cross-form scanning.
-    global_arities: HashMap<SymbolId, Arity>,
-    /// Arities defined during this analysis pass, for fixpoint iteration.
-    defined_global_arities: HashMap<SymbolId, Arity>,
     /// Bindings explicitly created by var/def forms (to distinguish from
     /// implicit global references when checking primitive arities).
     user_defined_globals: HashSet<Binding>,
@@ -141,10 +131,6 @@ pub struct Analyzer<'a> {
     current_effect_sources: EffectSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
     current_lambda_params: Vec<Binding>,
-    /// Immutable global bindings from previous forms (for cross-form const tracking)
-    immutable_globals: std::collections::HashSet<SymbolId>,
-    /// Immutable global bindings defined in this form (for cross-form tracking)
-    defined_immutable_globals: std::collections::HashSet<SymbolId>,
     /// Stack of active blocks for `break` targeting
     block_contexts: Vec<BlockContext>,
     /// Next block ID to allocate
@@ -187,17 +173,11 @@ impl<'a> Analyzer<'a> {
             parent_captures: Vec::new(),
             effect_env: HashMap::new(),
             primitive_effects,
-            global_effects: HashMap::new(),
-            defined_global_effects: HashMap::new(),
             arity_env: HashMap::new(),
             primitive_arities,
-            global_arities: HashMap::new(),
-            defined_global_arities: HashMap::new(),
             user_defined_globals: HashSet::new(),
             current_effect_sources: EffectSources::default(),
             current_lambda_params: Vec::new(),
-            immutable_globals: std::collections::HashSet::new(),
-            defined_immutable_globals: std::collections::HashSet::new(),
             block_contexts: Vec::new(),
             next_block_id: 0,
             fn_depth: 0,
@@ -206,39 +186,6 @@ impl<'a> Analyzer<'a> {
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
         analyzer
-    }
-
-    /// Set global effects from previous forms (for cross-form effect tracking)
-    pub fn set_global_effects(&mut self, global_effects: HashMap<SymbolId, Effect>) {
-        self.global_effects = global_effects;
-    }
-
-    /// Take the defined global effects (consumes them, for use after analysis)
-    pub fn take_defined_global_effects(&mut self) -> HashMap<SymbolId, Effect> {
-        std::mem::take(&mut self.defined_global_effects)
-    }
-
-    /// Set global arities from previous forms (for cross-form arity tracking)
-    pub fn set_global_arities(&mut self, arities: HashMap<SymbolId, Arity>) {
-        self.global_arities = arities;
-    }
-
-    /// Take the defined global arities (consumes them, for use after analysis)
-    pub fn take_defined_global_arities(&mut self) -> HashMap<SymbolId, Arity> {
-        std::mem::take(&mut self.defined_global_arities)
-    }
-
-    /// Set immutable globals from previous forms (for cross-form const tracking)
-    pub fn set_immutable_globals(
-        &mut self,
-        immutable_globals: std::collections::HashSet<SymbolId>,
-    ) {
-        self.immutable_globals = immutable_globals;
-    }
-
-    /// Take the defined immutable globals (consumes them, for use after analysis)
-    pub fn take_defined_immutable_globals(&mut self) -> std::collections::HashSet<SymbolId> {
-        std::mem::take(&mut self.defined_immutable_globals)
     }
 
     /// Analyze a syntax tree into HIR

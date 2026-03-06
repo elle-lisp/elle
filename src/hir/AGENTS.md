@@ -172,7 +172,7 @@ HIR (bindings are inline — no separate HashMap)
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | 25 | Re-exports |
-| `analyze/mod.rs` | ~560 | `Analyzer` struct, `ScopedBinding`, scope-aware resolution, `analyze_file_letrec`, `bind_primitives` |
+| `analyze/mod.rs` | ~500 | `Analyzer` struct, `ScopedBinding`, scope-aware resolution, `analyze_file_letrec`, `bind_primitives` |
 | `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
 | `analyze/binding.rs` | ~425 | Binding forms: `let`, `letrec`, `def`/`var`, `set` |
 | `analyze/destructure.rs` | ~215 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |

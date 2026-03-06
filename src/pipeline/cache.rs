@@ -15,7 +15,7 @@ use crate::vm::VM;
 ///
 /// - Prelude must be 100% defmacro (no runtime definitions)
 /// - Primitives must be registered before any pipeline function call
-/// - Pipeline functions are not re-entrant (no nested compile/compile_all)
+/// - Pipeline functions are not re-entrant (no nested compile calls)
 /// - Primitive registration order is deterministic (ALL_TABLES)
 struct CompilationCache {
     /// VM with primitives registered. Fiber always reset between uses.
@@ -73,7 +73,7 @@ pub(super) fn get_compilation_cache() -> (*mut VM, Expander, PrimitiveMeta) {
 
 /// Get a cloned Expander and PrimitiveMeta from the cache without
 /// borrowing the cached VM. Used by functions that have their own VM
-/// (eval, analyze, analyze_all).
+/// (eval, analyze, analyze_file).
 pub(super) fn get_cached_expander_and_meta() -> (Expander, PrimitiveMeta) {
     COMPILATION_CACHE.with(|cache| {
         let mut cache_ref = cache.borrow_mut();

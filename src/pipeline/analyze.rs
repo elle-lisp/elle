@@ -2,8 +2,6 @@
 
 use super::cache;
 use super::compile::classify_form;
-use super::fixpoint;
-use super::scan;
 use super::AnalyzeResult;
 use crate::hir::Analyzer;
 use crate::primitives::intern_primitive_names;
@@ -27,44 +25,6 @@ pub fn analyze(
     let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let analysis = analyzer.analyze(&expanded)?;
     Ok(AnalyzeResult { hir: analysis.hir })
-}
-
-/// Analyze multiple top-level forms without generating bytecode.
-/// Uses fixpoint iteration for effect inference (same as compile_all).
-pub fn analyze_all(
-    source: &str,
-    symbols: &mut SymbolTable,
-    vm: &mut VM,
-) -> Result<Vec<AnalyzeResult>, String> {
-    let syntaxes = read_syntax_all(source)?;
-
-    let (mut expander, meta) = cache::get_cached_expander_and_meta();
-
-    // Expand all forms first
-    let mut expanded_forms = Vec::new();
-    for syntax in syntaxes {
-        let expanded = expander.expand(syntax, symbols, vm)?;
-        expanded_forms.push(expanded);
-    }
-
-    let (global_effects, global_arities, immutable_globals) =
-        scan::prescan_forms(&expanded_forms, symbols);
-
-    let analysis_results = fixpoint::run_fixpoint(
-        &expanded_forms,
-        symbols,
-        &meta,
-        global_effects,
-        global_arities,
-        immutable_globals,
-        |_| {},
-    )?;
-
-    // Convert to AnalyzeResult
-    Ok(analysis_results
-        .into_iter()
-        .map(|a| AnalyzeResult { hir: a.hir })
-        .collect())
 }
 
 /// Analyze a file as a single synthetic letrec (no bytecode).

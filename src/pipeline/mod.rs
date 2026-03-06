@@ -6,13 +6,14 @@ mod analyze;
 mod cache;
 mod compile;
 mod eval;
-mod fixpoint;
-mod scan;
 
 // Re-export public API
-pub use analyze::{analyze, analyze_all, analyze_file};
-pub use compile::{compile, compile_all, compile_file};
+pub use analyze::{analyze, analyze_file};
+pub use compile::{compile, compile_file};
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
+
+// Internal-only: used by init_stdlib
+pub(crate) use compile::compile_all;
 
 /// Compilation result
 #[derive(Debug)]

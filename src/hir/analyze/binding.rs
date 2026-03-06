@@ -368,7 +368,6 @@ impl<'a> Analyzer<'a> {
         let name = items[1]
             .as_symbol()
             .ok_or_else(|| format!("{}: {} name must be a symbol", span, form))?;
-        let sym = self.symbols.intern(name);
 
         // Check if we're inside a function scope
         let in_function = self.scopes.iter().any(|s| s.is_function);
@@ -441,7 +440,6 @@ impl<'a> Analyzer<'a> {
 
             if immutable {
                 binding.mark_immutable();
-                self.defined_immutable_globals.insert(sym);
             }
 
             // Seed effect_env and arity_env for lambda forms so self-recursive calls
@@ -453,7 +451,6 @@ impl<'a> Analyzer<'a> {
                     if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
                         let arity = Self::arity_from_syntax_params(params_syn);
                         self.arity_env.insert(binding, arity);
-                        self.defined_global_arities.insert(sym, arity);
                     }
                 }
             }
@@ -462,7 +459,6 @@ impl<'a> Analyzer<'a> {
             let value = self.analyze_expr(&items[2])?;
 
             // Update effect_env and arity_env with the actual inferred values
-            // Also record in defined_global_effects/arities for cross-form tracking
             if let HirKind::Lambda {
                 params: lambda_params,
                 num_required,
@@ -472,11 +468,9 @@ impl<'a> Analyzer<'a> {
             } = &value.kind
             {
                 self.effect_env.insert(binding, *inferred_effect);
-                self.defined_global_effects.insert(sym, *inferred_effect);
                 let arity =
                     Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
                 self.arity_env.insert(binding, arity);
-                self.defined_global_arities.insert(sym, arity);
             }
 
             Ok(Hir::new(
@@ -911,12 +905,8 @@ impl<'a> Analyzer<'a> {
         let target = match self.lookup(name, items[1].scopes.as_slice()) {
             Some(binding) => binding,
             None => {
-                // Treat as global reference (may have been defined in a previous form)
+                // Treat as global reference
                 let sym = self.symbols.intern(name);
-                // Check if this was declared const in a previous form
-                if self.immutable_globals.contains(&sym) {
-                    return Err(format!("{}: cannot set immutable binding '{}'", span, name));
-                }
                 Binding::new(sym, BindingScope::Global)
             }
         };
