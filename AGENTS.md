@@ -102,7 +102,7 @@ bytecode. Error messages include file:line:col information.
 | `formatter` | Code formatting for Elle source |
 | `plugin` | Dynamic plugin loading for Rust cdylib primitives |
 | `path` | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
-| `pipeline` | Compilation entry points (`compile`, `analyze`, `eval`). See [`docs/pipeline.md`](docs/pipeline.md) |
+| `pipeline` | Compilation entry points. Single-form: `compile`, `analyze`, `eval`. File-level (Chunk 1): `compile_file`, `analyze_file`, `eval_file`. Deprecated: `compile_all`, `analyze_all`, `eval_all`. See [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md). |
 | `error` | `LocationMap` for bytecode offset → source location mapping |
 
 ### The Value type

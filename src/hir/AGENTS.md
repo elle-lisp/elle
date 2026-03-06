@@ -32,6 +32,14 @@ Does NOT:
 | `HirLinter` | HIR-based linter producing Diagnostics (no constructor args) |
 | `extract_symbols_from_hir` | Builds SymbolIndex from HIR (2 args: hir, symbols) |
 
+### Analyzer methods
+
+| Method | Purpose |
+|--------|---------|
+| `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR |
+| `analyze_file_letrec(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a list of top-level forms as a synthetic letrec. Classifies each form as `Def` (immutable), `Var` (mutable), or `Expr` (gensym-named dummy binding). Two-pass analysis: Pass 1 pre-binds all names, Pass 2 analyzes initializers sequentially. Returns a single `HirKind::Letrec` node. |
+| `bind_primitives(&mut self, hir: Hir) -> Hir` | Wrap a file's letrec in an outer scope that binds all registered primitives as immutable Global bindings. Primitives are visible to all file-level code but can be shadowed by file-level `def` bindings. |
+
 ## Data flow
 
 ```
@@ -157,12 +165,28 @@ HIR (bindings are inline — no separate HashMap)
        lowerer emits `PushParamFrame` before evaluating bindings, stores them
        in the frame, then emits `PopParamFrame` after the body.
 
+17. **Files compile to a single synthetic letrec.** `analyze_file_letrec`
+    transforms a list of top-level forms into a single `HirKind::Letrec`.
+    Each form is classified: `def` → immutable binding, `var` → mutable
+    binding, bare expression → gensym-named dummy binding. Two-pass analysis
+    pre-binds all names (enabling mutual recursion), then analyzes initializers
+    sequentially. The letrec body is the last binding's name (or a gensym if
+    the last form was a bare expression). This replaces the old model of
+    independent top-level forms connected by mutable globals.
+
+18. **Primitives are pre-bound as immutable Global bindings.** `bind_primitives`
+    wraps the file's letrec in an outer scope containing all registered
+    primitives. Primitives are `BindingScope::Global` with `mark_immutable()`
+    set. File-level `def` bindings shadow primitives. The lowerer emits
+    `LoadGlobal` for both, but compile-time checks (e.g., `(set + 42)` is
+    an error) use the `Binding` identity.
+
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | 25 | Re-exports |
-| `analyze/mod.rs` | ~560 | `Analyzer` struct, `ScopedBinding`, scope-aware resolution |
+| `analyze/mod.rs` | ~560 | `Analyzer` struct, `ScopedBinding`, scope-aware resolution, `analyze_file_letrec`, `bind_primitives` |
 | `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
 | `analyze/binding.rs` | ~425 | Binding forms: `let`, `letrec`, `def`/`var`, `set` |
 | `analyze/destructure.rs` | ~215 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |

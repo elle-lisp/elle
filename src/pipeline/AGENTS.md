@@ -1,120 +1,156 @@
 # pipeline
 
-Compilation entry points: orchestrate the full pipeline from source to bytecode or value.
+Compilation entry points: source text → bytecode or HIR.
 
 ## Responsibility
 
-Provide high-level functions that coordinate the compilation pipeline:
-- **`analyze()`** — Source → HIR (no bytecode)
-- **`analyze_all()`** — Multiple forms → HIR (with fixpoint effect inference)
-- **`compile()`** — Source → Bytecode
-- **`compile_all()`** — Multiple forms → Bytecode (with fixpoint effect inference)
-- **`eval()`** — Source → Value (compile + execute)
-- **`eval_all()`** — Multiple forms → Value (compile + execute)
-- **`eval_syntax()`** — Syntax → Value (for macro body evaluation)
+Orchestrate the full compilation pipeline:
+- Reader: source text → Syntax
+- Expander: Syntax → expanded Syntax (macro expansion)
+- Analyzer: expanded Syntax → HIR (binding resolution, effect inference)
+- Lowerer: HIR → LIR (register allocation, basic blocks)
+- Emitter: LIR → Bytecode (instruction encoding)
+- VM: Bytecode → Value (execution)
 
 Does NOT:
 - Parse source (that's `reader`)
-- Expand macros (that's `syntax/expand`)
-- Analyze bindings (that's `hir/analyze`)
-- Lower to LIR (that's `lir/lower`)
-- Emit bytecode (that's `lir/emit`)
+- Expand macros (that's `syntax`)
+- Analyze bindings (that's `hir`)
+- Generate code (that's `lir` and `compiler`)
 - Execute bytecode (that's `vm`)
 
-## Key types
+## Interface
 
-| Type | Purpose |
-|------|---------|
-| `CompileResult` | Bytecode + warnings |
-| `AnalyzeResult` | HIR (no bytecode) |
+| Function | Purpose |
+|----------|---------|
+| `compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | Compile a single expression to bytecode. Returns `CompileResult` with bytecode and warnings. |
+| `compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<CompileResult>, String>` | Compile multiple top-level forms with fixpoint effect inference. Returns one `CompileResult` per form. **Deprecated in Chunk 1**: use `compile_file` instead. |
+| `compile_file(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | Compile a file as a single synthetic letrec. All top-level forms are analyzed together, enabling mutual recursion. Returns a single `CompileResult`. |
+| `analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<AnalyzeResult, String>` | Analyze a single expression to HIR (no bytecode). Used by linter and LSP. |
+| `analyze_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Vec<AnalyzeResult>, String>` | Analyze multiple top-level forms to HIR with fixpoint effect inference. Returns one `AnalyzeResult` per form. **Deprecated in Chunk 1**: use `analyze_file` instead. |
+| `analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<AnalyzeResult, String>` | Analyze a file as a single synthetic letrec (no bytecode). Used by linter and LSP for file-level analysis. |
+| `eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute a single expression. Returns the result value. |
+| `eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute multiple top-level forms sequentially. Returns the value of the last form. **Deprecated in Chunk 1**: use `eval_file` instead. |
+| `eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute a file as a single synthetic letrec. Returns the value of the last expression. |
+| `eval_syntax(syntax: Syntax, expander: &mut Expander, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute a pre-parsed Syntax tree. Used internally by macro expansion. |
 
 ## Data flow
 
 ```
-Source code
+Source text
     │
-    ├─► Reader → Syntax
+    ▼
+Reader (read_syntax / read_syntax_all)
     │
-    ├─► Expander → Syntax (expanded)
+    ▼
+Syntax (one or many)
     │
-    ├─► Analyzer → HIR
+    ▼
+Expander (macro expansion, cached VM)
     │
-    ├─► (optional) Lowerer → LIR
+    ▼
+Expanded Syntax (one or many)
     │
-    ├─► (optional) Emitter → Bytecode
+    ├─► (compile_file / analyze_file / eval_file)
+    │   │
+    │   ▼
+    │   Analyzer.analyze_file_letrec (synthetic letrec)
+    │   │
+    │   ▼
+    │   Analyzer.bind_primitives (wrap in primitive scope)
+    │   │
+    │   ▼
+    │   HIR (single Letrec node)
     │
-    └─► (optional) VM → Value
+    └─► (compile_all / analyze_all / eval_all) [DEPRECATED]
+        │
+        ▼
+        Fixpoint iteration (effect inference)
+        │
+        ▼
+        Vec<HIR> (one per form)
+    │
+    ▼
+Lowerer (HIR → LIR)
+    │
+    ▼
+Emitter (LIR → Bytecode)
+    │
+    ▼
+Bytecode
+    │
+    ▼
+VM (execution)
+    │
+    ▼
+Value
 ```
 
-## Fixpoint iteration for effect inference
+## File-as-letrec model (Chunk 1)
 
-`compile_all()` and `analyze_all()` use fixpoint iteration to correctly infer effects for mutually recursive top-level defines:
+The new model compiles a file to a **single compilation unit** instead of
+a sequence of independent forms:
 
-1. **Pre-scan** all forms for `(def name (fn ...))` patterns via `scan::prescan_forms()`
-2. **Seed** `global_effects` with `Effect::inert()` for all such defines (optimistic)
-3. **Analyze** all forms, collecting actual inferred effects via `fixpoint::run_fixpoint()`
-4. **If any effect changed**, re-analyze with corrected effects
-5. **Repeat** until stable (max 10 iterations)
+1. **Expand all forms** — macro expansion is idempotent
+2. **Classify forms** — each form is `Def` (immutable), `Var` (mutable), or `Expr` (gensym-named)
+3. **Analyze as letrec** — `Analyzer.analyze_file_letrec` does two-pass analysis:
+    - Pass 1: pre-bind all names (enables mutual recursion)
+    - Pass 2: analyze initializers sequentially
+4. **Bind primitives** — `Analyzer.bind_primitives` wraps the letrec in an outer scope
+    containing all registered primitives as immutable Global bindings
+5. **Lower and emit** — standard LIR → Bytecode pipeline
 
-This ensures that mutually recursive functions have correct effect annotations before lowering.
+**Key differences from `compile_all`:**
+- Single `CompileResult` instead of `Vec<CompileResult>`
+- All forms analyzed together (mutual recursion works)
+- No fixpoint iteration needed (letrec pre-binding eliminates it)
+- Primitives are lexical bindings, not just globals
+- File's last expression is the return value
 
-## Macro expansion caching
+## Dependents
 
-The pipeline uses a thread-local cache for macro expansion:
+- `main.rs` — CLI file execution uses `eval_file`
+- `primitives/import.rs` — module loading uses `compile_file`
+- `lsp/state.rs` — file analysis uses `analyze_file`
+- `lint/cli.rs` — linting uses `analyze_file`
 
-- **`cache::get_cached_expander_and_meta()`** — Returns a cached `Expander` + `PrimitiveMeta` (effects + arities)
-- **`cache::get_compilation_cache()`** — Returns a cached VM pointer + `Expander` + `PrimitiveMeta` for compilation
+## Invariants
 
-The cached VM is used only for macro body evaluation. Macro side effects don't persist beyond compilation.
+1. **`compile` and `eval` are single-form entry points.** They parse a single
+    expression, expand it, analyze it, and compile/execute it. No fixpoint
+    iteration. Used for REPL and macro body evaluation.
 
-## Symbol table context
+2. **`compile_file`, `analyze_file`, `eval_file` are file-level entry points.**
+    They parse all top-level forms, expand them, classify them, and analyze
+    them as a single synthetic letrec via `Analyzer.analyze_file_letrec`.
+    Used for file execution and module loading.
 
-The pipeline requires thread-local context pointers for macro expansion:
+3. **`compile_all`, `analyze_all`, `eval_all` are deprecated.** They use
+    fixpoint iteration and return `Vec<CompileResult>` / `Vec<AnalyzeResult>`.
+    Callers should migrate to the file-as-letrec model.
 
-- **`set_vm_context(vm_ptr)`** — Set the current VM for macro body evaluation
-- **`set_symbol_table(symbols_ptr)`** — Set the current SymbolTable for symbol interning during macros
+4. **Primitives are pre-bound in file-level analysis.** `Analyzer.bind_primitives`
+    wraps the file's letrec in an outer scope containing all registered primitives.
+    This enables compile-time checks (e.g., `(set + 42)` is an error) and
+    effect/arity tracking via `Binding` identity.
 
-These are set by the caller (e.g., `tests/common/mod.rs::eval_source()`) and must be cleared after use to avoid affecting other tests.
+5. **File return value is the last expression.** If the last form is a `def`/`var`,
+    the file returns the binding's name. If the last form is a bare expression,
+    the file returns the expression's value. For empty files, the return value
+    is `nil`.
+
+6. **Macro expansion is cached.** The `cache` module maintains a thread-local
+    `Expander` and `VM` for macro expansion. This avoids re-parsing the prelude
+    and re-initializing the VM on every compilation.
 
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | ~30 | Re-exports and type definitions |
-| `analyze.rs` | ~65 | `analyze()` and `analyze_all()` entry points |
-| `compile.rs` | ~120 | `compile()` and `compile_all()` entry points |
-| `eval.rs` | ~95 | `eval()`, `eval_all()`, `eval_syntax()` entry points |
-| `cache.rs` | ~100 | Thread-local caching for Expander and VM |
-| `scan.rs` | ~150 | Pre-scanning for global defines and arities |
-| `fixpoint.rs` | ~200 | Fixpoint iteration for effect inference |
-
-## Invariants
-
-1. **Primitive names must be interned before compilation.** Call `intern_primitive_names(symbols)` at the start of `compile()` and `compile_all()` to ensure SymbolIds match the cached `PrimitiveMeta`.
-
-2. **Symbol table context must be set for macro expansion.** Call `set_symbol_table()` before macro expansion and clear it afterward.
-
-3. **VM context must be set for macro body evaluation.** Call `set_vm_context()` before macro expansion and clear it afterward.
-
-4. **Fixpoint iteration is bounded.** Max 10 iterations to prevent infinite loops. If effects don't stabilize, compilation fails.
-
-5. **Macro side effects don't persist.** The cached VM used for macro expansion is separate from the caller's VM. Macro side effects (e.g., `(print "hello")`) don't affect the caller's VM state.
-
-6. **Tail calls are marked post-analysis.** After HIR analysis, `mark_tail_calls()` is called to identify tail positions. This must happen before lowering.
-
-7. **Intrinsics are built per-compilation.** `build_intrinsics()` and `build_immediate_primitives()` are called during lowering to specialize operators based on the current symbol table.
-
-## When to modify
-
-- **Adding a new compilation phase**: Add a new function in the appropriate file (`analyze.rs`, `compile.rs`, `eval.rs`)
-- **Changing fixpoint iteration**: Update `fixpoint.rs` and `scan.rs`
-- **Changing caching strategy**: Update `cache.rs`
-- **Changing symbol table handling**: Update all entry points to ensure context is set/cleared correctly
-
-## Common pitfalls
-
-- **Forgetting to intern primitive names**: If SymbolIds don't match `PrimitiveMeta`, effect and arity tracking fails
-- **Not setting symbol table context**: Macros that use `gensym` will fail if context is not set
-- **Not clearing context after use**: Leaving context pointers set can affect subsequent tests or compilations
-- **Not calling `mark_tail_calls()`**: Tail call optimization is skipped if this is not called
-- **Not building intrinsics**: Operator specialization is skipped if intrinsics are not built
+| `mod.rs` | ~30 | Re-exports, `CompileResult`, `AnalyzeResult` |
+| `compile.rs` | ~120 | `compile`, `compile_all` (deprecated), `compile_file` (new) |
+| `analyze.rs` | ~65 | `analyze`, `analyze_all` (deprecated), `analyze_file` (new) |
+| `eval.rs` | ~100 | `eval`, `eval_all` (deprecated), `eval_file` (new), `eval_syntax` |
+| `cache.rs` | ~50 | Thread-local `Expander` and `VM` caching for macro expansion |
+| `fixpoint.rs` | ~100 | Fixpoint iteration for effect/arity inference (used by `compile_all`) |
+| `scan.rs` | ~80 | Pre-scanning forms for `def (name (fn ...))` patterns (used by `compile_all`) |

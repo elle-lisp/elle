@@ -5,6 +5,188 @@ use crate::common::eval_source;
 use elle::Value;
 
 // ============================================================================
+// SECTION 0: File-as-letrec pipeline (eval_file, compile_file, analyze_file)
+// ============================================================================
+
+/// Helper: evaluate source through the file-as-letrec pipeline.
+fn eval_file_source(input: &str) -> Result<Value, String> {
+    use elle::context::{set_symbol_table, set_vm_context};
+    use elle::{register_primitives, SymbolTable, VM};
+
+    let mut vm = VM::new();
+    let mut symbols = SymbolTable::new();
+    let _meta = register_primitives(&mut vm, &mut symbols);
+    set_vm_context(&mut vm as *mut VM);
+    set_symbol_table(&mut symbols as *mut SymbolTable);
+    let result = elle::eval_file(input, &mut symbols, &mut vm);
+    set_vm_context(std::ptr::null_mut());
+    result
+}
+
+/// Helper: compile source through the file-as-letrec pipeline.
+fn compile_file_source(input: &str) -> Result<elle::CompileResult, String> {
+    use elle::{register_primitives, SymbolTable, VM};
+
+    let mut _vm = VM::new();
+    let mut symbols = SymbolTable::new();
+    let _meta = register_primitives(&mut _vm, &mut symbols);
+    elle::compile_file(input, &mut symbols)
+}
+
+#[test]
+fn test_file_single_def() {
+    // A file with a single def returns the binding's value.
+    assert_eq!(eval_file_source("(def x 42) x").unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_file_multiple_defs() {
+    // Multiple defs, last expression is the return value.
+    assert_eq!(
+        eval_file_source("(def x 42) (def y (+ x 1)) y").unwrap(),
+        Value::int(43)
+    );
+}
+
+#[test]
+fn test_file_mutual_recursion() {
+    // Mutual recursion between top-level defs works because letrec
+    // pre-binds all names.
+    let code = r#"
+        (def f (fn () (g)))
+        (def g (fn () 42))
+        (f)
+    "#;
+    assert_eq!(eval_file_source(code).unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_file_side_effect_ordering() {
+    // Side effects interleave correctly: initializers run sequentially.
+    let code = r#"
+        (var log @[])
+        (def a (begin (push log 1) 1))
+        (def b (begin (push log 2) 2))
+        log
+    "#;
+    let result = eval_file_source(code).unwrap();
+    // log should be @[1, 2]
+    let items = result.as_array().expect("expected array");
+    let items = items.borrow();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0], Value::int(1));
+    assert_eq!(items[1], Value::int(2));
+}
+
+#[test]
+fn test_file_def_immutability() {
+    // def bindings are immutable — (set x ...) on a def should fail.
+    let result = compile_file_source("(def x 1) (set x 2)");
+    assert!(result.is_err(), "expected compile error for set on def");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("immutable"),
+        "error should mention immutable: {}",
+        err
+    );
+}
+
+#[test]
+fn test_file_var_mutability() {
+    // var bindings are mutable.
+    assert_eq!(
+        eval_file_source("(var x 1) (set x 2) x").unwrap(),
+        Value::int(2)
+    );
+}
+
+#[test]
+fn test_file_var_set_from_later_expression() {
+    // var can be set from a later bare expression.
+    assert_eq!(
+        eval_file_source("(var count 0) (set count (+ count 1)) count").unwrap(),
+        Value::int(1)
+    );
+}
+
+#[test]
+fn test_file_primitive_immutability() {
+    // Primitives are immutable — (set + 42) should fail.
+    let result = compile_file_source("(set + 42)");
+    assert!(
+        result.is_err(),
+        "expected compile error for set on primitive"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("immutable"),
+        "error should mention immutable: {}",
+        err
+    );
+}
+
+#[test]
+fn test_file_primitive_shadowing() {
+    // File-level def can shadow a primitive.
+    assert_eq!(
+        eval_file_source("(def cons 42) cons").unwrap(),
+        Value::int(42)
+    );
+}
+
+#[test]
+fn test_file_empty() {
+    // Empty file returns nil.
+    assert_eq!(eval_file_source("").unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_file_single_bare_expression() {
+    // A single bare expression is the return value.
+    assert_eq!(eval_file_source("(+ 1 2)").unwrap(), Value::int(3));
+}
+
+#[test]
+fn test_file_destructuring_def() {
+    // Destructuring def at file level.
+    assert_eq!(
+        eval_file_source("(def (a b) (list 10 20)) (+ a b)").unwrap(),
+        Value::int(30)
+    );
+}
+
+#[test]
+fn test_file_primitives_accessible() {
+    // Primitives like + are accessible as lexical bindings.
+    assert_eq!(eval_file_source("(+ 1 2 3)").unwrap(), Value::int(6));
+}
+
+#[test]
+fn test_file_last_def_is_return() {
+    // When the last form is a def, the file returns the def's value.
+    assert_eq!(eval_file_source("(def x 42)").unwrap(), Value::int(42));
+}
+
+#[test]
+fn test_file_compile_produces_single_result() {
+    // compile_file returns a single CompileResult, not a Vec.
+    let result = compile_file_source("(def x 1) (def y 2) (+ x y)");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_file_analyze_produces_single_result() {
+    // analyze_file returns a single AnalyzeResult.
+    use elle::{register_primitives, SymbolTable, VM};
+
+    let mut vm = VM::new();
+    let mut symbols = SymbolTable::new();
+    let _meta = register_primitives(&mut vm, &mut symbols);
+    let result = elle::analyze_file("(def x 1) (def y 2)", &mut symbols, &mut vm);
+    assert!(result.is_ok());
+}
+
+// ============================================================================
 // SECTION 1: Immutable captures (def) — no cell wrapping
 // ============================================================================
 
