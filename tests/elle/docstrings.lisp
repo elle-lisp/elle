@@ -3,7 +3,7 @@
 # Tests for the (doc name) primitive and docstring extraction from function definitions.
 # Migrated from tests/integration/docstrings.rs.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # === User-defined docstrings ===
 

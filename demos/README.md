@@ -30,7 +30,7 @@ Elle is designed with Janet ergonomics in mind. These demos allow us to:
 
 ## Demo Categories
 
-### N-Queens Problem (`./nqueens/`)
+### [N-Queens Problem](nqueens/)
 
 A classic backtracking algorithm that solves the N-Queens chess problem. Tests:
 - **Recursion depth** and tail-call patterns
@@ -43,10 +43,10 @@ A classic backtracking algorithm that solves the N-Queens chess problem. Tests:
 |----------|-----|-----|--------|
 | Chez Scheme | 2 ✓ | 92 ✓ | Working |
 | SBCL | 2 ✓ | 92 ✓ | Working |
-| Janet | 2 ✓ | 92 ✓ | Fixed in #158 |
-| Elle | 2 ✓ | 92 ✓ | Fixed |
+| Janet | 2 ✓ | 92 ✓ | Working |
+| Elle | 2 ✓ | 92 ✓ | Working |
 
-### Matrix Operations (`./matrix-ops/`)
+### [Matrix Operations](matrix-ops/)
 
 Pure Lisp matrix operations testing numeric computation and performance. Tests:
 - **Dense matrix representation** (array of arrays, 2D arrays)
@@ -66,14 +66,14 @@ Pure Lisp matrix operations testing numeric computation and performance. Tests:
 - Chez 256x256 matrix multiply: ~128ms
 - Chez LU decomposition: ~0.88ms
 
-### AWS SigV4 Signing (`./aws-sigv4/`)
+### [AWS SigV4 Signing](aws-sigv4/)
 
 AWS API authentication implementation testing string manipulation, datetime handling, and cryptographic operations. Tests:
 - **Datetime parsing and formatting** (ISO 8601, AWS format YYYYMMDDTHHMMSSZ)
 - **String manipulation** (canonicalization, padding, formatting)
 - **URL/URI encoding** (percent encoding for query parameters)
 - **Hex conversion** (bytevector to hex string)
-- **FFI requirements** (cryptographic hashing - SHA256, HMAC-SHA256)
+- **Cryptographic hashing** (SHA256, HMAC-SHA256 via crypto plugin)
 
 **Status:**
 | Language | Parsing | Encoding | Formatting | Hashing | Status |
@@ -81,12 +81,12 @@ AWS API authentication implementation testing string manipulation, datetime hand
 | Chez Scheme | ✓ | ✓ | ✓ | ✗ (FFI) | Partial |
 | SBCL | - | - | - | - | Planned |
 | Janet | - | - | - | - | Planned |
-| Elle | - | - | - | - | Planned |
+| Elle | ✓ | ✓ | ✓ | ✓ | Working |
 
 **What This Reveals:**
 - How well each Lisp handles string operations
 - Need for datetime libraries and utilities
-- FFI integration for cryptographic functions
+- Cryptographic capabilities (native plugin vs FFI)
 - Real-world API authentication patterns
 
 ## Running the Demos
@@ -157,24 +157,6 @@ Date (YYYYMMDD): 20230208
 DateTime (YYYYMMDDTHHmmSSZ): 20230208T153045Z
 ```
 
-## Known Issues
-
-### ✓ FIXED: Janet Bug #155: Array Accumulation in Recursion
-Janet's `array/concat` in recursive backtracking contexts failed to accumulate solutions.
-- File: `nqueens/nqueens.janet`
-- Issue: [#155](https://github.com/elle-lisp/elle/issues/155)
-- Fix: [PR #158](https://github.com/elle-lisp/elle/pull/158) - Corrected queen array ordering
-- Previous Impact: All test sizes returned 0 solutions
-- Current Status: All test sizes return correct solution counts
-
-### ✓ FIXED: Elle Bug #154: Incomplete Solution Search
-Elle now correctly accumulates all solutions in recursive backtracking.
-- File: `nqueens/nqueens.lisp`
-- Issue: [#154](https://github.com/elle-lisp/elle/issues/154)
-- Fix: Provided working implementation that correctly uses append
-- Previous Impact: All test sizes returned 1 solution instead of correct count
-- Current Status: N=8 finds 92 solutions correctly
-
 ## Code Organization
 
 Each demo typically has implementations for:
@@ -207,7 +189,7 @@ If you fix one of the known issues:
 | **String manipulation** | - | - | ✓ |
 | **DateTime handling** | - | - | ✓ |
 | **URL encoding** | - | - | ✓ |
-| **Cryptographic hashing** | - | - | ✗ (FFI) |
+| **Cryptographic hashing** | - | - | ✓ (plugin) |
 
 ## Future Demos
 

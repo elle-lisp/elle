@@ -25,8 +25,8 @@ fn prim_add(args: &[Value]) -> (SignalBits, Value) {
     for arg in args {
         match arg.as_int() {
             Some(n) => sum += n,
-            None => return (SIG_ERROR, Value::condition(
-                Condition::type_error("expected integer".to_string())
+            None => return (SIG_ERROR, error_val(
+                "type-error", "expected integer"
             )),
         }
     }
@@ -43,17 +43,17 @@ VM's dispatch loop handles the actual execution.
 1. **Choose the right module** based on category (arithmetic, string, etc.)
 
 2. **Implement the function**:
-   ```rust
-   pub fn prim_my_func(args: &[Value]) -> (SignalBits, Value) {
-       if args.len() != 2 {
-           return (SIG_ERROR, Value::condition(
-               Condition::arity_error("my-func: expected 2 arguments".to_string())
-           ));
-       }
-       // Implementation...
-       (SIG_OK, result)
-   }
-   ```
+    ```rust
+    pub fn prim_my_func(args: &[Value]) -> (SignalBits, Value) {
+        if args.len() != 2 {
+            return (SIG_ERROR, error_val(
+                "arity-error", "my-func: expected 2 arguments"
+            ));
+        }
+        // Implementation...
+        (SIG_OK, result)
+    }
+    ```
 
 3. **Register it** in `registration.rs`:
    ```rust
@@ -62,14 +62,14 @@ VM's dispatch loop handles the actual execution.
 
 ## Error Handling
 
-All errors use `(SIG_ERROR, Value::condition(...))`:
+All errors use `(SIG_ERROR, error_val(kind, message))`:
 
 ```rust
 // Type mismatch
-return (SIG_ERROR, Value::condition(Condition::type_error("expected integer".to_string())));
+return (SIG_ERROR, error_val("type-error", "expected integer"));
 
 // Wrong number of arguments
-return (SIG_ERROR, Value::condition(Condition::arity_error("expected 2 arguments".to_string())));
+return (SIG_ERROR, error_val("arity-error", "expected 2 arguments"));
 ```
 
 ## See Also

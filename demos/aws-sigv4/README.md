@@ -4,11 +4,12 @@
 
 This demo implements AWS Signature Version 4 (SigV4), the authentication mechanism used by Amazon Web Services. It demonstrates:
 - String manipulation and formatting
-- Cryptographic operations (SHA-256, HMAC-SHA256)
+- Cryptographic operations (SHA-256, HMAC-SHA256 via native crypto plugin)
 - Byte/hex conversion
 - DateTime parsing and formatting
 - URI encoding
 - Higher-order functions and functional composition
+- Plugin loading and integration
 
 The demo includes test cases for each component and a complete end-to-end SigV4 signing example.
 
@@ -228,7 +229,7 @@ This demo shows that Elle can implement production-grade cryptographic protocols
 cargo run --release -- demos/aws-sigv4/sigv4.lisp
 ```
 
-This requires the Elle crypto plugin (`libelle_crypto.so`), which is loaded via:
+This demo uses Elle's native crypto plugin (`libelle_crypto.so`), a dynamically-loaded Rust module that provides cryptographic primitives. The plugin is loaded via:
 ```lisp
 (import-file "target/debug/libelle_crypto.so")
 ```
@@ -236,6 +237,8 @@ This requires the Elle crypto plugin (`libelle_crypto.so`), which is loaded via:
 The plugin provides:
 - `crypto/sha256` — SHA-256 hash function
 - `crypto/hmac-sha256` — HMAC-SHA256 authentication code
+
+Unlike FFI (which calls external C libraries), the crypto plugin is a native Rust implementation compiled as a dynamic library and loaded directly into Elle's runtime. This provides both the safety of Rust and the convenience of native integration.
 
 ## Further Reading
 

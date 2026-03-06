@@ -4,7 +4,7 @@
 # The compiler is either deterministic or it isn't — varying input
 # values doesn't help detect nondeterminism. One example per form suffices.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Arithmetic

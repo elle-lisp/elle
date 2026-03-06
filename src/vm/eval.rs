@@ -3,6 +3,7 @@
 //! Compiles and executes a datum (quoted value) at runtime.
 //! Supports an optional environment table for injecting bindings.
 
+use crate::error::{LError, LResult};
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::Analyzer;
 use crate::lir::{Emitter, Lowerer};
@@ -63,7 +64,7 @@ fn eval_inner(
     expr_value: Value,
     env_value: Value,
     symbols: &mut SymbolTable,
-) -> Result<Value, String> {
+) -> LResult<Value> {
     // Convert value to Syntax
     let span = Span::synthetic();
     let expr_syntax = Syntax::from_value(&expr_value, symbols, span.clone())?;
@@ -82,13 +83,13 @@ fn eval_inner(
     if !expander.has_macros() {
         expander
             .load_prelude(symbols, vm)
-            .map_err(|e| format!("eval: prelude load failed: {}", e))?;
+            .map_err(|e| LError::generic(format!("eval: prelude load failed: {}", e)))?;
     }
 
     // Expand
     let expanded = expander
         .expand(syntax, symbols, vm)
-        .map_err(|e| format!("eval: expansion failed: {}", e))?;
+        .map_err(|e| LError::generic(format!("eval: expansion failed: {}", e)))?;
 
     // Put Expander back
     vm.eval_expander = Some(expander);
@@ -98,7 +99,7 @@ fn eval_inner(
     let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
     let mut analysis = analyzer
         .analyze(&expanded)
-        .map_err(|e| format!("eval: analysis failed: {}", e))?;
+        .map_err(|e| LError::generic(format!("eval: analysis failed: {}", e)))?;
 
     // Mark tail calls
     mark_tail_calls(&mut analysis.hir);
@@ -111,7 +112,7 @@ fn eval_inner(
         .with_immediate_primitives(imm_prims);
     let lir_func = lowerer
         .lower(&analysis.hir)
-        .map_err(|e| format!("eval: lowering failed: {}", e))?;
+        .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;
 
     // Emit
     let symbol_snapshot = symbols.all_names();
@@ -133,9 +134,12 @@ fn eval_inner(
         }
         SIG_ERROR => {
             let (_, err_value) = vm.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-            Err(vm.format_error_with_location(err_value))
+            Err(LError::generic(vm.format_error_with_location(err_value)))
         }
-        _ => Err(format!("eval: unexpected signal: {}", result.bits)),
+        _ => Err(LError::generic(format!(
+            "eval: unexpected signal: {}",
+            result.bits
+        ))),
     }
 }
 
@@ -143,11 +147,7 @@ fn eval_inner(
 ///
 /// Given `expr` and `{:x 10 :y 20}`, produces:
 /// `(let ((x 10) (y 20)) expr)`
-fn wrap_with_env(
-    expr_syntax: Syntax,
-    env_value: &Value,
-    symbols: &SymbolTable,
-) -> Result<Syntax, String> {
+fn wrap_with_env(expr_syntax: Syntax, env_value: &Value, symbols: &SymbolTable) -> LResult<Syntax> {
     let span = Span::synthetic();
 
     // Try mutable table first, then immutable struct
@@ -158,24 +158,24 @@ fn wrap_with_env(
             .map(|(k, v)| {
                 let name = match k {
                     TableKey::Keyword(name) => Ok(name.clone()),
-                    _ => Err("eval: env keys must be keywords".to_string()),
+                    _ => Err(LError::generic("eval: env keys must be keywords")),
                 };
                 name.map(|n| (n, *v))
             })
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<LResult<Vec<_>>>()?
     } else if let Some(struct_ref) = env_value.as_struct() {
         struct_ref
             .iter()
             .map(|(k, v)| {
                 let name = match k {
                     TableKey::Keyword(name) => Ok(name.clone()),
-                    _ => Err("eval: env keys must be keywords".to_string()),
+                    _ => Err(LError::generic("eval: env keys must be keywords")),
                 };
                 name.map(|n| (n, *v))
             })
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<LResult<Vec<_>>>()?
     } else {
-        return Err("eval: env must be a table or struct".to_string());
+        return Err(LError::generic("eval: env must be a table or struct"));
     };
 
     let mut bindings = Vec::new();

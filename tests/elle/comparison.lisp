@@ -3,7 +3,7 @@
 # Tests for <, >, <=, >= on strings and keywords.
 # Migrated from tests/integration/comparison.rs.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # String comparison — basic

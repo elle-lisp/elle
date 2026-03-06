@@ -1,7 +1,7 @@
 # Tests for prelude macros: when, unless, try/catch, protect, defer, with,
 # butlast, hygiene, case, if-let, when-let, while, forever
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # Helper: assert that an expression produced an error via protect
 (defn assert-err [result msg]

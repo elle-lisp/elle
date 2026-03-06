@@ -58,8 +58,8 @@ pub fn is_truthy(&self) -> bool {
 }
 ```
 
-**DO NOT CHANGE THIS IMPLEMENTATION** without updating this document and all
-dependent tests.
+This implementation is the authoritative definition of truthiness. Changes to
+this function require updates to this document and all dependent tests.
 
 See `docs/types.md` for the complete type system reference.
 

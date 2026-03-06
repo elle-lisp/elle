@@ -4,7 +4,7 @@
 ## Tests the fundamental roundtrip property: read(display(read(s))) == read(s)
 ## for structurally valid source code.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Integer roundtrip

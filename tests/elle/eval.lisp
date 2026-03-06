@@ -2,7 +2,7 @@
 #
 # Migrated from tests/integration/eval.rs (46 tests)
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # Helper: assert that an expression errors (wraps in try/catch)
 (defn assert-err [thunk msg]

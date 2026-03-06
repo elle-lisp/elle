@@ -5,7 +5,7 @@
 # The desugaring is structural (not data-dependent), so representative
 # hardcoded examples suffice instead of property-based generation.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # defn equivalence tests

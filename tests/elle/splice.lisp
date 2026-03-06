@@ -1,6 +1,6 @@
 # Tests for splice (;expr) — spreading indexed types into calls and literals
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Basic splice in function calls

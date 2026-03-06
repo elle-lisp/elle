@@ -1,8 +1,10 @@
 use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::heap::TableKey;
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
+use std::collections::BTreeMap;
 
 /// Logical NOT operation
 pub fn prim_not(args: &[Value]) -> (SignalBits, Value) {
@@ -71,6 +73,38 @@ pub fn prim_xor(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(truthy_count % 2 == 1))
 }
 
+/// Assert that a value is truthy
+/// (assert value) => value if truthy, else signal error
+/// (assert value message) => value if truthy, else signal error with message
+pub fn prim_assert(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() || args.len() > 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("assert: expected 1-2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    let value = args[0];
+    let message = if args.len() == 2 { args[1] } else { Value::NIL };
+
+    if value.is_truthy() {
+        // Pass through the value
+        (SIG_OK, value)
+    } else {
+        // Signal error with {:error :failed-assertion :message msg}
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            TableKey::Keyword("error".into()),
+            Value::keyword("failed-assertion"),
+        );
+        fields.insert(TableKey::Keyword("message".into()), message);
+        (SIG_ERROR, Value::struct_from(fields))
+    }
+}
+
 /// Declarative primitive definitions for logic operations.
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -115,6 +149,17 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "logic",
         example: "(xor true false)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "assert",
+        func: prim_assert,
+        effect: Effect::ffi_raises(),
+        arity: Arity::Range(1, 2),
+        doc: "Assert that value is truthy. Signals {:error :failed-assertion :message msg} if not. Returns value if truthy.",
+        params: &["value", "message?"],
+        category: "control",
+        example: "(assert true)\n(assert (> x 0) \"x must be positive\")",
         aliases: &[],
     },
 ];

@@ -291,7 +291,7 @@ impl VM {
                 }
                 _ => {
                     // Other signal (error, etc.) — propagate to caller.
-                    // DO NOT pop the call frame on error — preserve it for stack traces
+                    // The call frame is preserved on error for stack traces.
                     return Some(bits);
                 }
             }

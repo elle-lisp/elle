@@ -7,7 +7,7 @@
 ## Boundary tests, unicode, and roundtrip tests remain as property tests
 ## in tests/property/strings.rs.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Slice properties

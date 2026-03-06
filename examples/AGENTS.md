@@ -48,10 +48,8 @@ For strict identity checks (no numeric coercion), use `identical?`.
 
 - **`nil` vs empty list**: `(list)` returns `EMPTY_LIST`, which is truthy.
   `nil` is falsy. `nil?` only matches `nil`. Use `empty?` for end-of-list.
-- **`match` bug**: `(assert-eq (match 42 ...) ...)` can return `<closure>`
-  instead of the match result. Bind to a `var` first.
-- **`string/join` expects a list**, not an array.
-- **`string/split` returns a list**.
+- **`string/join` accepts any sequence** (list, tuple, or array).
+- **`string/split` returns a tuple**.
 - **`[...]` in `match`** matches tuples (not arrays). `@[...]` matches arrays.
 - **`put` on immutable types** returns a new copy. On mutable types it
   returns the same mutated object.
