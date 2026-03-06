@@ -139,3 +139,8 @@ fn parameters() {
 fn ports() {
     run_elle_script("ports");
 }
+
+#[test]
+fn chan() {
+    run_elle_script("chan");
+}
