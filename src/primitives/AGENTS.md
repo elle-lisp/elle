@@ -101,6 +101,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `display.rs` | `print`, `println`, `display`, `newline` |
 | `types.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `tuple?`, `table?`, `struct?`, `buffer?`, `box?`, `bytes?`, `blob?`, `type-of` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
+| `chan.rs` | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
 | `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro/>iterator` |
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value`, `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `parameters.rs` | `make-parameter`, `parameter?` |
@@ -118,4 +119,5 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `mod.rs` | 35 | Re-exports |
 | `registration.rs` | ~1390 | `register_primitives`, `register_fn` |
 | `module_init.rs` | ~170 | `init_stdlib`, module initialization |
+| `chan.rs` | varies | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
 | (others) | varies | Individual primitive implementations |
