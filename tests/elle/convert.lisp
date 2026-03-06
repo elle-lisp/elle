@@ -1,4 +1,4 @@
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # Helper for asserting errors
 (defn assert-err [thunk msg]

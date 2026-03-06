@@ -68,13 +68,24 @@ pub fn setup() -> (SymbolTable, VM) {
 ///
 ///   PROPTEST_CASES=8 cargo test    # fast smoke
 ///   cargo test                     # use per-test defaults
+///
+/// Regression files are persisted to `tests/proptest-regressions/`.
 #[allow(dead_code)]
 pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
+    use proptest::test_runner::FileFailurePersistence;
+
     let cases = std::env::var("PROPTEST_CASES")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(default);
-    proptest::prelude::ProptestConfig::with_cases(cases)
+
+    proptest::prelude::ProptestConfig {
+        cases,
+        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(
+            "tests/proptest-regressions",
+        ))),
+        ..proptest::prelude::ProptestConfig::default()
+    }
 }
 
 // ---------------------------------------------------------------------------

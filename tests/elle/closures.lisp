@@ -6,7 +6,7 @@
 # LoadUpvalue).  These tests verify the optimization preserves correct
 # behavior at the boundary between cell-wrapped and non-cell locals.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Non-captured let bindings — use stack, no heap allocation

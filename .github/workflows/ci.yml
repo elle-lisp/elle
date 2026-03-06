@@ -209,7 +209,7 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
       - name: Generate Elle documentation site
-        run: ./target/release/elle elle-doc/generate.lisp
+        run: ./target/release/elle demos/docgen/generate.lisp
       - name: Merge documentation
         run: |
           # Move Rust API docs under site/api/

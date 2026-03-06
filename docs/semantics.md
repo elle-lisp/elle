@@ -3,6 +3,15 @@
 This document defines the authoritative semantics for Elle. When tests, code,
 or documentation contradict this document, **this document is correct**.
 
+## Contents
+
+- [Truthiness](#truthiness)
+- [Lists](#lists)
+- [Conditional Evaluation](#conditional-evaluation)
+- [Equality](#equality)
+- [Destructuring](#destructuring)
+- [Maintaining This Document](#maintaining-this-document)
+
 ## Truthiness
 
 Elle has exactly two falsy values:
@@ -49,8 +58,8 @@ pub fn is_truthy(&self) -> bool {
 }
 ```
 
-**DO NOT CHANGE THIS IMPLEMENTATION** without updating this document and all
-dependent tests.
+This implementation is the authoritative definition of truthiness. Changes to
+this function require updates to this document and all dependent tests.
 
 See `docs/types.md` for the complete type system reference.
 
@@ -83,7 +92,7 @@ The `if` special form evaluates the test expression and:
 - If the result is **falsy** (`false` or `nil`), evaluates the else branch
 - If the result is **truthy** (anything else), evaluates the then branch
 
-```lisp
+```janet
 (if ()  "yes" "no")  # ⟹ "yes" (empty list is truthy)
 (if nil "yes" "no")  # ⟹ "no"  (nil is falsy)
 (if 0   "yes" "no")  # ⟹ "yes" (0 is truthy)
@@ -94,7 +103,7 @@ The `if` special form evaluates the test expression and:
 
 `nil` and `()` are **not equal**:
 
-```lisp
+```janet
 (= nil ())   # ⟹ false
 (identical? nil ()) # ⟹ false
 ```
@@ -149,7 +158,6 @@ If you need to change these semantics:
 2. Update `src/value/repr.rs` to match
 3. Update all tests to match
 4. Update AGENTS.md files to match
-5. Update docs/whats-new.md to match
 
 **Never** change code to "fix" tests that contradict this document.
 The tests are wrong if they contradict this document.

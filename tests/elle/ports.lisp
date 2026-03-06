@@ -1,6 +1,6 @@
 # Ports — lifecycle, predicates, display, and standard port parameters
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # === Type predicate ===
 

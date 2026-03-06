@@ -2,322 +2,374 @@
 
 [![CI](https://github.com/elle-lisp/elle/actions/workflows/ci.yml/badge.svg)](https://github.com/elle-lisp/elle/actions/workflows/ci.yml)
 
-Elle is a Lisp that compiles to bytecode and runs on a register-based VM
-written in Rust. It takes heavy inspiration from
-[Janet](https://janet-lang.org) — fibers as the universal control flow
-primitive, signals over exceptions, masks over handler chains — and
-extends the model with static effect inference, a Cranelift JIT, and
-per-fiber heap isolation. The result is a dynamic language where the
-compiler knows enough about your code to make the runtime fast without
-annotations, without a garbage collector, and without coloring your
-functions.
+Elle is a Lisp. What separates it from other Lisps is the depth of its static analysis: full binding resolution, capture analysis, and effect inference happen at compile time, before any code runs. This gives Elle a sound effect system, fully hygienic macros, colorless concurrency via fibers, and deterministic memory management — all derived from the same analysis pass.
 
 ## Contents
 
-- [Why Another Lisp](#why-another-lisp)
-- [Colorless Concurrency](#colorless-concurrency)
-- [Effects](#effects)
-- [Fibers and Processes](#fibers-and-processes)
+- [What Makes Elle Different](#what-makes-elle-different)
+- [Language](#language)
+- [Control Flow](#control-flow)
 - [Memory](#memory)
+- [JIT](#jit)
 - [FFI](#ffi)
 - [Modules and Plugins](#modules-and-plugins)
-- [JIT](#jit)
-- [Macros](#macros)
-- [Destructuring](#destructuring)
-- [The Compilation Pipeline](#the-compilation-pipeline)
+- [Tooling](#tooling)
 - [Getting Started](#getting-started)
+- [License](#license)
 
-## Why Another Lisp
+## What Makes Elle Different
 
-Most languages carry decades of compatibility constraints. Elle has none.
-The tradeoffs it makes are:
+- **Static analysis is a first-class feature.** The compiler performs full binding resolution, capture analysis, effect inference, and lint passes before any code runs. This is not optional tooling bolted on — it is the compilation pipeline. Most Lisps are dynamic; Elle knows at compile time what every binding refers to, what every closure captures, and what effects every function can produce.
+  <details><summary>More: Compile-Time Analysis</summary>
 
-- **Lisp syntax** for uniform, machine-friendly structure. No parser
-  ambiguity. Macros that operate on syntax trees, not text.
-- **Rust host** for native performance and direct C interop without a
-  garbage collector.
-- **Inference over annotation.** Effects, captures, mutations, escape
-  behavior, JIT eligibility — all inferred by the compiler. You write
-  the logic; the compiler discovers the properties.
+  The compilation pipeline is: Source → Reader → Syntax → Expander → Analyzer → HIR → Lowerer → LIR → Emitter → Bytecode → VM. Each stage infers more than the last. The analyzer resolves all bindings to their definitions, computes which variables each closure captures, infers the effect of every expression, and flags lint violations — all before bytecode is emitted. This is why the linter catches errors at compile time, why the effect system is sound, and why the JIT can make intelligent decisions about what to compile natively.
+  </details>
 
-Elle is a scripting language that doesn't compromise on the parts that
-matter: memory safety, FFI ergonomics, and knowing what your code does
-before it runs.
+- **A sound effect system, inferred not declared.** Every function is automatically classified as `Pure`, `Yields`, or `Polymorphic`. The compiler enforces this: a pure context cannot call a yielding function. No annotations required. This is what makes the fiber/concurrency story coherent — the compiler knows which functions can suspend.
 
-## Colorless Concurrency
+  ```janet
+  # Pure function — inferred automatically
+  (defn add (a b) (+ a b))
 
-In most languages, a function that can suspend (async, yield, block) is
-a different color from one that can't. You choose at definition time,
-and the color propagates virally through every caller.
+  # Yielding function — inferred from yield call
+  (defn fetch-data (url)
+    (yield :http-request url)
+    (yield :http-wait))
 
-In Elle, functions are colorless. Any function can be run inside a fiber,
-and the fiber decides what signals to catch — not the function. The
-effect system infers which functions *might* suspend, but this is a
-compile-time property used by the optimizer, not a constraint on the
-programmer. You never write `async`. You never choose between sync and
-async APIs. You write functions. The runtime handles the rest.
+  # Polymorphic — effect depends on callback
+  (defn map-effect (f xs)
+    (map f xs))  # effect = effect of f
+  ```
 
-This follows Janet's insight: *functions are colorless, fibers are
-colored.* The signal mask lives on the fiber, set at creation time by the
-caller. A pure function and a yielding function have the same type, the
-same calling convention, and the same syntax. The difference is only
-visible to the compiler's effect analysis — and it uses that information
-to optimize, not to restrict.
+  <details><summary>More: Effect Enforcement</summary>
 
-## Effects
+  The compiler enforces effect contracts: a pure context cannot call a yielding function. This is checked at compile time.
+  </details>
 
-Every expression in Elle carries an inferred effect: a compact
-description of what it might do. The compiler computes this
-automatically — no annotations, no declarations, no effect types in
-your signatures.
+- **Fully hygienic macros that operate on syntax objects, not text or s-expressions.** Macros receive and return `Syntax` objects carrying scope information (Racket-style scope sets). Name capture is structurally impossible, not just conventionally avoided. This is stronger than Janet's macros, which are s-expression templates.
 
-A function that calls `yield` is inferred to suspend. A function that
-only does arithmetic is inferred to be pure. A higher-order function
-like `map` is inferred to be polymorphic over its callback — its effect
-depends on what you pass it. This is all automatic.
+  ```janet
+  (defmacro my-swap (a b)
+    `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
 
-This single mechanism replaces what other languages split across
-async/await coloring, exception declarations, and capability
-annotations. The compiler uses it to make three concrete decisions:
+  (let ((tmp 100) (x 1) (y 2))
+    (my-swap x y)
+    tmp)  # => 100, not 1
+  ```
 
-1. **JIT eligibility.** Functions that can't suspend get compiled to
-   native x86_64 via Cranelift. Functions that might suspend stay
-   interpreted — their frames need to be snapshot/restored, which native
-   frames can't do. The programmer doesn't choose; the compiler
-   decides based on what the code actually does.
+  <details><summary>More: Scope Sets</summary>
 
-2. **Scope-level memory reclamation.** When the compiler can prove a
-   scope's allocations don't escape — no captures, no suspension, no
-   outward mutation — it frees them automatically at scope exit. No
-   manual memory management, no GC, just inference.
+  The `tmp` binding introduced by the macro does not shadow the caller's `tmp`. This is guaranteed by the scope set mechanism, not by convention.
+  </details>
 
-3. **Fiber heap routing.** When a yielding fiber passes values to its
-   parent, those values must outlive the child's private heap. The
-   runtime uses the inferred effect to route allocations to a shared
-   arena — only for fibers that actually yield.
+- **Functions are colorless.** Any function can be called from a fiber. There is no `async`/`await` annotation that marks a function as suspending and forces all its callers to be marked too. Whether something runs concurrently is decided at the call site, not baked into the function definition.
 
-## Fibers and Processes
+  ```janet
+  # A pure function
+  (defn add (a b)
+    (+ a b))
 
-A fiber is an independent execution context: its own stack, its own call
-frames, its own heap. Fibers communicate through yield/resume, and each
-yield carries a signal — an integer that classifies the event. Signal
-dispatch is a single bitmask check: O(1), branch-predictor-friendly.
-`try`/`catch`, `protect`, and generators are all prelude macros built on
-`fiber/new` and `resume`. One primitive; the language provides sugar.
+  # A yielding function — suspends to fetch a value
+  (defn fetch (key)
+    (yield :get key))
 
-This is the same idea as Erlang's process model, built on cooperative
-scheduling. Each fiber runs until it yields, then the scheduler picks
-the next one. Crash isolation comes from each fiber owning its own heap
-— when a fiber dies, its entire heap is freed in O(1). Link-based
-supervision comes from signal propagation through fiber chains.
+  # Both called identically — compute is not marked async/await
+  (defn compute (a b key)
+    (+ (add a b) (fetch key)))
+  ```
 
-The scheduler itself is user-level Elle code, not a runtime built-in.
-`examples/processes.lisp` implements Erlang-style `spawn`, `send`,
-`recv`, `link`, `trap-exit`, and `spawn-link` in under 200 lines,
-including crash cascade and deadlock detection.
+  <details><summary>More: Colorless Functions</summary>
+
+  In Rust/JS/Python, `fetch` would be `async fn`/`async def`, forcing `compute` to be `async` too, and every caller to `await` it. In Elle, the effect is inferred by the compiler, not declared by the programmer. Callers are unaffected.
+  </details>
+
+- **Structured concurrency via fibers with per-fiber memory.** Each fiber has its own heap arena. When a fiber finishes, its memory is reclaimed in O(1) — no GC pause, no reference counting. The compiler's escape analysis drives scope-level reclamation within fibers.
+
+  ```janet
+  (defn make-producer []
+    (coro/new (fn []
+      (each i in (range 5)
+        (yield i)))))
+
+  (def co (make-producer))
+  (forever
+    (if (coro/done? co)
+      (break)
+      (print (coro/resume co))))
+  ```
+
+  <details><summary>More: Fiber Memory</summary>
+
+  Fibers are independent execution contexts. Each has its own stack, call frames, and heap. When a fiber finishes, its entire heap is freed in O(1). No garbage collection, no reference counting, no pause.
+  </details>
+
+- **The Rust ecosystem.** FFI without ceremony. Native plugins as Rust cdylib crates. Values are marshalled directly to C types via libffi — no intermediate serialization format, no separate process, no generated bindings.
+
+## Language
+
+- **Modern Lisp syntax with no parser ambiguity.** Macros operate on syntax trees, not text. See [`prelude.lisp`](prelude.lisp) for hygienic macros and standard forms.
+
+- **Collection literals with mutable/immutable split.** Bare delimiters are immutable: `[1 2 3]` (tuple), `{:key val}` (struct), `"hello"` (string). `@`-prefixed are mutable: `@[1 2 3]` (array), `@{:key val}` (table), `@"hello"` (buffer).
+
+  ```janet
+  # Immutable
+  (def t [1 2 3])           # tuple
+  (def s {:name "Bob"})     # struct
+  (def str "hello")         # string
+
+  # Mutable
+  (def a @[1 2 3])          # array
+  (def tbl @{:name "Bob"})  # table
+  (def buf @"hello")        # buffer
+
+  # Bytes and blobs (no literal syntax)
+  (def b (bytes 1 2 3))     # immutable bytes
+  (def bl (blob 1 2 3))     # mutable blob
+  ```
+
+- **Strings are sequences of grapheme clusters.** `length`, slicing, indexing, and iteration all count grapheme clusters — not bytes, not codepoints.
+
+  ```janet
+  (length "café")           # => 4, not 5 bytes
+  (string/char-at "café" 3) # => "é"
+  (string/slice "café" 0 2) # => "ca"
+  (first "café")            # => "c"
+  (rest "café")             # => "afé"
+  (length "👨‍👩‍👧")   # => 1
+  ```
+
+- **Destructuring in all binding positions.** `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values become `nil`, wrong types become `nil`.
+
+  ```janet
+  (def (head & tail) (list 1 2 3 4))
+  (def [x _ z] [10 20 30])
+  (def {:name n :age a} {:name "Bob" :age 25})
+  (def {:config {:db {:host h}}}
+    {:config {:db {:host "localhost"}}})
+  ```
+
+- **Closures with automatic capture analysis.** The compiler tracks which variables each closure captures. Mutable captures use cells automatically. Enables escape analysis for scope-level memory reclamation.
+
+  ```janet
+  (defn make-counter [start]
+    (var n start)
+    (fn []
+      (set n (+ n 1))
+      n))
+
+  (def c (make-counter 0))
+  (c)  # => 1
+  (c)  # => 2
+  ```
+
+  <details><summary>More: Automatic Cell Wrapping</summary>
+
+  The closure captures `n` by value. The compiler detects that `n` is mutated, so it wraps it in a cell automatically. No explicit `box` or `ref` needed.
+  </details>
+
+- **Full tail-call optimisation.** All tail calls are optimised — not just self-recursion. Mutually recursive functions, continuation-passing style, and trampolining all work without stack overflow.
+
+- **Splice operator for array spreading.** `;expr` marks a value for spreading at call sites and in data constructors. `(splice expr)` is the long form.
+
+  ```janet
+  (def args @[2 3])
+  (+ 1 ;args)  # => 6, same as (+ 1 2 3)
+
+  (def items @[1 2])
+  @[0 ;items 3]  # => @[0 1 2 3]
+  ```
+
+- **Reader macros for quasiquote and unquote.** `` ` `` for quasiquote, `,` for unquote, `,;` for unquote-splice (inside quasiquote).
+
+- **Parameters for dynamic binding.** `make-parameter` creates a parameter, `parameterize` sets it in a scope, child fibers inherit parent parameter frames.
+
+  ```janet
+  (def *port* (make-parameter :stdout))
+
+  (parameterize ((*port* :stderr))
+    (print "to stderr"))  # uses *port* = :stderr
+
+  (print "to stdout")     # uses *port* = :stdout
+  ```
+
+## Control Flow
+
+- **Conditionals: `if`, `cond`, `when`, `unless`, `case`.** `if` is the primitive, others are macros or sugar.
+
+  ```janet
+  (if (> x 0) "positive" "non-positive")
+
+  (cond
+    ((< x 0) "negative")
+    ((= x 0) "zero")
+    (true "positive"))
+
+  (case x
+    (1 "one")
+    (2 "two")
+    ("other"))
+  ```
+
+- **Pattern matching with `match`.** Type guards, element extraction, nested patterns, wildcard `_`, and guard clauses.
+
+  ```janet
+  (match value
+    (0                    "zero")
+    (n when (< n 0)       "negative")
+    (n when (> n 0)       "positive")
+    ([a b]                (+ a b))
+    ({:x x :y y}          (+ x y))
+    (_                    "no match"))
+  ```
+
+- **Error handling: `try`/`catch`, `protect`, `defer`.** Built on fibers and signals, not exceptions.
+
+  ```janet
+  (try
+    (if (< x 0) (error "negative"))
+    (+ x 1)
+    (catch e
+      (print "error:" e)
+      0))
+
+  (protect
+    (do-something))  # => [success? value]
+
+  (defer (cleanup)
+    (do-work))  # cleanup runs after do-work
+  ```
+
+- **Loops: `while`, `forever`, `break`.** `while` is the primitive, `forever` is a macro, `break` exits a block.
+
+  ```janet
+  (while (< i 10)
+    (print i)
+    (set i (+ i 1)))
+
+  (forever
+    (if (done?) (break) (step)))
+
+  (block :outer
+    (each x in xs
+      (if (found? x) (break :outer x))))
+  ```
 
 ## Memory
 
-Elle uses NaN-boxing: every value is 8 bytes. Integers, floats,
-booleans, nil, symbols, keywords, and short strings (up to 6 bytes) fit
-inline — no allocation. Everything else is a pointer into a heap.
+- **No garbage collector.** Memory is reclaimed deterministically through three mechanisms:
+  - **Per-fiber heaps:** Each fiber allocates into a bump arena. When it finishes, the entire heap is freed in O(1) — no traversal, no mark phase, no sweep. Fibers get strong cache locality.
+  - **Zero-copy inter-fiber sharing:** Yielding fibers route allocations to a shared arena; parents read directly from shared memory. No deep copy, no serialization.
+  - **Escape-analysis-driven scope reclamation:** Compiler analyzes every `let`, `letrec`, `block` scope. When it can prove no allocated value escapes — no captures, no suspension, no outward mutation — it frees allocations at scope exit.
 
-There is no garbage collector. There is no stop-the-world pause. Memory
-is managed through three mechanisms that work together:
+- **NaN-boxed values: 8 bytes per value.** Integers, floats, booleans, nil, symbols, keywords, and short strings (≤6 bytes) fit inline. Everything else is a pointer into a heap.
 
-**Per-fiber heaps.** Each fiber allocates into its own bump arena. When
-a fiber finishes, its entire heap is freed in a single `reset()` — O(1)
-regardless of how many objects it allocated. No traversal, no mark
-phase, no sweep. This also gives fibers strong cache locality: a fiber's
-working set is contiguous in memory, not scattered across a shared heap.
-
-**Zero-copy inter-fiber sharing.** When a yielding fiber needs to pass
-values to its parent, those allocations route to a shared arena that
-both fibers can read. No deep copy, no serialization. The parent reads
-the yielded value directly from shared memory. The compiler's effect
-inference decides which fibers need this — pure fibers skip the overhead
-entirely.
-
-**Escape-analysis-driven scope reclamation.** The compiler analyzes
-every `let`, `letrec`, and `block` scope. When it can prove that no
-allocated value escapes — no captures, no suspension, no outward
-mutation — it emits region instructions that free the scope's
-allocations at exit. The allocator architecture is designed to support
-custom allocators at the scope level, allowing hot scopes to use
-dedicated arenas tuned for their allocation patterns (currently in
-development).
-
-The combination means Elle reclaims memory deterministically, at scope
-exit or fiber death, without pausing the world. Long-running fiber
-schedulers don't accumulate garbage — each fiber's heap dies with it.
-
-## FFI
-
-Elle talks to C without ceremony. Load a library, bind a symbol, call
-it:
-
-```lisp
-(def libc (ffi/native nil))
-(ffi/defbind sqrt libc "sqrt" :double @[:double])
-(sqrt 2.0)  # => 1.4142135623730951
-```
-
-Struct marshalling, variadic calls, callbacks (Elle functions as C
-function pointers), and manual memory management all work:
-
-```lisp
-(def point-type (ffi/struct @[:double :double]))
-(def p (ffi/malloc (ffi/size point-type)))
-(ffi/write p point-type @[1.5 2.5])
-(ffi/read p point-type)  # => @[1.5 2.5]
-(ffi/free p)
-```
-
-FFI calls are tagged in the effect system so the compiler knows where
-Elle's safety guarantees end and C's begin.
-
-## Modules and Plugins
-
-Elle's module system is minimal by design. `import-file` loads a file —
-Elle source or a native `.so` plugin — compiles and executes it, and
-returns the last expression's value. There is no module declaration
-syntax, no export list, no special import form. It's a function call.
-
-**Source modules** return their last expression. A module that defines
-functions via `def` makes them available as globals; a module that ends
-with a struct or a function hands that value back to the caller:
-
-```lisp
-# math.lisp — parametric module
-(fn (precision)
-  {:add (fn (a b) (round (+ a b) precision))
-   :mul (fn (a b) (round (* a b) precision))})
-```
-
-```lisp
-(def {:add add :mul mul} ((import-file "math.lisp") 3))
-(add 1.1111 2.2222)  # => 3.333
-```
-
-The caller destructures whichever symbols it wants. The module decides
-what to expose by choosing what to return.
-
-**Native plugins** are Rust cdylib crates that link against `elle` and
-export an init function. Plugins register primitives through the same
-`PrimitiveDef` mechanism as builtins — same effect declarations, same
-doc strings, same arity checking — and work directly with `Value`. No C
-marshalling, no serialization boundary:
-
-```lisp
-(def re (import-file "target/release/libelle_regex.so"))
-(def pat (re:compile "\\d+"))
-(re:find-all pat "a1b2c3")  # => ({:match "1" ...} {:match "2" ...} ...)
-```
-
-Nine plugins ship with Elle: regex, sqlite, crypto, random, mermaid,
-selkie, sugiyama, fdg, and dagre.
-
-Because `import-file` is an ordinary primitive, the module system is
-user-replaceable. You can wrap it with caching, path resolution, or
-sandboxing. You can shadow it entirely. The language doesn't care how
-modules get loaded — it only cares about the value that comes back.
+- **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Memory is reclaimed at scope exit or fiber death, without pausing the world.
 
 ## JIT
 
-The JIT compiles non-suspending functions to native x86_64 via
-Cranelift. The compiler's effect inference decides what qualifies —
-there is no annotation. If a function might yield or suspend, it stays
-interpreted. Everything else — arithmetic, data structures, recursion,
-FFI — is a JIT candidate.
+- **JIT compilation is fully automatic.** Pure, non-suspending functions are compiled to native code via Cranelift at runtime. No annotations, no opt-in. The compiler's effect system identifies eligible functions; the JIT fires transparently.
 
-Self-tail-calls become native loops: the JIT detects self-recursion in
-tail position and emits a jump instead of a call. Mutually recursive
-groups are discovered and compiled as a batch, with direct native calls
-between peers. Integer arithmetic gets inline fast paths — a type-tag
-check, then native machine operations, with a fallback for mixed types.
+## FFI
 
-## Source-to-Source Rewriting
+- **Call C without ceremony.** Load a library, bind a symbol, call it.
 
-Elle includes a source-to-source rewriting tool for automated code
-transformation. The `rewrite` subcommand applies pattern-based rules to
-Elle source files, enabling refactoring, migration, and code generation
-tasks. Rules are defined as pattern-action pairs that match syntax trees
-and produce transformed output.
+  ```janet
+  (def libc (ffi/native nil))
+  (ffi/defbind sqrt libc "sqrt" :double @[:double])
+  (sqrt 2.0)  # => 1.4142135623730951
+  ```
 
-## Macros
+- **Struct marshalling, variadic calls, callbacks, manual memory management all work.**
 
-Elle's macros are hygienic. The expander uses scope sets (Racket-style)
-to prevent accidental name capture. A macro that introduces a `tmp`
-binding won't shadow the caller's `tmp`:
+  ```janet
+  (def point-type (ffi/struct @[:double :double]))
+  (def p (ffi/malloc (ffi/size point-type)))
+  (ffi/write p point-type @[1.5 2.5])
+  (def point-val (ffi/read p point-type))
+  (ffi/free p)
 
-```lisp
-(defmacro my-swap (a b)
-  `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+  # Variadic: snprintf
+  (def snprintf-ptr (ffi/lookup libc "snprintf"))
+  (def snprintf-sig (ffi/signature :int @[:ptr :size :string :int] 3))
+  (def out (ffi/malloc 128))
+  (ffi/call snprintf-ptr snprintf-sig out 128 "answer: %d" 42)
+  (ffi/free out)
 
-(let ([tmp 100] [x 1] [y 2])
-  (my-swap x y)
-  tmp)  # => 100, not 1
-```
+  # Callbacks: qsort with Elle comparison function
+  (def cmp (ffi/callback cmp-sig
+    (fn [a b] (- (ffi/read a :i32) (ffi/read b :i32)))))
+  (ffi/call qsort-ptr qsort-sig arr 5 4 cmp)
+  (ffi/callback-free cmp)
+  ```
 
-When you want intentional capture — anaphoric macros, DSLs —
-`datum->syntax` is the escape hatch.
+- **FFI calls are tagged in the effect system.** Compiler knows where Elle's safety guarantees end and C's begin.
 
-`defn`, `let*`, `->`, `->>`, `when`, `unless`, `try`/`catch`,
-`protect`, `defer`, `with`, and `yield*` are all prelude macros. The
-prelude is plain Elle loaded by the expander before user code — no
-special-form machinery, just the same expansion available to user macros.
+## Modules and Plugins
 
-## Destructuring
+- **Module system is minimal by design.** `import-file` loads a file — Elle source or native `.so` plugin — compiles and executes it, returns the last expression's value. No module declarations, no export lists, no special import form. It's a function call.
 
-Destructuring works everywhere bindings appear: `def`, `let`, `let*`,
-`var`, `fn` parameters, `match` patterns.
+- **Source modules return their last expression.** A module that defines functions via `def` makes them available as globals; a module that ends with a struct or function hands that value back to the caller.
 
-```lisp
-(def (head & tail) (list 1 2 3 4))              # list rest
-(def [x _ z] [10 20 30])                        # tuple with wildcard
-(def {:name n :age a} {:name "Bob" :age 25})     # struct by key
-(def {:config {:db {:host h}}}                   # nested, three levels
-  {:config {:db {:host "localhost"}}})
-```
+  ```janet
+  # math.lisp
+  (fn (scale)
+    {:add (fn (a b) (* (+ a b) scale))
+     :mul (fn (a b) (* (* a b) scale))})
 
-Missing values become `nil` — no runtime error. Wrong types become
-`nil`. This is silent nil semantics, separate from `match` which is
-conditional and type-guarded.
+  # Usage
+  (def {:add add :mul mul} ((import-file "math.lisp") 2))
+  (add 1 2)  # => 6
+  ```
 
-## The Compilation Pipeline
+- **Native plugins are Rust cdylib crates.** Link against `elle`, export an init function. Plugins register primitives through the same `PrimitiveDef` mechanism as builtins — same effect declarations, same doc strings, same arity checking. Work directly with `Value`. No intermediate serialization format, no separate process, no generated bindings.
 
-![Compilation pipeline](docs/pipeline.svg)
+  ```janet
+  (def re (import-file "target/release/libelle_regex.so"))
+  (def pat (re:compile "\\d+"))
+  (re:find-all pat "a1b2c3")
+  # => ({:match "1" ...} {:match "2" ...} ...)
+  ```
 
-Source locations survive the full journey for error reporting. Each stage
-infers more than the last: the reader produces syntax objects with scope
-sets; the analyzer resolves bindings, infers effects, computes captures,
-and flags mutations; the lowerer runs escape analysis and emits
-scope-level memory reclamation; the JIT uses all of this to decide what
-to compile natively.
+- **Five plugins ship with Elle:** regex, sqlite, crypto, random, selkie.
 
-The pipeline has three non-linear paths. The analyzer loops until
-inter-procedural effects converge (fixpoint iteration over mutually
-recursive top-level defines). The expander re-enters the pipeline
-recursively to evaluate macro bodies. And the JIT forks off the VM to
-compile non-suspending closures to native x86_64 after bytecode
-execution.
+- **Module system is user-replaceable.** `import-file` is an ordinary primitive. You can wrap it with caching, path resolution, sandboxing, or shadow it entirely.
 
-Nothing is annotated. Everything is inferred.
+## Tooling
+
+- **Language server (LSP) for IDE integration.** Real-time diagnostics, hover documentation, jump-to-definition, refactoring support.
+
+- **Static linter catches errors at compile time.** Wrong arity, unused bindings, effect violations, type mismatches in patterns, duplicate pattern variables.
+
+  ```janet
+  # Compile-time errors caught by elle lint:
+  (defn foo (x y) (+ x))  # Error: missing argument y
+  (let ((unused 42)) 100) # Warning: unused binding
+  (fn (a b) (yield))      # Error: pure context, can't yield
+  (match x
+    ([a b c] a)           # Error: pattern expects 3 elements
+    (v v))                # Error: duplicate pattern variable
+  ```
+
+- **Match exhaustiveness is checked at compile time.** The compiler warns when a match expression has patterns that can never be reached, and when the match may not cover all cases for a known type.
+
+- **Source-to-source rewriting tool.** The `rewrite` subcommand applies pattern-based rules to Elle source files for refactoring and code generation. Rules are pattern-action pairs that match syntax trees and produce transformed output.
+
+- **Formatter for consistent code style.** The `formatter` subcommand formats Elle source files.
+
+- **Compilation pipeline is fully documented.** See [`docs/pipeline.md`](docs/pipeline.md) for data flow across boundaries and [`AGENTS.md`](AGENTS.md) for architecture details.
 
 ## Getting Started
 
 ```bash
-make                                              # build elle + plugins + docs
-./target/release/elle examples/hello.lisp         # run a file
-./target/release/elle                             # REPL
-./target/release/elle lint [options] <file|dir>  # static analysis
-./target/release/elle lsp                         # language server
-./target/release/elle rewrite [options] <file>   # source-to-source rewriting
+make                                      # build elle + plugins + docs
+./target/release/elle examples/hello.lisp # run a file
+./target/release/elle                     # REPL
+./target/release/elle lint <file|dir>    # static analysis
+./target/release/elle lsp                 # language server
+./target/release/elle rewrite <file>     # source-to-source rewriting
 ```
 
-The `examples/` directory is executable documentation. Each file
-demonstrates a feature and asserts its own correctness — they run as
-part of CI.
+The `examples/` directory is executable documentation. Each file demonstrates a feature and asserts its own correctness — they run as part of CI.
 
 ### Subcommands
 
@@ -325,6 +377,7 @@ part of CI.
 - **`elle lint [options] <file|dir>...`** — Static analysis and linting
 - **`elle lsp`** — Start the language server protocol server
 - **`elle rewrite [options] <file...>`** — Source-to-source rewriting with rules
+- **`elle format [options] <file...>`** — Format Elle source files
 
 ## License
 

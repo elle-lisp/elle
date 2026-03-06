@@ -3,7 +3,7 @@
 # Migrated from tests/integration/destructuring.rs
 # Tests that check error messages stay in Rust (3 tests).
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # Helper: assert that (thunk) signals an error
 (defn assert-err [thunk msg]
@@ -309,6 +309,30 @@
 # test_rest_array_in_let
 (assert-eq (let (([a & r] [10 20 30])) (+ a (get r 0))) 30
   "rest array in let")
+
+# test_rest_tuple_basic — rest binding preserves tuple type
+(begin
+  (def [a & r] [1 2 3])
+  (assert-true (tuple? r) "rest tuple basic: r is a tuple")
+  (assert-eq (get r 0) 2 "rest tuple basic: r[0]")
+  (assert-eq (get r 1) 3 "rest tuple basic: r[1]"))
+
+# test_rest_tuple_empty_rest
+(begin
+  (def [a b & r] [1 2])
+  (assert-true (tuple? r) "rest tuple empty: r is a tuple")
+  (assert-eq (length r) 0 "rest tuple empty rest"))
+
+# test_rest_tuple_in_let
+(assert-eq (let (([a & r] [10 20 30])) (+ a (get r 0))) 30
+  "rest tuple in let")
+
+# test_rest_array_type_preserved
+(begin
+  (def @[a & r] @[1 2 3])
+  (assert-true (array? r) "rest array type: r is an array")
+  (assert-eq (get r 0) 2 "rest array type: r[0]")
+  (assert-eq (get r 1) 3 "rest array type: r[1]"))
 
 # ============================================================
 # Wildcard + rest combined

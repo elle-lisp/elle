@@ -3,6 +3,16 @@
 This document defines the authoritative type system for Elle. When code or
 other documentation contradicts this document, **this document is correct**.
 
+## Contents
+
+- [Design principle: the mutable/immutable split](#design-principle-the-mutableimmutable-split)
+- [All types](#all-types)
+- [Type predicates](#type-predicates)
+- [Display format](#display-format)
+- [Truthiness](#truthiness)
+- [Equality](#equality)
+- [Mutability summary](#mutability-summary)
+
 ## Design principle: the mutable/immutable split
 
 Elle follows Janet's approach to collection types: every collection has an
@@ -26,7 +36,7 @@ Bracket syntax `[1 2 3]` creates a **tuple** (immutable). If you want a
 mutable array, write `@[1 2 3]`. This is not a cosmetic distinction — it
 affects what operations are valid:
 
-```lisp
+```janet
 (def t [1 2 3])        # tuple — immutable
 (def a @[1 2 3])       # array — mutable
 (array-set! a 0 99)    # ok
@@ -64,7 +74,7 @@ These fit in 8 bytes with no allocation.
 
 The absence of a value. One of two falsy values (with `false`).
 
-```lisp
+```janet
 nil             # literal
 (nil? x)        # predicate
 ```
@@ -73,7 +83,7 @@ Not the same as the empty list `()`. `nil` is falsy# `()` is truthy.
 
 #### boolean
 
-```lisp
+```janet
 true              # true (truthy)
 false              # false (falsy)
 (boolean? x)    # predicate
@@ -83,7 +93,7 @@ false              # false (falsy)
 
 48-bit signed integer. Range: -2^47 to 2^47-1.
 
-```lisp
+```janet
 42              # literal
 -17             # literal
 0               # literal
@@ -97,7 +107,7 @@ No automatic coercion to float. Overflow panics.
 IEEE 754 double-precision. NaN and Infinity are heap-allocated to avoid
 collision with the NaN-boxing scheme.
 
-```lisp
+```janet
 3.14            # literal
 1e10            # literal
 (number? x)     # predicate (true for int or float)
@@ -107,7 +117,7 @@ collision with the NaN-boxing scheme.
 
 Interned identifier. Used for variable names, function names.
 
-```lisp
+```janet
 foo             # literal
 'foo            # quoted
 (symbol? x)     # predicate
@@ -117,7 +127,7 @@ foo             # literal
 
 Self-evaluating interned name. Used for keys, tags, enum-like values.
 
-```lisp
+```janet
 :foo            # literal
 :my-key         # literal
 (keyword? x)    # predicate
@@ -128,7 +138,7 @@ Self-evaluating interned name. Used for keys, tags, enum-like values.
 The empty list `()`. Terminates proper lists. **Truthy** (it is a value, not
 the absence of one).
 
-```lisp
+```janet
 ()              # literal
 '()             # quoted
 (empty? x)      # predicate
@@ -138,7 +148,7 @@ the absence of one).
 
 Raw C pointer. 48-bit address space. FFI only. NULL becomes nil.
 
-```lisp
+```janet
 (pointer? x)    # predicate
 ```
 
@@ -150,7 +160,7 @@ Raw C pointer. 48-bit address space. FFI only. NULL becomes nil.
 
 Fixed-length immutable sequence. The immutable counterpart of array.
 
-```lisp
+```janet
 [1 2 3]         # literal (desired — currently creates array)
 (tuple 1 2 3)   # constructor
 ```
@@ -158,7 +168,7 @@ Fixed-length immutable sequence. The immutable counterpart of array.
 Error values are tuples: `[:kind "message"]`. Bracket destructuring works on
 tuples:
 
-```lisp
+```janet
 (try (/ 1 0) (catch [kind msg] kind))  # => :division-by-zero
 (let (([a b] [1 2])) a)                # => 1
 ```
@@ -171,7 +181,7 @@ discrimination. Destructuring in `let`/`def`/`fn` works on both.
 
 Mutable resizable sequence. The mutable counterpart of tuple.
 
-```lisp
+```janet
 @[1 2 3]        # literal (desired — currently creates list)
 (array 1 2 3)   # constructor
 (array-ref a 0) # indexed access
@@ -184,7 +194,7 @@ Mutable resizable sequence. The mutable counterpart of tuple.
 
 Immutable ordered dictionary. The immutable counterpart of table.
 
-```lisp
+```janet
 {:a 1 :b 2}    # literal
 (struct :a 1 :b 2)  # constructor
 (get s :a)      # access
@@ -195,7 +205,7 @@ Immutable ordered dictionary. The immutable counterpart of table.
 
 Mutable ordered dictionary. The mutable counterpart of struct.
 
-```lisp
+```janet
 @{:a 1 :b 2}   # literal
 (table :a 1 :b 2)  # constructor
 (get t :a)      # access
@@ -211,7 +221,7 @@ Mutable ordered dictionary. The mutable counterpart of struct.
 
 Immutable interned text. The immutable counterpart of buffer.
 
-```lisp
+```janet
 "hello"         # literal
 (string? x)     # predicate
 ```
@@ -222,7 +232,7 @@ Strings are interned — equality is O(1).
 
 Mutable byte sequence. The mutable counterpart of string.
 
-```lisp
+```janet
 @"hello"        # literal (desugars to (string->buffer "hello"))
 (buffer? x)     # predicate
 (buffer 72 101)  # constructor from bytes
@@ -246,7 +256,7 @@ Mutable byte sequence. The mutable counterpart of string.
 
 Singly-linked list built from cons cells. Proper lists terminate with `()`.
 
-```lisp
+```janet
 (list 1 2 3)    # constructor
 '(1 2 3)        # quoted literal
 (cons 1 (list 2 3)) # manual construction
@@ -268,7 +278,7 @@ arrays are contiguous in memory.
 
 Compiled function with captured environment.
 
-```lisp
+```janet
 (fn (x) (+ x 1))       # anonymous
 (defn add1 (x) (+ x 1)) # named (macro)
 (closure? x)            # predicate
@@ -282,7 +292,7 @@ need cell wrapping.
 
 Rust function registered as a primitive. Not directly constructible from Elle.
 
-```lisp
+```janet
 # No literal syntax. Primitives like +, -, cons are native functions.
 ```
 
@@ -295,7 +305,7 @@ Rust function registered as a primitive. Not directly constructible from Elle.
 Independent execution context with its own stack, call frames, and signal
 mask. See `docs/fibers.md` for the full fiber architecture.
 
-```lisp
+```janet
 (fiber/new (fn () body) mask) # constructor
 (fiber/resume f value)        # resume
 (fiber/status f)              # status keyword
@@ -311,7 +321,7 @@ Mutable box. Two variants:
 - **Local cell**: compiler-created for mutable captures. Auto-unwrapped by
   `LoadUpvalue`. Users never see these directly.
 
-```lisp
+```janet
 (box 42)        # create user cell
 (unbox c)       # read
 (set-box! c 99) # write
@@ -326,7 +336,7 @@ Mutable box. Two variants:
 Wraps a syntax tree node with source location and scope information. Used
 during macro expansion for hygiene.
 
-```lisp
+```janet
 # Created by quasiquote, quote, and macro expansion.
 # Not typically constructed directly.
 ```
@@ -360,7 +370,7 @@ Compound type descriptor (struct, array) for FFI marshalling.
 Heap-tracked C pointer. Tracks freed state to prevent use-after-free.
 Created by `ffi/malloc`.
 
-```lisp
+```janet
 (pointer? x)    # predicate (matches both raw and managed pointers)
 ```
 

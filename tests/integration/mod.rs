@@ -101,9 +101,6 @@ mod regex {
 mod glob {
     include!("glob.rs");
 }
-mod docstrings {
-    include!("docstrings.rs");
-}
 mod fn_flow {
     include!("fn_flow.rs");
 }
@@ -121,9 +118,6 @@ mod escape {
 }
 mod elle_scripts {
     include!("elle_scripts.rs");
-}
-mod comparison {
-    include!("comparison.rs");
 }
 mod allocator {
     include!("allocator.rs");

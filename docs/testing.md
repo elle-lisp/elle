@@ -3,6 +3,23 @@
 This document describes where every test in Elle belongs and how to run them.
 Follow the decision tree when writing new tests.
 
+## Contents
+
+- [Test execution order](#test-execution-order)
+- [Decision tree](#decision-tree)
+- [Which Rust test category?](#which-rust-test-category)
+- [Elle test scripts](#elle-test-scripts)
+- [Property tests](#property-tests)
+- [CI structure](#ci-structure)
+- [Local development workflow](#local-development-workflow)
+- [What stays in Rust](#what-stays-in-rust)
+- [Test helpers](#test-helpers)
+- [Running tests](#running-tests)
+- [Adding a new test](#adding-a-new-test)
+- [Naming conventions](#naming-conventions)
+- [Fixtures](#fixtures)
+- [Failure triage](#failure-triage)
+
 ## Test execution order
 
 Both locally and in CI, tests run in this order. Fail fast: if a cheaper tier
@@ -11,13 +28,24 @@ fails, skip the expensive ones.
 | Tier | What | Time | Purpose |
 |------|------|------|---------|
 | 1 | `examples/*.lisp` | ~2s | Smoke test across the whole language surface |
-| 2 | `tests/elle/*.lisp` | seconds–minutes | Behavioral tests (407 tests) |
-| 3 | `cargo test` (unit + integration) | ~5min | Rust tests (compile errors, error messages, type inspection) |
-| 4 | `cargo test property::` | ~10min | Property tests (102 proptest blocks) |
+| 2 | `tests/elle/*.lisp` | ~6s | Behavioral tests (Elle semantics) |
+| 3 | `cargo test` (unit + integration) | ~15min | Rust tests (compile errors, error messages, type inspection) |
+| 4 | `cargo test property::` | ~30min | Property tests (invariants across generated inputs) |
 
 Examples are the cheapest full-pipeline smoke test: reader, expander, analyzer,
 lowerer, emitter, VM, and a broad swath of primitives in ~2 seconds. If an
 example fails, nothing else is worth running.
+
+Elle test scripts are the next tier: they verify language semantics by running
+Elle code directly, with no Rust-level setup. They're faster than integration
+tests because they skip Rust type inspection and error message matching.
+
+Integration tests are slower because they require Rust-level setup (VM
+construction, symbol table initialization, error message inspection).
+
+Property tests are the slowest because they run many generated test cases.
+However, they're only necessary when random input generation genuinely finds
+bugs that concrete cases would miss.
 
 ## Decision tree
 
@@ -74,6 +102,22 @@ Example: confirming division by zero signals an error with kind
 (assert-eq (get err 0) :division-by-zero "error kind")
 ```
 
+**6. Does the test use random input generation to find bugs?**
+
+Property tests use proptest to generate random inputs and verify that an
+invariant holds across all of them. This is valuable when randomness genuinely
+finds bugs that concrete cases would miss — e.g., testing that a roundtrip
+property holds for all possible values, or that a mathematical law (like
+commutativity) holds across all inputs.
+
+However, if you're really just testing a fixed set of known-good examples
+(e.g., "yield 3 values, resume 3 times, get them back in order"), property
+testing is the wrong tool. Write Elle test scripts instead — they're faster
+and clearer.
+
+→ **Property test** in `tests/property/` IF random generation genuinely adds
+value. Otherwise, write Elle test scripts.
+
 ## Which Rust test category?
 
 | Need | Location | When |
@@ -99,7 +143,7 @@ and exits non-zero on failure.
 
 ### Structure
 
-```lisp
+```janet
 (import-file "./examples/assertions.lisp")
 
 # Description of what this file tests
@@ -117,7 +161,7 @@ Elle test scripts use `examples/assertions.lisp` which provides:
 
 For runtime error checking, use `protect`:
 
-```lisp
+```janet
 (def [ok? err] (protect (/ 1 0)))
 (assert-false ok? "division by zero should error")
 (assert-eq (get err 0) :division-by-zero "error kind")
@@ -151,8 +195,11 @@ Do not merge test scripts into examples or vice versa.
 
 - Tests that require Rust type inspection (see decision tree)
 - Compile-time rejection tests
-- Property-based tests
 - Tests for the Rust API surface (`Value` methods, `SymbolTable` API)
+
+Note: Property-based tests belong in `tests/property/` only if random input
+generation genuinely finds bugs. If you're testing a fixed set of known-good
+examples, write Elle test scripts instead — they're faster and clearer.
 
 ## Property tests
 
@@ -160,9 +207,14 @@ Property tests use proptest to verify invariants across generated inputs.
 They live in `tests/property/` and answer: "Does this invariant hold for
 *all* valid inputs?"
 
-### The PROPTEST_CASES knob
+**Use property tests only when random input generation genuinely finds bugs.**
+If you're testing a fixed set of known-good examples, write Elle test scripts
+instead — they're faster and clearer. Property testing is the wrong tool for
+concrete cases.
 
-All 102 `proptest!` blocks use the `proptest_cases()` helper from
+### The PROPTEST_CASES environment variable
+
+All `proptest!` blocks use the `proptest_cases()` helper from
 `tests/common/mod.rs`:
 
 ```rust
@@ -176,8 +228,24 @@ proptest! {
 }
 ```
 
-The `default` parameter (200 in this example) is the per-test tuning. The
-`PROPTEST_CASES` environment variable overrides all tests uniformly when set.
+The `default` parameter (200 in this example) is the per-test tuning. **Do NOT
+change hardcoded case counts in test files.** Instead, use the `PROPTEST_CASES`
+environment variable to override all tests uniformly:
+
+```bash
+# Fast smoke during development (8 cases per test)
+PROPTEST_CASES=8 cargo test property::
+
+# Full run with per-test defaults (CI)
+cargo test property::
+
+# Targeted run with custom case count
+PROPTEST_CASES=50 cargo test property::fibers
+```
+
+When `PROPTEST_CASES` is set, it overrides the hardcoded default in every
+`proptest_cases(N)` call. This allows CI and local development to control
+case counts uniformly without modifying test files.
 
 ### Case count guidelines
 

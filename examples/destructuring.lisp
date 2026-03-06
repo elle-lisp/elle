@@ -96,11 +96,11 @@
 # 4. Tuple/array & rest
 # ========================================
 
-# Tuple rest collects remaining elements into an *array* (not a tuple).
+# Tuple rest collects remaining elements into a *tuple* (not an array).
 (def [tr-first & tr-rest] [10 20 30])
 (assert-eq tr-first 10 "tuple rest: first")
 (assert-eq (get tr-rest 0) 20 "tuple rest: rest[0]")
-(assert-true (array? tr-rest) "tuple rest: rest is array, not tuple")
+(assert-true (tuple? tr-rest) "tuple rest: rest is tuple, not array")
 
 # Array rest also collects into array
 (def [ar-first & ar-rest] @[100 200 300])
@@ -112,7 +112,7 @@
 
 (display "  [a & r] from [10 20 30] → a=") (display tr-first)
   (display " r=") (display tr-rest)
-  (display " array?=") (print (array? tr-rest))
+  (display " tuple?=") (print (tuple? tr-rest))
 
 
 # ========================================

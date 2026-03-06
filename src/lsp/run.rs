@@ -500,7 +500,7 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                                         Err(e) => {
                                             error = Some(json!({
                                                 "code": -32603,
-                                                "message": e
+                                                "message": e.description()
                                             }));
                                         }
                                     }

@@ -125,7 +125,7 @@ fn test_rename_symbol_no_symbol_at_position() {
 
     let result = rename::rename_symbol(0, 0, "bar", &index, &symbol_table, source, uri);
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("No symbol found"));
+    assert!(result.unwrap_err().to_string().contains("No symbol found"));
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn test_rename_symbol_validate_reserved_word() {
 
     let result = rename::rename_symbol(0, 10, "def", &index, &symbol_table, source, uri);
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("reserved"));
+    assert!(result.unwrap_err().to_string().contains("reserved"));
 }
 
 #[test]

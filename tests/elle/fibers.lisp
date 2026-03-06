@@ -3,7 +3,7 @@
 ## Migrated from tests/property/fibers.rs (behavioral property tests).
 ## Tests yield/resume order, signal masks, cancel, propagate, and nesting.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Yield/resume order

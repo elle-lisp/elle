@@ -1,6 +1,3 @@
-# Simple test module for import-file tests
-# This file contains basic definitions for testing module loading
-
-(var test-var 42)
-(var test-string "hello")
+# Test module for import-file integration tests
+(def test-value 42)
 (var test-list (list 1 2 3))
