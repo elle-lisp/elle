@@ -144,6 +144,11 @@ impl fmt::Display for Value {
             return write!(f, "#<syntax:{}>", s.as_ref());
         }
 
+        // Parameter
+        if let Some((id, _)) = self.as_parameter() {
+            return write!(f, "<parameter:{}>", id);
+        }
+
         // Binding
         if self.is_binding() {
             return write!(f, "#<binding>");

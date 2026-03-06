@@ -40,6 +40,7 @@ Runtime value representation using NaN-boxing.
 | `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
 | `FiberHeap` | `fiber_heap.rs` | Per-fiber bump allocator (bumpalo) with destructor tracking and shared alloc ownership |
 | `SharedAllocator` | `shared_alloc.rs` | Bump allocator for zero-copy inter-fiber value exchange |
+| `Parameter` | `heap.rs` | Dynamic binding with id and default value, looked up at runtime |
 
 ### Fiber fields for parent/child chain
 
@@ -101,7 +102,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 NaN-boxing uses the NaN space of IEEE 754 doubles:
 
 - **Immediate**: nil, bool, int (i48), symbol, keyword, float
-- **Heap pointer**: cons, array, table, closure, fiber, cell, syntax, binding, etc.
+- **Heap pointer**: cons, array, table, closure, fiber, cell, parameter, syntax, binding, etc.
 
 ### Syntax objects
 

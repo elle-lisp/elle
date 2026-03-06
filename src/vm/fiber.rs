@@ -268,6 +268,23 @@ impl VM {
             (rv, first)
         });
 
+        // Inherit parent's parameter bindings on first resume.
+        // Flatten all frames into a single frame so the child starts
+        // with the parent's current dynamic bindings as its baseline.
+        if is_first_resume && !self.fiber.param_frames.is_empty() {
+            let mut flat: Vec<(u32, Value)> = Vec::new();
+            for frame in &self.fiber.param_frames {
+                for &(id, val) in frame {
+                    if let Some(pos) = flat.iter().position(|&(k, _)| k == id) {
+                        flat[pos].1 = val;
+                    } else {
+                        flat.push((id, val));
+                    }
+                }
+            }
+            child_handle.with_mut(|c| c.param_frames = vec![flat]);
+        }
+
         self.with_child_fiber(child_handle, child_value, |vm| {
             vm.fiber.status = FiberStatus::Alive;
 

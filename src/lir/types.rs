@@ -280,6 +280,14 @@ pub enum LirInstr {
     /// Exit an allocation region (scope boundary for allocator).
     /// No registers produced or consumed.
     RegionExit,
+
+    // === Dynamic Parameters ===
+    /// Push a parameter frame. `pairs` contains (param_reg, value_reg) pairs.
+    /// All param/value registers are consumed from the stack.
+    PushParamFrame { pairs: Vec<(Reg, Reg)> },
+    /// Pop the top parameter frame.
+    /// No registers produced or consumed.
+    PopParamFrame,
 }
 
 /// Binary operations

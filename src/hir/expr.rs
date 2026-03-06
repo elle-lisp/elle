@@ -203,4 +203,12 @@ pub enum HirKind {
         expr: Box<Hir>,
         env: Box<Hir>,
     },
+
+    /// Dynamic parameter binding: `(parameterize ((p1 v1) (p2 v2) ...) body ...)`
+    /// Pushes a parameter frame, evaluates body, pops the frame.
+    /// Body is NOT in tail position (PopParamFrame must execute after).
+    Parameterize {
+        bindings: Vec<(Hir, Hir)>,
+        body: Box<Hir>,
+    },
 }

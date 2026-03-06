@@ -648,6 +648,11 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::RegionEnter | LirInstr::RegionExit => {
                 // No-op in JIT (allocation regions not yet active)
             }
+            LirInstr::PushParamFrame { .. } | LirInstr::PopParamFrame => {
+                return Err(JitError::UnsupportedInstruction(
+                    "PushParamFrame/PopParamFrame".to_string(),
+                ));
+            }
         }
         Ok(false)
     }
