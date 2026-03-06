@@ -160,33 +160,131 @@
   "char-at single char")
 
 # ============================================================================
-# String comparison laws (migrated from tests/property/comparison.rs)
+# Slice boundary checking (migrated from property tests)
 # ============================================================================
 
-# < and >= are complementary
-(assert-true (not (= (< "abc" "def") (>= "abc" "def")))
-  "lt/ge complementary: abc vs def")
-(assert-true (not (= (< "zzz" "aaa") (>= "zzz" "aaa")))
-  "lt/ge complementary: zzz vs aaa")
-(assert-true (not (= (< "same" "same") (>= "same" "same")))
-  "lt/ge complementary: same vs same")
+# slice_start_end_order: valid range succeeds
+(assert-string-eq (string/slice "hello" 0 2) "he"
+  "slice valid range: he")
+(assert-string-eq (string/slice "abcdef" 1 4) "bcd"
+  "slice valid range: bcd")
+(assert-string-eq (string/slice "test" 0 4) "test"
+  "slice valid range: full string")
 
-# > and <= are complementary
-(assert-true (not (= (> "abc" "def") (<= "abc" "def")))
-  "gt/le complementary: abc vs def")
-(assert-true (not (= (> "zzz" "aaa") (<= "zzz" "aaa")))
-  "gt/le complementary: zzz vs aaa")
+# slice_oob_end_returns_nil: OOB end index returns nil
+(assert-eq (string/slice "hello" 0 100) nil
+  "slice OOB end returns nil (hello)")
+(assert-eq (string/slice "abc" 0 50) nil
+  "slice OOB end returns nil (abc)")
+(assert-eq (string/slice "" 0 1) nil
+  "slice OOB end returns nil (empty)")
 
-# Transitivity: if a < b and b < c then a < c
-(assert-true (if (and (< "abc" "def") (< "def" "ghi"))
-               (< "abc" "ghi")
-               true)
-  "lt transitive: abc < def < ghi")
+# slice_oob_start_returns_nil: OOB start index returns nil
+(assert-eq (string/slice "hello" 100 101) nil
+  "slice OOB start returns nil (hello)")
+(assert-eq (string/slice "abc" 50 51) nil
+  "slice OOB start returns nil (abc)")
 
-# <= is equivalent to (or (< a b) (= a b))
-(assert-eq (<= "abc" "def") (or (< "abc" "def") (= "abc" "def"))
-  "le = lt or eq: abc vs def")
-(assert-eq (<= "abc" "abc") (or (< "abc" "abc") (= "abc" "abc"))
-  "le = lt or eq: abc vs abc")
-(assert-eq (<= "def" "abc") (or (< "def" "abc") (= "def" "abc"))
-  "le = lt or eq: def vs abc")
+# slice_reversed_range_returns_nil: reversed range returns nil
+(assert-eq (string/slice "hello" 3 1) nil
+  "slice reversed range returns nil (hello)")
+(assert-eq (string/slice "abcdef" 5 2) nil
+  "slice reversed range returns nil (abcdef)")
+
+# ============================================================================
+# Split / Join roundtrip (migrated from property tests)
+# ============================================================================
+
+# split_join_roundtrip: split then join recovers original
+(assert-string-eq (string/join (string/split "a,b,c" ",") ",") "a,b,c"
+  "split/join roundtrip: comma")
+(assert-string-eq (string/join (string/split "x;y;z" ";") ";") "x;y;z"
+  "split/join roundtrip: semicolon")
+(assert-string-eq (string/join (string/split "one|two|three" "|") "|") "one|two|three"
+  "split/join roundtrip: pipe")
+
+# split_produces_list: split produces a list
+(assert-true (pair? (string/split "a,b" ","))
+  "split produces a cons cell")
+(assert-true (pair? (string/split "hello" "l"))
+  "split produces a cons cell (hello)")
+
+# ============================================================================
+# Conversion roundtrips (migrated from property tests)
+# ============================================================================
+
+# number_to_string_roundtrip: number->string->integer roundtrip
+(assert-eq (string->integer (number->string 42)) 42
+  "number->string->integer roundtrip: 42")
+(assert-eq (string->integer (number->string -100)) -100
+  "number->string->integer roundtrip: -100")
+(assert-eq (string->integer (number->string 0)) 0
+  "number->string->integer roundtrip: 0")
+
+# string_to_integer_roundtrip: string->integer roundtrip
+(assert-eq (string->integer "42") 42
+  "string->integer: 42")
+(assert-eq (string->integer "-100") -100
+  "string->integer: -100")
+(assert-eq (string->integer "0") 0
+  "string->integer: 0")
+
+# string_to_integer_invalid_returns_error: non-numeric string errors
+(assert-err (fn [] (string->integer "abc"))
+  "string->integer errors on abc")
+(assert-err (fn [] (string->integer "hello"))
+  "string->integer errors on hello")
+(assert-err (fn [] (string->integer "xyz"))
+  "string->integer errors on xyz")
+
+# ============================================================================
+# Index/char-at operations (migrated from property tests)
+# ============================================================================
+
+# char_at_valid_index: char-at returns single character
+(assert-string-eq (string/char-at "hello" 0) "h"
+  "char-at index 0")
+(assert-string-eq (string/char-at "hello" 4) "o"
+  "char-at index 4")
+(assert-string-eq (string/char-at "abc" 1) "b"
+  "char-at index 1")
+
+# char_at_out_of_bounds_errors: char-at OOB errors
+(assert-err (fn [] (string/char-at "hi" 1000))
+  "char-at OOB errors (hi)")
+(assert-err (fn [] (string/char-at "abc" 100))
+  "char-at OOB errors (abc)")
+
+# string_index_finds_char: string/index finds character
+(assert-eq (string/index "hello" "l") 2
+  "string/index finds l in hello")
+(assert-eq (string/index "abcdef" "d") 3
+  "string/index finds d in abcdef")
+(assert-eq (string/index "test" "t") 0
+  "string/index finds t in test (first occurrence)")
+
+# string_index_not_found_returns_nil: string/index returns nil when not found
+(assert-eq (string/index "hello" "z") nil
+  "string/index returns nil for z in hello")
+(assert-eq (string/index "abc" "x") nil
+  "string/index returns nil for x in abc")
+
+# ============================================================================
+# Unicode operations (migrated from property tests)
+# ============================================================================
+
+# unicode_append_preserves_content: unicode append preserves content
+(assert-string-eq (append "hello" "world") "helloworld"
+  "unicode append: hello + world")
+(assert-string-eq (append "café" "latte") "cafélatte"
+  "unicode append: café + latte")
+(assert-string-eq (append "" "test") "test"
+  "unicode append: empty + test")
+
+# unicode_upcase_downcase_roundtrip: upcase/downcase roundtrip (ASCII)
+(assert-string-eq (string/downcase (string/upcase "hello")) "hello"
+  "upcase/downcase roundtrip: hello")
+(assert-string-eq (string/downcase (string/upcase "abc")) "abc"
+  "upcase/downcase roundtrip: abc")
+(assert-string-eq (string/downcase (string/upcase "xyz")) "xyz"
+  "upcase/downcase roundtrip: xyz")

@@ -664,7 +664,9 @@ fn test_jit_branch_integer_truthy() {
 // =============================================================================
 
 #[test]
-fn test_jit_rejects_yielding() {
+fn test_jit_accepts_yielding() {
+    // Yielding functions are now accepted by the JIT gate (side-exit support).
+    // Only polymorphic effects (propagates != 0) are rejected.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
@@ -684,7 +686,36 @@ fn test_jit_rejects_yielding() {
 
     let compiler = JitCompiler::new().unwrap();
     let result = compiler.compile(&func, None);
-    assert!(matches!(result, Err(JitError::NotPure)));
+    assert!(
+        result.is_ok(),
+        "JIT should accept yielding functions: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_jit_rejects_polymorphic() {
+    // Polymorphic effects (propagates != 0) are rejected by the JIT gate.
+    let mut func = LirFunction::new(Arity::Exact(0));
+    func.num_regs = 1;
+    func.num_captures = 0;
+    func.effect = Effect::polymorphic(0);
+
+    let mut entry = BasicBlock::new(Label(0));
+    entry.instructions.push(SpannedInstr::new(
+        LirInstr::Const {
+            dst: Reg(0),
+            value: LirConst::Int(42),
+        },
+        span(),
+    ));
+    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), span());
+    func.blocks.push(entry);
+    func.entry = Label(0);
+
+    let compiler = JitCompiler::new().unwrap();
+    let result = compiler.compile(&func, None);
+    assert!(matches!(result, Err(JitError::Polymorphic)));
 }
 
 #[test]
@@ -1813,10 +1844,9 @@ fn test_jit_not_empty_list() {
 // =============================================================================
 
 #[test]
-fn test_jit_rejects_yields_raises_effect() {
-    // Effect::yields_raises() has may_suspend() = true.
-    // The JIT gate must reject this — fiber/resume and fiber/signal
-    // propagate this effect to their callers.
+fn test_jit_accepts_yields_raises_effect() {
+    // Effect::yields_raises() has propagates == 0 (not polymorphic).
+    // The JIT gate now accepts yielding functions via side-exit support.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
@@ -1837,9 +1867,9 @@ fn test_jit_rejects_yields_raises_effect() {
     let compiler = JitCompiler::new().unwrap();
     let result = compiler.compile(&func, None);
     assert!(
-        matches!(result, Err(JitError::NotPure)),
-        "JIT should reject yields_raises effect: {:?}",
-        result
+        result.is_ok(),
+        "JIT should accept yields_raises effect: {:?}",
+        result.err()
     );
 }
 

@@ -4,9 +4,11 @@ JIT compilation for Elle using Cranelift.
 
 ## Responsibility
 
-Compile non-suspending `LirFunction` to native x86_64 code. Only functions
-where `!effect.may_suspend()` are JIT candidates (no yield/debug/polymorphic
-complexity — Cranelift native frames can't be snapshot/restored mid-execution).
+Compile `LirFunction` to native x86_64 code. Functions with `Effect::none()`
+or `Effect::yields()` are JIT candidates. Polymorphic functions (where
+`effect.propagates != 0`) are rejected. Yielding functions use side-exit:
+JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
+`YIELD_SENTINEL` to the interpreter.
 
 ## Architecture
 
@@ -19,9 +21,11 @@ LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 | Type | Purpose |
 |------|---------|
 | `JitCompiler` | Translates LIR to native code via Cranelift |
-| `JitCode` | Wrapper for native function pointer + module lifetime |
+| `JitCode` | Wrapper for native function pointer + module lifetime + yield metadata |
 | `JitError` | Compilation errors |
 | `BatchMember` | A member of an SCC compilation group (SymbolId + LirFunction) |
+| `YieldPointMeta` | Metadata for a yield point: resume IP and spilled register count |
+| `YIELD_SENTINEL` | Sentinel value indicating JIT function yielded (side-exited) |
 | `discover_compilation_group` | Discover call peers for batch JIT compilation |
 
 ## Calling Convention
@@ -45,6 +49,11 @@ function tail-calls itself, the JIT compares the callee against `self_bits`.
 If equal, it updates the arg variables and jumps to the loop header instead
 of calling `elle_jit_tail_call`. This turns self-recursive tail calls into
 native loops.
+
+**Return values:**
+- Normal return: NaN-boxed `Value`
+- Tail call: `TAIL_CALL_SENTINEL` (0xDEAD_BEEF_DEAD_BEEFu64)
+- Yield: `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) — `fiber.signal` and `fiber.suspended` are set by the yield helper
 
 ## JIT Phases
 
@@ -72,7 +81,10 @@ Supported instructions:
 
 Unsupported (returns JitError::UnsupportedInstruction):
 - `MakeClosure` — rare in hot loops, deferred
-- Fiber/yield: LoadResumeValue, Yield
+
+Supported in yielding functions (via side-exit):
+- `LoadResumeValue` — emitted as dead code (unreachable in JIT, resume goes through interpreter)
+- `Yield` — emitted as side-exit: spill registers, call `elle_jit_yield`, return `YIELD_SENTINEL`
 
 ## Files
 
@@ -193,9 +205,9 @@ Benefits:
 When `self_sym` is `None` (anonymous closures), behavior is unchanged — calls
 go through `elle_jit_call` as before.
 
-## Fiber Integration
+## Fiber Integration and Yield Side-Exit
 
-The effect system ensures fibers and JIT coexist safely:
+The effect system and JIT side-exit mechanism enable fibers and JIT to coexist:
 
 - **JIT-safe fiber primitives**: `fiber/new`, `fiber/status`, `fiber/value`,
   `fiber/bits`, `fiber/mask` have `Effect::raises()` — `may_suspend()` is
@@ -207,14 +219,33 @@ The effect system ensures fibers and JIT coexist safely:
   `Effect::yields_raises()` — `may_suspend()` is true. Any closure calling
   them transitively inherits this effect, so the JIT gate rejects them.
 
+- **Yield side-exit**: When a JIT-compiled function reaches a `Yield` terminator,
+  it calls `elle_jit_yield` (a runtime helper) which:
+  1. Reads yield point metadata from `JitCode.yield_points`
+  2. Spills live registers to a temporary buffer
+  3. Builds a `SuspendedFrame` with the bytecode resume IP and spilled stack
+  4. Sets `fiber.signal = (SIG_YIELD, yielded_value)` and `fiber.suspended`
+  5. Returns `YIELD_SENTINEL` to the JIT caller
+  
+  The JIT caller detects `YIELD_SENTINEL` and returns it to the interpreter,
+  which resumes via `execute_bytecode_from_ip`.
+
+- **Yield-through-call**: When a JIT-compiled function calls another function
+  that yields, the JIT detects the yield via post-call signal check and calls
+  `elle_jit_yield_through_call` to build the caller's `SuspendedFrame` and
+  append it to the suspended frame chain.
+
+- **SIG_YIELD handling**: `jit_handle_primitive_signal` now handles `SIG_YIELD`
+  from primitives (e.g., `fiber/resume`) by returning `YIELD_SENTINEL`.
+
 - **SIG_QUERY handling**: `jit_handle_primitive_signal` dispatches `SIG_QUERY`
   to `vm.dispatch_query()` and returns the result. This supports primitives
   like `list-primitives` and `primitive-meta` that read VM state but don't
   suspend execution.
 
 - **Catch-all panic**: `jit_handle_primitive_signal` panics on unexpected
-  signal bits (not `SIG_OK`, `SIG_ERROR`, `SIG_HALT`, or `SIG_QUERY`).
-  Reaching this means the effect system has a bug — a suspending primitive
+  signal bits (not `SIG_OK`, `SIG_ERROR`, `SIG_HALT`, `SIG_YIELD`, or `SIG_QUERY`).
+  Reaching this means the effect system has a bug — a polymorphic primitive
   was called from JIT code.
 
 ## JIT-to-JIT Calling
@@ -245,32 +276,53 @@ No errors are silently swallowed.
 
 ## Invariants
 
-1. **Only non-suspending functions.** `JitCompiler::compile` returns
-   `JitError::NotPure` for functions where `effect.may_suspend()` is true
-   (yields, debug, or polymorphic). Errors (SIG_ERROR) and FFI (SIG_FFI)
-   are fine — they don't require frame snapshot/restore.
+1. **Only non-polymorphic functions.** `JitCompiler::compile` returns
+   `JitError::Polymorphic` for functions where `effect.propagates != 0` (polymorphic).
+   Functions with `Effect::none()` or `Effect::yields()` are accepted.
+   Errors (SIG_ERROR) and FFI (SIG_FFI) are fine — they don't require frame
+   snapshot/restore.
 
-2. **NaN-boxing correctness.** The JIT uses the exact same bit patterns as
+2. **Yield metadata is populated during emission.** `Emitter::emit()` returns
+   `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller attaches
+   these to `LirFunction.yield_points` and `LirFunction.call_sites` before
+   storing on a `Closure`. The JIT reads this metadata to generate side-exit code.
+
+3. **YieldPointMeta is derived from YieldPointInfo.** During JIT compilation,
+   `YieldPointInfo.stack_regs.len()` is converted to `YieldPointMeta.num_spilled`
+   (the count of spilled values). The JIT stores this in `JitCode.yield_points`
+   for runtime lookup.
+
+4. **YIELD_SENTINEL is distinct from TAIL_CALL_SENTINEL.** Both are sentinel
+   values returned by JIT code, but they trigger different handlers:
+   - `TAIL_CALL_SENTINEL` (0xDEAD_BEEF_DEAD_BEEFu64) → resolve pending tail call
+   - `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) → side-exit to interpreter
+
+5. **NaN-boxing correctness.** The JIT uses the exact same bit patterns as
    `Value::int()`, `Value::float()`, etc. Constants are encoded at compile time.
 
-3. **Module lifetime.** `JitCode` keeps the `JITModule` alive via `Arc` so the
+6. **Module lifetime.** `JitCode` keeps the `JITModule` alive via `Arc` so the
    native code isn't freed while still in use.
 
-4. **Always enabled.** JIT is a required dependency (Cranelift). No feature gate.
+7. **Always enabled.** JIT is a required dependency (Cranelift). No feature gate.
 
-5. **VM pointer for runtime calls.** The 4th parameter changed from `globals`
-   to `vm` in Phase 3 to support function calls and global variable access.
+8. **VM pointer for runtime calls.** The 4th parameter is `vm` to support
+   function calls, global variable access, and yield side-exit helpers.
 
-6. **Self-tail-call identity.** The 5th parameter `self_bits` is the NaN-boxed
+9. **Self-tail-call identity.** The 5th parameter `self_bits` is the NaN-boxed
    closure pointer. Self-tail-calls are detected by comparing the callee's bits
    against `self_bits`.
 
-7. **No silent error swallowing.** Every error path in dispatch helpers sets
-   `vm.fiber.signal` to `(SIG_ERROR, condition)` before returning `TAG_NIL`.
+10. **No silent error swallowing.** Every error path in dispatch helpers sets
+    `vm.fiber.signal` to `(SIG_ERROR, condition)` before returning `TAG_NIL`.
 
-8. **Value is repr(transparent) over u64.** JIT-to-JIT calling and native
-   function dispatch cast `*const u64` to `*const Value` (and vice versa)
-   without copying. If `Value`'s representation changes, these casts break.
+11. **Value is repr(transparent) over u64.** JIT-to-JIT calling and native
+    function dispatch cast `*const u64` to `*const Value` (and vice versa)
+    without copying. If `Value`'s representation changes, these casts break.
+
+12. **Yield helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`
+    and `elle_jit_yield_through_call` are responsible for building the
+    `SuspendedFrame` and setting `fiber.signal = (SIG_YIELD, value)` and
+    `fiber.suspended`. The JIT caller must not modify these fields.
 
 ## Cell Optimization for Locally-Defined Variables
 
@@ -293,9 +345,49 @@ The optimization applies to three code paths in `translate.rs`:
 Impact: 3.2x speedup on N-Queens N=12 (4.4s → 1.38s), 30x reduction in
 kernel time (2.4s → 80ms) from eliminated allocation pressure.
 
+## Yield Side-Exit Implementation Details
+
+### YieldPointMeta
+
+Stored in `JitCode.yield_points`, indexed by yield point index:
+- `resume_ip: usize` — Bytecode offset to resume at (matches `SuspendedFrame.ip`)
+- `num_spilled: u16` — Number of values on the operand stack at yield time
+
+The JIT yield helper reads `num_spilled` to know how many u64 values to read
+from the spilled buffer and convert back to `Value`s.
+
+### Yield Point Recording
+
+During bytecode emission, when a `Terminator::Yield` is encountered:
+1. The emitter records the bytecode position after the Yield opcode as `resume_ip`
+2. The emitter captures the current operand stack state as `stack_regs`
+3. A `YieldPointInfo` is pushed to `Emitter.yield_points`
+
+After emission, the caller attaches `yield_points` to `LirFunction.yield_points`.
+
+During JIT compilation, `YieldPointInfo` is converted to `YieldPointMeta`:
+```rust
+YieldPointMeta {
+    resume_ip: yp.resume_ip,
+    num_spilled: yp.stack_regs.len() as u16,
+}
+```
+
+### Call Site Recording
+
+During bytecode emission, when a `LirInstr::Call` is encountered in a function
+where `effect.may_suspend()`:
+1. The emitter records the bytecode position after the Call opcode as `resume_ip`
+2. The emitter captures the operand stack state (after popping func/args, before pushing result) as `stack_regs`
+3. A `CallSiteInfo` is pushed to `Emitter.call_sites`
+
+This metadata is used by the JIT to generate yield-through-call code: when a
+callee yields, the JIT builds the caller's `SuspendedFrame` using the recorded
+resume IP and stack state.
+
 ## Future Phases
 
 - Phase 5:
-  - Inline type checks for arithmetic fast paths
-  - JIT-native exception handling (setjmp/longjmp or Cranelift exception tables)
-  - Benchmarks and profiling
+   - Inline type checks for arithmetic fast paths
+   - JIT-native exception handling (setjmp/longjmp or Cranelift exception tables)
+   - Benchmarks and profiling
