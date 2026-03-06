@@ -9,13 +9,13 @@ pub enum Instruction {
     /// Load constant from constant pool
     LoadConst,
 
-    /// Load local variable (depth, index)
+    /// Load local variable (index u16)
     LoadLocal,
 
     /// Load global variable
     LoadGlobal,
 
-    /// Store local variable (depth, index)
+    /// Store local variable (index u16)
     StoreLocal,
 
     /// Store global variable
@@ -377,9 +377,8 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             }
             Instruction::LoadLocal | Instruction::StoreLocal => {
                 if i + 1 < instructions.len() {
-                    let depth = instructions[i];
-                    let index = instructions[i + 1];
-                    line.push_str(&format!(" (depth={}, index={})", depth, index));
+                    let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                    line.push_str(&format!(" (index={})", index));
                     i += 2;
                 }
             }

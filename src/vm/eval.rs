@@ -79,17 +79,41 @@ fn eval_inner(
     // Get-or-create Expander (cached on VM)
     let mut expander = vm.eval_expander.take().unwrap_or_default();
 
+    // Save the caller's stack before macro expansion. load_prelude and
+    // expand both execute VM bytecode (via eval_syntax → vm.execute)
+    // which shares the same fiber stack. Without saving, macro expansion
+    // overwrites the caller's local variable slots — corrupting cells
+    // that hold destructured bindings.
+    let saved_stack = std::mem::take(&mut vm.fiber.stack);
+    let saved_allocator = crate::value::fiber_heap::save_active_allocator();
+
     // Load prelude if this is a fresh expander
     if !expander.has_macros() {
-        expander
-            .load_prelude(symbols, vm)
-            .map_err(|e| LError::generic(format!("eval: prelude load failed: {}", e)))?;
+        match expander.load_prelude(symbols, vm) {
+            Ok(_) => {}
+            Err(e) => {
+                vm.fiber.stack = saved_stack;
+                crate::value::fiber_heap::restore_active_allocator(saved_allocator);
+                vm.eval_expander = Some(expander);
+                return Err(LError::generic(format!("eval: prelude load failed: {}", e)));
+            }
+        }
     }
 
     // Expand
-    let expanded = expander
-        .expand(syntax, symbols, vm)
-        .map_err(|e| LError::generic(format!("eval: expansion failed: {}", e)))?;
+    let expanded = match expander.expand(syntax, symbols, vm) {
+        Ok(e) => e,
+        Err(e) => {
+            vm.fiber.stack = saved_stack;
+            crate::value::fiber_heap::restore_active_allocator(saved_allocator);
+            vm.eval_expander = Some(expander);
+            return Err(LError::generic(format!("eval: expansion failed: {}", e)));
+        }
+    };
+
+    // Restore the caller's stack after macro expansion
+    vm.fiber.stack = saved_stack;
+    crate::value::fiber_heap::restore_active_allocator(saved_allocator);
 
     // Put Expander back
     vm.eval_expander = Some(expander);

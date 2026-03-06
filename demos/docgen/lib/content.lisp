@@ -1,6 +1,6 @@
 ## Content block rendering
 
-(import-file "elle-doc/lib/html.lisp")
+(def {:html-escape html-escape} ((import-file "elle-doc/lib/html.lisp")))
 
 ## Render a paragraph block
 (var render-paragraph

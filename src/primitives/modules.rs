@@ -93,7 +93,7 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             }
         };
 
-        let results = match crate::pipeline::compile_all(&contents, symbols) {
+        let result = match crate::pipeline::compile_file(&contents, symbols) {
             Ok(r) => r,
             Err(e) => {
                 return (
@@ -106,23 +106,50 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             }
         };
 
-        let mut last_value = Value::NIL;
-        for result in &results {
-            match vm.execute(&result.bytecode) {
-                Ok(v) => last_value = v,
-                Err(e) => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            format!("import-file: runtime error in {}: {}", path, e),
-                        ),
-                    );
-                }
-            }
-        }
+        // Save/restore the caller's stack. import-file executes the
+        // module's bytecode on the same VM, which would overwrite the
+        // caller's local variable slots without this protection.
+        vm.location_map = result.bytecode.location_map.clone();
+        let bc_rc = std::rc::Rc::new(result.bytecode.instructions);
+        let consts_rc = std::rc::Rc::new(result.bytecode.constants);
+        let location_map_rc = std::rc::Rc::new(vm.location_map.clone());
+        let empty_env = std::rc::Rc::new(vec![]);
 
-        (SIG_OK, last_value)
+        let exec_result =
+            vm.execute_bytecode_saving_stack(&bc_rc, &consts_rc, &empty_env, &location_map_rc);
+
+        match exec_result.bits {
+            SIG_OK => {
+                let (_, value) = vm
+                    .fiber
+                    .signal
+                    .take()
+                    .unwrap_or((SIG_OK, crate::value::Value::NIL));
+                (SIG_OK, value)
+            }
+            SIG_ERROR => {
+                let (_, err_value) = vm
+                    .fiber
+                    .signal
+                    .take()
+                    .unwrap_or((SIG_ERROR, crate::value::Value::NIL));
+                let msg = vm.format_error_with_location(err_value);
+                (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("import-file: runtime error in {}: {}", path, msg),
+                    ),
+                )
+            }
+            bits => (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("import-file: unexpected signal {} in {}", bits, path),
+                ),
+            ),
+        }
     }
 }
 

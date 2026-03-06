@@ -44,8 +44,7 @@ pub fn handle_store_global(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constan
 }
 
 pub fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
-    let _depth = vm.read_u8(bytecode, ip);
-    let idx = vm.read_u8(bytecode, ip) as usize;
+    let idx = vm.read_u16(bytecode, ip) as usize;
     let value = vm
         .fiber
         .stack

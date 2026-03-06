@@ -175,7 +175,11 @@ impl<'a> Analyzer<'a> {
         // pre-existing bindings.
         enum LetrecEntry<'s> {
             Simple(Binding, &'s Syntax),
-            Destructure(&'s Syntax, &'s Syntax),
+            Destructure {
+                pattern: &'s Syntax,
+                value: &'s Syntax,
+                leaf_bindings: HashMap<String, Binding>,
+            },
         }
         let mut entries = Vec::new();
 
@@ -197,13 +201,19 @@ impl<'a> Analyzer<'a> {
                 // Destructure pattern — pre-bind leaf names for mutual visibility
                 let mut names = Vec::new();
                 Self::extract_pattern_names(&pair[0], &mut names);
+                let mut leaf_bindings = HashMap::new();
                 for (name, name_scopes) in &names {
                     if *name != "_" {
                         let b = self.bind(name, name_scopes, BindingScope::Local);
                         b.mark_prebound();
+                        leaf_bindings.insert(name.to_string(), b);
                     }
                 }
-                entries.push(LetrecEntry::Destructure(&pair[0], &pair[1]));
+                entries.push(LetrecEntry::Destructure {
+                    pattern: &pair[0],
+                    value: &pair[1],
+                    leaf_bindings,
+                });
             } else {
                 return Err(format!(
                     "{}: letrec binding name must be a symbol or destructure pattern",
@@ -248,19 +258,25 @@ impl<'a> Analyzer<'a> {
                     }
                     bindings.push((*binding, value));
                 }
-                LetrecEntry::Destructure(pattern_syntax, value_syntax) => {
+                LetrecEntry::Destructure {
+                    pattern: pattern_syntax,
+                    value: value_syntax,
+                    leaf_bindings,
+                } => {
                     let value = self.analyze_expr(value_syntax)?;
                     effect = effect.combine(value.effect);
                     // Create a temp binding for the value in the Letrec bindings
                     let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
                     bindings.push((tmp, value));
-                    // Analyze the pattern (leaf bindings already exist from pass 1)
+                    // Analyze the pattern using pre-created bindings from pass 1
+                    self.pre_bindings.clone_from(leaf_bindings);
                     let pattern = self.analyze_destructure_pattern(
                         pattern_syntax,
                         BindingScope::Local,
                         false,
                         &span,
                     )?;
+                    self.pre_bindings.clear();
                     // Add leaf bindings to the Letrec bindings vec (initialized
                     // to nil) so the lowerer allocates slots for them before
                     // lowering any lambda values that might capture them.
@@ -504,6 +520,10 @@ impl<'a> Analyzer<'a> {
                 pattern_syntax: &'s Syntax,
                 value_syntax: &'s Syntax,
                 immutable: bool,
+                /// Pre-created bindings from pass 1, keyed by name.
+                /// Passed to `analyze_destructure_pattern` in pass 2 to
+                /// ensure binding identity matches.
+                leaf_bindings: HashMap<String, Binding>,
             },
         }
 
@@ -543,17 +563,20 @@ impl<'a> Analyzer<'a> {
                         // Pre-bind leaf names for mutual visibility
                         let mut names = Vec::new();
                         Self::extract_pattern_names(name_syntax, &mut names);
+                        let mut leaf_bindings = HashMap::new();
                         for (name, name_scopes) in &names {
                             if *name != "_" {
                                 let b = self.bind(name, name_scopes, BindingScope::Local);
                                 b.mark_prebound();
                                 b.mark_immutable();
+                                leaf_bindings.insert(name.to_string(), b);
                             }
                         }
                         entries.push(PreBound::Destructure {
                             pattern_syntax: name_syntax,
                             value_syntax,
                             immutable: true,
+                            leaf_bindings,
                         });
                     } else {
                         return Err(format!(
@@ -591,17 +614,20 @@ impl<'a> Analyzer<'a> {
                     } else if Self::is_destructure_pattern(name_syntax) {
                         let mut names = Vec::new();
                         Self::extract_pattern_names(name_syntax, &mut names);
+                        let mut leaf_bindings = HashMap::new();
                         for (name, name_scopes) in &names {
                             if *name != "_" {
                                 let b = self.bind(name, name_scopes, BindingScope::Local);
                                 b.mark_prebound();
                                 // var — mutable
+                                leaf_bindings.insert(name.to_string(), b);
                             }
                         }
                         entries.push(PreBound::Destructure {
                             pattern_syntax: name_syntax,
                             value_syntax,
                             immutable: false,
+                            leaf_bindings,
                         });
                     } else {
                         return Err(format!(
@@ -663,28 +689,34 @@ impl<'a> Analyzer<'a> {
                     pattern_syntax,
                     value_syntax,
                     immutable,
+                    leaf_bindings,
                 } => {
                     let value = self.analyze_expr(value_syntax)?;
                     effect = effect.combine(value.effect);
 
-                    // Create a temp binding for the value in the Letrec bindings
-                    let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
-                    bindings.push((tmp, value));
-
-                    // Analyze the pattern (leaf bindings already exist from pass 1)
+                    // Analyze the pattern using pre-created bindings from pass 1.
+                    // This ensures binding identity matches even when the same
+                    // name appears in multiple file-scope forms.
+                    self.pre_bindings.clone_from(leaf_bindings);
                     let pattern = self.analyze_destructure_pattern(
                         pattern_syntax,
                         BindingScope::Local,
                         *immutable,
                         &span,
                     )?;
+                    self.pre_bindings.clear();
 
                     // Add leaf bindings to the Letrec bindings vec (initialized
-                    // to nil) so the lowerer allocates slots for them.
+                    // to nil) FIRST so the lowerer allocates slots for them
+                    // before processing the destructure gensym.
                     for leaf_binding in &pattern.bindings().bindings {
                         bindings.push((*leaf_binding, Hir::pure(HirKind::Nil, span.clone())));
                         last_binding = Some(*leaf_binding);
                     }
+
+                    // Create a temp binding for the value in the Letrec bindings
+                    let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
+                    bindings.push((tmp, value));
 
                     // Emit the destructure inline as a gensym binding whose
                     // initializer is the Destructure node. This ensures the

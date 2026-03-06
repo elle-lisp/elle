@@ -102,7 +102,7 @@ bytecode. Error messages include file:line:col information.
 | `formatter` | Code formatting for Elle source |
 | `plugin` | Dynamic plugin loading for Rust cdylib primitives |
 | `path` | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
-| `pipeline` | Compilation entry points. Single-form: `compile`, `analyze`, `eval`. File-level (Chunk 1): `compile_file`, `analyze_file`, `eval_file`. Deprecated: `compile_all`, `analyze_all`, `eval_all`. See [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md). |
+| `pipeline` | Compilation entry points. Single-form: `compile`, `analyze`, `eval`. File-level (PRIMARY, Chunk 3): `compile_file`, `analyze_file`, `eval_file`. Deprecated (Chunk 3, removal in Chunk 6): `compile_all`, `analyze_all`, `eval_all`. See [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md). |
 | `error` | `LocationMap` for bytecode offset → source location mapping |
 
 ### The Value type
@@ -327,7 +327,7 @@ Things that look wrong but aren't:
   This is intentional — plugins are dynamically loaded and the core compiler cannot
   know their types at compile time. The `type_name` field provides Elle-side identity,
   and `downcast_ref` is used only within the plugin that created the type.
-- **Module convention (Chunk 2)**: Module files (`.lisp`) follow a standard pattern.
+- **Module convention (Chunk 3)**: Module files (`.lisp`) follow a standard pattern.
   The last expression in a module is a closure that returns a struct of exports.
   This allows parameterized modules in the future. Example:
   ```lisp
@@ -338,19 +338,19 @@ Things that look wrong but aren't:
   # last expression is a closure returning exports
   (fn [] {:assert-eq assert-eq :assert-true assert-true})
   ```
-  When imported, the module returns a closure (not a struct directly). Call it
-  to get the exports struct:
+  When imported via `import-file`, the module's last expression (a closure) is
+  returned. Call it to get the exports struct:
   ```lisp
-  (def asserts ((import "assertions.lisp")))
+  (def asserts ((import-file "assertions.lisp")))
   (asserts :assert-eq 1 1)
   ```
   Or destructure directly:
   ```lisp
-  (def {:assert-eq assert-eq :assert-true assert-true} ((import "assertions.lisp")))
+  (def {:assert-eq assert-eq :assert-true assert-true} ((import-file "assertions.lisp")))
   ```
-  The `import` primitive returns the last expression's value for `.lisp` files,
-  and `true` for `.so` plugins. The `import-file` primitive handles both Elle
-  source files and plugin `.so` files.
+  The `import-file` primitive (Chunk 3) uses `eval_file` to compile and execute
+  the module, returning its last expression's value. For `.so` plugins, it
+  returns `true`.
 - Docstrings are extracted from leading string literals in function bodies.
   `HirKind::Lambda` has a `doc: Option<Value>` field, threaded through LIR
   and into `Closure.doc`. The `(doc name)` primitive checks closure doc fields

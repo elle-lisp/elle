@@ -187,6 +187,126 @@ fn test_file_analyze_produces_single_result() {
 }
 
 // ============================================================================
+// SECTION 0b: import-file returns file's last expression (Chunk 3 Part 1)
+// ============================================================================
+
+/// Helper: evaluate source through the file-as-letrec pipeline with stdlib.
+fn eval_file_source_with_stdlib(input: &str) -> Result<Value, String> {
+    use elle::context::{set_symbol_table, set_vm_context};
+    use elle::{init_stdlib, register_primitives, SymbolTable, VM};
+
+    let mut vm = VM::new();
+    let mut symbols = SymbolTable::new();
+    let _meta = register_primitives(&mut vm, &mut symbols);
+    set_vm_context(&mut vm as *mut VM);
+    set_symbol_table(&mut symbols as *mut SymbolTable);
+    init_stdlib(&mut vm, &mut symbols);
+    let result = elle::eval_file(input, &mut symbols, &mut vm);
+    set_vm_context(std::ptr::null_mut());
+    result
+}
+
+#[test]
+fn test_eval_file_returns_last_expression() {
+    // eval_file returns the value of the last expression in the file.
+    assert_eq!(eval_file_source("(+ 1 2)").unwrap(), Value::int(3));
+    assert_eq!(
+        eval_file_source("(def x 10) (def y 20) (+ x y)").unwrap(),
+        Value::int(30)
+    );
+}
+
+#[test]
+fn test_eval_file_returns_closure_for_module() {
+    // A file whose last expression is a closure returns that closure.
+    let code = r#"
+        (def x 42)
+        (fn [] x)
+    "#;
+    let result = eval_file_source(code).unwrap();
+    assert!(result.is_closure(), "expected closure, got {:?}", result);
+}
+
+#[test]
+fn test_eval_file_module_closure_callable() {
+    // The closure returned by eval_file can be called to get exports.
+    let code = r#"
+        (def x 42)
+        (def y "hello")
+        (def get-exports (fn [] {:x x :y y}))
+        (get-exports)
+    "#;
+    let result = eval_file_source(code).unwrap();
+    // The result is a struct with :x and :y
+    assert!(result.is_struct(), "expected struct, got {:?}", result);
+}
+
+#[test]
+fn test_import_file_returns_closure() {
+    // import-file on test-modules/test.lisp returns a closure (the last
+    // expression in the file). Under compile_file, the file's letrec body
+    // is the last expression, which is `(fn [] {...})`.
+    let code = r#"(import-file "test-modules/test.lisp")"#;
+    let result = eval_file_source_with_stdlib(code).unwrap();
+    assert!(
+        result.is_closure(),
+        "import-file should return a closure, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_import_file_closure_returns_exports() {
+    // Calling the closure returned by import-file yields the exports struct.
+    let code = r#"
+        (def exports ((import-file "test-modules/test.lisp")))
+        (get exports :test-var)
+    "#;
+    let result = eval_file_source_with_stdlib(code).unwrap();
+    assert_eq!(result, Value::int(42));
+}
+
+#[test]
+fn test_import_file_destructure_exports() {
+    // Destructuring the closure result gives access to individual exports.
+    let code = r#"
+        (def {:test-var tv :test-string ts}
+          ((import-file "test-modules/test.lisp")))
+        (list tv ts)
+    "#;
+    let result = eval_file_source_with_stdlib(code).unwrap();
+    assert!(result.is_list(), "expected list, got {:?}", result);
+}
+
+// ============================================================================
+// SECTION 0c: Destructured def bindings captured by closures (issue #469)
+// ============================================================================
+
+#[test]
+fn test_file_destructured_def_captured_by_closure() {
+    // Destructured def bindings at file level should NOT get cell wrapping
+    // even when captured by a closure. They are immutable.
+    let code = r#"
+        (def {:x x} {:x 42})
+        (def f (fn [] x))
+        (f)
+    "#;
+    let result = eval_file_source(code).unwrap();
+    assert_eq!(result, Value::int(42));
+}
+
+#[test]
+fn test_file_destructured_def_not_captured() {
+    // Destructured def bindings at file level used directly (no capture).
+    let code = r#"
+        (def {:x x} {:x 42})
+        x
+    "#;
+    let result = eval_file_source(code).unwrap();
+    assert_eq!(result, Value::int(42));
+}
+
+// ============================================================================
 // SECTION 1: Immutable captures (def) — no cell wrapping
 // ============================================================================
 
@@ -315,4 +435,25 @@ fn test_def_fn_captured_by_sibling() {
           (caller 41))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(42));
+}
+
+// ============================================================================
+// Bug reproduction: eval with macros corrupting destructured binding cells
+// ============================================================================
+
+#[test]
+fn test_file_destructure_eval_with_macro() {
+    // Regression test: eval with a macro (like `when`) triggers macro expansion
+    // which executes VM bytecode. Without stack save/restore around expansion,
+    // the macro expansion overwrites the caller's local variable slots,
+    // corrupting cells that hold destructured bindings.
+    let result = eval_file_source(
+        r#"
+        (def {:f f} {:f (fn [a b c] a)})
+        (defn helper [] (f 1 2 3))
+        (f (eval '(when true 42)) 42 "test")
+        "#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(42));
 }

@@ -24,14 +24,14 @@ Does NOT:
 | Function | Purpose |
 |----------|---------|
 | `compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | Compile a single expression to bytecode. Returns `CompileResult` with bytecode and warnings. |
-| `compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<CompileResult>, String>` | Compile multiple top-level forms with fixpoint effect inference. Returns one `CompileResult` per form. **Deprecated in Chunk 1**: use `compile_file` instead. |
-| `compile_file(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | Compile a file as a single synthetic letrec. All top-level forms are analyzed together, enabling mutual recursion. Returns a single `CompileResult`. |
+| `compile_file(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | **PRIMARY ENTRY POINT (Chunk 3).** Compile a file as a single synthetic letrec. All top-level forms are analyzed together, enabling mutual recursion. Returns a single `CompileResult`. |
+| `compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<CompileResult>, String>` | Compile multiple top-level forms with fixpoint effect inference. Returns one `CompileResult` per form. **DEPRECATED (Chunk 3)**: use `compile_file` instead. Will be removed in Chunk 6. |
 | `analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<AnalyzeResult, String>` | Analyze a single expression to HIR (no bytecode). Used by linter and LSP. |
-| `analyze_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Vec<AnalyzeResult>, String>` | Analyze multiple top-level forms to HIR with fixpoint effect inference. Returns one `AnalyzeResult` per form. **Deprecated in Chunk 1**: use `analyze_file` instead. |
-| `analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<AnalyzeResult, String>` | Analyze a file as a single synthetic letrec (no bytecode). Used by linter and LSP for file-level analysis. |
+| `analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<AnalyzeResult, String>` | **PRIMARY ENTRY POINT (Chunk 3).** Analyze a file as a single synthetic letrec (no bytecode). Used by linter and LSP for file-level analysis. |
+| `analyze_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Vec<AnalyzeResult>, String>` | Analyze multiple top-level forms to HIR with fixpoint effect inference. Returns one `AnalyzeResult` per form. **DEPRECATED (Chunk 3)**: use `analyze_file` instead. Will be removed in Chunk 6. |
 | `eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute a single expression. Returns the result value. |
-| `eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute multiple top-level forms sequentially. Returns the value of the last form. **Deprecated in Chunk 1**: use `eval_file` instead. |
-| `eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute a file as a single synthetic letrec. Returns the value of the last expression. |
+| `eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | **PRIMARY ENTRY POINT (Chunk 3).** Compile and execute a file as a single synthetic letrec. Returns the value of the last expression. |
+| `eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute multiple top-level forms sequentially. Returns the value of the last form. **DEPRECATED (Chunk 3)**: use `eval_file` instead. Will be removed in Chunk 6. |
 | `eval_syntax(syntax: Syntax, expander: &mut Expander, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute a pre-parsed Syntax tree. Used internally by macro expansion. |
 
 ## Data flow
@@ -109,8 +109,8 @@ a sequence of independent forms:
 
 ## Dependents
 
-- `main.rs` — CLI file execution uses `eval_file`
-- `primitives/import.rs` — module loading uses `compile_file`
+- `main.rs` — CLI file execution uses `eval_file` (Chunk 3)
+- `primitives/modules.rs` — module loading uses `eval_file` (Chunk 3)
 - `lsp/state.rs` — file analysis uses `analyze_file`
 - `lint/cli.rs` — linting uses `analyze_file`
 
@@ -120,14 +120,15 @@ a sequence of independent forms:
     expression, expand it, analyze it, and compile/execute it. No fixpoint
     iteration. Used for REPL and macro body evaluation.
 
-2. **`compile_file`, `analyze_file`, `eval_file` are file-level entry points.**
+2. **`compile_file`, `analyze_file`, `eval_file` are PRIMARY file-level entry points (Chunk 3).**
     They parse all top-level forms, expand them, classify them, and analyze
     them as a single synthetic letrec via `Analyzer.analyze_file_letrec`.
-    Used for file execution and module loading.
+    Used for file execution and module loading. All callers have migrated to
+    this model.
 
-3. **`compile_all`, `analyze_all`, `eval_all` are deprecated.** They use
+3. **`compile_all`, `analyze_all`, `eval_all` are DEPRECATED (Chunk 3).** They use
     fixpoint iteration and return `Vec<CompileResult>` / `Vec<AnalyzeResult>`.
-    Callers should migrate to the file-as-letrec model.
+    These functions will be removed in Chunk 6. No new code should use them.
 
 4. **Primitives are pre-bound in file-level analysis.** `Analyzer.bind_primitives`
     wraps the file's letrec in an outer scope containing all registered primitives.
@@ -137,7 +138,7 @@ a sequence of independent forms:
 5. **File return value is the last expression.** If the last form is a `def`/`var`,
     the file returns the binding's name. If the last form is a bare expression,
     the file returns the expression's value. For empty files, the return value
-    is `nil`.
+    is `nil`. Modules return their last expression (typically a closure of exports).
 
 6. **Macro expansion is cached.** The `cache` module maintains a thread-local
     `Expander` and `VM` for macro expansion. This avoids re-parsing the prelude

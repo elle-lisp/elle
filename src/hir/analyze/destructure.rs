@@ -325,6 +325,11 @@ impl<'a> Analyzer<'a> {
 
                 let binding = if matches!(binding_scope, BindingScope::Global) {
                     self.bind(name, &[], binding_scope)
+                } else if let Some(&pre) = self.pre_bindings.get(name.as_str()) {
+                    // Use pre-created binding from letrec pass 1 (avoids
+                    // identity mismatch when the same name appears in
+                    // multiple file-scope forms).
+                    pre
                 } else {
                     // Check if pre-created (by analyze_begin or letrec pass 1)
                     let name_scopes = syntax.scopes.as_slice();

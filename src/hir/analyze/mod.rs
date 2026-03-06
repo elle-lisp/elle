@@ -152,6 +152,11 @@ pub struct Analyzer<'a> {
     /// Current function nesting depth (incremented in analyze_lambda).
     /// Used to prevent `break` from crossing function boundaries.
     fn_depth: u32,
+    /// Pre-created bindings from letrec pass 1 for destructured forms.
+    /// When set, `analyze_destructure_pattern` uses these instead of
+    /// `lookup_in_current_scope` to avoid binding identity mismatch
+    /// when the same name appears in multiple file-scope forms.
+    pre_bindings: HashMap<String, Binding>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -196,6 +201,7 @@ impl<'a> Analyzer<'a> {
             block_contexts: Vec::new(),
             next_block_id: 0,
             fn_depth: 0,
+            pre_bindings: HashMap::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
@@ -338,21 +344,14 @@ impl<'a> Analyzer<'a> {
             if let Some(candidates) = scope.bindings.get(name) {
                 // Find the best candidate: binding's scopes must be a subset of
                 // the reference's scopes, and the largest scope set wins.
+                // When multiple candidates share the largest scope-set size,
+                // max_by_key returns the last one (the most recently bound),
+                // which gives correct file-level redefinition semantics.
                 let best = candidates
                     .iter()
                     .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = best {
-                    debug_assert!(
-                        candidates
-                            .iter()
-                            .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
-                            .filter(|c| c.scopes.len() == winner.scopes.len())
-                            .count()
-                            == 1,
-                        "Ambiguous binding: multiple candidates with same scope-set size for '{}'",
-                        name
-                    );
                     found_in_scope = Some((depth, winner.binding, crossed_function_boundary));
                     break;
                 }

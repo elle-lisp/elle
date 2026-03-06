@@ -1,7 +1,7 @@
 //! Evaluation pipeline: source -> value.
 
 use super::cache;
-use super::compile::compile_all;
+use super::compile::compile_file;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::Analyzer;
 use crate::lir::{Emitter, Lowerer};
@@ -79,20 +79,16 @@ pub fn eval(
 
 /// Compile and execute multiple top-level forms.
 ///
-/// Each form is compiled with fixpoint effect inference (like `compile_all`)
-/// then executed sequentially. Returns the value of the last form.
+/// All forms are compiled as a single synthetic letrec (via `compile_file`)
+/// then executed as one unit. Returns the value of the last form.
 /// Returns `Ok(Value::NIL)` for empty input.
 pub fn eval_all(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
 ) -> Result<crate::value::Value, String> {
-    let results = compile_all(source, symbols)?;
-    let mut last_value = crate::value::Value::NIL;
-    for result in results {
-        last_value = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-    }
-    Ok(last_value)
+    let result = compile_file(source, symbols)?;
+    vm.execute(&result.bytecode).map_err(|e| e.to_string())
 }
 
 /// Compile and execute a file as a single synthetic letrec.

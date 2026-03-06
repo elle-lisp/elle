@@ -11,7 +11,7 @@ use elle::{eval_all, init_stdlib, register_primitives, SymbolTable, Value, VM};
 /// Identical to `eval_source` except it skips `init_stdlib`. Use this
 /// for tests that never call stdlib functions (map, filter, fold, etc.).
 /// Prelude macros (defn, let*, ->, ->>, when, unless, try/catch, etc.)
-/// are still available — they're loaded by `compile_all`'s internal
+/// are still available — they're loaded by `compile_file`'s internal
 /// `Expander::load_prelude`, not by `init_stdlib`.
 #[allow(dead_code)]
 pub fn eval_source_bare(input: &str) -> Result<Value, String> {
