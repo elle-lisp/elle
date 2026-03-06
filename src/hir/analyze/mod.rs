@@ -306,6 +306,25 @@ impl<'a> Analyzer<'a> {
         binding
     }
 
+    /// Register an already-created binding in the current scope without
+    /// creating a new one. Used by `analyze_file_letrec` Pass 2 to add
+    /// deferred duplicate-name bindings at the correct sequential point.
+    fn register_binding(&mut self, name: &str, scopes: &[ScopeId], binding: Binding) {
+        if let Some(scope_frame) = self.scopes.last_mut() {
+            scope_frame
+                .bindings
+                .entry(name.to_string())
+                .or_default()
+                .push(ScopedBinding {
+                    scopes: scopes.to_vec(),
+                    binding,
+                });
+            if matches!(binding.scope(), BindingScope::Local) {
+                scope_frame.next_local += 1;
+            }
+        }
+    }
+
     /// Bind a symbol by its already-interned SymbolId.
     ///
     /// Used by `bind_primitives` where we already have SymbolIds from
