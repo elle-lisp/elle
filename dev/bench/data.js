@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772764232308,
+  "lastUpdate": 1772776756650,
   "repoUrl": "https://github.com/elle-lisp/elle",
   "entries": {
     "Elle Benchmarks": [
@@ -815,6 +815,210 @@ window.BENCHMARK_DATA = {
             "name": "memory_operations/list_to_vec",
             "value": 112,
             "range": "± 3",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "disruptek@users.noreply.github.com",
+            "name": "Smooth Operator",
+            "username": "disruptek"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a67e09f28a53c056fce5e1c120466f061a6551bd",
+          "message": "Implement I/O Phase 2: Ports (#474) (#489)\n\n* Add Port type and display integration (#474)\n\nIntroduce src/port.rs with Port struct (OwnedFd-based), PortKind,\nDirection, and Encoding enums. Ports are ExternalObjects wrapping\nfile descriptors with kind-aware Display formatting. Update\nvalue display to recognize port external objects. Add integration\ntest stubs for port display.\n\n* Add port primitives (#474)\n\nImplement port/open, port/open-bytes, port/close, port/stdin,\nport/stdout, port/stderr, port?, and port/open? primitives in\nsrc/primitives/ports.rs. Register in ALL_TABLES. Add integration\ntests covering lifecycle, error handling, and display formatting.\n\n* Add standard port parameters and Elle tests (#474)\n\nDefine *stdin*, *stdout*, *stderr* as parameters in stdlib.lisp\nusing make-parameter. Add comprehensive Elle behavioral tests\ncovering port predicates, lifecycle, error handling, resource\nmanagement with `with`, and parameterize integration.\n\n* Move port tests to Elle, add mode coverage, fix basics example (#474)\n\nMigrate 14 integration tests to tests/elle/ports.lisp, keeping only\n3 Rust tests that need format inspection. Add :read-write and :append\nmode tests. Remove bare (/ 1 0) from examples/basics.lisp that caused\nCI failure.",
+          "timestamp": "2026-03-06T05:03:15Z",
+          "tree_id": "f618f45639d2d83eaf25a715527f9ed1092c4475",
+          "url": "https://github.com/elle-lisp/elle/commit/a67e09f28a53c056fce5e1c120466f061a6551bd"
+        },
+        "date": 1772776755966,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parsing/simple_number",
+            "value": 157,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/list_literal",
+            "value": 1280,
+            "range": "± 24",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/nested_expr",
+            "value": 2201,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/deep_nesting",
+            "value": 1338,
+            "range": "± 32",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/large_list_100",
+            "value": 25535,
+            "range": "± 126",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/first_intern",
+            "value": 76,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/repeat_intern",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/many_unique",
+            "value": 18316,
+            "range": "± 1284",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/simple_arithmetic",
+            "value": 270827,
+            "range": "± 25655",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/conditional",
+            "value": 409043,
+            "range": "± 64878",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/nested_arithmetic",
+            "value": 443228,
+            "range": "± 73386",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/int_add",
+            "value": 570,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/mixed_arithmetic",
+            "value": 444,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/comparison",
+            "value": 280,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/cons",
+            "value": 999,
+            "range": "± 22",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/first",
+            "value": 862,
+            "range": "± 27",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/if_true",
+            "value": 554,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/nested_if",
+            "value": 4989,
+            "range": "± 2115",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/simple",
+            "value": 614066,
+            "range": "± 31584",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/complex",
+            "value": 633682,
+            "range": "± 47662",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/10",
+            "value": 1949,
+            "range": "± 555",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/10",
+            "value": 814,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/50",
+            "value": 29666,
+            "range": "± 5361",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/50",
+            "value": 27245,
+            "range": "± 3759",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/100",
+            "value": 63867,
+            "range": "± 9333",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/100",
+            "value": 49285,
+            "range": "± 13635",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/500",
+            "value": 297815,
+            "range": "± 34219",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/500",
+            "value": 263762,
+            "range": "± 38513",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/value_clone",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/list_to_vec",
+            "value": 109,
+            "range": "± 1",
             "unit": "ns/iter"
           }
         ]
