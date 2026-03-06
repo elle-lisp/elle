@@ -231,6 +231,14 @@ impl fmt::Display for Value {
             return write!(f, "<lib-handle:{}>", id);
         }
 
+        // External object — delegate to type-specific Display if available
+        if let Some(port) = self.as_external::<crate::port::Port>() {
+            return write!(f, "{}", port);
+        }
+        if let Some(name) = self.external_type_name() {
+            return write!(f, "#<{}>", name);
+        }
+
         // Default for unknown heap types
         write!(f, "<heap:{:#x}>", self.to_bits() & 0x0000_FFFF_FFFF_FFFF)
     }
