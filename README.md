@@ -10,6 +10,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - [Language](#language)
 - [Control Flow](#control-flow)
 - [Memory](#memory)
+- [JIT](#jit)
 - [FFI](#ffi)
 - [Modules and Plugins](#modules-and-plugins)
 - [Tooling](#tooling)
@@ -264,6 +265,10 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Memory is reclaimed at scope exit or fiber death, without pausing the world.
 
+## JIT
+
+- **JIT compilation is fully automatic.** Pure, non-suspending functions are compiled to native code via Cranelift at runtime. No annotations, no opt-in. The compiler's effect system identifies eligible functions; the JIT fires transparently.
+
 ## FFI
 
 - **Call C without ceremony.** Load a library, bind a symbol, call it.
@@ -346,8 +351,6 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   ```
 
 - **Match exhaustiveness is checked at compile time.** The compiler warns when a match expression has patterns that can never be reached, and when the match may not cover all cases for a known type.
-
-- **JIT compilation is fully automatic.** Pure, non-suspending functions are compiled to native code via Cranelift at runtime. No annotations, no opt-in. The compiler's effect system identifies eligible functions; the JIT fires transparently.
 
 - **Source-to-source rewriting tool.** The `rewrite` subcommand applies pattern-based rules to Elle source files for refactoring and code generation. Rules are pattern-action pairs that match syntax trees and produce transformed output.
 
