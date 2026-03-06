@@ -11,6 +11,7 @@ pub mod eval;
 pub mod execute;
 pub mod fiber;
 pub mod literals;
+pub mod parameters;
 pub mod signal;
 pub mod stack;
 pub mod types;
