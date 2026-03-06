@@ -137,6 +137,8 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 | `IsTable` | value → bool | Type check: is value a table or struct? (for pattern matching) |
 | `ArrayLen` | array → int | Get array length (for pattern matching) |
 | `TableGetOrNil` | table → value | Get key from table/struct, or nil if missing/wrong type (u16 const_idx operand) |
+| `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
+| `PopParamFrame` | (none) | Pop the current parameter binding frame |
 | `RegionEnter` | (none) | Push scope mark on FiberHeap (no-op for root fiber) |
 | `RegionExit` | (none) | Pop scope mark and release scoped objects (no-op for root fiber) |
 

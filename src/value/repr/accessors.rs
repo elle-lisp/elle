@@ -512,6 +512,26 @@ impl Value {
         }
     }
 
+    /// Check if this is a parameter.
+    #[inline]
+    pub fn is_parameter(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::Parameter)
+    }
+
+    /// Extract parameter (id, default) if this is a parameter.
+    #[inline]
+    pub fn as_parameter(&self) -> Option<(u32, Value)> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::Parameter { id, default } => Some((*id, *default)),
+            _ => None,
+        }
+    }
+
     /// Check if this is a binding.
     #[inline]
     pub fn is_binding(&self) -> bool {

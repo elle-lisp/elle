@@ -131,6 +131,9 @@ mod allocator {
 mod environment {
     include!("environment.rs");
 }
+mod parameters {
+    include!("parameters.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

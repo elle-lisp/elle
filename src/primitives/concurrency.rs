@@ -120,6 +120,9 @@ fn is_value_sendable(value: &Value) -> bool {
 
         // External objects are not sendable (contain Rc<dyn Any>)
         HeapObject::External(_) => false,
+
+        // Parameters are not sendable (fiber-local state)
+        HeapObject::Parameter { .. } => false,
     }
 }
 

@@ -209,6 +209,7 @@ impl<'a> Analyzer<'a> {
                         "match" => return self.analyze_match(items, span),
                         "cond" => return self.analyze_cond(items, span),
                         "eval" => return self.analyze_eval(items, span),
+                        "parameterize" => return self.analyze_parameterize(items, span),
 
                         // (doc <symbol>) → (doc "<symbol-name>")
                         // Rewrites the symbol arg to a string so bare symbols
@@ -540,6 +541,68 @@ impl<'a> Analyzer<'a> {
             HirKind::Eval {
                 expr: Box::new(expr),
                 env: Box::new(env),
+            },
+            span,
+            effect,
+        ))
+    }
+
+    pub(crate) fn analyze_parameterize(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+    ) -> Result<Hir, String> {
+        // (parameterize ((param1 val1) (param2 val2) ...) body ...)
+        if items.len() < 3 {
+            return Err(format!(
+                "{}: parameterize requires bindings and at least one body expression",
+                span
+            ));
+        }
+
+        let bindings_syntax = items[1]
+            .as_list_or_tuple()
+            .ok_or_else(|| format!("{}: parameterize bindings must be a list", span))?;
+
+        if bindings_syntax.len() > 255 {
+            return Err(format!(
+                "{}: parameterize supports at most 255 bindings, got {}",
+                span,
+                bindings_syntax.len()
+            ));
+        }
+
+        let mut bindings = Vec::new();
+        let mut effect = Effect::none();
+
+        for pair_syntax in bindings_syntax {
+            let pair = pair_syntax.as_list_or_tuple().ok_or_else(|| {
+                format!(
+                    "{}: parameterize binding must be (param value), got {}",
+                    pair_syntax.span,
+                    pair_syntax.kind_label()
+                )
+            })?;
+            if pair.len() != 2 {
+                return Err(format!(
+                    "{}: parameterize binding must be (param value), got {} elements",
+                    pair_syntax.span,
+                    pair.len()
+                ));
+            }
+            let param = self.analyze_expr(&pair[0])?;
+            let value = self.analyze_expr(&pair[1])?;
+            effect = effect.combine(param.effect).combine(value.effect);
+            bindings.push((param, value));
+        }
+
+        let body = self.analyze_body(&items[2..], span.clone())?;
+        effect = effect.combine(body.effect);
+
+        Ok(Hir::new(
+            HirKind::Parameterize {
+                bindings,
+                body: Box::new(body),
             },
             span,
             effect,

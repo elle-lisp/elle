@@ -243,6 +243,14 @@ impl HirSymbolExtractor {
                 self.walk(expr, index, symbols);
                 self.walk(env, index, symbols);
             }
+
+            HirKind::Parameterize { bindings, body } => {
+                for (param, value) in bindings {
+                    self.walk(param, index, symbols);
+                    self.walk(value, index, symbols);
+                }
+                self.walk(body, index, symbols);
+            }
         }
     }
 

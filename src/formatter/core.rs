@@ -148,6 +148,7 @@ fn format_value(
                 }
             }
             HeapObject::External(ext) => return format!("#<{}>", ext.type_name),
+            HeapObject::Parameter { id, .. } => return format!("<parameter:{}>", id),
             HeapObject::String(s) => return format!("\"{}\"", s.escape_default()),
         }
     }

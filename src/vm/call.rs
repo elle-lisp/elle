@@ -156,6 +156,21 @@ impl VM {
             return self.handle_primitive_signal(bits, value, bytecode, constants, closure_env, ip);
         }
 
+        if let Some((id, default)) = func.as_parameter() {
+            if !args.is_empty() {
+                set_error(
+                    &mut self.fiber,
+                    "arity-error",
+                    format!("parameter call: expected 0 arguments, got {}", args.len()),
+                );
+                self.fiber.stack.push(Value::NIL);
+                return None;
+            }
+            let value = self.resolve_parameter(id, default);
+            self.fiber.stack.push(value);
+            return None;
+        }
+
         if let Some(closure) = func.as_closure() {
             self.fiber.call_depth += 1;
             if self.fiber.call_depth > 1000 {
@@ -351,6 +366,20 @@ impl VM {
         if let Some(f) = func.as_native_fn() {
             let (bits, value) = f(&args);
             return Some(self.handle_primitive_signal_tail(bits, value));
+        }
+
+        if let Some((id, default)) = func.as_parameter() {
+            if !args.is_empty() {
+                set_error(
+                    &mut self.fiber,
+                    "arity-error",
+                    format!("parameter call: expected 0 arguments, got {}", args.len()),
+                );
+                return Some(SIG_ERROR);
+            }
+            let value = self.resolve_parameter(id, default);
+            self.fiber.signal = Some((SIG_OK, value));
+            return Some(SIG_OK);
         }
 
         if let Some(closure) = func.as_closure() {

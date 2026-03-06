@@ -352,6 +352,56 @@ impl VM {
                 Instruction::RegionExit => {
                     crate::value::fiber_heap::region_exit();
                 }
+
+                // Dynamic parameter frame management
+                Instruction::PushParamFrame => {
+                    let count = bc[ip] as usize;
+                    ip += 1;
+                    let mut frame = Vec::with_capacity(count);
+                    // Stack has pairs pushed as [param1, val1, param2, val2, ...]
+                    // We need to pop them in reverse order (last pair first)
+                    // First collect all pairs from the stack
+                    let mut raw_pairs = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        let val = self
+                            .fiber
+                            .stack
+                            .pop()
+                            .expect("VM bug: stack underflow in PushParamFrame");
+                        let param = self
+                            .fiber
+                            .stack
+                            .pop()
+                            .expect("VM bug: stack underflow in PushParamFrame");
+                        raw_pairs.push((param, val));
+                    }
+                    // Process in reverse to restore original order
+                    for (param, val) in raw_pairs.into_iter().rev() {
+                        if let Some((id, _default)) = param.as_parameter() {
+                            frame.push((id, val));
+                        } else {
+                            use crate::value::error_val;
+                            self.fiber.signal = Some((
+                                SIG_ERROR,
+                                error_val(
+                                    "type-error",
+                                    format!(
+                                        "parameterize: {} is not a parameter",
+                                        param.type_name()
+                                    ),
+                                ),
+                            ));
+                            self.fiber.stack.push(Value::NIL);
+                            break;
+                        }
+                    }
+                    if self.fiber.signal.is_none() {
+                        self.fiber.param_frames.push(frame);
+                    }
+                }
+                Instruction::PopParamFrame => {
+                    self.fiber.param_frames.pop();
+                }
             }
 
             // Check for error signal set by this instruction's handler
