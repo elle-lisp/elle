@@ -4,7 +4,7 @@
 # Tests that require float precision checks (.as_float() with tolerance)
 # or error message substring matching remain in the Rust file.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # Helper: assert that a thunk signals an error
 (defn assert-err [thunk msg]

@@ -4,11 +4,11 @@
 //! (add, subtract, multiply, divide, etc.) to avoid duplication between
 //! the VM's binary stack operations and the primitives' variadic functions.
 
+use crate::error::{LError, LResult};
 use crate::value::Value;
 
 /// Add two numeric values, automatically promoting Int to Float when needed
-/// Add two numeric values, automatically promoting Int to Float when needed
-pub fn add_values(a: &Value, b: &Value) -> Result<Value, String> {
+pub fn add_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Ok(Value::int(x + y)),
         _ => match (a.as_float(), b.as_float()) {
@@ -19,7 +19,7 @@ pub fn add_values(a: &Value, b: &Value) -> Result<Value, String> {
                     (Some(x), Some(y)) => Ok(Value::float(x as f64 + y)),
                     _ => match (a.as_float(), b.as_int()) {
                         (Some(x), Some(y)) => Ok(Value::float(x + y as f64)),
-                        _ => Err("Type error: + requires numbers".to_string()),
+                        _ => Err(LError::type_mismatch("number", "non-numeric value")),
                     },
                 }
             }
@@ -28,7 +28,7 @@ pub fn add_values(a: &Value, b: &Value) -> Result<Value, String> {
 }
 
 /// Subtract two numeric values, automatically promoting Int to Float when needed
-pub fn sub_values(a: &Value, b: &Value) -> Result<Value, String> {
+pub fn sub_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Ok(Value::int(x - y)),
         _ => match (a.as_float(), b.as_float()) {
@@ -39,7 +39,7 @@ pub fn sub_values(a: &Value, b: &Value) -> Result<Value, String> {
                     (Some(x), Some(y)) => Ok(Value::float(x as f64 - y)),
                     _ => match (a.as_float(), b.as_int()) {
                         (Some(x), Some(y)) => Ok(Value::float(x - y as f64)),
-                        _ => Err("Type error: - requires numbers".to_string()),
+                        _ => Err(LError::type_mismatch("number", "non-numeric value")),
                     },
                 }
             }
@@ -48,7 +48,7 @@ pub fn sub_values(a: &Value, b: &Value) -> Result<Value, String> {
 }
 
 /// Multiply two numeric values, automatically promoting Int to Float when needed
-pub fn mul_values(a: &Value, b: &Value) -> Result<Value, String> {
+pub fn mul_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Ok(Value::int(x * y)),
         _ => match (a.as_float(), b.as_float()) {
@@ -59,7 +59,7 @@ pub fn mul_values(a: &Value, b: &Value) -> Result<Value, String> {
                     (Some(x), Some(y)) => Ok(Value::float(x as f64 * y)),
                     _ => match (a.as_float(), b.as_int()) {
                         (Some(x), Some(y)) => Ok(Value::float(x * y as f64)),
-                        _ => Err("Type error: * requires numbers".to_string()),
+                        _ => Err(LError::type_mismatch("number", "non-numeric value")),
                     },
                 }
             }
@@ -68,11 +68,11 @@ pub fn mul_values(a: &Value, b: &Value) -> Result<Value, String> {
 }
 
 /// Divide two numeric values, automatically promoting Int to Float when needed
-pub fn div_values(a: &Value, b: &Value) -> Result<Value, String> {
+pub fn div_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => {
             if y == 0 {
-                return Err("Division by zero".to_string());
+                return Err(LError::division_by_zero());
             }
             Ok(Value::int(x / y))
         }
@@ -85,11 +85,11 @@ pub fn div_values(a: &Value, b: &Value) -> Result<Value, String> {
                     _ => match (a.as_float(), b.as_int()) {
                         (Some(x), Some(y)) => {
                             if y == 0 {
-                                return Err("Division by zero".to_string());
+                                return Err(LError::division_by_zero());
                             }
                             Ok(Value::float(x / y as f64))
                         }
-                        _ => Err("Type error: / requires numbers".to_string()),
+                        _ => Err(LError::type_mismatch("number", "non-numeric value")),
                     },
                 }
             }
@@ -98,66 +98,66 @@ pub fn div_values(a: &Value, b: &Value) -> Result<Value, String> {
 }
 
 /// Negate a numeric value
-pub fn negate_value(a: &Value) -> Result<Value, String> {
+pub fn negate_value(a: &Value) -> LResult<Value> {
     match a.as_int() {
         Some(n) => Ok(Value::int(-n)),
         None => match a.as_float() {
             Some(f) => Ok(Value::float(-f)),
-            None => Err("Type error: negate requires a number".to_string()),
+            None => Err(LError::type_mismatch("number", "non-numeric value")),
         },
     }
 }
 
 /// Reciprocal of a numeric value (1/x)
-pub fn reciprocal_value(a: &Value) -> Result<Value, String> {
+pub fn reciprocal_value(a: &Value) -> LResult<Value> {
     match a.as_int() {
         Some(n) => {
             if n == 0 {
-                Err("Division by zero".to_string())
+                Err(LError::division_by_zero())
             } else {
                 Ok(Value::float(1.0 / n as f64))
             }
         }
         None => match a.as_float() {
             Some(f) => Ok(Value::float(1.0 / f)),
-            None => Err("Type error: reciprocal requires a number".to_string()),
+            None => Err(LError::type_mismatch("number", "non-numeric value")),
         },
     }
 }
 
 /// Modulo operation (Euclidean modulo - result has same sign as divisor)
-pub fn mod_values(a: &Value, b: &Value) -> Result<Value, String> {
+pub fn mod_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => {
             if y == 0 {
-                return Err("Modulo by zero".to_string());
+                return Err(LError::division_by_zero());
             }
             Ok(Value::int(x.rem_euclid(y)))
         }
-        _ => Err("Type error: mod requires integers".to_string()),
+        _ => Err(LError::type_mismatch("integer", "non-integer value")),
     }
 }
 
 /// Remainder operation (truncated division - result has same sign as dividend)
-pub fn remainder_values(a: &Value, b: &Value) -> Result<Value, String> {
+pub fn remainder_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => {
             if y == 0 {
-                return Err("Remainder by zero".to_string());
+                return Err(LError::division_by_zero());
             }
             Ok(Value::int(x % y))
         }
-        _ => Err("Type error: remainder requires integers".to_string()),
+        _ => Err(LError::type_mismatch("integer", "non-integer value")),
     }
 }
 
 /// Absolute value of a numeric value
-pub fn abs_value(a: &Value) -> Result<Value, String> {
+pub fn abs_value(a: &Value) -> LResult<Value> {
     match a.as_int() {
         Some(n) => Ok(Value::int(n.abs())),
         None => match a.as_float() {
             Some(f) => Ok(Value::float(f.abs())),
-            None => Err("Type error: abs requires a number".to_string()),
+            None => Err(LError::type_mismatch("number", "non-numeric value")),
         },
     }
 }

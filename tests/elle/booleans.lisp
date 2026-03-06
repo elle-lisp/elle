@@ -1,6 +1,6 @@
 # Booleans — boolean literals, predicates, and match behavior
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # Boolean literals
 (assert-eq true true "true literal")

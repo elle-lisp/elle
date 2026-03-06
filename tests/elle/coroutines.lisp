@@ -4,7 +4,7 @@
 ## Tests sequential yields, resume values, conditionals, loops, state
 ## transitions, interleaving, and effect threading.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Sequential yields in order

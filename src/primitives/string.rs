@@ -279,7 +279,7 @@ pub fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Split string or buffer on delimiter
+/// Split string or buffer on delimiter, returning a tuple
 pub fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -320,7 +320,7 @@ pub fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
 
     let parts: Vec<Value> = s.split(&delimiter).map(Value::string).collect();
 
-    (SIG_OK, crate::value::list(parts))
+    (SIG_OK, Value::tuple(parts))
 }
 
 /// Replace all occurrences of old with new in a string or buffer
@@ -544,7 +544,7 @@ pub fn prim_string_ends_with(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Join list of strings with separator
+/// Join sequence of strings with separator
 pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -556,7 +556,7 @@ pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let list = &args[0];
+    let seq = &args[0];
     let separator = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
@@ -569,15 +569,30 @@ pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let vec = match list.list_to_vec() {
-        Ok(v) => v,
-        Err(e) => {
-            return (
-                SIG_ERROR,
-                error_val("type-error", format!("string-join: {}", e)),
-            )
+    // Try tuple first
+    let vec = if let Some(elems) = seq.as_tuple() {
+        elems.to_vec()
+    } else if let Some(arr) = seq.as_array() {
+        arr.borrow().clone()
+    } else {
+        // Fall back to list_to_vec for lists and syntax
+        match seq.list_to_vec() {
+            Ok(v) => v,
+            Err(_) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "string-join: expected sequence (list, tuple, or array), got {}",
+                            seq.type_name()
+                        ),
+                    ),
+                )
+            }
         }
     };
+
     let mut strings = Vec::new();
 
     for val in vec {
@@ -710,10 +725,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_string_split,
         effect: Effect::none(),
         arity: Arity::Exact(2),
-        doc: "Split string by delimiter, returning a list of substrings.",
+        doc: "Split string by delimiter, returning a tuple of substrings.",
         params: &["s", "delim"],
         category: "string",
-        example: "(string/split \"a,b,c\" \",\") #=> (\"a\" \"b\" \"c\")",
+        example: "(string/split \"a,b,c\" \",\") #=> [\"a\" \"b\" \"c\"]",
         aliases: &["string-split"],
     },
     PrimitiveDef {

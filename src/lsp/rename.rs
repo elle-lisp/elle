@@ -1,5 +1,6 @@
 //! Symbol renaming support for LSP
 
+use crate::error::{LError, LResult};
 use crate::symbol::SymbolTable;
 use crate::symbols::SymbolIndex;
 use serde_json::{json, Value};
@@ -39,26 +40,26 @@ const RESERVED_WORDS: &[&str] = &[
 ];
 
 /// Validate that a new name is acceptable for renaming
-fn validate_new_name(new_name: &str) -> Result<(), String> {
+fn validate_new_name(new_name: &str) -> LResult<()> {
     if new_name.is_empty() {
-        return Err("New name cannot be empty".to_string());
+        return Err(LError::generic("New name cannot be empty"));
     }
 
     if !new_name
         .chars()
         .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
     {
-        return Err(format!(
+        return Err(LError::generic(format!(
             "Invalid identifier format: '{}' contains invalid characters",
             new_name
-        ));
+        )));
     }
 
     if RESERVED_WORDS.contains(&new_name) {
-        return Err(format!(
+        return Err(LError::generic(format!(
             "'{}' is a reserved word and cannot be used as a symbol name",
             new_name
-        ));
+        )));
     }
 
     Ok(())
@@ -70,17 +71,17 @@ fn check_rename_conflict(
     new_name: &str,
     symbol_index: &SymbolIndex,
     _symbol_table: &SymbolTable,
-) -> Result<(), String> {
+) -> LResult<()> {
     for def in symbol_index.definitions.values() {
         let sym_name = &def.name;
         if sym_name == old_name {
             continue;
         }
         if sym_name == new_name {
-            return Err(format!(
+            return Err(LError::generic(format!(
                 "Symbol '{}' already exists in this scope",
                 new_name
-            ));
+            )));
         }
     }
 
@@ -96,7 +97,7 @@ pub fn rename_symbol(
     symbol_table: &SymbolTable,
     _source_text: &str,
     uri: &str,
-) -> Result<Value, String> {
+) -> LResult<Value> {
     validate_new_name(new_name)?;
 
     let target_line = line as usize + 1;
@@ -135,7 +136,7 @@ pub fn rename_symbol(
     }
 
     if target_symbol.is_none() {
-        return Err("No symbol found at the given position".to_string());
+        return Err(LError::generic("No symbol found at the given position"));
     }
 
     check_rename_conflict(&old_name, new_name, symbol_index, symbol_table)?;
@@ -251,7 +252,10 @@ mod tests {
 
         let result = rename_symbol(0, 0, "bar", &index, &symbol_table, source, uri);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "No symbol found at the given position");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No symbol found at the given position"));
     }
 
     #[test]

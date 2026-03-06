@@ -2,7 +2,7 @@
 #
 # Tests for make-parameter, parameter?, parameterize, and fiber inheritance.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # === Basic parameter creation and predicates ===
 

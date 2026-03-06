@@ -70,4 +70,4 @@ at the point of failure.
 ## See Also
 
 - [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- `src/value/condition.rs` - Elle-level condition system (user-facing exceptions)
+- `docs/except.md` - Elle-level error handling (user-facing error tuples)

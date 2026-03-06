@@ -263,7 +263,7 @@ pub fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
 }
 
 /// Slice from index with silent nil: returns sub-array from index to end.
-/// Works on both arrays and tuples; result is always an array.
+/// Works on both arrays and tuples; result type matches input type.
 /// Operand: u16 index (immediate, read from bytecode).
 /// Used by & rest destructuring — collects remaining elements.
 pub fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
@@ -282,9 +282,9 @@ pub fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
         }
     } else if let Some(elems) = val.as_tuple() {
         if index < elems.len() {
-            Value::array(elems[index..].to_vec())
+            Value::tuple(elems[index..].to_vec())
         } else {
-            Value::array(vec![])
+            Value::tuple(vec![])
         }
     } else {
         Value::array(vec![])

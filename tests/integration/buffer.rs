@@ -373,11 +373,11 @@ fn test_buffer_trim() {
 #[test]
 fn test_buffer_split() {
     let result = eval_source(r#"(string/split @"a,b,c" ",")"#).unwrap();
-    let vec = result.list_to_vec().unwrap();
-    assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0].with_string(|s| s.to_string()).unwrap(), "a");
-    assert_eq!(vec[1].with_string(|s| s.to_string()).unwrap(), "b");
-    assert_eq!(vec[2].with_string(|s| s.to_string()).unwrap(), "c");
+    let tuple = result.as_tuple().unwrap();
+    assert_eq!(tuple.len(), 3);
+    assert_eq!(tuple[0].with_string(|s| s.to_string()).unwrap(), "a");
+    assert_eq!(tuple[1].with_string(|s| s.to_string()).unwrap(), "b");
+    assert_eq!(tuple[2].with_string(|s| s.to_string()).unwrap(), "c");
 }
 
 #[test]

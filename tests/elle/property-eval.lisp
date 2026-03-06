@@ -1,4 +1,4 @@
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # eval property tests
 # Migrated from tests/property/eval.rs

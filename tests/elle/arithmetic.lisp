@@ -5,7 +5,7 @@
 ## Tests mathematical properties like commutativity, associativity, identity,
 ## and distributivity with a mix of positive, negative, zero, and boundary values.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # add_commutative: (+ a b) == (+ b a)

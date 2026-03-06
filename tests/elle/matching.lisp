@@ -3,7 +3,7 @@
 ## Migrated from tests/property/matching.rs (behavioral property tests).
 ## Tests wildcard patterns, match in expression position, guards, and or-patterns.
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Wildcard catches all values

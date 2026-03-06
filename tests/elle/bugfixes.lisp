@@ -9,7 +9,7 @@
 ## - List display (no `. ()` terminator)
 ## - or expression return value corruption in recursive calls
 
-(import-file "./examples/assertions.lisp")
+(import-file "tests/elle/assert.lisp")
 
 # ============================================================================
 # Bug 1: StoreCapture stack mismatch (let bindings inside lambdas)

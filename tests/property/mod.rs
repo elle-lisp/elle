@@ -1,8 +1,5 @@
 // Property-based tests harness
 mod strategies;
-mod coroutines {
-    include!("coroutines.rs");
-}
 mod nanboxing {
     include!("nanboxing.rs");
 }
