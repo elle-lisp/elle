@@ -71,17 +71,17 @@ fn check_rename_conflict(
     new_name: &str,
     symbol_index: &SymbolIndex,
     _symbol_table: &SymbolTable,
-) -> Result<(), String> {
+) -> LResult<()> {
     for def in symbol_index.definitions.values() {
         let sym_name = &def.name;
         if sym_name == old_name {
             continue;
         }
         if sym_name == new_name {
-            return Err(format!(
+            return Err(LError::generic(format!(
                 "Symbol '{}' already exists in this scope",
                 new_name
-            ));
+            )));
         }
     }
 
@@ -97,7 +97,7 @@ pub fn rename_symbol(
     symbol_table: &SymbolTable,
     _source_text: &str,
     uri: &str,
-) -> Result<Value, String> {
+) -> LResult<Value> {
     validate_new_name(new_name)?;
 
     let target_line = line as usize + 1;
@@ -136,7 +136,7 @@ pub fn rename_symbol(
     }
 
     if target_symbol.is_none() {
-        return Err("No symbol found at the given position".to_string());
+        return Err(LError::generic("No symbol found at the given position"));
     }
 
     check_rename_conflict(&old_name, new_name, symbol_index, symbol_table)?;
