@@ -11,9 +11,9 @@
 # Parameter initialization
 
 (defn init-weight [rows cols scale]
-  "Create a rows x cols 2D array of Value nodes with uniform random init."
-  (make-2d rows cols
-     (fn [r c] (make-value (- (* (random/float) 2.0 scale) scale)))))
+   "Create a rows x cols 2D array of Value nodes with uniform random init."
+   (make-2d rows cols
+      (fn [r c] (make-value (- (* (random/float) 2.0 scale) scale)))))
 
 (defn init-model [vocab-size]
   "Initialize all model parameters. Returns a table of named weight matrices."
