@@ -8,6 +8,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - [What Makes Elle Different](#what-makes-elle-different)
 - [Language](#language)
+- [Types](#types)
 - [Control Flow](#control-flow)
 - [Memory](#memory)
 - [JIT](#jit)
@@ -191,6 +192,180 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
   (print "to stdout")     # uses *port* = :stdout
   ```
+
+## Types
+
+Every Elle value is a NaN-boxed 64-bit word. Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a reference-counted pointer into a heap.
+
+### Design principle: mutable/immutable split
+
+Every collection type has an immutable variant and a mutable variant. Bare literal syntax is immutable; the `@` prefix makes it mutable.
+
+| Immutable | Mutable | Literal | `@`-literal |
+|-----------|---------|---------|-------------|
+| tuple | array | `[1 2 3]` | `@[1 2 3]` |
+| struct | table | `{:a 1}` | `@{:a 1}` |
+| string | buffer | `"hello"` | `@"hello"` |
+| bytes | blob | *(no literal)* | *(no literal)* |
+
+The `@` prefix means "mutable version of this literal." The types within each pair share the same logical structure but differ in mutability.
+
+### Immediate types
+
+| Type | Literal | Notes |
+|------|---------|-------|
+| nil | `nil` | Absence of a value. Falsy. |
+| boolean | `true`, `false` | `false` is falsy; `true` is truthy. |
+| integer | `42`, `-17` | 48-bit signed. No auto-coercion to float. Overflow panics. |
+| float | `3.14`, `1e10` | IEEE 754 double. NaN/Infinity are heap-allocated. |
+| symbol | `foo`, `'foo` | Interned identifier. |
+| keyword | `:foo` | Self-evaluating interned name. Used for keys and tags. |
+| empty list | `()`, `'()` | Terminates proper lists. **Truthy** — not the same as nil. |
+| pointer | — | Raw C pointer (FFI only). NULL becomes nil. |
+
+### Collections
+
+```janet
+# Immutable                        # Mutable
+[1 2 3]                             @[1 2 3]
+{:name "Bob" :age 25}               @{:name "Bob" :age 25}
+"hello"                             @"hello"
+(bytes 1 2 3)                       (blob 1 2 3)
+```
+
+**Tuple** — fixed-length immutable sequence. Error values are tuples: `[:division-by-zero "message"]`. Bracket destructuring works on both tuples and arrays.
+
+**Array** — mutable resizable sequence. `(array-set! a 0 99)`, `(array-ref a 0)`, `(array-length a)`.
+
+**Struct** — immutable ordered dictionary. `(get s :key)`. Keys are typically keywords.
+
+**Table** — mutable ordered dictionary. `(get t :key)`, `(put t :key val)`, `(del t :key)`, `(keys t)`, `(values t)`, `(has-key? t :key)`.
+
+**String** — immutable interned text. Equality is O(1). Indexing and length count grapheme clusters, not bytes.
+
+**Buffer** — mutable byte sequence. `@"hello"` desugars to `(string->buffer "hello")`. Supports `get`, `put`, `push`, `pop`, `length`, `append`, `concat`.
+
+**Bytes** — immutable binary data. No literal syntax; constructed via `(bytes 1 2 3)` or `(string->bytes "hello")`. Displays as `#bytes[hex ...]`.
+
+**Blob** — mutable binary data. No literal syntax; constructed via `(blob 1 2 3)` or `(string->blob "hello")`. Displays as `#blob[hex ...]`.
+
+### Lists
+
+Singly-linked cons cells. Proper lists terminate with `()` (empty list), **not** `nil`.
+
+```janet
+(list 1 2 3)            # => (1 2 3)
+(cons 1 (list 2 3))     # => (1 2 3)
+(first (list 1 2 3))    # => 1
+(rest (list 1 2 3))     # => (2 3)
+(rest (list 1))          # => ()  — empty list, not nil
+```
+
+> **nil vs empty list** — this is the most common gotcha. `nil` represents absence and is **falsy**. `()` is the empty list and is **truthy**. Lists terminate with `()`. Use `empty?` to check for end-of-list, not `nil?`. `nil?` only matches `nil`.
+
+```janet
+(nil? nil)              # => true
+(nil? ())               # => false  — empty list is not nil
+(empty? ())             # => true
+(empty? nil)            # => false  — nil is not an empty list
+```
+
+Lists are linked; tuples and arrays are contiguous in memory. They are not interchangeable.
+
+### Functions
+
+**Closures** — compiled functions with captured environment. Captures are by value; mutable captures use compiler-managed cells automatically.
+
+```janet
+(fn (x) (+ x 1))           # anonymous
+(defn add1 (x) (+ x 1))    # named (macro)
+```
+
+**Native functions** — Rust primitives (`+`, `-`, `cons`, etc.). Not constructible from Elle.
+
+### Concurrency types
+
+**Fiber** — independent execution context with its own stack, call frames, signal mask, and heap. See [Memory](#memory).
+
+```janet
+(fiber/new (fn () body) mask)
+(fiber/resume f value)
+(fiber/status f)
+```
+
+**Parameter** — dynamic binding. `(make-parameter default)` creates one; calling it reads the current value. `parameterize` sets it within a scope. Child fibers inherit parent parameter frames.
+
+**Cell** — mutable box. User cells are explicit (`box`/`unbox`/`set-box!`). Local cells are compiler-created for mutable captures and auto-unwrapped — users never see them.
+
+### Truthiness
+
+Exactly two values are falsy. Everything else is truthy.
+
+| Value | Truthy? |
+|-------|---------|
+| `nil` | **No** |
+| `false` | **No** |
+| `()`, `0`, `""`, `[]`, `@[]` | Yes |
+
+### Equality
+
+`=` is structural for collections, interned for strings/symbols/keywords (O(1) comparison), and pointer identity for other heap objects.
+
+### Type predicates
+
+| Predicate | Matches |
+|-----------|---------|
+| `nil?` | `nil` only |
+| `boolean?` | `true` or `false` |
+| `number?` | integer or float |
+| `integer?` | integer only |
+| `float?` | float only |
+| `symbol?` | symbol |
+| `keyword?` | keyword |
+| `string?` | string |
+| `pair?` | cons cell |
+| `list?` | cons cell or empty list |
+| `empty?` | empty list, empty array, empty tuple, empty table, empty struct, empty buffer |
+| `array?` | array |
+| `tuple?` | tuple |
+| `table?` | table |
+| `struct?` | struct |
+| `buffer?` | buffer |
+| `bytes?` | bytes |
+| `blob?` | blob |
+| `function?` | closure or native function |
+| `closure?` | closure only |
+| `primitive?` | native function only |
+| `fiber?` | fiber |
+| `pointer?` | raw or managed C pointer |
+| `zero?` | zero (integer or float) |
+| `type` / `type-of` | returns type as keyword (`:integer`, `:string`, etc.) |
+
+### Display format
+
+| Type | Display |
+|------|---------|
+| nil | `nil` |
+| boolean | `true` / `false` |
+| integer | `42` |
+| float | `3.14` |
+| symbol | `foo` |
+| keyword | `:foo` |
+| empty list | `()` |
+| string | `hello` (no quotes) |
+| cons | `(1 2 3)` or `(a . b)` for improper |
+| tuple | `[1 2 3]` |
+| array | `@[1 2 3]` |
+| struct | `{:a 1}` |
+| table | `@{:a 1}` |
+| bytes | `#bytes[01 02 03]` |
+| blob | `#blob[01 02 03]` |
+| closure | `<closure>` |
+| native fn | `<native-fn>` |
+| fiber | `<fiber:status>` |
+| cell | `<cell value>` |
+| buffer | `@"hello"` |
+| pointer | `<pointer 0x...>` |
 
 ## Control Flow
 
