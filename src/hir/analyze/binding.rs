@@ -767,6 +767,9 @@ impl<'a> Analyzer<'a> {
         let mut bindings = Vec::new();
         let mut effect = Effect::none();
         let mut last_binding: Option<Binding> = None;
+        // Track lambda bindings for fixpoint effect propagation (Pass 3).
+        // Each entry: (index in `bindings`, binding, reference to value syntax).
+        let mut lambda_entries: Vec<(usize, Binding, &Syntax)> = Vec::new();
 
         for entry in &entries {
             match entry {
@@ -784,6 +787,8 @@ impl<'a> Analyzer<'a> {
                     let value = self.analyze_expr(value_syntax)?;
                     effect = effect.combine(value.effect);
 
+                    let bindings_idx = bindings.len();
+
                     // Update effect_env and arity_env with actual inferred values
                     if let HirKind::Lambda {
                         params: lambda_params,
@@ -800,6 +805,7 @@ impl<'a> Analyzer<'a> {
                             lambda_params.len(),
                         );
                         self.arity_env.insert(*binding, arity);
+                        lambda_entries.push((bindings_idx, *binding, *value_syntax));
                     }
 
                     bindings.push((*binding, value));
@@ -860,6 +866,45 @@ impl<'a> Analyzer<'a> {
                     gensym_counter += 1;
                     let destr_binding = self.bind(&destr_gensym, &[], BindingScope::Local);
                     bindings.push((destr_binding, destructure_hir));
+                }
+            }
+        }
+
+        // Pass 3: fixpoint loop for effect propagation through mutual recursion.
+        //
+        // Pass 2 analyzes bindings sequentially, so a lambda analyzed early may
+        // see stale (optimistic) effects for lambdas analyzed later. For mutually
+        // recursive functions, this means effects don't propagate through cycles:
+        //
+        //   (def foo (fn [] (bar)))    # analyzed first, sees bar as Pure (stale)
+        //   (def bar (fn [] (yield 1) (foo)))  # analyzed second, correctly Yields
+        //
+        // foo stays Pure even though it calls a Yields function. Fix: re-analyze
+        // lambda bindings until effect_env stabilizes.
+        if !lambda_entries.is_empty() {
+            const MAX_FIXPOINT_ITERS: usize = 10;
+            for _ in 0..MAX_FIXPOINT_ITERS {
+                let mut changed = false;
+                for &(idx, binding, value_syntax) in &lambda_entries {
+                    let old_effect = self
+                        .effect_env
+                        .get(&binding)
+                        .copied()
+                        .unwrap_or_else(Effect::none);
+                    let new_hir = self.analyze_expr(value_syntax)?;
+                    if let HirKind::Lambda {
+                        inferred_effect, ..
+                    } = &new_hir.kind
+                    {
+                        if *inferred_effect != old_effect {
+                            self.effect_env.insert(binding, *inferred_effect);
+                            changed = true;
+                        }
+                    }
+                    bindings[idx].1 = new_hir;
+                }
+                if !changed {
+                    break;
                 }
             }
         }

@@ -457,3 +457,77 @@ fn test_file_destructure_eval_with_macro() {
     .unwrap();
     assert_eq!(result, Value::int(42));
 }
+
+// ============================================================================
+// Fixpoint effect propagation for mutually recursive file-scope lambdas
+// ============================================================================
+
+#[test]
+fn test_mutual_recursion_effect_propagation() {
+    // foo calls bar; bar yields; foo must also be inferred as Yields.
+    // Without the fixpoint loop, foo is analyzed first and sees bar's
+    // stale seed (Pure), so foo is incorrectly inferred as Pure.
+    let result = eval_file_source(
+        r#"
+        (def foo (fn [] (bar)))
+        (def bar (fn [] (yield 1) (foo)))
+        (pure? foo)
+        "#,
+    );
+    // foo should NOT be pure — it calls a yielding function
+    assert_eq!(result.unwrap(), Value::bool(false));
+}
+
+#[test]
+fn test_mutual_recursion_effect_propagation_reverse_order() {
+    // Same as above but bar is defined first — bar directly yields,
+    // so foo should see bar's Yields effect even in a single pass.
+    // This test ensures the fixpoint doesn't break the already-correct case.
+    let result = eval_file_source(
+        r#"
+        (def bar (fn [] (yield 1) (foo)))
+        (def foo (fn [] (bar)))
+        (pure? foo)
+        "#,
+    );
+    assert_eq!(result.unwrap(), Value::bool(false));
+}
+
+#[test]
+fn test_mutual_recursion_three_way_effect_propagation() {
+    // Three-way mutual recursion: a -> b -> c -> yield.
+    // All three should be inferred as Yields.
+    let result = eval_file_source(
+        r#"
+        (def a (fn [] (b)))
+        (def b (fn [] (c)))
+        (def c (fn [] (yield 1) (a)))
+        (list (pure? a) (pure? b) (pure? c))
+        "#,
+    );
+    let val = result.unwrap();
+    // All three should be non-pure
+    let items = val.list_to_vec().expect("expected list");
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0], Value::bool(false), "a should not be pure");
+    assert_eq!(items[1], Value::bool(false), "b should not be pure");
+    assert_eq!(items[2], Value::bool(false), "c should not be pure");
+}
+
+#[test]
+fn test_mutual_recursion_pure_stays_pure() {
+    // Mutually recursive functions that are genuinely pure should stay pure.
+    // The fixpoint must not incorrectly promote Pure to Yields.
+    let result = eval_file_source(
+        r#"
+        (def even? (fn [n] (if (= n 0) true (odd? (- n 1)))))
+        (def odd? (fn [n] (if (= n 0) false (even? (- n 1)))))
+        (list (pure? even?) (pure? odd?))
+        "#,
+    );
+    let val = result.unwrap();
+    let items = val.list_to_vec().expect("expected list");
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0], Value::bool(true), "even? should be pure");
+    assert_eq!(items[1], Value::bool(true), "odd? should be pure");
+}
