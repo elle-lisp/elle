@@ -110,7 +110,7 @@ fn run_source(
             );
         }
 
-        match vm.execute(&result.bytecode) {
+        match vm.execute_scheduled(&result.bytecode, symbols) {
             Ok(_) => {
                 // Script mode is silent except for explicit output (display, etc.)
             }
@@ -177,7 +177,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                         accumulated_input.clear();
 
                         // Execute
-                        match vm.execute(&result.bytecode) {
+                        match vm.execute_scheduled(&result.bytecode, symbols) {
                             Ok(value) => {
                                 if !value.is_nil() {
                                     println!("⟹ {:?}", value);
@@ -297,7 +297,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                 accumulated_input.clear();
 
                 // Execute
-                match vm.execute(&result.bytecode) {
+                match vm.execute_scheduled(&result.bytecode, symbols) {
                     Ok(value) => {
                         if !value.is_nil() {
                             println!("⟹ {:?}", value);

@@ -149,3 +149,36 @@ fn test_ev_spawn_error_propagation() {
     let result = eval_source("(ev/spawn (fn [] (error :boom)))");
     assert!(result.is_err());
 }
+
+// Chunk 7: Root fiber bootstrap tests
+
+#[test]
+fn test_pure_code_unchanged_with_scheduler() {
+    // Pure code should work identically through the scheduler
+    let result = eval_source("(+ 1 2 3)").unwrap();
+    assert_eq!(result.as_int(), Some(6));
+}
+
+#[test]
+fn test_stream_io_via_ev_spawn() {
+    // With the scheduler bootstrap, stream I/O should work via ev/spawn
+    let result = eval_source(
+        "(begin
+           (spit \"/tmp/elle-test-toplevel-io\" \"top level\")
+           (ev/spawn (fn []
+             (stream/read-all (port/open \"/tmp/elle-test-toplevel-io\" :read)))))",
+    )
+    .unwrap();
+    result.with_string(|s| assert_eq!(s, "top level")).unwrap();
+}
+
+#[test]
+fn test_existing_stdlib_functions_work() {
+    // Verify stdlib functions still work (scheduler is transparent)
+    let result = eval_source("(map (fn [x] (* x x)) (list 1 2 3))").unwrap();
+    let vec = result.list_to_vec().unwrap();
+    assert_eq!(vec.len(), 3);
+    assert_eq!(vec[0].as_int(), Some(1));
+    assert_eq!(vec[1].as_int(), Some(4));
+    assert_eq!(vec[2].as_int(), Some(9));
+}
