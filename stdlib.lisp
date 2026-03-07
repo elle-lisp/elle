@@ -697,3 +697,27 @@
 (def *stdin*  (make-parameter (port/stdin)))
 (def *stdout* (make-parameter (port/stdout)))
 (def *stderr* (make-parameter (port/stderr)))
+
+## ── Scheduler ───────────────────────────────────────────────────────
+
+(def sync-scheduler
+  (fn [fiber]
+    "Run a fiber to completion, dispatching I/O requests synchronously."
+    (let ((backend (io/backend :sync)))
+      (fiber/resume fiber)
+      (forever
+        (case (fiber/status fiber)
+          :dead      (break (fiber/value fiber))
+          :error     (fiber/propagate fiber)
+          :suspended (case (fiber/bits fiber)
+                       1   (fiber/propagate fiber)
+                       512 (fiber/resume fiber (io/execute backend (fiber/value fiber)))
+                       (fiber/resume fiber)))))))
+
+(def *scheduler* (make-parameter sync-scheduler))
+
+(def ev/spawn
+  (fn [closure]
+    "Spawn a closure in a new fiber managed by the current scheduler."
+    (let ((fiber (fiber/new closure (bit/or 1 512))))
+      ((*scheduler*) fiber))))

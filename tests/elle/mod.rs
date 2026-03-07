@@ -144,3 +144,8 @@ fn ports() {
 fn chan() {
     run_elle_script("chan");
 }
+
+#[test]
+fn io() {
+    run_elle_script("io");
+}

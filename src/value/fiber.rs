@@ -154,6 +154,7 @@ pub const SIG_PROPAGATE: SignalBits = 1 << 5; // re-raise caught signal (VM-inte
 pub const SIG_CANCEL: SignalBits = 1 << 6; // inject error into fiber (VM-internal)
 pub const SIG_QUERY: SignalBits = 1 << 7; // VM state query (VM-internal)
 pub const SIG_HALT: SignalBits = 1 << 8; // graceful VM termination
+pub const SIG_IO: SignalBits = 1 << 9; // I/O request to scheduler
 
 // Signal bit partitioning:
 //
@@ -164,7 +165,8 @@ pub const SIG_HALT: SignalBits = 1 << 8; // graceful VM termination
 //   Bit  6:     Cancel — inject error into fiber (VM-internal)
 //   Bit  7:     Query — read VM state without fiber swap (VM-internal)
 //   Bit  8:     Halt — graceful VM termination with return value
-//   Bits 9-15:  Reserved for future use
+//   Bit  9:     IO — I/O request to scheduler
+//   Bits 10-15: Reserved for future use
 //   Bits 16-31: User-defined signal types
 //
 // The VM dispatch loop checks all bits. User code only sees

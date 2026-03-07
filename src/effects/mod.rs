@@ -6,7 +6,7 @@
 //! functions like map/filter/fold).
 
 use crate::value::fiber::SignalBits;
-use crate::value::fiber::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_YIELD};
+use crate::value::fiber::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_IO, SIG_YIELD};
 use std::fmt;
 
 /// Effect classification for expressions and functions.
@@ -92,6 +92,22 @@ impl Effect {
         }
     }
 
+    /// May perform I/O (yields SIG_IO to scheduler).
+    pub const fn io() -> Self {
+        Effect {
+            bits: SIG_IO,
+            propagates: 0,
+        }
+    }
+
+    /// May perform I/O and may error.
+    pub const fn io_errors() -> Self {
+        Effect {
+            bits: SIG_IO | SIG_ERROR,
+            propagates: 0,
+        }
+    }
+
     /// Polymorphic: effect depends on a single parameter (no raise).
     pub const fn polymorphic(param: usize) -> Self {
         Effect {
@@ -131,10 +147,10 @@ impl Effect {
 
 impl Effect {
     /// Can this function suspend execution?
-    /// Suspension signals: yield, debug. Polymorphic effects may also
+    /// Suspension signals: yield, debug, I/O. Polymorphic effects may also
     /// suspend (depends on the argument's effect at the call site).
     pub const fn may_suspend(&self) -> bool {
-        const SUSPENSION_BITS: SignalBits = SIG_YIELD | SIG_DEBUG;
+        const SUSPENSION_BITS: SignalBits = SIG_YIELD | SIG_DEBUG | SIG_IO;
         (self.bits & SUSPENSION_BITS) != 0 || self.propagates != 0
     }
 
@@ -156,6 +172,11 @@ impl Effect {
     /// Does this function call foreign code?
     pub const fn may_ffi(&self) -> bool {
         self.bits & SIG_FFI != 0
+    }
+
+    /// Does this function perform I/O?
+    pub const fn may_io(&self) -> bool {
+        self.bits & SIG_IO != 0
     }
 
     /// Does this function's effect depend on its arguments?
@@ -195,11 +216,15 @@ impl Effect {
 
 impl fmt::Display for Effect {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut primary_is_io = false;
         if self.propagates != 0 {
             let indices: Vec<_> = self.propagated_params().map(|i| i.to_string()).collect();
             write!(f, "polymorphic({})", indices.join(","))?;
         } else if self.bits & SIG_YIELD != 0 {
             write!(f, "yields")?;
+        } else if self.bits & SIG_IO != 0 {
+            write!(f, "io")?;
+            primary_is_io = true;
         } else {
             write!(f, "none")?;
         }
@@ -217,6 +242,9 @@ impl fmt::Display for Effect {
         }
         if self.bits & SIG_DEBUG != 0 {
             flags.push("debug");
+        }
+        if self.bits & SIG_IO != 0 && !primary_is_io {
+            flags.push("io");
         }
         if !flags.is_empty() {
             write!(f, "+{}", flags.join("+"))?;
@@ -295,6 +323,7 @@ mod tests {
             propagates: 0
         }
         .may_suspend());
+        assert!(Effect::io().may_suspend());
     }
 
     #[test]
@@ -383,5 +412,50 @@ mod tests {
         assert!(Effect::errors().is_pure()); // errors doesn't suspend
         assert!(!Effect::yields().is_pure());
         assert!(!Effect::polymorphic(0).is_pure());
+    }
+
+    #[test]
+    fn test_io_effect() {
+        let e = Effect::io();
+        assert!(e.may_io());
+        assert!(e.may_suspend());
+        assert!(!e.may_yield());
+        assert!(!e.may_error());
+        assert!(!e.may_ffi());
+        assert!(!e.is_polymorphic());
+    }
+
+    #[test]
+    fn test_io_errors_effect() {
+        let e = Effect::io_errors();
+        assert!(e.may_io());
+        assert!(e.may_error());
+        assert!(e.may_suspend());
+        assert!(!e.may_yield());
+    }
+
+    #[test]
+    fn test_may_io_predicate() {
+        assert!(!Effect::none().may_io());
+        assert!(!Effect::yields().may_io());
+        assert!(!Effect::errors().may_io());
+        assert!(Effect::io().may_io());
+        assert!(Effect::io_errors().may_io());
+    }
+
+    #[test]
+    fn test_may_suspend_includes_io() {
+        assert!(Effect::io().may_suspend());
+        assert!(Effect::io_errors().may_suspend());
+    }
+
+    #[test]
+    fn test_io_display() {
+        assert_eq!(format!("{}", Effect::io()), "io");
+        assert_eq!(format!("{}", Effect::io_errors()), "io+errors");
+        // Combined with yields
+        let combined = Effect::io().combine(Effect::yields());
+        let s = format!("{}", combined);
+        assert!(s.contains("io"), "expected 'io' in '{}'", s);
     }
 }

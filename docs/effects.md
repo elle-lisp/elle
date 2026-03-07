@@ -546,6 +546,48 @@ The compiler's effect information guides JIT decisions:
   signal checks
 
 
+## I/O Effects
+
+### SIG_IO and the Scheduler
+
+I/O effects (`SIG_IO`) are distinct from yield effects (`SIG_YIELD`). This
+separation allows the scheduler to intercept I/O requests without interfering
+with coroutines.
+
+**Signal bit**: Bit 9 (`SIG_IO = 1 << 9`)
+
+**Effect constructors**:
+- `Effect::io()` — function may perform I/O
+- `Effect::io_errors()` — function may perform I/O and may error
+
+**Predicate**: `may_io()` — check if effect includes I/O
+
+### Stream Primitives and I/O Requests
+
+Stream primitives (`stream/read-line`, `stream/read`, `stream/read-all`,
+`stream/write`, `stream/flush`) have effect `io_errors()`. They do not
+perform I/O themselves. Instead, they:
+
+1. Build an `IoRequest` (typed descriptor of the I/O operation)
+2. Return `(SIG_IO, request)` to suspend the fiber
+3. Let the scheduler catch `SIG_IO` and dispatch to a backend
+
+The backend (`SyncBackend` in Phase 3) performs the actual I/O and returns
+`(SIG_OK, result)` or `(SIG_ERROR, error)`. The scheduler resumes the fiber
+with the result.
+
+### Why Separate I/O from Yield?
+
+Coroutines use `SIG_YIELD` to suspend and resume. I/O uses `SIG_IO` to
+request backend execution. Separating them allows:
+
+- **Transparent I/O**: A function that does I/O can be called from a
+  coroutine without the coroutine seeing the I/O suspension.
+- **Scheduler control**: The scheduler can intercept I/O without intercepting
+  user-level yields.
+- **Capability-based dispatch**: Different schedulers can handle I/O
+  differently (sync, async, mock) without changing the function.
+
 ## Surface Syntax
 
 ### Fiber Primitives
