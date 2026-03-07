@@ -2,3 +2,4 @@
 
 pub mod backend;
 pub mod request;
+pub(crate) mod types;
