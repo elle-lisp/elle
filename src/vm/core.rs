@@ -8,7 +8,7 @@ use crate::value::{
     SIG_YIELD,
 };
 use rustc_hash::FxHashMap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::jit::JitCode;
@@ -40,7 +40,7 @@ pub struct VM {
     /// without scanning the full sparse vector.
     pub defined_globals: Vec<bool>,
     pub ffi: FFISubsystem,
-    pub loaded_modules: HashSet<String>,
+    pub loaded_modules: HashMap<String, Value>,
     pub closure_call_counts: FxHashMap<*const u8, usize>,
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
@@ -108,7 +108,7 @@ impl VM {
             globals: vec![Value::UNDEFINED; 256],
             defined_globals: vec![false; 256],
             ffi: FFISubsystem::new(),
-            loaded_modules: HashSet::new(),
+            loaded_modules: HashMap::new(),
             closure_call_counts: FxHashMap::default(),
             location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),
@@ -242,14 +242,14 @@ impl VM {
             .unwrap_or(0)
     }
 
-    /// Check if module is already loaded
-    pub fn is_module_loaded(&self, module_path: &str) -> bool {
-        self.loaded_modules.contains(module_path)
+    /// Return the cached value for an already-loaded module, or None.
+    pub fn get_module_value(&self, module_path: &str) -> Option<Value> {
+        self.loaded_modules.get(module_path).copied()
     }
 
-    /// Mark module as loaded
-    pub fn mark_module_loaded(&mut self, module_path: String) {
-        self.loaded_modules.insert(module_path);
+    /// Cache a module's return value so subsequent imports return it.
+    pub fn cache_module_value(&mut self, module_path: String, value: Value) {
+        self.loaded_modules.insert(module_path, value);
     }
 
     /// Get the frame base for the current call frame

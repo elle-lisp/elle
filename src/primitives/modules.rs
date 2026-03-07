@@ -47,13 +47,14 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
     unsafe {
         let vm = &mut *vm_ptr;
 
-        // Check for circular dependencies
-        if vm.is_module_loaded(&path) {
-            return (SIG_OK, Value::bool(true));
+        // Return cached value if module was already loaded
+        if let Some(cached) = vm.get_module_value(&path) {
+            return (SIG_OK, cached);
         }
 
-        // Mark as loaded to prevent circular dependency
-        vm.mark_module_loaded(path.clone());
+        // Mark as loading (with NIL sentinel) to prevent circular dependency.
+        // The real value is stored after execution completes.
+        vm.cache_module_value(path.clone(), Value::NIL);
 
         // Get the caller's symbol table context
         let symbols_ptr = match crate::context::get_symbol_table() {
@@ -125,6 +126,8 @@ pub fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                     .signal
                     .take()
                     .unwrap_or((SIG_OK, crate::value::Value::NIL));
+                // Cache the module's return value for subsequent imports
+                vm.cache_module_value(path, value);
                 (SIG_OK, value)
             }
             SIG_ERROR => {
