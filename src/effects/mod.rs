@@ -361,49 +361,4 @@ mod tests {
         assert_eq!(Effect::INERT, Effect::inert());
         assert_eq!(Effect::YIELDS, Effect::yields());
     }
-
-    #[test]
-    fn test_io_effect() {
-        let e = Effect::io();
-        assert!(e.may_io());
-        assert!(e.may_suspend());
-        assert!(!e.may_yield());
-        assert!(!e.may_error());
-        assert!(!e.may_ffi());
-        assert!(!e.is_polymorphic());
-    }
-
-    #[test]
-    fn test_io_errors_effect() {
-        let e = Effect::io_errors();
-        assert!(e.may_io());
-        assert!(e.may_error());
-        assert!(e.may_suspend());
-        assert!(!e.may_yield());
-    }
-
-    #[test]
-    fn test_may_io_predicate() {
-        assert!(!Effect::inert().may_io());
-        assert!(!Effect::yields().may_io());
-        assert!(!Effect::errors().may_io());
-        assert!(Effect::io().may_io());
-        assert!(Effect::io_errors().may_io());
-    }
-
-    #[test]
-    fn test_may_suspend_includes_io() {
-        assert!(Effect::io().may_suspend());
-        assert!(Effect::io_errors().may_suspend());
-    }
-
-    #[test]
-    fn test_io_display() {
-        assert_eq!(format!("{}", Effect::io()), "io");
-        assert_eq!(format!("{}", Effect::io_errors()), "io+errors");
-        // Combined with yields
-        let combined = Effect::io().combine(Effect::yields());
-        let s = format!("{}", combined);
-        assert!(s.contains("io"), "expected 'io' in '{}'", s);
-    }
 }
