@@ -194,13 +194,13 @@
               ((= (fiber/status f) :dead)
                 (process-exit pid [:normal (fiber/value f)]))
 
-              # Process errored
-              ((= bits 1)
-                (process-exit pid [:error (fiber/value f)]))
+               # Process errored
+               ((not (= 0 (bit/and bits 1)))
+                 (process-exit pid [:error (fiber/value f)]))
 
-              # Process yielded a command
-              ((= bits 2)
-                (handle-cmd pid (fiber/value f)))
+               # Process yielded a command
+               ((not (= 0 (bit/and bits 2)))
+                 (handle-cmd pid (fiber/value f)))
 
               (true
                 (error [:scheduler-error "unexpected signal bits"]))))))))

@@ -709,10 +709,13 @@
         (case (fiber/status fiber)
           :dead      (break (fiber/value fiber))
           :error     (fiber/propagate fiber)
-          :suspended (case (fiber/bits fiber)
-                       1   (fiber/propagate fiber)
-                       512 (fiber/resume fiber (io/execute backend (fiber/value fiber)))
-                       (fiber/resume fiber)))))))
+          :suspended (cond
+                       ((not (= 0 (bit/and (fiber/bits fiber) 1)))
+                        (fiber/propagate fiber))
+                       ((not (= 0 (bit/and (fiber/bits fiber) 512)))
+                        (fiber/resume fiber (io/execute backend (fiber/value fiber))))
+                       (true
+                        (fiber/resume fiber))))))))
 
 (def *scheduler* (make-parameter sync-scheduler))
 
@@ -747,11 +750,14 @@
                 (case (fiber/status fiber)
                   :dead      nil
                   :error     (fiber/propagate fiber)
-                  :suspended (case (fiber/bits fiber)
-                               1   (fiber/propagate fiber)
-                               512 (let ((id (io/submit backend (fiber/value fiber))))
-                                     (put pending id fiber))
-                               (push runnable fiber)))))
+                  :suspended (cond
+                               ((not (= 0 (bit/and (fiber/bits fiber) 1)))
+                                (fiber/propagate fiber))
+                               ((not (= 0 (bit/and (fiber/bits fiber) 512)))
+                                (let ((id (io/submit backend (fiber/value fiber))))
+                                  (put pending id fiber)))
+                               (true
+                                (push runnable fiber))))))
             # 2. If nothing pending, done
             (when (= (length pending) 0)
               (break :loop nil))
@@ -768,12 +774,16 @@
                         (case (fiber/status fiber)
                           :dead      nil
                           :error     (fiber/propagate fiber)
-                          :suspended (case (fiber/bits fiber)
-                                      1   (fiber/propagate fiber)
-                                      512 (let ((id2 (io/submit backend (fiber/value fiber))))
-                                            (put pending id2 fiber))
-                                      (push runnable fiber))))
+                          :suspended (cond
+                                       ((not (= 0 (bit/and (fiber/bits fiber) 1)))
+                                        (fiber/propagate fiber))
+                                       ((not (= 0 (bit/and (fiber/bits fiber) 512)))
+                                        (let ((id2 (io/submit backend (fiber/value fiber))))
+                                          (put pending id2 fiber)))
+                                        (true
+                                         (push runnable fiber)))))
                       (error (get c :error)))))))))))))
+
 
 (defn ev/run (& thunks)
   "Run thunks concurrently with async I/O.
