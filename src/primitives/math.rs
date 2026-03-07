@@ -3,12 +3,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
-use std::cell::RefCell;
 use std::f64::consts::{E, PI};
-
-thread_local! {
-    static RNG_STATE: RefCell<u64> = const { RefCell::new(0xdeadbeef) };
-}
 
 pub fn prim_sqrt(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -309,47 +304,6 @@ pub fn prim_e(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::float(E))
 }
 
-/// Random number generator: seed with one arg, generate with zero args.
-pub fn prim_random(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() > 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("math/random: expected 0-1 arguments, got {}", args.len()),
-            ),
-        );
-    }
-    if args.len() == 1 {
-        let seed = match args[0].as_int() {
-            Some(s) => s as u64,
-            None => match args[0].as_float() {
-                Some(f) => f.to_bits(),
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!("math/random: expected number, got {}", args[0].type_name()),
-                        ),
-                    )
-                }
-            },
-        };
-        RNG_STATE.with(|rng| *rng.borrow_mut() = if seed == 0 { 1 } else { seed });
-        return (SIG_OK, Value::NIL);
-    }
-    RNG_STATE.with(|rng| {
-        let mut s = *rng.borrow();
-        s ^= s << 13;
-        s ^= s >> 7;
-        s ^= s << 17;
-        *rng.borrow_mut() = s;
-        let f = (s >> 11) as f64 / ((1u64 << 53) as f64);
-        (SIG_OK, Value::float(f))
-    })
-}
-
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/sqrt",
@@ -482,16 +436,5 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "math",
         example: "(math/e)",
         aliases: &["e"],
-    },
-    PrimitiveDef {
-        name: "math/random",
-        func: prim_random,
-        effect: Effect::errors(),
-        arity: Arity::Range(0, 1),
-        doc: "With no args: return random float in [0, 1). With one arg: seed the RNG.",
-        params: &["seed"],
-        category: "math",
-        example: "(math/random)",
-        aliases: &["random"],
     },
 ];

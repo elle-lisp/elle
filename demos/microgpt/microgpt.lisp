@@ -5,6 +5,7 @@
 #
 # Usage: cargo run --release -- demos/microgpt/microgpt.lisp
 
+(import-file "target/debug/libelle_random.so")
 (import "demos/microgpt/helpers.lisp")
 (import "demos/microgpt/autograd.lisp")
 (import "demos/microgpt/model.lisp")
@@ -111,7 +112,7 @@
     (var step 0)
     (while (< step num-steps)
       # Pick a random name
-      (let* ([idx (floor (* (random) n-names))]
+      (let* ([idx (floor (* (random/float) n-names))]
              [name (get names idx)]
              [tokens (tokenize name tokenizer)]
              # Truncate to block-size+1 if needed
@@ -156,7 +157,7 @@
           (push exps e)
           (set sum-exp (+ sum-exp e))))
       # CDF sampling
-      (let* ([r (random)]
+      (let* ([r (random/float)]
              [cumulative 0.0])
         (var idx 0)
         (block :sample
@@ -216,7 +217,7 @@
 # ── Main ────────────────────────────────────────────────────────────
 
 (defn main []
-  (random 42)
+  (random/seed 42)
 
   # Verify autograd
   (check-grads)
