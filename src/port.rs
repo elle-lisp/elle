@@ -142,6 +142,19 @@ impl Port {
     pub fn path(&self) -> Option<&str> {
         self.path.as_deref()
     }
+
+    /// Borrow the fd for I/O operations.
+    ///
+    /// Returns `None` if the port is closed or is a stdio port (stdio
+    /// ports have `fd: None` — callers should use `std::io::stdin()` /
+    /// `stdout()` / `stderr()` handles directly for those).
+    pub fn with_fd<R>(&self, f: impl FnOnce(&OwnedFd) -> R) -> Option<R> {
+        if self.closed.get() {
+            return None;
+        }
+        let borrow = self.fd.borrow();
+        borrow.as_ref().map(f)
+    }
 }
 
 impl fmt::Display for Port {
@@ -188,5 +201,42 @@ impl fmt::Display for Port {
                 write!(f, ">")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::os::unix::io::OwnedFd;
+
+    #[test]
+    fn test_with_fd_file_port() {
+        let file = File::open("/dev/null").unwrap();
+        let fd: OwnedFd = file.into();
+        let port = Port::new_file(fd, Direction::Read, Encoding::Text, "/dev/null".to_string());
+
+        // with_fd should return Some
+        let result = port.with_fd(|fd| {
+            use std::os::unix::io::AsRawFd;
+            fd.as_raw_fd()
+        });
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_with_fd_closed_port() {
+        let file = File::open("/dev/null").unwrap();
+        let fd: OwnedFd = file.into();
+        let port = Port::new_file(fd, Direction::Read, Encoding::Text, "/dev/null".to_string());
+        port.close();
+        assert!(port.with_fd(|_| ()).is_none());
+    }
+
+    #[test]
+    fn test_with_fd_stdio_port() {
+        let port = Port::stdin();
+        // Stdio ports have fd: None, so with_fd returns None
+        assert!(port.with_fd(|_| ()).is_none());
     }
 }
