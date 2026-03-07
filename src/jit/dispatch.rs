@@ -335,6 +335,21 @@ pub extern "C" fn elle_jit_call(
         return jit_handle_primitive_signal(vm, bits, value);
     }
 
+    // Dispatch to parameter (dynamic binding lookup)
+    if let Some((id, default)) = func.as_parameter() {
+        if nargs != 0 {
+            vm.fiber.signal = Some((
+                SIG_ERROR,
+                error_val(
+                    "arity-error",
+                    format!("parameter call: expected 0 arguments, got {}", nargs),
+                ),
+            ));
+            return TAG_NIL;
+        }
+        return vm.resolve_parameter(id, default).to_bits();
+    }
+
     // Dispatch to closure
     if let Some(closure) = func.as_closure() {
         // Check arity using nargs directly — no Vec needed
@@ -535,6 +550,21 @@ pub extern "C" fn elle_jit_tail_call(
         let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
         let (bits, value) = f(args_slice);
         return jit_handle_primitive_signal(vm, bits, value);
+    }
+
+    // Handle parameter (dynamic binding lookup)
+    if let Some((id, default)) = func.as_parameter() {
+        if nargs != 0 {
+            vm.fiber.signal = Some((
+                SIG_ERROR,
+                error_val(
+                    "arity-error",
+                    format!("parameter call: expected 0 arguments, got {}", nargs),
+                ),
+            ));
+            return TAG_NIL;
+        }
+        return vm.resolve_parameter(id, default).to_bits();
     }
 
     // Handle closures
