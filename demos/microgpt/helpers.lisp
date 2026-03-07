@@ -21,11 +21,11 @@
 
 (defn shuffle! [arr]
   "Shuffle array in place using Fisher-Yates."
-  (var i (- (length arr) 1))
-   (while (> i 0)
-      (let* ([j (floor (* (random/float) (+ i 1)))]
-             [tmp (get arr i)])
-      (put arr i (get arr j))
+   (var i (- (length arr) 1))
+    (while (> i 0)
+       (let* ([j (floor (* (random/float) (+ i 1)))]
+              [tmp (get arr i)])
+       (put arr i (get arr j))
       (put arr j tmp))
     (set i (- i 1)))
   arr)

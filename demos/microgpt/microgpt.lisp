@@ -109,12 +109,12 @@
          [opt (make-adam params lr 0.85 0.99 0.00000001)]
          [n-names (length names)])
     (display (string/format "Parameters: {}\n" (length params)))
-    (var step 0)
-     (while (< step num-steps)
-       # Pick a random name
-       (let* ([idx (floor (* (random/float) n-names))]
-              [name (get names idx)]
-             [tokens (tokenize name tokenizer)]
+     (var step 0)
+      (while (< step num-steps)
+        # Pick a random name
+        (let* ([idx (floor (* (random/float) n-names))]
+               [name (get names idx)]
+              [tokens (tokenize name tokenizer)]
              # Truncate to block-size+1 if needed
              [tokens (if (> (length tokens) (+ *block-size* 1))
                        (slice tokens 0 (+ *block-size* 1))
@@ -155,11 +155,11 @@
       (each s in scaled
         (let* ([e (exp (- s max-val))])
           (push exps e)
-          (set sum-exp (+ sum-exp e))))
-       # CDF sampling
-       (let* ([r (random/float)]
-              [cumulative 0.0])
-        (var idx 0)
+           (set sum-exp (+ sum-exp e))))
+        # CDF sampling
+        (let* ([r (random/float)]
+               [cumulative 0.0])
+         (var idx 0)
         (block :sample
           (while (< idx n)
             (set cumulative (+ cumulative (/ (get exps idx) sum-exp)))
@@ -217,7 +217,7 @@
 # ── Main ────────────────────────────────────────────────────────────
 
 (defn main []
-   (random/seed 42)
+    (random/seed 42)
 
   # Verify autograd
   (check-grads)
