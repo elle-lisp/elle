@@ -294,7 +294,7 @@ fn test_closure_has_location_map() {
             // Nested closures should have their own location maps
             // The location_map field exists (verified by compilation)
             // and may have entries for the closure's bytecode
-            let _ = closure.location_map.len(); // Access to verify field exists
+            let _ = closure.template.location_map.len(); // Access to verify field exists
         }
     }
 }

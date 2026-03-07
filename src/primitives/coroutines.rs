@@ -343,7 +343,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
 mod tests {
     use super::*;
     use crate::effects::Effect;
-    use crate::value::{Arity, Closure};
+    use crate::value::{Arity, Closure, ClosureTemplate};
     use std::rc::Rc;
 
     fn make_test_closure() -> Value {
@@ -356,23 +356,25 @@ mod tests {
         ];
 
         Value::closure(Closure {
-            bytecode: Rc::new(bytecode),
-            arity: Arity::Exact(0),
+            template: Rc::new(ClosureTemplate {
+                bytecode: Rc::new(bytecode),
+                arity: Arity::Exact(0),
+                num_locals: 0,
+                num_captures: 0,
+                num_params: 0,
+                constants: Rc::new(vec![Value::NIL]),
+                effect: Effect::none(),
+                cell_params_mask: 0,
+                cell_locals_mask: 0,
+                symbol_names: Rc::new(std::collections::HashMap::new()),
+                location_map: Rc::new(crate::error::LocationMap::new()),
+                jit_code: None,
+                lir_function: None,
+                doc: None,
+                vararg_kind: crate::hir::VarargKind::List,
+                name: None,
+            }),
             env: Rc::new(vec![]),
-            num_locals: 0,
-            num_captures: 0,
-            constants: Rc::new(vec![Value::NIL]),
-            effect: Effect::none(),
-            cell_params_mask: 0,
-            cell_locals_mask: 0,
-            symbol_names: Rc::new(std::collections::HashMap::new()),
-            location_map: Rc::new(crate::error::LocationMap::new()),
-            jit_code: None,
-            lir_function: None,
-            doc: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
-            name: None,
         })
     }
 

@@ -154,7 +154,7 @@ impl VM {
         match op_name.as_str() {
             "call-count" => {
                 if let Some(closure) = arg.as_closure() {
-                    let ptr = closure.bytecode.as_ptr();
+                    let ptr = closure.template.bytecode.as_ptr();
                     (SIG_OK, Value::int(self.get_closure_call_count(ptr) as i64))
                 } else {
                     (SIG_OK, Value::int(0))
@@ -183,13 +183,13 @@ impl VM {
                     .and_then(|st_ptr| unsafe { (*st_ptr).get(&name) })
                     .and_then(|sym_id| self.get_global(sym_id.0))
                     .and_then(|val| val.as_closure().cloned())
-                    .and_then(|closure| closure.doc)
+                    .and_then(|closure| closure.template.doc)
                     .and_then(|doc_val| doc_val.with_string(|s| s.to_string()));
                 // If not found in globals, check file-level locals (letrec model)
                 let user_doc = user_doc.or_else(|| {
                     self.get_local_value_by_name(&name)
                         .and_then(|val| val.as_closure().cloned())
-                        .and_then(|closure| closure.doc)
+                        .and_then(|closure| closure.template.doc)
                         .and_then(|doc_val| doc_val.with_string(|s| s.to_string()))
                 });
                 if let Some(doc_str) = user_doc {

@@ -316,12 +316,12 @@ impl Emitter {
                 nested_lir.call_sites = nested_call_sites;
 
                 // Create closure template
-                let closure = Closure {
+                let template = crate::value::ClosureTemplate {
                     bytecode: Rc::new(nested_bytecode.instructions),
                     arity: func.arity,
-                    env: Rc::new(vec![]), // Empty - captures added at runtime
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
+                    num_params: func.num_params,
                     constants: Rc::new(nested_bytecode.constants),
                     effect: func.effect,
                     cell_params_mask: func.cell_params_mask,
@@ -332,8 +332,11 @@ impl Emitter {
                     lir_function: Some(Rc::new(nested_lir)),
                     doc: func.doc,
                     vararg_kind: func.vararg_kind.clone(),
-                    num_params: func.num_params,
                     name: func.name.clone().map(|s| Rc::from(s.as_str())),
+                };
+                let closure = Closure {
+                    template: Rc::new(template),
+                    env: Rc::new(vec![]),
                 };
 
                 // Add closure template to constants

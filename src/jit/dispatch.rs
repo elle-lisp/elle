@@ -338,12 +338,12 @@ pub extern "C" fn elle_jit_call(
     // Dispatch to closure
     if let Some(closure) = func.as_closure() {
         // Check arity using nargs directly — no Vec needed
-        if !vm.check_arity(&closure.arity, nargs as usize) {
+        if !vm.check_arity(&closure.template.arity, nargs as usize) {
             return TAG_NIL;
         }
 
         // JIT-to-JIT fast path: check if callee has JIT code
-        let bytecode_ptr = closure.bytecode.as_ptr();
+        let bytecode_ptr = closure.template.bytecode.as_ptr();
         if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
             vm.fiber.call_depth += 1;
             if vm.fiber.call_depth > 1000 {
@@ -415,10 +415,10 @@ pub extern "C" fn elle_jit_call(
 
         vm.fiber.call_depth += 1;
         let result = vm.execute_bytecode_saving_stack(
-            &closure.bytecode,
-            &closure.constants,
+            &closure.template.bytecode,
+            &closure.template.constants,
             &new_env,
-            &closure.location_map,
+            &closure.template.location_map,
         );
         vm.fiber.call_depth -= 1;
 
@@ -539,12 +539,12 @@ pub extern "C" fn elle_jit_tail_call(
 
     // Handle closures
     if let Some(closure) = func.as_closure() {
-        if !vm.check_arity(&closure.arity, nargs as usize) {
+        if !vm.check_arity(&closure.template.arity, nargs as usize) {
             return TAG_NIL;
         }
 
         // JIT fast path: if the target has JIT code, call it directly
-        let bytecode_ptr = closure.bytecode.as_ptr();
+        let bytecode_ptr = closure.template.bytecode.as_ptr();
         if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
             let env_ptr = if closure.env.is_empty() {
                 std::ptr::null()
@@ -587,10 +587,10 @@ pub extern "C" fn elle_jit_tail_call(
 
         let new_env = build_closure_env_for_jit(closure, &args);
         vm.pending_tail_call = Some(crate::vm::core::TailCallInfo {
-            bytecode: closure.bytecode.clone(),
-            constants: closure.constants.clone(),
+            bytecode: closure.template.bytecode.clone(),
+            constants: closure.template.constants.clone(),
             env: new_env,
-            location_map: closure.location_map.clone(),
+            location_map: closure.template.location_map.clone(),
         });
 
         return TAIL_CALL_SENTINEL;
@@ -632,7 +632,7 @@ pub extern "C" fn elle_jit_yield(
         .expect("VM bug: elle_jit_yield called with non-closure self_bits");
 
     // Look up yield point metadata from JitCode
-    let bytecode_ptr = closure.bytecode.as_ptr();
+    let bytecode_ptr = closure.template.bytecode.as_ptr();
     let jit_code = vm
         .jit_cache
         .get(&bytecode_ptr)
@@ -654,13 +654,13 @@ pub extern "C" fn elle_jit_yield(
     }
 
     let frame = SuspendedFrame {
-        bytecode: closure.bytecode.clone(),
-        constants: closure.constants.clone(),
+        bytecode: closure.template.bytecode.clone(),
+        constants: closure.template.constants.clone(),
         env: closure.env.clone(),
         ip: yield_meta.resume_ip,
         stack,
         active_allocator: crate::value::fiber_heap::save_active_allocator(),
-        location_map: closure.location_map.clone(),
+        location_map: closure.template.location_map.clone(),
     };
 
     vm.fiber.signal = Some((SIG_YIELD, yielded));
@@ -699,7 +699,7 @@ pub extern "C" fn elle_jit_yield_through_call(
         .expect("VM bug: elle_jit_yield_through_call called with non-closure");
 
     // Look up call site metadata from JitCode
-    let bytecode_ptr = closure.bytecode.as_ptr();
+    let bytecode_ptr = closure.template.bytecode.as_ptr();
     let jit_code = vm
         .jit_cache
         .get(&bytecode_ptr)
@@ -715,13 +715,13 @@ pub extern "C" fn elle_jit_yield_through_call(
     }
 
     let caller_frame = SuspendedFrame {
-        bytecode: closure.bytecode.clone(),
-        constants: closure.constants.clone(),
+        bytecode: closure.template.bytecode.clone(),
+        constants: closure.template.constants.clone(),
         env: closure.env.clone(),
         ip: call_meta.resume_ip,
         stack,
         active_allocator: crate::value::fiber_heap::save_active_allocator(),
-        location_map: closure.location_map.clone(),
+        location_map: closure.template.location_map.clone(),
     };
 
     // Append caller frame to the existing suspended chain.
@@ -758,7 +758,7 @@ pub extern "C" fn elle_jit_has_signal(vm: u64) -> u64 {
 /// LocalCell if the cell_params_mask indicates it's needed.
 #[inline]
 fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, val: Value) {
-    if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+    if i < 64 && (closure.template.cell_params_mask & (1 << i)) != 0 {
         buf.push(Value::local_cell(val));
     } else {
         buf.push(val);
@@ -786,7 +786,7 @@ fn build_closure_env_for_jit(
     let mut new_env = Vec::with_capacity(closure.env_capacity());
     new_env.extend((*closure.env).iter().cloned());
 
-    match closure.arity {
+    match closure.template.arity {
         crate::value::Arity::Exact(_) => {
             for (i, arg) in args.iter().enumerate() {
                 push_param(&mut new_env, closure, i, *arg);
@@ -794,16 +794,16 @@ fn build_closure_env_for_jit(
         }
         crate::value::Arity::AtLeast(_) => {
             // Total fixed slots = num_params - 1 (rest slot is last param)
-            let fixed_slots = closure.num_params - 1;
+            let fixed_slots = closure.template.num_params - 1;
 
             // Determine how many positional args to consume for fixed slots.
             // For &keys/&named, keyword args should not fill optional slots.
             let collects_keywords = matches!(
-                closure.vararg_kind,
+                closure.template.vararg_kind,
                 crate::hir::VarargKind::Struct | crate::hir::VarargKind::StrictStruct(_)
             );
             let provided_fixed = if collects_keywords {
-                let min = closure.arity.fixed_params();
+                let min = closure.template.arity.fixed_params();
                 let mut count = args.len().min(min);
                 while count < fixed_slots && count < args.len() {
                     if args[count].as_keyword_name().is_some() {
@@ -851,18 +851,18 @@ fn build_closure_env_for_jit(
     }
 
     // Calculate number of locally-defined variables
-    let num_params = match closure.arity {
+    let num_params = match closure.template.arity {
         crate::value::Arity::Exact(n) => n,
         crate::value::Arity::AtLeast(n) => n,
         crate::value::Arity::Range(min, _) => min,
     };
-    let num_locally_defined = closure.num_locals.saturating_sub(num_params);
+    let num_locally_defined = closure.template.num_locals.saturating_sub(num_params);
 
     // Add slots for locally-defined variables.
     // Cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
     // Beyond index 63, conservatively use LocalCell.
     for i in 0..num_locally_defined {
-        if i >= 64 || (closure.cell_locals_mask & (1 << i)) != 0 {
+        if i >= 64 || (closure.template.cell_locals_mask & (1 << i)) != 0 {
             new_env.push(Value::local_cell(Value::NIL));
         } else {
             new_env.push(Value::NIL);
@@ -1001,6 +1001,7 @@ mod tests {
     ) -> (crate::vm::VM, Value) {
         use crate::effects::Effect;
         use crate::value::types::Arity;
+        use crate::value::ClosureTemplate;
         use std::collections::HashMap;
         use std::rc::Rc;
 
@@ -1008,12 +1009,12 @@ mod tests {
         let constants = Rc::new(constants);
         let env = Rc::new(env);
 
-        let closure = crate::value::Closure {
+        let template = Rc::new(ClosureTemplate {
             bytecode: bytecode.clone(),
             arity: Arity::Exact(0),
-            env,
             num_locals: 0,
             num_captures: 0,
+            num_params: 0,
             constants,
             effect: Effect::yields(),
             cell_params_mask: 0,
@@ -1024,12 +1025,16 @@ mod tests {
             lir_function: None,
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
             name: None,
+        });
+
+        let closure = crate::value::Closure {
+            template: template.clone(),
+            env,
         };
 
         // bytecode_ptr must be captured before Value::closure moves the Closure
-        let bytecode_ptr = closure.bytecode.as_ptr();
+        let bytecode_ptr = template.bytecode.as_ptr();
         let closure_val = Value::closure(closure);
 
         let jit_code = Rc::new(crate::jit::JitCode::test_with_yield_points(yield_points));

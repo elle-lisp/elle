@@ -637,3 +637,63 @@ fn test_eval_can_see_file_level_locals_with_environment() {
     );
     assert_eq!(result.unwrap(), Value::int(42));
 }
+
+// ============================================================================
+// SECTION: eval with (environment) containing closures (Bug 2 — Feature)
+// ============================================================================
+// These tests verify that once closures carry their source Syntax,
+// (eval expr (environment)) can see file-level functions by injecting them
+// as (let ((f (fn [x] ...))) ...) using the stored syntax.
+
+#[test]
+fn test_eval_sees_file_level_function() {
+    // A file defines a function (def (double x) (* x 2)), then does
+    // (eval '(double 5) (environment)). Should return 10.
+    let result = eval_file_source_with_stdlib(
+        r#"
+        (def (double x) (* x 2))
+        (eval '(double 5) (environment))
+    "#,
+    );
+    assert_eq!(result.unwrap(), Value::int(10));
+}
+
+#[test]
+fn test_eval_sees_file_level_lambda() {
+    // A file defines (def triple (fn [x] (* x 3))), then does
+    // (eval '(triple 4) (environment)). Should return 12.
+    let result = eval_file_source_with_stdlib(
+        r#"
+        (def triple (fn [x] (* x 3)))
+        (eval '(triple 4) (environment))
+    "#,
+    );
+    assert_eq!(result.unwrap(), Value::int(12));
+}
+
+#[test]
+fn test_eval_sees_multiple_file_level_functions() {
+    // A file defines (def (add a b) (+ a b)) and (def (mul a b) (* a b)),
+    // then does (eval '(add (mul 2 3) 4) (environment)). Should return 10.
+    let result = eval_file_source_with_stdlib(
+        r#"
+        (def (add a b) (+ a b))
+        (def (mul a b) (* a b))
+        (eval '(add (mul 2 3) 4) (environment))
+    "#,
+    );
+    assert_eq!(result.unwrap(), Value::int(10));
+}
+
+#[test]
+fn test_eval_environment_closure_roundtrip() {
+    // A file defines (def (greet name) (string-append "hello " name)),
+    // then does (eval '(greet "world") (environment)). Should return "hello world".
+    let result = eval_file_source_with_stdlib(
+        r#"
+        (def (greet name) (string-append "hello " name))
+        (eval '(greet "world") (environment))
+    "#,
+    );
+    assert_eq!(result.unwrap(), Value::string("hello world"));
+}

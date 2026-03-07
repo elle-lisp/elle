@@ -44,7 +44,7 @@ bytecode. Error messages include file:line:col information.
 | Reader → Expander | `Syntax` | `kind: SyntaxKind`, `span: Span`, `scopes: Vec<ScopeId>`, `scope_exempt: bool` |
 | Expander → Analyzer | `Syntax` (expanded) | Same shape; macros resolved, scopes stamped |
 | Analyzer → Lowerer | `Hir` (via `AnalysisResult`) | `kind: HirKind`, `span: Span`, `effect: Effect` |
-| Lowerer → Emitter | `LirFunction` | `blocks: Vec<BasicBlock>`, `constants: Vec<LirConst>`, `arity: Arity`, `effect: Effect`, `num_locals: u16`, `num_captures: u16`, `cell_params_mask: u64`, `cell_locals_mask: u64`, `entry: Label`, `num_regs: u32`, `name: Option<String>`, `doc: Option<Value>` |
+| Lowerer → Emitter | `LirFunction` | `blocks: Vec<BasicBlock>`, `constants: Vec<LirConst>`, `arity: Arity`, `effect: Effect`, `num_locals: u16`, `num_captures: u16`, `cell_params_mask: u64`, `cell_locals_mask: u64`, `entry: Label`, `num_regs: u32`, `name: Option<String>`, `doc: Option<Value>`, `syntax: Option<Rc<Syntax>>` |
 | Emitter → VM | `Bytecode` | `instructions: Vec<u8>`, `constants: Vec<Value>`, `location_map: LocationMap`, `symbol_names: HashMap<u32, String>`, `inline_caches: HashMap<usize, CacheEntry>` |
 | VM → caller | `Value` | NaN-boxed 8-byte runtime value |
 
@@ -58,6 +58,7 @@ bytecode. Error messages include file:line:col information.
 | Cell mask (params) | — | `Binding.needs_cell()` | `LirFunction.cell_params_mask` | — | `Closure.cell_params_mask` |
 | Cell mask (locals) | — | `Binding.needs_cell()` (mutable captures only) | `LirFunction.cell_locals_mask` | — | JIT only (not on `Closure`) |
 | Docstring | — | `Lambda.doc` | `LirFunction.doc` | — | `Closure.doc` |
+| Syntax | — | `Lambda.syntax` | `LirFunction.syntax` | — | `Closure.syntax` |
 
 **What is transformed at each boundary:**
 
@@ -105,7 +106,7 @@ bytecode. Error messages include file:line:col information.
 `Value` is the runtime representation. It uses NaN-boxing for efficient
 representation. Create values via methods like `Value::int()`, `Value::cons()`,
 `Value::closure()` rather than enum variants. Notable types:
-- `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>` + `doc: Option<Value>`
+- `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>` + `doc: Option<Value>` + `syntax: Option<Rc<Syntax>>`
 - `Cell` / `LocalCell` - mutable cells for captured variables
 - `Fiber` - independent execution context with stack, frames, signal mask, and per-fiber `FiberHeap`
 - `Parameter` - dynamic binding with default value (id, default), looked up at runtime from parameter frame stack

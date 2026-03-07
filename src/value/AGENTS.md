@@ -34,7 +34,7 @@ Runtime value representation using NaN-boxing.
 | Type | Location | Purpose |
 |------|----------|---------|
 | `Value` | `repr/mod.rs` | NaN-boxed 8-byte value (Copy) |
-| `Closure` | `closure.rs` | Bytecode + env + arity + effect + location_map |
+| `Closure` | `closure.rs` | Bytecode + env + arity + effect + location_map + syntax |
 | `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
 | `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
@@ -76,10 +76,13 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
      auto-unwrapped). Distinguished by a bool flag on `HeapObject::Cell`.
      Immutable captured locals do not need cells — they are captured by value.
 
-4. **`Closure` has `location_map` and `doc`.** The `location_map: Rc<LocationMap>`
+4. **`Closure` has `location_map`, `doc`, and `syntax`.** The `location_map: Rc<LocationMap>`
     field maps bytecode offsets to source locations for error reporting. The
     `doc: Option<Value>` field carries the docstring extracted from the function
-    body, threaded from HIR through LIR.
+    body, threaded from HIR through LIR. The `syntax: Option<Rc<Syntax>>` field
+    stores the original lambda `Syntax` node, used by `eval` to reconstruct
+    closures in the environment. Most construction sites set this to `None`;
+    it is populated by the emitter for user-defined lambdas.
 
 5. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
     transfer between threads, cloning `Rc` contents as needed.

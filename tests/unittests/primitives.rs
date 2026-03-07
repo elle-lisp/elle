@@ -3,7 +3,7 @@ use elle::error::LError;
 use elle::pipeline::eval as pipeline_eval;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
-use elle::value::{list, Closure, Value};
+use elle::value::{list, Closure, ClosureTemplate, Value};
 use elle::vm::VM;
 
 fn setup() -> (VM, SymbolTable) {
@@ -1150,24 +1150,25 @@ fn test_spawn_primitive() {
 
     // Create a simple closure to spawn
     let closure = Value::closure(Closure {
-        bytecode: std::rc::Rc::new(vec![0u8]), // dummy bytecode
-        arity: elle::value::Arity::Exact(0),
+        template: std::rc::Rc::new(ClosureTemplate {
+            bytecode: std::rc::Rc::new(vec![0u8]), // dummy bytecode
+            arity: elle::value::Arity::Exact(0),
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 0,
+            constants: std::rc::Rc::new(vec![]),
+            effect: elle::effects::Effect::none(),
+            cell_params_mask: 0,
+            cell_locals_mask: 0,
+            symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+            location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+            doc: None,
+            vararg_kind: elle::hir::VarargKind::List,
+            name: None,
+        }),
         env: std::rc::Rc::new(vec![]),
-        num_locals: 0,
-        num_captures: 0,
-        constants: std::rc::Rc::new(vec![]),
-
-        effect: elle::effects::Effect::none(),
-        cell_params_mask: 0,
-        cell_locals_mask: 0,
-        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-        jit_code: None,
-        lir_function: None,
-        doc: None,
-        vararg_kind: elle::hir::VarargKind::List,
-        num_params: 0,
-        name: None,
     });
 
     let result = call_primitive(&spawn, &[closure]);
@@ -1676,24 +1677,25 @@ fn test_json_serialize_errors() {
     let json_serialize = get_primitive(&vm, &mut symbols, "json-serialize");
 
     let closure = Value::closure(Closure {
-        bytecode: std::rc::Rc::new(vec![]),
-        arity: elle::value::Arity::Exact(0),
+        template: std::rc::Rc::new(ClosureTemplate {
+            bytecode: std::rc::Rc::new(vec![]),
+            arity: elle::value::Arity::Exact(0),
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 0,
+            constants: std::rc::Rc::new(vec![]),
+            effect: elle::effects::Effect::none(),
+            cell_params_mask: 0,
+            cell_locals_mask: 0,
+            symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+            location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+            doc: None,
+            vararg_kind: elle::hir::VarargKind::List,
+            name: None,
+        }),
         env: std::rc::Rc::new(vec![]),
-        num_locals: 0,
-        num_captures: 0,
-        constants: std::rc::Rc::new(vec![]),
-
-        effect: elle::effects::Effect::none(),
-        cell_params_mask: 0,
-        cell_locals_mask: 0,
-        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-        jit_code: None,
-        lir_function: None,
-        doc: None,
-        vararg_kind: elle::hir::VarargKind::List,
-        num_params: 0,
-        name: None,
     });
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());
@@ -2018,23 +2020,25 @@ fn test_function_predicate() {
 
     // Closure is a function
     let closure = Value::closure(Closure {
-        bytecode: std::rc::Rc::new(vec![0u8]),
-        arity: elle::value::Arity::Exact(1),
+        template: std::rc::Rc::new(ClosureTemplate {
+            bytecode: std::rc::Rc::new(vec![0u8]),
+            arity: elle::value::Arity::Exact(1),
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 1,
+            constants: std::rc::Rc::new(vec![]),
+            effect: elle::effects::Effect::none(),
+            cell_params_mask: 0,
+            cell_locals_mask: 0,
+            symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+            location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+            doc: None,
+            vararg_kind: elle::hir::VarargKind::List,
+            name: None,
+        }),
         env: std::rc::Rc::new(vec![]),
-        num_locals: 0,
-        num_captures: 0,
-        constants: std::rc::Rc::new(vec![]),
-        effect: elle::effects::Effect::none(),
-        cell_params_mask: 0,
-        cell_locals_mask: 0,
-        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-        jit_code: None,
-        lir_function: None,
-        doc: None,
-        vararg_kind: elle::hir::VarargKind::List,
-        num_params: 1,
-        name: None,
     });
     assert_eq!(
         call_primitive(&fn_pred, &[closure]).unwrap(),
@@ -2062,23 +2066,25 @@ fn test_primitive_predicate() {
 
     // Closure is not a primitive
     let closure = Value::closure(Closure {
-        bytecode: std::rc::Rc::new(vec![0u8]),
-        arity: elle::value::Arity::Exact(1),
+        template: std::rc::Rc::new(ClosureTemplate {
+            bytecode: std::rc::Rc::new(vec![0u8]),
+            arity: elle::value::Arity::Exact(1),
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 1,
+            constants: std::rc::Rc::new(vec![]),
+            effect: elle::effects::Effect::none(),
+            cell_params_mask: 0,
+            cell_locals_mask: 0,
+            symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+            location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+            doc: None,
+            vararg_kind: elle::hir::VarargKind::List,
+            name: None,
+        }),
         env: std::rc::Rc::new(vec![]),
-        num_locals: 0,
-        num_captures: 0,
-        constants: std::rc::Rc::new(vec![]),
-        effect: elle::effects::Effect::none(),
-        cell_params_mask: 0,
-        cell_locals_mask: 0,
-        symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-        location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-        jit_code: None,
-        lir_function: None,
-        doc: None,
-        vararg_kind: elle::hir::VarargKind::List,
-        num_params: 1,
-        name: None,
     });
     assert_eq!(
         call_primitive(&prim_pred, &[closure]).unwrap(),

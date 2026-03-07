@@ -145,7 +145,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
     }
 
     // Also check constants for sendability
-    for (i, constant) in closure.constants.iter().enumerate() {
+    for (i, constant) in closure.template.constants.iter().enumerate() {
         if !is_value_sendable(constant) {
             return Err(LError::generic(format!(
                 "spawn: closure has non-sendable constant at position {} ({})",
@@ -165,6 +165,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         .map_err(|e| LError::generic(format!("spawn: failed to copy environment: {}", e)))?;
 
     let constants_send: Result<Vec<SendValue>, String> = closure
+        .template
         .constants
         .iter()
         .map(|v| SendValue::from_value(*v))
@@ -173,13 +174,13 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         .map_err(|e| LError::generic(format!("spawn: failed to copy constants: {}", e)))?;
 
     // Extract the closure bytecode for thread safety
-    let bytecode_data: Vec<u8> = (*closure.bytecode).clone();
+    let bytecode_data: Vec<u8> = (*closure.template.bytecode).clone();
 
     // Extract closure metadata needed for proper environment setup
-    let num_locals = closure.num_locals;
-    let cell_locals_mask = closure.cell_locals_mask;
-    let _num_captures = closure.num_captures;
-    let arity = match closure.arity {
+    let num_locals = closure.template.num_locals;
+    let cell_locals_mask = closure.template.cell_locals_mask;
+    let _num_captures = closure.template.num_captures;
+    let arity = match closure.template.arity {
         crate::value::Arity::Exact(n) => n,
         crate::value::Arity::AtLeast(n) => n,
         crate::value::Arity::Range(min, _) => min,
@@ -187,11 +188,11 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 
     // Extract symbol names for cross-thread portability
     // This allows remapping symbol IDs in the new thread's symbol table
-    let symbol_names_for_thread: HashMap<u32, String> = (*closure.symbol_names).clone();
+    let symbol_names_for_thread: HashMap<u32, String> = (*closure.template.symbol_names).clone();
 
     // Extract location map for error reporting in the spawned thread
     let location_map_for_thread: std::collections::HashMap<usize, crate::error::SourceLoc> =
-        (*closure.location_map).clone();
+        (*closure.template.location_map).clone();
 
     // Create a holder for the result
     let result_holder: Arc<Mutex<Option<Result<crate::value::SendValue, String>>>> =

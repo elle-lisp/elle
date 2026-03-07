@@ -79,7 +79,7 @@ impl VM {
         //     (a) Parent already has shared_alloc → propagate down the chain.
         //     (b) Root fiber parent (saved_heap is null) → child creates its own.
         //     (c) Non-root parent, no existing shared_alloc → create on parent's heap.
-        if self.fiber.closure.effect.may_yield() {
+        if self.fiber.closure.effect().may_yield() {
             let shared_ptr = if !child_fiber.heap.shared_alloc().is_null() {
                 // Case (a): parent has shared_alloc from its own parent — propagate
                 child_fiber.heap.shared_alloc()
@@ -312,12 +312,12 @@ impl VM {
         // Build args from resume_value based on closure arity.
         // fiber/resume provides at most one value, so we pass it as a
         // single argument when the closure expects parameters.
-        let args: &[Value] = match closure.arity {
+        let args: &[Value] = match closure.template.arity {
             crate::value::Arity::Exact(0) => &[],
             _ => &[resume_value],
         };
 
-        if !self.check_arity(&closure.arity, args.len()) {
+        if !self.check_arity(&closure.template.arity, args.len()) {
             return SIG_ERROR;
         }
 
@@ -330,10 +330,10 @@ impl VM {
         };
 
         let result = self.execute_bytecode_saving_stack(
-            &closure.bytecode,
-            &closure.constants,
+            &closure.template.bytecode,
+            &closure.template.constants,
             &env_rc,
-            &closure.location_map,
+            &closure.template.location_map,
         );
 
         // If the fiber signaled (not normal completion), save context for resumption.

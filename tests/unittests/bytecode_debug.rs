@@ -32,11 +32,11 @@ fn test_print_raw_bytecode() {
     for (i, c) in result.bytecode.constants.iter().enumerate() {
         if let Some(closure) = c.as_closure() {
             println!("  [{}] = Closure:", i);
-            println!("    bytecode len: {}", closure.bytecode.len());
-            println!("    constants len: {}", closure.constants.len());
+            println!("    bytecode len: {}", closure.template.bytecode.len());
+            println!("    constants len: {}", closure.template.constants.len());
             println!(
                 "    raw bytes: {:?}",
-                &closure.bytecode[..std::cmp::min(20, closure.bytecode.len())]
+                &closure.template.bytecode[..std::cmp::min(20, closure.template.bytecode.len())]
             );
         } else {
             println!("  [{}] = {:?}", i, c);

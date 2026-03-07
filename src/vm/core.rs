@@ -4,7 +4,8 @@ use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
 use crate::value::fiber::CallFrame;
 use crate::value::{
-    Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_OK, SIG_YIELD,
+    Closure, ClosureTemplate, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT,
+    SIG_OK, SIG_YIELD,
 };
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
@@ -77,23 +78,25 @@ fn root_closure() -> Rc<Closure> {
     use crate::effects::Effect;
     use crate::value::types::Arity;
     Rc::new(Closure {
-        bytecode: Rc::new(vec![]),
-        arity: Arity::Exact(0),
+        template: Rc::new(ClosureTemplate {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Exact(0),
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 0,
+            constants: Rc::new(vec![]),
+            effect: Effect::none(),
+            cell_params_mask: 0,
+            cell_locals_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+            doc: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            name: None,
+        }),
         env: Rc::new(vec![]),
-        num_locals: 0,
-        num_captures: 0,
-        constants: Rc::new(vec![]),
-        effect: Effect::none(),
-        cell_params_mask: 0,
-        cell_locals_mask: 0,
-        symbol_names: Rc::new(HashMap::new()),
-        location_map: Rc::new(LocationMap::new()),
-        jit_code: None,
-        lir_function: None,
-        doc: None,
-        vararg_kind: crate::hir::VarargKind::List,
-        num_params: 0,
-        name: None,
     })
 }
 

@@ -63,7 +63,7 @@ pub fn discover_compilation_group(
             None => continue,
         };
 
-        let lir = match &closure.lir_function {
+        let lir = match &closure.template.lir_function {
             Some(lir) => lir.clone(),
             None => continue,
         };
@@ -231,14 +231,15 @@ mod tests {
     /// Build a mock closure Value with the given LIR function.
     fn make_closure_value(lir: LirFunction) -> Value {
         use crate::error::LocationMap;
+        use crate::value::ClosureTemplate;
         use std::collections::HashMap;
 
-        let closure = crate::value::Closure {
+        let template = Rc::new(ClosureTemplate {
             bytecode: Rc::new(vec![]),
             arity: lir.arity,
-            env: Rc::new(vec![]),
             num_locals: 0,
             num_captures: 0,
+            num_params: 0,
             constants: Rc::new(vec![]),
             effect: lir.effect,
             cell_params_mask: 0,
@@ -249,8 +250,12 @@ mod tests {
             lir_function: Some(Rc::new(lir)),
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
             name: None,
+        });
+
+        let closure = crate::value::Closure {
+            template,
+            env: Rc::new(vec![]),
         };
         Value::closure(closure)
     }
@@ -436,18 +441,19 @@ mod tests {
     #[test]
     fn test_discover_closure_without_lir() {
         use crate::error::LocationMap;
+        use crate::value::ClosureTemplate;
         use std::collections::HashMap;
 
         let sym_g = SymbolId(5);
         let caller = make_caller("f", sym_g);
 
         // Closure with no lir_function
-        let closure = crate::value::Closure {
+        let template = Rc::new(ClosureTemplate {
             bytecode: Rc::new(vec![]),
             arity: Arity::Exact(1),
-            env: Rc::new(vec![]),
             num_locals: 0,
             num_captures: 0,
+            num_params: 0,
             constants: Rc::new(vec![]),
             effect: Effect::none(),
             cell_params_mask: 0,
@@ -458,8 +464,12 @@ mod tests {
             lir_function: None,
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
             name: None,
+        });
+
+        let closure = crate::value::Closure {
+            template,
+            env: Rc::new(vec![]),
         };
 
         let mut globals = vec![Value::NIL; 10];
