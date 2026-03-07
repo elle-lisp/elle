@@ -69,9 +69,16 @@ fn eval_inner(
     let span = Span::synthetic();
     let expr_syntax = Syntax::from_value(&expr_value, symbols, span.clone())?;
 
-    // If env is not nil, wrap in a let expression
-    let syntax = if !env_value.is_nil() {
-        wrap_with_env(expr_syntax, &env_value, symbols)?
+    // If env is not nil, wrap in a let expression.
+    // If env is nil, automatically capture the current lexical environment
+    // so that file-level locals are visible to bare (eval expr) calls.
+    let effective_env = if env_value.is_nil() {
+        vm.build_current_environment()
+    } else {
+        env_value
+    };
+    let syntax = if !effective_env.is_nil() {
+        wrap_with_env(expr_syntax, &effective_env, symbols)?
     } else {
         expr_syntax
     };

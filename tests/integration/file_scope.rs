@@ -607,23 +607,31 @@ fn test_eval_with_environment_containing_closures() {
 }
 
 // ============================================================================
-// SECTION: eval cannot see file-level locals without env (Bug 3 — by design)
+// SECTION: eval with implicit environment (file-level locals visible)
 // ============================================================================
 
 #[test]
-fn test_eval_cannot_see_file_level_locals_without_env() {
-    // eval compiles fresh code; file-level locals are not globals.
-    // Without an explicit environment, eval cannot see them.
+fn test_eval_implicit_environment() {
+    // (eval expr) without explicit env should see file-level locals
     let result = eval_file_source_with_stdlib(
         r#"
         (def x 42)
-        (eval 'x)
+        (eval '(+ x 1))
     "#,
     );
-    assert!(
-        result.is_err(),
-        "eval without env cannot see file-level locals"
+    assert_eq!(result.unwrap(), Value::int(43));
+}
+
+#[test]
+fn test_eval_implicit_environment_sees_function() {
+    // (eval expr) without explicit env should see file-level functions
+    let result = eval_file_source_with_stdlib(
+        r#"
+        (defn square [n] (* n n))
+        (eval '(square 7))
+    "#,
     );
+    assert_eq!(result.unwrap(), Value::int(49));
 }
 
 #[test]

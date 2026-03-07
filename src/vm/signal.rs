@@ -331,33 +331,7 @@ impl VM {
                 );
                 (SIG_OK, Value::struct_from(fields))
             }
-            "environment" => {
-                use crate::value::heap::TableKey;
-                use std::collections::BTreeMap;
-                let mut fields = BTreeMap::new();
-                let st_ptr = unsafe { crate::context::get_symbol_table() };
-                if let Some(st_ptr) = st_ptr {
-                    let st = unsafe { &*st_ptr };
-                    for (idx, &defined) in self.defined_globals.iter().enumerate() {
-                        if !defined {
-                            continue;
-                        }
-                        if let Some(name) = st.name(crate::value::SymbolId(idx as u32)) {
-                            fields.insert(TableKey::Keyword(name.to_string()), self.globals[idx]);
-                        }
-                    }
-                }
-                // Also include file-level locals (letrec model)
-                let frame_base = self.current_frame_base();
-                for (&slot, name) in &self.local_names {
-                    let abs_idx = frame_base + slot as usize;
-                    if abs_idx < self.fiber.stack.len() {
-                        let val = self.unwrap_local_cell(self.fiber.stack[abs_idx]);
-                        fields.insert(TableKey::Keyword(name.clone()), val);
-                    }
-                }
-                (SIG_OK, Value::struct_from(fields))
-            }
+            "environment" => (SIG_OK, self.build_current_environment()),
             _ => (
                 SIG_ERROR,
                 error_val(
@@ -365,6 +339,42 @@ impl VM {
                     format!("SIG_QUERY: unknown operation: {}", op_name),
                 ),
             ),
+        }
+    }
+
+    /// Build a struct containing the current lexical environment.
+    ///
+    /// Includes defined globals and file-level locals (letrec model).
+    /// Returns `Value::NIL` if no bindings are available.
+    pub(crate) fn build_current_environment(&self) -> Value {
+        use crate::value::heap::TableKey;
+        use std::collections::BTreeMap;
+        let mut fields = BTreeMap::new();
+        let st_ptr = unsafe { crate::context::get_symbol_table() };
+        if let Some(st_ptr) = st_ptr {
+            let st = unsafe { &*st_ptr };
+            for (idx, &defined) in self.defined_globals.iter().enumerate() {
+                if !defined {
+                    continue;
+                }
+                if let Some(name) = st.name(crate::value::SymbolId(idx as u32)) {
+                    fields.insert(TableKey::Keyword(name.to_string()), self.globals[idx]);
+                }
+            }
+        }
+        // Also include file-level locals (letrec model)
+        let frame_base = self.current_frame_base();
+        for (&slot, name) in &self.local_names {
+            let abs_idx = frame_base + slot as usize;
+            if abs_idx < self.fiber.stack.len() {
+                let val = self.unwrap_local_cell(self.fiber.stack[abs_idx]);
+                fields.insert(TableKey::Keyword(name.clone()), val);
+            }
+        }
+        if fields.is_empty() {
+            Value::NIL
+        } else {
+            Value::struct_from(fields)
         }
     }
 
