@@ -122,9 +122,6 @@ mod elle_scripts {
 mod allocator {
     include!("allocator.rs");
 }
-mod environment {
-    include!("environment.rs");
-}
 mod file_scope {
     include!("file_scope.rs");
 }

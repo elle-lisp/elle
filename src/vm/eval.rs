@@ -1,7 +1,9 @@
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
-//! Supports an optional environment table for injecting bindings.
+//! The expression is compiled in an empty environment (just primitives
+//! and prelude). The optional env argument on the stack is consumed
+//! but ignored.
 
 use crate::error::{LError, LResult};
 use crate::hir::tailcall::mark_tail_calls;
@@ -9,8 +11,7 @@ use crate::hir::Analyzer;
 use crate::lir::{Emitter, Lowerer};
 use crate::primitives::cached_primitive_meta;
 use crate::symbol::SymbolTable;
-use crate::syntax::{Span, Syntax, SyntaxKind};
-use crate::value::heap::TableKey;
+use crate::syntax::{Span, Syntax};
 use crate::value::{error_val, Value, SIG_ERROR, SIG_OK};
 use std::rc::Rc;
 
@@ -27,7 +28,10 @@ pub fn handle_eval_instruction(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on eval (expr)");
-    let env_value = vm
+    // Pop the env argument from the stack (bytecode always pushes two
+    // operands for Eval). The env is ignored — eval compiles in an
+    // empty environment.
+    let _env_value = vm
         .fiber
         .stack
         .pop()
@@ -48,7 +52,7 @@ pub fn handle_eval_instruction(vm: &mut VM) {
     };
     let symbols = unsafe { &mut *symbols_ptr };
 
-    match eval_inner(vm, expr_value, env_value, symbols) {
+    match eval_inner(vm, expr_value, symbols) {
         Ok(result) => {
             vm.fiber.stack.push(result);
         }
@@ -59,29 +63,10 @@ pub fn handle_eval_instruction(vm: &mut VM) {
     }
 }
 
-fn eval_inner(
-    vm: &mut VM,
-    expr_value: Value,
-    env_value: Value,
-    symbols: &mut SymbolTable,
-) -> LResult<Value> {
+fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LResult<Value> {
     // Convert value to Syntax
     let span = Span::synthetic();
-    let expr_syntax = Syntax::from_value(&expr_value, symbols, span.clone())?;
-
-    // If env is not nil, wrap in a let expression.
-    // If env is nil, automatically capture the current lexical environment
-    // so that file-level locals are visible to bare (eval expr) calls.
-    let effective_env = if env_value.is_nil() {
-        vm.build_current_environment()
-    } else {
-        env_value
-    };
-    let syntax = if !effective_env.is_nil() {
-        wrap_with_env(expr_syntax, &effective_env, symbols)?
-    } else {
-        expr_syntax
-    };
+    let syntax = Syntax::from_value(&expr_value, symbols, span)?;
 
     // Get-or-create Expander (cached on VM)
     let mut expander = vm.eval_expander.take().unwrap_or_default();
@@ -169,72 +154,4 @@ fn eval_inner(
             result.bits
         ))),
     }
-}
-
-/// Wrap an expression syntax in a let form with bindings from an env table/struct.
-///
-/// Given `expr` and `{:x 10 :y 20}`, produces:
-/// `(let ((x 10) (y 20)) expr)`
-fn wrap_with_env(expr_syntax: Syntax, env_value: &Value, symbols: &SymbolTable) -> LResult<Syntax> {
-    let span = Span::synthetic();
-
-    // Try mutable table first, then immutable struct
-    let entries: Vec<(String, Value)> = if let Some(table_ref) = env_value.as_table() {
-        let table = table_ref.borrow();
-        table
-            .iter()
-            .map(|(k, v)| {
-                let name = match k {
-                    TableKey::Keyword(name) => Ok(name.clone()),
-                    _ => Err(LError::generic("eval: env keys must be keywords")),
-                };
-                name.map(|n| (n, *v))
-            })
-            .collect::<LResult<Vec<_>>>()?
-    } else if let Some(struct_ref) = env_value.as_struct() {
-        struct_ref
-            .iter()
-            .map(|(k, v)| {
-                let name = match k {
-                    TableKey::Keyword(name) => Ok(name.clone()),
-                    _ => Err(LError::generic("eval: env keys must be keywords")),
-                };
-                name.map(|n| (n, *v))
-            })
-            .collect::<LResult<Vec<_>>>()?
-    } else {
-        return Err(LError::generic("eval: env must be a table or struct"));
-    };
-
-    let mut bindings = Vec::new();
-    for (name, val) in entries {
-        // For closures with stored syntax, use the original lambda form directly.
-        // For other values, convert to Syntax (skipping unconvertible values).
-        let val_syntax = if let Some(closure) = val.as_closure() {
-            if let Some(syntax_node) = &closure.template.syntax {
-                syntax_node.as_ref().clone()
-            } else {
-                continue;
-            }
-        } else {
-            match Syntax::from_value(&val, symbols, span.clone()) {
-                Ok(s) => s,
-                Err(_) => continue,
-            }
-        };
-        let name_syntax = Syntax::new(SyntaxKind::Symbol(name), span.clone());
-        let binding_pair = Syntax::new(
-            SyntaxKind::List(vec![name_syntax, val_syntax]),
-            span.clone(),
-        );
-        bindings.push(binding_pair);
-    }
-
-    let let_sym = Syntax::new(SyntaxKind::Symbol("let".to_string()), span.clone());
-    let bindings_list = Syntax::new(SyntaxKind::List(bindings), span.clone());
-
-    Ok(Syntax::new(
-        SyntaxKind::List(vec![let_sym, bindings_list, expr_syntax]),
-        span,
-    ))
 }

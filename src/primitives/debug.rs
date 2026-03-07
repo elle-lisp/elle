@@ -848,29 +848,6 @@ fn get_memory_usage() -> (u64, u64) {
     (0, 0)
 }
 
-/// (environment) — return the current global environment as a struct
-///
-/// Returns a struct mapping keyword names to values for all defined
-/// globals:
-/// ```text
-/// {:+ <native-fn> :cons <native-fn> :my-var 42 ...}
-/// ```
-pub fn prim_environment(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("environment: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
-    (
-        SIG_QUERY,
-        Value::cons(Value::keyword("environment"), Value::NIL),
-    )
-}
-
 /// Declarative primitive definitions for debugging operations.
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -1094,17 +1071,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(arena/scope-stats)",
         aliases: &[],
     },
-    PrimitiveDef {
-        name: "environment",
-        func: prim_environment,
-        effect: Effect::none(),
-        arity: Arity::Exact(0),
-        doc: "Return the current global environment as a struct mapping keyword names to values.",
-        params: &[],
-        category: "meta",
-        example: "(environment)",
-        aliases: &[],
-    },
+
     PrimitiveDef {
         name: "debug/print",
         func: prim_debug_print,
