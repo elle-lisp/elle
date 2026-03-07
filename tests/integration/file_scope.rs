@@ -279,6 +279,29 @@ fn test_import_file_destructure_exports() {
 }
 
 // ============================================================================
+// SECTION 0b2: Second import-file must not break captured bindings (issue #469)
+// ============================================================================
+
+#[test]
+fn test_import_file_does_not_corrupt_captured_bindings() {
+    // A second import-file call must not corrupt bindings captured by closures
+    // defined before the import. The bug: import-file returned `true` (a
+    // boolean sentinel) for already-loaded modules instead of the module's
+    // cached return value. Calling `(true)` then failed with "Cannot call true".
+    let result = eval_file_source_with_stdlib(
+        r#"
+        (def {:assert-eq assert-eq} ((import-file "./examples/assertions.lisp")))
+        (defn check [] (assert-eq 1 1 "captured binding still works"))
+        (def _unused ((import-file "./examples/assertions.lisp")))
+        (check)
+        (assert-eq 2 2 "direct call after second import")
+        true
+    "#,
+    );
+    assert_eq!(result.unwrap(), Value::bool(true));
+}
+
+// ============================================================================
 // SECTION 0c: Destructured def bindings captured by closures (issue #469)
 // ============================================================================
 
