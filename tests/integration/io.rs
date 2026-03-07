@@ -49,3 +49,33 @@ fn test_stream_write_non_port_errors() {
         err
     );
 }
+
+#[test]
+fn test_io_backend_sync() {
+    let result = eval_source("(io-backend? (io/backend :sync))").unwrap();
+    assert_eq!(result, elle::Value::bool(true));
+}
+
+#[test]
+fn test_io_backend_invalid_kind() {
+    let result = eval_source("(io/backend :invalid)");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_io_execute_roundtrip() {
+    // Write a file, then read it back via io/execute
+    let result = eval_source(
+        "(begin
+           (spit \"/tmp/elle-test-io-exec\" \"hello from elle\")
+           (let* ((backend (io/backend :sync))
+                  (port (port/open \"/tmp/elle-test-io-exec\" :read))
+                  (f (fiber/new (fn [] (stream/read-all port)) 512)))
+             (fiber/resume f)
+             (io/execute backend (fiber/value f))))",
+    )
+    .unwrap();
+    result
+        .with_string(|s| assert_eq!(s, "hello from elle"))
+        .unwrap();
+}
