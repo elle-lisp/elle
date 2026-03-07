@@ -18,6 +18,7 @@ pub mod ffi;
 pub mod fibers;
 pub mod fileio;
 pub mod format;
+pub mod io;
 pub mod json;
 pub mod list;
 pub mod logic;
