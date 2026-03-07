@@ -308,7 +308,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/sqrt",
         func: prim_sqrt,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns the square root of a number.",
         params: &["x"],
@@ -319,7 +319,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/sin",
         func: prim_sin,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns the sine of a number (in radians).",
         params: &["x"],
@@ -330,7 +330,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/cos",
         func: prim_cos,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns the cosine of a number (in radians).",
         params: &["x"],
@@ -341,7 +341,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/tan",
         func: prim_tan,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns the tangent of a number (in radians).",
         params: &["x"],
@@ -352,7 +352,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/log",
         func: prim_log,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Range(1, 2),
         doc: "Returns the natural logarithm of x, or logarithm with specified base.",
         params: &["x", "base"],
@@ -363,7 +363,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/exp",
         func: prim_exp,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns e raised to the power of x.",
         params: &["x"],
@@ -374,7 +374,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/pow",
         func: prim_pow,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Returns x raised to the power of y.",
         params: &["x", "y"],
@@ -385,7 +385,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/floor",
         func: prim_floor,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns the largest integer less than or equal to x.",
         params: &["x"],
@@ -396,7 +396,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/ceil",
         func: prim_ceil,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns the smallest integer greater than or equal to x.",
         params: &["x"],
@@ -407,7 +407,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/round",
         func: prim_round,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns the nearest integer to x.",
         params: &["x"],
@@ -418,7 +418,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/pi",
         func: prim_pi,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "The mathematical constant pi (π).",
         params: &[],
@@ -429,7 +429,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/e",
         func: prim_e,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "The mathematical constant e (Euler's number).",
         params: &[],

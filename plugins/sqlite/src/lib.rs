@@ -278,7 +278,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sqlite/close",
         func: prim_sqlite_close,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Close a SQLite database (no-op; connection closes on GC).",
         params: &["db"],

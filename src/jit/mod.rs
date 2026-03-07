@@ -1,7 +1,7 @@
 //! JIT compilation for Elle
 //!
 //! This module provides JIT compilation of LIR functions to native code
-//! using Cranelift. Functions with `Effect::none()` or `Effect::yields()` are
+//! using Cranelift. Functions with `Effect::inert()` or `Effect::yields()` are
 //! JIT candidates. Polymorphic functions remain excluded.
 //!
 //! ## Architecture

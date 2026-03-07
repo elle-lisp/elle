@@ -66,7 +66,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "my-func",
         func: prim_my_func,
-        effect: Effect::none(),       // or Effect::yields() if it signals
+        effect: Effect::inert(),       // or Effect::yields() if it signals
         arity: Arity::Exact(1),
         doc: "One-line description.",
         params: &["x"],
@@ -114,7 +114,7 @@ dispatches it via `handle_primitive_signal()` in `src/vm/signal.rs`.
 | `PrimitiveDef` | `src/primitives/def.rs` | Declarative metadata struct |
 | `PrimitiveMeta` | `src/primitives/def.rs` | Collected effects/arities maps |
 | `Arity` | `src/value/types.rs` | `Exact(n)`, `AtLeast(n)`, `Range(min, max)` |
-| `Effect` | `src/effects/` | `Effect::none()`, `Effect::yields()` |
+| `Effect` | `src/effects/` | `Effect::inert()`, `Effect::yields()` |
 
 ### Conventions
 

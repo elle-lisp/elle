@@ -128,7 +128,7 @@ impl LirFunction {
             num_captures: 0,
             cell_params_mask: 0,
             cell_locals_mask: 0,
-            effect: Effect::none(),
+            effect: Effect::inert(),
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params: 0,

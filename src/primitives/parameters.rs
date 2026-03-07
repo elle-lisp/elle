@@ -40,7 +40,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "make-parameter",
         func: prim_make_parameter,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Create a new dynamic parameter with a default value.",
         params: &["default"],
@@ -51,7 +51,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "parameter?",
         func: prim_is_parameter,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a dynamic parameter.",
         params: &["value"],

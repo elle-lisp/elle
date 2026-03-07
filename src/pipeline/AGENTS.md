@@ -51,7 +51,7 @@ Source code
 `compile_all()` and `analyze_all()` use fixpoint iteration to correctly infer effects for mutually recursive top-level defines:
 
 1. **Pre-scan** all forms for `(def name (fn ...))` patterns via `scan::prescan_forms()`
-2. **Seed** `global_effects` with `Effect::none()` for all such defines (optimistic)
+2. **Seed** `global_effects` with `Effect::inert()` for all such defines (optimistic)
 3. **Analyze** all forms, collecting actual inferred effects via `fixpoint::run_fixpoint()`
 4. **If any effect changed**, re-analyze with corrected effects
 5. **Repeat** until stable (max 10 iterations)

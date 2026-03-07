@@ -274,7 +274,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "coro/new",
         func: prim_make_coroutine,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Create a coroutine (fiber with SIG_YIELD mask) from a closure",
         params: &["closure"],
@@ -285,7 +285,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "coro/status",
         func: prim_coroutine_status,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the status of a coroutine (:created, :running, :suspended, :done, :error)",
         params: &["coroutine"],
@@ -296,7 +296,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "coro/done?",
         func: prim_coroutine_done,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if a coroutine is done (dead or errored)",
         params: &["coroutine"],
@@ -307,7 +307,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "coro/value",
         func: prim_coroutine_value,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the signal payload from a coroutine's last signal",
         params: &["coroutine"],
@@ -329,7 +329,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "coro/>iterator",
         func: prim_coroutine_to_iterator,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert a coroutine to an iterator (identity — fibers are iterable)",
         params: &["coroutine"],
@@ -362,7 +362,7 @@ mod tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![Value::NIL]),
-            effect: Effect::none(),
+            effect: Effect::inert(),
             cell_params_mask: 0,
             cell_locals_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),

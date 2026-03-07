@@ -336,7 +336,7 @@ mod jit_tests {
 
     #[test]
     fn test_jit_fiber_predicate_in_hot_loop() {
-        // fiber? has Effect::none() — should be JIT-compilable.
+        // fiber? has Effect::inert() — should be JIT-compilable.
         // Call it in a hot loop to trigger JIT, verify correct results.
         let result = eval_source(
             r#"(begin

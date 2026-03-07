@@ -938,7 +938,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "cons",
         func: prim_cons,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Construct a cons cell with car and cdr",
         params: &["car", "cdr"],
@@ -949,7 +949,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "first",
         func: prim_first,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the first element of a sequence (list, tuple, array, string). Returns nil for empty.",
         params: &["sequence"],
@@ -960,7 +960,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "rest",
         func: prim_rest,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the rest of a sequence. Returns type-preserving empty for empty input.",
         params: &["sequence"],
@@ -971,7 +971,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "list",
         func: prim_list,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create a list from arguments",
         params: &["elements"],
@@ -982,7 +982,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "length",
         func: prim_length,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the length of a collection (list, string, vector, table, struct, symbol, or keyword)",
         params: &["collection"],
@@ -993,7 +993,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "empty?",
         func: prim_empty,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if a collection is empty",
         params: &["collection"],
@@ -1004,7 +1004,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "append",
         func: prim_append,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Append two collections. For arrays: mutates first arg, returns it. For tuples/strings: returns new value.",
         params: &["collection1", "collection2"],
@@ -1015,7 +1015,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "concat",
         func: prim_concat,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Concatenate two collections, always returns new value, never mutates.",
         params: &["collection1", "collection2"],
@@ -1026,7 +1026,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "reverse",
         func: prim_reverse,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Reverse a sequence (list, tuple, array, string). Returns same type.",
         params: &["sequence"],
@@ -1038,7 +1038,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "last",
         func: prim_last,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the last element of a list",
         params: &["list"],
@@ -1049,7 +1049,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "butlast",
         func: prim_butlast,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get all elements of a list except the last",
         params: &["list"],
@@ -1060,7 +1060,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "take",
         func: prim_take,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Take the first n elements of a list",
         params: &["count", "list"],
@@ -1071,7 +1071,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "drop",
         func: prim_drop,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Drop the first n elements of a list",
         params: &["count", "list"],

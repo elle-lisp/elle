@@ -350,7 +350,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "number->string",
         func: prim_number_to_string,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert number to string.",
         params: &["n"],
@@ -361,7 +361,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string->integer",
         func: prim_string_to_int,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Parse string as integer.",
         params: &["s"],
@@ -372,7 +372,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string->float",
         func: prim_string_to_float,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Parse string as floating-point number.",
         params: &["s"],
@@ -383,7 +383,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "any->string",
         func: prim_any_to_string,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert any value to its string representation.",
         params: &["x"],
@@ -394,7 +394,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "symbol->string",
         func: prim_symbol_to_string,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert symbol to string (without quote).",
         params: &["sym"],
@@ -405,7 +405,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "keyword->string",
         func: prim_keyword_to_string,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert keyword to string (without colon prefix).",
         params: &["kw"],
@@ -416,7 +416,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "integer",
         func: prim_to_int,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert value to integer. Accepts int, float, or string.",
         params: &["x"],
@@ -427,7 +427,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "float",
         func: prim_to_float,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert value to float. Accepts int, float, or string.",
         params: &["x"],
@@ -438,7 +438,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string",
         func: prim_to_string,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Convert values to string. Multiple arguments are concatenated.",
         params: &["values"],

@@ -31,7 +31,7 @@ impl<'a> Analyzer<'a> {
             Destructure(&'s Syntax, Hir),
         }
         let mut analyzed = Vec::new();
-        let mut effect = Effect::none();
+        let mut effect = Effect::inert();
 
         for binding in bindings_syntax {
             let pair = binding
@@ -105,7 +105,7 @@ impl<'a> Analyzer<'a> {
         let body = if items.len() > 2 {
             self.analyze_body(&items[2..], span.clone())?
         } else {
-            Hir::pure(HirKind::Nil, span.clone())
+            Hir::inert(HirKind::Nil, span.clone())
         };
         effect = effect.combine(body.effect);
 
@@ -118,10 +118,10 @@ impl<'a> Analyzer<'a> {
             let mut exprs: Vec<Hir> = destructures
                 .into_iter()
                 .map(|(pattern, tmp)| {
-                    Hir::pure(
+                    Hir::inert(
                         HirKind::Destructure {
                             pattern,
-                            value: Box::new(Hir::pure(HirKind::Var(tmp), span.clone())),
+                            value: Box::new(Hir::inert(HirKind::Var(tmp), span.clone())),
                         },
                         span.clone(),
                     )
@@ -219,7 +219,7 @@ impl<'a> Analyzer<'a> {
         // update the leaf binding slots.
         let mut bindings = Vec::new();
         let mut destructures = Vec::new();
-        let mut effect = Effect::none();
+        let mut effect = Effect::inert();
 
         for entry in &entries {
             match entry {
@@ -262,7 +262,7 @@ impl<'a> Analyzer<'a> {
                     // to nil) so the lowerer allocates slots for them before
                     // lowering any lambda values that might capture them.
                     for leaf_binding in &pattern.bindings().bindings {
-                        bindings.push((*leaf_binding, Hir::pure(HirKind::Nil, span.clone())));
+                        bindings.push((*leaf_binding, Hir::inert(HirKind::Nil, span.clone())));
                     }
                     destructures.push((pattern, tmp));
                 }
@@ -281,10 +281,10 @@ impl<'a> Analyzer<'a> {
             let mut exprs: Vec<Hir> = destructures
                 .into_iter()
                 .map(|(pattern, tmp)| {
-                    Hir::pure(
+                    Hir::inert(
                         HirKind::Destructure {
                             pattern,
-                            value: Box::new(Hir::pure(HirKind::Var(tmp), span.clone())),
+                            value: Box::new(Hir::inert(HirKind::Var(tmp), span.clone())),
                         },
                         span.clone(),
                     )
@@ -379,7 +379,7 @@ impl<'a> Analyzer<'a> {
             // Seed effect_env and arity_env for lambda forms so self-recursive calls
             // don't default to Yields during analysis
             if is_lambda_form {
-                self.effect_env.insert(binding, Effect::none());
+                self.effect_env.insert(binding, Effect::inert());
                 // Pre-seed arity from syntax (count params in the lambda form)
                 if let Some(list) = items[2].as_list() {
                     if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
@@ -413,7 +413,7 @@ impl<'a> Analyzer<'a> {
                     value: Box::new(value),
                 },
                 span,
-                Effect::none(),
+                Effect::inert(),
             ))
         } else {
             // At top level, creates a global binding
@@ -428,7 +428,7 @@ impl<'a> Analyzer<'a> {
             // Seed effect_env and arity_env for lambda forms so self-recursive calls
             // don't default to Yields during analysis
             if is_lambda_form {
-                self.effect_env.insert(binding, Effect::none());
+                self.effect_env.insert(binding, Effect::inert());
                 // Pre-seed arity from syntax (count params in the lambda form)
                 if let Some(list) = items[2].as_list() {
                     if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
@@ -466,7 +466,7 @@ impl<'a> Analyzer<'a> {
                     value: Box::new(value),
                 },
                 span,
-                Effect::none(),
+                Effect::inert(),
             ))
         }
     }

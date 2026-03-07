@@ -2,7 +2,7 @@
 //
 // Verifies that the effect system satisfies algebraic laws:
 // - Effect combine is commutative, associative, and idempotent
-// - Effect::none() is the identity element
+// - Effect::inert() is the identity element
 // - Propagates field is correctly ORed during combine
 // - Effect predicates (may_yield, may_error, may_suspend, etc.) work correctly
 // Converted from property tests to deterministic unit tests with concrete cases.
@@ -147,7 +147,7 @@ fn effect_combine_identity_none_right() {
         bits: 0,
         propagates: 0,
     };
-    assert_eq!(e.combine(Effect::none()), e);
+    assert_eq!(e.combine(Effect::inert()), e);
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn effect_combine_identity_none_left() {
         bits: 0,
         propagates: 0,
     };
-    assert_eq!(Effect::none().combine(e), e);
+    assert_eq!(Effect::inert().combine(e), e);
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn effect_combine_identity_1_right() {
         bits: 1,
         propagates: 0,
     };
-    assert_eq!(e.combine(Effect::none()), e);
+    assert_eq!(e.combine(Effect::inert()), e);
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn effect_combine_identity_1_left() {
         bits: 1,
         propagates: 0,
     };
-    assert_eq!(Effect::none().combine(e), e);
+    assert_eq!(Effect::inert().combine(e), e);
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn effect_combine_identity_7_right() {
         bits: 7,
         propagates: 0,
     };
-    assert_eq!(e.combine(Effect::none()), e);
+    assert_eq!(e.combine(Effect::inert()), e);
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn effect_combine_identity_7_left() {
         bits: 7,
         propagates: 0,
     };
-    assert_eq!(Effect::none().combine(e), e);
+    assert_eq!(Effect::inert().combine(e), e);
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn effect_combine_identity_15_right() {
         bits: 15,
         propagates: 0,
     };
-    assert_eq!(e.combine(Effect::none()), e);
+    assert_eq!(e.combine(Effect::inert()), e);
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn effect_combine_identity_15_left() {
         bits: 15,
         propagates: 0,
     };
-    assert_eq!(Effect::none().combine(e), e);
+    assert_eq!(Effect::inert().combine(e), e);
 }
 
 // =========================================================================
@@ -407,7 +407,7 @@ fn polymorphic_errors_has_error_bit_7() {
 
 #[test]
 fn none_effect_is_not_yielding() {
-    let effect = Effect::none();
+    let effect = Effect::inert();
     assert!(!effect.may_yield());
     assert!(!effect.may_ffi());
     assert!(!effect.may_suspend());

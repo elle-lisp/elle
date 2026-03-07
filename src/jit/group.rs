@@ -173,7 +173,7 @@ mod tests {
         func.name = Some(name.to_string());
         func.num_regs = 4;
         func.num_captures = 0;
-        func.effect = Effect::none();
+        func.effect = Effect::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -211,7 +211,7 @@ mod tests {
         func.name = Some("leaf".to_string());
         func.num_regs = 1;
         func.num_captures = 0;
-        func.effect = Effect::none();
+        func.effect = Effect::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -334,7 +334,7 @@ mod tests {
         callee.name = Some("callee_with_closure".to_string());
         callee.num_regs = 3;
         callee.num_captures = 0;
-        callee.effect = Effect::none();
+        callee.effect = Effect::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -449,7 +449,7 @@ mod tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![]),
-            effect: Effect::none(),
+            effect: Effect::inert(),
             cell_params_mask: 0,
             cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -476,7 +476,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 3;
         func.num_captures = 0;
-        func.effect = Effect::none();
+        func.effect = Effect::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -577,7 +577,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 3;
         func.num_captures = 0;
-        func.effect = Effect::none();
+        func.effect = Effect::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(

@@ -179,10 +179,10 @@ impl<'a> Analyzer<'a> {
             let mut exprs: Vec<Hir> = param_destructures
                 .into_iter()
                 .map(|(pattern, tmp)| {
-                    Hir::pure(
+                    Hir::inert(
                         HirKind::Destructure {
                             pattern,
-                            value: Box::new(Hir::pure(HirKind::Var(tmp), span.clone())),
+                            value: Box::new(Hir::inert(HirKind::Var(tmp), span.clone())),
                         },
                         span.clone(),
                     )
@@ -246,7 +246,7 @@ impl<'a> Analyzer<'a> {
                 doc,
             },
             span,
-            Effect::none(),
+            Effect::inert(),
         ))
     }
 }

@@ -31,7 +31,7 @@ fn test_closure_type_identification() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -62,7 +62,7 @@ fn test_closure_display() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -90,7 +90,7 @@ fn test_closure_clone() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -164,7 +164,7 @@ fn test_closure_empty_environment() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -191,7 +191,7 @@ fn test_closure_single_captured_variable() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -224,7 +224,7 @@ fn test_closure_multiple_captured_variables() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -254,7 +254,7 @@ fn test_closure_environment_sharing() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -275,7 +275,7 @@ fn test_closure_environment_sharing() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -309,7 +309,7 @@ fn test_closure_bytecode_storage() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -336,7 +336,7 @@ fn test_closure_constants_storage() {
         num_captures: 0,
         constants: Rc::new(constants.clone()),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -363,7 +363,7 @@ fn test_closure_num_locals() {
             num_captures: 0,
             constants: Rc::new(vec![]),
 
-            effect: Effect::none(),
+            effect: Effect::inert(),
             cell_params_mask: 0,
             cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -393,7 +393,7 @@ fn test_closure_zero_parameters() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -419,7 +419,7 @@ fn test_closure_single_parameter() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -444,7 +444,7 @@ fn test_closure_multiple_parameters() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -471,7 +471,7 @@ fn test_closure_variadic_parameters() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -503,7 +503,7 @@ fn test_closures_never_equal() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -524,7 +524,7 @@ fn test_closures_never_equal() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -552,7 +552,7 @@ fn test_same_closure_reference_equality() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -590,7 +590,7 @@ fn test_closure_with_nested_captured_values() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -617,7 +617,7 @@ fn test_closure_with_closure_in_constants() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -638,7 +638,7 @@ fn test_closure_with_closure_in_constants() {
         num_captures: 0,
         constants: Rc::new(vec![inner_closure]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -667,7 +667,7 @@ fn test_closure_with_many_upvalues() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -699,7 +699,7 @@ fn test_closure_as_method() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -733,7 +733,7 @@ fn test_closure_type_check() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -770,7 +770,7 @@ fn test_closure_environment_isolation() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -791,7 +791,7 @@ fn test_closure_environment_isolation() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -819,7 +819,7 @@ fn test_closure_local_variables_count() {
             num_captures: 0,
             constants: Rc::new(vec![]),
 
-            effect: Effect::none(),
+            effect: Effect::inert(),
             cell_params_mask: 0,
             cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -849,7 +849,7 @@ fn test_closure_with_empty_bytecode() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -876,7 +876,7 @@ fn test_closure_with_large_bytecode() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -905,7 +905,7 @@ fn test_closure_rc_reference_counting() {
         num_captures: 0,
         constants: Rc::new(vec![]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),
@@ -937,7 +937,7 @@ fn test_closure_debug_format() {
         num_captures: 0,
         constants: Rc::new(vec![Value::string("test")]),
 
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),

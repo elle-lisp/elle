@@ -838,7 +838,7 @@ mod tests {
         // A row with guard and all-wildcard patterns produces a Guard node.
         // We use a dummy Hir for the guard.
         use crate::syntax::Span;
-        let dummy_guard = Hir::pure(crate::hir::HirKind::Bool(true), Span::synthetic());
+        let dummy_guard = Hir::inert(crate::hir::HirKind::Bool(true), Span::synthetic());
 
         let matrix = PatternMatrix {
             rows: vec![
@@ -1105,7 +1105,7 @@ mod tests {
         // Guard arm before same pattern without guard → both reachable
         // (guard may fail, so the second arm is reachable)
         use crate::syntax::Span;
-        let dummy_guard = Hir::pure(crate::hir::HirKind::Bool(true), Span::synthetic());
+        let dummy_guard = Hir::inert(crate::hir::HirKind::Bool(true), Span::synthetic());
 
         let matrix = PatternMatrix {
             rows: vec![

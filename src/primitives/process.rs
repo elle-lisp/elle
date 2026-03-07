@@ -107,7 +107,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/args",
         func: prim_sys_args,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return command-line arguments as a tuple (excluding interpreter and script path)",
         params: &[],

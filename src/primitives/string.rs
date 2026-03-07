@@ -668,7 +668,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/upcase",
         func: prim_string_upcase,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert string to uppercase.",
         params: &["s"],
@@ -679,7 +679,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/downcase",
         func: prim_string_downcase,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert string to lowercase.",
         params: &["s"],
@@ -690,7 +690,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/slice",
         func: prim_substring,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Range(2, 3),
         doc: "Extract substring from start to end (exclusive). End defaults to string length.",
         params: &["s", "start", "end"],
@@ -701,7 +701,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/find",
         func: prim_string_find,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Range(2, 3),
         doc: "Find the grapheme index of a substring, with optional start offset.",
         params: &["haystack", "needle", "offset"],
@@ -712,7 +712,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/char-at",
         func: prim_char_at,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Get character at index as a single-character string.",
         params: &["s", "idx"],
@@ -723,7 +723,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/split",
         func: prim_string_split,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Split string by delimiter, returning a tuple of substrings.",
         params: &["s", "delim"],
@@ -734,7 +734,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/replace",
         func: prim_string_replace,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(3),
         doc: "Replace all occurrences of old substring with new.",
         params: &["s", "old", "new"],
@@ -745,7 +745,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/trim",
         func: prim_string_trim,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Remove leading and trailing whitespace.",
         params: &["s"],
@@ -756,7 +756,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/contains?",
         func: prim_string_contains,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Check if string contains substring.",
         params: &["s", "substr"],
@@ -767,7 +767,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/starts-with?",
         func: prim_string_starts_with,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Check if string starts with prefix.",
         params: &["s", "prefix"],
@@ -778,7 +778,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/ends-with?",
         func: prim_string_ends_with,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Check if string ends with suffix.",
         params: &["s", "suffix"],
@@ -789,7 +789,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/join",
         func: prim_string_join,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Join list of strings with separator.",
         params: &["lst", "sep"],
@@ -800,7 +800,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "uri-encode",
         func: prim_uri_encode,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Percent-encode a string per RFC 3986.",
         params: &["str"],

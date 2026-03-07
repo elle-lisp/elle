@@ -63,7 +63,7 @@ pub fn prim_is_pure(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.effect.is_pure()))
+        (SIG_OK, Value::bool(!closure.effect.may_suspend()))
     } else {
         (SIG_OK, Value::FALSE)
     }
@@ -876,7 +876,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "closure?",
         func: prim_is_closure,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns true if value is a bytecode closure",
         params: &["value"],
@@ -887,7 +887,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "jit?",
         func: prim_is_jit,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure has JIT-compiled code",
         params: &["value"],
@@ -898,7 +898,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pure?",
         func: prim_is_pure,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure has Pure effect (does not suspend)",
         params: &["value"],
@@ -909,7 +909,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "coroutine?",
         func: crate::primitives::coroutines::prim_is_coroutine,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns true if value is a coroutine (fiber-based)",
         params: &["value"],
@@ -920,7 +920,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/mutates-params?",
         func: prim_mutates_params,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure mutates any parameters",
         params: &["value"],
@@ -931,7 +931,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/errors?",
         func: prim_errors,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure may error",
         params: &["value"],
@@ -942,7 +942,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/arity",
         func: prim_arity,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns closure arity as int, pair, or nil",
         params: &["value"],
@@ -953,7 +953,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/captures",
         func: prim_captures,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns number of captured variables, or nil",
         params: &["value"],
@@ -964,7 +964,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/bytecode-size",
         func: prim_bytecode_size,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Returns size of bytecode in bytes, or nil",
         params: &["value"],
@@ -975,7 +975,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "doc",
         func: prim_doc,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Look up documentation for a primitive.",
         params: &["name"],
@@ -986,7 +986,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "vm/query",
         func: prim_vm_query,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Query VM state (call-count, doc, global?, fiber/self)",
         params: &["op", "arg"],
@@ -997,7 +997,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string->keyword",
         func: prim_string_to_keyword,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert a string to a keyword",
         params: &["str"],
@@ -1008,7 +1008,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/disasm",
         func: prim_disbit,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Disassemble a closure's bytecode into a list of instruction strings.",
         params: &["closure"],
@@ -1019,7 +1019,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/disasm-jit",
         func: prim_disjit,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Disassemble a closure's JIT-compiled Cranelift IR, or nil if not JIT'd.",
         params: &["closure"],
@@ -1030,7 +1030,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/flow",
         func: prim_fn_flow,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Return the LIR control flow graph of a closure or fiber as structured data.",
         params: &["closure-or-fiber"],
@@ -1041,7 +1041,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "vm/list-primitives",
         func: prim_list_primitives,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Range(0, 1),
         doc: "List registered names as a sorted list of strings. Optional category filter.",
         params: &["category?"],
@@ -1052,7 +1052,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "vm/primitive-meta",
         func: prim_primitive_meta,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get structured metadata for a primitive as a struct.",
         params: &["name"],
@@ -1064,7 +1064,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/stats",
         func: prim_arena_stats,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return heap arena statistics as a struct with :count and :capacity.",
         params: &[],
@@ -1075,7 +1075,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/count",
         func: prim_arena_count,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return current heap arena object count as an integer (zero measurement overhead).",
         params: &[],
@@ -1086,7 +1086,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/scope-stats",
         func: prim_scope_stats,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return scope allocation runtime stats as {:enters N :dtors-run N}. Only non-zero inside child fibers.",
         params: &[],
@@ -1097,7 +1097,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "environment",
         func: prim_environment,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return the current global environment as a struct mapping keyword names to values.",
         params: &[],
@@ -1108,7 +1108,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "debug/print",
         func: prim_debug_print,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Prints a value with debug information to stderr",
         params: &["value"],
@@ -1119,7 +1119,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "debug/trace",
         func: prim_trace,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Traces execution with a label, prints to stderr, returns value",
         params: &["label", "value"],
@@ -1130,7 +1130,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "debug/memory",
         func: prim_memory_usage,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Returns memory usage statistics as (rss-bytes virtual-bytes)",
         params: &[],

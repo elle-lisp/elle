@@ -431,7 +431,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/thread-id",
         func: prim_current_thread_id,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return the ID of the current thread",
         params: &[],

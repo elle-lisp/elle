@@ -76,7 +76,7 @@ fn root_closure() -> Rc<Closure> {
         num_locals: 0,
         num_captures: 0,
         constants: Rc::new(vec![]),
-        effect: Effect::none(),
+        effect: Effect::inert(),
         cell_params_mask: 0,
         cell_locals_mask: 0,
         symbol_names: Rc::new(HashMap::new()),

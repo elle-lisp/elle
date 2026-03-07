@@ -439,7 +439,7 @@ mod tests {
             num_locals: arity,
             num_captures: 0,
             constants: Rc::new(vec![]),
-            effect: Effect::none(),
+            effect: Effect::inert(),
             cell_params_mask: 0,
             cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -535,7 +535,7 @@ mod tests {
             num_locals: 2,                      // 1 param + 1 local
             num_captures: 1,
             constants: Rc::new(vec![]),
-            effect: Effect::none(),
+            effect: Effect::inert(),
             cell_params_mask: 0,
             cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
