@@ -9,7 +9,7 @@
 
 use elle::effects::Effect;
 use elle::hir::HirKind;
-use elle::pipeline::{analyze, analyze_all};
+use elle::pipeline::analyze;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::vm::VM;
@@ -766,98 +766,7 @@ fn test_polymorphic_inference_pure_function() {
     }
 }
 
-// ============================================================================
-// 8. CROSS-FORM EFFECT TRACKING TESTS
-// ============================================================================
-
-#[test]
-fn test_cross_form_effect_tracking_pure_helper() {
-    // When a pure helper function is defined in one form and called in another,
-    // the caller should know the helper is pure.
-    let (mut symbols, mut vm) = setup();
-    let results = analyze_all(
-        r#"        (def helper (fn (x) (+ x 1)))        (def caller (fn (y) (helper y)))        "#,
-        &mut symbols,
-        &mut vm,
-    )
-    .unwrap();
-
-    // The second form (caller) should have Pure effect because helper is pure
-    assert_eq!(results.len(), 2);
-
-    // Check that caller's lambda has Pure effect
-    if let HirKind::Define { value, .. } = &results[1].hir.kind {
-        if let HirKind::Lambda {
-            inferred_effect, ..
-        } = &value.kind
-        {
-            assert_eq!(
-                *inferred_effect,
-                Effect::none(),
-                "Caller of pure helper should be Pure"
-            );
-        } else {
-            panic!("Expected Lambda");
-        }
-    } else {
-        panic!("Expected Define");
-    }
-}
-
-#[test]
-fn test_cross_form_effect_tracking_polymorphic_helper() {
-    // When a polymorphic helper is defined in one form and called in another,
-    // the caller should correctly resolve the polymorphic effect.
-    let (mut symbols, mut vm) = setup();
-    let results = analyze_all(        r#"        (def apply-fn (fn (f x) (f x)))        (def use-apply (fn () (apply-fn + 5)))        "#,        &mut symbols,    &mut vm,    )
-    .unwrap();
-
-    assert_eq!(results.len(), 2);
-
-    // Check that use-apply's lambda has Pure effect (because + is pure)
-    if let HirKind::Define { value, .. } = &results[1].hir.kind {
-        if let HirKind::Lambda {
-            inferred_effect, ..
-        } = &value.kind
-        {
-            assert_eq!(
-                *inferred_effect,
-                Effect::none(),
-                "Caller of polymorphic helper with pure arg should be Pure"
-            );
-        } else {
-            panic!("Expected Lambda");
-        }
-    } else {
-        panic!("Expected Define");
-    }
-}
-
-#[test]
-fn test_cross_form_effect_tracking_mutual_recursion() {
-    // Test that mutually recursive functions across forms work correctly.
-    // safe? calls check-safe-helper, which should be known as pure.
-    let (mut symbols, mut vm) = setup();
-    let results = analyze_all(        r#"        (def check-safe-helper (fn (x) (= x 0)))        (def safe? (fn (n) (check-safe-helper n)))        "#,        &mut symbols,    &mut vm,    )
-    .unwrap();
-
-    assert_eq!(results.len(), 2);
-
-    // Check that safe?'s lambda has Pure effect
-    if let HirKind::Define { value, .. } = &results[1].hir.kind {
-        if let HirKind::Lambda {
-            inferred_effect, ..
-        } = &value.kind
-        {
-            assert_eq!(
-                *inferred_effect,
-                Effect::none(),
-                "safe? calling pure check-safe-helper should be Pure"
-            );
-        } else {
-            panic!("Expected Lambda");
-        }
-    } else {
-        panic!("Expected Define");
-    }
-}
+// Cross-form effect tracking is now handled natively by the letrec model.
+// The old fixpoint-based tests have been removed. Equivalent coverage is
+// provided by test_mutual_recursion_effects_are_pure in pipeline.rs and
+// the nqueens effect test.

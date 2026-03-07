@@ -363,10 +363,15 @@ fn test_sleep_in_arithmetic_context() {
 
 #[test]
 fn test_import_file_returns_last_value() {
-    // import-file returns the last expression's value from the loaded file
-    let result = eval_source("(import-file \"test-modules/test.lisp\")").unwrap();
-    // test.lisp ends with (var test-list (list 1 2 3)), so last value is (1 2 3)
-    assert!(result.is_list(), "expected list, got {:?}", result);
+    // import-file returns the last expression's value from the loaded file.
+    // test.lisp ends with a closure that returns a struct of exports.
+    // Call the closure to get the exports struct, then use get for field access.
+    let result = eval_source(
+        "(def exports ((import-file \"test-modules/test.lisp\")))
+         (get exports :test-var)",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(42));
 }
 
 #[test]
@@ -392,16 +397,16 @@ fn test_import_multiple_files_sequentially() {
 }
 
 #[test]
-fn test_import_same_file_twice_idempotent() {
-    // Within a single VM, loading the same file twice is idempotent:
-    // first load returns the last value, second returns true (already loaded)
+fn test_import_same_file_twice_reexecutes() {
+    // Importing the same file twice re-executes the module each time.
+    // Both imports return fresh closures (no caching).
     let result = eval_source(
         "(def r1 (import-file \"test-modules/test.lisp\"))
          (def r2 (import-file \"test-modules/test.lisp\"))
-         (list (list? r1) (= r2 true))",
+         (list (fn? r1) (fn? r2))",
     );
     assert!(result.is_ok());
-    // r1 is a list (last value from file), r2 is true (already loaded)
+    // Both r1 and r2 are closures (module export functions)
     assert_eq!(
         result.unwrap(),
         elle::list([Value::bool(true), Value::bool(true)])
@@ -1061,9 +1066,9 @@ fn test_decision_tree_deeply_nested() {
 fn test_decision_tree_match_in_loop() {
     // Match inside a loop — exercises repeated decision tree execution
     let result = eval_source(
-        "(def result (list))
+        "(var result (list))
          (each i (list 1 2 3)
-           (def result (cons (match i
+           (set result (cons (match i
                                (1 :one)
                                (2 :two)
                                (3 :three)

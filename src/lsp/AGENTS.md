@@ -16,11 +16,11 @@ Provide IDE features for Elle via the LSP protocol:
 ## Architecture
 
 Synchronous LSP server reading JSON-RPC from stdin, writing to stdout.
-Uses the new pipeline exclusively:
+Uses the file-as-letrec pipeline exclusively:
 
 ```
-Source → analyze_all → HIR + bindings
-                           ↓
+Source → analyze_file → HIR (single letrec)
+                            ↓
                 extract_symbols_from_hir → SymbolIndex
                 HirLinter → Diagnostics
 ```
@@ -54,7 +54,7 @@ Invoked via `elle lsp`.
 
 ## Invariants
 
-1. **Uses new pipeline only.** No `Expr`, no `value_to_expr`, no old pipeline.
+1. **Uses file-as-letrec pipeline.** `analyze_file` for file-level analysis. No `Expr`, no `value_to_expr`, no old pipeline.
 2. **Synchronous I/O.** No async runtime. Reads stdin, writes stdout.
 3. **Per-document state.** Each open document has its own `SymbolIndex` and diagnostics.
 4. **Formatting is pipeline-independent.** Uses `elle::formatter::format_code` on source text directly.

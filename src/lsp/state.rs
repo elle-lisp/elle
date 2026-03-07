@@ -9,7 +9,7 @@ use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::primitives::def::Doc;
 use crate::symbol::SymbolTable;
 use crate::symbols::SymbolIndex;
-use crate::{analyze_all, init_stdlib, register_primitives, VM};
+use crate::{analyze_file, init_stdlib, register_primitives, VM};
 use std::collections::HashMap;
 
 /// Document state: source + diagnostics + symbol index
@@ -89,9 +89,9 @@ impl CompilerState {
         doc.diagnostics.clear();
         doc.symbol_index = SymbolIndex::new();
 
-        // Analyze using the new pipeline
-        let analyses = match analyze_all(&doc.source_text, &mut self.symbol_table, &mut self.vm) {
-            Ok(results) => results,
+        // Analyze using the file-as-letrec pipeline
+        let analysis = match analyze_file(&doc.source_text, &mut self.symbol_table, &mut self.vm) {
+            Ok(result) => result,
             Err(e) => {
                 // Analysis error - add as diagnostic
                 doc.diagnostics.push(Diagnostic::new(
@@ -105,17 +105,13 @@ impl CompilerState {
             }
         };
 
-        // Process each analysis result
-        for analysis in &analyses {
-            // Extract symbols and merge into document's symbol index
-            let partial_index = extract_symbols_from_hir(&analysis.hir, &self.symbol_table);
-            doc.symbol_index.merge(partial_index);
+        // Extract symbols from the file-level HIR
+        doc.symbol_index = extract_symbols_from_hir(&analysis.hir, &self.symbol_table);
 
-            // Run HIR linter
-            let mut linter = HirLinter::new();
-            linter.lint(&analysis.hir, &self.symbol_table);
-            doc.diagnostics.extend(linter.diagnostics().iter().cloned());
-        }
+        // Run HIR linter
+        let mut linter = HirLinter::new();
+        linter.lint(&analysis.hir, &self.symbol_table);
+        doc.diagnostics.extend(linter.diagnostics().iter().cloned());
 
         true
     }

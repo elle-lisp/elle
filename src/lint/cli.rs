@@ -4,7 +4,7 @@ use crate::context::set_symbol_table;
 use crate::hir::HirLinter;
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::symbol::SymbolTable;
-use crate::{analyze_all, init_stdlib, register_primitives, VM};
+use crate::{analyze_file, init_stdlib, register_primitives, VM};
 
 /// Main linter configuration
 #[derive(Debug, Clone)]
@@ -51,16 +51,14 @@ impl Linter {
         init_stdlib(&mut vm, &mut symbols);
 
         // Use pipeline: parse -> expand -> analyze -> HIR
-        let analyses = analyze_all(code, &mut symbols, &mut vm)
+        let analysis = analyze_file(code, &mut symbols, &mut vm)
             .map_err(|e| format!("Analysis error: {}", e))?;
 
-        // Lint each analyzed form
-        for analysis in &analyses {
-            let mut hir_linter = HirLinter::new();
-            hir_linter.lint(&analysis.hir, &symbols);
-            self.diagnostics
-                .extend(hir_linter.diagnostics().iter().cloned());
-        }
+        // Lint the analyzed file
+        let mut hir_linter = HirLinter::new();
+        hir_linter.lint(&analysis.hir, &symbols);
+        self.diagnostics
+            .extend(hir_linter.diagnostics().iter().cloned());
 
         Ok(())
     }

@@ -9,13 +9,13 @@ pub enum Instruction {
     /// Load constant from constant pool
     LoadConst,
 
-    /// Load local variable (depth, index)
+    /// Load local variable (index u16)
     LoadLocal,
 
     /// Load global variable
     LoadGlobal,
 
-    /// Store local variable (depth, index)
+    /// Store local variable (index u16)
     StoreLocal,
 
     /// Store global variable
@@ -239,6 +239,10 @@ pub struct Bytecode {
     /// Bytecode offset → source location mapping for error reporting.
     /// Maps instruction offsets to their source locations.
     pub location_map: LocationMap,
+    /// Local slot index → variable name mapping.
+    /// Populated by `compile_file` for file-level letrec bindings.
+    /// Used by `(doc)` and `(environment)` to find locals by name.
+    pub local_names: std::collections::HashMap<u16, String>,
 }
 
 impl Bytecode {
@@ -249,6 +253,7 @@ impl Bytecode {
             inline_caches: std::collections::HashMap::new(),
             symbol_names: std::collections::HashMap::new(),
             location_map: LocationMap::new(),
+            local_names: std::collections::HashMap::new(),
         }
     }
 
@@ -372,9 +377,8 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             }
             Instruction::LoadLocal | Instruction::StoreLocal => {
                 if i + 1 < instructions.len() {
-                    let depth = instructions[i];
-                    let index = instructions[i + 1];
-                    line.push_str(&format!(" (depth={}, index={})", depth, index));
+                    let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                    line.push_str(&format!(" (index={})", index));
                     i += 2;
                 }
             }

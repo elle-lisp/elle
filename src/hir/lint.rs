@@ -73,8 +73,29 @@ impl HirLinter {
 
             HirKind::Var(_) => {}
 
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+            HirKind::Let { bindings, body } => {
                 for (_, init) in bindings {
+                    self.check(init, symbols);
+                }
+                self.check(body, symbols);
+            }
+
+            HirKind::Letrec { bindings, body } => {
+                for (binding, init) in bindings {
+                    // Check naming convention on file-level def/var bindings.
+                    // Skip gensyms (__file_expr_N) and primitive bindings (Global).
+                    if !binding.is_global() {
+                        if let Some(sym_name) = symbols.name(binding.name()) {
+                            if !sym_name.starts_with("__") {
+                                let binding_loc = Self::span_to_loc(&init.span);
+                                rules::check_naming_convention(
+                                    sym_name,
+                                    &binding_loc,
+                                    &mut self.diagnostics,
+                                );
+                            }
+                        }
+                    }
                     self.check(init, symbols);
                 }
                 self.check(body, symbols);

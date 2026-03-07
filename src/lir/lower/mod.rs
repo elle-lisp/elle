@@ -183,6 +183,24 @@ impl Lowerer {
         &self.scope_stats
     }
 
+    /// Return a mapping from local slot index to variable name.
+    ///
+    /// Built from `binding_to_slot` after lowering. Only includes
+    /// non-global bindings (file-level letrec locals). Used by
+    /// `(doc)` and `(environment)` to find locals by name.
+    pub fn local_names(&self, symbols: &crate::symbol::SymbolTable) -> HashMap<u16, String> {
+        let mut result = HashMap::new();
+        for (binding, &slot) in &self.binding_to_slot {
+            if !binding.is_global() {
+                let sym_id = binding.name();
+                if let Some(name) = symbols.name(sym_id) {
+                    result.insert(slot, name.to_string());
+                }
+            }
+        }
+        result
+    }
+
     /// Lower a HIR expression to LIR
     pub fn lower(&mut self, hir: &Hir) -> Result<LirFunction, String> {
         self.current_func = LirFunction::new(Arity::Exact(0));

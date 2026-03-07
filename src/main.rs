@@ -1,5 +1,5 @@
 use elle::context::{clear_vm_context, set_symbol_table, set_vm_context};
-use elle::pipeline::{compile, compile_all};
+use elle::pipeline::{compile, compile_file};
 use elle::primitives::set_length_symbol_table;
 use elle::repl::Repl;
 use elle::{init_stdlib, register_primitives, SymbolTable, VM};
@@ -86,10 +86,8 @@ fn run_source(
     vm: &mut VM,
     symbols: &mut SymbolTable,
 ) -> Result<(), String> {
-    let mut had_error = false;
-
-    // Compile all forms with new pipeline
-    let results = match compile_all(contents, symbols) {
+    // Compile file as a single letrec
+    let result = match compile_file(contents, symbols) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("✗ Compilation error: {}", e);
@@ -97,35 +95,23 @@ fn run_source(
         }
     };
 
-    // Execute each compiled form
-    for result in results {
-        // Debug: print bytecode if ELLE_DEBUG is set
-        if std::env::var("ELLE_DEBUG").is_ok() {
-            eprintln!(
-                "{}",
-                elle::compiler::format_bytecode_with_constants(
-                    &result.bytecode.instructions,
-                    &result.bytecode.constants
-                )
-            );
-        }
-
-        match vm.execute(&result.bytecode) {
-            Ok(_) => {
-                // Script mode is silent except for explicit output (display, etc.)
-            }
-            Err(e) => {
-                eprintln!("✗ Runtime error: {}", format_runtime_error(&e, symbols));
-                had_error = true;
-            }
-        }
+    // Debug: print bytecode if ELLE_DEBUG is set
+    if std::env::var("ELLE_DEBUG").is_ok() {
+        eprintln!(
+            "{}",
+            elle::compiler::format_bytecode_with_constants(
+                &result.bytecode.instructions,
+                &result.bytecode.constants
+            )
+        );
     }
 
-    // Return error if any errors occurred (will exit with status 1)
-    if had_error {
-        Err("Errors encountered during execution".to_string())
-    } else {
-        Ok(())
+    match vm.execute(&result.bytecode) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            eprintln!("✗ Runtime error: {}", format_runtime_error(&e, symbols));
+            Err("Errors encountered during execution".to_string())
+        }
     }
 }
 

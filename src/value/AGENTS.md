@@ -72,8 +72,9 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
     is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
 3. **Two cell types exist.** `Cell` (user-created via `box`, explicit deref)
-    and `LocalCell` (compiler-created for mutable captures, auto-unwrapped).
-    Distinguished by a bool flag on `HeapObject::Cell`.
+     and `LocalCell` (compiler-created for mutable captures and mutated parameters,
+     auto-unwrapped). Distinguished by a bool flag on `HeapObject::Cell`.
+     Immutable captured locals do not need cells — they are captured by value.
 
 4. **`Closure` has `location_map` and `doc`.** The `location_map: Rc<LocationMap>`
     field maps bytecode offsets to source locations for error reporting. The

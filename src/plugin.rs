@@ -49,7 +49,7 @@ pub type PluginInitFn = unsafe extern "C" fn(ctx: &mut PluginContext) -> Value;
 /// The library handle is intentionally leaked — plugins are never unloaded.
 /// This avoids use-after-free if Elle code holds values created by the plugin.
 ///
-/// The caller is responsible for deduplication (e.g., via `is_module_loaded`).
+/// The caller is responsible for deduplication (e.g., via `is_module_loading`).
 /// Calling this twice with the same path will register primitives twice and
 /// leak a second library handle.
 pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResult<Value> {

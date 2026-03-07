@@ -1,12 +1,13 @@
 //! Analysis pipeline: source -> HIR (no bytecode generation).
 
 use super::cache;
-use super::fixpoint;
-use super::scan;
+use super::compile::classify_form;
 use super::AnalyzeResult;
 use crate::hir::Analyzer;
+use crate::primitives::intern_primitive_names;
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
+use crate::syntax::Span;
 use crate::vm::VM;
 
 /// Analyze source code without generating bytecode.
@@ -26,40 +27,45 @@ pub fn analyze(
     Ok(AnalyzeResult { hir: analysis.hir })
 }
 
-/// Analyze multiple top-level forms without generating bytecode.
-/// Uses fixpoint iteration for effect inference (same as compile_all).
-pub fn analyze_all(
+/// Analyze a file as a single synthetic letrec (no bytecode).
+///
+/// Used by linter and LSP for file-level analysis. Primitives are
+/// pre-bound as immutable Global bindings.
+pub fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
-) -> Result<Vec<AnalyzeResult>, String> {
+) -> Result<AnalyzeResult, String> {
+    intern_primitive_names(symbols);
+
     let syntaxes = read_syntax_all(source)?;
 
     let (mut expander, meta) = cache::get_cached_expander_and_meta();
 
-    // Expand all forms first
+    // Expand all forms
     let mut expanded_forms = Vec::new();
     for syntax in syntaxes {
         let expanded = expander.expand(syntax, symbols, vm)?;
         expanded_forms.push(expanded);
     }
 
-    let (global_effects, global_arities, immutable_globals) =
-        scan::prescan_forms(&expanded_forms, symbols);
+    // Classify each form
+    let forms = expanded_forms.iter().map(classify_form).collect();
 
-    let analysis_results = fixpoint::run_fixpoint(
-        &expanded_forms,
-        symbols,
-        &meta,
-        global_effects,
-        global_arities,
-        immutable_globals,
-        |_| {},
-    )?;
+    // Compute span
+    let span = if expanded_forms.is_empty() {
+        Span::synthetic()
+    } else {
+        expanded_forms[0]
+            .span
+            .merge(&expanded_forms[expanded_forms.len() - 1].span)
+    };
 
-    // Convert to AnalyzeResult
-    Ok(analysis_results
-        .into_iter()
-        .map(|a| AnalyzeResult { hir: a.hir })
-        .collect())
+    // Analyze
+    let mut analyzer =
+        Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+    analyzer.bind_primitives(&meta);
+    let hir = analyzer.analyze_file_letrec(forms, span)?;
+
+    Ok(AnalyzeResult { hir })
 }

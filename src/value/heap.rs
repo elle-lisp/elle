@@ -165,6 +165,11 @@ pub struct BindingInner {
     pub is_captured: bool,
     /// Whether this binding is immutable (def)
     pub is_immutable: bool,
+    /// Whether this binding was pre-created before its initializer runs
+    /// (begin pass 1, letrec pass 1). Pre-bound immutable locals still
+    /// need cells because they may be captured before initialization
+    /// (self-recursion, forward references).
+    pub is_prebound: bool,
 }
 
 /// Where a binding lives at runtime

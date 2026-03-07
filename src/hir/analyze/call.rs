@@ -104,9 +104,6 @@ impl<'a> Analyzer<'a> {
                     if let Some(arity) = self.primitive_arities.get(&binding.name()) {
                         return Some(*arity);
                     }
-                    if let Some(arity) = self.global_arities.get(&binding.name()) {
-                        return Some(*arity);
-                    }
                 }
                 None
             }
@@ -138,10 +135,8 @@ impl<'a> Analyzer<'a> {
                 if let Some(effect) = self.effect_env.get(binding) {
                     *effect
                 } else if binding.is_global() {
-                    // Check primitive effects first, then global effects from previous forms
                     self.primitive_effects
                         .get(&binding.name())
-                        .or_else(|| self.global_effects.get(&binding.name()))
                         .cloned()
                         .unwrap_or(Effect::yields())
                 } else {
@@ -232,11 +227,7 @@ impl<'a> Analyzer<'a> {
                 .cloned()
                 .or_else(|| {
                     if binding.is_global() {
-                        // Check primitive effects first, then global effects from previous forms
-                        self.primitive_effects
-                            .get(&binding.name())
-                            .or_else(|| self.global_effects.get(&binding.name()))
-                            .cloned()
+                        self.primitive_effects.get(&binding.name()).cloned()
                     } else {
                         None
                     }

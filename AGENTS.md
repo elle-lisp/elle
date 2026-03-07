@@ -56,7 +56,7 @@ bytecode. Error messages include file:line:col information.
 | Effects | — | `Effect` on each `Hir` | `LirFunction.effect` | — | `Closure.effect` |
 | Arity | — | `Lambda.params.len()` | `LirFunction.arity` | — | `Closure.arity` |
 | Cell mask (params) | — | `Binding.needs_cell()` | `LirFunction.cell_params_mask` | — | `Closure.cell_params_mask` |
-| Cell mask (locals) | — | `Binding.needs_cell()` | `LirFunction.cell_locals_mask` | — | JIT only (not on `Closure`) |
+| Cell mask (locals) | — | `Binding.needs_cell()` (mutable captures only) | `LirFunction.cell_locals_mask` | — | JIT only (not on `Closure`) |
 | Docstring | — | `Lambda.doc` | `LirFunction.doc` | — | `Closure.doc` |
 
 **What is transformed at each boundary:**
@@ -97,7 +97,7 @@ bytecode. Error messages include file:line:col information.
 | `formatter` | Code formatting for Elle source |
 | `plugin` | Dynamic plugin loading for Rust cdylib primitives |
 | `path` | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
-| `pipeline` | Compilation entry points (`compile`, `analyze`, `eval`). See [`docs/pipeline.md`](docs/pipeline.md) |
+| `pipeline` | Compilation entry points. Single-form: `compile`, `analyze`, `eval`. File-level: `compile_file`, `analyze_file`, `eval_file`. Multi-form convenience: `eval_all` (delegates to `compile_file`). See [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md). |
 | `error` | `LocationMap` for bytecode offset → source location mapping |
 
 ### The Value type
@@ -185,9 +185,10 @@ These must remain true. Violating them breaks the system:
    Value pointing to heap `BindingInner`), not symbols. If you see symbol
    lookup at runtime, something is wrong.
 
-2. **Closures capture by value into their environment.** Mutable captures use
-   `LocalCell`. The `cell_params_mask` on `Closure` tracks which parameters need
-   cell wrapping.
+2. **Closures capture by value into their environment.** Immutable captured
+   locals are captured directly. Mutable captured locals and mutated parameters
+   use `LocalCell` for indirection. The `cell_params_mask` on `Closure` tracks
+   which parameters need cell wrapping.
 
 3. **Effects are inferred, not declared.** The `Effect` enum (`Pure`, `Yields`,
    `Polymorphic`) propagates from leaves to root during analysis.
@@ -286,10 +287,30 @@ Things that look wrong but aren't:
   This is intentional — plugins are dynamically loaded and the core compiler cannot
   know their types at compile time. The `type_name` field provides Elle-side identity,
   and `downcast_ref` is used only within the plugin that created the type.
-- `import` is now an alias for the `import-file` primitive (was previously an
-  Elle-level function using `eval`/`read-all`/`slurp`). It returns the last
-  expression's value for `.lisp` files, and `true` for `.so` plugins. The
-  `import-file` primitive handles both Elle source files and plugin `.so` files.
+- **Module convention (Chunk 3)**: Module files (`.lisp`) follow a standard pattern.
+  The last expression in a module is a closure that returns a struct of exports.
+  This allows parameterized modules in the future. Example:
+  ```lisp
+  # module defines functions...
+  (defn assert-eq [a b] ...)
+  (defn assert-true [x] ...)
+  
+  # last expression is a closure returning exports
+  (fn [] {:assert-eq assert-eq :assert-true assert-true})
+  ```
+  When imported via `import-file`, the module's last expression (a closure) is
+  returned. Call it to get the exports struct:
+  ```lisp
+  (def asserts ((import-file "assertions.lisp")))
+  (asserts :assert-eq 1 1)
+  ```
+  Or destructure directly:
+  ```lisp
+  (def {:assert-eq assert-eq :assert-true assert-true} ((import-file "assertions.lisp")))
+  ```
+  The `import-file` primitive (Chunk 3) uses `eval_file` to compile and execute
+  the module, returning its last expression's value. For `.so` plugins, it
+  returns `true`.
 - Docstrings are extracted from leading string literals in function bodies.
   `HirKind::Lambda` has a `doc: Option<Value>` field, threaded through LIR
   and into `Closure.doc`. The `(doc name)` primitive checks closure doc fields

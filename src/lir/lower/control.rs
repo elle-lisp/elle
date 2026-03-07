@@ -409,17 +409,9 @@ impl Lowerer {
         }
 
         // Build decision tree
-        use super::decision::{find_reachable_arms, AccessPath, PatternMatrix};
+        use super::decision::{AccessPath, PatternMatrix};
         let matrix = PatternMatrix::from_arms(arms);
         let tree = matrix.compile(vec![AccessPath::Root]);
-
-        // Check for unreachable arms (stopgap warning until lint integration)
-        let reachable = find_reachable_arms(&tree);
-        for (i, (_pat, _guard, body)) in arms.iter().enumerate() {
-            if !reachable.contains(&i) {
-                eprintln!("warning: unreachable match arm at {:?}", body.span);
-            }
-        }
 
         // Lower decision tree
         self.lower_decision_tree(&tree, arms, scrutinee_slot, result_slot, done_label)?;

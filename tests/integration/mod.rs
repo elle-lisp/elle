@@ -125,6 +125,9 @@ mod allocator {
 mod environment {
     include!("environment.rs");
 }
+mod file_scope {
+    include!("file_scope.rs");
+}
 mod parameters {
     include!("parameters.rs");
 }

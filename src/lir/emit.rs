@@ -214,16 +214,14 @@ impl Emitter {
 
             LirInstr::LoadLocal { dst, slot } => {
                 self.bytecode.emit(Instruction::LoadLocal);
-                self.bytecode.emit_byte(0); // depth 0 for now
-                self.bytecode.emit_byte(*slot as u8);
+                self.bytecode.emit_u16(*slot);
                 self.push_reg(*dst);
             }
 
             LirInstr::StoreLocal { slot, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::StoreLocal);
-                self.bytecode.emit_byte(0); // depth 0
-                self.bytecode.emit_byte(*slot as u8);
+                self.bytecode.emit_u16(*slot);
                 // StoreLocal pops the value, stores it, and pushes it back
                 // So the stack simulation stays the same (value is still on top)
             }
@@ -232,8 +230,7 @@ impl Emitter {
                 if let Some(stack_slot) = Self::non_cell_local_slot(*index, func) {
                     // Non-cell locally-defined variable: use stack
                     self.bytecode.emit(Instruction::LoadLocal);
-                    self.bytecode.emit_byte(0); // depth 0
-                    self.bytecode.emit_byte(stack_slot as u8);
+                    self.bytecode.emit_u16(stack_slot);
                 } else {
                     self.bytecode.emit(Instruction::LoadUpvalue);
                     self.bytecode.emit_byte(0); // depth (currently unused)
@@ -255,8 +252,7 @@ impl Emitter {
                 if let Some(stack_slot) = Self::non_cell_local_slot(*index, func) {
                     // Non-cell locally-defined variable: use stack
                     self.bytecode.emit(Instruction::StoreLocal);
-                    self.bytecode.emit_byte(0); // depth 0
-                    self.bytecode.emit_byte(stack_slot as u8);
+                    self.bytecode.emit_u16(stack_slot);
                 } else {
                     self.bytecode.emit(Instruction::StoreUpvalue);
                     self.bytecode.emit_byte(0); // depth (currently unused)
