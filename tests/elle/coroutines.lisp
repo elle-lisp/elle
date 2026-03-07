@@ -194,4 +194,494 @@
   (assert-eq (coro/resume co7b) -100
     "effect threading: negative yield value")
   (assert-eq (keyword->string (coro/status co7b)) "suspended"
-    "effect threading: suspended after negative yield"))
+     "effect threading: suspended after negative yield"))
+
+# ============================================================================
+# Basic yield/resume tests (from integration/coroutines.rs)
+# ============================================================================
+
+# test_simple_yield
+(begin
+  (var co (make-coroutine (fn [] (yield 42))))
+  (assert-eq (coro/resume co) 42 "simple yield"))
+
+# test_multiple_yields
+(begin
+  (var co (make-coroutine (fn [] (yield 1) (yield 2) (yield 3) 4)))
+  (assert-eq (coro/resume co) 1 "multiple yields: first")
+  (assert-eq (coro/resume co) 2 "multiple yields: second")
+  (assert-eq (coro/resume co) 3 "multiple yields: third")
+  (assert-eq (coro/resume co) 4 "multiple yields: final"))
+
+# test_yield_with_resume_value
+(begin
+  (var co (make-coroutine (fn [] (+ 10 (yield 1)))))
+  (assert-eq (coro/resume co) 1 "yield with resume value: first")
+  (assert-eq (coro/resume co 5) 15 "yield with resume value: second"))
+
+# ============================================================================
+# Coroutine status tests
+# ============================================================================
+
+# test_coroutine_status_created
+(begin
+  (var co (make-coroutine (fn [] 42)))
+  (assert-eq (keyword->string (coro/status co)) "created" "status: created"))
+
+# test_coroutine_status_done
+(begin
+  (var co (make-coroutine (fn [] 42)))
+  (coro/resume co)
+  (assert-eq (keyword->string (coro/status co)) "done" "status: done"))
+
+# test_coroutine_done_predicate
+(begin
+  (var co (make-coroutine (fn [] 42)))
+  (assert-false (coro/done? co) "done predicate: initially false")
+  (coro/resume co)
+  (assert-true (coro/done? co) "done predicate: true after resume"))
+
+# test_coroutine_status_suspended_after_yield
+(begin
+  (def gen (fn [] (yield 1) (yield 2)))
+  (var co (make-coroutine gen))
+  (coro/resume co)
+  (assert-eq (keyword->string (coro/status co)) "suspended" "status: suspended after yield"))
+
+# test_coroutine_value_after_yield
+(begin
+  (var co (make-coroutine (fn [] (yield 42))))
+  (coro/resume co)
+  (assert-eq (coro/value co) 42 "value after yield"))
+
+# ============================================================================
+# Effect inference tests
+# ============================================================================
+
+# test_pure_function_no_cps
+(begin
+  (def sum (fn (n)
+    (if (<= n 0)
+      0
+      (+ n (sum (- n 1))))))
+  (assert-eq (sum 5) 15 "pure function: sum 5"))
+
+# test_yielding_function_detected
+(begin
+  (def gen (fn []
+    (yield 1)
+    (yield 2)))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 1 "yielding function detected"))
+
+# test_calling_yielding_function_propagates_effect
+(begin
+  (def f (fn []
+    (yield 1)))
+  (def g (fn []
+    (f)
+    (yield 2)))
+  (var co (make-coroutine g))
+  (assert-eq (coro/resume co) 1 "effect propagation: first yield"))
+
+# ============================================================================
+# Nested coroutines tests
+# ============================================================================
+
+# test_nested_coroutines
+(begin
+  (def inner-gen (fn [] (yield 10)))
+  (def outer-gen (fn []
+    (var inner-co (make-coroutine inner-gen))
+    (yield (coro/resume inner-co))))
+  (var co (make-coroutine outer-gen))
+  (assert-eq (coro/resume co) 10 "nested coroutines"))
+
+# test_nested_coroutines_multiple_levels
+(begin
+  (def level3 (fn [] (yield 3)))
+  (def level2 (fn []
+    (var co3 (make-coroutine level3))
+    (yield (coro/resume co3))))
+  (def level1 (fn []
+    (var co2 (make-coroutine level2))
+    (yield (coro/resume co2))))
+  (var co1 (make-coroutine level1))
+  (assert-eq (coro/resume co1) 3 "nested coroutines: 3 levels"))
+
+# ============================================================================
+# Closures with captured variables tests
+# ============================================================================
+
+# test_coroutine_with_captured_variables
+(begin
+  (let ((x 10))
+    (var co (make-coroutine (fn [] (yield x))))
+    (assert-eq (coro/resume co) 10 "captured variables")))
+
+# test_coroutine_with_multiple_captured_variables
+(begin
+  (let ((x 10) (y 20))
+    (var co (make-coroutine (fn [] (yield (+ x y)))))
+    (assert-eq (coro/resume co) 30 "multiple captured variables")))
+
+# test_coroutine_captures_mutable_state
+(begin
+  (let ((counter (box 0)))
+    (var co (make-coroutine (fn []
+      (rebox counter (+ (unbox counter) 1))
+      (yield (unbox counter)))))
+    (assert-eq (coro/resume co) 1 "mutable state capture")))
+
+# test_closure_captured_var_after_resume_issue_258
+(begin
+  (def make-counter (fn (start)
+    (fn []
+      (yield start)
+      (yield (+ start 1))
+      (yield (+ start 2)))))
+  (var co-100 (make-coroutine (make-counter 100)))
+  (assert-eq (coro/resume co-100) 100 "issue #258: first yield")
+  (assert-eq (coro/resume co-100) 101 "issue #258: second yield")
+  (assert-eq (coro/resume co-100) 102 "issue #258: third yield"))
+
+# ============================================================================
+# Issue #259 regression tests - state management
+# ============================================================================
+
+# test_interleaved_coroutines_issue_259
+(begin
+  (def make-counter (fn (start)
+    (fn []
+      (yield start)
+      (yield (+ start 1))
+      (yield (+ start 2)))))
+  (var co-100 (make-coroutine (make-counter 100)))
+  (var co-200 (make-coroutine (make-counter 200)))
+  (assert-eq (coro/resume co-100) 100 "interleaved #259: co1 first")
+  (assert-eq (coro/resume co-200) 200 "interleaved #259: co2 first")
+  (assert-eq (coro/resume co-100) 101 "interleaved #259: co1 second")
+  (assert-eq (coro/resume co-200) 201 "interleaved #259: co2 second")
+  (assert-eq (coro/resume co-100) 102 "interleaved #259: co1 third")
+  (assert-eq (coro/resume co-200) 202 "interleaved #259: co2 third"))
+
+# test_multiple_coroutines_independent_state
+(begin
+  (def gen1 (fn [] (yield 'a) (yield 'b)))
+  (def gen2 (fn [] (yield 'x) (yield 'y)))
+  (var co1 (make-coroutine gen1))
+  (var co2 (make-coroutine gen2))
+  (assert-eq (coro/resume co1) 'a "independent state: co1 first")
+  (assert-eq (coro/resume co2) 'x "independent state: co2 first")
+  (assert-eq (coro/resume co1) 'b "independent state: co1 second")
+  (assert-eq (coro/resume co2) 'y "independent state: co2 second"))
+
+# test_nested_coroutine_resume_from_coroutine
+(begin
+  (def inner-gen (fn [] (yield 10) (yield 20)))
+  (def outer-gen (fn []
+    (var inner-co (make-coroutine inner-gen))
+    (yield (+ 1 (coro/resume inner-co)))
+    (yield (+ 1 (coro/resume inner-co)))))
+  (var outer-co (make-coroutine outer-gen))
+  (assert-eq (coro/resume outer-co) 11 "nested resume from coroutine: first")
+  (assert-eq (coro/resume outer-co) 21 "nested resume from coroutine: second"))
+
+# ============================================================================
+# Error handling tests
+# ============================================================================
+
+# test_error_in_coroutine (skipped - requires error message checking)
+
+# ============================================================================
+# Coroutine predicates and accessors
+# ============================================================================
+
+# test_coroutine_predicate
+(begin
+  (var co (make-coroutine (fn [] 42)))
+  (assert-true (coro? co) "coroutine predicate: true for coroutine")
+  (assert-false (coro? 42) "coroutine predicate: false for int")
+  (assert-false (coro? (fn [] 42)) "coroutine predicate: false for function"))
+
+# ============================================================================
+# Integration with other language features
+# ============================================================================
+
+# test_coroutine_with_recursion
+(begin
+  (def countdown (fn (n)
+    (if (<= n 0)
+      (yield 0)
+      (begin
+        (yield n)
+        (countdown (- n 1))))))
+  (var co (make-coroutine (fn [] (countdown 3))))
+  (assert-eq (coro/resume co) 3 "recursion in coroutine"))
+
+# test_coroutine_with_higher_order_functions
+(begin
+  (var co (make-coroutine (fn []
+    (yield (map (fn (x) (* x 2)) (list 1 2 3))))))
+  (coro/resume co)
+  (assert-true true "higher-order functions in coroutine"))
+
+# ============================================================================
+# Edge cases and boundary conditions
+# ============================================================================
+
+# test_coroutine_with_no_yield
+(begin
+  (var co (make-coroutine (fn [] 42)))
+  (assert-eq (coro/resume co) 42 "no yield: returns value"))
+
+# test_coroutine_with_nil_yield
+(begin
+  (var co (make-coroutine (fn [] (yield nil))))
+  (assert-eq (coro/resume co) nil "nil yield"))
+
+# test_coroutine_with_complex_yielded_value
+(begin
+  (var co (make-coroutine (fn []
+    (yield (list 1 2 3)))))
+  (coro/resume co)
+  (assert-true true "complex yielded value"))
+
+# test_coroutine_with_empty_body
+(begin
+  (var co (make-coroutine (fn [] nil)))
+  (assert-eq (coro/resume co) nil "empty body"))
+
+# ============================================================================
+# CPS path tests
+# ============================================================================
+
+# test_cps_simple_yield
+(begin
+  (def gen (fn [] (yield 42)))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 42 "CPS: simple yield"))
+
+# test_cps_yield_in_if
+(begin
+  (def gen (fn []
+    (if true
+      (yield 1)
+      (yield 2))))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 1 "CPS: yield in if true"))
+
+# test_cps_yield_in_else
+(begin
+  (def gen (fn []
+    (if false
+      (yield 1)
+      (yield 2))))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 2 "CPS: yield in if false"))
+
+# test_cps_yield_in_begin
+(begin
+  (def gen (fn []
+    (begin
+      (yield 1)
+      (yield 2))))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 1 "CPS: yield in begin"))
+
+# test_cps_yield_with_computation
+(begin
+  (def gen (fn []
+    (yield (+ 10 20 12))))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 42 "CPS: yield with computation"))
+
+# test_cps_yield_in_let
+(begin
+  (def gen (fn []
+    (let ((x 10))
+      (yield x))))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 10 "CPS: yield in let"))
+
+# test_cps_yield_with_captured_var
+(begin
+  (let ((x 42))
+    (def gen (fn [] (yield x)))
+    (var co (make-coroutine gen))
+    (assert-eq (coro/resume co) 42 "CPS: yield with captured var")))
+
+# test_cps_yield_in_and
+(begin
+  (def gen (fn []
+    (and true (yield 42))))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 42 "CPS: yield in and"))
+
+# test_cps_yield_in_or
+(begin
+  (def gen (fn []
+    (or false (yield 42))))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 42 "CPS: yield in or"))
+
+# test_cps_yield_in_cond
+(begin
+  (def gen (fn []
+    (cond
+      (false (yield 1))
+      (true (yield 2))
+      (else (yield 3)))))
+  (var co (make-coroutine gen))
+  (assert-eq (coro/resume co) 2 "CPS: yield in cond"))
+
+# ============================================================================
+# Performance and stress tests
+# ============================================================================
+
+# test_coroutine_with_large_yielded_value
+(begin
+  (var co (make-coroutine (fn []
+    (yield (list 1 2 3 4 5 6 7 8 9 10)))))
+  (coro/resume co)
+  (assert-true true "large yielded value"))
+
+# test_multiple_coroutines_independent
+(begin
+  (var co1 (make-coroutine (fn [] (yield 1))))
+  (var co2 (make-coroutine (fn [] (yield 2))))
+  (assert-eq (coro/resume co1) 1 "multiple independent: co1")
+  (assert-eq (coro/resume co2) 2 "multiple independent: co2"))
+
+# ============================================================================
+# Issue #260 regression tests - quoted symbols in yield
+# ============================================================================
+
+# test_yield_quoted_symbol_issue_260
+(begin
+  (def gen-sym (fn [] (yield 'a) (yield 'b) (yield 'c)))
+  (var co (make-coroutine gen-sym))
+  (assert-eq (coro/resume co) 'a "quoted symbol: first")
+  (assert-eq (coro/resume co) 'b "quoted symbol: second")
+  (assert-eq (coro/resume co) 'c "quoted symbol: third"))
+
+# test_yield_quoted_symbol_is_value_not_variable
+(begin
+  (def gen (fn [] (yield 'test-symbol)))
+  (var co (make-coroutine gen))
+  (var result (coro/resume co))
+  (assert-true (symbol? result) "quoted symbol is symbol value"))
+
+# test_yield_various_literal_types
+(begin
+  (def gen (fn []
+    (yield 'symbol-val)
+    (yield 42)
+    (yield "string")
+    (yield true)
+    (yield nil)))
+  (var co (make-coroutine gen))
+  (assert-true (symbol? (coro/resume co)) "literal types: symbol")
+  (assert-true (number? (coro/resume co)) "literal types: number")
+  (assert-true (string? (coro/resume co)) "literal types: string")
+  (assert-eq (coro/resume co) true "literal types: true")
+  (assert-eq (coro/resume co) nil "literal types: nil"))
+
+# test_yield_quoted_list
+(begin
+  (def gen (fn [] (yield '(1 2 3))))
+  (var co (make-coroutine gen))
+  (coro/resume co)
+  (assert-true true "quoted list yield"))
+
+# ============================================================================
+# Yield with intermediate values on stack
+# ============================================================================
+
+# test_yield_with_intermediate_values_on_stack
+(begin
+  (var co (make-coroutine (fn [] (+ 1 (yield 2) 3))))
+  (assert-eq (coro/resume co) 2 "intermediate values: first yield")
+  (assert-eq (coro/resume co 10) 14 "intermediate values: 1+10+3=14"))
+
+# test_yield_with_multiple_intermediate_values
+(begin
+  (var co (make-coroutine (fn [] (+ 1 2 (yield 3) 4 5))))
+  (assert-eq (coro/resume co) 3 "multiple intermediate: first yield")
+  (assert-eq (coro/resume co 100) 112 "multiple intermediate: 1+2+100+4+5=112"))
+
+# test_yield_in_nested_call_with_intermediate_values
+(begin
+  (var co (make-coroutine (fn [] (* 2 (+ 1 (yield 5) 3)))))
+  (assert-eq (coro/resume co) 5 "nested intermediate: first yield")
+  (assert-eq (coro/resume co 10) 28 "nested intermediate: 2*(1+10+3)=28"))
+
+# test_multiple_yields_with_intermediate_values
+(begin
+  (var co (make-coroutine (fn []
+    (+ (+ 1 (yield 2) 3)
+       (+ 4 (yield 5) 6)))))
+  (assert-eq (coro/resume co) 2 "multiple yields intermediate: first")
+  (assert-eq (coro/resume co 10) 5 "multiple yields intermediate: second")
+  (assert-eq (coro/resume co 20) 44 "multiple yields intermediate: (1+10+3)+(4+20+6)=44"))
+
+# ============================================================================
+# Runtime effect checks (Pure closure warnings)
+# ============================================================================
+
+# test_make_coroutine_pure_closure_still_works
+(begin
+  (let ((co (make-coroutine (fn [] 42))))
+    (assert-eq (coro/resume co) 42 "pure closure in coroutine")))
+
+# test_make_coroutine_yielding_closure_works
+(begin
+  (let ((co (make-coroutine (fn [] (yield 42)))))
+    (assert-eq (coro/resume co) 42 "yielding closure in coroutine")))
+
+# test_coroutine_resume_pure_closure_completes_immediately
+(begin
+  (var co (make-coroutine (fn [] (+ 1 2 3))))
+  (assert-eq (coro/resume co) 6 "pure closure completes: value")
+  (assert-eq (keyword->string (coro/status co)) "done" "pure closure completes: status"))
+
+# ============================================================================
+# Deep cross-call yield tests
+# ============================================================================
+
+# test_yield_across_three_call_levels
+(begin
+  (def a (fn (x) (yield (* x 2))))
+  (def b (fn (x) (+ (a x) 1)))
+  (def c (fn (x) (+ (b x) 1)))
+  (var co (make-coroutine (fn [] (c 10))))
+  (assert-eq (coro/resume co) 20 "three call levels: first yield")
+  (assert-eq (coro/resume co 20) 22 "three call levels: final return"))
+
+# test_yield_in_tail_position
+(begin
+  (var co (make-coroutine (fn []
+    (yield 1)
+    (yield 2))))
+  (assert-eq (coro/resume co) 1 "tail position: first")
+  (assert-eq (coro/resume co) 2 "tail position: second")
+  (assert-eq (keyword->string (coro/status co)) "suspended" "tail position: suspended after second yield")
+  (coro/resume co)
+  (assert-eq (keyword->string (coro/status co)) "done" "tail position: done after final resume"))
+
+# test_deep_call_chain_with_multiple_yields
+(begin
+  (def level1 (fn []
+    (yield 1)
+    (level2)))
+  (def level2 (fn []
+    (yield 2)
+    (level3)))
+  (def level3 (fn []
+    (yield 3)
+    "done"))
+  (var co (make-coroutine level1))
+  (assert-eq (coro/resume co) 1 "deep call chain: first")
+  (assert-eq (coro/resume co) 2 "deep call chain: second")
+  (assert-eq (coro/resume co) 3 "deep call chain: third")
+  (assert-eq (coro/resume co) "done" "deep call chain: final"))

@@ -117,5 +117,12 @@
 
 (assert-eq (+ ;(list)) 0 "splice empty list")
 
-# Splice with list (runtime error — lists are not indexed)
 # ============================================================================
+# Compile-time error cases
+# ============================================================================
+
+(assert-err (fn () (eval '(;@[1 2 3]))) "splice at top level should error")
+
+(assert-err (fn () (eval '(+ ;42))) "splicing an integer should error")
+
+(assert-err (fn () (eval '(;;@[1 2]))) "nested splice should error")

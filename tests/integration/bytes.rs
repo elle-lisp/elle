@@ -1,6 +1,8 @@
 // Bytes and blob type tests
 //
 // Tests for the immutable bytes and mutable blob types.
+// Most tests migrated to tests/elle/bytes.lisp.
+// This file retains tests that require byte-level inspection or crypto plugin support.
 
 use crate::common::eval_source;
 
@@ -50,20 +52,6 @@ fn test_blob_empty() {
 }
 
 #[test]
-fn test_bytes_predicate() {
-    let result = eval_source("(bytes? (bytes 1 2 3))").unwrap();
-    assert!(result.is_bool());
-    assert!(result.as_bool().unwrap());
-}
-
-#[test]
-fn test_blob_predicate() {
-    let result = eval_source("(blob? (blob 1 2 3))").unwrap();
-    assert!(result.is_bool());
-    assert!(result.as_bool().unwrap());
-}
-
-#[test]
 fn test_string_to_bytes() {
     let result = eval_source(r#"(string->bytes "hello")"#).unwrap();
     assert!(result.is_bytes());
@@ -105,20 +93,6 @@ fn test_blob_to_hex() {
     let result = eval_source("(blob->hex (blob 72 101 108))").unwrap();
     assert!(result.is_string());
     assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "48656c");
-}
-
-#[test]
-fn test_bytes_length() {
-    let result = eval_source("(length (bytes 1 2 3 4 5))").unwrap();
-    assert!(result.is_int());
-    assert_eq!(result.as_int().unwrap(), 5);
-}
-
-#[test]
-fn test_blob_length() {
-    let result = eval_source("(length (blob 1 2 3 4 5))").unwrap();
-    assert!(result.is_int());
-    assert_eq!(result.as_int().unwrap(), 5);
 }
 
 #[test]
@@ -203,30 +177,6 @@ fn test_hmac_sha256() {
 }
 
 #[test]
-fn test_uri_encode_simple() {
-    let result = eval_source(r#"(uri-encode "hello")"#).unwrap();
-    assert!(result.is_string());
-    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "hello");
-}
-
-#[test]
-fn test_uri_encode_space() {
-    let result = eval_source(r#"(uri-encode "hello world")"#).unwrap();
-    assert!(result.is_string());
-    assert_eq!(
-        result.with_string(|s| s.to_string()).unwrap(),
-        "hello%20world"
-    );
-}
-
-#[test]
-fn test_uri_encode_special() {
-    let result = eval_source(r#"(uri-encode "a/b")"#).unwrap();
-    assert!(result.is_string());
-    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "a%2Fb");
-}
-
-#[test]
 fn test_sigv4_demo_runs() {
     if !crypto_plugin_available() {
         eprintln!("SKIP: crypto plugin not built (run `cargo build -p elle-crypto`)");
@@ -250,25 +200,6 @@ fn test_sigv4_demo_runs() {
         stdout.contains("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
         "SHA-256 of empty string incorrect"
     );
-}
-
-#[test]
-fn test_blob_push() {
-    let result = eval_source("(let ((b (blob 1 2))) (push b 3) b)").unwrap();
-    assert!(result.is_blob());
-    assert_eq!(&result.as_blob().unwrap().borrow()[..], &[1, 2, 3]);
-}
-
-#[test]
-fn test_blob_pop() {
-    let result = eval_source("(let ((b (blob 1 2 3))) (pop b))").unwrap();
-    assert_eq!(result.as_int().unwrap(), 3);
-}
-
-#[test]
-fn test_blob_put() {
-    let result = eval_source("(let ((b (blob 1 2 3))) (put b 1 99) (get b 1))").unwrap();
-    assert_eq!(result.as_int().unwrap(), 99);
 }
 
 #[test]
@@ -314,46 +245,6 @@ fn test_buffer_to_blob() {
 }
 
 #[test]
-fn test_bytes_to_buffer() {
-    let result = eval_source("(buffer->string (bytes->buffer (bytes 104 105)))").unwrap();
-    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "hi");
-}
-
-#[test]
-fn test_blob_to_buffer() {
-    let result = eval_source("(buffer->string (blob->buffer (blob 104 105)))").unwrap();
-    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "hi");
-}
-
-#[test]
-fn test_each_over_bytes() {
-    let result = eval_source(
-        r#"
-        (let ((sum 0))
-          (each b (bytes 1 2 3)
-            (set sum (+ sum b)))
-          sum)
-    "#,
-    )
-    .unwrap();
-    assert_eq!(result.as_int().unwrap(), 6);
-}
-
-#[test]
-fn test_each_over_blob() {
-    let result = eval_source(
-        r#"
-        (let ((sum 0))
-          (each b (blob 10 20 30)
-            (set sum (+ sum b)))
-          sum)
-    "#,
-    )
-    .unwrap();
-    assert_eq!(result.as_int().unwrap(), 60);
-}
-
-#[test]
 fn test_map_over_tuple() {
     let result = eval_source("(map (fn (x) (+ x 1)) [1 2 3])").unwrap();
     // map returns a list
@@ -362,14 +253,4 @@ fn test_map_over_tuple() {
     assert_eq!(vec[0].as_int().unwrap(), 2);
     assert_eq!(vec[1].as_int().unwrap(), 3);
     assert_eq!(vec[2].as_int().unwrap(), 4);
-}
-
-#[test]
-fn test_map_over_bytes() {
-    let result = eval_source("(map (fn (b) (* b 2)) (bytes 1 2 3))").unwrap();
-    let vec = result.list_to_vec().unwrap();
-    assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0].as_int().unwrap(), 2);
-    assert_eq!(vec[1].as_int().unwrap(), 4);
-    assert_eq!(vec[2].as_int().unwrap(), 6);
 }
