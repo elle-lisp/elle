@@ -758,8 +758,8 @@
             # 3. Wait for completions
             (let ((completions (io/wait backend (- 0 1))))
               (each c in completions
-                (let ((id    (get c :id))
-                      (fiber (get pending id)))
+                (let* ((id    (get c :id))
+                       (fiber (get pending id)))
                   (when (not (nil? fiber))
                     (del pending id)
                     (if (nil? (get c :error))

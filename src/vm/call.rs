@@ -11,7 +11,7 @@ use crate::error::LocationMap;
 use crate::value::error_val;
 use crate::value::fiber::CallFrame;
 use crate::value::{
-    SignalBits, SuspendedFrame, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD,
+    SignalBits, SuspendedFrame, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_YIELD,
 };
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
@@ -153,7 +153,15 @@ impl VM {
     ) -> Option<SignalBits> {
         if let Some(f) = func.as_native_fn() {
             let (bits, value) = f(args.as_slice());
-            return self.handle_primitive_signal(bits, value, bytecode, constants, closure_env, ip);
+            return self.handle_primitive_signal(
+                bits,
+                value,
+                bytecode,
+                constants,
+                closure_env,
+                ip,
+                location_map,
+            );
         }
 
         if let Some((id, default)) = func.as_parameter() {
@@ -204,10 +212,11 @@ impl VM {
                 if let Some(bits) = self.try_jit_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
                     match bits {
-                        Some(SIG_YIELD) => {
-                            // JIT function yielded. fiber.signal and fiber.suspended
-                            // are set by the JIT yield helpers. Build the interpreter-
-                            // level caller frame (same logic as lines 189-205 below).
+                        Some(SIG_YIELD) | Some(SIG_IO) => {
+                            // JIT function yielded or signaled I/O. fiber.signal
+                            // and fiber.suspended are set by the JIT yield helpers.
+                            // Build the interpreter-level caller frame.
+                            let sig = bits.unwrap();
                             if let Some(mut frames) = self.fiber.suspended.take() {
                                 let (_, value) = self.fiber.signal.take().unwrap();
                                 let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -222,10 +231,10 @@ impl VM {
                                     location_map: location_map.clone(),
                                 };
                                 frames.push(caller_frame);
-                                self.fiber.signal = Some((SIG_YIELD, value));
+                                self.fiber.signal = Some((sig, value));
                                 self.fiber.suspended = Some(frames);
                             }
-                            return Some(SIG_YIELD);
+                            return Some(sig);
                         }
                         other => return other,
                     }
@@ -260,11 +269,12 @@ impl VM {
                     self.fiber.stack.push(value);
                     self.fiber.call_stack.pop();
                 }
-                SIG_YIELD => {
-                    // Yield propagated from a nested call. Two cases:
+                SIG_YIELD | SIG_IO => {
+                    // Yield/IO propagated from a nested call. Two cases:
                     //
-                    // 1. yield instruction: suspended frames exist — append the
-                    //    caller's frame so resume replays the full call stack.
+                    // 1. yield/IO instruction: suspended frames exist — append
+                    //    the caller's frame so resume replays the full call
+                    //    stack.
                     //
                     // 2. fiber/signal: no suspended frames — just propagate the
                     //    signal. The fiber saves its own context for resumption.
@@ -283,11 +293,11 @@ impl VM {
                         };
 
                         frames.push(caller_frame);
-                        self.fiber.signal = Some((SIG_YIELD, value));
+                        self.fiber.signal = Some((bits, value));
                         self.fiber.suspended = Some(frames);
                     }
                     self.fiber.call_stack.pop();
-                    return Some(SIG_YIELD);
+                    return Some(bits);
                 }
                 _ => {
                     // Other signal (error, etc.) — propagate to caller.
