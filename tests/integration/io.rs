@@ -182,3 +182,115 @@ fn test_existing_stdlib_functions_work() {
     assert_eq!(vec[1].as_int(), Some(4));
     assert_eq!(vec[2].as_int(), Some(9));
 }
+
+// Chunk 3: Async backend primitives
+
+#[test]
+fn test_io_backend_async() {
+    let result = eval_source("(io-backend? (io/backend :async))").unwrap();
+    assert_eq!(result, elle::Value::bool(true));
+}
+
+#[test]
+fn test_io_submit_returns_int() {
+    let result = eval_source(
+        "(begin
+           (spit \"/tmp/elle-test-submit\" \"test\")
+           (let* ((backend (io/backend :async))
+                  (port (port/open \"/tmp/elle-test-submit\" :read))
+                  (f (fiber/new (fn [] (stream/read-all port)) 512)))
+             (fiber/resume f)
+             (let ((id (io/submit backend (fiber/value f))))
+               (int? id))))",
+    )
+    .unwrap();
+    assert_eq!(result, elle::Value::bool(true));
+}
+
+#[test]
+fn test_io_reap_returns_tuple() {
+    let result = eval_source(
+        "(let ((backend (io/backend :async)))
+           (tuple? (io/reap backend)))",
+    )
+    .unwrap();
+    assert_eq!(result, elle::Value::bool(true));
+}
+
+#[test]
+fn test_io_wait_returns_tuple() {
+    let result = eval_source(
+        "(let ((backend (io/backend :async)))
+           (tuple? (io/wait backend 0)))",
+    )
+    .unwrap();
+    assert_eq!(result, elle::Value::bool(true));
+}
+
+#[test]
+fn test_io_submit_wait_roundtrip() {
+    let result = eval_source(
+        "(begin
+           (spit \"/tmp/elle-test-submit-wait\" \"roundtrip\")
+           (let* ((backend (io/backend :async))
+                  (port (port/open \"/tmp/elle-test-submit-wait\" :read))
+                  (f (fiber/new (fn [] (stream/read-all port)) 512)))
+             (fiber/resume f)
+             (let ((id (io/submit backend (fiber/value f))))
+               (let ((completions (io/wait backend -1)))
+                 (length completions)))))",
+    )
+    .unwrap();
+    assert_eq!(result.as_int(), Some(1));
+}
+
+#[test]
+fn test_io_completion_struct_has_id() {
+    let result = eval_source(
+        "(begin
+           (spit \"/tmp/elle-test-comp-id\" \"test\")
+           (let* ((backend (io/backend :async))
+                  (port (port/open \"/tmp/elle-test-comp-id\" :read))
+                  (f (fiber/new (fn [] (stream/read-all port)) 512)))
+             (fiber/resume f)
+             (let ((id (io/submit backend (fiber/value f))))
+               (let ((completions (io/wait backend -1)))
+                 (= id (get (get completions 0) :id))))))",
+    )
+    .unwrap();
+    assert_eq!(result, elle::Value::bool(true));
+}
+
+#[test]
+fn test_io_completion_struct_has_value() {
+    let result = eval_source(
+        "(begin
+           (spit \"/tmp/elle-test-comp-val\" \"hello async\")
+           (let* ((backend (io/backend :async))
+                  (port (port/open \"/tmp/elle-test-comp-val\" :read))
+                  (f (fiber/new (fn [] (stream/read-all port)) 512)))
+             (fiber/resume f)
+             (let ((id (io/submit backend (fiber/value f))))
+               (let ((completions (io/wait backend -1)))
+                 (nil? (get (get completions 0) :error))))))",
+    )
+    .unwrap();
+    assert_eq!(result, elle::Value::bool(true));
+}
+
+#[test]
+fn test_io_submit_sync_backend_errors() {
+    let result = eval_source(
+        "(begin
+           (spit \"/tmp/elle-test-submit-sync\" \"test\")
+           (let* ((backend (io/backend :sync))
+                  (port (port/open \"/tmp/elle-test-submit-sync\" :read))
+                  (f (fiber/new (fn [] (stream/read-all port)) 512)))
+             (fiber/resume f)
+             (io/submit backend (fiber/value f))))",
+    );
+    assert!(
+        result.is_err(),
+        "io/submit on sync backend should signal error"
+    );
+}

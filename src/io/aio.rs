@@ -23,8 +23,7 @@ pub(crate) struct Completion {
 
 impl Completion {
     /// Convert to an Elle struct: {:id n :value v :error nil} or {:id n :value nil :error e}
-    #[allow(dead_code)]
-    fn to_value(&self) -> Value {
+    pub(crate) fn to_value(&self) -> Value {
         let mut fields = BTreeMap::new();
         fields.insert(TableKey::Keyword("id".into()), Value::int(self.id as i64));
         match &self.result {
