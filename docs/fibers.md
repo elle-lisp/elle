@@ -83,7 +83,7 @@ Signal types are bit positions in a `u32` bitmask:
 | 2 | `SIG_DEBUG` | 4 | Breakpoint / trace |
 | 3 | `SIG_RESUME` | 8 | VM-internal: fiber resume request |
 | 4 | `SIG_FFI` | 16 | Calls foreign code |
-| 5 | `SIG_PROPAGATE` | 32 | VM-internal: re-raise caught signal |
+| 5 | `SIG_PROPAGATE` | 32 | VM-internal: propagate caught signal |
 | 6 | `SIG_CANCEL` | 64 | VM-internal: inject error into fiber |
 | 7–15 | — | — | Reserved |
 | 16–31 | — | — | User-defined signal types |
@@ -251,7 +251,7 @@ Walk `fiber/child` to find the originating fiber. The originator's
 | `fiber/mask` | `(fiber) → int` | Capability mask |
 | `fiber/parent` | `(fiber) → fiber\|nil` | Parent fiber |
 | `fiber/child` | `(fiber) → fiber\|nil` | Most recently resumed child |
-| `fiber/propagate` | `(fiber) → (propagates)` | Re-raise caught signal, preserve chain |
+| `fiber/propagate` | `(fiber) → (propagates)` | Propagate caught signal, preserve chain |
 | `fiber/cancel` | `(fiber value) → value` | Inject error into suspended fiber |
 | `fiber?` | `(value) → bool` | Type predicate |
 

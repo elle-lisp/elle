@@ -69,15 +69,15 @@
   "Assert that two strings are equal"
   (assert (= actual expected) msg)))
 
-## Assert that a thunk raises any error
+## Assert that a thunk signals any error
 (def assert-err (fn (f msg)
-  "Assert that (f) raises an error"
+  "Assert that (f) signals an error"
   (let (([ok? _] (protect (f))))
     (assert (not ok?) msg))))
 
-## Assert that a thunk raises an error with a specific kind keyword
+## Assert that a thunk signals an error with a specific kind keyword
 (def assert-err-kind (fn (f expected-kind msg)
-  "Assert that (f) raises an error with the given kind"
+  "Assert that (f) signals an error with the given kind"
   (let (([ok? err] (protect (f))))
     (if ok?
       (error {:error :failed-assertion :message (-> "Expected error, got success\n" (append msg))})

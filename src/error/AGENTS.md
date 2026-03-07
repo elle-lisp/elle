@@ -50,7 +50,7 @@ Everything. Key consumers:
 ## Invariants
 
 1. **Errors propagate, never silently drop.** Functions return `LResult`.
-   If you handle an error, handle it meaningfully or re-raise.
+   If you handle an error, handle it meaningfully or propagate it.
 
 2. **`ErrorKind` is exhaustive.** Add new variants for new error categories.
    Don't use `Generic` for things that deserve their own kind.

@@ -36,7 +36,7 @@ The `examples/assertions.lisp` library provides:
 - `assert-eq` — Assert equality
 - `assert-true` — Assert truthy
 - `assert-false` — Assert falsy
-- `assert-error` — Assert error is raised
+- `assert-error` — Assert error is signaled
 - `assert-contains` — Assert string contains substring
 
 All assertions call `(exit 1)` on failure, causing the script to exit with code 1.

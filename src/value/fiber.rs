@@ -150,7 +150,7 @@ pub const SIG_YIELD: SignalBits = 1 << 1; // cooperative suspension
 pub const SIG_DEBUG: SignalBits = 1 << 2; // breakpoint / trace
 pub const SIG_RESUME: SignalBits = 1 << 3; // fiber resumption (VM-internal)
 pub const SIG_FFI: SignalBits = 1 << 4; // calls foreign code
-pub const SIG_PROPAGATE: SignalBits = 1 << 5; // re-raise caught signal (VM-internal)
+pub const SIG_PROPAGATE: SignalBits = 1 << 5; // propagate caught signal (VM-internal)
 pub const SIG_CANCEL: SignalBits = 1 << 6; // inject error into fiber (VM-internal)
 pub const SIG_QUERY: SignalBits = 1 << 7; // VM state query (VM-internal)
 pub const SIG_HALT: SignalBits = 1 << 8; // graceful VM termination
@@ -161,7 +161,7 @@ pub const SIG_IO: SignalBits = 1 << 9; // I/O request to scheduler
 //   Bits 0-2:   User-facing signals (error, yield, debug)
 //   Bit  3:     Resume - run a suspended fiber (VM-internal)
 //   Bit  4:     FFI — calls foreign code
-//   Bit  5:     Propagate — re-raise caught signal (VM-internal)
+//   Bit  5:     Propagate — propagate caught signal (VM-internal)
 //   Bit  6:     Cancel — inject error into fiber (VM-internal)
 //   Bit  7:     Query — read VM state without fiber swap (VM-internal)
 //   Bit  8:     Halt — graceful VM termination with return value

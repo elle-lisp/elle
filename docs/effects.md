@@ -243,7 +243,7 @@ capability. If the callee never needs FFI, no signal — full speed. If it
 does need FFI, it signals, and the caller handles the denial.
 
 **"This callback must be pure"**: The caller grants *no* capabilities. If the
-callback tries to do anything — yield, raise, IO, allocate — it signals.
+callback tries to do anything — yield, error, IO, allocate — it signals.
 The caller treats any signal as a contract violation.
 
 ### Narrowing, Not Widening
@@ -298,7 +298,7 @@ compiler-reserved:
 | 2 | debug | 4 | Breakpoint / trace |
 | 3 | resume | 8 | VM-internal: fiber resume request |
 | 4 | ffi | 16 | Calls foreign code |
-| 5 | propagate | 32 | VM-internal: re-raise caught signal |
+| 5 | propagate | 32 | VM-internal: propagate caught signal |
 | 6 | cancel | 64 | VM-internal: inject error into fiber |
 | 7–15 | reserved | — | Future compiler-known signals |
 | 16+ | user | — | User-defined signal types |
@@ -538,7 +538,7 @@ be elided entirely.
 The compiler's effect information guides JIT decisions:
 
 - **No effects**: inline aggressively, no signal checks needed
-- **Raises only**: signal checks needed, but no yield/continuation overhead
+- **Errors only**: signal checks needed, but no yield/continuation overhead
 - **Yields**: full signal protocol, but the JIT still compiles the function —
   it just includes the propagation path
 - **Known pure callback**: when a higher-order function is called with a
@@ -688,7 +688,7 @@ Steps 1–3 are complete. Steps 4–7 are future work.
 
 3. ✅ **Signal-bits-based Effect type.** `Effect { bits: SignalBits,
    propagates: u32 }`. Inference tracks signal bits. Old `yield_behavior`
-   and `may_raise` fields replaced.
+    and `may_error` fields replaced.
 
 4. ❌ **Relax JIT restrictions.** JIT still restricted to pure functions.
    Signal-aware calling convention not yet implemented.

@@ -5,7 +5,7 @@
 - [Overview](#overview)
 - [1. Introspection Primitives](#1-introspection-primitives)
 - [2. Time API](#2-time-api)
-- [3. Effect System: Raises](#3-effect-system-raises)
+- [3. Effect System: Signals](#3-effect-system-signals)
 
 ## Overview
 
@@ -48,7 +48,7 @@ require scanning `env`, which is a different (and more expensive) operation.
 
 | Primitive | Signature | Returns | Notes |
 |-----------|-----------|---------|-------|
-| `fn/errors?` | `(fn/errors? value)` | `true` or `false` | Returns `true` if the closure may raise an error, `false` if it is guaranteed not to. Returns `false` for non-closures. |
+| `fn/errors?` | `(fn/errors? value)` | `true` or `false` | Returns `true` if the closure may signal an error, `false` if it is guaranteed not to. Returns `false` for non-closures. |
 
 This is a boolean query.
 
@@ -92,7 +92,7 @@ Use it when you need to distinguish computation time from I/O wait.
 
 | Primitive | Signature | Returns | Effect | Implementation |
 |-----------|-----------|---------|--------|----------------|
-| `time/sleep` | `(time/sleep seconds)` | nil | `Effect::raises()` | `std::thread::sleep` (Rust primitive) |
+| `time/sleep` | `(time/sleep seconds)` | nil | `Effect::errors()` | `std::thread::sleep` (Rust primitive) |
 | `time/stopwatch` | `(time/stopwatch)` | coroutine | yields | Elle: coroutine over `clock/monotonic` |
 | `time/elapsed` | `(time/elapsed thunk)` | `(result seconds)` | polymorphic | Elle: wraps thunk with clock reads |
 
@@ -145,14 +145,14 @@ variants. The float approach is simpler and better:
 - **Precedent.** Lua's `os.clock()`, Common Lisp's `get-internal-real-time`,
   JavaScript's `performance.now()` — all return numbers, not opaque types.
 
-## 3. Effect System: Raises
+## 3. Effect System: Signals
 
 ### 3.1 Design
 
 The `Effect` struct tracks which signals a function may emit via a `bits`
 field (bitmask of `SIG_ERROR`, `SIG_YIELD`, `SIG_DEBUG`, `SIG_FFI`) and
 which parameter indices propagate their callee's effects via a `propagates`
-bitmask. This is more general than the original `YieldBehavior` + `may_raise`
+bitmask. This is more general than the original `YieldBehavior` + `may_error`
 proposal — it handles error, yield, debug, and FFI effects uniformly.
 
 ```rust
@@ -162,52 +162,52 @@ pub struct Effect {
 }
 ```
 
-Constructors: `Effect::none()`, `Effect::raises()`, `Effect::yields()`,
-`Effect::yields_raises()`, `Effect::ffi()`, `Effect::polymorphic(n)`,
-`Effect::polymorphic_raises(n)`.
+Constructors: `Effect::none()`, `Effect::errors()`, `Effect::yields()`,
+`Effect::yields_errors()`, `Effect::ffi()`, `Effect::polymorphic(n)`,
+`Effect::polymorphic_errors(n)`.
 
-Predicates: `may_raise()`, `may_yield()`, `may_suspend()`, `may_ffi()`,
+Predicates: `may_error()`, `may_yield()`, `may_suspend()`, `may_ffi()`,
 `is_polymorphic()`.
 
 We do NOT attempt to track specific exception types. Any `throw` is
-conservatively marked as "raises."
+conservatively marked as "signals."
 
 ### 3.2 Inference rules
 
-| Form | Raises |
+| Form | Signals |
 |------|--------|
 | `(throw expr)` | `true` — always, regardless of argument |
 | `(try body (catch exception e ...))` | `false` — exception is the root type, catches everything |
-| `(try body (catch error e ...))` | body.raises — catching a subtype doesn't guarantee all exceptions are caught |
-| `(begin a b)` | a.raises ∨ b.raises |
-| `(if c t e)` | c.raises ∨ t.raises ∨ e.raises |
-| `(f args...)` | args.raises ∨ f.may_raise |
+| `(try body (catch error e ...))` | body.signals — catching a subtype doesn't guarantee all exceptions are caught |
+| `(begin a b)` | a.signals ∨ b.signals |
+| `(if c t e)` | c.signals ∨ t.signals ∨ e.signals |
+| `(f args...)` | args.signals ∨ f.may_error |
 | literal | `false` |
-| primitive call | Uses the primitive's registered `may_raise` flag (see §5) |
+| primitive call | Uses the primitive's registered `may_error` flag (see §5) |
 
 ### 3.3 Key principle: conservative and correct
 
 Every `throw` is an unknown exception. We don't peek into the argument to
 determine the type — `(throw (error "x"))` and `(throw some-variable)` both
-produce `raises = true`.
+produce `signals = true`.
 
-The only way to clear `raises` is `try`/`catch` catching `exception` (ID 1),
+The only way to clear `signals` is `try`/`catch` catching `exception` (ID 1),
 which is the root of the hierarchy and catches everything. Catching a specific
-subtype like `error` does NOT clear `raises` because the throw could be a
+subtype like `error` does NOT clear `signals` because the throw could be a
 `warning` or any other type.
 
 This is genuinely useful: it tells you which functions are **guaranteed** to
-never throw. The set of non-raising functions is exactly the set where every
-code path avoids `throw` and calls only non-raising functions.
+never throw. The set of non-signaling functions is exactly the set where every
+code path avoids `throw` and calls only non-signaling functions.
 
 ### 3.4 Propagation during fixpoint iteration
 
-Raises effects propagate exactly like yield effects during the cross-form
+Error effects propagate exactly like yield effects during the cross-form
 fixpoint iteration in `compile_all`. Self-recursive functions start
-with `may_raise = false` (optimistic) and iterate until stable.
+with `may_error = false` (optimistic) and iterate until stable.
 
 ### 3.5 Runtime query
 
-`(fn/errors? value)` reads `closure.effect.may_raise()` (checks `SIG_ERROR`
-in the effect's signal bits). Returns `true` if the closure may raise an error,
+`(fn/errors? value)` reads `closure.effect.may_error()` (checks `SIG_ERROR`
+in the effect's signal bits). Returns `true` if the closure may signal an error,
 `false` otherwise.

@@ -70,12 +70,12 @@ pub(super) fn run_fixpoint(
 
         // Check for convergence: did any effect change?
         if new_global_effects == global_effects {
-            break; // Stable -- we're done
+            return Ok(analysis_results);
         }
 
         // Effects changed -- update and re-analyze
         global_effects = new_global_effects;
     }
 
-    Ok(analysis_results)
+    panic!("effect fixpoint did not converge after {MAX_ITERATIONS} iterations");
 }

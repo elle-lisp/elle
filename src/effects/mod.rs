@@ -108,7 +108,7 @@ impl Effect {
         }
     }
 
-    /// Polymorphic: effect depends on a single parameter (no raise).
+    /// Polymorphic: effect depends on a single parameter (no error signal).
     pub const fn polymorphic(param: usize) -> Self {
         Effect {
             bits: 0,

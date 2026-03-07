@@ -54,7 +54,7 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             vm.handle_fiber_resume_signal_jit(value)
         }
         SIG_PROPAGATE => {
-            // fiber/propagate: re-raise the child fiber's signal.
+            // fiber/propagate: propagate the child fiber's signal.
             vm.handle_fiber_propagate_signal_jit(value)
         }
         SIG_CANCEL => {

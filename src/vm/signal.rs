@@ -44,7 +44,7 @@ impl VM {
                 self.handle_fiber_resume_signal(value, bytecode, constants, closure_env, ip)
             }
             SIG_PROPAGATE => {
-                // fiber/propagate: re-raise the child fiber's signal
+                // fiber/propagate: propagate the child fiber's signal
                 self.handle_fiber_propagate_signal(value)
             }
             SIG_CANCEL => {

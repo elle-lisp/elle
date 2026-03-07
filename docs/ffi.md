@@ -383,7 +383,7 @@ This means:
 All FFI primitives return `(SignalBits, Value)`. Errors are signaled via
 `SIG_ERROR` with an error tuple.
 
-| Error kind | Raised by | Cause |
+| Error kind | Signaled by | Cause |
 |------------|-----------|-------|
 | `arity-error` | All primitives | Wrong number of arguments |
 | `type-error` | All primitives | Wrong argument type (e.g., int where pointer expected) |
