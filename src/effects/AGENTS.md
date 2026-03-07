@@ -18,6 +18,9 @@ debug, ffi) and which parameter indices propagate their callee's effects.
 | `Effect::yields()` | May yield (SIG_YIELD) |
 | `Effect::yields_errors()` | May yield and error |
 | `Effect::ffi()` | Calls foreign code (SIG_FFI) |
+| `Effect::ffi_errors()` | FFI + may error |
+| `Effect::io()` | May perform I/O (SIG_IO) |
+| `Effect::io_errors()` | I/O + may error |
 | `Effect::halts()` | May halt (SIG_HALT) |
 | `Effect::polymorphic(n)` | Effect depends on parameter n |
 | `Effect::polymorphic_errors(n)` | Polymorphic + may error |
@@ -29,10 +32,11 @@ Each predicate asks a specific question. No vague "is_pure".
 
 | Predicate | Meaning |
 |-----------|---------|
-| `may_suspend()` | Can suspend execution? (yield, debug, or polymorphic) |
+| `may_suspend()` | Can suspend execution? (yield, debug, I/O, or polymorphic) |
 | `may_yield()` | Can yield? (SIG_YIELD) |
 | `may_raise()` | Can raise an error? (SIG_ERROR) |
 | `may_ffi()` | Calls foreign code? (SIG_FFI) |
+| `may_io()` | May perform I/O? (SIG_IO) |
 | `may_halt()` | Can halt? (SIG_HALT) |
 | `is_polymorphic()` | Effect depends on arguments? (propagates != 0) |
 | `propagated_params()` | Iterator over propagated parameter indices |
@@ -65,6 +69,20 @@ When analyzing a call:
 - `set` invalidates effect tracking for the mutated binding
 - Mutual recursion in `letrec` may have incomplete effect information
 
+## I/O Effects
+
+I/O effects (`SIG_IO`) are distinct from yield effects (`SIG_YIELD`). This allows
+the scheduler to catch I/O requests without intercepting coroutines.
+
+- `Effect::io()` — function may perform I/O (yields SIG_IO to scheduler)
+- `Effect::io_errors()` — function may perform I/O and may error
+- `may_io()` — predicate to check if effect includes I/O
+
+Stream primitives (`stream/read-line`, `stream/read`, `stream/read-all`,
+`stream/write`, `stream/flush`) have effect `io_errors()`. They return
+`(SIG_IO, IoRequest)` to suspend the fiber and let the scheduler dispatch
+to a backend.
+
 ## Dependents
 
 Used across the pipeline and the runtime:
@@ -76,6 +94,8 @@ Used across the pipeline and the runtime:
 - `jit/compiler.rs` — JIT gate checks `!effect.may_suspend()`
 - `vm/call.rs` — call dispatch checks `!effect.may_suspend()`
 - `primitives/coroutines.rs` — coroutine warnings check `!effect.may_yield()`
+- `primitives/stream.rs` — stream primitives use `Effect::io_errors()`
+- `io/backend.rs` — backend execution returns `(SIG_OK, result)` or `(SIG_ERROR, error)`
 
 ## Files
 

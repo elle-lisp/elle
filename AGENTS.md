@@ -47,6 +47,9 @@ bytecode. Error messages include file:line:col information.
 | Lowerer → Emitter | `LirFunction` | `blocks: Vec<BasicBlock>`, `constants: Vec<LirConst>`, `arity: Arity`, `effect: Effect`, `num_locals: u16`, `num_captures: u16`, `cell_params_mask: u64`, `cell_locals_mask: u64`, `entry: Label`, `num_regs: u32`, `name: Option<String>`, `doc: Option<Value>` |
 | Emitter → VM | `Bytecode` | `instructions: Vec<u8>`, `constants: Vec<Value>`, `location_map: LocationMap`, `symbol_names: HashMap<u32, String>`, `inline_caches: HashMap<usize, CacheEntry>` |
 | VM → caller | `Value` | NaN-boxed 8-byte runtime value |
+| Stream primitive → Scheduler | `(SIG_IO, IoRequest)` | `IoOp`, port `Value` |
+| Scheduler → Backend | `IoRequest` | `IoOp`, port `Value` |
+| Backend → Scheduler | `(SignalBits, Value)` | Result or error |
 
 **What is preserved across the full pipeline:**
 
@@ -89,6 +92,7 @@ bytecode. Error messages include file:line:col information.
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed) |
 | `effects` | Effect type (`Pure`, `Yields`, `Polymorphic`) |
+| `io` | I/O request types (`IoRequest`, `IoOp`) and backends (`SyncBackend`) |
 | `lint` | Diagnostic types and lint rules (pipeline-agnostic) |
 | `symbols` | Symbol index types for IDE features (pipeline-agnostic) |
 | `primitives` | Built-in functions |
@@ -126,6 +130,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 | Path | Contains |
 |------|----------|
 | `src/` | Core interpreter/compiler |
+| `src/io/` | I/O request types and backends |
 | `src/lsp/` | Language server protocol implementation |
 | `examples/` | Executable semantics documentation |
 | `tests/` | Unit, integration, property tests |
@@ -221,7 +226,8 @@ Things that look wrong but aren't:
   list functions and affects `demos/docgen/` and `examples/`.
 - Signal bits are partitioned: Bits 0-2 are user-facing (error, yield, debug),
   Bits 3-8 are VM-internal (resume, FFI, propagate, cancel, query, halt),
-  Bits 9-15 are reserved, and Bits 16-31 are for user-defined signal types.
+  Bit 9 is SIG_IO (I/O request to scheduler), Bits 10-15 are reserved,
+  and Bits 16-31 are for user-defined signal types.
   See `src/value/fiber.rs` lines 138-165 for the constants and partitioning
   comment.
 - Destructuring uses **silent nil semantics**: missing values become `nil`,

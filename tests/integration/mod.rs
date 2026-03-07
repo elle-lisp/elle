@@ -131,6 +131,9 @@ mod parameters {
 mod ports {
     include!("ports.rs");
 }
+mod io {
+    include!("io.rs");
+}
 mod jit_yield {
     include!("jit_yield.rs");
 }
