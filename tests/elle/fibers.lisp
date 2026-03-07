@@ -239,5 +239,333 @@
 (let ([c (fiber/new (fn [] (fiber/signal 2 -20)) 2)])
   (let ([b (fiber/new (fn [] (+ (fiber/resume c) 30)) 0)])
     (let ([a (fiber/new (fn [] (+ (fiber/resume b) -5)) 0)])
-      (assert-eq (fiber/resume a) 5
-        "3-level nested: -20 + 30 + -5 = 5"))))
+       (assert-eq (fiber/resume a) 5
+         "3-level nested: -20 + 30 + -5 = 5"))))
+
+# ============================================================================
+# Fiber child chain wiring (from integration/fibers.rs)
+# ============================================================================
+
+# test_fiber_child_nil_before_resume
+(begin
+  (let ((f (fiber/new (fn [] 42) 0)))
+    (assert-eq (fiber/child f) nil "fiber child: nil before resume")))
+
+# ============================================================================
+# Fiber propagate
+# ============================================================================
+
+# test_fiber_propagate_yield
+(begin
+  (let ((inner (fiber/new (fn [] (fiber/signal 2 99)) 2)))
+    (let ((outer (fiber/new
+                   (fn []
+                     (fiber/resume inner)
+                     (fiber/propagate inner))
+                   2)))
+      (fiber/resume outer)
+      (assert-true true "fiber propagate yield"))))
+
+# ============================================================================
+# Fiber cancel
+# ============================================================================
+
+# test_fiber_cancel_suspended_fiber
+(begin
+  (let ((f (fiber/new (fn [] (fiber/signal 2 "waiting") 99) 3)))
+    (fiber/resume f)
+    (fiber/cancel f "cancelled")
+    (assert-eq (keyword->string (fiber/status f)) "error"
+      "fiber cancel: suspended fiber becomes error")))
+
+# test_fiber_cancel_new_fiber
+(begin
+  (let ((f (fiber/new (fn [] 42) 1)))
+    (fiber/cancel f "never started")
+    (assert-eq (keyword->string (fiber/status f)) "error"
+      "fiber cancel: new fiber becomes error")))
+
+# test_fiber_cancel_returns_error_value
+(begin
+  (let ((f (fiber/new (fn [] 42) 1)))
+    (let ((result (fiber/cancel f "injected")))
+      (assert-eq result "injected" "fiber cancel: returns error value"))))
+
+# ============================================================================
+# Error macro arity
+# ============================================================================
+
+# test_error_no_args
+(begin
+  (let (([ok? val] (protect (error))))
+    (assert-false ok? "error no args: signals error")
+    (assert-eq val nil "error no args: value is nil")))
+
+# test_error_with_value
+(begin
+  (let (([ok? val] (protect (error :boom))))
+    (assert-false ok? "error with value: signals error")
+    (assert-eq val :boom "error with value: value is :boom")))
+
+# ============================================================================
+# Fiber cancel default nil and cancel alias
+# ============================================================================
+
+# test_fiber_cancel_default_nil
+(begin
+  (let ((f (fiber/new (fn [] 42) 1)))
+    (fiber/cancel f)
+    (assert-eq (fiber/value f) nil "fiber cancel: default nil")))
+
+# test_cancel_alias_works
+(begin
+  (let ((f (fiber/new (fn [] 42) 1)))
+    (cancel f "stopped")
+    (assert-eq (fiber/value f) "stopped" "cancel alias: works")))
+
+# test_cancel_alias_default_nil
+(begin
+  (let ((f (fiber/new (fn [] 42) 1)))
+    (cancel f)
+    (assert-eq (fiber/value f) nil "cancel alias: default nil")))
+
+# ============================================================================
+# Basic fiber resume still works
+# ============================================================================
+
+# test_fiber_resume_basic
+(begin
+  (let ((f (fiber/new (fn [] 42) 0)))
+    (assert-eq (fiber/resume f) 42 "fiber resume: basic")))
+
+# test_fiber_yield_and_resume
+(begin
+  (let ((f (fiber/new (fn [] (fiber/signal 2 10) 20) 2)))
+    (assert-eq (+ (fiber/resume f) (fiber/resume f)) 30
+      "fiber yield and resume: 10 + 20 = 30")))
+
+# test_fiber_error_caught_by_mask
+(begin
+  (let ((f (fiber/new (fn [] (fiber/signal 1 "oops")) 1)))
+    (assert-eq (fiber/resume f) "oops"
+      "fiber error caught by mask")))
+
+# test_fiber_error_propagates_without_mask
+(begin
+  (assert-err (fn []
+    (let ((f (fiber/new (fn [] (fiber/signal 1 "oops")) 0)))
+      (fiber/resume f)))
+    "fiber error propagates without mask"))
+
+# ============================================================================
+# Fiber propagate preserving child chain
+# ============================================================================
+
+# test_fiber_propagate_preserves_child_chain
+(begin
+  (let ((inner (fiber/new (fn [] (fiber/signal 1 "err")) 1)))
+    (let ((outer (fiber/new
+                   (fn []
+                     (fiber/resume inner)
+                     (fiber/propagate inner))
+                   1)))
+      (fiber/resume outer)
+      (assert-eq (fiber? (fiber/child outer)) true
+        "fiber propagate: child chain preserved"))))
+
+# test_fiber_propagate_child_identity
+(begin
+  (let ((inner (fiber/new (fn [] (fiber/signal 2 99)) 2)))
+    (let ((outer (fiber/new
+                   (fn []
+                     (fiber/resume inner)
+                     (fiber/propagate inner))
+                   2)))
+      (fiber/resume outer)
+      (assert-eq (identical? inner (fiber/child outer)) true
+        "fiber propagate: child identity preserved"))))
+
+# ============================================================================
+# Fiber resume and cancel in tail position
+# ============================================================================
+
+# test_fiber_resume_in_tail_position
+(begin
+  (let ((inner (fiber/new (fn [] 42) 0)))
+    (let ((outer (fiber/new (fn [] (fiber/resume inner)) 0)))
+      (assert-eq (fiber/resume outer) 42
+        "fiber resume: tail position"))))
+
+# test_fiber_resume_yield_in_tail_position
+(begin
+  (let ((inner (fiber/new (fn [] (fiber/signal 2 10) 20) 2)))
+    (let ((outer (fiber/new (fn [] (fiber/resume inner)) 0)))
+      (assert-eq (fiber/resume outer) 10
+        "fiber resume yield: tail position"))))
+
+# test_fiber_cancel_in_tail_position
+(begin
+  (let ((target (fiber/new (fn [] 42) 1)))
+    (let ((canceller (fiber/new
+                       (fn [] (fiber/cancel target "cancelled"))
+                       0)))
+      (fiber/resume canceller)
+      (assert-true true "fiber cancel: tail position"))))
+
+# test_fiber_cancel_suspended_in_tail_position
+(begin
+  (let ((target (fiber/new (fn [] (fiber/signal 2 0) 99) 3)))
+    (fiber/resume target)
+    (let ((canceller (fiber/new
+                       (fn [] (fiber/cancel target "stop"))
+                       0)))
+      (fiber/resume canceller)
+      (assert-eq (keyword->string (fiber/status target)) "error"
+        "fiber cancel suspended: tail position"))))
+
+# ============================================================================
+# 3-level nested fiber resume (from integration/fibers.rs)
+# ============================================================================
+
+# test_three_level_nested_fiber_resume
+(begin
+  (let ((c (fiber/new (fn [] (fiber/signal 2 10)) 2)))
+    (let ((b (fiber/new
+               (fn []
+                 (+ (fiber/resume c) 5))
+               0)))
+      (let ((a (fiber/new
+                 (fn []
+                   (+ (fiber/resume b) 1))
+                 0)))
+        (assert-eq (fiber/resume a) 16
+          "3-level nested fiber: 10 + 5 + 1 = 16")))))
+
+# test_three_level_nested_fiber_error_propagation
+(begin
+  (let ((c (fiber/new (fn [] (fiber/signal 1 "deep error")) 0)))
+    (let ((b (fiber/new
+               (fn [] (fiber/resume c))
+               0)))
+      (let ((a (fiber/new
+                 (fn [] (fiber/resume b))
+                 1)))
+        (fiber/resume a)
+        (assert-true true "3-level nested fiber: error propagation")))))
+
+# ============================================================================
+# Fiber parent and child identity
+# ============================================================================
+
+# test_fiber_parent_identity
+(begin
+  (let ((f (fiber/new (fn [] 42) 0)))
+    (let ((outer (fiber/new
+                   (fn []
+                     (fiber/resume f)
+                     42)
+                   0)))
+      (fiber/resume outer)
+      (assert-eq (identical? (fiber/parent f) (fiber/parent f)) true
+        "fiber parent: identity preserved"))))
+
+# test_fiber_child_identity
+(begin
+  (let ((inner (fiber/new (fn [] (fiber/signal 1 "err")) 0)))
+    (let ((outer (fiber/new
+                   (fn []
+                     (fiber/resume inner)
+                     42)
+                   1)))
+      (fiber/resume outer)
+      (assert-eq (identical? (fiber/child outer) (fiber/child outer)) true
+        "fiber child: identity preserved"))))
+
+# ============================================================================
+# Issue #299: caught SIG_ERROR status and resumability
+# ============================================================================
+
+# test_caught_sig_error_leaves_fiber_suspended
+(begin
+  (let ((f (fiber/new (fn [] (fiber/signal 1 "oops") "recovered") 1)))
+    (fiber/resume f)
+    (assert-eq (keyword->string (fiber/status f)) "suspended"
+      "caught SIG_ERROR: leaves fiber suspended")))
+
+# test_caught_sig_error_fiber_is_resumable
+(begin
+  (let ((f (fiber/new (fn [] (fiber/signal 1 "oops") "recovered") 1)))
+    (fiber/resume f)
+    (assert-eq (fiber/resume f) "recovered"
+      "caught SIG_ERROR: fiber is resumable")))
+
+# test_cancel_always_produces_error_status
+(begin
+  (let ((f (fiber/new (fn [] (fiber/signal 2 "waiting") 99) 3)))
+    (fiber/resume f)
+    (fiber/cancel f "stop")
+    (assert-eq (keyword->string (fiber/status f)) "error"
+      "cancel: always produces error status")))
+
+# ============================================================================
+# Fiber with signal parameter (#346)
+# ============================================================================
+
+# test_fiber_closure_with_signal_parameter
+(begin
+  (let ((f (fiber/new (fn (s) (+ s 42)) 0)))
+    (assert-eq (fiber/resume f 8) 50
+      "fiber signal parameter: 8 + 42 = 50")))
+
+# test_fiber_signal_parameter_with_valid_bits
+(begin
+  (let ((f (fiber/new (fn (s) (fiber/signal s 42)) 2)))
+    (fiber/resume f 2)
+    (assert-eq (fiber/value f) 42
+      "fiber signal parameter: valid bits")))
+
+# test_fiber_closure_with_resume_value_as_parameter
+(begin
+  (let ((f (fiber/new (fn (x) (* x x)) 0)))
+    (assert-eq (fiber/resume f 7) 49
+      "fiber resume value as parameter: 7 * 7 = 49")))
+
+# test_fiber_zero_param_closure_still_works
+(begin
+  (let ((f (fiber/new (fn [] 42) 0)))
+    (assert-eq (fiber/resume f) 42
+      "fiber zero param closure: still works")))
+
+# ============================================================================
+# Issue #415: letrec binding reads as nil after fiber yield/resume
+# ============================================================================
+
+# test_letrec_binding_survives_fiber_yield_resume
+(begin
+  (let* ((f (fiber/new (fn []
+                  (letrec ((go (fn (n)
+                              (fiber/signal 2 n)
+                              (go (+ n 1)))))
+                    (go 0)))
+              2)))
+    (assert-eq (fiber/resume f) 0 "letrec binding: first yield")
+    (assert-eq (fiber/resume f) 1 "letrec binding: second yield")
+    (assert-eq (fiber/resume f) 2 "letrec binding: third yield")))
+
+# test_tail_call_then_signal_preserves_state
+(begin
+  (defn helper (n)
+    (fiber/signal 2 n)
+    (helper (+ n 10)))
+  (let* ((f (fiber/new (fn [] (helper 1)) 2)))
+    (assert-eq (fiber/resume f) 1 "tail call signal: first")
+    (assert-eq (fiber/resume f) 11 "tail call signal: second")
+    (assert-eq (fiber/resume f) 21 "tail call signal: third")))
+
+# test_multiple_tail_calls_before_signal
+(begin
+  (defn signaler (n) (fiber/signal 2 n) (signaler (+ n 1)))
+  (defn bouncer (n) (signaler n))
+  (let* ((f (fiber/new (fn [] (bouncer 100)) 2)))
+    (assert-eq (fiber/resume f) 100 "multiple tail calls: first")
+    (assert-eq (fiber/resume f) 101 "multiple tail calls: second")))

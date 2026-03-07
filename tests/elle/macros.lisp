@@ -504,3 +504,216 @@
 (begin
   (let* ((x 0) (y (->> x (- 0))))
     (assert-eq y 0 "let*+thread-last zero")))
+
+# ============================================================================
+# Macro hygiene tests (migrated from tests/integration/hygiene.rs)
+# ============================================================================
+
+# SECTION 1: Macro hygiene — no accidental capture
+
+# The swap macro introduces a `tmp` binding. The caller also has `tmp`.
+# The macro's `tmp` must not shadow the caller's `tmp`.
+(begin
+  (defmacro my-swap (a b)
+    `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+
+  (let ((tmp 10) (x 1) (y 2))
+    (my-swap x y)
+    (assert-eq tmp 10 "test_macro_no_capture")))
+
+# The macro introduces an internal binding. The caller should not
+# be able to see it.
+(begin
+  (defmacro with-internal (body)
+    `(let ((internal-var 42)) ,body))
+
+  (assert-eq (with-internal (+ 1 2)) 3 "test_macro_no_leak"))
+
+# Two different macros both introduce `tmp`. They must not interfere.
+(begin
+  (defmacro add-tmp-a (x)
+    `(let ((tmp ,x)) (+ tmp 1)))
+
+  (defmacro add-tmp-b (x)
+    `(let ((tmp ,x)) (+ tmp 2)))
+
+  (assert-eq (+ (add-tmp-a 10) (add-tmp-b 20)) 33 "test_nested_macro_hygiene"))
+
+# SECTION 2: Non-macro code unchanged
+
+# Code without macros should work identically.
+(begin
+  (let ((x 10) (y 20))
+    (assert-eq (+ x y) 30 "test_non_macro_code_unchanged")))
+
+# Normal shadowing (no macros) should still work.
+(begin
+  (let ((x 10))
+    (let ((x 20))
+      (assert-eq x 20 "test_non_macro_shadowing_unchanged"))))
+
+# SECTION 3: Macro argument resolution
+
+# Macro argument variable reference resolves to the caller's binding.
+(begin
+  (defmacro double (x)
+    `(+ ,x ,x))
+
+  (let ((val 7))
+    (assert-eq (double val) 14 "test_macro_with_expression_arg")))
+
+# A macro-generated closure should capture a call-site variable correctly.
+(begin
+  (defmacro make-adder (n)
+    `(fn (x) (+ x ,n)))
+
+  (let ((amount 5))
+    (let ((f (make-adder amount)))
+      (assert-eq (f 10) 15 "test_macro_closure_captures_callsite"))))
+
+# SECTION 4: Macro with conditional body (regression)
+
+# This was a regression: wrapping false in a syntax object made it truthy.
+# The hybrid wrapping approach (atoms via Quote, compounds via SyntaxLiteral)
+# fixes this.
+(begin
+  (defmacro when-true (cond body)
+    `(if ,cond ,body nil))
+
+  (assert-eq (when-true false 42) nil "test_macro_with_conditional_body_regression"))
+
+(begin
+  (defmacro when-true2 (cond body)
+    `(if ,cond ,body nil))
+
+  (assert-eq (when-true2 true 42) 42 "test_macro_with_conditional_body_true"))
+
+# SECTION 5: Swap macro end-to-end
+
+# Verify the swap macro actually swaps values, not just that it's hygienic.
+(begin
+  (defmacro my-swap2 (a b)
+    `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+
+  (let ((x 1) (y 2))
+    (my-swap2 x y)
+    (assert-eq (list x y) (list 2 1) "test_swap_actually_swaps")))
+
+# The real hygiene test: swap when caller has a variable named `tmp`.
+(begin
+  (defmacro my-swap3 (a b)
+    `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+
+  (let ((tmp 100) (x 1) (y 2))
+    (my-swap3 x y)
+    (assert-eq (list tmp x y) (list 100 2 1) "test_swap_with_same_named_tmp")))
+
+# SECTION 6: gensym returns symbols (not strings)
+
+# gensym should return a symbol that works in quasiquote templates.
+# This was broken (#306): gensym returned a string, producing
+# string literals where symbols were needed.
+(begin
+  (defmacro with-temp (body)
+    (let ((tmp (gensym "tmp")))
+      `(let ((,tmp 42)) ,body)))
+
+  (assert-eq (with-temp (+ 1 2)) 3 "test_gensym_in_macro"))
+
+# Macro A expands to code that invokes macro B, passing A's arguments
+# through to B. Arguments from A's call site must retain their scopes
+# through B's expansion. This exercises the Value::syntax round-trip
+# for nested expansions.
+(begin
+  (defmacro inner-add (x y)
+    `(+ ,x ,y))
+
+  (defmacro outer-add (a b)
+    `(inner-add ,a ,b))
+
+  (let ((x 10) (y 20))
+    (assert-eq (outer-add x y) 30 "test_nested_macro_scope_preservation")))
+
+# Two gensym calls produce different symbols, so two macro
+# expansions don't interfere.
+(begin
+  (defmacro bind-val (val body)
+    (let ((g (gensym "v")))
+      `(let ((,g ,val)) ,body)))
+
+  (assert-eq (bind-val 10 (bind-val 20 (+ 1 2))) 3 "test_gensym_produces_unique_bindings"))
+
+# SECTION 7: datum->syntax — hygiene escape hatch
+
+# datum->syntax creates an `it` binding visible at the call site.
+# This is the canonical anaphoric macro use case.
+(begin
+  (defmacro aif (test then else)
+    `(let ((,(datum->syntax test 'it) ,test))
+       (if ,(datum->syntax test 'it) ,then ,else)))
+
+  (assert-eq (aif 42 it 0) 42 "test_anaphoric_if"))
+
+# When the test is falsy, the else branch is taken.
+(begin
+  (defmacro aif2 (test then else)
+    `(let ((,(datum->syntax test 'it) ,test))
+       (if ,(datum->syntax test 'it) ,then ,else)))
+
+  (assert-eq (aif2 false 42 0) 0 "test_anaphoric_if_false_branch"))
+
+# datum->syntax works when the test is a compound expression.
+(begin
+  (defmacro aif3 (test then else)
+    `(let ((,(datum->syntax test 'it) ,test))
+       (if ,(datum->syntax test 'it) ,then ,else)))
+
+  (assert-eq (aif3 (+ 1 2) (+ it 10) 0) 13 "test_anaphoric_if_with_expression"))
+
+# An outer `it` binding should not be affected by the macro's `it`.
+(begin
+  (defmacro aif4 (test then else)
+    `(let ((,(datum->syntax test 'it) ,test))
+       (if ,(datum->syntax test 'it) ,then ,else)))
+
+  (let ((it 999))
+    (assert-eq (aif4 42 it 0) 42 "test_anaphoric_if_no_capture_of_outer_it")))
+
+# datum->syntax with a symbol datum creates a binding visible at call site.
+(begin
+  (defmacro bind-as-x (val body)
+    `(let ((,(datum->syntax val 'x) ,val)) ,body))
+
+  (assert-eq (bind-as-x 100 (+ x 1)) 101 "test_datum_to_syntax_with_symbol"))
+
+# When the context IS a syntax object (symbol argument), datum->syntax
+# copies its scopes. The scope_exempt flag prevents the intro scope from
+# being added, so the binding resolves correctly.
+(begin
+  (defmacro bind-it (name val body)
+    `(let ((,(datum->syntax name 'it) ,val)) ,body))
+
+  (assert-eq (bind-it x 42 (+ it 1)) 43 "test_datum_to_syntax_with_syntax_context"))
+
+# datum->syntax with a list datum — set_scopes_recursive must recurse
+# into the list structure, not just set scopes on the outer node.
+(begin
+  (defmacro inject-list (ctx)
+    `(let ((,(datum->syntax ctx 'result) (list 1 2 3))) result))
+
+  (assert-eq (inject-list x) (list 1 2 3) "test_datum_to_syntax_with_compound_datum"))
+
+# SECTION 8: syntax->datum — scope stripping
+
+# syntax->datum on a syntax object returns the plain value.
+# Inside a macro, the argument is a syntax object; stripping it
+# gives the underlying symbol/value.
+(begin
+  (defmacro get-datum (x)
+    (syntax->datum x))
+
+  (assert-eq (get-datum 42) 42 "test_syntax_to_datum_strips_scopes"))
+
+# syntax->datum on a non-syntax value returns it unchanged.
+(begin
+  (assert-eq (syntax->datum 42) 42 "test_syntax_to_datum_non_syntax_passthrough"))

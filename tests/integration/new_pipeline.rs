@@ -3,10 +3,8 @@
 // These tests verify that code compiled through the new pipeline
 // produces correct results when executed.
 
-use crate::common::eval_source;
 use elle::pipeline::compile;
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, VM};
+use elle::SymbolTable;
 
 /// Helper that compiles but doesn't execute (for testing compilation only)
 fn compiles(input: &str) -> bool {
@@ -192,18 +190,6 @@ fn test_call_nested() {
 #[test]
 fn test_while_simple() {
     assert!(compiles("(while false nil)"));
-}
-
-#[test]
-fn test_each_simple() {
-    let result = eval_source("(let ((sum 0)) (each x '(1 2 3) (set sum (+ sum x))) sum)");
-    assert_eq!(result.unwrap().as_int().unwrap(), 6);
-}
-
-#[test]
-fn test_each_with_in() {
-    let result = eval_source("(let ((sum 0)) (each x in '(1 2 3) (set sum (+ sum x))) sum)");
-    assert_eq!(result.unwrap().as_int().unwrap(), 6);
 }
 
 // ============ Sequence Tests ============
@@ -520,51 +506,4 @@ fn test_and_short_circuit() {
 #[test]
 fn test_or_short_circuit() {
     assert!(compiles("(or false true false)"));
-}
-
-#[test]
-fn test_trace_vm_execution() {
-    // Enable some form of debug if available
-    std::env::set_var("ELLE_DEBUG", "1");
-
-    let code = r#"(begin
-        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
-        (def my-fold (fn (f init lst)
-            (if (nil? lst)
-                init
-                (my-fold f (f init (first lst)) (rest lst)))))
-        (my-fold process 0 (list 1)))"#; // Only one element for simpler trace
-
-    let result = eval_source(code);
-    println!("Result: {:?}", result);
-
-    // Also try with the non-begin version to compare
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
-
-    // Define process
-    let code2a = r#"(def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))"#;
-    let results = elle::compile_all(code2a, &mut symbols).expect("compile failed");
-    for r in &results {
-        vm.execute(&r.bytecode).expect("exec failed");
-    }
-
-    // Define my-fold
-    let code2b = r#"(def my-fold (fn (f init lst)
-            (if (nil? lst)
-                init
-                (my-fold f (f init (first lst)) (rest lst)))))"#;
-    let results = elle::compile_all(code2b, &mut symbols).expect("compile failed");
-    for r in &results {
-        vm.execute(&r.bytecode).expect("exec failed");
-    }
-
-    // Call it
-    let code2c = r#"(my-fold process 0 (list 1))"#;
-    let results = elle::compile_all(code2c, &mut symbols).expect("compile failed");
-    for r in &results {
-        let res = vm.execute(&r.bytecode);
-        println!("Multi-form result: {:?}", res);
-    }
 }

@@ -149,3 +149,98 @@ fn chan() {
 fn io() {
     run_elle_script("io");
 }
+
+#[test]
+fn advanced() {
+    run_elle_script("advanced");
+}
+
+#[test]
+fn brackets() {
+    run_elle_script("brackets");
+}
+
+#[test]
+fn lexical_scope() {
+    run_elle_script("lexical-scope");
+}
+
+#[test]
+fn primitives() {
+    run_elle_script("primitives");
+}
+
+#[test]
+fn pipeline() {
+    run_elle_script("pipeline");
+}
+
+#[test]
+fn jit_yield() {
+    run_elle_script("jit-yield");
+}
+
+#[test]
+fn buffer() {
+    run_elle_script("buffer");
+}
+
+#[test]
+fn bytes() {
+    run_elle_script("bytes");
+}
+
+#[test]
+fn table_keys() {
+    run_elle_script("table-keys");
+}
+
+#[test]
+fn environment() {
+    run_elle_script("environment");
+}
+
+#[test]
+fn concurrency() {
+    run_elle_script("concurrency");
+}
+
+#[test]
+fn ffi() {
+    run_elle_script("ffi");
+}
+
+#[test]
+fn glob() {
+    run_elle_script("glob");
+}
+
+#[test]
+fn fn_flow() {
+    run_elle_script("fn-flow");
+}
+
+#[test]
+fn fn_graph() {
+    run_elle_script("fn-graph");
+}
+
+#[test]
+fn fn_graph_2() {
+    run_elle_script("fn-graph-2");
+}
+
+#[test]
+fn fn_graph_3() {
+    run_elle_script("fn-graph-3");
+}
+
+#[test]
+fn arena() {
+    run_elle_script("arena");
+}
+
+#[test]
+fn new_pipeline() {
+    run_elle_script("new-pipeline");
+}
