@@ -58,17 +58,17 @@
 # 2. Nested try/catch
 # ========================================
 
-# Errors can be caught at any level. An inner catch can re-raise.
+# Errors can be caught at any level. An inner catch can re-signal.
 (def outer-result
   (try
     (try
       (error {:error :inner :message "from inside"})
       (catch e
-        # Caught the inner error, now raise a new one
+        # Caught the inner error, now signal a new one
         (error {:error :wrapped :message (string/join (list "wrapped: " (get e :message)) "")})))
     (catch e e)))
-(display "  nested re-raise: ") (print outer-result)
-(assert-eq (get outer-result :error) :wrapped "nested: outer catches re-raised error")
+(display "  nested re-signal: ") (print outer-result)
+(assert-eq (get outer-result :error) :wrapped "nested: outer catches re-signaled error")
 
 # Built-in errors (like division by zero) are also catchable
 (def div-err (try (/ 1 0) (catch e e)))
@@ -243,7 +243,7 @@
 # Attempting to resume an errored fiber fails
 (def [ok2? err2] (protect (fiber/resume f0)))
 (display "  resume errored fiber: ") (print err2)
-(assert-false ok2? "resume errored: raises an error")
+(assert-false ok2? "resume errored: signals an error")
 (assert-eq (get err2 :error) :error "resume errored: error kind is :error")
 
 # The fiber is still in :error — nothing changed.
@@ -288,7 +288,7 @@
 # Resuming a cancelled fiber fails the same way as any errored fiber.
 (def [ok3? err3] (protect (fiber/resume f2)))
 (display "  resume cancelled fiber: ") (print err3)
-(assert-false ok3? "resume cancelled: raises an error")
+(assert-false ok3? "resume cancelled: signals an error")
 (assert-eq (get err3 :error) :error "resume cancelled: error kind is :error")
 
 

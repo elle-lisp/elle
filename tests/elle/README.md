@@ -51,7 +51,7 @@ Example test file:
 | `assert-eq` | Assert equality |
 | `assert-true` | Assert value is truthy |
 | `assert-false` | Assert value is falsy |
-| `assert-error` | Assert expression raises error |
+| `assert-error` | Assert expression signals error |
 | `assert-match` | Assert value matches pattern |
 
 ## Differences from Examples

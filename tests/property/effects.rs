@@ -4,7 +4,7 @@
 // - Effect combine is commutative, associative, and idempotent
 // - Effect::none() is the identity element
 // - Propagates field is correctly ORed during combine
-// - Effect predicates (may_yield, may_raise, may_suspend, etc.) work correctly
+// - Effect predicates (may_yield, may_error, may_suspend, etc.) work correctly
 // Converted from property tests to deterministic unit tests with concrete cases.
 
 use elle::effects::Effect;
@@ -381,21 +381,21 @@ fn polymorphic_propagates_correct_param_7() {
 }
 
 #[test]
-fn polymorphic_raises_has_error_bit_0() {
+fn polymorphic_errors_has_error_bit_0() {
     let effect = Effect::polymorphic_errors(0);
     assert!(effect.may_error());
     assert!(effect.is_polymorphic());
 }
 
 #[test]
-fn polymorphic_raises_has_error_bit_1() {
+fn polymorphic_errors_has_error_bit_1() {
     let effect = Effect::polymorphic_errors(1);
     assert!(effect.may_error());
     assert!(effect.is_polymorphic());
 }
 
 #[test]
-fn polymorphic_raises_has_error_bit_7() {
+fn polymorphic_errors_has_error_bit_7() {
     let effect = Effect::polymorphic_errors(7);
     assert!(effect.may_error());
     assert!(effect.is_polymorphic());
@@ -421,14 +421,14 @@ fn yields_effect_may_yield() {
 }
 
 #[test]
-fn raises_effect_may_raise() {
+fn errors_effect_may_error() {
     let effect = Effect::errors();
     assert!(effect.may_error());
     assert!(!effect.may_yield());
 }
 
 #[test]
-fn yields_raises_has_both() {
+fn yields_errors_has_both() {
     let effect = Effect::yields_errors();
     assert!(effect.may_yield());
     assert!(effect.may_error());

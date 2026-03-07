@@ -221,7 +221,7 @@ fn prim_is_port(args: &[Value]) -> (SignalBits, Value) {
 /// (port/open? port) → boolean
 ///
 /// Returns true if the port is open, false if closed.
-/// Raises :type-error if argument is not a port.
+/// Signals :type-error if argument is not a port.
 fn prim_is_port_open(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -322,7 +322,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_is_port_open,
         effect: Effect::errors(),
         arity: Arity::Exact(1),
-        doc: "Check if a port is open. Raises :type-error on non-port.",
+        doc: "Check if a port is open. Signals :type-error on non-port.",
         params: &["port"],
         category: "port",
         example: "(port/open? (port/stdout)) #=> true",

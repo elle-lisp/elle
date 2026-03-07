@@ -203,7 +203,7 @@ These must remain true. Violating them breaks the system:
 
 5. **Errors propagate.** Functions return `LResult<T>`. Silent failure is
    forbidden. If you catch an error, you must either handle it meaningfully or
-   re-raise it.
+   propagate it.
 
 ## Intentional oddities
 

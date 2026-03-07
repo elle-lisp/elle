@@ -34,7 +34,7 @@ Each predicate asks a specific question. No vague "is_pure".
 |-----------|---------|
 | `may_suspend()` | Can suspend execution? (yield, debug, I/O, or polymorphic) |
 | `may_yield()` | Can yield? (SIG_YIELD) |
-| `may_raise()` | Can raise an error? (SIG_ERROR) |
+| `may_error()` | Can signal an error? (SIG_ERROR) |
 | `may_ffi()` | Calls foreign code? (SIG_FFI) |
 | `may_io()` | May perform I/O? (SIG_IO) |
 | `may_halt()` | Can halt? (SIG_HALT) |

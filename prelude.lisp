@@ -51,7 +51,7 @@
 (defmacro unless (test & body)
   `(if ,test nil (begin ,;body)))
 
-## error - raise a fiber error signal
+## error - signal a fiber error
 ## (error) => (fiber/signal 1 nil)
 ## (error value) => (fiber/signal 1 value)
 (defmacro error (& args)
@@ -86,7 +86,7 @@
      [(= (fiber/status f) :dead) (fiber/value f)]))
 
 ## defer - run cleanup after body regardless of success/failure
-## If the body errors, cleanup runs then the error is re-raised.
+## If the body errors, cleanup runs then the error is propagated.
 (defmacro defer (cleanup & body)
   `(let ((f (fiber/new (fn () ,;body) 1)))
      (fiber/resume f nil)

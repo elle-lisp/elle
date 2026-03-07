@@ -269,7 +269,7 @@
           "headers": ["Function", "Description"],
           "rows": [
             ["(try body (catch (e) handler) (finally cleanup))", "Exception handling"],
-            ["(throw msg)", "Raise an exception"]
+            ["(throw msg)", "Signal an exception"]
           ]
         }
       ]

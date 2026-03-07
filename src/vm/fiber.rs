@@ -375,7 +375,7 @@ impl VM {
         self.resume_suspended(frames, resume_value)
     }
 
-    // ── SIG_PROPAGATE: re-raise caught signal ─────────────────────
+    // ── SIG_PROPAGATE: propagate caught signal ────────────────────
 
     /// Handle SIG_PROPAGATE from fiber/propagate (Call position).
     pub(super) fn handle_fiber_propagate_signal(

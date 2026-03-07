@@ -92,7 +92,7 @@ dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
 - `SIG_ERROR` → store `(SIG_ERROR, value)` in `fiber.signal`, push NIL
 - `SIG_YIELD` → store in `fiber.signal`, return yield
 - `SIG_RESUME` → dispatch to fiber handler
-- `SIG_PROPAGATE` → re-raise child fiber's signal, preserve child chain
+- `SIG_PROPAGATE` → propagate child fiber's signal, preserve child chain
 - `SIG_CANCEL` → inject error into target fiber
 - `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack
 

@@ -339,7 +339,7 @@ pub fn prim_spawn(args: &[Value]) -> (SignalBits, Value) {
 /// (join thread-handle)
 ///
 /// Blocks until the spawned thread completes and returns the actual Value result.
-/// If the thread produced an error, that error is re-raised.
+/// If the thread produced an error, that error is propagated.
 pub fn prim_join(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (

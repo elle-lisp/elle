@@ -938,7 +938,7 @@ Cleanup code runs here
 
 ### Creating and Throwing Exceptions
 
-Use `exception` to create exception values and `throw` to raise them:
+Use `exception` to create exception values and `throw` to signal them:
 
 ```janet
 (var my-error (exception "Invalid input" (table "code" 42)))

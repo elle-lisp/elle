@@ -641,7 +641,7 @@ fn test_empty_predicate_array() {
 
 #[test]
 fn test_fn_errors_on_pure_closure() {
-    // Identity function cannot raise
+    // Identity function cannot signal an error
     assert_eq!(
         eval_source("(fn/errors? (fn (x) x))").unwrap(),
         Value::FALSE

@@ -54,11 +54,11 @@ All tests verify algebraic laws on the Effect type:
 - `effect_propagates_combine` — Verifies propagates field is ORed
 - `polymorphic_effect_is_polymorphic` — Verifies polymorphic effect marking
 - `polymorphic_propagates_correct_param` — Verifies param propagation
-- `polymorphic_raises_has_error_bit` — Verifies error bit in polymorphic_raises
+- `polymorphic_errors_has_error_bit` — Verifies error bit in polymorphic_errors
 - `none_effect_is_not_yielding` — Verifies Effect::none() properties
 - `yields_effect_may_yield` — Verifies yields effect has yield bit
-- `raises_effect_may_raise` — Verifies raises effect has error bit
-- `yields_raises_has_both` — Verifies combined effect
+- `errors_effect_may_error` — Verifies errors effect has error bit
+- `yields_errors_has_both` — Verifies combined effect
 - `ffi_effect_may_ffi` — Verifies FFI effect
 - `halts_effect_may_halt` — Verifies halt effect
 

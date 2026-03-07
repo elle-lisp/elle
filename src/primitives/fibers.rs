@@ -14,7 +14,7 @@
 //! - fiber/mask: Get the fiber's signal mask
 //! - fiber/parent: Get parent fiber or nil
 //! - fiber/child: Get most recently resumed child fiber or nil
-//! - fiber/propagate: Re-raise caught signal preserving child chain
+//! - fiber/propagate: Propagate caught signal preserving child chain
 //! - fiber/cancel: Inject error into suspended fiber
 //! - fiber?: Type predicate
 
@@ -383,7 +383,7 @@ pub fn prim_fiber_child(args: &[Value]) -> (SignalBits, Value) {
 
 /// (fiber/propagate fiber) → suspends
 ///
-/// Re-raise a caught signal from a child fiber, preserving the child chain
+/// Propagate a caught signal from a child fiber, preserving the child chain
 /// for stack traces. The fiber must be in :error or :suspended status.
 ///
 /// Returns SIG_PROPAGATE — the VM sets parent.child = fiber and propagates
@@ -615,7 +615,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_fiber_propagate,
         effect: Effect::yields_errors(),
         arity: Arity::Exact(1),
-        doc: "Re-raise a caught signal from a child fiber, preserving the child chain",
+        doc: "Propagate a caught signal from a child fiber, preserving the child chain",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/propagate f)",

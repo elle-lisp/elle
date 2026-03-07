@@ -371,7 +371,7 @@
         {
           "type": "code",
           "language": "lisp",
-          "text": "(try\n  (/ 10 0)  ; This will raise an error\n  (catch (e)\n    (display \"Error: \")\n    (display e)\n    (newline))\n  (finally\n    (display \"Cleanup\")))"
+          "text": "(try\n  (/ 10 0)  ; This will signal an error\n  (catch (e)\n    (display \"Error: \")\n    (display e)\n    (newline))\n  (finally\n    (display \"Cleanup\")))"
         }
       ]
     },

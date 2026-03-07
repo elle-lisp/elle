@@ -104,18 +104,18 @@
     (fiber/propagate f)))
   "propagate rejects dead fiber (-100)")
 
-# propagate_succeeds_for_errored_fibers: propagate re-raises error
+# propagate_succeeds_for_errored_fibers: propagate re-signals error
 (assert-err (fn []
   (let ([f (fiber/new (fn [] (fiber/signal 1 99)) 1)])
     (fiber/resume f)
     (fiber/propagate f)))
-  "propagate re-raises error (99)")
+  "propagate re-signals error (99)")
 
 (assert-err (fn []
   (let ([f (fiber/new (fn [] (fiber/signal 1 -50)) 1)])
     (fiber/resume f)
     (fiber/propagate f)))
-  "propagate re-raises error (-50)")
+  "propagate re-signals error (-50)")
 
 # ============================================================================
 # Cancel rejects invalid states

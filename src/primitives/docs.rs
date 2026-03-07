@@ -295,7 +295,7 @@ pub(crate) fn register_builtin_docs(docs: &mut std::collections::HashMap<String,
         },
         Doc {
             name: "error",
-            doc: "Raise an error signal. The value can be anything; by convention a tuple [:kind \"message\"]. With no argument, signals nil.",
+            doc: "Signal an error. The value can be anything; by convention a tuple [:kind \"message\"]. With no argument, signals nil.",
             params: &["value?"],
             arity: Arity::Range(0, 1),
             effect: Effect::yields(),
