@@ -139,7 +139,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/monotonic",
         func: prim_clock_monotonic,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return seconds elapsed since process start (monotonic clock)",
         params: &[],
@@ -150,7 +150,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/realtime",
         func: prim_clock_realtime,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return seconds since Unix epoch (wall clock)",
         params: &[],
@@ -161,7 +161,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/cpu",
         func: prim_clock_cpu,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return thread CPU time in seconds",
         params: &[],

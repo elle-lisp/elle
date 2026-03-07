@@ -133,7 +133,7 @@ count of 10 within phase 4):
    `run_fixpoint`.)
 
 2. **Pre-scan for `(def name (fn ...))` patterns** via `prescan_forms()`.
-   For each match, seed `global_effects` with `Effect::none()` (optimistic —
+   For each match, seed `global_effects` with `Effect::inert()` (optimistic —
    assume pure) and extract syntactic arity into `global_arities`.
 
 3. **Pre-scan for `(def name ...)` patterns** via `prescan_forms()`. Track all
@@ -185,7 +185,7 @@ pub(super) fn prescan_forms(
 
 Unified pre-scan that processes all forms in a single pass, calling both
 `scan_define_lambda` and `scan_const_binding` for each form. Returns:
-- `global_effects`: `(def name (fn ...))` patterns seeded with `Effect::none()`
+- `global_effects`: `(def name (fn ...))` patterns seeded with `Effect::inert()`
 - `global_arities`: syntactic arities from lambda parameter lists
 - `immutable_globals`: all `(def name ...)` patterns
 
@@ -201,7 +201,7 @@ pub(super) fn scan_define_lambda(
 Matches expanded syntax of the form `(var/def name (fn ...))`. Returns the
 interned `SymbolId` and the syntactic arity (number of parameters, if the
 parameter list is a simple list). Used to seed the fixpoint loop with
-optimistic `Effect::none()` and known arities before analysis begins.
+optimistic `Effect::inert()` and known arities before analysis begins.
 
 This operates on **expanded** syntax — `defn` has already been desugared to
 `(def name (fn ...))` by the Expander.

@@ -63,7 +63,7 @@ pub(super) fn scan_const_binding(syntax: &Syntax, symbols: &mut SymbolTable) -> 
 ///
 /// Extracts:
 /// - Lambda definitions: `(def/var name (fn ...))` -> seed global_effects
-///   with `Effect::none()`
+///   with `Effect::inert()`
 /// - Arities: from lambda parameter lists
 /// - Const bindings: `(def name ...)` -> immutable_globals
 ///
@@ -83,7 +83,7 @@ pub(super) fn prescan_forms(
 
     for form in forms {
         if let Some((sym, arity)) = scan_define_lambda(form, symbols) {
-            global_effects.insert(sym, Effect::none());
+            global_effects.insert(sym, Effect::inert());
             if let Some(arity) = arity {
                 global_arities.insert(sym, arity);
             }

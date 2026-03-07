@@ -503,7 +503,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/new",
         func: prim_fiber_new,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Create a fiber from a closure with a signal mask",
         params: &["closure", "mask"],
@@ -536,7 +536,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/status",
         func: prim_fiber_status,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the fiber's lifecycle status (:new, :alive, :suspended, :dead, :error)",
         params: &["fiber"],
@@ -547,7 +547,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/value",
         func: prim_fiber_value,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the signal payload from the fiber's last signal",
         params: &["fiber"],
@@ -558,7 +558,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/bits",
         func: prim_fiber_bits,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the signal bits from the fiber's last signal",
         params: &["fiber"],
@@ -569,7 +569,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/mask",
         func: prim_fiber_mask,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the fiber's signal mask",
         params: &["fiber"],
@@ -580,7 +580,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber?",
         func: prim_is_fiber,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if a value is a fiber",
         params: &["value"],
@@ -591,7 +591,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/parent",
         func: prim_fiber_parent,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the parent fiber, or nil if none",
         params: &["fiber"],
@@ -602,7 +602,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/child",
         func: prim_fiber_child,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the most recently resumed child fiber, or nil if none",
         params: &["fiber"],
@@ -660,7 +660,7 @@ mod tests {
             num_locals: 0,
             num_captures: 0,
             constants: Rc::new(vec![Value::int(42)]),
-            effect: Effect::none(),
+            effect: Effect::inert(),
             cell_params_mask: 0,
             cell_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),

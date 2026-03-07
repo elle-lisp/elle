@@ -46,7 +46,7 @@ impl PrimitiveDef {
     pub const DEFAULT: PrimitiveDef = PrimitiveDef {
         name: "",
         func: _default_prim,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "",
         params: &[],

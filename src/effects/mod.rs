@@ -28,7 +28,7 @@ pub struct Effect {
 
 impl Default for Effect {
     fn default() -> Self {
-        Effect::none()
+        Effect::inert()
     }
 }
 
@@ -36,7 +36,7 @@ impl Default for Effect {
 
 impl Effect {
     /// No effects: does not signal, does not propagate.
-    pub const fn none() -> Self {
+    pub const fn inert() -> Self {
         Effect {
             bits: 0,
             propagates: 0,
@@ -121,13 +121,13 @@ impl Effect {
     pub fn combine_all(effects: impl IntoIterator<Item = Effect>) -> Effect {
         effects
             .into_iter()
-            .fold(Effect::none(), |a, b| a.combine(b))
+            .fold(Effect::inert(), |a, b| a.combine(b))
     }
 }
 
 // ── Predicates ──────────────────────────────────────────────────────
 //
-// Each predicate asks a specific question. No vague "is_pure".
+// Each predicate asks a specific question about capabilities.
 
 impl Effect {
     /// Can this function suspend execution?
@@ -170,26 +170,10 @@ impl Effect {
     }
 }
 
-// ── Deprecated aliases ──────────────────────────────────────────────
+// ── Constants ───────────────────────────────────────────────────────
 
 impl Effect {
-    /// Alias for `none()`. Deprecated — use `none()` or a specific
-    /// constructor instead.
-    pub const fn pure() -> Self {
-        Self::none()
-    }
-
-    /// Alias for `errors()`. Deprecated — use `errors()` directly.
-    pub const fn pure_errors() -> Self {
-        Self::errors()
-    }
-
-    /// Deprecated — use `!may_suspend()` or check specific capabilities.
-    pub const fn is_pure(&self) -> bool {
-        !self.may_suspend()
-    }
-
-    pub const PURE: Effect = Effect::none();
+    pub const INERT: Effect = Effect::inert();
     pub const YIELDS: Effect = Effect::yields();
 }
 
@@ -201,7 +185,7 @@ impl fmt::Display for Effect {
         } else if self.bits & SIG_YIELD != 0 {
             write!(f, "yields")?;
         } else {
-            write!(f, "none")?;
+            write!(f, "inert")?;
         }
 
         // Append capability flags
@@ -230,25 +214,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_effect_combine_none() {
-        assert_eq!(Effect::none().combine(Effect::none()), Effect::none());
+    fn test_effect_combine_inert() {
+        assert_eq!(Effect::inert().combine(Effect::inert()), Effect::inert());
     }
 
     #[test]
     fn test_effect_combine_yields() {
-        assert_eq!(Effect::none().combine(Effect::yields()), Effect::yields());
-        assert_eq!(Effect::yields().combine(Effect::none()), Effect::yields());
+        assert_eq!(Effect::inert().combine(Effect::yields()), Effect::yields());
+        assert_eq!(Effect::yields().combine(Effect::inert()), Effect::yields());
         assert_eq!(Effect::yields().combine(Effect::yields()), Effect::yields());
     }
 
     #[test]
     fn test_effect_combine_polymorphic() {
         assert_eq!(
-            Effect::none().combine(Effect::polymorphic(0)),
+            Effect::inert().combine(Effect::polymorphic(0)),
             Effect::polymorphic(0)
         );
         assert_eq!(
-            Effect::polymorphic(1).combine(Effect::none()),
+            Effect::polymorphic(1).combine(Effect::inert()),
             Effect::polymorphic(1)
         );
         // Polymorphic + Yields = both
@@ -275,18 +259,18 @@ mod tests {
     #[test]
     fn test_effect_combine_all() {
         assert_eq!(
-            Effect::combine_all([Effect::none(), Effect::none(), Effect::none()]),
-            Effect::none()
+            Effect::combine_all([Effect::inert(), Effect::inert(), Effect::inert()]),
+            Effect::inert()
         );
         assert_eq!(
-            Effect::combine_all([Effect::none(), Effect::yields(), Effect::none()]),
+            Effect::combine_all([Effect::inert(), Effect::yields(), Effect::inert()]),
             Effect::yields()
         );
     }
 
     #[test]
     fn test_may_suspend() {
-        assert!(!Effect::none().may_suspend());
+        assert!(!Effect::inert().may_suspend());
         assert!(!Effect::errors().may_suspend());
         assert!(Effect::yields().may_suspend());
         assert!(Effect::polymorphic(0).may_suspend());
@@ -299,27 +283,27 @@ mod tests {
 
     #[test]
     fn test_may_yield() {
-        assert!(!Effect::none().may_yield());
+        assert!(!Effect::inert().may_yield());
         assert!(Effect::yields().may_yield());
         assert!(!Effect::errors().may_yield());
     }
 
     #[test]
     fn test_may_error() {
-        assert!(!Effect::none().may_error());
+        assert!(!Effect::inert().may_error());
         assert!(Effect::errors().may_error());
         assert!(!Effect::yields().may_error());
         assert!(Effect::yields_errors().may_error());
 
         // Combining errors
-        let combined = Effect::none().combine(Effect::errors());
+        let combined = Effect::inert().combine(Effect::errors());
         assert!(combined.may_error());
         assert!(!combined.may_suspend());
     }
 
     #[test]
     fn test_may_ffi() {
-        assert!(!Effect::none().may_ffi());
+        assert!(!Effect::inert().may_ffi());
         assert!(Effect::ffi().may_ffi());
         assert!(Effect::ffi_errors().may_ffi());
     }
@@ -336,23 +320,23 @@ mod tests {
 
     #[test]
     fn test_is_polymorphic() {
-        assert!(!Effect::none().is_polymorphic());
+        assert!(!Effect::inert().is_polymorphic());
         assert!(Effect::polymorphic(0).is_polymorphic());
     }
 
     #[test]
     fn test_effect_display() {
-        assert_eq!(format!("{}", Effect::none()), "none");
+        assert_eq!(format!("{}", Effect::inert()), "inert");
         assert_eq!(format!("{}", Effect::yields()), "yields");
-        assert_eq!(format!("{}", Effect::errors()), "none+errors");
+        assert_eq!(format!("{}", Effect::errors()), "inert+errors");
         assert_eq!(format!("{}", Effect::yields_errors()), "yields+errors");
         assert_eq!(format!("{}", Effect::polymorphic(0)), "polymorphic(0)");
         assert_eq!(
             format!("{}", Effect::polymorphic_errors(0)),
             "polymorphic(0)+errors"
         );
-        assert_eq!(format!("{}", Effect::ffi()), "none+ffi");
-        assert_eq!(format!("{}", Effect::ffi_errors()), "none+errors+ffi");
+        assert_eq!(format!("{}", Effect::ffi()), "inert+ffi");
+        assert_eq!(format!("{}", Effect::ffi_errors()), "inert+errors+ffi");
     }
 
     #[test]
@@ -373,15 +357,8 @@ mod tests {
     }
 
     #[test]
-    fn test_deprecated_aliases() {
-        assert_eq!(Effect::pure(), Effect::none());
-        assert_eq!(Effect::pure_errors(), Effect::errors());
-        assert_eq!(Effect::PURE, Effect::none());
+    fn test_constants() {
+        assert_eq!(Effect::INERT, Effect::inert());
         assert_eq!(Effect::YIELDS, Effect::yields());
-        // is_pure() = !may_suspend()
-        assert!(Effect::none().is_pure());
-        assert!(Effect::errors().is_pure()); // errors doesn't suspend
-        assert!(!Effect::yields().is_pure());
-        assert!(!Effect::polymorphic(0).is_pure());
     }
 }

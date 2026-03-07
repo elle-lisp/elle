@@ -246,7 +246,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "random/seed",
         func: prim_random_seed,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Seed the PRNG for deterministic output",
         params: &["seed"],
@@ -257,7 +257,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "random/int",
         func: prim_random_int,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Range(0, 2),
         doc: "Random integer. No args: full range. One arg: 0..n. Two args: min..max.",
         params: &["[max-or-min]", "[max]"],
@@ -268,7 +268,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "random/float",
         func: prim_random_float,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Random float in [0, 1)",
         params: &[],
@@ -279,7 +279,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "random/bool",
         func: prim_random_bool,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Random boolean",
         params: &[],
@@ -290,7 +290,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "random/bytes",
         func: prim_random_bytes,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Generate a byte vector of the given length filled with random bytes",
         params: &["length"],
@@ -301,7 +301,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "random/shuffle",
         func: prim_random_shuffle,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Return a new array with elements shuffled randomly",
         params: &["collection"],
@@ -312,7 +312,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "random/choice",
         func: prim_random_choice,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Return a random element from an array or tuple",
         params: &["collection"],

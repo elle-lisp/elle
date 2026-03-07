@@ -20,12 +20,12 @@ impl Hir {
         Hir { kind, span, effect }
     }
 
-    /// Create a pure HIR node
-    pub fn pure(kind: HirKind, span: Span) -> Self {
+    /// Create an inert HIR node (no effects)
+    pub fn inert(kind: HirKind, span: Span) -> Self {
         Hir {
             kind,
             span,
-            effect: Effect::none(),
+            effect: Effect::inert(),
         }
     }
 }

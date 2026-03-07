@@ -276,7 +276,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/stdin",
         func: prim_port_stdin,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return a port for standard input.",
         params: &[],
@@ -287,7 +287,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/stdout",
         func: prim_port_stdout,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return a port for standard output.",
         params: &[],
@@ -298,7 +298,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/stderr",
         func: prim_port_stderr,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Return a port for standard error.",
         params: &[],
@@ -309,7 +309,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port?",
         func: prim_is_port,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a port.",
         params: &["value"],

@@ -10,12 +10,12 @@ impl<'a> Analyzer<'a> {
 
         match &syntax.kind {
             // Literals
-            SyntaxKind::Nil => Ok(Hir::pure(HirKind::Nil, span)),
-            SyntaxKind::Bool(b) => Ok(Hir::pure(HirKind::Bool(*b), span)),
-            SyntaxKind::Int(n) => Ok(Hir::pure(HirKind::Int(*n), span)),
-            SyntaxKind::Float(f) => Ok(Hir::pure(HirKind::Float(*f), span)),
-            SyntaxKind::String(s) => Ok(Hir::pure(HirKind::String(s.clone()), span)),
-            SyntaxKind::Keyword(k) => Ok(Hir::pure(HirKind::Keyword(k.clone()), span)),
+            SyntaxKind::Nil => Ok(Hir::inert(HirKind::Nil, span)),
+            SyntaxKind::Bool(b) => Ok(Hir::inert(HirKind::Bool(*b), span)),
+            SyntaxKind::Int(n) => Ok(Hir::inert(HirKind::Int(*n), span)),
+            SyntaxKind::Float(f) => Ok(Hir::inert(HirKind::Float(*f), span)),
+            SyntaxKind::String(s) => Ok(Hir::inert(HirKind::String(s.clone()), span)),
+            SyntaxKind::Keyword(k) => Ok(Hir::inert(HirKind::Keyword(k.clone()), span)),
 
             // Variable reference
             SyntaxKind::Symbol(name) => {
@@ -26,12 +26,12 @@ impl<'a> Analyzer<'a> {
                 }
 
                 match self.lookup(name, syntax.scopes.as_slice()) {
-                    Some(binding) => Ok(Hir::pure(HirKind::Var(binding), span)),
+                    Some(binding) => Ok(Hir::inert(HirKind::Var(binding), span)),
                     None => {
                         // Treat as global reference
                         let sym = self.symbols.intern(name);
                         let binding = Binding::new(sym, BindingScope::Global);
-                        Ok(Hir::pure(HirKind::Var(binding), span))
+                        Ok(Hir::inert(HirKind::Var(binding), span))
                     }
                 }
             }
@@ -39,7 +39,7 @@ impl<'a> Analyzer<'a> {
             // Tuple literal [...] - call tuple primitive
             SyntaxKind::Tuple(items) => {
                 let mut args = Vec::new();
-                let mut effect = Effect::none();
+                let mut effect = Effect::inert();
                 for item in items {
                     let (inner, spliced) = Self::unwrap_splice(item);
                     let hir = self.analyze_expr(inner)?;
@@ -48,7 +48,7 @@ impl<'a> Analyzer<'a> {
                 }
                 let sym = self.symbols.intern("tuple");
                 let binding = Binding::new(sym, BindingScope::Global);
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::inert());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -63,7 +63,7 @@ impl<'a> Analyzer<'a> {
             // Array literal @[...] - call array primitive
             SyntaxKind::Array(items) => {
                 let mut args = Vec::new();
-                let mut effect = Effect::none();
+                let mut effect = Effect::inert();
                 for item in items {
                     let (inner, spliced) = Self::unwrap_splice(item);
                     let hir = self.analyze_expr(inner)?;
@@ -72,7 +72,7 @@ impl<'a> Analyzer<'a> {
                 }
                 let sym = self.symbols.intern("array");
                 let binding = Binding::new(sym, BindingScope::Global);
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::inert());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -87,7 +87,7 @@ impl<'a> Analyzer<'a> {
             // Struct literal {...} - call struct primitive
             SyntaxKind::Struct(items) => {
                 let mut args = Vec::new();
-                let mut effect = Effect::none();
+                let mut effect = Effect::inert();
                 for item in items {
                     if matches!(&item.kind, SyntaxKind::Splice(_))
                         || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
@@ -106,7 +106,7 @@ impl<'a> Analyzer<'a> {
                 }
                 let sym = self.symbols.intern("struct");
                 let binding = Binding::new(sym, BindingScope::Global);
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::inert());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -121,7 +121,7 @@ impl<'a> Analyzer<'a> {
             // Table literal @{...} - call table primitive
             SyntaxKind::Table(items) => {
                 let mut args = Vec::new();
-                let mut effect = Effect::none();
+                let mut effect = Effect::inert();
                 for item in items {
                     if matches!(&item.kind, SyntaxKind::Splice(_))
                         || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
@@ -140,7 +140,7 @@ impl<'a> Analyzer<'a> {
                 }
                 let sym = self.symbols.intern("table");
                 let binding = Binding::new(sym, BindingScope::Global);
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::inert());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -155,11 +155,11 @@ impl<'a> Analyzer<'a> {
             // Quote - convert to Value at analysis time
             SyntaxKind::Quote(inner) => {
                 let value = (**inner).to_value(self.symbols);
-                Ok(Hir::pure(HirKind::Quote(value), span))
+                Ok(Hir::inert(HirKind::Quote(value), span))
             }
 
             // Syntax literal — pre-computed Value from macro argument passing
-            SyntaxKind::SyntaxLiteral(value) => Ok(Hir::pure(HirKind::Quote(*value), span)),
+            SyntaxKind::SyntaxLiteral(value) => Ok(Hir::inert(HirKind::Quote(*value), span)),
 
             // Quasiquote, Unquote, UnquoteSplicing should have been expanded
             SyntaxKind::Quasiquote(_) | SyntaxKind::Unquote(_) | SyntaxKind::UnquoteSplicing(_) => {
@@ -178,7 +178,7 @@ impl<'a> Analyzer<'a> {
             // List - could be special form or function call
             SyntaxKind::List(items) => {
                 if items.is_empty() {
-                    return Ok(Hir::pure(HirKind::EmptyList, span));
+                    return Ok(Hir::inert(HirKind::EmptyList, span));
                 }
 
                 // Check for special forms
@@ -203,7 +203,7 @@ impl<'a> Analyzer<'a> {
                                 return Err(format!("{}: quote requires 1 argument", span));
                             }
                             let value = items[1].to_value(self.symbols);
-                            return Ok(Hir::pure(HirKind::Quote(value), span));
+                            return Ok(Hir::inert(HirKind::Quote(value), span));
                         }
                         "yield" => return self.analyze_yield(items, span),
                         "match" => return self.analyze_match(items, span),
@@ -252,7 +252,7 @@ impl<'a> Analyzer<'a> {
         let else_branch = if items.len() == 4 {
             self.analyze_expr(&items[3])?
         } else {
-            Hir::pure(HirKind::Nil, span.clone())
+            Hir::inert(HirKind::Nil, span.clone())
         };
 
         let effect = cond
@@ -273,7 +273,7 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_begin(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
-            return Ok(Hir::pure(HirKind::Nil, span));
+            return Ok(Hir::inert(HirKind::Nil, span));
         }
 
         // Check if we're inside a function scope
@@ -291,7 +291,7 @@ impl<'a> Analyzer<'a> {
 
             // Pass 2: Analyze all expressions (all bindings now visible)
             let mut exprs = Vec::new();
-            let mut effect = Effect::none();
+            let mut effect = Effect::inert();
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
@@ -303,7 +303,7 @@ impl<'a> Analyzer<'a> {
         } else {
             // At top level, sequential semantics are fine
             let mut exprs = Vec::new();
-            let mut effect = Effect::none();
+            let mut effect = Effect::inert();
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
@@ -411,7 +411,7 @@ impl<'a> Analyzer<'a> {
         let value = if let Some(val_syn) = value_syntax {
             self.analyze_expr(val_syn)?
         } else {
-            Hir::pure(HirKind::Nil, span.clone())
+            Hir::inert(HirKind::Nil, span.clone())
         };
 
         let effect = value.effect;
@@ -454,7 +454,7 @@ impl<'a> Analyzer<'a> {
         } else {
             // Multiple body forms: wrap in implicit begin
             let mut exprs = Vec::new();
-            let mut effect = Effect::none();
+            let mut effect = Effect::inert();
             for item in &items[2..] {
                 let hir = self.analyze_expr(item)?;
                 effect = effect.combine(hir.effect);
@@ -489,11 +489,11 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_and(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
-            return Ok(Hir::pure(HirKind::Bool(true), span));
+            return Ok(Hir::inert(HirKind::Bool(true), span));
         }
 
         let mut exprs = Vec::new();
-        let mut effect = Effect::none();
+        let mut effect = Effect::inert();
 
         for item in items {
             let hir = self.analyze_expr(item)?;
@@ -506,11 +506,11 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_or(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
-            return Ok(Hir::pure(HirKind::Bool(false), span));
+            return Ok(Hir::inert(HirKind::Bool(false), span));
         }
 
         let mut exprs = Vec::new();
-        let mut effect = Effect::none();
+        let mut effect = Effect::inert();
 
         for item in items {
             let hir = self.analyze_expr(item)?;
@@ -534,7 +534,7 @@ impl<'a> Analyzer<'a> {
         let env = if items.len() == 3 {
             self.analyze_expr(&items[2])?
         } else {
-            Hir::pure(HirKind::Nil, span.clone())
+            Hir::inert(HirKind::Nil, span.clone())
         };
         let effect = Effect::yields().combine(expr.effect).combine(env.effect);
         Ok(Hir::new(
@@ -573,7 +573,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let mut bindings = Vec::new();
-        let mut effect = Effect::none();
+        let mut effect = Effect::inert();
 
         for pair_syntax in bindings_syntax {
             let pair = pair_syntax.as_list_or_tuple().ok_or_else(|| {
@@ -611,12 +611,12 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_cond(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() < 2 {
-            return Ok(Hir::pure(HirKind::Nil, span));
+            return Ok(Hir::inert(HirKind::Nil, span));
         }
 
         let mut clauses = Vec::new();
         let mut else_branch = None;
-        let mut effect = Effect::none();
+        let mut effect = Effect::inert();
 
         for clause in &items[1..] {
             let parts = clause.as_list_or_tuple().ok_or_else(|| {
@@ -683,11 +683,11 @@ impl<'a> Analyzer<'a> {
         // First segment: resolve as variable
         let first = segments[0];
         let mut result = match self.lookup(first, scopes) {
-            Some(binding) => Hir::pure(HirKind::Var(binding), span.clone()),
+            Some(binding) => Hir::inert(HirKind::Var(binding), span.clone()),
             None => {
                 let sym = self.symbols.intern(first);
                 let binding = Binding::new(sym, BindingScope::Global);
-                Hir::pure(HirKind::Var(binding), span.clone())
+                Hir::inert(HirKind::Var(binding), span.clone())
             }
         };
 
@@ -697,8 +697,8 @@ impl<'a> Analyzer<'a> {
         let get_sym = self.symbols.intern("get");
         for segment in &segments[1..] {
             let get_binding = Binding::new(get_sym, BindingScope::Global);
-            let get_func = Hir::pure(HirKind::Var(get_binding), span.clone());
-            let key = Hir::pure(HirKind::Keyword(segment.to_string()), span.clone());
+            let get_func = Hir::inert(HirKind::Var(get_binding), span.clone());
+            let key = Hir::inert(HirKind::Keyword(segment.to_string()), span.clone());
             let call_effect = result.effect;
             result = Hir::new(
                 HirKind::Call {

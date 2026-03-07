@@ -346,7 +346,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "nil?",
         func: prim_is_nil,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is nil.",
         params: &["value"],
@@ -357,7 +357,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pair?",
         func: prim_is_pair,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a pair (cons cell).",
         params: &["value"],
@@ -368,7 +368,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "list?",
         func: prim_is_list,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a list (empty list or cons cell).",
         params: &["value"],
@@ -379,7 +379,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "number?",
         func: prim_is_number,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a number.",
         params: &["value"],
@@ -390,7 +390,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "integer?",
         func: prim_is_integer,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is an integer.",
         params: &["value"],
@@ -401,7 +401,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "float?",
         func: prim_is_float,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a floating-point number.",
         params: &["value"],
@@ -412,7 +412,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "symbol?",
         func: prim_is_symbol,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a symbol.",
         params: &["value"],
@@ -423,7 +423,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string?",
         func: prim_is_string,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a string.",
         params: &["value"],
@@ -434,7 +434,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "boolean?",
         func: prim_is_boolean,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a boolean.",
         params: &["value"],
@@ -445,7 +445,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "keyword?",
         func: prim_is_keyword,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a keyword.",
         params: &["value"],
@@ -456,7 +456,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "type",
         func: prim_type_of,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get the type of a value as a keyword.",
         params: &["value"],
@@ -467,7 +467,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pointer?",
         func: prim_is_pointer,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a raw C pointer.",
         params: &["value"],
@@ -478,7 +478,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "array?",
         func: prim_is_array,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is an array (mutable indexed sequence).",
         params: &["value"],
@@ -489,7 +489,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "tuple?",
         func: prim_is_tuple,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a tuple (immutable indexed sequence).",
         params: &["value"],
@@ -500,7 +500,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "table?",
         func: prim_is_table,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a table (mutable key-value map).",
         params: &["value"],
@@ -511,7 +511,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "struct?",
         func: prim_is_struct,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a struct (immutable key-value map).",
         params: &["value"],
@@ -522,7 +522,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "buffer?",
         func: prim_is_buffer,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a buffer (mutable byte sequence).",
         params: &["value"],
@@ -533,7 +533,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes?",
         func: prim_is_bytes,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is bytes (immutable binary data).",
         params: &["value"],
@@ -544,7 +544,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "blob?",
         func: prim_is_blob,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a blob (mutable binary data).",
         params: &["value"],
@@ -555,7 +555,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "function?",
         func: prim_is_function,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a function (closure or primitive).",
         params: &["value"],
@@ -566,7 +566,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "primitive?",
         func: prim_is_primitive,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a built-in primitive function.",
         params: &["value"],
@@ -577,7 +577,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "zero?",
         func: prim_is_zero,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is numerically zero.",
         params: &["value"],

@@ -203,7 +203,7 @@ impl<'a> Analyzer<'a> {
     /// Resolve a polymorphic effect by examining the arguments at the specified indices.
     pub(crate) fn resolve_polymorphic_effect(&self, effect: &Effect, args: &[&Hir]) -> Effect {
         if effect.is_polymorphic() {
-            let mut resolved = Effect::none();
+            let mut resolved = Effect::inert();
             for param_idx in effect.propagated_params() {
                 if param_idx < args.len() {
                     resolved = resolved.combine(self.resolve_arg_effect(args[param_idx]));
@@ -253,7 +253,7 @@ impl<'a> Analyzer<'a> {
     pub(crate) fn compute_inferred_effect(&self, body: &Hir, params: &[Binding]) -> Effect {
         // If body doesn't suspend, lambda doesn't suspend
         if !body.effect.may_suspend() {
-            return Effect::none();
+            return Effect::inert();
         }
 
         // If there's a direct yield or non-parameter yield, it's Yields

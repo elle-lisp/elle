@@ -635,7 +635,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes",
         func: prim_bytes,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create immutable bytes from integer arguments (0-255).",
         params: &[],
@@ -646,7 +646,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "blob",
         func: prim_blob,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable blob from integer arguments (0-255).",
         params: &[],
@@ -657,7 +657,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string->bytes",
         func: prim_string_to_bytes,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Encode a string as immutable UTF-8 bytes.",
         params: &["str"],
@@ -668,7 +668,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string->blob",
         func: prim_string_to_blob,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Encode a string as a mutable UTF-8 blob.",
         params: &["str"],
@@ -679,7 +679,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes->string",
         func: prim_bytes_to_string,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Decode UTF-8 bytes to a string. Errors on invalid UTF-8.",
         params: &["b"],
@@ -690,7 +690,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "blob->string",
         func: prim_blob_to_string,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Decode a UTF-8 blob to a string. Errors on invalid UTF-8.",
         params: &["b"],
@@ -701,7 +701,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "blob->bytes",
         func: prim_blob_to_bytes,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Freeze a blob to immutable bytes (copies).",
         params: &["b"],
@@ -712,7 +712,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes->blob",
         func: prim_bytes_to_blob,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Thaw bytes to a mutable blob (copies).",
         params: &["b"],
@@ -723,7 +723,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes->hex",
         func: prim_bytes_to_hex,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert bytes to a lowercase hex string.",
         params: &["b"],
@@ -734,7 +734,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "blob->hex",
         func: prim_blob_to_hex,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert a blob to a lowercase hex string.",
         params: &["b"],
@@ -745,7 +745,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "slice",
         func: prim_slice,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(3),
         doc: "Slice bytes or blob from start to end index.",
         params: &["coll", "start", "end"],
@@ -756,7 +756,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "buffer->bytes",
         func: prim_buffer_to_bytes,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert buffer to immutable bytes.",
         params: &["buf"],
@@ -767,7 +767,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "buffer->blob",
         func: prim_buffer_to_blob,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert buffer to mutable blob.",
         params: &["buf"],
@@ -778,7 +778,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes->buffer",
         func: prim_bytes_to_buffer,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert bytes to buffer. Errors on invalid UTF-8.",
         params: &["b"],
@@ -789,7 +789,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "blob->buffer",
         func: prim_blob_to_buffer,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert blob to buffer. Errors on invalid UTF-8.",
         params: &["b"],

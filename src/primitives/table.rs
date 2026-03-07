@@ -12,7 +12,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "table",
         func: prim_table,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable table from key-value pairs",
         params: &[],
@@ -23,7 +23,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "get",
         func: prim_get,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Range(2, 3),
         doc: "Get a value from a collection (tuple, array, string, table, or struct) by index or key, with optional default",
         params: &["collection", "key", "default"],
@@ -34,7 +34,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "put",
         func: prim_put,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(3),
         doc: "Put a key-value pair into a table or struct",
         params: &["collection", "key", "value"],
@@ -45,7 +45,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "del",
         func: prim_del,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Delete a key from a table or struct",
         params: &["collection", "key"],
@@ -56,7 +56,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "keys",
         func: prim_keys,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get all keys from a table or struct as a list",
         params: &["collection"],
@@ -67,7 +67,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "values",
         func: prim_values,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Get all values from a table or struct as a list",
         params: &["collection"],
@@ -78,7 +78,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "has-key?",
         func: prim_has_key,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Check if a table or struct has a key",
         params: &["collection", "key"],

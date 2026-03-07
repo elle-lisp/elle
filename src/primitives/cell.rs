@@ -108,7 +108,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "box",
         func: prim_box,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Create a mutable cell containing a value.",
         params: &["value"],
@@ -119,7 +119,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "unbox",
         func: prim_unbox,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Extract the value from a cell.",
         params: &["cell"],
@@ -130,7 +130,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "rebox",
         func: prim_rebox,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Modify the value in a cell and return the new value.",
         params: &["cell", "value"],
@@ -141,7 +141,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "box?",
         func: prim_box_p,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if a value is a box.",
         params: &["value"],

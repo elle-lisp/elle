@@ -26,7 +26,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pkg/version",
         func: prim_package_version,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Get the current package version",
         params: &[],
@@ -37,7 +37,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pkg/info",
         func: prim_package_info,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Get package information (name, version, description)",
         params: &[],

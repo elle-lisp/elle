@@ -4,7 +4,7 @@ JIT compilation for Elle using Cranelift.
 
 ## Responsibility
 
-Compile `LirFunction` to native x86_64 code. Functions with `Effect::none()`
+Compile `LirFunction` to native x86_64 code. Functions with `Effect::inert()`
 or `Effect::yields()` are JIT candidates. Polymorphic functions (where
 `effect.propagates != 0`) are rejected. Yielding functions use side-exit:
 JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
@@ -212,7 +212,7 @@ The effect system and JIT side-exit mechanism enable fibers and JIT to coexist:
 - **JIT-safe fiber primitives**: `fiber/new`, `fiber/status`, `fiber/value`,
   `fiber/bits`, `fiber/mask` have `Effect::errors()` — `may_suspend()` is
   false, so closures calling them can be JIT-compiled. `fiber?` has
-  `Effect::none()`. These all return `SIG_OK` or `SIG_ERROR`, which
+  `Effect::inert()`. These all return `SIG_OK` or `SIG_ERROR`, which
   `jit_handle_primitive_signal` handles.
 
 - **JIT-excluded fiber primitives**: `fiber/resume` and `fiber/signal` have
@@ -278,7 +278,7 @@ No errors are silently swallowed.
 
 1. **Only non-polymorphic functions.** `JitCompiler::compile` returns
    `JitError::Polymorphic` for functions where `effect.propagates != 0` (polymorphic).
-   Functions with `Effect::none()` or `Effect::yields()` are accepted.
+   Functions with `Effect::inert()` or `Effect::yields()` are accepted.
    Errors (SIG_ERROR) and FFI (SIG_FFI) are fine — they don't require frame
    snapshot/restore.
 

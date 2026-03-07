@@ -11,7 +11,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "struct",
         func: prim_struct,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create an immutable struct from key-value pairs",
         params: &[],
@@ -22,7 +22,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "struct/del",
         func: prim_struct_del,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Create a new struct without a key (immutable)",
         params: &["struct", "key"],
@@ -33,7 +33,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "freeze",
         func: prim_freeze,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert a mutable table to an immutable struct",
         params: &["table"],
@@ -44,7 +44,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "thaw",
         func: prim_thaw,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert an immutable struct to a mutable table",
         params: &["struct"],

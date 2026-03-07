@@ -260,7 +260,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sort",
         func: prim_sort,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Sort a collection of numbers in ascending order. Type-preserving: arrays mutated in place, lists/tuples return new values.",
         params: &["coll"],
@@ -271,7 +271,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "range",
         func: prim_range,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Range(1, 3),
         doc: "Generate a range of numbers as an array. (range end), (range start end), (range start end step).",
         params: &["start-or-end", "end", "step"],

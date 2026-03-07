@@ -116,7 +116,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "read",
         func: prim_read,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Parse the first form from a string, returning a value",
         params: &["str"],
@@ -127,7 +127,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "read-all",
         func: prim_read_all,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Parse all forms from a string, returning a list of values",
         params: &["str"],

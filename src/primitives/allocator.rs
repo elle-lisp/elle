@@ -156,7 +156,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "%install-allocator",
         func: prim_install_allocator,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Install a custom allocator on the current fiber's heap. \
               INTERNAL: use via with-allocator macro only.",
@@ -168,7 +168,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "%uninstall-allocator",
         func: prim_uninstall_allocator,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Uninstall the current custom allocator, freeing remaining \
               custom objects. INTERNAL: use via with-allocator macro only.",

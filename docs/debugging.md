@@ -73,9 +73,9 @@ Two namespaces separate concerns: `clock/` for point-in-time readings,
 
 | Primitive | Signature | Returns | Effect | Backing |
 |-----------|-----------|---------|--------|---------|
-| `clock/monotonic` | `(clock/monotonic)` | float | `Effect::none()` | `std::time::Instant` relative to a process-global epoch |
-| `clock/realtime` | `(clock/realtime)` | float | `Effect::none()` | `std::time::SystemTime::UNIX_EPOCH` |
-| `clock/cpu` | `(clock/cpu)` | float | `Effect::none()` | `libc::clock_gettime(CLOCK_THREAD_CPUTIME_ID)` |
+| `clock/monotonic` | `(clock/monotonic)` | float | `Effect::inert()` | `std::time::Instant` relative to a process-global epoch |
+| `clock/realtime` | `(clock/realtime)` | float | `Effect::inert()` | `std::time::SystemTime::UNIX_EPOCH` |
+| `clock/cpu` | `(clock/cpu)` | float | `Effect::inert()` | `libc::clock_gettime(CLOCK_THREAD_CPUTIME_ID)` |
 
 `clock/monotonic` uses a `OnceLock<Instant>` initialized on first call.
 All readings are relative to this epoch, keeping values small and maximizing
@@ -162,7 +162,7 @@ pub struct Effect {
 }
 ```
 
-Constructors: `Effect::none()`, `Effect::errors()`, `Effect::yields()`,
+Constructors: `Effect::inert()`, `Effect::errors()`, `Effect::yields()`,
 `Effect::yields_errors()`, `Effect::ffi()`, `Effect::polymorphic(n)`,
 `Effect::polymorphic_errors(n)`.
 

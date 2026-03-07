@@ -13,7 +13,7 @@ debug, ffi) and which parameter indices propagate their callee's effects.
 | Type/Function | Purpose |
 |---------------|---------|
 | `Effect` | `{ bits: SignalBits, propagates: u32 }` — Copy, const fn constructors |
-| `Effect::none()` | No effects |
+| `Effect::inert()` | No effects |
 | `Effect::errors()` | May error (SIG_ERROR) |
 | `Effect::yields()` | May yield (SIG_YIELD) |
 | `Effect::yields_errors()` | May yield and error |
@@ -38,13 +38,12 @@ Each predicate asks a specific question. No vague "is_pure".
 | `is_polymorphic()` | Effect depends on arguments? (propagates != 0) |
 | `propagated_params()` | Iterator over propagated parameter indices |
 
-## Deprecated aliases
+## Constants
 
-| Deprecated | Use instead |
-|------------|-------------|
-| `Effect::pure()` | `Effect::none()` |
-| `Effect::pure_errors()` | `Effect::errors()` |
-| `effect.is_pure()` | `!effect.may_suspend()` |
+| Constant | Value |
+|----------|-------|
+| `Effect::INERT` | `Effect::inert()` |
+| `Effect::YIELDS` | `Effect::yields()` |
 
 ## Interprocedural Effect Tracking
 
@@ -100,7 +99,7 @@ Used across the pipeline and the runtime:
 
 ## Invariants
 
-1. **Effect::none() is the default.** Unknown effects start as none. This is
+1. **Effect::inert() is the default.** Unknown effects start as inert. This is
    conservative — we may miss some suspension propagation but never produce
    false positives.
 

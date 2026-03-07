@@ -123,7 +123,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "io-request?",
         func: prim_is_io_request,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O request.",
         params: &["value"],
@@ -134,7 +134,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "io-backend?",
         func: prim_is_io_backend,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O backend.",
         params: &["value"],

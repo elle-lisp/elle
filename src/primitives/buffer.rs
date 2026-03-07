@@ -106,7 +106,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "buffer",
         func: prim_buffer,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable buffer from byte arguments.",
         params: &[],
@@ -117,7 +117,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string->buffer",
         func: prim_string_to_buffer,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert a string to a buffer (UTF-8 bytes).",
         params: &["str"],
@@ -128,7 +128,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "buffer->string",
         func: prim_buffer_to_string,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Convert a buffer to a string (UTF-8).",
         params: &["buf"],

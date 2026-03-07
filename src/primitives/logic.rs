@@ -110,7 +110,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "not",
         func: prim_not,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Logical NOT operation",
         params: &["x"],
@@ -121,7 +121,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "and",
         func: prim_and,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Logical AND operation",
         params: &[],
@@ -132,7 +132,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "or",
         func: prim_or,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Logical OR operation",
         params: &[],
@@ -143,7 +143,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "xor",
         func: prim_xor,
-        effect: Effect::none(),
+        effect: Effect::inert(),
         arity: Arity::AtLeast(0),
         doc: "Logical XOR operation",
         params: &[],

@@ -160,7 +160,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "glob/glob",
         func: prim_glob_glob,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Return array of file paths matching a glob pattern",
         params: &["pattern"],
@@ -171,7 +171,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "glob/match?",
         func: prim_glob_match,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Test if a string matches a glob pattern",
         params: &["pattern", "str"],
@@ -182,7 +182,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "glob/match-path?",
         func: prim_glob_match_path,
-        effect: Effect::pure(),
+        effect: Effect::inert(),
         arity: Arity::Exact(2),
         doc: "Test if a path matches a glob pattern (separator-aware)",
         params: &["pattern", "path"],
