@@ -2,9 +2,6 @@
 mod core {
     include!("core.rs");
 }
-mod advanced {
-    include!("advanced.rs");
-}
 mod concurrency {
     include!("concurrency.rs");
 }
@@ -13,12 +10,6 @@ mod error_reporting {
 }
 mod repl_exit_codes {
     include!("repl_exit_codes.rs");
-}
-mod coroutines {
-    include!("coroutines.rs");
-}
-mod lexical_scope {
-    include!("lexical_scope.rs");
 }
 mod new_pipeline {
     include!("new_pipeline.rs");
@@ -56,9 +47,6 @@ mod time_property {
 mod time_elapsed {
     include!("time_elapsed.rs");
 }
-mod hygiene {
-    include!("hygiene.rs");
-}
 mod destructuring {
     include!("destructuring.rs");
 }
@@ -68,6 +56,8 @@ mod blocks {
 mod primitives {
     include!("primitives.rs");
 }
+// ffi tests migrated to tests/elle/ffi.lisp
+// Keeping only epsilon tolerance and error message tests in Rust
 mod ffi {
     include!("ffi.rs");
 }
@@ -89,24 +79,20 @@ mod compliance {
 mod buffer {
     include!("buffer.rs");
 }
-mod splice {
-    include!("splice.rs");
-}
+// splice tests migrated to tests/elle/splice.lisp
 mod bytes {
     include!("bytes.rs");
 }
 mod regex {
     include!("regex.rs");
 }
+// glob tests migrated to tests/elle/glob.lisp
+// Keeping only plugin availability tests in Rust
 mod glob {
     include!("glob.rs");
 }
-mod fn_flow {
-    include!("fn_flow.rs");
-}
-mod fn_graph {
-    include!("fn_graph.rs");
-}
+// fn_flow tests migrated to tests/elle/fn-flow.lisp
+// fn_graph tests migrated to tests/elle/fn-graph.lisp
 mod table_keys {
     include!("table_keys.rs");
 }
