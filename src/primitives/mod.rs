@@ -34,6 +34,7 @@ pub mod process;
 pub mod read;
 pub mod registration;
 pub mod sort;
+pub mod stream;
 pub mod string;
 pub mod structs;
 pub mod table;
