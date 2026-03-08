@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772941731331,
+  "lastUpdate": 1773011079722,
   "repoUrl": "https://github.com/elle-lisp/elle",
   "entries": {
     "Elle Benchmarks": [
@@ -2243,6 +2243,210 @@ window.BENCHMARK_DATA = {
             "name": "memory_operations/list_to_vec",
             "value": 111,
             "range": "± 2",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "disruptek@users.noreply.github.com",
+            "name": "Smooth Operator",
+            "username": "disruptek"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c50ced3c51078606c419dc73f80e1540d5122b24",
+          "message": "I/O Phase 5: Network I/O (TCP, UDP, Unix sockets, timeouts, graceful shutdown) (#526)\n\n* feat(io): network port types, IoOp variants, ConnectAddr, IoRequest timeout\n\n* feat(io): SyncBackend network handlers, keyword arg helper\n\n* feat(io): network primitives, port/set-options, stream timeout\n\n* docs: clarify test command runtimes, rename smoke/test targets\n\n* feat(io): scheduler timeout enforcement, network integration tests\n\n* feat(io): AsyncBackend io_uring network support with linked timeouts\n\n* test(net): move validation tests to Elle, keep concurrency tests in Rust\n\n* fix(io): correct io_uring opcodes and function signatures for --all-features build",
+          "timestamp": "2026-03-08T22:55:18Z",
+          "tree_id": "0d1c797a870a7c5fe7c435165dc18d3d88fb3437",
+          "url": "https://github.com/elle-lisp/elle/commit/c50ced3c51078606c419dc73f80e1540d5122b24"
+        },
+        "date": 1773011078924,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parsing/simple_number",
+            "value": 162,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/list_literal",
+            "value": 1288,
+            "range": "± 23",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/nested_expr",
+            "value": 2212,
+            "range": "± 24",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/deep_nesting",
+            "value": 1370,
+            "range": "± 35",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/large_list_100",
+            "value": 25592,
+            "range": "± 139",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/first_intern",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/repeat_intern",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/many_unique",
+            "value": 18288,
+            "range": "± 451",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/simple_arithmetic",
+            "value": 322088,
+            "range": "± 36090",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/conditional",
+            "value": 341523,
+            "range": "± 25198",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/nested_arithmetic",
+            "value": 422896,
+            "range": "± 27225",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/int_add",
+            "value": 576,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/mixed_arithmetic",
+            "value": 433,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/comparison",
+            "value": 294,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/cons",
+            "value": 981,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/first",
+            "value": 857,
+            "range": "± 18",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/if_true",
+            "value": 646,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/nested_if",
+            "value": 3252,
+            "range": "± 1049",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/simple",
+            "value": 574678,
+            "range": "± 38008",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/complex",
+            "value": 639451,
+            "range": "± 31285",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/10",
+            "value": 1740,
+            "range": "± 128",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/10",
+            "value": 803,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/50",
+            "value": 29102,
+            "range": "± 4160",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/50",
+            "value": 15183,
+            "range": "± 3511",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/100",
+            "value": 58958,
+            "range": "± 5059",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/100",
+            "value": 39740,
+            "range": "± 7414",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/500",
+            "value": 276894,
+            "range": "± 29749",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/500",
+            "value": 249795,
+            "range": "± 39873",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/value_clone",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/list_to_vec",
+            "value": 114,
+            "range": "± 54",
             "unit": "ns/iter"
           }
         ]
