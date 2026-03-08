@@ -121,6 +121,11 @@ fn matching() {
 }
 
 #[test]
+fn sets() {
+    run_elle_script("sets");
+}
+
+#[test]
 fn coroutines() {
     run_elle_script("coroutines");
 }
