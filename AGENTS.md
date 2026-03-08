@@ -142,8 +142,22 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 
 ## Verification
 
+Approximate runtimes (for guidance — vary by machine):
+
+| Command | Runtime | What it does |
+|---------|---------|-------------|
+| `make smoke` | ~15s | Elle examples only |
+| `make test` | ~2min | build + examples + elle scripts + unit tests |
+| `cargo test --workspace` | ~30min | full suite (unit + integration ~10min + property ~20min) |
+
+**Rule of thumb**: Before committing, run `make test` locally (~2min). Before
+pushing, run `cargo test --workspace` (~30min) to catch property test failures.
+
 ```bash
-# Full test suite (do this before committing)
+# Fast local test (build + examples + elle scripts + unit tests, ~2min)
+make test
+
+# Full test suite (do this before pushing)
 cargo test --workspace
 
 # Just the main crate

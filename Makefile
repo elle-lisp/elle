@@ -31,10 +31,14 @@ examples: elle  ## Run all examples
 
 # ── Test ────────────────────────────────────────────────────────────
 
-test:  ## Run all workspace tests
-	cargo test --workspace
+# Approximate runtimes (for guidance — vary by machine):
+#   make smoke    ~15s   Elle examples only
+#   make test     ~2min  build + examples + elle scripts + unit tests
+#   cargo test    ~30min full suite (unit + integration ~10min + property ~20min)
 
-smoke:  ## Fast local smoke test (build + examples + elle scripts + unit tests)
+smoke: examples  ## Run Elle examples (~15s)
+
+test:  ## Fast local test (build + examples + elle scripts + unit tests, ~2min)
 	cargo build --release -p elle
 	@for f in examples/*.lisp; do \
 		timeout 10s ./target/release/elle "$$f" || exit 1; \
