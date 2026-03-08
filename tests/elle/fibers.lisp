@@ -569,3 +569,21 @@
   (let* ((f (fiber/new (fn [] (bouncer 100)) 2)))
     (assert-eq (fiber/resume f) 100 "multiple tail calls: first")
     (assert-eq (fiber/resume f) 101 "multiple tail calls: second")))
+
+# ============================================================================
+# Error message tests (from integration/fibers.rs)
+# ============================================================================
+
+# fiber_propagate_error
+(assert-err (fn ()
+  (let ((inner (fiber/new (fn () (fiber/signal 1 "boom")) 1)))
+    (fiber/resume inner)
+    (fiber/propagate inner)))
+  "fiber propagate re-signals error")
+
+# fiber_propagate_dead_fiber_errors
+(assert-err (fn ()
+  (let ((f (fiber/new (fn () 42) 0)))
+    (fiber/resume f)
+    (fiber/propagate f)))
+  "fiber propagate rejects dead fiber")

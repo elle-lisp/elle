@@ -229,3 +229,14 @@
       (stream/write p "async write test")
       (stream/flush p))))
 (assert-eq (slurp "/tmp/elle-test-ev-write-lisp") "async write test" "ev/run write thunk")
+
+# ============================================================================
+# Error tests (from integration/io.rs)
+# ============================================================================
+
+# stream_write_outside_scheduler_errors — SKIPPED
+# SIG_IO propagates as an uncatchable signal outside a scheduler.
+# This is testable from Rust (eval_source catches all signals) but not from Elle.
+
+# stream_write_non_port_errors — SKIPPED
+# Same issue: stream/write yields SIG_IO before type checking the port argument.

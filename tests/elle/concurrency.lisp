@@ -153,3 +153,46 @@
           (join handle))))
     true)
   "spawn jit closure with conditional")
+
+# ============================================================================
+# Error tests (from integration/concurrency.rs)
+# ============================================================================
+
+# spawn_rejects_mutable_table_capture
+(assert-err (fn ()
+  (let ((t (table)))
+    (spawn (fn () t))))
+  "spawn rejects mutable table capture")
+
+# spawn_rejects_native_function
+(assert-err (fn () (spawn +))
+  "spawn rejects native function")
+
+# spawn_wrong_arity
+(assert-err (fn () (eval '(spawn)))
+  "spawn wrong arity: no args")
+
+(assert-err (fn () (eval '(spawn (fn () 1) 2)))
+  "spawn wrong arity: two args")
+
+# join_wrong_arity
+(assert-err (fn () (eval '(join)))
+  "join wrong arity: no args")
+
+(assert-err (fn () (eval '(join 1 2)))
+  "join wrong arity: two args")
+
+# join_invalid_argument
+(assert-err (fn () (join 42))
+  "join rejects non-thread-handle")
+
+# sleep_negative_duration
+(assert-err (fn () (time/sleep -1))
+  "sleep rejects negative int")
+
+(assert-err (fn () (time/sleep -0.5))
+  "sleep rejects negative float")
+
+# sleep_non_numeric
+(assert-err (fn () (time/sleep "hello"))
+  "sleep rejects non-numeric")

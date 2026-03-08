@@ -135,3 +135,13 @@
       (list (get t f) (get t c))))
   (list :fib :clo)
   "fiber and closure are different keys")
+
+# ============================================================================
+# Error tests (from integration/table_keys.rs)
+# ============================================================================
+
+# rejected_type_still_errors
+(assert-err (fn ()
+  (let ((t @{}))
+    (put t @[1 2] :val)))
+  "unhashable array as table key errors")

@@ -87,3 +87,19 @@
 # Note: These are compile-time errors, not runtime errors, so they cannot
 # be tested with assert-err (which expects runtime errors).
 # fn_params_array_rejected and let_bindings_array_rejected are skipped.
+
+# ============================================================================
+# Error message tests (from integration/bracket_errors.rs)
+# ============================================================================
+
+# match_arm_non_list_error
+(assert-err (fn () (eval '(match 42 99)))
+  "match arm non-list is compile error")
+
+# fn_params_array_rejected
+(assert-err (fn () (eval '(fn @[x] x)))
+  "fn params with @[] is compile error")
+
+# let_bindings_array_rejected
+(assert-err (fn () (eval '(let @[(x 1)] x)))
+  "let bindings with @[] is compile error")
