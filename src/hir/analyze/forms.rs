@@ -175,6 +175,21 @@ impl<'a> Analyzer<'a> {
                 span
             )),
 
+            // Set literal |...| - call set constructor primitive (chunk 4+)
+            SyntaxKind::Set(_) => Err(format!(
+                "{}: set literals are not yet supported (requires chunk 4 implementation)",
+                span
+            )),
+
+            // Mutable set literal @|...| - call mutable-set constructor primitive (chunk 4+)
+            SyntaxKind::SetMut(_) => Err(format!(
+                "{}: mutable set literals are not yet supported (requires chunk 4 implementation)",
+                span
+            )),
+
+            // Pipe outside of match pattern is an error
+            SyntaxKind::Pipe => Err(format!("{}: unexpected | outside of match pattern", span)),
+
             // List - could be special form or function call
             SyntaxKind::List(items) => {
                 if items.is_empty() {

@@ -136,7 +136,7 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Keyword(k) => Ok(HirPattern::Literal(PatternLiteral::Keyword(k.clone()))),
             SyntaxKind::List(items) => {
                 // Or-pattern check FIRST — before any other list pattern logic
-                if items.iter().any(|s| s.as_symbol() == Some("|")) {
+                if items.iter().any(|s| matches!(s.kind, SyntaxKind::Pipe)) {
                     return self.analyze_or_pattern(items, &syntax.span, resolve_var);
                 }
                 if items.is_empty() {
@@ -309,7 +309,9 @@ impl<'a> Analyzer<'a> {
     ) -> Result<HirPattern, String> {
         use crate::hir::pattern::validate_or_pattern_bindings;
 
-        let groups: Vec<&[Syntax]> = items.split(|s| s.as_symbol() == Some("|")).collect();
+        let groups: Vec<&[Syntax]> = items
+            .split(|s| matches!(s.kind, SyntaxKind::Pipe))
+            .collect();
 
         if groups.len() < 2 {
             return Err(format!(

@@ -111,6 +111,8 @@ impl SyntaxReader {
             OwnedToken::LeftBracket => self.read_array(loc),
             OwnedToken::LeftBrace => self.read_struct(loc),
             OwnedToken::ListSugar => self.read_list_sugar(loc),
+            OwnedToken::Pipe => self.read_set(loc),
+            OwnedToken::AtPipe => self.read_set_mut(loc),
 
             OwnedToken::Quote => {
                 let len = self.current_length();
@@ -203,6 +205,52 @@ impl SyntaxReader {
         }
     }
 
+    fn read_set(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+        self.advance(); // skip opening |
+        let mut elements = Vec::new();
+
+        loop {
+            match self.current() {
+                None => {
+                    return Err(format!(
+                        "{}: unterminated set literal (missing closing |)",
+                        start_loc.position()
+                    ));
+                }
+                Some(OwnedToken::Pipe) => {
+                    let end_loc = self.current_location();
+                    self.advance();
+                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    return Ok(Syntax::new(SyntaxKind::Set(elements), span));
+                }
+                _ => elements.push(self.read()?),
+            }
+        }
+    }
+
+    fn read_set_mut(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+        self.advance(); // skip opening @|
+        let mut elements = Vec::new();
+
+        loop {
+            match self.current() {
+                None => {
+                    return Err(format!(
+                        "{}: unterminated mutable set literal (missing closing |)",
+                        start_loc.position()
+                    ));
+                }
+                Some(OwnedToken::Pipe) => {
+                    let end_loc = self.current_location();
+                    self.advance();
+                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    return Ok(Syntax::new(SyntaxKind::SetMut(elements), span));
+                }
+                _ => elements.push(self.read()?),
+            }
+        }
+    }
+
     fn read_list(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
         self.advance(); // skip (
         let mut elements = Vec::new();
@@ -220,6 +268,15 @@ impl SyntaxReader {
                     self.advance();
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
                     return Ok(Syntax::new(SyntaxKind::List(elements), span));
+                }
+                Some(OwnedToken::Pipe) => {
+                    // Pipe inside a list is an or-pattern separator, not a set literal
+                    let pipe_loc = self.current_location();
+                    let len = self.current_length();
+                    self.advance();
+                    let span = self.source_loc_to_span(&pipe_loc, pipe_loc.col + len);
+                    elements.push(Syntax::new(SyntaxKind::Pipe, span));
+                    continue;
                 }
                 _ => elements.push(self.read()?),
             }
@@ -244,6 +301,15 @@ impl SyntaxReader {
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
                     return Ok(Syntax::new(SyntaxKind::Tuple(elements), span));
                 }
+                Some(OwnedToken::Pipe) => {
+                    // Pipe inside an array is an or-pattern separator
+                    let pipe_loc = self.current_location();
+                    let len = self.current_length();
+                    self.advance();
+                    let span = self.source_loc_to_span(&pipe_loc, pipe_loc.col + len);
+                    elements.push(Syntax::new(SyntaxKind::Pipe, span));
+                    continue;
+                }
                 _ => elements.push(self.read()?),
             }
         }
@@ -267,6 +333,15 @@ impl SyntaxReader {
 
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
                     return Ok(Syntax::new(SyntaxKind::Struct(elements), span));
+                }
+                Some(OwnedToken::Pipe) => {
+                    // Pipe inside a struct is an or-pattern separator
+                    let pipe_loc = self.current_location();
+                    let len = self.current_length();
+                    self.advance();
+                    let span = self.source_loc_to_span(&pipe_loc, pipe_loc.col + len);
+                    elements.push(Syntax::new(SyntaxKind::Pipe, span));
+                    continue;
                 }
                 _ => elements.push(self.read()?),
             }
