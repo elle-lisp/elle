@@ -195,5 +195,206 @@ impl Hash for Value {
     }
 }
 
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Value {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+
+        // Fast path: identical bits → Equal
+        if self.0 == other.0 {
+            return Ordering::Equal;
+        }
+
+        let self_rank = type_rank(self);
+        let other_rank = type_rank(other);
+        match self_rank.cmp(&other_rank) {
+            Ordering::Equal => {}
+            ord => return ord,
+        }
+
+        cmp_same_rank(self, other, self_rank)
+    }
+}
+
+/// Assign a numeric rank to each value type for cross-type ordering.
+///
+/// Values with different ranks are ordered by rank alone.
+/// Values with the same rank are compared within-type by `cmp_same_rank`.
+fn type_rank(v: &Value) -> u8 {
+    use crate::value::heap::{deref, HeapTag};
+
+    if v.is_nil() {
+        0
+    } else if v.is_bool() {
+        1
+    } else if v.is_int() {
+        2
+    } else if v.is_float() && !v.is_heap() {
+        // Inline float (regular IEEE bits) or TAG_NAN encoded
+        3
+    } else if v.is_symbol() {
+        4
+    } else if v.is_keyword() {
+        5
+    } else if v.is_pointer() {
+        6
+    } else if v.is_empty_list() {
+        7
+    } else if (v.0 & super::TAG_SSO_MASK) == super::TAG_SSO {
+        // SSO string — same rank as heap string
+        8
+    } else if v.is_heap() {
+        match unsafe { deref(*v).tag() } {
+            HeapTag::String => 8, // same rank as SSO
+            HeapTag::Float => 3,  // same rank as inline float
+            HeapTag::Cons => 9,
+            HeapTag::Tuple => 10,
+            HeapTag::Array => 11,
+            HeapTag::Bytes => 12,
+            HeapTag::Buffer => 13,
+            HeapTag::Blob => 14,
+            HeapTag::Struct => 15,
+            HeapTag::Table => 16,
+            HeapTag::Closure => 17,
+            HeapTag::Cell => 18,
+            HeapTag::NativeFn => 19,
+            HeapTag::LibHandle => 20,
+            HeapTag::ThreadHandle => 21,
+            HeapTag::Fiber => 22,
+            HeapTag::Syntax => 23,
+            HeapTag::Binding => 24,
+            HeapTag::FFISignature => 25,
+            HeapTag::FFIType => 26,
+            HeapTag::ManagedPointer => 27,
+            HeapTag::External => 28,
+            HeapTag::Parameter => 29,
+        }
+    } else {
+        // Unknown — should not happen
+        30
+    }
+}
+
+/// Compare two values known to have the same type rank.
+fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    match rank {
+        // Nil — singleton
+        0 => Ordering::Equal,
+
+        // Bool — false < true
+        1 => {
+            let a_bool = a.as_bool().unwrap();
+            let b_bool = b.as_bool().unwrap();
+            a_bool.cmp(&b_bool)
+        }
+
+        // Int — numeric
+        2 => {
+            let a_int = a.as_int().unwrap();
+            let b_int = b.as_int().unwrap();
+            a_int.cmp(&b_int)
+        }
+
+        // Float (inline + heap) — f64::total_cmp
+        3 => {
+            let a_f = a.as_float().unwrap();
+            let b_f = b.as_float().unwrap();
+            a_f.total_cmp(&b_f)
+        }
+
+        // Symbol — by ID
+        4 => {
+            let a_id = a.as_symbol().unwrap();
+            let b_id = b.as_symbol().unwrap();
+            a_id.cmp(&b_id)
+        }
+
+        // Keyword — lexicographic by name
+        5 => {
+            let a_name = a.as_keyword_name().unwrap();
+            let b_name = b.as_keyword_name().unwrap();
+            a_name.cmp(b_name)
+        }
+
+        // C pointer — by address bits
+        6 => a.0.cmp(&b.0),
+
+        // Empty list — singleton
+        7 => Ordering::Equal,
+
+        // String (SSO + heap) — lexicographic by content
+        8 => a.compare_str(b).unwrap_or(Ordering::Equal),
+
+        // Heap types (ranks 9–29) — deref and compare
+        _ => unsafe { cmp_heap(a, b) },
+    }
+}
+
+/// Compare two heap values of the same type.
+///
+/// # Safety
+/// Both values must be heap pointers (`is_heap()` returns true).
+unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
+    use crate::value::heap::{deref, HeapObject};
+
+    let a_obj = deref(*a);
+    let b_obj = deref(*b);
+
+    match (a_obj, b_obj) {
+        // Cons — (first, rest) lexicographic
+        (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1.cmp(c2),
+
+        // Tuple — element-wise lexicographic
+        (HeapObject::Tuple(t1), HeapObject::Tuple(t2)) => t1.cmp(t2),
+
+        // Array — element-wise lexicographic (borrow)
+        (HeapObject::Array(a1), HeapObject::Array(a2)) => {
+            let b1 = a1.borrow();
+            let b2 = a2.borrow();
+            b1.as_slice().cmp(b2.as_slice())
+        }
+
+        // Bytes — byte-wise lexicographic
+        (HeapObject::Bytes(b1), HeapObject::Bytes(b2)) => b1.cmp(b2),
+
+        // Buffer — byte-wise lexicographic (borrow)
+        (HeapObject::Buffer(b1), HeapObject::Buffer(b2)) => {
+            let r1 = b1.borrow();
+            let r2 = b2.borrow();
+            r1.cmp(&*r2)
+        }
+
+        // Blob — byte-wise lexicographic (borrow)
+        (HeapObject::Blob(b1), HeapObject::Blob(b2)) => {
+            let r1 = b1.borrow();
+            let r2 = b2.borrow();
+            r1.cmp(&*r2)
+        }
+
+        // Struct — entry-wise lexicographic (BTreeMap iteration is sorted)
+        (HeapObject::Struct(s1), HeapObject::Struct(s2)) => s1.iter().cmp(s2.iter()),
+
+        // Cell — by contained value (borrow)
+        (HeapObject::Cell(c1, _), HeapObject::Cell(c2, _)) => {
+            let v1 = c1.borrow();
+            let v2 = c2.borrow();
+            v1.cmp(&*v2)
+        }
+
+        // LibHandle — by u32 ID
+        (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1.cmp(h2),
+
+        // All reference-identity types — by raw pointer bits
+        _ => a.0.cmp(&b.0),
+    }
+}
+
 // Debug is implemented in display.rs alongside Display, since both
 // share the resolve_name helper for symbol/keyword resolution.
