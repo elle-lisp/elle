@@ -26,7 +26,7 @@
        (cons (f (first coll)) (map f (rest coll)))))
       ((set? coll)
        (letrec ((items (set->list coll))
-                (seed (if (= (type-of coll) :set) || @||))
+                 (seed (if (= (type-of coll) :set) (set) (mutable-set)))
                 (loop (fn (lst acc)
                         (if (empty? lst)
                           acc
