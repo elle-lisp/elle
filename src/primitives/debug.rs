@@ -871,6 +871,164 @@ pub fn prim_environment(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
+/// (arena/set-object-limit n) or (arena/set-object-limit n :global)
+///
+/// Set max heap object count. Default scope is :fiber (child fiber's FiberHeap).
+/// :global targets HEAP_ARENA (root fiber). On root fiber, :fiber is implicitly :global.
+/// Pass nil as n to remove the limit.
+/// Returns previous limit as int, or nil if previously unlimited.
+///
+/// Operates directly on thread-local state (no SIG_QUERY) to avoid allocating
+/// cons cells for the query message — those allocations would themselves be
+/// subject to the limit, creating a chicken-and-egg problem.
+pub fn prim_arena_set_object_limit(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() || args.len() > 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!(
+                    "arena/set-object-limit: expected 1-2 arguments, got {}",
+                    args.len()
+                ),
+            ),
+        );
+    }
+    let limit = if args[0].is_nil() {
+        None
+    } else if let Some(n) = args[0].as_int() {
+        if n < 0 {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "value-error",
+                    "arena/set-object-limit: limit must be non-negative".to_string(),
+                ),
+            );
+        }
+        Some(n as usize)
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "arena/set-object-limit: expected integer or nil, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        );
+    };
+    let is_global = args.len() == 2 && {
+        if args[1].as_keyword_name() == Some("global") {
+            true
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "value-error",
+                    "arena/set-object-limit: second argument must be :global".to_string(),
+                ),
+            );
+        }
+    };
+    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    let prev = if is_global || heap_ptr.is_null() {
+        crate::value::heap::heap_arena_set_object_limit(limit)
+    } else {
+        unsafe { (*heap_ptr).set_object_limit(limit) }
+    };
+    let result = match prev {
+        Some(n) => Value::int(n as i64),
+        None => Value::NIL,
+    };
+    (SIG_OK, result)
+}
+
+/// (arena/object-limit) or (arena/object-limit :global)
+///
+/// Get current object limit. Returns int or nil (unlimited).
+///
+/// Operates directly on thread-local state (no SIG_QUERY).
+pub fn prim_arena_object_limit(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() > 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!(
+                    "arena/object-limit: expected 0-1 arguments, got {}",
+                    args.len()
+                ),
+            ),
+        );
+    }
+    let is_global = args.len() == 1 && {
+        if args[0].as_keyword_name() == Some("global") {
+            true
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "value-error",
+                    "arena/object-limit: argument must be :global".to_string(),
+                ),
+            );
+        }
+    };
+    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    let limit = if is_global || heap_ptr.is_null() {
+        crate::value::heap::heap_arena_object_limit()
+    } else {
+        unsafe { (*heap_ptr).object_limit() }
+    };
+    let result = match limit {
+        Some(n) => Value::int(n as i64),
+        None => Value::NIL,
+    };
+    (SIG_OK, result)
+}
+
+/// (arena/bytes) or (arena/bytes :global)
+///
+/// Return bytes consumed. :fiber = bumpalo allocated_bytes() for child fibers
+/// (0 for root). :global = HEAP_ARENA object count × 128 (estimated object size).
+///
+/// Operates directly on thread-local state (no SIG_QUERY).
+pub fn prim_arena_bytes(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() > 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("arena/bytes: expected 0-1 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let is_global = args.len() == 1 && {
+        if args[0].as_keyword_name() == Some("global") {
+            true
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "value-error",
+                    "arena/bytes: argument must be :global".to_string(),
+                ),
+            );
+        }
+    };
+    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    if is_global || heap_ptr.is_null() {
+        // Global: estimate from object count × 128 bytes per object
+        let bytes = crate::value::heap::heap_arena_len() * 128;
+        (SIG_OK, Value::int(bytes as i64))
+    } else {
+        let bytes = unsafe { (*heap_ptr).allocated_bytes() };
+        (SIG_OK, Value::int(bytes as i64))
+    }
+}
+
 /// Declarative primitive definitions for debugging operations.
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -1092,6 +1250,39 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "meta",
         example: "(arena/scope-stats)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "arena/set-object-limit",
+        func: prim_arena_set_object_limit,
+        effect: Effect::inert(),
+        arity: Arity::Range(1, 2),
+        doc: "Set max heap object count. Pass nil to remove limit. Returns previous limit or nil.",
+        params: &["n", "scope?"],
+        category: "meta",
+        example: "(arena/set-object-limit 10000)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "arena/object-limit",
+        func: prim_arena_object_limit,
+        effect: Effect::inert(),
+        arity: Arity::Range(0, 1),
+        doc: "Get current object limit. Returns int or nil (unlimited).",
+        params: &["scope?"],
+        category: "meta",
+        example: "(arena/object-limit)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "arena/bytes",
+        func: prim_arena_bytes,
+        effect: Effect::inert(),
+        arity: Arity::Range(0, 1),
+        doc: "Return bytes consumed. :fiber = bumpalo bytes, :global = estimated from object count × 128.",
+        params: &["scope?"],
+        category: "meta",
+        example: "(arena/bytes)",
         aliases: &[],
     },
     PrimitiveDef {

@@ -114,6 +114,8 @@ pub struct FiberHeap {
     /// Stack of custom allocators. The top is active.
     /// Pushed by `%install-allocator`, popped by `%uninstall-allocator`.
     custom_alloc_stack: Vec<CustomAllocState>,
+    /// Maximum number of objects this fiber may allocate. `None` = unlimited.
+    object_limit: Option<usize>,
 }
 
 impl FiberHeap {
@@ -129,6 +131,7 @@ impl FiberHeap {
             scope_enters: 0,
             scope_dtors_run: 0,
             custom_alloc_stack: Vec::new(),
+            object_limit: None,
         }
     }
 
@@ -179,6 +182,14 @@ impl FiberHeap {
                 return Value::from_heap_ptr(typed as *const ());
             }
             // Fall through to bumpalo on null return
+        }
+
+        // Check object limit before allocating
+        if let Some(limit) = self.object_limit {
+            if self.alloc_count >= limit {
+                crate::value::heap::set_alloc_error(self.alloc_count, limit);
+                return Value::NIL;
+            }
         }
 
         // Normal bumpalo path (unchanged)
@@ -272,6 +283,23 @@ impl FiberHeap {
 
     pub fn capacity(&self) -> usize {
         self.bump.chunk_capacity()
+    }
+
+    /// Get the current object limit.
+    pub fn object_limit(&self) -> Option<usize> {
+        self.object_limit
+    }
+
+    /// Set the object limit. Returns the previous limit.
+    pub fn set_object_limit(&mut self, limit: Option<usize>) -> Option<usize> {
+        let prev = self.object_limit;
+        self.object_limit = limit;
+        prev
+    }
+
+    /// Bytes consumed by the bump allocator.
+    pub fn allocated_bytes(&self) -> usize {
+        self.bump.allocated_bytes()
     }
 
     /// Number of `RegionEnter` instructions executed (scope regions entered).

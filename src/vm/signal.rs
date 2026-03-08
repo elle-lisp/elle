@@ -309,7 +309,9 @@ impl VM {
                 }
             }
             "arena/stats" => {
-                use crate::value::heap::{heap_arena_capacity, heap_arena_len, TableKey};
+                use crate::value::heap::{
+                    heap_arena_capacity, heap_arena_len, heap_arena_object_limit, TableKey,
+                };
                 use std::collections::BTreeMap;
                 let mut fields = BTreeMap::new();
                 fields.insert(
@@ -319,6 +321,16 @@ impl VM {
                 fields.insert(
                     TableKey::Keyword("capacity".to_string()),
                     Value::int(heap_arena_capacity() as i64),
+                );
+                let limit_val = match heap_arena_object_limit() {
+                    Some(n) => Value::int(n as i64),
+                    None => Value::NIL,
+                };
+                fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
+                // Bytes: estimate from object count × 128 bytes per object
+                fields.insert(
+                    TableKey::Keyword("bytes".to_string()),
+                    Value::int((heap_arena_len() * 128) as i64),
                 );
                 (SIG_OK, Value::struct_from(fields))
             }

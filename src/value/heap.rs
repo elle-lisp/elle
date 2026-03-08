@@ -4,7 +4,7 @@
 //! are stored on the heap and accessed through `HeapObject`.
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -425,18 +425,29 @@ struct HeapArena {
     /// Box provides pointer stability: HeapObject addresses survive Vec reallocation.
     #[allow(clippy::vec_box)]
     objects: Vec<Box<HeapObject>>,
+    object_limit: Option<usize>,
 }
 
 impl HeapArena {
     fn new() -> Self {
         HeapArena {
             objects: Vec::new(),
+            object_limit: None,
         }
     }
 }
 
 thread_local! {
     static HEAP_ARENA: RefCell<HeapArena> = RefCell::new(HeapArena::new());
+}
+
+thread_local! {
+    static ALLOC_ERROR: Cell<Option<(usize, usize)>> = const { Cell::new(None) };
+}
+
+/// Take the allocation error flag, clearing it. Returns `(count, limit)` if set.
+pub fn take_alloc_error() -> Option<(usize, usize)> {
+    ALLOC_ERROR.with(|e| e.take())
 }
 
 /// Opaque mark for arena scope management.
@@ -550,6 +561,26 @@ pub fn heap_arena_capacity() -> usize {
     HEAP_ARENA.with(|arena| arena.borrow().objects.capacity())
 }
 
+/// Get the current object limit for the global heap arena.
+pub fn heap_arena_object_limit() -> Option<usize> {
+    HEAP_ARENA.with(|a| a.borrow().object_limit)
+}
+
+/// Set the object limit for the global heap arena. Returns the previous limit.
+pub fn heap_arena_set_object_limit(limit: Option<usize>) -> Option<usize> {
+    HEAP_ARENA.with(|a| {
+        let mut a = a.borrow_mut();
+        let prev = a.object_limit;
+        a.object_limit = limit;
+        prev
+    })
+}
+
+/// Set the allocation error flag. Called by FiberHeap when its limit is exceeded.
+pub fn set_alloc_error(count: usize, limit: usize) {
+    ALLOC_ERROR.with(|e| e.set(Some((count, limit))));
+}
+
 /// Allocate a heap object on the thread-local arena and return a Value pointing to it.
 ///
 /// Single thread-local read: check the raw pointer once, then dispatch.
@@ -562,6 +593,13 @@ pub fn alloc(obj: HeapObject) -> Value {
     }
     HEAP_ARENA.with(|arena| {
         let mut a = arena.borrow_mut();
+        if let Some(limit) = a.object_limit {
+            let count = a.objects.len();
+            if count >= limit {
+                ALLOC_ERROR.with(|e| e.set(Some((count, limit))));
+                return Value::NIL;
+            }
+        }
         let boxed = Box::new(obj);
         let ptr = &*boxed as *const HeapObject as *const ();
         a.objects.push(boxed);

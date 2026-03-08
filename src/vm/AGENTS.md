@@ -308,9 +308,9 @@ to see parent-established parameter bindings.
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | ~100 | VM struct, VmResult, public interface |
-| `dispatch.rs` | ~373 | Main execution loop, instruction dispatch, returns `(SignalBits, usize)` |
+| `dispatch.rs` | ~373 | Main execution loop, instruction dispatch, allocation error check, returns `(SignalBits, usize)` |
 | `call.rs` | ~823 | Call, TailCall, JIT dispatch (solo + batch), environment building |
-| `signal.rs` | ~177 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch |
+| `signal.rs` | ~177 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch (arena/set-object-limit, arena/object-limit, arena/bytes) |
 | `fiber.rs` | ~555 | Fiber resume/propagate/cancel, shared swap protocol, shared alloc provisioning |
 | `execute.rs` | ~147 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack` |
 | `core.rs` | ~456 | VM struct, `resume_suspended`, stack trace helpers |
