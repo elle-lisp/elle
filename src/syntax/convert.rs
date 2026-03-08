@@ -17,7 +17,9 @@ fn contains_syntax_literal(s: &Syntax) -> bool {
         | SyntaxKind::Tuple(items)
         | SyntaxKind::Array(items)
         | SyntaxKind::Struct(items)
-        | SyntaxKind::Table(items) => items.iter().any(contains_syntax_literal),
+        | SyntaxKind::Table(items)
+        | SyntaxKind::Set(items)
+        | SyntaxKind::SetMut(items) => items.iter().any(contains_syntax_literal),
         SyntaxKind::Quote(inner)
         | SyntaxKind::Quasiquote(inner)
         | SyntaxKind::Unquote(inner)
@@ -88,6 +90,20 @@ impl Syntax {
                 // Convert to (table k1 v1 k2 v2 ...) list
                 let table_sym = symbols.intern("table");
                 let mut values = vec![Value::symbol(table_sym.0)];
+                values.extend(items.iter().map(|item| item.to_value(symbols)));
+                crate::value::list(values)
+            }
+            SyntaxKind::Set(items) => {
+                // Convert to (set e1 e2 ...) list
+                let set_sym = symbols.intern("set");
+                let mut values = vec![Value::symbol(set_sym.0)];
+                values.extend(items.iter().map(|item| item.to_value(symbols)));
+                crate::value::list(values)
+            }
+            SyntaxKind::SetMut(items) => {
+                // Convert to (@set e1 e2 ...) list
+                let set_mut_sym = symbols.intern("@set");
+                let mut values = vec![Value::symbol(set_mut_sym.0)];
                 values.extend(items.iter().map(|item| item.to_value(symbols)));
                 crate::value::list(values)
             }

@@ -19,7 +19,7 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `Syntax` | Tree node with kind, span, scopes |
-| `SyntaxKind` | Node variants (Int, Symbol, List, Quote, Set, SetMut, Pipe, etc.) |
+| `SyntaxKind` | Node variants (Int, Symbol, List, Quote, Set, SetMut, etc.) |
 | `Span` | Source range with line/col |
 | `ScopeId` | Unique scope identifier for hygiene |
 | `Expander` | Macro expansion engine |
@@ -32,7 +32,6 @@ Does NOT:
 |---------|---------|
 | `Set(Vec<Syntax>)` | Immutable set literal `\|...\|` |
 | `SetMut(Vec<Syntax>)` | Mutable set literal `@\|...\|` |
-| `Pipe` | Zero-payload marker node used by or-patterns. Produced when `\|` appears inside a list `(...)`, array `[...]`, struct `{...}`, or table `@{...}`. Not a set literal — used for splitting or-patterns: `(1 \| 3 \| 5)` splits on `Pipe` nodes. |
 
 ## Data flow
 
@@ -96,11 +95,15 @@ Analyzer (hir)
    is recognized by the lexer as a single token. The Expander does not
    transform it. The Analyzer desugars it to nested `get` calls.
 
-8. **Or-patterns split on `SyntaxKind::Pipe` nodes.** The `Pipe` variant is
-   a zero-payload marker produced when `|` appears inside a list. The analyzer
-   uses `split(|s| matches!(s.kind, SyntaxKind::Pipe))` to partition or-pattern
-   alternatives. Previously, or-patterns split on `Symbol("|")` — that is no
-   longer valid.
+8. **Or-patterns use `(or pat1 pat2 ...)` syntax.** The `or` symbol in
+   pattern position is recognized by the match analyzer in `special.rs`.
+   `|` inside lists always starts a set literal (no special marker node).
+
+9. **Set literals are desugared during analysis.** `SyntaxKind::Set` and
+   `SyntaxKind::SetMut` pass through expansion unchanged. The Analyzer
+   desugars them to `(set ;elems)` and `(mutable-set ;elems)` calls,
+   respectively. This keeps the Expander simple and defers collection
+   construction to the analysis phase.
 
 ## Hygiene
 

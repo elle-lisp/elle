@@ -132,23 +132,29 @@ HIR (bindings are inline — no separate HashMap)
      in `doc`. This field is threaded through LIR into `Closure.doc` and
      used by the `(doc name)` primitive and LSP hover.
 
-16. **Qualified symbols are desugared to nested `get` calls.**
-     `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to
-     `(get (get a :b) :c)`. The first segment is resolved as a variable
-     (local or global). Subsequent segments become keyword arguments to
-     `get`. This produces standard `HirKind::Call` nodes — no special
-     HIR variant. The `get` binding always resolves to the global
-     primitive, matching the pattern used for tuple/array/struct/table
-     literal desugaring. All synthesized nodes carry the original
-     symbol's span.
+16. **Set literals are desugared to constructor calls.**
+      `SyntaxKind::Set` (immutable set `|1 2 3|`) desugars to `(set ;elems)`.
+      `SyntaxKind::SetMut` (mutable set `@|1 2 3|`) desugars to `(mutable-set ;elems)`.
+      The `set` and `mutable-set` bindings resolve to global primitives.
+      All synthesized nodes carry the original set literal's span.
 
-17. **`Parameterize` creates dynamic binding frames.**
-      `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }`
-      is produced by the analyzer for `(parameterize ((p1 v1) (p2 v2) ...) body ...)`.
-      Each binding is a (parameter, value) pair. The analyzer validates that
-      each parameter expression is a parameter (or will be at runtime). The
-      lowerer emits `PushParamFrame` before evaluating bindings, stores them
-      in the frame, then emits `PopParamFrame` after the body.
+17. **Qualified symbols are desugared to nested `get` calls.**
+      `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to
+      `(get (get a :b) :c)`. The first segment is resolved as a variable
+      (local or global). Subsequent segments become keyword arguments to
+      `get`. This produces standard `HirKind::Call` nodes — no special
+      HIR variant. The `get` binding always resolves to the global
+      primitive, matching the pattern used for tuple/array/struct/table
+      literal desugaring. All synthesized nodes carry the original
+      symbol's span.
+
+18. **`Parameterize` creates dynamic binding frames.**
+       `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }`
+       is produced by the analyzer for `(parameterize ((p1 v1) (p2 v2) ...) body ...)`.
+       Each binding is a (parameter, value) pair. The analyzer validates that
+       each parameter expression is a parameter (or will be at runtime). The
+       lowerer emits `PushParamFrame` before evaluating bindings, stores them
+       in the frame, then emits `PopParamFrame` after the body.
 
 ## Files
 

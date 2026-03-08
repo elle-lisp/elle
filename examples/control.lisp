@@ -227,7 +227,7 @@
 (var i 0)
 (while (< i (length batch))
   (push results (eval-simple (get batch i)))
-  (set i (+ i 1)))
+  (assign i (+ i 1)))
 (assert-eq results @[10 20 -5 7] "while: evaluated batch")
 (display "  batch results: ") (print results)
 
@@ -235,7 +235,7 @@
 (var j 0)
 (def while-result
   (while (< j 3)
-    (set j (+ j 1))))
+    (assign j (+ j 1))))
 (assert-eq while-result nil "while: always returns nil")
 
 # Factorial via while — the classic accumulator pattern
@@ -244,8 +244,8 @@
   (var acc 1)
   (var k n)
   (while (> k 1)
-    (set acc (* acc k))
-    (set k (- k 1)))
+    (assign acc (* acc k))
+    (assign k (- k 1)))
   acc)
 
 (assert-eq (factorial 0) 1 "factorial: 0")
@@ -257,7 +257,7 @@
 (var k 0)
 (def found
   (while (< k 100)
-    (set k (+ k 1))
+    (assign k (+ k 1))
     (when (= k 5)
       (break :while k))))
 (assert-eq found 5 "while: break :while returns a value")
@@ -276,7 +276,7 @@
   (forever
     (match expr
       ([:neg [:neg inner]]
-        (set expr inner))           # strip one layer, loop again
+        (assign expr inner))           # strip one layer, loop again
       (_
         (break :while expr)))))     # stable — return it
 
@@ -290,7 +290,7 @@
 (var x 0)
 (def bare-result
   (forever
-    (set x (+ x 1))
+    (assign x (+ x 1))
     (when (= x 3) (break))))
 (assert-eq bare-result nil "forever: bare break returns nil")
 (assert-eq x 3 "forever: ran 3 times")
@@ -303,11 +303,11 @@
   (forever
     (if (= x 1)
       (break :while steps))
-    (set x
+    (assign x
       (if (= (% x 2) 0)
         (/ x 2)
         (+ (* 3 x) 1)))
-    (set steps (+ steps 1))))
+    (assign steps (+ steps 1))))
 
 (assert-eq (collatz-steps 1) 0 "collatz: 1 → 0 steps")
 (assert-eq (collatz-steps 6) 8 "collatz: 6 → 8 steps")
@@ -523,6 +523,23 @@
     (_ 0)))
 (assert-eq m-dispatch 25 "match: struct tag dispatch")
 
+# --- Or-patterns ---
+# (or p1 p2 ...) matches if any alternative matches.
+(assert-eq (match 2 ((or 1 2 3) :small) (_ :big)) :small
+  "match: or-pattern matches any alternative")
+(assert-eq (match 5 ((or 1 2 3) :small) (_ :big)) :big
+  "match: or-pattern falls through when none match")
+(assert-eq (match :b ((or :a :b :c) :found) (_ :not)) :found
+  "match: or-pattern with keywords")
+
+# Or-patterns can nest inside compound patterns
+(assert-eq (match (cons 2 :x) (((or 1 2) . t) t) (_ :fail)) :x
+  "match: or-pattern nested in cons")
+
+# Or-patterns with bindings — each alternative must bind the same names
+(assert-eq (match (cons 1 2) ((or (x . _) (_ . x)) x) (_ 0)) 1
+  "match: or-pattern with binding")
+
 
 # ========================================
 # 10. each — evaluate a list of expressions
@@ -549,7 +566,7 @@
 # each over a tuple
 (var tuple-sum 0)
 (each x in [10 20 30]
-  (set tuple-sum (+ tuple-sum x)))
+  (assign tuple-sum (+ tuple-sum x)))
 (assert-eq tuple-sum 60 "each: tuple sum")
 
 

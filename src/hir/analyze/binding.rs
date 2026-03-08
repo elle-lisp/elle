@@ -471,14 +471,14 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    pub(crate) fn analyze_set(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+    pub(crate) fn analyze_assign(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() != 3 {
-            return Err(format!("{}: set requires target and value", span));
+            return Err(format!("{}: assign requires target and value", span));
         }
 
         let name = items[1]
             .as_symbol()
-            .ok_or_else(|| format!("{}: set target must be a symbol", span))?;
+            .ok_or_else(|| format!("{}: assign target must be a symbol", span))?;
 
         let target = match self.lookup(name, items[1].scopes.as_slice()) {
             Some(binding) => binding,
@@ -487,7 +487,10 @@ impl<'a> Analyzer<'a> {
                 let sym = self.symbols.intern(name);
                 // Check if this was declared const in a previous form
                 if self.immutable_globals.contains(&sym) {
-                    return Err(format!("{}: cannot set immutable binding '{}'", span, name));
+                    return Err(format!(
+                        "{}: cannot assign immutable binding '{}'",
+                        span, name
+                    ));
                 }
                 Binding::new(sym, BindingScope::Global)
             }
@@ -495,7 +498,10 @@ impl<'a> Analyzer<'a> {
 
         // Check for immutable binding
         if target.is_immutable() {
-            return Err(format!("{}: cannot set immutable binding '{}'", span, name));
+            return Err(format!(
+                "{}: cannot assign immutable binding '{}'",
+                span, name
+            ));
         }
 
         // Mark as mutated
@@ -510,7 +516,7 @@ impl<'a> Analyzer<'a> {
         let effect = value.effect;
 
         Ok(Hir::new(
-            HirKind::Set {
+            HirKind::Assign {
                 target,
                 value: Box::new(value),
             },

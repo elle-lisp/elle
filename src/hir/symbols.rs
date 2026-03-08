@@ -215,7 +215,7 @@ impl HirSymbolExtractor {
                 }
             }
 
-            HirKind::Set { target, value } => {
+            HirKind::Assign { target, value } => {
                 self.record_usage(*target, &hir.span, index);
                 self.walk(value, index, symbols);
             }

@@ -218,6 +218,8 @@ impl fmt::Display for LirInstr {
                 write!(f, ")")
             }
             LirInstr::PopParamFrame => f.write_str("pop-param-frame"),
+            LirInstr::IsSet { dst, src } => write!(f, "{} = is-set {}", dst, src),
+            LirInstr::IsSetMut { dst, src } => write!(f, "{} = is-set-mut {}", dst, src),
         }
     }
 }

@@ -67,17 +67,17 @@
 # defer runs cleanup
 (begin
   (var cleaned false)
-  (defer (set cleaned true) 42)
+  (defer (assign cleaned true) 42)
   (assert-true cleaned "defer runs cleanup"))
 
 # defer returns body value
-(let ([result (begin (var x 0) (defer (set x 1) 42))])
+(let ([result (begin (var x 0) (defer (assign x 1) 42))])
   (assert-eq result 42 "defer returns body value"))
 
 # defer runs cleanup on error
 (begin
   (var cleaned false)
-  (try (defer (set cleaned true) (/ 1 0)) (catch e nil))
+  (try (defer (assign cleaned true) (/ 1 0)) (catch e nil))
   (assert-true cleaned "defer runs cleanup on error"))
 
 # ============================================================================
@@ -97,7 +97,7 @@
 (begin
   (var cleaned false)
   (defn make [] :resource)
-  (defn cleanup [r] (set cleaned true))
+  (defn cleanup [r] (assign cleaned true))
   (with r (make) cleanup
     42)
   (assert-true cleaned "with cleanup runs"))
@@ -129,7 +129,7 @@
   (begin
     (var cleaned false)
     (let ((f 99))
-      (defer (set cleaned true) (+ f 1))))])
+      (defer (assign cleaned true) (+ f 1))))])
   (assert-eq result 100 "defer hygiene: user binding f not captured"))
 
 # ============================================================================
@@ -143,7 +143,7 @@
 # case should not double-evaluate the test expression
 (begin
   (var counter 0)
-  (case (begin (set counter (+ counter 1)) counter)
+  (case (begin (assign counter (+ counter 1)) counter)
     1 :one 2 :two)
   (assert-eq counter 1 "case no double eval"))
 
@@ -181,14 +181,14 @@
   (var n 0)
   (var sum 0)
   (while (< n 3)
-    (set sum (+ sum n))
-    (set n (+ n 1)))
+    (assign sum (+ sum n))
+    (assign n (+ n 1)))
   (assert-eq sum 3 "while multi body"))
 
 # while with single body
 (begin
   (var n 0)
-  (while (< n 5) (set n (+ n 1)))
+  (while (< n 5) (assign n (+ n 1)))
   (assert-eq n 5 "while single body"))
 
 # ============================================================================
@@ -199,7 +199,7 @@
 (begin
   (var n 0)
   (forever
-    (set n (+ n 1))
+    (assign n (+ n 1))
     (if (= n 5) (break)))
   (assert-eq n 5 "forever with break"))
 
@@ -208,6 +208,6 @@
   (begin
     (var n 0)
     (forever
-      (set n (+ n 1))
+      (assign n (+ n 1))
       (if (= n 3) (break :while :done))))])
   (assert-eq result :done "forever break value"))

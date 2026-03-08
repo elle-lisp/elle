@@ -12,13 +12,13 @@
 (defn make-value [data]
   "Create a leaf Value node (no children)."
   (let* ([id *next-id*])
-    (set *next-id* (+ *next-id* 1))
+     (assign *next-id* (+ *next-id* 1))
     @{:id id :data data :grad 0.0 :children @[] :local-grads @[]}))
 
 (defn make-op [data children local-grads]
   "Create a Value node that is the result of an operation."
   (let* ([id *next-id*])
-    (set *next-id* (+ *next-id* 1))
+     (assign *next-id* (+ *next-id* 1))
     @{:id id :data data :grad 0.0
       :children children :local-grads local-grads}))
 
@@ -98,4 +98,4 @@
           (let* ([child (get children j)]
                  [lg    (get local-grads j)])
             (put child :grad (+ (v-grad child) (* node-grad lg))))
-          (set j (+ j 1)))))))
+           (assign j (+ j 1)))))))

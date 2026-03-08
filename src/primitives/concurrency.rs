@@ -124,6 +124,18 @@ fn is_value_sendable(value: &Value) -> bool {
 
         // Parameters are not sendable (fiber-local state)
         HeapObject::Parameter { .. } => false,
+
+        // Sets (immutable) are safe if their contents are
+        HeapObject::LSet(s) => s.iter().all(is_value_sendable),
+
+        // Sets (mutable) are sendable if we deep-copy
+        HeapObject::LSetMut(s_ref) => {
+            if let Ok(s) = s_ref.try_borrow() {
+                s.iter().all(is_value_sendable)
+            } else {
+                false
+            }
+        }
     }
 }
 

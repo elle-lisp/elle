@@ -126,7 +126,7 @@
   "Return a function that grades scores and counts how many it has seen."
   (var count 0)                    # mutable binding, captured by the closure
   (fn [score]
-    (set count (+ count 1))        # mutate the captured variable
+    (assign count (+ count 1))        # mutate the captured variable
     (letter-grade score)))
 
 (def grader (make-grader))
@@ -318,8 +318,8 @@
   (var count 0)
   [                                # return a tuple of two closures
     (fn [score]
-      (set total (+ total score))  # mutate shared 'total'
-      (set count (+ count 1)))     # mutate shared 'count'
+      (assign total (+ total score))  # mutate shared 'total'
+      (assign count (+ count 1)))     # mutate shared 'count'
     (fn []
       (if (= count 0)
         0
@@ -338,7 +338,7 @@
   "Return a function that adds to a running total."
   (var total initial)
   (fn [amount]
-    (set total (+ total amount))   # mutate captured 'total'
+    (assign total (+ total amount))   # mutate captured 'total'
     total))                        # return new total
 
 (def bonus-points (make-accumulator 0))

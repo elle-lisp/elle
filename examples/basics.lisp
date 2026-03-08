@@ -248,7 +248,7 @@
 # each over bytes yields integers (byte values)
 (var byte-sum 0)
 (each v in (bytes 1 2 3)
-  (set byte-sum (+ byte-sum v)))    # 1 + 2 + 3 = 6
+  (assign byte-sum (+ byte-sum v)))    # 1 + 2 + 3 = 6
 (assert-eq byte-sum 6 "each over bytes sums integers")
 
 # Conversions: string ↔ bytes ↔ blob ↔ buffer

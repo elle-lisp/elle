@@ -69,6 +69,26 @@ impl fmt::Display for SyntaxKind {
                 }
                 write!(f, "}}")
             }
+            SyntaxKind::Set(items) => {
+                write!(f, "|")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, "|")
+            }
+            SyntaxKind::SetMut(items) => {
+                write!(f, "@|")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, "|")
+            }
             SyntaxKind::Quote(inner) => write!(f, "'{}", inner),
             SyntaxKind::Quasiquote(inner) => write!(f, "`{}", inner),
             SyntaxKind::Unquote(inner) => write!(f, ",{}", inner),

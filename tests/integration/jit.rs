@@ -2078,7 +2078,7 @@ fn test_jit_solo_fib_e2e() {
 #[test]
 fn test_jit_batch_global_mutation_known_limitation() {
     // Documents a known Phase 1 limitation: after batch JIT compilation,
-    // mutating a global (`set!`) does NOT update the direct SCC calls.
+    // mutating a global (`assign`) does NOT update the direct SCC calls.
     // The batch-compiled code still calls the old function because direct
     // calls are resolved at compilation time, not at runtime.
     //
@@ -2106,7 +2106,7 @@ fn test_jit_batch_global_mutation_known_limitation() {
         (helper 10)
         (helper 10)
         ## Mutate the global
-        (set helper (fn (n) "replaced"))
+        (assign helper (fn (n) "replaced"))
         ## Call again — may use old or new function depending on JIT state.
         ## The key invariant: this must not crash.
         (helper 5))"#,

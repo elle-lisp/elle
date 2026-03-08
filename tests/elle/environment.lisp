@@ -14,7 +14,7 @@
   "environment contains user defined global")
 
 (assert-eq
-  (begin (var x 1) (set x 2) (get (environment) :x))
+  (begin (var x 1) (assign x 2) (get (environment) :x))
   2
   "environment reflects mutation")
 

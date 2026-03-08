@@ -403,6 +403,12 @@ impl VM {
                 Instruction::PopParamFrame => {
                     self.fiber.param_frames.pop();
                 }
+                Instruction::IsSet => {
+                    types::handle_is_set(self);
+                }
+                Instruction::IsSetMut => {
+                    types::handle_is_set_mut(self);
+                }
             }
 
             // Check for error signal set by this instruction's handler

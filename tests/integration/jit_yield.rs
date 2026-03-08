@@ -29,7 +29,7 @@ fn test_jit_yield_through_call() {
           (def warmup-c (make-coroutine run))
           (coro/resume warmup-c)
           (coro/resume warmup-c)
-          (set warmup-i (+ warmup-i 1)))
+          (assign warmup-i (+ warmup-i 1)))
 
         # Now outer should be JIT-compiled. Test it.
         (def c (make-coroutine run))
@@ -54,7 +54,7 @@ fn test_jit_yield_through_call_with_resume_value() {
           (def warmup-c (make-coroutine run))
           (coro/resume warmup-c)
           (coro/resume warmup-c 0)
-          (set warmup-i (+ warmup-i 1)))
+          (assign warmup-i (+ warmup-i 1)))
 
         (def c (make-coroutine run))
         (coro/resume c)
@@ -79,7 +79,7 @@ fn test_jit_yield_through_call_multiple_yields() {
           (coro/resume warmup-c)
           (coro/resume warmup-c)
           (coro/resume warmup-c)
-          (set warmup-i (+ warmup-i 1)))
+          (assign warmup-i (+ warmup-i 1)))
 
         (def c (make-coroutine run))
         (list (coro/resume c) (coro/resume c) (coro/resume c) (coro/resume c))
@@ -104,7 +104,7 @@ fn test_jit_yield_through_call_stack_preservation() {
           (def warmup-c (make-coroutine run))
           (coro/resume warmup-c)
           (coro/resume warmup-c)
-          (set warmup-i (+ warmup-i 1)))
+          (assign warmup-i (+ warmup-i 1)))
 
         (def c (make-coroutine run))
         (def v1 (coro/resume c))
@@ -131,7 +131,7 @@ fn test_jit_yield_through_nested_calls() {
           (def warmup-c (make-coroutine run))
           (coro/resume warmup-c)
           (coro/resume warmup-c)
-          (set warmup-i (+ warmup-i 1)))
+          (assign warmup-i (+ warmup-i 1)))
 
         (def c (make-coroutine run))
         (def v1 (coro/resume c))
@@ -157,7 +157,7 @@ fn test_jit_yield_with_captures() {
           (def warmup-c (make-coroutine run))
           (coro/resume warmup-c)
           (coro/resume warmup-c)
-          (set warmup-i (+ warmup-i 1)))
+          (assign warmup-i (+ warmup-i 1)))
 
         (def c (make-coroutine run))
         (def v1 (coro/resume c))
@@ -194,7 +194,7 @@ fn test_jit_yield_locals_survive_yield_resume() {
           (def warmup-c (make-coroutine run))
           (coro/resume warmup-c)
           (coro/resume warmup-c)
-          (set warmup-i (+ warmup-i 1)))
+          (assign warmup-i (+ warmup-i 1)))
 
         (def c (make-coroutine run))
         (def v1 (coro/resume c))
@@ -226,7 +226,7 @@ fn test_jit_yield_multiple_locals_survive() {
           (def warmup-c (make-coroutine run))
           (coro/resume warmup-c)
           (coro/resume warmup-c)
-          (set warmup-i (+ warmup-i 1)))
+          (assign warmup-i (+ warmup-i 1)))
 
         (def c (make-coroutine run))
         (def v1 (coro/resume c))

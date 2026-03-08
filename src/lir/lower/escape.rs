@@ -237,16 +237,16 @@ impl Lowerer {
 
     fn walk_for_outward_set(&self, hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
         match &hir.kind {
-            HirKind::Set { target, value } => {
+            HirKind::Assign { target, value } => {
                 // Check if target is outside our scope
                 let in_scope = scope_bindings.iter().any(|(b, _)| b == target);
                 if !in_scope {
-                    // Outward set — only dangerous if value could be heap-allocated
+                    // Outward assign — only dangerous if value could be heap-allocated
                     if !self.result_is_safe(value, scope_bindings) {
                         return true;
                     }
                 }
-                // Recurse into value expression (it may contain further set!s)
+                // Recurse into value expression (it may contain further assigns)
                 self.walk_for_outward_set(value, scope_bindings)
             }
 
@@ -454,7 +454,7 @@ impl Lowerer {
                         .all(|a| self.hir_break_values_safe(&a.expr, target_id, scope_bindings))
             }
 
-            HirKind::Set { value, .. } | HirKind::Define { value, .. } => {
+            HirKind::Assign { value, .. } | HirKind::Define { value, .. } => {
                 self.hir_break_values_safe(value, target_id, scope_bindings)
             }
 
@@ -592,7 +592,7 @@ impl Lowerer {
                         .any(|a| Self::walk_for_escaping_break(&a.expr, inner_blocks))
             }
 
-            HirKind::Set { value, .. } | HirKind::Define { value, .. } => {
+            HirKind::Assign { value, .. } | HirKind::Define { value, .. } => {
                 Self::walk_for_escaping_break(value, inner_blocks)
             }
 
@@ -698,7 +698,7 @@ impl Lowerer {
                         .all(|a| self.all_breaks_have_safe_values(&a.expr))
             }
 
-            HirKind::Set { value, .. } | HirKind::Define { value, .. } => {
+            HirKind::Assign { value, .. } | HirKind::Define { value, .. } => {
                 self.all_breaks_have_safe_values(value)
             }
 

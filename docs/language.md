@@ -202,10 +202,10 @@ x ⟹ 42
 message ⟹ "Hello, Elle!"
 ```
 
-Once defined, you can modify a variable with `set`:
+Once defined, you can modify a variable with `assign`:
 
 ```janet
-(set x 100)
+(assign x 100)
 x ⟹ 100
 ```
 
@@ -215,7 +215,7 @@ x ⟹ 100
 
 ```janet
 (def x 42)
-(set x 100) ⟹ Error: immutable binding
+(assign x 100) ⟹ Error: immutable binding
 ```
 
 ### let - Local Bindings
@@ -381,20 +381,20 @@ Destructuring patterns in parameter lists extract values from arguments:
 
 ```janet
 (var (a b) (list 1 2))
-(set a 100)
+(assign a 100)
 a ⟹ 100
 
 (def (x y) (list 1 2))
-(set x 10) ⟹ Error: immutable binding
+(assign x 10) ⟹ Error: immutable binding
 ```
 
-### set! - Mutation
+### assign - Mutation
 
-`set` updates an existing binding:
+`assign` updates an existing binding:
 
 ```janet
 (var counter 0)
-(set counter (+ counter 1))
+(assign counter (+ counter 1))
 counter ⟹ 1
 ```
 
@@ -531,17 +531,17 @@ The `set` operator modifies existing variables:
 (var counter 0)
 
 (lambda ()
-  (set counter (+ counter 1))  # Modifies global counter
+  (assign counter (+ counter 1))  # Modifies global counter
   counter)
 ```
 
-`set` searches the scope chain to find where a variable is defined:
+`assign` searches the scope chain to find where a variable is defined:
 
 ```janet
 (var outer-var 100)
 
 (lambda ()
-  (set outer-var 200)  # Modifies outer-var in global scope
+  (assign outer-var 200)  # Modifies outer-var in global scope
 )
 ```
 
@@ -580,7 +580,7 @@ Use a global or let-bound accumulator with loops:
 ```janet
 (let ((sum 0))
   (for item (list 1 2 3 4 5)
-    (set sum (+ sum item)))
+    (assign sum (+ sum item)))
   sum)  # Returns 15
 ```
 
@@ -675,7 +675,7 @@ Each closure has its own captured variables:
 (defn make-counter ()
   (var count 0)
   (fn ()
-    (set count (+ count 1))
+    (assign count (+ count 1))
     count))
 
 (var c1 (make-counter))
@@ -832,12 +832,12 @@ result  # ⟹ "early exit"
   (begin
     (display counter)
     (newline)
-    (set counter (+ counter 1))))
+    (assign counter (+ counter 1))))
 ⟹ nil (prints 0 1 2 3 4)
 
 (var x 100)
 (while (> x 0)
-  (set x (/ x 2)))
+  (assign x (/ x 2)))
 ⟹ nil (x becomes 0 after repeated halving)
 ```
 
