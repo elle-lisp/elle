@@ -6,7 +6,7 @@ use super::token::{SourceLoc, Token, TokenWithLoc};
 fn is_delimiter(c: char) -> bool {
     matches!(
         c,
-        '(' | ')' | '[' | ']' | '{' | '}' | '\'' | '`' | ',' | ':' | '@' | ';'
+        '(' | ')' | '[' | ']' | '{' | '}' | '\'' | '`' | ',' | ':' | '@' | ';' | '|'
     )
 }
 
@@ -307,23 +307,56 @@ impl<'a> Lexer<'a> {
                     byte_offset: start_pos,
                 }))
             }
-            Some('@') => {
+            Some('|') => {
                 self.advance();
                 Ok(Some(TokenWithLoc {
-                    token: Token::ListSugar,
+                    token: Token::Pipe,
                     loc,
                     len: self.pos - start_pos,
                     byte_offset: start_pos,
                 }))
             }
+            Some('@') => {
+                self.advance();
+                // Check if next character is |
+                if self.current() == Some('|') {
+                    self.advance();
+                    Ok(Some(TokenWithLoc {
+                        token: Token::AtPipe,
+                        loc,
+                        len: self.pos - start_pos,
+                        byte_offset: start_pos,
+                    }))
+                } else {
+                    Ok(Some(TokenWithLoc {
+                        token: Token::ListSugar,
+                        loc,
+                        len: self.pos - start_pos,
+                        byte_offset: start_pos,
+                    }))
+                }
+            }
             Some(':') => {
                 self.advance();
+                // Allow :@name for mutable type keywords (e.g. :@set, :@array)
+                let at_prefix = if self.current() == Some('@') {
+                    self.advance();
+                    true
+                } else {
+                    false
+                };
                 // Read keyword - must be followed by symbol characters
                 let (start, end) = self.read_symbol();
                 if start == end {
                     Err("Invalid keyword: expected symbol after :".to_string())
                 } else {
-                    let keyword = self.slice(start, end);
+                    let keyword = if at_prefix {
+                        // The @ was already consumed, so we need to include it in the keyword name.
+                        // Since @ is at position (start - 1) in the source, we can slice from there.
+                        self.slice(start - 1, end)
+                    } else {
+                        self.slice(start, end)
+                    };
                     Ok(Some(TokenWithLoc {
                         token: Token::Keyword(keyword),
                         loc,

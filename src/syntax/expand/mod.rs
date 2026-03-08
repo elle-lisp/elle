@@ -133,6 +133,16 @@ impl Expander {
             SyntaxKind::Table(items) => {
                 self.expand_table(items, syntax.span, syntax.scopes, symbols, vm)
             }
+            SyntaxKind::Set(items) => {
+                self.expand_set(items, syntax.span, syntax.scopes, symbols, vm)
+            }
+            SyntaxKind::SetMut(items) => {
+                self.expand_set_mut(items, syntax.span, syntax.scopes, symbols, vm)
+            }
+            SyntaxKind::Pipe => {
+                // Pipe is a marker for or-patterns, pass through unchanged
+                Ok(syntax)
+            }
             SyntaxKind::Quote(_) => {
                 // Don't expand inside quote
                 Ok(syntax)
@@ -270,6 +280,19 @@ impl Expander {
                     .map(|item| self.add_scope_recursive(item, scope))
                     .collect(),
             ),
+            SyntaxKind::Set(items) => SyntaxKind::Set(
+                items
+                    .into_iter()
+                    .map(|item| self.add_scope_recursive(item, scope))
+                    .collect(),
+            ),
+            SyntaxKind::SetMut(items) => SyntaxKind::SetMut(
+                items
+                    .into_iter()
+                    .map(|item| self.add_scope_recursive(item, scope))
+                    .collect(),
+            ),
+            SyntaxKind::Pipe => SyntaxKind::Pipe,
             SyntaxKind::Quote(inner) => {
                 // Don't add scope inside quote - it's literal data
                 SyntaxKind::Quote(inner)
@@ -385,6 +408,44 @@ impl Expander {
             .collect();
         Ok(Syntax::with_scopes(
             SyntaxKind::Table(expanded?),
+            span,
+            scopes,
+        ))
+    }
+
+    fn expand_set(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+        scopes: Vec<ScopeId>,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Syntax, String> {
+        let expanded: Result<Vec<Syntax>, String> = items
+            .iter()
+            .map(|item| self.expand(item.clone(), symbols, vm))
+            .collect();
+        Ok(Syntax::with_scopes(
+            SyntaxKind::Set(expanded?),
+            span,
+            scopes,
+        ))
+    }
+
+    fn expand_set_mut(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+        scopes: Vec<ScopeId>,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Syntax, String> {
+        let expanded: Result<Vec<Syntax>, String> = items
+            .iter()
+            .map(|item| self.expand(item.clone(), symbols, vm))
+            .collect();
+        Ok(Syntax::with_scopes(
+            SyntaxKind::SetMut(expanded?),
             span,
             scopes,
         ))

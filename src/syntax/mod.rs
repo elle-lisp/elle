@@ -80,7 +80,9 @@ impl Syntax {
             | SyntaxKind::Tuple(items)
             | SyntaxKind::Array(items)
             | SyntaxKind::Struct(items)
-            | SyntaxKind::Table(items) => {
+            | SyntaxKind::Table(items)
+            | SyntaxKind::Set(items)
+            | SyntaxKind::SetMut(items) => {
                 for item in items {
                     item.set_scopes_recursive(scopes);
                 }
@@ -101,7 +103,8 @@ impl Syntax {
             | SyntaxKind::Float(_)
             | SyntaxKind::Symbol(_)
             | SyntaxKind::Keyword(_)
-            | SyntaxKind::String(_) => {}
+            | SyntaxKind::String(_)
+            | SyntaxKind::Pipe => {}
             // SyntaxLiteral is internal-only (created by expand_macro_call_inner);
             // it should never appear in datum->syntax input from from_value()
             SyntaxKind::SyntaxLiteral(_) => {}
@@ -156,11 +159,14 @@ impl Syntax {
             SyntaxKind::Array(_) => "array",
             SyntaxKind::Struct(_) => "struct",
             SyntaxKind::Table(_) => "table",
+            SyntaxKind::Set(_) => "set",
+            SyntaxKind::SetMut(_) => "mutable set",
             SyntaxKind::Quote(_) => "quote",
             SyntaxKind::Quasiquote(_) => "quasiquote",
             SyntaxKind::Unquote(_) => "unquote",
             SyntaxKind::UnquoteSplicing(_) => "unquote-splicing",
             SyntaxKind::Splice(_) => "splice",
+            SyntaxKind::Pipe => "pipe",
             SyntaxKind::SyntaxLiteral(_) => "syntax-literal",
         }
     }
@@ -187,6 +193,10 @@ pub enum SyntaxKind {
     Struct(Vec<Syntax>),
     /// Brace-delimited mutable table: `@{...}`
     Table(Vec<Syntax>),
+    /// Pipe-delimited immutable set literal: `|...|`
+    Set(Vec<Syntax>),
+    /// Pipe-delimited mutable set literal: `@|...|`
+    SetMut(Vec<Syntax>),
 
     // Quote forms - preserved as structure for macro handling
     Quote(Box<Syntax>),
@@ -196,6 +206,9 @@ pub enum SyntaxKind {
     /// Splice form: `;expr` or `(splice expr)`. Marks a value for
     /// array-spreading at call sites and data constructors.
     Splice(Box<Syntax>),
+
+    /// Pipe separator (used as or-pattern delimiter inside lists)
+    Pipe,
 
     /// Internal: pre-computed Value literal for macro argument passing.
     /// Never produced by the reader. The analyzer handles this by producing

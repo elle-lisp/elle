@@ -17,7 +17,9 @@ fn contains_syntax_literal(s: &Syntax) -> bool {
         | SyntaxKind::Tuple(items)
         | SyntaxKind::Array(items)
         | SyntaxKind::Struct(items)
-        | SyntaxKind::Table(items) => items.iter().any(contains_syntax_literal),
+        | SyntaxKind::Table(items)
+        | SyntaxKind::Set(items)
+        | SyntaxKind::SetMut(items) => items.iter().any(contains_syntax_literal),
         SyntaxKind::Quote(inner)
         | SyntaxKind::Quasiquote(inner)
         | SyntaxKind::Unquote(inner)
@@ -90,6 +92,25 @@ impl Syntax {
                 let mut values = vec![Value::symbol(table_sym.0)];
                 values.extend(items.iter().map(|item| item.to_value(symbols)));
                 crate::value::list(values)
+            }
+            SyntaxKind::Set(items) => {
+                // Convert to (set e1 e2 ...) list
+                let set_sym = symbols.intern("set");
+                let mut values = vec![Value::symbol(set_sym.0)];
+                values.extend(items.iter().map(|item| item.to_value(symbols)));
+                crate::value::list(values)
+            }
+            SyntaxKind::SetMut(items) => {
+                // Convert to (mutable-set e1 e2 ...) list
+                let set_mut_sym = symbols.intern("mutable-set");
+                let mut values = vec![Value::symbol(set_mut_sym.0)];
+                values.extend(items.iter().map(|item| item.to_value(symbols)));
+                crate::value::list(values)
+            }
+            SyntaxKind::Pipe => {
+                // Pipe is a marker for or-patterns. Convert to symbol "|"
+                let sym = symbols.intern("|");
+                Value::symbol(sym.0)
             }
             SyntaxKind::Quote(inner) => {
                 let quote_sym = symbols.intern("quote");
