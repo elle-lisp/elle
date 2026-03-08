@@ -415,7 +415,16 @@ impl AsyncBackend {
         };
 
         // Submit to platform backend
-        match &mut inner.platform {
+        // Destructure to get independent borrows of each field.
+        #[allow(unused_variables)]
+        let AsyncBackendInner {
+            ref mut platform,
+            ref mut buffer_pool,
+            ref mut pending,
+            ..
+        } = *inner;
+
+        match platform {
             #[cfg(all(target_os = "linux", feature = "io-uring"))]
             PlatformBackend::Uring(ring) => {
                 Self::submit_uring(
@@ -425,7 +434,7 @@ impl AsyncBackend {
                     op_kind,
                     &write_data,
                     read_size,
-                    &mut inner.buffer_pool,
+                    buffer_pool,
                     buf_handle,
                 )?;
             }
@@ -434,7 +443,7 @@ impl AsyncBackend {
             }
         }
 
-        inner.pending.insert(
+        pending.insert(
             id,
             PendingOp {
                 op: match &request.op {
@@ -529,83 +538,88 @@ impl AsyncBackend {
             Some(timeout_ms as u64)
         };
 
-        match &mut inner.platform {
-            #[cfg(all(target_os = "linux", feature = "io-uring"))]
-            PlatformBackend::Uring(ring) => {
-                Self::wait_uring(
-                    ring,
-                    timeout,
-                    &mut inner.pending,
-                    &mut inner.buffer_pool,
-                    &mut inner.fd_states,
-                    &mut inner.completions,
-                )?;
-            }
-            PlatformBackend::ThreadPool(pool) => {
-                let raw_completions = pool.wait(timeout)?;
-                for (id, result_code, data) in raw_completions {
-                    if let Some(pending) = inner.pending.remove(&id) {
-                        let buf_handle = pending.buffer_handle;
-                        // Release buffer first
-                        inner.buffer_pool.release(buf_handle);
+        // Destructure to get independent borrows of each field.
+        // Scoped so the borrows end before drain_stdin_completions.
+        {
+            let AsyncBackendInner {
+                ref mut platform,
+                ref mut pending,
+                ref mut buffer_pool,
+                ref mut fd_states,
+                ref mut completions,
+                ..
+            } = *inner;
 
-                        // Process completion
-                        let completion = if result_code < 0 {
-                            let errno = -result_code;
-                            let msg = format!("I/O error: errno {}", errno);
-                            let state = inner
-                                .fd_states
-                                .entry(pending.port_key.clone())
-                                .or_insert_with(FdState::new);
-                            state.status = FdStatus::Error(msg.clone());
-                            Completion {
-                                id,
-                                result: Err(error_val("io-error", msg)),
-                            }
-                        } else if result_code == 0
-                            && matches!(
-                                pending.op,
-                                IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll
-                            )
-                        {
-                            let state = inner
-                                .fd_states
-                                .entry(pending.port_key.clone())
-                                .or_insert_with(FdState::new);
-                            state.status = FdStatus::Eof;
-                            Completion {
-                                id,
-                                result: Ok(Value::NIL),
-                            }
-                        } else {
-                            let value = match &pending.op {
-                                IoOp::ReadLine => {
-                                    let s = String::from_utf8_lossy(&data);
-                                    let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                                    Value::string(trimmed)
+            match platform {
+                #[cfg(all(target_os = "linux", feature = "io-uring"))]
+                PlatformBackend::Uring(ring) => {
+                    Self::wait_uring(ring, timeout, pending, buffer_pool, fd_states, completions)?;
+                }
+                PlatformBackend::ThreadPool(pool) => {
+                    let raw_completions = pool.wait(timeout)?;
+                    for (id, result_code, data) in raw_completions {
+                        if let Some(pending_op) = pending.remove(&id) {
+                            let buf_handle = pending_op.buffer_handle;
+                            // Release buffer first
+                            buffer_pool.release(buf_handle);
+
+                            // Process completion
+                            let completion = if result_code < 0 {
+                                let errno = -result_code;
+                                let msg = format!("I/O error: errno {}", errno);
+                                let state = fd_states
+                                    .entry(pending_op.port_key.clone())
+                                    .or_insert_with(FdState::new);
+                                state.status = FdStatus::Error(msg.clone());
+                                Completion {
+                                    id,
+                                    result: Err(error_val("io-error", msg)),
                                 }
-                                IoOp::Read { .. } | IoOp::ReadAll => {
-                                    if let Some(port) = pending.port.as_external::<Port>() {
-                                        match port.encoding() {
-                                            Encoding::Text => {
-                                                let s = String::from_utf8_lossy(&data);
-                                                Value::string(s.as_ref())
-                                            }
-                                            Encoding::Binary => Value::bytes(data),
-                                        }
-                                    } else {
-                                        Value::string(String::from_utf8_lossy(&data).as_ref())
+                            } else if result_code == 0
+                                && matches!(
+                                    pending_op.op,
+                                    IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll
+                                )
+                            {
+                                let state = fd_states
+                                    .entry(pending_op.port_key.clone())
+                                    .or_insert_with(FdState::new);
+                                state.status = FdStatus::Eof;
+                                Completion {
+                                    id,
+                                    result: Ok(Value::NIL),
+                                }
+                            } else {
+                                let value = match &pending_op.op {
+                                    IoOp::ReadLine => {
+                                        let s = String::from_utf8_lossy(&data);
+                                        let trimmed =
+                                            s.trim_end_matches('\n').trim_end_matches('\r');
+                                        Value::string(trimmed)
                                     }
+                                    IoOp::Read { .. } | IoOp::ReadAll => {
+                                        if let Some(port) = pending_op.port.as_external::<Port>() {
+                                            match port.encoding() {
+                                                Encoding::Text => {
+                                                    let s = String::from_utf8_lossy(&data);
+                                                    Value::string(s.as_ref())
+                                                }
+                                                Encoding::Binary => Value::bytes(data),
+                                            }
+                                        } else {
+                                            Value::string(String::from_utf8_lossy(&data).as_ref())
+                                        }
+                                    }
+                                    IoOp::Write { .. } => Value::int(result_code as i64),
+                                    IoOp::Flush => Value::NIL,
+                                };
+                                Completion {
+                                    id,
+                                    result: Ok(value),
                                 }
-                                IoOp::Write { .. } => Value::int(result_code as i64),
-                                IoOp::Flush => Value::NIL,
                             };
-                            Completion {
-                                id,
-                                result: Ok(value),
-                            }
-                        };
-                        inner.completions.push_back(completion);
+                            completions.push_back(completion);
+                        }
                     }
                 }
             }
@@ -634,7 +648,7 @@ impl AsyncBackend {
                     .sec(ms / 1000)
                     .nsec(((ms % 1000) * 1_000_000) as u32);
                 let args = io_uring::types::SubmitArgs::new().timespec(&ts);
-                let _ = ring.submitter().submit_and_wait_with_timeout(1, &args);
+                let _ = ring.submitter().submit_with_args(1, &args);
             }
             None => {
                 ring.submit_and_wait(1)

@@ -1,7 +1,7 @@
 //! Buffer pool for async I/O backends.
 //!
 //! Buffers passed to io_uring must not move while the kernel holds them.
-//! The pool owns Vec<u8> allocations indexed by BufferHandle. Buffers are
+//! The pool owns `Vec<u8>` allocations indexed by BufferHandle. Buffers are
 //! allocated on submit, returned on completion.
 
 /// Opaque handle to a pooled buffer.
