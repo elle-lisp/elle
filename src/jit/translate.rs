@@ -47,7 +47,7 @@ pub(crate) struct FunctionTranslator<'a> {
     /// When a Call/TailCall targets a global in this map, we emit a direct
     /// Cranelift call instead of going through elle_jit_call.
     pub(crate) scc_peers: HashMap<SymbolId, FuncId>,
-    /// Map from register to the SymbolId it was loaded from (for LoadGlobal).
+    /// Map from register to the SymbolId it was loaded from.
     /// Used to detect when a Call/TailCall targets an SCC peer.
     pub(crate) global_load_map: HashMap<Reg, SymbolId>,
     /// SymbolId of the function being compiled (for self-call detection)

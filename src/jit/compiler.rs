@@ -32,7 +32,7 @@ fn var(n: u32) -> Variable {
 
 /// A member of a compilation group (SCC) for batch JIT compilation.
 pub struct BatchMember<'a> {
-    /// Symbol ID for this function (used to identify it in LoadGlobal)
+    /// Symbol ID for this function (used to identify it for direct calls)
     pub sym: SymbolId,
     /// The LIR function to compile
     pub lir: &'a LirFunction,
@@ -79,8 +79,6 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) load_capture: FuncId,
     pub(crate) store_cell: FuncId,
     pub(crate) store_capture: FuncId,
-    pub(crate) load_global: FuncId,
-    pub(crate) store_global: FuncId,
     pub(crate) call: FuncId,
     pub(crate) tail_call: FuncId,
     pub(crate) has_exception: FuncId,
@@ -170,14 +168,6 @@ impl JitCompiler {
         builder.symbol(
             "elle_jit_store_capture",
             dispatch::elle_jit_store_capture as *const u8,
-        );
-        builder.symbol(
-            "elle_jit_load_global",
-            dispatch::elle_jit_load_global as *const u8,
-        );
-        builder.symbol(
-            "elle_jit_store_global",
-            dispatch::elle_jit_store_global as *const u8,
         );
         builder.symbol("elle_jit_call", dispatch::elle_jit_call as *const u8);
         builder.symbol(
@@ -319,8 +309,6 @@ impl JitCompiler {
             load_capture: declare(module, "elle_jit_load_capture", &unary_sig)?,
             store_cell: declare(module, "elle_jit_store_cell", &binary_sig)?,
             store_capture: declare(module, "elle_jit_store_capture", &ternary_sig)?,
-            load_global: declare(module, "elle_jit_load_global", &binary_sig)?,
-            store_global: declare(module, "elle_jit_store_global", &ternary_sig)?,
             call: declare(module, "elle_jit_call", &call_sig)?,
             tail_call: declare(module, "elle_jit_tail_call", &call_sig)?,
             has_exception: declare(module, "elle_jit_has_exception", &unary_sig)?,
@@ -593,8 +581,7 @@ impl JitCompiler {
         // Set up SCC peer map for direct calls between mutually recursive functions
         if let Some(peers) = scc_peers {
             translator.scc_peers = peers.clone();
-            // global_load_map is no longer populated from LIR (LoadGlobal was removed).
-            // SCC peer detection now relies on the scc_peers map passed in from
+            // SCC peer detection relies on the scc_peers map passed in from
             // the batch compilation caller.
         }
 

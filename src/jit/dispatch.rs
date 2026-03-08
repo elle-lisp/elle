@@ -269,43 +269,6 @@ pub extern "C" fn elle_jit_store_capture(env_ptr: *mut u64, index: u64, value: u
 }
 
 // =============================================================================
-// Global Variable Access
-// =============================================================================
-
-/// Load a global variable by symbol ID
-#[no_mangle]
-pub extern "C" fn elle_jit_load_global(sym_id: u64, vm: *mut ()) -> u64 {
-    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    let sym = sym_id as u32;
-    match vm.globals.get(sym as usize).filter(|v| !v.is_undefined()) {
-        Some(val) => val.to_bits(),
-        None => {
-            vm.fiber.signal = Some((
-                SIG_ERROR,
-                error_val("error", format!("Undefined global: {}", sym)),
-            ));
-            TAG_NIL
-        }
-    }
-}
-
-/// Store a global variable by symbol ID
-#[no_mangle]
-pub extern "C" fn elle_jit_store_global(sym_id: u64, value: u64, vm: *mut ()) -> u64 {
-    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    let sym = sym_id as u32;
-    let val = unsafe { Value::from_bits(value) };
-    let idx = sym as usize;
-    if idx >= vm.globals.len() {
-        vm.globals.resize(idx + 1, Value::UNDEFINED);
-        vm.defined_globals.resize(idx + 1, false);
-    }
-    vm.globals[idx] = val;
-    vm.defined_globals[idx] = true;
-    TAG_NIL
-}
-
-// =============================================================================
 // Function Calls
 // =============================================================================
 
