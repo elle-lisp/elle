@@ -23,9 +23,11 @@ pub use core::VM;
 use crate::compiler::bytecode::Bytecode;
 use crate::io::backend::SyncBackend;
 use crate::io::request::IoRequest;
+use crate::port::Port;
 use crate::symbol::SymbolTable;
 use crate::value::{error_val, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_YIELD};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 impl VM {
     pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
@@ -145,32 +147,38 @@ impl VM {
         }
 
         // Execute with inline SIG_IO handling.
+        //
+        // When a primitive yields SIG_IO, the VM saves the entire call
+        // stack into `fiber.suspended` (a Vec<SuspendedFrame>). We
+        // execute the I/O synchronously, then replay the suspended
+        // frames via `resume_suspended` — the same mechanism used by
+        // fiber resume. This correctly restores locals, call frames,
+        // and stack state at every nesting level.
         self.location_map = bytecode.location_map.clone();
         self.error_loc = None;
 
-        let empty_env = Rc::new(vec![]);
-        let mut current_bytecode = Rc::new(bytecode.instructions.to_vec());
-        let mut current_constants = Rc::new(bytecode.constants.to_vec());
-        let mut current_env = empty_env;
-        let mut current_location_map = Rc::new(self.location_map.clone());
-        let mut current_ip = 0usize;
         let mut backend: Option<SyncBackend> = None;
 
-        loop {
-            let (bits, ip) = self.execute_bytecode_inner_impl(
-                &current_bytecode,
-                &current_constants,
-                &current_env,
-                current_ip,
-                &current_location_map,
-            );
+        // Initial execution.
+        let mut bits = {
+            let bc = Rc::new(bytecode.instructions.to_vec());
+            let cs = Rc::new(bytecode.constants.to_vec());
+            let env = Rc::new(vec![]);
+            let lm = Rc::new(self.location_map.clone());
+            self.execute_bytecode_inner_impl(&bc, &cs, &env, 0, &lm).0
+        };
 
+        loop {
             if let Some(tail) = self.pending_tail_call.take() {
-                current_bytecode = tail.bytecode;
-                current_constants = tail.constants;
-                current_env = tail.env;
-                current_location_map = tail.location_map;
-                current_ip = 0;
+                bits = self
+                    .execute_bytecode_inner_impl(
+                        &tail.bytecode,
+                        &tail.constants,
+                        &tail.env,
+                        0,
+                        &tail.location_map,
+                    )
+                    .0;
                 continue;
             }
 
@@ -178,17 +186,37 @@ impl VM {
                 let (_, value) = self.fiber.signal.take().unwrap();
                 return Ok(value);
             } else if bits.contains(SIG_IO) {
-                // Extract the IoRequest from the signal, execute it
-                // with the backend, push the result, and resume.
+                // Extract the IoRequest, execute I/O, then resume the
+                // suspended frame chain with the result.
                 let (_, request_val) = self.fiber.signal.take().unwrap();
                 let backend = backend.get_or_insert_with(SyncBackend::new);
-                match request_val.as_external::<IoRequest>() {
+                let io_result = match request_val.as_external::<IoRequest>() {
                     Some(req) => {
+                        // Resolve effective timeout: per-call overrides port-level.
+                        let effective_timeout = req.timeout.or_else(|| {
+                            req.port
+                                .as_external::<Port>()
+                                .and_then(|p| p.timeout_ms())
+                                .map(Duration::from_millis)
+                        });
+                        let deadline = effective_timeout.map(|d| Instant::now() + d);
+
                         let (result_bits, result_val) = backend.execute(req);
+
+                        // Post-hoc deadline check (sync backend blocks).
+                        if let Some(dl) = deadline {
+                            if Instant::now() > dl {
+                                return Err(self.format_error_with_location(error_val(
+                                    "timeout",
+                                    "I/O operation timed out",
+                                )));
+                            }
+                        }
+
                         if result_bits.contains(SIG_ERROR) {
                             return Err(self.format_error_with_location(result_val));
                         }
-                        self.fiber.stack.push(result_val);
+                        result_val
                     }
                     None => {
                         return Err(format!(
@@ -196,8 +224,12 @@ impl VM {
                             request_val.type_name()
                         ));
                     }
-                }
-                current_ip = ip;
+                };
+
+                // Resume the suspended frame chain with the I/O result.
+                // This restores locals and call frames at every level.
+                let frames = self.fiber.suspended.take().unwrap_or_default();
+                bits = self.resume_suspended(frames, io_result);
             } else if bits.contains(SIG_YIELD) {
                 return Err("Unexpected yield outside coroutine context".to_string());
             } else if bits.contains(SIG_ERROR) {

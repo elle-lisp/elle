@@ -334,7 +334,21 @@ Property test files follow a consistent structure:
 
 ## Running tests
 
+Approximate runtimes (for guidance — vary by machine):
+
+| Command | Runtime | What it does |
+|---------|---------|-------------|
+| `make smoke` | ~15s | Elle examples only |
+| `make test` | ~2min | build + examples + elle scripts + unit tests |
+| `cargo test --workspace` | ~30min | full suite (unit + integration ~10min + property ~20min) |
+
+**Rule of thumb**: Before committing, run `make test` locally (~2min). Before
+pushing, run `cargo test --workspace` (~30min) to catch property test failures.
+
 ```bash
+# Fast local test (build + examples + elle scripts + unit tests, ~2min)
+make test
+
 # Full test suite (includes inline tests, integration, unit, property, examples)
 cargo test --workspace
 

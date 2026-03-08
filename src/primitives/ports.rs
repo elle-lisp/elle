@@ -239,6 +239,96 @@ fn prim_is_port_open(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(!port.is_closed()))
 }
 
+/// (port/set-options port :timeout ms) → nil
+///
+/// Set port options. Currently only :timeout is recognized.
+/// Pass nil to clear the timeout.
+fn prim_port_set_options(args: &[Value]) -> (SignalBits, Value) {
+    let port = match extract_port(&args[0], "port/set-options") {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+
+    let remaining = &args[1..];
+    if !remaining.len().is_multiple_of(2) {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                "port/set-options: keyword arguments must be key-value pairs",
+            ),
+        );
+    }
+
+    let mut i = 0;
+    while i < remaining.len() {
+        let key = &remaining[i];
+        let val = &remaining[i + 1];
+
+        match key.as_keyword_name() {
+            Some("timeout") => {
+                if val.is_nil() {
+                    port.set_timeout_ms(None);
+                } else {
+                    match val.as_int() {
+                        Some(ms) if ms >= 0 => {
+                            port.set_timeout_ms(Some(ms as u64));
+                        }
+                        Some(ms) => {
+                            return (
+                                SIG_ERROR,
+                                error_val(
+                                    "value-error",
+                                    format!(
+                                        "port/set-options: :timeout must be non-negative, got {}",
+                                        ms
+                                    ),
+                                ),
+                            );
+                        }
+                        None => {
+                            return (
+                                SIG_ERROR,
+                                error_val(
+                                    "type-error",
+                                    format!(
+                                        "port/set-options: :timeout value must be integer or nil, got {}",
+                                        val.type_name()
+                                    ),
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+            Some(other) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "value-error",
+                        format!("port/set-options: unknown option :{}", other),
+                    ),
+                );
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "port/set-options: expected keyword, got {}",
+                            key.type_name()
+                        ),
+                    ),
+                );
+            }
+        }
+        i += 2;
+    }
+
+    (SIG_OK, Value::NIL)
+}
+
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/open",
@@ -328,4 +418,74 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(port/open? (port/stdout)) #=> true",
         aliases: &[],
     },
+    PrimitiveDef {
+        name: "port/set-options",
+        func: prim_port_set_options,
+        effect: Effect::errors(),
+        arity: Arity::AtLeast(1),
+        doc: "Set port options. Currently: :timeout ms (nil clears).",
+        params: &["port"],
+        category: "port",
+        example: "(port/set-options p :timeout 5000)",
+        aliases: &[],
+    },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::fiber::SIG_OK;
+
+    fn make_port() -> Value {
+        Value::external("port", Port::stdin())
+    }
+
+    #[test]
+    fn test_port_set_options_timeout() {
+        let port_val = make_port();
+        let (bits, _) =
+            prim_port_set_options(&[port_val, Value::keyword("timeout"), Value::int(5000)]);
+        assert_eq!(bits, SIG_OK);
+        let port = port_val.as_external::<Port>().unwrap();
+        assert_eq!(port.timeout_ms(), Some(5000));
+    }
+
+    #[test]
+    fn test_port_set_options_clear_timeout() {
+        let port_val = make_port();
+        prim_port_set_options(&[port_val, Value::keyword("timeout"), Value::int(5000)]);
+        let (bits, _) = prim_port_set_options(&[port_val, Value::keyword("timeout"), Value::NIL]);
+        assert_eq!(bits, SIG_OK);
+        let port = port_val.as_external::<Port>().unwrap();
+        assert_eq!(port.timeout_ms(), None);
+    }
+
+    #[test]
+    fn test_port_set_options_unknown_key_errors() {
+        let port_val = make_port();
+        let (bits, _) = prim_port_set_options(&[port_val, Value::keyword("foo"), Value::int(1)]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_set_options_non_port_errors() {
+        let (bits, _) =
+            prim_port_set_options(&[Value::int(42), Value::keyword("timeout"), Value::int(1)]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_set_options_negative_timeout_errors() {
+        let port_val = make_port();
+        let (bits, _) =
+            prim_port_set_options(&[port_val, Value::keyword("timeout"), Value::int(-1)]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_set_options_odd_args_errors() {
+        let port_val = make_port();
+        let (bits, _) = prim_port_set_options(&[port_val, Value::keyword("timeout")]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+}

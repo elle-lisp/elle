@@ -15,6 +15,11 @@ pub enum PortKind {
     Stdin,
     Stdout,
     Stderr,
+    TcpListener,
+    TcpStream,
+    UdpSocket,
+    UnixListener,
+    UnixStream,
 }
 
 /// Which operations are permitted on this port.
@@ -54,6 +59,7 @@ pub struct Port {
     closed: Cell<bool>,
     /// Original path for file ports (display and error messages).
     path: Option<String>,
+    timeout: Cell<Option<u64>>, // milliseconds, set by port/set-options
 }
 
 impl Port {
@@ -66,6 +72,7 @@ impl Port {
             encoding,
             closed: Cell::new(false),
             path: Some(path),
+            timeout: Cell::new(None),
         }
     }
 
@@ -78,6 +85,7 @@ impl Port {
             encoding: Encoding::Text,
             closed: Cell::new(false),
             path: None,
+            timeout: Cell::new(None),
         }
     }
 
@@ -90,6 +98,7 @@ impl Port {
             encoding: Encoding::Text,
             closed: Cell::new(false),
             path: None,
+            timeout: Cell::new(None),
         }
     }
 
@@ -102,6 +111,67 @@ impl Port {
             encoding: Encoding::Text,
             closed: Cell::new(false),
             path: None,
+            timeout: Cell::new(None),
+        }
+    }
+
+    pub fn new_tcp_listener(fd: OwnedFd, bound_addr: String) -> Self {
+        Port {
+            fd: RefCell::new(Some(fd)),
+            kind: PortKind::TcpListener,
+            direction: Direction::Read,
+            encoding: Encoding::Text,
+            closed: Cell::new(false),
+            path: Some(bound_addr),
+            timeout: Cell::new(None),
+        }
+    }
+
+    pub fn new_tcp_stream(fd: OwnedFd, peer_addr: String) -> Self {
+        Port {
+            fd: RefCell::new(Some(fd)),
+            kind: PortKind::TcpStream,
+            direction: Direction::ReadWrite,
+            encoding: Encoding::Text,
+            closed: Cell::new(false),
+            path: Some(peer_addr),
+            timeout: Cell::new(None),
+        }
+    }
+
+    pub fn new_udp_socket(fd: OwnedFd, bound_addr: String) -> Self {
+        Port {
+            fd: RefCell::new(Some(fd)),
+            kind: PortKind::UdpSocket,
+            direction: Direction::ReadWrite,
+            encoding: Encoding::Binary,
+            closed: Cell::new(false),
+            path: Some(bound_addr),
+            timeout: Cell::new(None),
+        }
+    }
+
+    pub fn new_unix_listener(fd: OwnedFd, path: String) -> Self {
+        Port {
+            fd: RefCell::new(Some(fd)),
+            kind: PortKind::UnixListener,
+            direction: Direction::Read,
+            encoding: Encoding::Text,
+            closed: Cell::new(false),
+            path: Some(path),
+            timeout: Cell::new(None),
+        }
+    }
+
+    pub fn new_unix_stream(fd: OwnedFd, peer_path: String) -> Self {
+        Port {
+            fd: RefCell::new(Some(fd)),
+            kind: PortKind::UnixStream,
+            direction: Direction::ReadWrite,
+            encoding: Encoding::Text,
+            closed: Cell::new(false),
+            path: Some(peer_path),
+            timeout: Cell::new(None),
         }
     }
 
@@ -141,6 +211,14 @@ impl Port {
     /// The original file path, if this is a file port.
     pub fn path(&self) -> Option<&str> {
         self.path.as_deref()
+    }
+
+    pub fn timeout_ms(&self) -> Option<u64> {
+        self.timeout.get()
+    }
+
+    pub fn set_timeout_ms(&self, ms: Option<u64>) {
+        self.timeout.set(ms);
     }
 
     /// Borrow the fd for I/O operations.
@@ -200,6 +278,59 @@ impl fmt::Display for Port {
                 }
                 write!(f, ">")
             }
+            PortKind::TcpListener => {
+                write!(f, "#<port:tcp-listener")?;
+                if let Some(ref addr) = self.path {
+                    write!(f, " \"{}\"", addr)?;
+                }
+                if self.closed.get() {
+                    write!(f, " [closed]")?;
+                }
+                write!(f, ">")
+            }
+            PortKind::TcpStream => {
+                write!(f, "#<port:tcp-stream")?;
+                if let Some(ref addr) = self.path {
+                    write!(f, " \"{}\"", addr)?;
+                }
+                write!(f, " :read-write :text")?;
+                if self.closed.get() {
+                    write!(f, " [closed]")?;
+                }
+                write!(f, ">")
+            }
+            PortKind::UdpSocket => {
+                write!(f, "#<port:udp")?;
+                if let Some(ref addr) = self.path {
+                    write!(f, " \"{}\"", addr)?;
+                }
+                write!(f, " :read-write :binary")?;
+                if self.closed.get() {
+                    write!(f, " [closed]")?;
+                }
+                write!(f, ">")
+            }
+            PortKind::UnixListener => {
+                write!(f, "#<port:unix-listener")?;
+                if let Some(ref path) = self.path {
+                    write!(f, " \"{}\"", path)?;
+                }
+                if self.closed.get() {
+                    write!(f, " [closed]")?;
+                }
+                write!(f, ">")
+            }
+            PortKind::UnixStream => {
+                write!(f, "#<port:unix-stream")?;
+                if let Some(ref path) = self.path {
+                    write!(f, " \"{}\"", path)?;
+                }
+                write!(f, " :read-write :text")?;
+                if self.closed.get() {
+                    write!(f, " [closed]")?;
+                }
+                write!(f, ">")
+            }
         }
     }
 }
@@ -238,5 +369,65 @@ mod tests {
         let port = Port::stdin();
         // Stdio ports have fd: None, so with_fd returns None
         assert!(port.with_fd(|_| ()).is_none());
+    }
+
+    fn devnull_fd() -> OwnedFd {
+        File::open("/dev/null").unwrap().into()
+    }
+
+    #[test]
+    fn test_new_tcp_listener_kind() {
+        let p = Port::new_tcp_listener(devnull_fd(), "127.0.0.1:8080".into());
+        assert_eq!(p.kind(), PortKind::TcpListener);
+        assert_eq!(p.direction(), Direction::Read);
+    }
+
+    #[test]
+    fn test_new_tcp_stream_kind() {
+        let p = Port::new_tcp_stream(devnull_fd(), "127.0.0.1:8080".into());
+        assert_eq!(p.kind(), PortKind::TcpStream);
+        assert_eq!(p.direction(), Direction::ReadWrite);
+        assert_eq!(p.encoding(), Encoding::Text);
+    }
+
+    #[test]
+    fn test_new_udp_socket_kind() {
+        let p = Port::new_udp_socket(devnull_fd(), "0.0.0.0:9000".into());
+        assert_eq!(p.kind(), PortKind::UdpSocket);
+        assert_eq!(p.encoding(), Encoding::Binary);
+    }
+
+    #[test]
+    fn test_new_unix_listener_kind() {
+        let p = Port::new_unix_listener(devnull_fd(), "/tmp/test.sock".into());
+        assert_eq!(p.kind(), PortKind::UnixListener);
+    }
+
+    #[test]
+    fn test_new_unix_stream_kind() {
+        let p = Port::new_unix_stream(devnull_fd(), "/tmp/test.sock".into());
+        assert_eq!(p.kind(), PortKind::UnixStream);
+        assert_eq!(p.encoding(), Encoding::Text);
+    }
+
+    #[test]
+    fn test_tcp_listener_display() {
+        let p = Port::new_tcp_listener(devnull_fd(), "127.0.0.1:8080".into());
+        assert!(format!("{}", p).contains("tcp-listener"));
+    }
+
+    #[test]
+    fn test_port_timeout_default_none() {
+        let p = Port::new_tcp_stream(devnull_fd(), "x".into());
+        assert_eq!(p.timeout_ms(), None);
+    }
+
+    #[test]
+    fn test_port_timeout_get_set() {
+        let p = Port::new_tcp_stream(devnull_fd(), "x".into());
+        p.set_timeout_ms(Some(5000));
+        assert_eq!(p.timeout_ms(), Some(5000));
+        p.set_timeout_ms(None);
+        assert_eq!(p.timeout_ms(), None);
     }
 }

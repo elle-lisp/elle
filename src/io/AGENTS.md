@@ -44,17 +44,34 @@ Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBa
 ### IoOp
 
 Enum of I/O operations:
+
+**Stream operations:**
 - `ReadLine` — read one line (up to `\n`), returns string or nil (EOF)
 - `Read { count }` — read up to `count` bytes, returns bytes/string or nil (EOF)
 - `ReadAll` — read everything remaining, returns string or bytes
 - `Write { data }` — write data to port, returns bytes written (int)
 - `Flush` — flush port's write buffer, returns nil
 
+**Network operations:**
+- `Accept` — accept incoming connection on listener port, returns new stream port. Backend inspects `port.kind()` to determine TCP vs Unix behavior.
+- `Connect { addr: ConnectAddr }` — connect to remote address, returns new stream port. Unified variant; backend dispatches on `ConnectAddr::Tcp` vs `ConnectAddr::Unix`.
+- `SendTo { addr: String, port_num: u16, data: Value }` — send datagram to address:port on UDP socket, returns bytes sent (int).
+- `RecvFrom { count: usize }` — receive datagram on UDP socket, returns struct `{:data bytes :addr string :port int}`.
+- `Shutdown { how: i32 }` — graceful shutdown of stream socket. `how` is `SHUT_RD` (0), `SHUT_WR` (1), or `SHUT_RDWR` (2). Returns nil.
+
+### ConnectAddr
+
+Enum for connect target address:
+- `Tcp { addr: String, port: u16 }` — TCP address and port
+- `Unix { path: String }` — Unix domain socket path (prefix with `@` for abstract socket on Linux)
+
 ### IoRequest
 
-Struct with `op: IoOp` and `port: Value`. Wrapped as `ExternalObject`
+Struct with `op: IoOp`, `port: Value`, and `timeout: Option<Duration>`. Wrapped as `ExternalObject`
 with type_name `"io-request"`. The port is stored as `Value` (not `&Port`)
 because the `Value` holds the `Rc` to the `ExternalObject` containing the `Port`.
+
+**Timeout resolution:** Per-call timeout (`IoRequest.timeout`) overrides port-level timeout (`Port.timeout_ms()`). If both are None, no timeout is enforced. Timeout is set via `IoRequest::with_timeout(op, port, Some(duration))` or `IoRequest::new(op, port)` (no timeout).
 
 ### SyncBackend
 
@@ -105,9 +122,17 @@ State machine:
 | `io/reap` | errors | Non-blocking poll for completions (returns tuple) |
 | `io/wait` | errors | Blocking wait for completions with timeout (returns tuple) |
 
+## Timeout Handling
+
+**Sync backend:** Timeout is checked post-hoc after the blocking syscall returns. For short operations (read/write on ready fds), this is a no-op check. For potentially long operations (accept on idle listener, connect to unreachable host), the OS-level timeout may be much longer than requested. True preemptive timeout requires the backend to use `poll()`/`select()` with a timeout before the blocking call — deferred to a future PR.
+
+**Async backend (io_uring):** Linked timeout SQEs provide true preemptive timeout. For each network operation SQE with a timeout, a `LinkTimeout` SQE is submitted immediately after with the `IO_LINK` flag. If the timeout fires first, the kernel cancels the linked operation. Both SQEs generate CQEs. The operation CQE has `result = -ECANCELED` (errno 125), and the timeout CQE is identified by a high-bit tag (`id | (1 << 63)`) and skipped during completion processing. If the operation completes first, the timeout is cancelled and its CQE has `result = 0` or `-ETIME`.
+
+**Thread-pool fallback:** Timeout is implemented by setting `SO_RCVTIMEO`/`SO_SNDTIMEO` on the fd before the blocking call, or using `poll()` with timeout before the blocking call.
+
 ## Invariants
 
-1. `IoRequest` values are only created by stream primitives.
+1. `IoRequest` values are only created by stream primitives and network primitives.
 2. Backends are only created by `io/backend`.
 3. The backend validates port direction and open status before I/O.
 4. Stdio ports use `std::io::stdin()/stdout()/stderr()` handles directly
@@ -119,3 +144,4 @@ State machine:
 8. stdin reads in async mode go through a dedicated OS thread, not io_uring.
 9. `io/submit`, `io/reap`, `io/wait` only work with async backends (created via `:async`).
    Passing a sync backend signals a type error.
+10. Network operations (Accept, Connect, SendTo, RecvFrom, Shutdown) are yielding (return `SIG_IO`). Synchronous network operations (tcp/listen, udp/bind, unix/listen) do not yield.
