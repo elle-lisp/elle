@@ -471,14 +471,23 @@ pub struct ArenaMark {
     /// `RegionExit` may dealloc from a popped allocator (use-after-free).
     /// **These primitives must only be used via the `with-allocator` macro.**
     custom_ptrs_len: usize,
+    /// Depth of the scope bump stack at mark time. Used by `RegionExit`
+    /// to verify that exactly one scope bump was pushed since this mark.
+    bump_depth: usize,
 }
 
 impl ArenaMark {
-    pub(crate) fn new_full(position: usize, dtor_len: usize, custom_ptrs_len: usize) -> Self {
+    pub(crate) fn new_full(
+        position: usize,
+        dtor_len: usize,
+        custom_ptrs_len: usize,
+        bump_depth: usize,
+    ) -> Self {
         ArenaMark {
             position,
             dtor_len,
             custom_ptrs_len,
+            bump_depth,
         }
     }
 
@@ -492,6 +501,10 @@ impl ArenaMark {
 
     pub(crate) fn custom_ptrs_len(&self) -> usize {
         self.custom_ptrs_len
+    }
+
+    pub(crate) fn bump_depth(&self) -> usize {
+        self.bump_depth
     }
 }
 
@@ -527,6 +540,7 @@ pub fn heap_arena_mark() -> ArenaMark {
         position: arena.borrow().objects.len(),
         dtor_len: 0,
         custom_ptrs_len: 0,
+        bump_depth: 0,
     })
 }
 

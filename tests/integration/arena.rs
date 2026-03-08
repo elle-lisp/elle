@@ -140,3 +140,27 @@ fn test_arena_bytes_returns_int() {
     assert!(result.as_int().is_some(), "expected integer");
     assert!(result.as_int().unwrap() > 0, "expected positive bytes");
 }
+
+// ── Scope bump reclamation tests ────────────────────────────────────
+
+#[test]
+fn test_scope_bump_reclaims_memory() {
+    // Run in a child fiber so FiberHeap is active.
+    // Allocate many objects in a scoped let, verify arena/bytes drops
+    // after scope exit. The let must qualify for scope allocation
+    // (result must be immediate).
+    let result = eval_source(
+        "(fiber/resume (fiber/new (fn []
+           (var bytes-before (arena/bytes))
+           (let* ([x @[1 2 3 4 5 6 7 8 9 10]] [n (length x)])
+             n)
+           (var bytes-after (arena/bytes))
+           (< bytes-after (+ bytes-before 1000))) 1))",
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        elle::Value::TRUE,
+        "scope bump should reclaim memory: bytes-after should be close to bytes-before"
+    );
+}

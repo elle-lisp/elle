@@ -4,18 +4,22 @@
 //! ensures that `HeapObject` variants with inner heap allocations (`Vec`, `Rc`,
 //! `BTreeMap`, `Box<str>`, etc.) have their `Drop` impls called on release/clear.
 //!
-//! The bump itself is only fully reset on `clear()` (fiber death / reset).
-//! Partial `release(mark)` runs destructors but does not reclaim bump memory
-//! — bumpalo has no partial reset. The real memory savings come from Drop
-//! freeing the inner allocations (which live on the global heap, not in the
-//! bump).
+//! ## Per-scope bump allocators
+//!
+//! Each `RegionEnter` pushes a fresh `bumpalo::Bump` onto `scope_bumps`.
+//! All allocations within the scope go to this scope bump. `RegionExit`
+//! runs destructors for scoped objects, then pops and drops the scope bump,
+//! reclaiming ALL bump memory allocated in that scope.
+//!
+//! The root `bump` is used when `scope_bumps` is empty (no active scope).
+//! `clear()` drops all scope bumps before resetting the root bump.
 //!
 //! ## Scope marks
 //!
 //! `FiberHeap` maintains a stack of scope marks (`scope_marks: Vec<ArenaMark>`)
 //! for `RegionEnter`/`RegionExit` bytecodes. `RegionEnter` pushes a mark;
 //! `RegionExit` pops the mark and calls `release()` to run destructors for
-//! objects allocated within the scope.
+//! objects allocated within the scope, then drops the scope bump.
 //!
 //! The lowerer gates `RegionEnter`/`RegionExit` emission on escape analysis
 //! (`src/lir/lower/escape.rs`): only scopes where no allocated values can
@@ -26,8 +30,8 @@
 //!
 //! `FiberHeap` carries an `active_allocator: *const bumpalo::Bump` pointer
 //! that tracks which bump allocator the current execution context should use.
-//! Currently always points to the fiber's root bump. The machinery supports
-//! future scope-level allocator redirection (separate scope bumps).
+//! Points to the top of `scope_bumps` when non-empty, otherwise to the root
+//! `bump`.
 //!
 //! The pointer is saved/restored:
 //! - On **Call/Return** via `execute_bytecode_saving_stack` (Rust call stack)
@@ -80,14 +84,18 @@ pub(crate) struct CustomAllocState {
 
 pub struct FiberHeap {
     bump: bumpalo::Bump,
+    /// Per-scope bump allocators. `RegionEnter` pushes a new `Bump`;
+    /// `RegionExit` pops and drops it, reclaiming all bump memory for
+    /// that scope. When empty, allocations go to the root `bump`.
+    scope_bumps: Vec<bumpalo::Bump>,
     /// Raw pointers to bump-allocated HeapObjects that need Drop.
     /// Ordered by allocation time (oldest first).
     dtors: Vec<*mut HeapObject>,
     /// Total number of objects allocated (including those not needing Drop).
     alloc_count: usize,
     /// Pointer to the bump allocator that new allocations should use.
-    /// Currently always points to `self.bump` once initialized. Supports
-    /// future scope-level allocator redirection (separate scope bumps).
+    /// Points to the top of `scope_bumps` when non-empty, otherwise to
+    /// the root `bump`.
     ///
     /// Starts as null; set via `init_active_allocator()` after the FiberHeap
     /// is in its final Box location (pointer stability requires this).
@@ -122,6 +130,7 @@ impl FiberHeap {
     pub fn new() -> Self {
         FiberHeap {
             bump: bumpalo::Bump::new(),
+            scope_bumps: Vec::new(),
             dtors: Vec::new(),
             alloc_count: 0,
             active_allocator: std::ptr::null(),
@@ -135,13 +144,23 @@ impl FiberHeap {
         }
     }
 
-    /// Set `active_allocator` to point to this FiberHeap's own bump.
+    /// Set `active_allocator` to point to the active bump (top of
+    /// `scope_bumps`, or root `bump` if empty).
     ///
     /// Must be called after the FiberHeap is in its final Box location
     /// (the pointer targets `&self.bump`, which must not move). Called by
     /// `with_child_fiber` when installing the child's heap.
     pub fn init_active_allocator(&mut self) {
-        self.active_allocator = &self.bump as *const bumpalo::Bump;
+        self.active_allocator = self.active_bump_ptr();
+    }
+
+    /// Return a pointer to the currently active bump allocator:
+    /// the top of `scope_bumps` if non-empty, otherwise the root `bump`.
+    fn active_bump_ptr(&self) -> *const bumpalo::Bump {
+        self.scope_bumps
+            .last()
+            .map(|b| b as *const bumpalo::Bump)
+            .unwrap_or(&self.bump as *const bumpalo::Bump)
     }
 
     /// Current active allocator pointer. Returns null if not yet initialized.
@@ -192,9 +211,12 @@ impl FiberHeap {
             }
         }
 
-        // Normal bumpalo path (unchanged)
+        // Allocate from the active bump (scope bump or root bump).
+        // `active_allocator` uses interior mutability (`Cell`-based chunks),
+        // so casting away const is safe — bumpalo::Bump::alloc takes &self.
         let needs_drop = needs_drop(obj.tag());
-        let ptr: &mut HeapObject = self.bump.alloc(obj);
+        let bump_ref = unsafe { &*self.active_allocator };
+        let ptr: &mut HeapObject = bump_ref.alloc(obj);
         let raw = ptr as *mut HeapObject;
         if needs_drop {
             self.dtors.push(raw);
@@ -208,7 +230,12 @@ impl FiberHeap {
             .custom_alloc_stack
             .last()
             .map_or(0, |s| s.custom_ptrs.len());
-        ArenaMark::new_full(self.alloc_count, self.dtors.len(), custom_ptrs_len)
+        ArenaMark::new_full(
+            self.alloc_count,
+            self.dtors.len(),
+            custom_ptrs_len,
+            self.scope_bumps.len(),
+        )
     }
 
     /// Run destructors for objects allocated after the mark, then truncate
@@ -246,20 +273,23 @@ impl FiberHeap {
 
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).
     ///
-    /// Records the current `(alloc_count, dtors.len())` so that
-    /// `pop_scope_mark_and_release` can run destructors for objects
-    /// allocated within the scope.
+    /// Records the current `(alloc_count, dtors.len(), bump_depth)` so that
+    /// `pop_scope_mark_and_release` can run destructors and reclaim bump
+    /// memory for objects allocated within the scope.
     pub fn push_scope_mark(&mut self) {
         self.scope_marks.push(self.mark());
+        self.scope_bumps.push(bumpalo::Bump::new());
+        self.active_allocator = self.active_bump_ptr();
         self.scope_enters += 1;
     }
 
     /// Pop the top scope mark and release objects allocated since it
     /// was pushed (called by `RegionExit`).
     ///
-    /// Runs destructors for objects allocated within the scope, truncates
-    /// the destructor list, and restores `alloc_count`. Does NOT reset
-    /// the bump (bumpalo has no partial reset).
+    /// Runs destructors for objects allocated within the scope (dtors
+    /// point into the scope bump, so they MUST run before the bump is
+    /// dropped), then pops and drops the scope bump to reclaim all
+    /// bump memory for this scope.
     ///
     /// Panics (debug) if the scope stack is empty.
     pub fn pop_scope_mark_and_release(&mut self) {
@@ -268,7 +298,18 @@ impl FiberHeap {
             .pop()
             .expect("RegionExit without matching RegionEnter");
         let dtors_before = self.dtors.len();
+        let bump_depth = mark.bump_depth();
+        // Run dtors and dealloc custom objects FIRST — pointers are into
+        // the scope bump which we're about to drop.
         self.release(mark);
+        // Drop the scope bump — reclaims all bump memory for this scope.
+        debug_assert_eq!(
+            self.scope_bumps.len(),
+            bump_depth + 1,
+            "scope bump stack depth mismatch on RegionExit"
+        );
+        self.scope_bumps.pop(); // Drop reclaims memory
+        self.active_allocator = self.active_bump_ptr();
         self.scope_dtors_run += dtors_before - self.dtors.len();
     }
 
@@ -297,9 +338,14 @@ impl FiberHeap {
         prev
     }
 
-    /// Bytes consumed by the bump allocator.
+    /// Bytes consumed by all bump allocators (root + scope bumps).
     pub fn allocated_bytes(&self) -> usize {
         self.bump.allocated_bytes()
+            + self
+                .scope_bumps
+                .iter()
+                .map(|b| b.allocated_bytes())
+                .sum::<usize>()
     }
 
     /// Number of `RegionEnter` instructions executed (scope regions entered).
@@ -421,6 +467,8 @@ impl FiberHeap {
         self.alloc_count = 0;
         self.scope_enters = 0;
         self.scope_dtors_run = 0;
+        // Drop all scope bumps before resetting the root bump.
+        self.scope_bumps.clear();
         self.bump.reset();
         // Reset to root bump in case scope-level redirection was active.
         if !self.active_allocator.is_null() {
@@ -892,6 +940,60 @@ mod tests {
     }
 
     #[test]
+    fn test_scope_bump_reclaims_memory() {
+        let mut heap = FiberHeap::new();
+        heap.init_active_allocator();
+        let bytes_before = heap.allocated_bytes();
+
+        heap.push_scope_mark();
+        // Allocate many objects in the scope bump
+        for i in 0..100 {
+            heap.alloc(HeapObject::String(format!("obj-{}", i).into()));
+        }
+        let bytes_during = heap.allocated_bytes();
+        assert!(
+            bytes_during > bytes_before,
+            "scope allocations should increase bytes"
+        );
+
+        heap.pop_scope_mark_and_release();
+        let bytes_after = heap.allocated_bytes();
+        // After popping the scope bump, its memory is fully reclaimed.
+        // bytes_after should equal bytes_before (root bump unchanged).
+        assert_eq!(
+            bytes_after, bytes_before,
+            "scope bump memory should be fully reclaimed"
+        );
+    }
+
+    #[test]
+    fn test_scope_bump_nested_reclaims_inner_only() {
+        let mut heap = FiberHeap::new();
+        heap.init_active_allocator();
+
+        heap.push_scope_mark();
+        heap.alloc(HeapObject::String("outer".into()));
+        let bytes_after_outer = heap.allocated_bytes();
+
+        heap.push_scope_mark();
+        for i in 0..50 {
+            heap.alloc(HeapObject::String(format!("inner-{}", i).into()));
+        }
+        let bytes_during_inner = heap.allocated_bytes();
+        assert!(bytes_during_inner > bytes_after_outer);
+
+        heap.pop_scope_mark_and_release(); // pops inner
+        let bytes_after_inner_pop = heap.allocated_bytes();
+        // Inner bump reclaimed, outer bump still alive
+        assert_eq!(bytes_after_inner_pop, bytes_after_outer);
+
+        heap.pop_scope_mark_and_release(); // pops outer
+        let bytes_after_outer_pop = heap.allocated_bytes();
+        // Both bumps reclaimed, back to root-only
+        assert_eq!(bytes_after_outer_pop, 0);
+    }
+
+    #[test]
     fn test_clear_clears_scope_marks() {
         let mut heap = FiberHeap::new();
         heap.init_active_allocator();
@@ -904,6 +1006,21 @@ mod tests {
         heap.clear();
         assert_eq!(heap.scope_marks.len(), 0);
         assert_eq!(heap.len(), 0);
+    }
+
+    #[test]
+    fn test_clear_clears_scope_bumps() {
+        let mut heap = FiberHeap::new();
+        heap.init_active_allocator();
+        heap.push_scope_mark();
+        heap.alloc(HeapObject::String("a".into()));
+        heap.push_scope_mark();
+        heap.alloc(HeapObject::String("b".into()));
+        assert_eq!(heap.scope_bumps.len(), 2);
+
+        heap.clear();
+        assert_eq!(heap.scope_bumps.len(), 0);
+        assert_eq!(heap.allocated_bytes(), 0);
     }
 
     // ── Shared allocator ownership tests ──────────────────────────────
