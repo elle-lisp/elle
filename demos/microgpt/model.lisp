@@ -1,13 +1,17 @@
 # GPT model: initialization, forward pass, loss
+#
+# Architecture: GPT-2 style transformer (RMSNorm, no biases, ReLU instead of GeLU).
+# Single-layer, 4-head attention with KV cache for incremental inference.
+# Hyperparameters match the Python reference (microgpt.py).
 
-# Hyperparameters
-(def *n-embd* 8)
-(def *n-head* 2)
-(def *head-dim* 4)
-(def *n-layer* 1)
-(def *block-size* 16)
-(def *mlp-hidden* 32)
-(def *eps* 0.00000001)
+# Hyperparameters — match Python reference exactly
+(def *n-embd* 16)       # embedding dimension (width of the network)
+(def *n-head* 4)        # number of attention heads
+(def *head-dim* 4)      # per-head dimension (n-embd / n-head)
+(def *n-layer* 1)       # number of transformer layers
+(def *block-size* 16)   # maximum context length
+(def *mlp-hidden* 64)   # MLP hidden dimension (4 * n-embd)
+(def *eps* 0.00000001)  # epsilon for RMS normalization
 
 # Parameter initialization
 

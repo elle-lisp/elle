@@ -13,26 +13,46 @@
 # ── Data loading and tokenizer ──────────────────────────────────────
 
 (defn load-data [path]
-  "Load names from file, return mutable array of lowercase strings."
+  "Load names from file, return mutable array of trimmed strings.
+   Preserves original case to match Python reference (uppercase initials
+   are distinct tokens from their lowercase counterparts)."
   (let* ([lines (read-lines path)]
          [result @[]])
     (each line in lines
       (let* ([trimmed (string/trim line)])
         (when (> (length trimmed) 0)
-          (push result (string/downcase trimmed)))))
+          (push result trimmed))))
+    result))
+
+(defn sort-strings [arr]
+  "Insertion sort for an array of strings. Returns a new sorted array.
+   Used to produce a deterministic char→id mapping matching the Python reference."
+  (let* ([result @[]])
+    (each s in arr
+      (push result s))
+    (var i 1)
+    (while (< i (length result))
+      (let* ([key (get result i)])
+        (var j (- i 1))
+        (while (and (>= j 0) (> (get result j) key))
+          (put result (+ j 1) (get result j))
+          (set j (- j 1)))
+        (put result (+ j 1) key))
+      (set i (+ i 1)))
     result))
 
 (defn build-tokenizer [names]
   "Build char-level tokenizer. Returns table with :char->id, :id->char, :vocab-size.
-   BOS token is at the last index (also serves as EOS)."
+   BOS token is at the last index (also serves as EOS).
+   Characters are sorted to produce a deterministic mapping matching Python."
   (let* ([chars @{}])
-    # Collect unique chars
+    # Collect unique chars from all names
     (each name in names
       (var i 0)
       (while (< i (length name))
         (put chars (string/char-at name i) true)
         (set i (+ i 1))))
-    (let* ([sorted-chars (keys chars)]
+    (let* ([sorted-chars (sort-strings (keys chars))]
            [char->id @{}]
            [id->char @{}])
       (var idx 0)
