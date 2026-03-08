@@ -45,6 +45,9 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
         .with_immediate_primitives(imm_prims);
     let lir_func = lowerer.lower(&analysis.hir)?;
 
+    // Debug: print scope stats
+    eprintln!("{}", lowerer.scope_stats());
+
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
     let symbol_snapshot = symbols.all_names();
     let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
@@ -100,12 +103,16 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
     // Lower and emit all forms
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let mut results = Vec::new();
+    let mut total_stats = crate::lir::ScopeStats::default();
     for analysis in analysis_results {
         let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
         let mut lowerer = Lowerer::new()
             .with_intrinsics(intrinsics.clone())
             .with_immediate_primitives(imm_prims);
         let lir_func = lowerer.lower(&analysis.hir)?;
+
+        // Accumulate scope stats
+        total_stats.merge(lowerer.scope_stats());
 
         let symbol_snapshot = symbols.all_names();
         let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
@@ -116,6 +123,9 @@ pub fn compile_all(source: &str, symbols: &mut SymbolTable) -> Result<Vec<Compil
             warnings: Vec::new(),
         });
     }
+
+    // Debug: print aggregated scope stats
+    eprintln!("{}", total_stats);
 
     Ok(results)
 }

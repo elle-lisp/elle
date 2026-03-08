@@ -55,9 +55,20 @@ impl VM {
                 self.handle_fiber_cancel_signal(value, bytecode, constants, closure_env, ip)
             }
             SIG_QUERY => {
-                // Primitive needs to read VM state. Value is a cons
-                // cell (operation . argument) where operation is a
-                // keyword or string.
+                // arena/allocs needs mutable VM access to call the thunk —
+                // handle before dispatch_query (which takes &self).
+                if let Some(cons) = value.as_cons() {
+                    if cons.first.as_keyword_name() == Some("arena/allocs") {
+                        let thunk = cons.rest;
+                        match self.handle_arena_allocs(thunk) {
+                            Ok(val) => {
+                                self.fiber.stack.push(val);
+                                return None;
+                            }
+                            Err(bits) => return Some(bits),
+                        }
+                    }
+                }
                 let (sig, result) = self.dispatch_query(value);
                 if sig == SIG_ERROR {
                     self.fiber.signal = Some((SIG_ERROR, result));
@@ -113,6 +124,20 @@ impl VM {
             SIG_PROPAGATE => self.handle_fiber_propagate_signal_tail(value),
             SIG_CANCEL => self.handle_fiber_cancel_signal_tail(value),
             SIG_QUERY => {
+                // arena/allocs needs mutable VM access to call the thunk —
+                // handle before dispatch_query (which takes &self).
+                if let Some(cons) = value.as_cons() {
+                    if cons.first.as_keyword_name() == Some("arena/allocs") {
+                        let thunk = cons.rest;
+                        match self.handle_arena_allocs(thunk) {
+                            Ok(val) => {
+                                self.fiber.signal = Some((SIG_OK, val));
+                                return SIG_OK;
+                            }
+                            Err(bits) => return bits,
+                        }
+                    }
+                }
                 let (sig, result) = self.dispatch_query(value);
                 self.fiber.signal = Some((sig, result));
                 sig
@@ -309,7 +334,10 @@ impl VM {
                 }
             }
             "arena/stats" => {
-                use crate::value::heap::{heap_arena_capacity, heap_arena_len, TableKey};
+                use crate::value::heap::{
+                    heap_arena_capacity, heap_arena_len, heap_arena_object_limit, heap_arena_peak,
+                    TableKey,
+                };
                 use std::collections::BTreeMap;
                 let mut fields = BTreeMap::new();
                 fields.insert(
@@ -320,6 +348,24 @@ impl VM {
                     TableKey::Keyword("capacity".to_string()),
                     Value::int(heap_arena_capacity() as i64),
                 );
+                let limit_val = match heap_arena_object_limit() {
+                    Some(n) => Value::int(n as i64),
+                    None => Value::NIL,
+                };
+                fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
+                // Bytes: estimate from object count × 128 bytes per object
+                fields.insert(
+                    TableKey::Keyword("bytes".to_string()),
+                    Value::int((heap_arena_len() * 128) as i64),
+                );
+                // Peak object count (high-water mark)
+                let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+                let peak = if heap_ptr.is_null() {
+                    heap_arena_peak() as i64
+                } else {
+                    unsafe { (*heap_ptr).peak_alloc_count() as i64 }
+                };
+                fields.insert(TableKey::Keyword("peak".to_string()), Value::int(peak));
                 (SIG_OK, Value::struct_from(fields))
             }
             "arena/count" => {
@@ -362,6 +408,61 @@ impl VM {
                 }
                 (SIG_OK, Value::struct_from(fields))
             }
+            "arena/fiber-stats" => {
+                let fiber_handle = match arg.as_fiber() {
+                    Some(h) => h,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                "arena/fiber-stats: expected a fiber".to_string(),
+                            ),
+                        )
+                    }
+                };
+                match fiber_handle.try_with(|fiber| {
+                    use crate::value::heap::TableKey;
+                    use std::collections::BTreeMap;
+                    let mut fields = BTreeMap::new();
+                    fields.insert(
+                        TableKey::Keyword("count".to_string()),
+                        Value::int(fiber.heap.len() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("bytes".to_string()),
+                        Value::int(fiber.heap.allocated_bytes() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("peak".to_string()),
+                        Value::int(fiber.heap.peak_alloc_count() as i64),
+                    );
+                    let limit_val = match fiber.heap.object_limit() {
+                        Some(n) => Value::int(n as i64),
+                        None => Value::NIL,
+                    };
+                    fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
+                    fields.insert(
+                        TableKey::Keyword("scope-enters".to_string()),
+                        Value::int(fiber.heap.scope_enters() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("dtors-run".to_string()),
+                        Value::int(fiber.heap.scope_dtors_run() as i64),
+                    );
+                    Value::struct_from(fields)
+                }) {
+                    Some(val) => (SIG_OK, val),
+                    None => (
+                        SIG_ERROR,
+                        error_val(
+                            "state-error",
+                            "arena/fiber-stats: cannot inspect a currently-executing fiber"
+                                .to_string(),
+                        ),
+                    ),
+                }
+            }
             _ => (
                 SIG_ERROR,
                 error_val(
@@ -370,5 +471,81 @@ impl VM {
                 ),
             ),
         }
+    }
+}
+
+impl VM {
+    /// Handle `arena/allocs` — snapshot count, call thunk, snapshot again.
+    ///
+    /// Uses `execute_bytecode_saving_stack` (re-entrant VM call). The thunk
+    /// runs on the current fiber — same heap, same globals, same parameter
+    /// frames. Yield from the thunk is propagated upward (not handled here);
+    /// callers should only pass non-yielding (Pure effect) closures.
+    ///
+    /// The before/after count snapshots bracket the thunk's execution to
+    /// measure net allocations.
+    ///
+    /// Returns `Ok(cons(result, net_allocs))` on success, or `Err(bits)` on error/halt.
+    pub(crate) fn handle_arena_allocs(&mut self, thunk: Value) -> Result<Value, SignalBits> {
+        let closure = match thunk.as_closure() {
+            Some(c) => c.clone(),
+            None => {
+                let err = error_val("type-error", "arena/allocs: expected a closure");
+                self.fiber.signal = Some((SIG_ERROR, err));
+                self.fiber.stack.push(Value::NIL);
+                return Err(SIG_ERROR);
+            }
+        };
+
+        // Snapshot count before
+        let before = {
+            let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+            if heap_ptr.is_null() {
+                crate::value::heap::heap_arena_len()
+            } else {
+                unsafe { (*heap_ptr).len() }
+            }
+        };
+
+        // Build a proper env (captures + local slots) for the thunk.
+        // Passing closure.env directly would omit local variable slots,
+        // causing StoreUpvalue panics for closures with locals.
+        let thunk_env = self
+            .build_closure_env(&closure, &[])
+            .expect("arena/allocs: zero-arg thunk env build cannot fail");
+
+        // Execute the thunk via execute_bytecode_saving_stack
+        let exec_result = self.execute_bytecode_saving_stack(
+            &closure.bytecode,
+            &closure.constants,
+            &thunk_env,
+            &closure.location_map,
+        );
+
+        if exec_result.bits.contains(SIG_ERROR) {
+            // Propagate the error — signal is already set by the inner execution
+            return Err(exec_result.bits);
+        }
+
+        // Get result from signal
+        let result = self
+            .fiber
+            .signal
+            .take()
+            .map(|(_, v)| v)
+            .unwrap_or(Value::NIL);
+
+        // Snapshot count after
+        let after = {
+            let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+            if heap_ptr.is_null() {
+                crate::value::heap::heap_arena_len()
+            } else {
+                unsafe { (*heap_ptr).len() }
+            }
+        };
+
+        let net = (after as i64) - (before as i64);
+        Ok(Value::cons(result, Value::int(net)))
     }
 }

@@ -4,7 +4,7 @@
 //! are stored on the heap and accessed through `HeapObject`.
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -425,18 +425,31 @@ struct HeapArena {
     /// Box provides pointer stability: HeapObject addresses survive Vec reallocation.
     #[allow(clippy::vec_box)]
     objects: Vec<Box<HeapObject>>,
+    object_limit: Option<usize>,
+    peak_object_count: usize,
 }
 
 impl HeapArena {
     fn new() -> Self {
         HeapArena {
             objects: Vec::new(),
+            object_limit: None,
+            peak_object_count: 0,
         }
     }
 }
 
 thread_local! {
     static HEAP_ARENA: RefCell<HeapArena> = RefCell::new(HeapArena::new());
+}
+
+thread_local! {
+    static ALLOC_ERROR: Cell<Option<(usize, usize)>> = const { Cell::new(None) };
+}
+
+/// Take the allocation error flag, clearing it. Returns `(count, limit)` if set.
+pub fn take_alloc_error() -> Option<(usize, usize)> {
+    ALLOC_ERROR.with(|e| e.take())
 }
 
 /// Opaque mark for arena scope management.
@@ -460,14 +473,23 @@ pub struct ArenaMark {
     /// `RegionExit` may dealloc from a popped allocator (use-after-free).
     /// **These primitives must only be used via the `with-allocator` macro.**
     custom_ptrs_len: usize,
+    /// Depth of the scope bump stack at mark time. Used by `RegionExit`
+    /// to verify that exactly one scope bump was pushed since this mark.
+    bump_depth: usize,
 }
 
 impl ArenaMark {
-    pub(crate) fn new_full(position: usize, dtor_len: usize, custom_ptrs_len: usize) -> Self {
+    pub(crate) fn new_full(
+        position: usize,
+        dtor_len: usize,
+        custom_ptrs_len: usize,
+        bump_depth: usize,
+    ) -> Self {
         ArenaMark {
             position,
             dtor_len,
             custom_ptrs_len,
+            bump_depth,
         }
     }
 
@@ -481,6 +503,10 @@ impl ArenaMark {
 
     pub(crate) fn custom_ptrs_len(&self) -> usize {
         self.custom_ptrs_len
+    }
+
+    pub(crate) fn bump_depth(&self) -> usize {
+        self.bump_depth
     }
 }
 
@@ -516,6 +542,7 @@ pub fn heap_arena_mark() -> ArenaMark {
         position: arena.borrow().objects.len(),
         dtor_len: 0,
         custom_ptrs_len: 0,
+        bump_depth: 0,
     })
 }
 
@@ -534,6 +561,34 @@ pub fn heap_arena_release(mark: ArenaMark) {
     HEAP_ARENA.with(|arena| arena.borrow_mut().objects.truncate(mark.position()))
 }
 
+/// Return the current root-fiber arena position as an opaque checkpoint.
+///
+/// Pass to [`heap_arena_reset`] to reclaim all objects allocated after
+/// this point. Only meaningful for the global HEAP_ARENA (root fiber).
+pub fn heap_arena_checkpoint() -> usize {
+    HEAP_ARENA.with(|arena| arena.borrow().objects.len())
+}
+
+/// Truncate the root-fiber HEAP_ARENA back to `mark`, running Drop for
+/// all objects allocated after that position.
+///
+/// # Safety contract (caller's responsibility)
+///
+/// Any `Value` pointing into the freed region is now dangling. The caller
+/// must ensure those Values are unreachable before calling this.
+///
+/// # Panics
+///
+/// Does not panic if `mark > len` — silently no-ops (validated by caller).
+pub fn heap_arena_reset(mark: usize) {
+    HEAP_ARENA.with(|arena| {
+        let mut a = arena.borrow_mut();
+        if mark <= a.objects.len() {
+            a.objects.truncate(mark);
+        }
+    })
+}
+
 /// Current number of live objects in the thread-local heap arena.
 pub fn heap_arena_len() -> usize {
     if let Some(len) = crate::value::fiber_heap::with_current_heap_mut(|heap| heap.len()) {
@@ -550,6 +605,41 @@ pub fn heap_arena_capacity() -> usize {
     HEAP_ARENA.with(|arena| arena.borrow().objects.capacity())
 }
 
+/// Get the current object limit for the global heap arena.
+pub fn heap_arena_object_limit() -> Option<usize> {
+    HEAP_ARENA.with(|a| a.borrow().object_limit)
+}
+
+/// Set the object limit for the global heap arena. Returns the previous limit.
+pub fn heap_arena_set_object_limit(limit: Option<usize>) -> Option<usize> {
+    HEAP_ARENA.with(|a| {
+        let mut a = a.borrow_mut();
+        let prev = a.object_limit;
+        a.object_limit = limit;
+        prev
+    })
+}
+
+/// Get the peak object count for the global heap arena.
+pub fn heap_arena_peak() -> usize {
+    HEAP_ARENA.with(|a| a.borrow().peak_object_count)
+}
+
+/// Reset peak to current count. Returns previous peak.
+pub fn heap_arena_reset_peak() -> usize {
+    HEAP_ARENA.with(|a| {
+        let mut a = a.borrow_mut();
+        let prev = a.peak_object_count;
+        a.peak_object_count = a.objects.len();
+        prev
+    })
+}
+
+/// Set the allocation error flag. Called by FiberHeap when its limit is exceeded.
+pub fn set_alloc_error(count: usize, limit: usize) {
+    ALLOC_ERROR.with(|e| e.set(Some((count, limit))));
+}
+
 /// Allocate a heap object on the thread-local arena and return a Value pointing to it.
 ///
 /// Single thread-local read: check the raw pointer once, then dispatch.
@@ -562,9 +652,19 @@ pub fn alloc(obj: HeapObject) -> Value {
     }
     HEAP_ARENA.with(|arena| {
         let mut a = arena.borrow_mut();
+        if let Some(limit) = a.object_limit {
+            let count = a.objects.len();
+            if count >= limit {
+                ALLOC_ERROR.with(|e| e.set(Some((count, limit))));
+                return Value::NIL;
+            }
+        }
         let boxed = Box::new(obj);
         let ptr = &*boxed as *const HeapObject as *const ();
         a.objects.push(boxed);
+        if a.objects.len() > a.peak_object_count {
+            a.peak_object_count = a.objects.len();
+        }
         Value::from_heap_ptr(ptr)
     })
 }

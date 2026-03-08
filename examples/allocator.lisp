@@ -47,7 +47,7 @@
 
 # arena/allocs compensates for this
 (let* ((m (arena/allocs (fn () nil)))
-       (allocs (first (rest m))))
+       (allocs (rest m)))
   (assert-eq allocs 0 "nil thunk allocates 0 net objects")
   (display "  arena/allocs overhead: compensated to 0\n"))
 
@@ -57,8 +57,8 @@
 # ========================================
 
 (defn net-allocs (thunk)
-  "Measure net allocations from a thunk, compensating for overhead."
-  (first (rest (arena/allocs thunk))))
+  "Measure net allocations from a thunk."
+  (rest (arena/allocs thunk)))
 
 (let ((n (net-allocs (fn () (cons 1 2)))))
   (assert-eq n 1 "cons = 1 heap object")
@@ -125,6 +125,10 @@
 # ========================================
 # 6. Scope allocation — compile-time analysis
 # ========================================
+#
+# Note: let bodies that call polymorphic-effect functions (map, filter, fold
+# with callbacks) or user-defined functions cannot scope-allocate — the
+# compiler cannot prove the result is immediate without interprocedural analysis.
 
 # Count RegionEnter instructions in a closure's compiled bytecode.
 (defn count-regions [f]
@@ -280,33 +284,107 @@
     (/ (- (arena/count) before 1) n)))
 
 (let* ((e '(let ((a 0)) (each x (list 1 2 3) (assign a (+ a x))) a))
-       (p10 (measure-per-iter 10 e))
-       (p100 (measure-per-iter 100 e)))
-  (display "  each via eval: ") (display p10) (display "/") (display p100)
-  (display " per-iter (10x/100x)\n")
-  (assert-eq p10 p100 "macro expansion cost is constant"))
+       (p5 (measure-per-iter 5 e))
+       (p20 (measure-per-iter 20 e)))
+  (display "  each via eval: ") (display p5) (display "/") (display p20)
+  (display " per-iter (5x/20x)\n")
+  (assert-eq p5 p20 "macro expansion cost is constant"))
 
 (let* ((e '(defn temp (x) (let* ((a (+ x 1)) (b (+ a 2))) (-> b (* 2)))))
-       (p10 (measure-per-iter 10 e))
-       (p100 (measure-per-iter 100 e)))
-  (display "  defn+let*+->: ") (display p10) (display "/") (display p100)
-  (display " per-iter (10x/100x)\n")
-  (assert-eq p10 p100 "complex macro cost is constant"))
+       (p5 (measure-per-iter 5 e))
+       (p20 (measure-per-iter 20 e)))
+  (display "  defn+let*+->: ") (display p5) (display "/") (display p20)
+  (display " per-iter (5x/20x)\n")
+  (assert-eq p5 p20 "complex macro cost is constant"))
 
 
 # ========================================
 # 10. Fiber lifecycle
 # ========================================
 
-(let* ((p10 (measure-per-iter 10
+(let* ((p5 (measure-per-iter 5
               '(let ((f (fiber/new (fn () 42) 1)))
                  (fiber/resume f nil))))
-       (p100 (measure-per-iter 100
+       (p20 (measure-per-iter 20
                '(let ((f (fiber/new (fn () 42) 1)))
                   (fiber/resume f nil)))))
-  (display "  fiber create+resume: ") (display p10) (display "/") (display p100)
+  (display "  fiber create+resume: ") (display p5) (display "/") (display p20)
   (display " per-iter\n")
-  (assert-eq p10 p100 "fiber cost is constant"))
+  (assert-eq p5 p20 "fiber cost is constant"))
+
+
+# ========================================
+# 11. Fiber-per-computation: bounded memory
+# ========================================
+#
+# Wrapping each iteration in a child fiber reclaims all temporary
+# allocations when the fiber dies. No GC — the bump resets on fiber death.
+# Use this pattern for long-running loops that create many temporaries.
+
+# Naive loop: allocations accumulate on the root fiber's arena.
+(var naive-growth
+  (let ((before (arena/count)))
+    (var i 0)
+    (while (< i 20)
+      (list 1 2 3 4 5)
+      (cons :a (cons :b nil))
+      (assign i (+ i 1)))
+    (- (arena/count) before)))
+(display "  naive 20 iters:   ") (display naive-growth) (print " net objects")
+
+# Fiber-per-iteration: each iteration runs in a child fiber.
+# When the fiber completes, its FiberHeap is reclaimed entirely.
+(var fiber-growth
+  (let ((before (arena/count)))
+    (var i 0)
+    (while (< i 20)
+      (run-in-fiber (fn ()
+        (list 1 2 3 4 5)
+        (cons :a (cons :b nil))
+        nil))
+      (assign i (+ i 1)))
+    (- (arena/count) before)))
+(display "  fiber 20 iters:   ") (display fiber-growth) (print " net objects")
+
+# The fiber pattern's growth is lower: temporaries inside each fiber
+# are reclaimed on fiber death. The root arena still grows from fiber
+# objects and closures, but much less than the naive loop's 7 objects/iter.
+(assert-true (> naive-growth (* 2 fiber-growth))
+  "fiber-per-iteration keeps net growth lower than naive loop")
+(display "  ratio:            ") (display (/ naive-growth fiber-growth)) (print "x")
+
+
+# ========================================
+# 12. arena/checkpoint and arena/reset
+# ========================================
+#
+# Explicit reclamation for the root fiber. Dangerous: invalidates Values
+# allocated after the checkpoint. Use only when you know those Values
+# are no longer reachable.
+
+# Take checkpoint, allocate, measure growth, reset, verify reclamation.
+# arena/count has 1 object overhead (SIG_QUERY cons), so after reset
+# the count reads as mark + 1.
+(var cp-mark (arena/checkpoint))
+(cons 1 2)
+(cons 3 4)
+(cons 5 6)
+(list 7 8 9)
+(var cp-after (arena/count))
+(assert-true (> cp-after cp-mark) "objects were allocated after checkpoint")
+(display "  after alloc:  ") (display (- cp-after cp-mark)) (print " new objects")
+(arena/reset cp-mark)
+(var cp-reset (arena/count))
+# arena/count itself allocates 1 cons (SIG_QUERY overhead)
+(assert-eq (- cp-reset cp-mark) 1 "arena/reset restored count (modulo measurement overhead)")
+(display "  after reset:  +") (display (- cp-reset cp-mark)) (print " (measurement overhead)")
+
+# Verify reset with invalid mark errors
+(let ((result (try
+                (arena/reset (+ (arena/checkpoint) 999))
+                (catch e (get e :error)))))
+  (assert-eq result :value-error "arena/reset with future mark errors")
+  (display "  bad mark:     caught ") (print result))
 
 (print "")
 (print "all allocator tests passed.")

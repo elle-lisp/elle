@@ -1,4 +1,61 @@
-//! Bytecode execution entry points and helpers.
+//! Bytecode execution entry points.
+//!
+//! ## Re-entrancy
+//!
+//! `execute_bytecode_saving_stack` makes the VM re-entrant. It is called
+//! recursively from within the dispatch loop in several places:
+//!
+//! | Caller | Context |
+//! |--------|---------|
+//! | `eval` primitive | Compiles and runs Elle source from within running code |
+//! | Non-yielding `fiber/resume` | Runs a child fiber inline on the current thread |
+//! | `arena/allocs` SIG_QUERY handler | Runs a thunk to measure its allocations |
+//! | JIT trampolines | Re-enters interpreter for uncompiled hot paths |
+//! | Coroutine resume in `call.rs` | Resumes a suspended coroutine |
+//!
+//! ### What `execute_bytecode_saving_stack` preserves
+//!
+//! - **Operand stack**: saved before inner execution, restored after. The
+//!   inner execution sees an empty stack. The outer stack is invisible to it.
+//! - **Active allocator pointer**: saved and restored. Inner execution uses
+//!   whatever allocator was active (scope bumps, shared allocator, etc.).
+//!
+//! ### What it does NOT preserve
+//!
+//! - **`self.fiber.signal`**: the inner execution overwrites this with its
+//!   result. Callers must read `fiber.signal` immediately after return and
+//!   before any other operation that might set it.
+//! - **`self.fiber.frames` / `self.fiber.call_stack`**: inner calls push
+//!   and pop frames. On normal return these are balanced. On error they
+//!   may be partially unwound.
+//! - **`self.error_loc`**: overwritten by inner execution on error.
+//! - **`self.pending_tail_call`**: consumed by the tail-call loop inside
+//!   `execute_bytecode_saving_stack`. Never leaks to the outer caller.
+//!
+//! ### Yield from inner execution
+//!
+//! If the inner closure yields (`SIG_YIELD`), `execute_bytecode_saving_stack`
+//! returns `SIG_YIELD` to its caller. The saved outer stack is restored, but
+//! the fiber is now suspended mid-inner-execution. **This is a bug in any
+//! caller that does not handle `SIG_YIELD`.** Current callers that call
+//! user-provided closures (`eval`, `arena/allocs`) do not handle yield —
+//! they propagate the signal upward, which will confuse the outer execution
+//! context. Closures passed to these primitives must be non-yielding (Pure
+//! effect). This is not currently enforced at the call site.
+//!
+//! ### Rules for new callers
+//!
+//! If you add a new SIG_QUERY handler or primitive that calls a user closure
+//! via `execute_bytecode_saving_stack`:
+//!
+//! 1. Read `fiber.signal` immediately after return to get the result.
+//! 2. Check `exec_result.bits` for `SIG_ERROR` and `SIG_HALT` before using
+//!    the result.
+//! 3. Do NOT call it with a closure that may yield unless you handle
+//!    `SIG_YIELD` in the return value.
+//! 4. Do NOT assume `fiber.signal` is unchanged after the call.
+//! 5. The inner execution runs on the SAME fiber — same heap, same globals,
+//!    same parameter frames. It is not isolated.
 
 use crate::error::LocationMap;
 use crate::value::{SignalBits, Value};
