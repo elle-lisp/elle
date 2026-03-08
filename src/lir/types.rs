@@ -265,6 +265,10 @@ pub enum LirInstr {
     IsStruct { dst: Reg, src: Reg },
     /// Check if value is a table (for pattern matching)
     IsTable { dst: Reg, src: Reg },
+    /// Check if value is an immutable set (for pattern matching)
+    IsSet { dst: Reg, src: Reg },
+    /// Check if value is a mutable set (for pattern matching)
+    IsSetMut { dst: Reg, src: Reg },
     /// Get array length (for pattern matching)
     ArrayLen { dst: Reg, src: Reg },
 

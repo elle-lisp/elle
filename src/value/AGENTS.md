@@ -24,7 +24,7 @@ Runtime value representation using NaN-boxing.
 | `ffi.rs` | `LibHandle` for C interop |
 | `fiber_heap.rs` | `FiberHeap` struct (bumpalo + destructor tracking + scope marks + scope stats + active_allocator + shared alloc ownership), thread-local routing, `region_enter`/`region_exit` |
 | `shared_alloc.rs` | `SharedAllocator` for zero-copy inter-fiber value exchange |
-| `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle`, `BindingInner`, `BindingScope` |
+| `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle`, `BindingInner`, `BindingScope`, `LSet`, `LSetMut` |
 | `send.rs` | `SendValue` wrapper for thread-safe transfer |
 | `display.rs` | `Display` implementation for values |
 | `intern.rs` | String interning (used by both strings and keywords) |
@@ -41,6 +41,8 @@ Runtime value representation using NaN-boxing.
 | `FiberHeap` | `fiber_heap.rs` | Per-fiber bump allocator (bumpalo) with destructor tracking and shared alloc ownership |
 | `SharedAllocator` | `shared_alloc.rs` | Bump allocator for zero-copy inter-fiber value exchange |
 | `Parameter` | `heap.rs` | Dynamic binding with id and default value, looked up at runtime |
+| `LSet` | `heap.rs` | Immutable set (`BTreeSet<Value>`), no `RefCell` |
+| `LSetMut` | `heap.rs` | Mutable set (`RefCell<BTreeSet<Value>>`) |
 
 ### Fiber fields for parent/child chain
 
@@ -126,9 +128,28 @@ and mutations after creating the binding) and read-only during lowering.
 
 `BindingScope` enum: `Parameter`, `Local`, `Global`. Defined in `heap.rs`.
 
+### Set types
+
+Two set types exist, following the immutable/mutable split:
+
+- **`LSet(BTreeSet<Value>)`** — immutable set, no `RefCell`. Created via
+  `Value::set()`. Accessed via `Value::as_set()`. Displays as `|1 2 3|`.
+  `type_name()` returns `"set"`.
+
+- **`LSetMut(RefCell<BTreeSet<Value>>)`** — mutable set, wrapped in `RefCell`.
+  Created via `Value::set_mut()`. Accessed via `Value::as_set_mut()`. Displays
+  as `@|1 2 3|`. `type_name()` returns `"@set"`.
+
+Set membership uses structural equality (from `Value: Eq`). When a mutable value
+is inserted into a set, it is frozen (converted to its immutable equivalent).
+This prevents mutation from breaking set invariants (e.g., changing a key's hash
+after insertion).
+
+Predicates: `is_set()` and `is_set_mut()` for type checking.
+
 Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
-`Value::closure(c)`, `Value::binding(name, scope)`. Don't construct enum
-variants directly.
+`Value::closure(c)`, `Value::binding(name, scope)`, `Value::set(btree_set)`,
+`Value::set_mut(btree_set)`. Don't construct enum variants directly.
 
 ## Files
 
@@ -147,7 +168,7 @@ variants directly.
 | `shared_alloc.rs` | ~180 | SharedAllocator (bump + destructor tracking), teardown, Drop impl |
 | `error.rs` | ~50 | error_val() and format_error() helpers |
 | `ffi.rs` | ~22 | LibHandle |
-| `heap.rs` | ~650 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope, `heap_arena_len()`, `heap_arena_capacity()` |
+| `heap.rs` | ~700 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope, LSet, LSetMut, `heap_arena_len()`, `heap_arena_capacity()` |
 | `send.rs` | ~150 | SendValue for thread transfer |
 | `display.rs` | ~100 | Display formatting |
 | `intern.rs` | ~100 | Symbol interning |

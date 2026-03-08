@@ -627,6 +627,20 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
+            LirInstr::IsSet { dst, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::IsSet);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::IsSetMut { dst, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::IsSetMut);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
             LirInstr::ArrayLen { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::ArrayLen);

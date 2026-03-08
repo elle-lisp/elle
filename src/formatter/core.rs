@@ -150,6 +150,23 @@ fn format_value(
             HeapObject::External(ext) => return format!("#<{}>", ext.type_name),
             HeapObject::Parameter { id, .. } => return format!("<parameter:{}>", id),
             HeapObject::String(s) => return format!("\"{}\"", s.escape_default()),
+            HeapObject::LSet(s) => {
+                let items: Vec<String> = s
+                    .iter()
+                    .map(|e| format_value(e, indent, config, symbol_table))
+                    .collect();
+                return format!("|{}|", items.join(" "));
+            }
+            HeapObject::LSetMut(s_ref) => {
+                if let Ok(s) = s_ref.try_borrow() {
+                    let items: Vec<String> = s
+                        .iter()
+                        .map(|e| format_value(e, indent, config, symbol_table))
+                        .collect();
+                    return format!("@|{}|", items.join(" "));
+                }
+                return "@|<borrowed>|".to_string();
+            }
         }
     }
 

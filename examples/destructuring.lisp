@@ -153,17 +153,17 @@
 
 # var + destructuring creates mutable bindings.
 (var (mut-a mut-b) (list 1 2))
-(set mut-a 100)
+(assign mut-a 100)
 (assert-eq mut-a 100 "mutable: set after destructure")
 
 # Works with tuples and structs too
 (var [mut-x mut-y] [10 20])
-(set mut-x (+ mut-x mut-y))
+(assign mut-x (+ mut-x mut-y))
 (assert-eq mut-x 30 "mutable: tuple set x = x + y")
 
 (var {:count mut-count} {:count 0})
-(set mut-count (+ mut-count 1))
-(set mut-count (+ mut-count 1))
+(assign mut-count (+ mut-count 1))
+(assign mut-count (+ mut-count 1))
 (assert-eq mut-count 2 "mutable: struct incremented twice")
 
 (display "  var list then set → a=") (print mut-a)

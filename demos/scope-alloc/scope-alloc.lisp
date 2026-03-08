@@ -30,7 +30,7 @@
     (while (< i 10000)
       (let ((data @[1 2 3 4 5]))
         (length data))
-      (set i (+ i 1)))
+      (assign i (+ i 1)))
     (- (arena/count) before))))
 
 (var tier1-unscoped
@@ -40,8 +40,8 @@
     (var last nil)
     (while (< i 10000)
       (let ((data @[1 2 3 4 5]))
-        (set last data))
-      (set i (+ i 1)))
+        (assign last data))
+      (assign i (+ i 1)))
     (- (arena/count) before))))
 
 (display "  scoped:   ") (display tier1-scoped) (print " live objects after 10k iters")
@@ -63,9 +63,9 @@
     (var outer-val 0)
     (while (< i 10000)
       (let ((temp @[1 2 3]))
-        (set outer-val (+ outer-val (length temp)))
+        (assign outer-val (+ outer-val (length temp)))
         outer-val)
-      (set i (+ i 1)))
+      (assign i (+ i 1)))
     (arena/scope-stats))))
 
 (display "  enters:    ") (display (get tier3-stats :enters)) (print "")
@@ -88,7 +88,7 @@
       (let ((xs @[10 20 30]))
         (let ((n (length xs)))
           (+ n 1)))
-      (set i (+ i 1)))
+      (assign i (+ i 1)))
     (- (arena/count) before))))
 
 (display "  scoped net: ") (display tier4-scoped) (print " live objects after 10k iters")
@@ -111,7 +111,7 @@
           (0 :zero)
           (1 :one)
           (_ :other)))
-      (set i (+ i 1)))
+      (assign i (+ i 1)))
     (- (arena/count) before))))
 
 (display "  scoped net: ") (display tier5-scoped) (print " live objects after 10k iters")
@@ -120,7 +120,7 @@
 
 # ── Tier 8: immediate outward set ───────────────────────────────────
 #
-# (set counter (+ counter 1)) writes an immediate outward. Tier 8
+# (assign counter (+ counter 1)) writes an immediate outward. Tier 8
 # recognises that an outward set with a provably immediate value is
 # harmless, so the while's implicit block scope-allocates.
 
@@ -132,7 +132,7 @@
     (while (< counter 10000)
       (let ((tmp @[1 2 3]))
         (length tmp))
-      (set counter (+ counter 1)))
+      (assign counter (+ counter 1)))
     (arena/scope-stats))))
 
 (display "  enters:    ") (display (get tier8-stats :enters))
@@ -156,7 +156,7 @@
     (while (< i 5000)
       # Tier 1: whitelist (length)
       (let ((xs @[1 2 3 4 5]))
-        (set total (+ total (length xs))))
+        (assign total (+ total (length xs))))
       # Tier 3: return outer binding
       (let ((tmp @[10 20]))
         total)
@@ -167,7 +167,7 @@
       # Tier 5: match → keyword
       (let ((tag (mod i 2)))
         (match tag (0 :even) (_ :odd)))
-      (set i (+ i 1)))
+      (assign i (+ i 1)))
     {:net (- (arena/count) before)
      :total total
      :stats (arena/scope-stats)})))

@@ -61,6 +61,10 @@ pub enum Constructor {
     Struct(Vec<PatternKey>),
     /// Table with these keys (open match).
     Table(Vec<PatternKey>),
+    /// Immutable set (type guard only, arity 1 — the binding gets the whole value).
+    Set,
+    /// Mutable set (type guard only, arity 1 — the binding gets the whole value).
+    SetMut,
 }
 
 impl Constructor {
@@ -73,6 +77,7 @@ impl Constructor {
             // Rest variants include the rest element as an extra sub-pattern.
             Constructor::TupleRest(n) | Constructor::ArrayRest(n) => *n + 1,
             Constructor::Struct(keys) | Constructor::Table(keys) => keys.len(),
+            Constructor::Set | Constructor::SetMut => 1,
         }
     }
 }
@@ -216,6 +221,8 @@ fn pattern_constructor(pat: &HirPattern) -> Option<Constructor> {
         HirPattern::Table { entries } => Some(Constructor::Table(
             entries.iter().map(|(k, _)| k.clone()).collect(),
         )),
+        HirPattern::Set { .. } => Some(Constructor::Set),
+        HirPattern::SetMut { .. } => Some(Constructor::SetMut),
         HirPattern::Or(_) => {
             // Or-patterns should have been expanded before reaching here.
             None
@@ -276,6 +283,11 @@ fn collect_pattern_bindings(
                     out,
                 );
             }
+        }
+        HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+            // Set patterns bind the whole value — the binding sub-pattern
+            // receives the same access path as the set itself.
+            collect_pattern_bindings(binding, access, out);
         }
         HirPattern::Or(alts) => {
             // Should have been expanded. Collect from first alternative.
@@ -468,6 +480,9 @@ fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<HirPattern>
                 })
                 .collect()
         }
+        HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+            vec![*binding.clone()]
+        }
         _ => vec![],
     }
 }
@@ -626,6 +641,10 @@ fn expand_access(col_access: &[AccessPath], col: usize, ctor: &Constructor) -> V
             for key in keys {
                 new_access.push(AccessPath::Key(Box::new(base.clone()), key.clone()));
             }
+        }
+        Constructor::Set | Constructor::SetMut => {
+            // Set patterns have arity 1 — the binding gets the whole value.
+            new_access.push(base.clone());
         }
     }
     new_access.extend_from_slice(&col_access[col + 1..]);

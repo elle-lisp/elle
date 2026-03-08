@@ -194,7 +194,7 @@
 # ============================================================
 
 # test_eval_with_while
-(assert-eq (eval '(begin (var i 0) (while (< i 3) (set i (+ i 1))) i)) 3
+(assert-eq (eval '(begin (var i 0) (while (< i 3) (assign i (+ i 1))) i)) 3
            "eval with while loop")
 
 # ============================================================

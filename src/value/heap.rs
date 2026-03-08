@@ -5,7 +5,7 @@
 
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -80,6 +80,8 @@ pub enum HeapTag {
     Blob = 23,
     External = 24,
     Parameter = 25,
+    LSet = 26,
+    LSetMut = 27,
 }
 
 /// All heap-allocated value types.
@@ -171,6 +173,12 @@ pub enum HeapObject {
     /// (for lookup in the fiber's param_frames stack) and a default value
     /// (returned when no parameterize binding is active).
     Parameter { id: u32, default: Value },
+
+    /// Immutable set (BTreeSet, no RefCell)
+    LSet(BTreeSet<Value>),
+
+    /// Mutable set (BTreeSet wrapped in RefCell)
+    LSetMut(RefCell<BTreeSet<Value>>),
 }
 
 /// Internal binding metadata, heap-allocated behind the Value pointer.
@@ -272,6 +280,8 @@ impl HeapObject {
             HeapObject::ManagedPointer(_) => HeapTag::ManagedPointer,
             HeapObject::External(_) => HeapTag::External,
             HeapObject::Parameter { .. } => HeapTag::Parameter,
+            HeapObject::LSet(_) => HeapTag::LSet,
+            HeapObject::LSetMut(_) => HeapTag::LSetMut,
         }
     }
 
@@ -301,6 +311,8 @@ impl HeapObject {
             HeapObject::ManagedPointer(_) => "pointer",
             HeapObject::External(ext) => ext.type_name,
             HeapObject::Parameter { .. } => "parameter",
+            HeapObject::LSet(_) => "set",
+            HeapObject::LSetMut(_) => "@set",
         }
     }
 }
@@ -380,6 +392,8 @@ impl std::fmt::Debug for HeapObject {
             },
             HeapObject::External(ext) => write!(f, "#<{}>", ext.type_name),
             HeapObject::Parameter { id, .. } => write!(f, "<parameter:{}>", id),
+            HeapObject::LSet(s) => write!(f, "LSet({:?})", s),
+            HeapObject::LSetMut(s) => write!(f, "LSetMut({:?})", s.borrow()),
         }
     }
 }

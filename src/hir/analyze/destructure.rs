@@ -407,6 +407,15 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok(HirPattern::Struct { entries })
             }
+            SyntaxKind::Set(_) | SyntaxKind::SetMut(_) => {
+                return Err(format!(
+                    "{}: sets cannot be destructured (unordered collection)",
+                    span
+                ));
+            }
+            SyntaxKind::Pipe => {
+                return Err(format!("{}: unexpected | in destructuring pattern", span));
+            }
             _ => Err(format!(
                 "{}: destructuring pattern element must be a symbol, list, tuple, array, struct, or table",
                 span

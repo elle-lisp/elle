@@ -136,7 +136,7 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Keyword(k) => Ok(HirPattern::Literal(PatternLiteral::Keyword(k.clone()))),
             SyntaxKind::List(items) => {
                 // Or-pattern check FIRST — before any other list pattern logic
-                if items.iter().any(|s| s.as_symbol() == Some("|")) {
+                if items.iter().any(|s| matches!(s.kind, SyntaxKind::Pipe)) {
                     return self.analyze_or_pattern(items, &syntax.span, resolve_var);
                 }
                 if items.is_empty() {
@@ -296,6 +296,35 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok(HirPattern::Table { entries })
             }
+            SyntaxKind::Set(items) => {
+                // Set pattern |x| - matches sets (immutable)
+                if items.len() != 1 {
+                    return Err(format!(
+                        "{}: set pattern must contain exactly 1 element (the binding pattern)",
+                        syntax.span
+                    ));
+                }
+                let binding = self.analyze_pattern_inner(&items[0], resolve_var)?;
+                Ok(HirPattern::Set {
+                    binding: Box::new(binding),
+                })
+            }
+            SyntaxKind::SetMut(items) => {
+                // Mutable set pattern @|x| - matches mutable sets
+                if items.len() != 1 {
+                    return Err(format!(
+                        "{}: mutable set pattern must contain exactly 1 element (the binding pattern)",
+                        syntax.span
+                    ));
+                }
+                let binding = self.analyze_pattern_inner(&items[0], resolve_var)?;
+                Ok(HirPattern::SetMut {
+                    binding: Box::new(binding),
+                })
+            }
+            SyntaxKind::Pipe => {
+                return Err(format!("{}: unexpected | in pattern", syntax.span));
+            }
             _ => Err(format!("{}: invalid pattern", syntax.span)),
         }
     }
@@ -309,7 +338,9 @@ impl<'a> Analyzer<'a> {
     ) -> Result<HirPattern, String> {
         use crate::hir::pattern::validate_or_pattern_bindings;
 
-        let groups: Vec<&[Syntax]> = items.split(|s| s.as_symbol() == Some("|")).collect();
+        let groups: Vec<&[Syntax]> = items
+            .split(|s| matches!(s.kind, SyntaxKind::Pipe))
+            .collect();
 
         if groups.len() < 2 {
             return Err(format!(

@@ -106,3 +106,21 @@ pub fn handle_is_empty_list(vm: &mut VM) {
         .expect("VM bug: Stack underflow on IsEmptyList");
     vm.fiber.stack.push(Value::bool(val.is_empty_list()));
 }
+
+pub fn handle_is_set(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on IsSet");
+    vm.fiber.stack.push(Value::bool(val.is_set()));
+}
+
+pub fn handle_is_set_mut(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on IsSetMut");
+    vm.fiber.stack.push(Value::bool(val.is_set_mut()));
+}

@@ -132,7 +132,7 @@
   (var n 0)
   (each line in (disbit f)
     (when (string/contains? line "RegionEnter")
-      (set n (+ n 1))))
+      (assign n (+ n 1))))
   n)
 
 # Arithmetic result — qualifies for scope allocation.
@@ -223,7 +223,7 @@
                (var i 0)
                (while (< i 100)
                  (let ((x @[1 2 3])) (length x))
-                 (set i (+ i 1)))
+                 (assign i (+ i 1)))
                (arena/scope-stats)))))
   (assert-eq (get stats :enters) 101 "101 scope enters (100 inner let + 1 while block)")
   (assert-eq (get stats :dtors-run) 100 "100 destructors run")
@@ -243,11 +243,11 @@
     (var i 0)
     (while (< i 50)
       (let ((x @[1 2 3 4 5])) (length x))
-      (set i (+ i 1)))
+      (assign i (+ i 1)))
     (- (arena/count) before))))
 (display "  50x scoped:   ") (display scoped-net) (print " net objects")
 
-# The `(set last x)` stores a heap value outward, defeating while-block
+# The `(assign last x)` stores a heap value outward, defeating while-block
 # scope allocation (Tier 8 only allows immediate outward sets).
 (var unscoped-net
   (run-in-fiber (fn []
@@ -255,8 +255,8 @@
     (var i 0)
     (var last nil)
     (while (< i 50)
-      (let ((x @[1 2 3 4 5])) (set last x))
-      (set i (+ i 1)))
+      (let ((x @[1 2 3 4 5])) (assign last x))
+      (assign i (+ i 1)))
     (- (arena/count) before))))
 (display "  50x unscoped: ") (display unscoped-net) (print " net objects")
 
@@ -279,7 +279,7 @@
       (loop 0))
     (/ (- (arena/count) before 1) n)))
 
-(let* ((e '(let ((a 0)) (each x (list 1 2 3) (set a (+ a x))) a))
+(let* ((e '(let ((a 0)) (each x (list 1 2 3) (assign a (+ a x))) a))
        (p10 (measure-per-iter 10 e))
        (p100 (measure-per-iter 100 e)))
   (display "  each via eval: ") (display p10) (display "/") (display p100)

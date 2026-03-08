@@ -25,7 +25,7 @@
 # Counter closure that increments a captured mutable binding
 (let ((counter ((fn ()
        (let ((n 0))
-         (fn () (set n (+ n 1)) n))))))
+         (fn () (assign n (+ n 1)) n))))))
   (counter)
   (counter)
   (assert-eq (counter) 3 "captured mutated let uses LocalCell"))
@@ -34,7 +34,7 @@
 # Mutated but not captured — uses StoreLocal for set
 # ============================================================================
 
-(assert-eq ((fn () (let ((y 0)) (set y 10) y))) 10
+(assert-eq ((fn () (let ((y 0)) (assign y 10) y))) 10
   "mutated non-captured let in lambda")
 
 # ============================================================================

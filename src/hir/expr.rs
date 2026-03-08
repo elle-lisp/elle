@@ -150,8 +150,8 @@ pub enum HirKind {
     },
 
     // === Mutation ===
-    /// Set! - mutate a binding
-    Set {
+    /// Assign - mutate a var binding
+    Assign {
         target: Binding,
         value: Box<Hir>,
     },
