@@ -217,6 +217,11 @@ pub enum Instruction {
     /// Pop the top parameter frame from the fiber's param_frames stack.
     /// No operands, no stack effect.
     PopParamFrame,
+
+    /// Type check: is value an immutable set?
+    IsSet,
+    /// Type check: is value a mutable set?
+    IsSetMut,
 }
 
 /// Inline cache entry for function lookups

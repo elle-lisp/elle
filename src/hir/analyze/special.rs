@@ -296,6 +296,35 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok(HirPattern::Table { entries })
             }
+            SyntaxKind::Set(items) => {
+                // Set pattern |x| - matches sets (immutable)
+                if items.len() != 1 {
+                    return Err(format!(
+                        "{}: set pattern must contain exactly 1 element (the binding pattern)",
+                        syntax.span
+                    ));
+                }
+                let binding = self.analyze_pattern_inner(&items[0], resolve_var)?;
+                Ok(HirPattern::Set {
+                    binding: Box::new(binding),
+                })
+            }
+            SyntaxKind::SetMut(items) => {
+                // Mutable set pattern @|x| - matches mutable sets
+                if items.len() != 1 {
+                    return Err(format!(
+                        "{}: mutable set pattern must contain exactly 1 element (the binding pattern)",
+                        syntax.span
+                    ));
+                }
+                let binding = self.analyze_pattern_inner(&items[0], resolve_var)?;
+                Ok(HirPattern::SetMut {
+                    binding: Box::new(binding),
+                })
+            }
+            SyntaxKind::Pipe => {
+                return Err(format!("{}: unexpected | in pattern", syntax.span));
+            }
             _ => Err(format!("{}: invalid pattern", syntax.span)),
         }
     }

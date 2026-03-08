@@ -175,17 +175,73 @@ impl<'a> Analyzer<'a> {
                 span
             )),
 
-            // Set literal |...| - call set constructor primitive (chunk 4+)
-            SyntaxKind::Set(_) => Err(format!(
-                "{}: set literals are not yet supported (requires chunk 4 implementation)",
-                span
-            )),
+            // Set literal |...| - call set constructor primitive
+            SyntaxKind::Set(items) => {
+                let mut args = Vec::new();
+                let mut effect = Effect::none();
+                for item in items {
+                    if matches!(&item.kind, SyntaxKind::Splice(_))
+                        || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
+                    {
+                        return Err(format!(
+                            "{}: splice is not supported in set constructors (unordered collection)",
+                            item.span
+                        ));
+                    }
+                    let hir = self.analyze_expr(item)?;
+                    effect = effect.combine(hir.effect);
+                    args.push(CallArg {
+                        expr: hir,
+                        spliced: false,
+                    });
+                }
+                let sym = self.symbols.intern("set");
+                let binding = Binding::new(sym, BindingScope::Global);
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                Ok(Hir::new(
+                    HirKind::Call {
+                        func: Box::new(func),
+                        args,
+                        is_tail: false,
+                    },
+                    span,
+                    effect,
+                ))
+            }
 
-            // Mutable set literal @|...| - call mutable-set constructor primitive (chunk 4+)
-            SyntaxKind::SetMut(_) => Err(format!(
-                "{}: mutable set literals are not yet supported (requires chunk 4 implementation)",
-                span
-            )),
+            // Mutable set literal @|...| - call mutable-set constructor primitive
+            SyntaxKind::SetMut(items) => {
+                let mut args = Vec::new();
+                let mut effect = Effect::none();
+                for item in items {
+                    if matches!(&item.kind, SyntaxKind::Splice(_))
+                        || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
+                    {
+                        return Err(format!(
+                            "{}: splice is not supported in mutable set constructors (unordered collection)",
+                            item.span
+                        ));
+                    }
+                    let hir = self.analyze_expr(item)?;
+                    effect = effect.combine(hir.effect);
+                    args.push(CallArg {
+                        expr: hir,
+                        spliced: false,
+                    });
+                }
+                let sym = self.symbols.intern("mutable-set");
+                let binding = Binding::new(sym, BindingScope::Global);
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                Ok(Hir::new(
+                    HirKind::Call {
+                        func: Box::new(func),
+                        args,
+                        is_tail: false,
+                    },
+                    span,
+                    effect,
+                ))
+            }
 
             // Pipe outside of match pattern is an error
             SyntaxKind::Pipe => Err(format!("{}: unexpected | outside of match pattern", span)),
