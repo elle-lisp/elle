@@ -77,9 +77,11 @@ pub fn discover_compilation_group(
             continue;
         }
 
-        // Variadic functions can't be JIT-compiled (rest-arg collection
-        // not implemented in JIT entry block).
-        if matches!(lir.arity, Arity::AtLeast(_)) {
+        // Variadic functions with struct/named varargs can't be JIT-compiled
+        // (need fiber access for keyword error reporting). List variadics are OK.
+        if matches!(lir.arity, Arity::AtLeast(_))
+            && !matches!(lir.vararg_kind, crate::hir::VarargKind::List)
+        {
             continue;
         }
 

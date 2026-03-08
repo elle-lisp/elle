@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::I64;
 use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, MemFlags, Signature, UserFuncName};
 use cranelift_codegen::isa::CallConv;
@@ -344,12 +345,15 @@ impl JitCompiler {
             return Err(JitError::Polymorphic);
         }
 
-        // Variadic functions (AtLeast arity) require rest-arg collection
-        // that the JIT entry block does not implement. Reject so the
-        // interpreter handles the call correctly.
-        if matches!(lir.arity, Arity::AtLeast(_)) {
+        // Variadic functions with struct/named varargs require fiber access
+        // for error reporting on invalid keyword arguments. The JIT entry
+        // block has no fiber pointer, so these fall back to the interpreter.
+        // VarargKind::List variadics are fully supported (cons loop in entry block).
+        if matches!(lir.arity, Arity::AtLeast(_))
+            && !matches!(lir.vararg_kind, crate::hir::VarargKind::List)
+        {
             return Err(JitError::UnsupportedInstruction(
-                "variadic function (AtLeast arity)".to_string(),
+                "variadic function with struct/named varargs".to_string(),
             ));
         }
 
@@ -477,9 +481,11 @@ impl JitCompiler {
             if member.lir.effect.may_suspend() {
                 return Err(JitError::Yielding);
             }
-            if matches!(member.lir.arity, Arity::AtLeast(_)) {
+            if matches!(member.lir.arity, Arity::AtLeast(_))
+                && !matches!(member.lir.vararg_kind, crate::hir::VarargKind::List)
+            {
                 return Err(JitError::UnsupportedInstruction(
-                    "variadic function (AtLeast arity)".to_string(),
+                    "variadic function with struct/named varargs".to_string(),
                 ));
             }
         }
@@ -606,7 +612,15 @@ impl JitCompiler {
         //   (used for let-bindings inside the function body)
         // All use the same Cranelift variable namespace, so declare enough for all
         let arg_var_base = lir.num_regs;
-        let arity_params = lir.arity.fixed_params() as u16;
+        let is_list_variadic = matches!(lir.arity, Arity::AtLeast(_))
+            && matches!(lir.vararg_kind, crate::hir::VarargKind::List);
+        // For variadic functions, all params including the rest slot are "arg variables".
+        // For non-variadic, arity_params == num_params so this is a no-op.
+        let arity_params = if is_list_variadic {
+            lir.num_params as u16
+        } else {
+            lir.arity.fixed_params() as u16
+        };
         let num_locally_defined = lir.num_locals.saturating_sub(arity_params) as u32;
         let local_var_base = arg_var_base + arity_params as u32;
         let max_var = std::cmp::max(
@@ -636,7 +650,7 @@ impl JitCompiler {
 
         let env_ptr = builder.block_params(entry_block)[0];
         let args_ptr = builder.block_params(entry_block)[1];
-        let _nargs = builder.block_params(entry_block)[2];
+        let nargs = builder.block_params(entry_block)[2];
         let vm_ptr = builder.block_params(entry_block)[3];
         let self_bits = builder.block_params(entry_block)[4];
 
@@ -644,12 +658,108 @@ impl JitCompiler {
         translator.vm_ptr = Some(vm_ptr);
         translator.self_bits = Some(self_bits);
 
-        // Load initial args into arg variables
-        for i in 0..arity_params as u32 {
-            let offset = (i as i32) * 8;
-            let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
-            let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
-            builder.def_var(var(arg_var_base + i), val);
+        if is_list_variadic {
+            // --- Variadic entry: load fixed params, then build cons list for rest ---
+            let fixed = lir.arity.fixed_params();
+
+            // Load fixed params from args pointer
+            for i in 0..fixed as u32 {
+                let offset = (i as i32) * 8;
+                let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
+                let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+                builder.def_var(var(arg_var_base + i), val);
+            }
+
+            // Build cons list from remaining args (reverse iteration).
+            // Equivalent to interpreter's args_to_list():
+            //   let mut list = EMPTY_LIST;
+            //   for i in (fixed..nargs).rev() { list = cons(args[i], list); }
+            let rest_var_idx = arg_var_base + fixed as u32;
+
+            let empty_list_bits = builder
+                .ins()
+                .iconst(I64, crate::value::Value::EMPTY_LIST.to_bits() as i64);
+            let one = builder.ins().iconst(I64, 1);
+            let initial_i = builder.ins().isub(nargs, one);
+            let fixed_val = builder.ins().iconst(I64, fixed as i64);
+
+            // Block structure:
+            //   loop_head(i, acc): if i >= fixed -> loop_body(i, acc) else -> loop_exit(acc)
+            //   loop_body(i, acc): new_acc = cons(args[i], acc); jump loop_head(i-1, new_acc)
+            //   loop_exit(acc): rest_var = acc
+            let cons_loop_head = builder.create_block();
+            let cons_loop_body = builder.create_block();
+            let cons_loop_exit = builder.create_block();
+
+            builder
+                .ins()
+                .jump(cons_loop_head, &[initial_i, empty_list_bits]);
+
+            // loop_head(i, acc)
+            builder.switch_to_block(cons_loop_head);
+            builder.append_block_param(cons_loop_head, I64); // i
+            builder.append_block_param(cons_loop_head, I64); // acc
+            let i_param = builder.block_params(cons_loop_head)[0];
+            let acc_param = builder.block_params(cons_loop_head)[1];
+            let cmp = builder
+                .ins()
+                .icmp(IntCC::SignedGreaterThanOrEqual, i_param, fixed_val);
+            builder.ins().brif(
+                cmp,
+                cons_loop_body,
+                &[i_param, acc_param],
+                cons_loop_exit,
+                &[acc_param],
+            );
+
+            // loop_body(i, acc)
+            builder.switch_to_block(cons_loop_body);
+            builder.append_block_param(cons_loop_body, I64); // i
+            builder.append_block_param(cons_loop_body, I64); // acc
+            builder.seal_block(cons_loop_body); // single predecessor: loop_head
+            let i_body = builder.block_params(cons_loop_body)[0];
+            let acc_body = builder.block_params(cons_loop_body)[1];
+            let offset = builder.ins().imul_imm(i_body, 8);
+            let addr = builder.ins().iadd(args_ptr, offset);
+            let arg_val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+            let cons_ref = translator
+                .module
+                .declare_func_in_func(translator.helpers.cons, builder.func);
+            let call_inst = builder.ins().call(cons_ref, &[arg_val, acc_body]);
+            let new_acc = builder.inst_results(call_inst)[0];
+            let new_i = builder.ins().isub(i_body, one);
+            builder.ins().jump(cons_loop_head, &[new_i, new_acc]);
+
+            // loop_exit(acc)
+            builder.switch_to_block(cons_loop_exit);
+            builder.append_block_param(cons_loop_exit, I64); // acc
+            builder.seal_block(cons_loop_exit); // single predecessor: loop_head
+            let rest_val = builder.block_params(cons_loop_exit)[0];
+
+            // Handle cell_params_mask: if the rest param needs a cell, wrap it
+            let rest_param_index = fixed;
+            if rest_param_index < 64 && (lir.cell_params_mask & (1 << rest_param_index)) != 0 {
+                let cell = translator.call_helper_unary(
+                    &mut builder,
+                    translator.helpers.make_cell,
+                    rest_val,
+                )?;
+                builder.def_var(var(rest_var_idx), cell);
+            } else {
+                builder.def_var(var(rest_var_idx), rest_val);
+            }
+
+            // NOTE: cons_loop_head is NOT sealed here — it has a back-edge from
+            // cons_loop_body. It will be sealed by builder.seal_all_blocks() at
+            // the end of translate_function().
+        } else {
+            // --- Non-variadic entry: load all args directly ---
+            for i in 0..arity_params as u32 {
+                let offset = (i as i32) * 8;
+                let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
+                let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+                builder.def_var(var(arg_var_base + i), val);
+            }
         }
 
         // Initialize locally-defined variables to LocalCell(NIL)
@@ -1087,23 +1197,58 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_variadic() {
+    fn test_reject_struct_variadic() {
         let mut lir = make_simple_lir();
         lir.arity = Arity::AtLeast(1);
+        lir.vararg_kind = crate::hir::VarargKind::Struct;
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let result = compiler.compile(&lir, None);
         assert!(
             matches!(result, Err(JitError::UnsupportedInstruction(_))),
-            "Variadic functions should be rejected: {:?}",
+            "Struct variadic functions should be rejected: {:?}",
             result,
         );
     }
 
     #[test]
-    fn test_compile_batch_rejects_variadic() {
+    fn test_reject_strict_struct_variadic() {
         let mut lir = make_simple_lir();
         lir.arity = Arity::AtLeast(1);
+        lir.vararg_kind = crate::hir::VarargKind::StrictStruct(vec!["key".to_string()]);
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let result = compiler.compile(&lir, None);
+        assert!(
+            matches!(result, Err(JitError::UnsupportedInstruction(_))),
+            "StrictStruct variadic functions should be rejected: {:?}",
+            result,
+        );
+    }
+
+    #[test]
+    fn test_compile_list_variadic() {
+        // AtLeast(1) + VarargKind::List should now compile successfully.
+        // fn(x & rest) -> x  (ignores rest, just returns first arg)
+        let mut lir = make_simple_lir();
+        lir.arity = Arity::AtLeast(1);
+        lir.vararg_kind = crate::hir::VarargKind::List;
+        lir.num_params = 2; // x + rest
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let result = compiler.compile(&lir, None);
+        assert!(
+            result.is_ok(),
+            "List variadic functions should compile: {:?}",
+            result.err(),
+        );
+    }
+
+    #[test]
+    fn test_compile_batch_rejects_struct_variadic() {
+        let mut lir = make_simple_lir();
+        lir.arity = Arity::AtLeast(1);
+        lir.vararg_kind = crate::hir::VarargKind::Struct;
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let members = vec![BatchMember {
@@ -1113,8 +1258,28 @@ mod tests {
         let result = compiler.compile_batch(&members);
         assert!(
             matches!(result, Err(JitError::UnsupportedInstruction(_))),
-            "Variadic functions should be rejected from batch: {:?}",
+            "Struct variadic functions should be rejected from batch: {:?}",
             result,
+        );
+    }
+
+    #[test]
+    fn test_compile_batch_accepts_list_variadic() {
+        let mut lir = make_simple_lir();
+        lir.arity = Arity::AtLeast(1);
+        lir.vararg_kind = crate::hir::VarargKind::List;
+        lir.num_params = 2;
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let members = vec![BatchMember {
+            sym: SymbolId(0),
+            lir: &lir,
+        }];
+        let result = compiler.compile_batch(&members);
+        assert!(
+            result.is_ok(),
+            "List variadic functions should compile in batch: {:?}",
+            result.err(),
         );
     }
 }

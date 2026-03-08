@@ -81,7 +81,7 @@ Supported instructions:
 
 Unsupported (returns JitError::UnsupportedInstruction):
 - `MakeClosure` — rare in hot loops, deferred
-- Variadic functions (`AtLeast` arity) — rest-arg collection not implemented in entry block
+- Variadic functions with `Struct`/`StrictStruct` varargs — need fiber for keyword error reporting
 
 Supported in yielding functions (via side-exit):
 - `LoadResumeValue` — emitted as dead code (unreachable in JIT, resume goes through interpreter)
@@ -325,12 +325,13 @@ No errors are silently swallowed.
      `SuspendedFrame` and setting `fiber.signal = (SIG_YIELD, value)` and
      `fiber.suspended`. The JIT caller must not modify these fields.
 
-13. **Variadic functions are excluded from JIT.** Functions with `AtLeast`
-     arity (rest parameters) are rejected by `compile()`, `compile_batch()`,
-     and `discover_compilation_group()`. The JIT entry block only loads
-     `fixed_params()` arguments and does not implement rest-arg collection.
-     These functions fall back to the interpreter. A future phase could add
-     JIT support for variadics by emitting `args_to_list` in the entry block.
+13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
+     entry block emits a Cranelift cons-building loop that iterates over
+     `args[fixed..nargs]` in reverse, calling `elle_jit_cons` to build the
+     rest-arg list. `cell_params_mask` is checked for the rest param slot.
+     Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are
+     still rejected (they require fiber access for keyword error reporting)
+     and fall back to the interpreter.
 
 ## Cell Optimization for Locally-Defined Variables
 

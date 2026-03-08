@@ -1,14 +1,15 @@
 (import-file "tests/elle/assert.lisp")
 
-## Regression test for #510: JIT must not break variadic functions.
+## Regression test for #510: JIT must correctly handle variadic functions.
 ##
-## The JIT entry block loads only fixed_params() arguments. For variadic
-## functions (AtLeast arity), the rest-parameter slot was never initialized,
-## becoming NIL instead of EMPTY_LIST. After 10 calls (JIT threshold), the
-## function would crash on (empty? opts) because NIL is not a collection.
-##
-## The fix rejects variadic functions from JIT compilation so they always
-## run through the interpreter, which handles rest-arg collection correctly.
+## The JIT entry block builds a cons list for the rest parameter from the
+## raw args pointer. This test exercises:
+## - Zero rest args (rest = EMPTY_LIST, not NIL)
+## - One rest arg
+## - Multiple rest args
+## - Rest arg type checking (list?, length, first, rest)
+## - Variadic function that captures rest param in a closure
+## - Self-tail-call with variadics
 
 (defn variadic-fn (x & rest)
   "Returns x as string, or x + first rest arg as string."
@@ -33,3 +34,68 @@
 (assert-eq (variadic-fn 13 :extra) "13 :extra" "variadic call 13 with rest arg")
 (assert-eq (variadic-fn 14) "14" "variadic call 14")
 (assert-eq (variadic-fn 15) "15" "variadic call 15")
+
+## Test rest arg is a proper list (not NIL)
+(defn check-rest-type (& rest)
+  "Returns a tuple of (list? rest, length rest, empty? rest)."
+  (list (list? rest) (length rest) (empty? rest)))
+
+(assert-eq (check-rest-type) (list true 0 true) "zero rest args: list? true, length 0, empty? true")
+(assert-eq (check-rest-type 1) (list true 1 false) "one rest arg: list? true, length 1, empty? false")
+(assert-eq (check-rest-type 1 2 3) (list true 3 false) "three rest args: list? true, length 3, empty? false")
+
+## Call past JIT threshold to ensure JIT path works
+(check-rest-type)
+(check-rest-type)
+(check-rest-type)
+(check-rest-type)
+(check-rest-type)
+(check-rest-type)
+(check-rest-type)
+(check-rest-type)
+(check-rest-type)
+(check-rest-type)
+(assert-eq (check-rest-type 10 20) (list true 2 false) "post-JIT: two rest args")
+(assert-eq (check-rest-type) (list true 0 true) "post-JIT: zero rest args")
+
+## Test multiple rest args — verify cons list order
+(defn collect-rest (& args)
+  args)
+
+## Warm up past JIT threshold
+(collect-rest)
+(collect-rest 1)
+(collect-rest 1 2)
+(collect-rest 1 2 3)
+(collect-rest)
+(collect-rest 1)
+(collect-rest 1 2)
+(collect-rest 1 2 3)
+(collect-rest)
+(collect-rest 1)
+(assert-eq (collect-rest) (list) "post-JIT collect: empty")
+(assert-eq (collect-rest 1) (list 1) "post-JIT collect: one")
+(assert-eq (collect-rest 1 2 3) (list 1 2 3) "post-JIT collect: three in order")
+
+## Test variadic with closure capture of rest param
+(defn make-rest-getter (& rest)
+  "Returns a closure that returns the captured rest list."
+  (fn () rest))
+
+## Warm up past JIT threshold
+(make-rest-getter)
+(make-rest-getter 1)
+(make-rest-getter 1 2)
+(make-rest-getter)
+(make-rest-getter 1)
+(make-rest-getter 1 2)
+(make-rest-getter)
+(make-rest-getter 1)
+(make-rest-getter 1 2)
+(make-rest-getter)
+(def getter-empty ((make-rest-getter)))
+(def getter-one ((make-rest-getter 42)))
+(def getter-multi ((make-rest-getter 10 20 30)))
+(assert-eq getter-empty (list) "captured rest: empty")
+(assert-eq getter-one (list 42) "captured rest: one")
+(assert-eq getter-multi (list 10 20 30) "captured rest: three")
