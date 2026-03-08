@@ -270,7 +270,7 @@
 ## ── memoize ─────────────────────────────────────────────────────────
 (let* ((call-count 0)
        (mf (memoize (fn (x)
-                      (set call-count (+ call-count 1))
+                      (assign call-count (+ call-count 1))
                       (* x x)))))
   (assert-eq (mf 3) 9 "memoize: compute 3*3")
   (assert-eq (mf 3) 9 "memoize: cached 3*3")

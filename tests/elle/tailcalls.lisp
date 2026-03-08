@@ -243,6 +243,6 @@
   (var i 0)
   (while (< i 10)
     (begin
-      (set result (+ result i))
-      (set i (+ i 1))))
+      (assign result (+ result i))
+      (assign i (+ i 1))))
   (assert-eq result 45 "accumulation in while loop"))

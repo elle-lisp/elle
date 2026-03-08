@@ -89,8 +89,8 @@
     (forever
       (yield a)
       (def next (+ a b))
-      (set a b)
-      (set b next)))))
+      (assign a b)
+      (assign b next)))))
 
 (def fib (make-fib))
 (display "  fib: ")
@@ -132,7 +132,7 @@
     (var n start)
     (forever
       (yield n)
-      (set n (+ n 1))))))
+      (assign n (+ n 1))))))
 
 (def from-10 (make-counter 10))
 (def from-99 (make-counter 99))

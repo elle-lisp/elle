@@ -193,7 +193,7 @@ impl<'a> Analyzer<'a> {
                         "break" => return self.analyze_break(&items[1..], span),
                         "var" => return self.analyze_define(items, span),
                         "def" => return self.analyze_const(items, span),
-                        "set" => return self.analyze_set(items, span),
+                        "assign" => return self.analyze_assign(items, span),
                         "while" => return self.analyze_while(items, span),
 
                         "and" => return self.analyze_and(&items[1..], span),

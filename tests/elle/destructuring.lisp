@@ -101,7 +101,7 @@
 # test_var_destructured_bindings_are_mutable
 (begin
   (var (a b) (list 1 2))
-  (set a 10)
+  (assign a 10)
   (assert-eq a 10 "var destructured mutable: a after set"))
 
 # ============================================================

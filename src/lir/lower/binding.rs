@@ -241,7 +241,7 @@ impl Lowerer {
         }
     }
 
-    pub(super) fn lower_set(&mut self, target: &Binding, value: &Hir) -> Result<Reg, String> {
+    pub(super) fn lower_assign(&mut self, target: &Binding, value: &Hir) -> Result<Reg, String> {
         let value_reg = self.lower_expr(value)?;
 
         // Check if this binding needs cell update

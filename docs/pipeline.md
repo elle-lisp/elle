@@ -216,7 +216,7 @@ pub(super) fn scan_const_binding(
 ```
 
 Matches `(def name ...)` patterns (not `var`). Returns the `SymbolId`. Used to
-populate `immutable_globals` so the analyzer can reject `(set name ...)` on
+populate `immutable_globals` so the analyzer can reject `(assign name ...)` on
 `def`-bound globals across form boundaries.
 
 ## Compilation phases (single-form)

@@ -145,7 +145,7 @@ impl HirLinter {
                 }
             }
 
-            HirKind::Set { value, .. } => {
+            HirKind::Assign { value, .. } => {
                 self.check(value, symbols);
             }
 
