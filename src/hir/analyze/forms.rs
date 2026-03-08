@@ -243,9 +243,6 @@ impl<'a> Analyzer<'a> {
                 ))
             }
 
-            // Pipe outside of match pattern is an error
-            SyntaxKind::Pipe => Err(format!("{}: unexpected | outside of match pattern", span)),
-
             // List - could be special form or function call
             SyntaxKind::List(items) => {
                 if items.is_empty() {

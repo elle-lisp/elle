@@ -432,55 +432,51 @@
   "match improper list pattern too short")
 
 # ============================================================================
-# Match: or-patterns (1 | 2 | 3)
+# Match: or-patterns (or 1 2 3)
 # ============================================================================
 
 # or pattern basic
-(assert-eq (match 2 ((1 | 2 | 3) :small) (_ :big)) :small
+(assert-eq (match 2 ((or 1 2 3) :small) (_ :big)) :small
   "or pattern basic match")
 
 # or pattern no match
-(assert-eq (match 5 ((1 | 2 | 3) :small) (_ :big)) :big
+(assert-eq (match 5 ((or 1 2 3) :small) (_ :big)) :big
   "or pattern no match")
 
 # or pattern keywords
-(assert-eq (match :b ((:a | :b | :c) :found) (_ :not)) :found
+(assert-eq (match :b ((or :a :b :c) :found) (_ :not)) :found
   "or pattern with keywords")
 
 # or pattern with binding
-(assert-eq (match (cons 1 2) (((x . _) | (_ . x)) x) (_ 0)) 1
+(assert-eq (match (cons 1 2) ((or (x . _) (_ . x)) x) (_ 0)) 1
   "or pattern with binding")
 
 # or pattern with binding second
-(assert-eq (match 99 (((x . _) | x) x) (_ 0)) 99
+(assert-eq (match 99 ((or (x . _) x) x) (_ 0)) 99
   "or pattern with binding second alternative")
 
 # or pattern different bindings error
-(assert-err (fn () (eval '(match 1 (((x . y) | (x . _)) :ok) (_ :no))))
+(assert-err (fn () (eval '(match 1 ((or (x . y) (x . _)) :ok) (_ :no))))
   "or pattern different bindings error")
 
 # or pattern with guard
-(assert-eq (match 2 ((1 | 2 | 3) when true :yes) (_ :no)) :yes
+(assert-eq (match 2 ((or 1 2 3) when true :yes) (_ :no)) :yes
   "or pattern with guard")
 
 # or pattern nested in cons
-(assert-eq (match (cons 2 :x) (((1 | 2) . t) t) (_ :fail)) :x
+(assert-eq (match (cons 2 :x) (((or 1 2) . t) t) (_ :fail)) :x
   "or pattern nested in cons")
 
-# or pattern multi item error
-(assert-err (fn () (eval '(match 1 ((a b | c d) :ok) (_ :no))))
-  "or pattern multi item error")
-
 # or pattern two alternatives
-(assert-eq (match :y ((:x | :y) :found) (_ :not)) :found
+(assert-eq (match :y ((or :x :y) :found) (_ :not)) :found
   "or pattern two alternatives")
 
 # or pattern with nil
-(assert-eq (match nil ((nil | 0) :empty) (_ :other)) :empty
+(assert-eq (match nil ((or nil 0) :empty) (_ :other)) :empty
   "or pattern with nil")
 
 # or pattern in tuple
-(assert-eq (match [2 :x] ([(1 | 2) y] y) (_ :fail)) :x
+(assert-eq (match [2 :x] ([(or 1 2) y] y) (_ :fail)) :x
   "or pattern in tuple")
 
 # ============================================================================
@@ -535,17 +531,17 @@
   "guard middle arm matches")
 
 # or pattern guard outer var
-(assert-eq (let ((threshold 3)) (match 2 ((1 | 2 | 3) when (< threshold 5) :yes) (_ :no)))
+(assert-eq (let ((threshold 3)) (match 2 ((or 1 2 3) when (< threshold 5) :yes) (_ :no)))
            :yes
   "or pattern guard outer var")
 
 # or pattern binding guard
-(assert-eq (match (cons 6 :x) (((a . _) | (_ . a)) when (> a 5) :big) (_ :small))
+(assert-eq (match (cons 6 :x) ((or (a . _) (_ . a)) when (> a 5) :big) (_ :small))
            :big
   "or pattern binding guard")
 
 # or pattern guard fallthrough
-(assert-eq (match 2 ((1 | 2 | 3) when false :never) (_ :fallback)) :fallback
+(assert-eq (match 2 ((or 1 2 3) when false :never) (_ :fallback)) :fallback
   "or pattern guard fallthrough")
 
 # ============================================================================
@@ -569,7 +565,7 @@
   "exhaustive match booleans")
 
 # exhaustive or pattern booleans
-(assert-eq (match true ((true | false) :both)) :both
+(assert-eq (match true ((or true false) :both)) :both
   "exhaustive or pattern booleans")
 
 # non-exhaustive guard on last arm
@@ -633,8 +629,8 @@
 
 # decision tree or pattern with shared body
 (assert-eq (match :b
-              ((:a | :b | :c) :first-group)
-              ((:d | :e | :f) :second-group)
+              ((or :a :b :c) :first-group)
+              ((or :d :e :f) :second-group)
               (_ :other))
            :first-group
   "decision tree or pattern with shared body")
@@ -686,21 +682,21 @@
 
 # decision tree or boolean exhaustive
 (assert-eq (match true
-              ((true | false) :bool))
+              ((or true false) :bool))
            :bool
   "decision tree or boolean exhaustive")
 
 # or pattern decision tree shared
-(assert-eq (match (cons 1 :x) ((1 . t) t) ((2 . t) t) (((3 | 4) . t) t) (_ :fail))
+(assert-eq (match (cons 1 :x) ((1 . t) t) ((2 . t) t) (((or 3 4) . t) t) (_ :fail))
            :x
   "or pattern decision tree shared")
 
 # or pattern nested decision tree
-(assert-eq (match [3 :y] ([(1 | 2 | 3) v] v) (_ :fail))
+(assert-eq (match [3 :y] ([(or 1 2 3) v] v) (_ :fail))
            :y
   "or pattern nested decision tree")
 
 # or pattern guard decision tree
-(assert-eq (match 5 ((1 | 2 | 3) when true :small) ((4 | 5 | 6) :medium) (_ :big))
+(assert-eq (match 5 ((or 1 2 3) when true :small) ((or 4 5 6) :medium) (_ :big))
            :medium
   "or pattern guard decision tree")

@@ -523,6 +523,23 @@
     (_ 0)))
 (assert-eq m-dispatch 25 "match: struct tag dispatch")
 
+# --- Or-patterns ---
+# (or p1 p2 ...) matches if any alternative matches.
+(assert-eq (match 2 ((or 1 2 3) :small) (_ :big)) :small
+  "match: or-pattern matches any alternative")
+(assert-eq (match 5 ((or 1 2 3) :small) (_ :big)) :big
+  "match: or-pattern falls through when none match")
+(assert-eq (match :b ((or :a :b :c) :found) (_ :not)) :found
+  "match: or-pattern with keywords")
+
+# Or-patterns can nest inside compound patterns
+(assert-eq (match (cons 2 :x) (((or 1 2) . t) t) (_ :fail)) :x
+  "match: or-pattern nested in cons")
+
+# Or-patterns with bindings — each alternative must bind the same names
+(assert-eq (match (cons 1 2) ((or (x . _) (_ . x)) x) (_ 0)) 1
+  "match: or-pattern with binding")
+
 
 # ========================================
 # 10. each — evaluate a list of expressions

@@ -228,47 +228,6 @@ impl SyntaxReader {
         }
     }
 
-    /// Try to read a set literal starting at the current Pipe token.
-    /// Returns Some(set) if a matching closing | is found before any
-    /// enclosing delimiter (paren/bracket/brace). Returns None if the
-    /// | is a bare pipe (or-pattern separator), restoring parser state.
-    fn try_read_set(&mut self) -> Option<Syntax> {
-        let saved_pos = self.pos;
-        let start_loc = self.current_location();
-        self.advance(); // skip opening |
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                // Hit EOF or an enclosing closer before finding | → not a set
-                None
-                | Some(OwnedToken::RightParen)
-                | Some(OwnedToken::RightBracket)
-                | Some(OwnedToken::RightBrace) => {
-                    self.pos = saved_pos;
-                    return None;
-                }
-                // Found closing | → it's a set literal
-                Some(OwnedToken::Pipe) => {
-                    let end_loc = self.current_location();
-                    self.advance();
-                    let span = self.merge_spans(&start_loc, &end_loc, &elements);
-                    return Some(Syntax::new(SyntaxKind::Set(elements), span));
-                }
-                _ => {
-                    match self.read() {
-                        Ok(syntax) => elements.push(syntax),
-                        Err(_) => {
-                            // Parse error inside set → not a set, restore
-                            self.pos = saved_pos;
-                            return None;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     fn read_set_mut(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
         self.advance(); // skip opening @|
         let mut elements = Vec::new();
@@ -311,18 +270,8 @@ impl SyntaxReader {
                     return Ok(Syntax::new(SyntaxKind::List(elements), span));
                 }
                 Some(OwnedToken::Pipe) => {
-                    // Try to read |...| as a set literal. If a closing |
-                    // is found before the enclosing ), it's a set. Otherwise
-                    // it's a bare | (Pipe marker for or-patterns).
-                    if let Some(set_syntax) = self.try_read_set() {
-                        elements.push(set_syntax);
-                    } else {
-                        let pipe_loc = self.current_location();
-                        let len = self.current_length();
-                        let span = self.source_loc_to_span(&pipe_loc, pipe_loc.col + len);
-                        self.advance();
-                        elements.push(Syntax::new(SyntaxKind::Pipe, span));
-                    }
+                    let set_loc = self.current_location();
+                    elements.push(self.read_set(&set_loc)?);
                     continue;
                 }
                 _ => elements.push(self.read()?),
@@ -349,15 +298,8 @@ impl SyntaxReader {
                     return Ok(Syntax::new(SyntaxKind::Tuple(elements), span));
                 }
                 Some(OwnedToken::Pipe) => {
-                    if let Some(set_syntax) = self.try_read_set() {
-                        elements.push(set_syntax);
-                    } else {
-                        let pipe_loc = self.current_location();
-                        let len = self.current_length();
-                        let span = self.source_loc_to_span(&pipe_loc, pipe_loc.col + len);
-                        self.advance();
-                        elements.push(Syntax::new(SyntaxKind::Pipe, span));
-                    }
+                    let set_loc = self.current_location();
+                    elements.push(self.read_set(&set_loc)?);
                     continue;
                 }
                 _ => elements.push(self.read()?),
@@ -385,15 +327,8 @@ impl SyntaxReader {
                     return Ok(Syntax::new(SyntaxKind::Struct(elements), span));
                 }
                 Some(OwnedToken::Pipe) => {
-                    if let Some(set_syntax) = self.try_read_set() {
-                        elements.push(set_syntax);
-                    } else {
-                        let pipe_loc = self.current_location();
-                        let len = self.current_length();
-                        let span = self.source_loc_to_span(&pipe_loc, pipe_loc.col + len);
-                        self.advance();
-                        elements.push(Syntax::new(SyntaxKind::Pipe, span));
-                    }
+                    let set_loc = self.current_location();
+                    elements.push(self.read_set(&set_loc)?);
                     continue;
                 }
                 _ => elements.push(self.read()?),

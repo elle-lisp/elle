@@ -94,7 +94,6 @@ impl fmt::Display for SyntaxKind {
             SyntaxKind::Unquote(inner) => write!(f, ",{}", inner),
             SyntaxKind::UnquoteSplicing(inner) => write!(f, ",;{}", inner),
             SyntaxKind::Splice(inner) => write!(f, ";{}", inner),
-            SyntaxKind::Pipe => write!(f, "|"),
             SyntaxKind::SyntaxLiteral(v) => write!(f, "#<syntax-literal:{:?}>", v),
         }
     }

@@ -271,10 +271,8 @@ Things that look wrong but aren't:
    both mutable and immutable types.
 - `|...|` is the immutable set literal syntax; `@|...|` is the mutable set
    literal. `|` is a delimiter (like `(`, `[`, `{`). Inside lists, arrays,
-   structs, and tables, a bare `|` produces a `SyntaxKind::Pipe` marker node
-   (not a set literal). This is used by or-patterns: `(1 | 3 | 5)` splits on
-   `Pipe` markers to create alternatives. Or-patterns previously used `Symbol("|")`
-   — that is no longer valid.
+   structs, and tables, a bare `|` starts a nested set literal (delegates to
+   `read_set`), not a special marker node.
 - `:@name` is valid keyword syntax. The lexer recognizes `:@` as a keyword
    prefix variant. The `@` is consumed and prepended to the keyword name.
    Examples: `:@set`, `:@array`, `:@string`. These are used for mutable type
@@ -296,11 +294,10 @@ Things that look wrong but aren't:
 - `#` is the comment character (not `;`). `true`/`false` are the boolean
    literals (not `#t`/`#f`).
 - `|` is a delimiter for set literals (`|1 2 3|` for immutable sets, `@|1 2 3|`
-   for mutable sets). Inside lists, `|` marks or-pattern separators (e.g.,
-   `(match x (a | b | c body))`). The parser distinguishes context: in expression
-   position, `|...|` is a set literal; inside a list, `|` is an or-pattern marker
-   (`SyntaxKind::Pipe`). Nested sets are not supported via literal syntax (use
-   the `set` or `mutable-set` constructors instead).
+   for mutable sets). `|` always starts a set literal, including inside lists,
+   arrays, structs, and tables (delegates to `read_set`). Or-patterns use
+   `(or pat1 pat2 pat3)` syntax — the `or` symbol in pattern position is
+   recognized by the match analyzer in `special.rs`.
 - `assign` is the form for variable mutation (was named `set` before set types
    were added). Syntax: `(assign var value)`. This is distinct from the `set`
    constructor primitive for creating set values.
@@ -461,10 +458,10 @@ Reader (source → tokens → syntax):
 - [x] `src/reader/parser.rs` — set parsing in legacy reader
 
 Syntax (expansion):
-- [x] `src/syntax/mod.rs` — added `SyntaxKind::Set`, `SetMut`, `Pipe`
+- [x] `src/syntax/mod.rs` — added `SyntaxKind::Set`, `SetMut`
 - [x] `src/syntax/display.rs` — display for set literals
 - [x] `src/syntax/convert.rs` — `to_value()` and `from_value()` for sets
-- [x] `src/syntax/expand/` — or-pattern migration to `SyntaxKind::Pipe`
+- [x] `src/syntax/expand/` — or-patterns use `(or ...)` syntax (no Pipe marker)
 
 HIR (analysis):
 - [x] `src/hir/analyze/forms.rs` — desugaring to `(set ;elems)` and `(mutable-set ;elems)`

@@ -84,22 +84,22 @@
   ":@set is a keyword")
 
 # ============================================================================
-# Or-patterns still work (| is a Pipe marker inside lists)
+# Or-patterns
 # ============================================================================
 
-(assert-eq (match 1 ((1 | 3 | 5) :odd) (_ :even)) :odd
+(assert-eq (match 1 ((or 1 3 5) :odd) (_ :even)) :odd
   "or-pattern: 1 is odd")
 
-(assert-eq (match 2 ((1 | 3 | 5) :odd) (_ :even)) :even
+(assert-eq (match 2 ((or 1 3 5) :odd) (_ :even)) :even
   "or-pattern: 2 is even")
 
-(assert-eq (match 3 ((1 | 3 | 5) :odd) (_ :even)) :odd
+(assert-eq (match 3 ((or 1 3 5) :odd) (_ :even)) :odd
   "or-pattern: 3 is odd")
 
-(assert-eq (match 5 ((1 | 3 | 5) :odd) (_ :even)) :odd
+(assert-eq (match 5 ((or 1 3 5) :odd) (_ :even)) :odd
   "or-pattern: 5 is odd")
 
-(assert-eq (match 4 ((1 | 3 | 5) :odd) (_ :even)) :even
+(assert-eq (match 4 ((or 1 3 5) :odd) (_ :even)) :even
   "or-pattern: 4 is even")
 
 # ============================================================================

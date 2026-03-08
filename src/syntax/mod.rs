@@ -103,8 +103,7 @@ impl Syntax {
             | SyntaxKind::Float(_)
             | SyntaxKind::Symbol(_)
             | SyntaxKind::Keyword(_)
-            | SyntaxKind::String(_)
-            | SyntaxKind::Pipe => {}
+            | SyntaxKind::String(_) => {}
             // SyntaxLiteral is internal-only (created by expand_macro_call_inner);
             // it should never appear in datum->syntax input from from_value()
             SyntaxKind::SyntaxLiteral(_) => {}
@@ -166,7 +165,6 @@ impl Syntax {
             SyntaxKind::Unquote(_) => "unquote",
             SyntaxKind::UnquoteSplicing(_) => "unquote-splicing",
             SyntaxKind::Splice(_) => "splice",
-            SyntaxKind::Pipe => "pipe",
             SyntaxKind::SyntaxLiteral(_) => "syntax-literal",
         }
     }
@@ -206,9 +204,6 @@ pub enum SyntaxKind {
     /// Splice form: `;expr` or `(splice expr)`. Marks a value for
     /// array-spreading at call sites and data constructors.
     Splice(Box<Syntax>),
-
-    /// Pipe separator (used as or-pattern delimiter inside lists)
-    Pipe,
 
     /// Internal: pre-computed Value literal for macro argument passing.
     /// Never produced by the reader. The analyzer handles this by producing

@@ -139,10 +139,6 @@ impl Expander {
             SyntaxKind::SetMut(items) => {
                 self.expand_set_mut(items, syntax.span, syntax.scopes, symbols, vm)
             }
-            SyntaxKind::Pipe => {
-                // Pipe is a marker for or-patterns, pass through unchanged
-                Ok(syntax)
-            }
             SyntaxKind::Quote(_) => {
                 // Don't expand inside quote
                 Ok(syntax)
@@ -292,7 +288,6 @@ impl Expander {
                     .map(|item| self.add_scope_recursive(item, scope))
                     .collect(),
             ),
-            SyntaxKind::Pipe => SyntaxKind::Pipe,
             SyntaxKind::Quote(inner) => {
                 // Don't add scope inside quote - it's literal data
                 SyntaxKind::Quote(inner)

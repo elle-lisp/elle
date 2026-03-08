@@ -107,11 +107,6 @@ impl Syntax {
                 values.extend(items.iter().map(|item| item.to_value(symbols)));
                 crate::value::list(values)
             }
-            SyntaxKind::Pipe => {
-                // Pipe is a marker for or-patterns. Convert to symbol "|"
-                let sym = symbols.intern("|");
-                Value::symbol(sym.0)
-            }
             SyntaxKind::Quote(inner) => {
                 let quote_sym = symbols.intern("quote");
                 crate::value::list(vec![Value::symbol(quote_sym.0), inner.to_value(symbols)])
@@ -173,12 +168,7 @@ impl Syntax {
             let name = symbols
                 .name(crate::value::SymbolId(id))
                 .ok_or("Unknown symbol")?;
-            // Restore Pipe marker that was converted to symbol "|" by to_value
-            if name == "|" {
-                SyntaxKind::Pipe
-            } else {
-                SyntaxKind::Symbol(name.to_string())
-            }
+            SyntaxKind::Symbol(name.to_string())
         } else if let Some(name) = value.as_keyword_name() {
             SyntaxKind::Keyword(name.to_string())
         } else if let Some(s) = value.with_string(|s| s.to_string()) {
