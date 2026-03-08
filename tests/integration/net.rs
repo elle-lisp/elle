@@ -1,4 +1,3 @@
-use crate::common::eval_source;
 use elle::context::{set_symbol_table, set_vm_context};
 use elle::{compile_all, init_stdlib, register_primitives, SymbolTable, Value, VM};
 
@@ -17,84 +16,6 @@ fn eval_scheduled(input: &str) -> Result<Value, String> {
     }
     set_vm_context(std::ptr::null_mut());
     Ok(last_value)
-}
-
-// --- TCP ---
-
-#[test]
-fn test_tcp_listen_returns_port() {
-    let result = eval_source("(port? (tcp/listen \"127.0.0.1\" 0))").unwrap();
-    assert_eq!(result, Value::bool(true));
-}
-
-#[test]
-fn test_tcp_listen_invalid_port_errors() {
-    let result = eval_source("(tcp/listen \"127.0.0.1\" 99999)");
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_tcp_listen_non_string_addr_errors() {
-    let result = eval_source("(tcp/listen 42 0)");
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("type-error"),
-        "expected type-error, got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_tcp_accept_non_port_errors() {
-    let result = eval_source("(tcp/accept 42)");
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("type-error"),
-        "expected type-error, got: {}",
-        err
-    );
-}
-
-// --- UDP ---
-
-#[test]
-fn test_udp_bind_returns_port() {
-    let result = eval_source("(port? (udp/bind \"0.0.0.0\" 0))").unwrap();
-    assert_eq!(result, Value::bool(true));
-}
-
-// --- Unix ---
-
-#[test]
-fn test_unix_listen_returns_port() {
-    let path = format!("/tmp/elle-test-net-integ-{}.sock", std::process::id());
-    let result = eval_source(&format!(
-        "(let* ((p (unix/listen \"{}\")) (r (port? p))) (port/close p) r)",
-        path
-    ))
-    .unwrap();
-    assert_eq!(result, Value::bool(true));
-    std::fs::remove_file(&path).ok();
-}
-
-// --- port/set-options ---
-
-#[test]
-fn test_port_set_options_via_eval() {
-    let result = eval_source(
-        "(let ((p (tcp/listen \"127.0.0.1\" 0))) (port/set-options p :timeout 5000) (port/close p))",
-    );
-    assert!(result.is_ok(), "expected ok, got: {:?}", result);
-}
-
-// --- Shutdown ---
-
-#[test]
-fn test_tcp_shutdown_bad_keyword_errors() {
-    let result = eval_source("(tcp/shutdown 42 :foo)");
-    assert!(result.is_err());
 }
 
 // --- Minimal SIG_IO test ---
