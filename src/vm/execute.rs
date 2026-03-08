@@ -1,7 +1,7 @@
 //! Bytecode execution entry points and helpers.
 
 use crate::error::LocationMap;
-use crate::value::{SignalBits, Value, SIG_OK};
+use crate::value::{SignalBits, Value};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -51,7 +51,7 @@ impl VM {
                 &current_location_map,
             );
 
-            if bits != SIG_OK {
+            if !bits.is_ok() {
                 break ExecResult {
                     bits,
                     ip,
@@ -118,7 +118,7 @@ impl VM {
                 &current_location_map,
             );
 
-            if bits != SIG_OK {
+            if !bits.is_ok() {
                 break ExecResult {
                     bits,
                     ip,

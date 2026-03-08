@@ -280,7 +280,7 @@ impl<'a> Analyzer<'a> {
             Effect::yields() // shouldn't happen
         } else {
             Effect {
-                bits: 0,
+                bits: crate::value::fiber::SignalBits(0),
                 propagates,
             }
         }

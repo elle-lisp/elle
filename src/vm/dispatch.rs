@@ -38,11 +38,13 @@ impl VM {
 
         loop {
             // Check for pre-existing error signal (e.g., from previous Call)
-            if let Some((bits @ (SIG_ERROR | SIG_HALT), _)) = self.fiber.signal {
-                if self.error_loc.is_none() {
-                    self.error_loc = location_map.get(&instr_ip).cloned();
+            if let Some((bits, _)) = self.fiber.signal {
+                if bits.contains(SIG_ERROR) || bits.contains(SIG_HALT) {
+                    if self.error_loc.is_none() {
+                        self.error_loc = location_map.get(&instr_ip).cloned();
+                    }
+                    return (bits, ip);
                 }
-                return (bits, ip);
             }
 
             if ip >= bc.len() {
@@ -404,11 +406,13 @@ impl VM {
             }
 
             // Check for error signal set by this instruction's handler
-            if let Some((bits @ (SIG_ERROR | SIG_HALT), _)) = self.fiber.signal {
-                if self.error_loc.is_none() {
-                    self.error_loc = location_map.get(&instr_ip).cloned();
+            if let Some((bits, _)) = self.fiber.signal {
+                if bits.contains(SIG_ERROR) || bits.contains(SIG_HALT) {
+                    if self.error_loc.is_none() {
+                        self.error_loc = location_map.get(&instr_ip).cloned();
+                    }
+                    return (bits, ip);
                 }
-                return (bits, ip);
             }
         }
     }

@@ -1,6 +1,7 @@
 //! I/O primitives: type predicates and backend operations.
 
 use crate::effects::Effect;
+use crate::io::aio::AsyncBackend;
 use crate::io::backend::SyncBackend;
 use crate::io::request::IoRequest;
 use crate::primitives::def::PrimitiveDef;
@@ -58,11 +59,18 @@ fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
             let backend = SyncBackend::new();
             (SIG_OK, Value::external("io-backend", backend))
         }
+        Some("async") => match AsyncBackend::new() {
+            Ok(backend) => (SIG_OK, Value::external("io-backend", backend)),
+            Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
+        },
         Some(other) => (
             SIG_ERROR,
             error_val(
                 "value-error",
-                format!("io/backend: unknown kind :{}, expected :sync", other),
+                format!(
+                    "io/backend: unknown kind :{}, expected :sync or :async",
+                    other
+                ),
             ),
         ),
         None => (
@@ -119,6 +127,125 @@ fn prim_io_execute(args: &[Value]) -> (SignalBits, Value) {
     backend.execute(request)
 }
 
+/// (io/submit backend request) → submission-id
+fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("io/submit: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let backend = match args[0].as_external::<AsyncBackend>() {
+        Some(b) => b,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    "io/submit: expected async io-backend (created with :async)",
+                ),
+            )
+        }
+    };
+    let request = match args[1].as_external::<IoRequest>() {
+        Some(r) => r,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "io/submit: expected io-request, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    match backend.submit(request) {
+        Ok(id) => (SIG_OK, Value::int(id as i64)),
+        Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
+    }
+}
+
+/// (io/reap backend) → tuple-of-completion-structs
+fn prim_io_reap(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("io/reap: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let backend = match args[0].as_external::<AsyncBackend>() {
+        Some(b) => b,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    "io/reap: expected async io-backend (created with :async)",
+                ),
+            )
+        }
+    };
+    let completions = backend.poll();
+    let values: Vec<Value> = completions.iter().map(|c| c.to_value()).collect();
+    (SIG_OK, Value::tuple(values))
+}
+
+/// (io/wait backend timeout-ms) → tuple-of-completion-structs
+fn prim_io_wait(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("io/wait: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let backend = match args[0].as_external::<AsyncBackend>() {
+        Some(b) => b,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    "io/wait: expected async io-backend (created with :async)",
+                ),
+            )
+        }
+    };
+    let timeout_ms = match args[1].as_int() {
+        Some(n) => n,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "io/wait: expected integer timeout, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    match backend.wait(timeout_ms) {
+        Ok(completions) => {
+            let values: Vec<Value> = completions.iter().map(|c| c.to_value()).collect();
+            (SIG_OK, Value::tuple(values))
+        }
+        Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
+    }
+}
+
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "io-request?",
@@ -147,10 +274,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_io_backend,
         effect: Effect::errors(),
         arity: Arity::Exact(1),
-        doc: "Create an I/O backend. :sync for synchronous.",
+        doc: "Create an I/O backend. :sync for synchronous, :async for asynchronous.",
         params: &["kind"],
         category: "io",
-        example: "(io/backend :sync)",
+        example: "(io/backend :sync) (io/backend :async)",
         aliases: &[],
     },
     PrimitiveDef {
@@ -162,6 +289,39 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["backend", "request"],
         category: "io",
         example: "(io/execute backend request)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "io/submit",
+        func: prim_io_submit,
+        effect: Effect::errors(),
+        arity: Arity::Exact(2),
+        doc: "Submit an I/O request to an async backend. Returns submission ID.",
+        params: &["backend", "request"],
+        category: "io",
+        example: "(io/submit backend request)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "io/reap",
+        func: prim_io_reap,
+        effect: Effect::errors(),
+        arity: Arity::Exact(1),
+        doc: "Non-blocking poll for async I/O completions. Returns tuple of completion structs.",
+        params: &["backend"],
+        category: "io",
+        example: "(io/reap backend)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "io/wait",
+        func: prim_io_wait,
+        effect: Effect::errors(),
+        arity: Arity::Exact(2),
+        doc: "Wait for async I/O completions. timeout-ms: negative=forever, 0=poll, positive=ms. Returns tuple of completion structs.",
+        params: &["backend", "timeout-ms"],
+        category: "io",
+        example: "(io/wait backend 1000)",
         aliases: &[],
     },
 ];

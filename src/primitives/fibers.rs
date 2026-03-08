@@ -60,7 +60,7 @@ pub fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let mask = match args[1].as_int() {
-        Some(m) => m as SignalBits,
+        Some(m) => SignalBits::new(m as u32),
         None => {
             return (
                 SIG_ERROR,
@@ -154,7 +154,7 @@ pub fn prim_fiber_signal(args: &[Value]) -> (SignalBits, Value) {
     }
 
     let bits = match args[0].as_int() {
-        Some(b) => b as SignalBits,
+        Some(b) => SignalBits::new(b as u32),
         None => {
             return (
                 SIG_ERROR,
@@ -266,8 +266,8 @@ pub fn prim_fiber_bits(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let bits = handle.with(|fiber| fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(0));
-    (SIG_OK, Value::int(bits as i64))
+    let bits = handle.with(|fiber| fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(SIG_OK));
+    (SIG_OK, Value::int(bits.bits() as i64))
 }
 
 /// (fiber/mask fiber) → int
@@ -298,7 +298,7 @@ pub fn prim_fiber_mask(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let mask = handle.with(|fiber| fiber.mask);
-    (SIG_OK, Value::int(mask as i64))
+    (SIG_OK, Value::int(mask.bits() as i64))
 }
 
 /// (fiber? value) → bool
@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn test_fiber_new() {
         let closure = make_test_closure();
-        let mask = Value::int((SIG_ERROR | SIG_YIELD) as i64);
+        let mask = Value::int((SIG_ERROR | SIG_YIELD).bits() as i64);
         let (sig, fiber_val) = prim_fiber_new(&[closure, mask]);
         assert_eq!(sig, SIG_OK);
         assert!(fiber_val.is_fiber());
@@ -749,7 +749,7 @@ mod tests {
 
     #[test]
     fn test_fiber_signal() {
-        let bits = Value::int(SIG_YIELD as i64);
+        let bits = Value::int(SIG_YIELD.bits() as i64);
         let value = Value::int(42);
         let (sig, val) = prim_fiber_signal(&[bits, value]);
         assert_eq!(sig, SIG_YIELD);
@@ -836,13 +836,13 @@ mod tests {
             .with_mut(|f| f.signal = Some((SIG_YIELD, Value::int(42))));
         let (sig, val) = prim_fiber_bits(&[fiber_val]);
         assert_eq!(sig, SIG_OK);
-        assert_eq!(val, Value::int(SIG_YIELD as i64));
+        assert_eq!(val, Value::int(SIG_YIELD.bits() as i64));
     }
 
     #[test]
     fn test_fiber_mask() {
         let closure = make_test_closure();
-        let mask = (FIBER_SIG_ERROR | SIG_YIELD) as i64;
+        let mask = (FIBER_SIG_ERROR | SIG_YIELD).bits() as i64;
         let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(mask)]);
         let (sig, val) = prim_fiber_mask(&[fiber_val]);
         assert_eq!(sig, SIG_OK);
@@ -896,7 +896,7 @@ mod tests {
     #[test]
     fn test_fiber_cancel_one_arg_defaults_nil() {
         let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(SIG_ERROR as i64)]);
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(SIG_ERROR.bits() as i64)]);
         let (sig, _) = prim_fiber_cancel(&[fiber_val]);
         assert_eq!(sig, SIG_CANCEL);
         // Verify the error value stored on the fiber is nil

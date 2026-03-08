@@ -11,11 +11,15 @@ to a backend for execution.
 
 | Module | Responsibility |
 |--------|----------------|
+| `types.rs` | Shared types: `PortKey`, `FdState`, `FdStatus` — used by both backends |
+| `pool.rs` | `BufferPool`, `BufferHandle` — pinned buffer management for async I/O |
+| `aio.rs` | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
 | `request.rs` | `IoRequest` and `IoOp` types — typed I/O request descriptors |
 | `backend.rs` | `SyncBackend` — synchronous I/O execution with per-fd buffering |
 
 ## Data Flow
 
+Sync path:
 ```
 Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/execute → SyncBackend → OS
 ```
@@ -28,6 +32,12 @@ Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/execute → SyncBa
 3. The scheduler calls `io/execute` with the backend and request.
 4. `SyncBackend::execute` performs the actual I/O and returns the result.
 5. The scheduler resumes the fiber with the result.
+
+Async path:
+```
+Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBackend → OS (async)
+                                                    ← io/wait  ← completions ← OS
+```
 
 ## Key Types
 
@@ -52,6 +62,27 @@ Synchronous backend with per-fd buffering. Wrapped as `ExternalObject`
 with type_name `"io-backend"`. Uses `RefCell<SyncBackendInner>` for
 interior mutability (ExternalObject wraps in Rc, so `&mut self` is unavailable).
 
+### AsyncBackend
+
+Asynchronous backend with io_uring (Linux, feature-gated) or thread-pool fallback.
+Wrapped as `ExternalObject` with type_name `"io-backend"` (same as `SyncBackend`).
+Uses `RefCell<AsyncBackendInner>` for interior mutability.
+
+Methods:
+- `submit(request) → Result<u64, String>` — submit async I/O, return submission ID
+- `poll() → Vec<Completion>` — non-blocking completion poll
+- `wait(timeout_ms) → Result<Vec<Completion>, String>` — blocking wait
+
+### BufferPool
+
+Owns `Vec<u8>` allocations indexed by `BufferHandle`. Buffers are allocated on
+submit, returned on completion. Lives on `AsyncBackendInner`, not on `FiberHeap`.
+
+### Completion
+
+Returned to Elle as struct: `{:id n :value v :error nil}` (success) or
+`{:id n :value nil :error e}` (failure).
+
 ## Buffer Drain Invariant
 
 Data already received is never lost when a fd dies (EOF or error).
@@ -68,15 +99,23 @@ State machine:
 |-----------|--------|---------|
 | `io-request?` | pure | Check if value is an I/O request |
 | `io-backend?` | pure | Check if value is an I/O backend |
-| `io/backend` | errors | Create an I/O backend (`:sync` for synchronous) |
+| `io/backend` | errors | Create an I/O backend (`:sync` for synchronous, `:async` for asynchronous) |
 | `io/execute` | errors | Execute an I/O request on a backend (blocking) |
+| `io/submit` | errors | Submit async I/O request, return submission ID |
+| `io/reap` | errors | Non-blocking poll for completions (returns tuple) |
+| `io/wait` | errors | Blocking wait for completions with timeout (returns tuple) |
 
 ## Invariants
 
 1. `IoRequest` values are only created by stream primitives.
-2. `SyncBackend` is only created by `io/backend`.
+2. Backends are only created by `io/backend`.
 3. The backend validates port direction and open status before I/O.
 4. Stdio ports use `std::io::stdin()/stdout()/stderr()` handles directly
    (Port has no OwnedFd for stdio).
 5. Per-fd state is keyed by `PortKey` (Stdin/Stdout/Stderr/Fd(raw_fd)).
 6. Buffer drain invariant: buffered data is never lost on EOF or error.
+7. Buffers passed to io_uring must not move while the kernel holds them.
+   The `BufferPool` on `AsyncBackendInner` owns all async I/O buffers.
+8. stdin reads in async mode go through a dedicated OS thread, not io_uring.
+9. `io/submit`, `io/reap`, `io/wait` only work with async backends (created via `:async`).
+   Passing a sync backend signals a type error.

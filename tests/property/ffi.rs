@@ -9,7 +9,7 @@ use elle::ffi::types::TypeDesc;
 use elle::primitives::ffi::{
     prim_ffi_align, prim_ffi_free, prim_ffi_malloc, prim_ffi_read, prim_ffi_size, prim_ffi_write,
 };
-use elle::value::fiber::SIG_OK;
+use elle::value::fiber::{SIG_ERROR, SIG_OK};
 use elle::value::repr::{INT_MAX, INT_MIN};
 use elle::Value;
 use proptest::prelude::*;
@@ -516,13 +516,13 @@ proptest! {
         if sd.fields.len() > 1 {
             let too_few = Value::array(vec![Value::int(0); sd.fields.len() - 1]);
             let write = prim_ffi_write(&[ptr, Value::ffi_type(desc.clone()), too_few]);
-            prop_assert_eq!(write.0, SIG_OK | 1, "should reject too few fields");
+            prop_assert_eq!(write.0, SIG_ERROR, "should reject too few fields");
         }
 
         // Too many values
         let too_many = Value::array(vec![Value::int(0); sd.fields.len() + extra]);
         let write = prim_ffi_write(&[ptr, Value::ffi_type(desc), too_many]);
-        prop_assert_eq!(write.0, SIG_OK | 1, "should reject too many fields");
+        prop_assert_eq!(write.0, SIG_ERROR, "should reject too many fields");
 
         prim_ffi_free(&[ptr]);
     }
@@ -537,7 +537,7 @@ proptest! {
         let ptr = alloc.1;
 
         let write = prim_ffi_write(&[ptr, Value::ffi_type(desc), Value::int(42)]);
-        prop_assert_eq!(write.0, SIG_OK | 1, "should reject non-array");
+        prop_assert_eq!(write.0, SIG_ERROR, "should reject non-array");
 
         prim_ffi_free(&[ptr]);
     }

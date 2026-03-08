@@ -1,14 +1,14 @@
-//! Stream primitives — yield SIG_IO with IoRequest descriptors.
+//! Stream primitives — yield SIG_YIELD | SIG_IO with IoRequest descriptors.
 //!
 //! These primitives do not perform I/O themselves. They build an
-//! IoRequest and return (SIG_IO, request), which suspends the fiber.
-//! The scheduler catches SIG_IO and dispatches to a backend.
+//! IoRequest and return (SIG_YIELD | SIG_IO, request), which suspends
+//! the fiber. The scheduler catches SIG_IO and dispatches to a backend.
 
 use crate::effects::Effect;
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::Port;
 use crate::primitives::def::PrimitiveDef;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -41,7 +41,7 @@ fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    (SIG_IO, IoRequest::new(IoOp::ReadLine, port))
+    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::ReadLine, port))
 }
 
 /// (stream/read port n) → bytes | nil
@@ -83,7 +83,10 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    (SIG_IO, IoRequest::new(IoOp::Read { count }, port))
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::new(IoOp::Read { count }, port),
+    )
 }
 
 /// (stream/read-all port) → string | bytes
@@ -101,7 +104,7 @@ fn prim_stream_read_all(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    (SIG_IO, IoRequest::new(IoOp::ReadAll, port))
+    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::ReadAll, port))
 }
 
 /// (stream/write port data) → int
@@ -119,7 +122,10 @@ fn prim_stream_write(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    (SIG_IO, IoRequest::new(IoOp::Write { data: args[1] }, port))
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::new(IoOp::Write { data: args[1] }, port),
+    )
 }
 
 /// (stream/flush port) → nil
@@ -137,7 +143,7 @@ fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    (SIG_IO, IoRequest::new(IoOp::Flush, port))
+    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::Flush, port))
 }
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[
@@ -202,13 +208,13 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
 mod tests {
     use super::*;
     use crate::port::Port;
-    use crate::value::fiber::SIG_IO;
+    use crate::value::fiber::{SIG_IO, SIG_YIELD};
 
     #[test]
     fn test_read_line_returns_sig_io() {
         let port_val = Value::external("port", Port::stdin());
         let (bits, val) = prim_stream_read_line(&[port_val]);
-        assert_eq!(bits, SIG_IO);
+        assert_eq!(bits, SIG_YIELD | SIG_IO);
         assert_eq!(val.external_type_name(), Some("io-request"));
     }
 
@@ -216,7 +222,7 @@ mod tests {
     fn test_read_returns_sig_io_with_count() {
         let port_val = Value::external("port", Port::stdin());
         let (bits, val) = prim_stream_read(&[port_val, Value::int(1024)]);
-        assert_eq!(bits, SIG_IO);
+        assert_eq!(bits, SIG_YIELD | SIG_IO);
         assert_eq!(val.external_type_name(), Some("io-request"));
     }
 
@@ -224,7 +230,7 @@ mod tests {
     fn test_write_returns_sig_io() {
         let port_val = Value::external("port", Port::stdout());
         let (bits, val) = prim_stream_write(&[port_val, Value::string("hello")]);
-        assert_eq!(bits, SIG_IO);
+        assert_eq!(bits, SIG_YIELD | SIG_IO);
         assert_eq!(val.external_type_name(), Some("io-request"));
     }
 

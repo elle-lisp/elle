@@ -4,7 +4,8 @@ use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
 use crate::value::fiber::CallFrame;
 use crate::value::{
-    Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_OK, SIG_YIELD,
+    Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_IO, SIG_OK,
+    SIG_YIELD,
 };
 use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
@@ -92,7 +93,7 @@ fn root_closure() -> Rc<Closure> {
 
 impl VM {
     pub fn new() -> Self {
-        let mut fiber = Fiber::new(root_closure(), 0);
+        let mut fiber = Fiber::new(root_closure(), SIG_OK);
         // Root fiber starts alive (it's the currently executing context)
         fiber.status = crate::value::FiberStatus::Alive;
 
@@ -131,7 +132,7 @@ impl VM {
         );
         heap.clear();
 
-        self.fiber = Fiber::new(root_closure(), 0);
+        self.fiber = Fiber::new(root_closure(), SIG_OK);
         self.fiber.heap = heap;
         self.fiber.status = crate::value::FiberStatus::Alive;
         self.current_fiber_handle = None;
@@ -415,44 +416,43 @@ impl VM {
                 &frame.location_map,
             );
 
-            match exec.bits {
-                SIG_OK => {
-                    let (_, v) = self.fiber.signal.take().unwrap();
-                    current_value = v;
+            if exec.bits.is_ok() {
+                let (_, v) = self.fiber.signal.take().unwrap();
+                current_value = v;
+            } else {
+                // Non-OK signal (yield, error, user-defined).
+                // Save context for potential future resume if not already
+                // set (yield instruction sets it; fiber/signal does not).
+                // SIG_HALT is non-resumable — no suspended frame needed.
+                //
+                // Use the active bytecode/constants/env from ExecResult,
+                // not the original frame — a tail call may have switched
+                // to a different function's bytecode before the signal.
+                if !exec.bits.contains(SIG_HALT) && self.fiber.suspended.is_none() {
+                    self.fiber.suspended = Some(vec![SuspendedFrame {
+                        bytecode: exec.bytecode,
+                        constants: exec.constants,
+                        env: exec.env,
+                        ip: exec.ip,
+                        stack: vec![],
+                        active_allocator: crate::value::fiber_heap::save_active_allocator(),
+                        location_map: exec.location_map,
+                    }]);
                 }
-                _ => {
-                    // Non-OK signal (yield, error, user-defined).
-                    // Save context for potential future resume if not already
-                    // set (yield instruction sets it; fiber/signal does not).
-                    // SIG_HALT is non-resumable — no suspended frame needed.
-                    //
-                    // Use the active bytecode/constants/env from ExecResult,
-                    // not the original frame — a tail call may have switched
-                    // to a different function's bytecode before the signal.
-                    if exec.bits != SIG_HALT && self.fiber.suspended.is_none() {
-                        self.fiber.suspended = Some(vec![SuspendedFrame {
-                            bytecode: exec.bytecode,
-                            constants: exec.constants,
-                            env: exec.env,
-                            ip: exec.ip,
-                            stack: vec![],
-                            active_allocator: crate::value::fiber_heap::save_active_allocator(),
-                            location_map: exec.location_map,
-                        }]);
-                    }
 
-                    // For yield signals, merge remaining outer frames
-                    if exec.bits == SIG_YIELD && i + 1 < frames.len() {
-                        if let Some(ref mut new_frames) = self.fiber.suspended {
-                            for f in frames[i + 1..].iter() {
-                                new_frames.push(f.clone());
-                            }
+                // For yield/IO signals, merge remaining outer frames
+                if (exec.bits.contains(SIG_YIELD) || exec.bits.contains(SIG_IO))
+                    && i + 1 < frames.len()
+                {
+                    if let Some(ref mut new_frames) = self.fiber.suspended {
+                        for f in frames[i + 1..].iter() {
+                            new_frames.push(f.clone());
                         }
                     }
-
-                    self.fiber.stack = saved_stack;
-                    return exec.bits;
                 }
+
+                self.fiber.stack = saved_stack;
+                return exec.bits;
             }
         }
 
@@ -476,14 +476,14 @@ mod tests {
     fn test_signal_bits() {
         use crate::value::{SIG_ERROR, SIG_OK, SIG_YIELD};
 
-        assert_eq!(SIG_OK, 0);
-        assert_eq!(SIG_ERROR, 1);
-        assert_eq!(SIG_YIELD, 2);
+        assert_eq!(SIG_OK.bits(), 0);
+        assert_eq!(SIG_ERROR.bits(), 1);
+        assert_eq!(SIG_YIELD.bits(), 2);
 
         let mask = SIG_ERROR | SIG_YIELD;
-        assert_ne!(mask & SIG_ERROR, 0);
-        assert_ne!(mask & SIG_YIELD, 0);
-        assert_eq!(mask & SIG_OK, 0);
+        assert!(mask.contains(SIG_ERROR));
+        assert!(mask.contains(SIG_YIELD));
+        assert!(!mask.contains(SIG_OK)); // SIG_OK has no bits, contains() returns false
     }
 
     #[test]

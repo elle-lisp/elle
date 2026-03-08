@@ -21,7 +21,7 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `VM` | Global state + root Fiber. Per-execution state lives on `vm.fiber` |
-| `SignalBits` | Internal return type: `SIG_OK`, `SIG_ERROR`, `SIG_YIELD`, `SIG_DEBUG`, `SIG_RESUME`, `SIG_FFI`, `SIG_PROPAGATE`, `SIG_CANCEL`, `SIG_HALT` |
+| `SignalBits` | Internal return type: `SIG_OK`, `SIG_ERROR`, `SIG_YIELD`, `SIG_DEBUG`, `SIG_RESUME`, `SIG_FFI`, `SIG_PROPAGATE`, `SIG_CANCEL`, `SIG_HALT`, `SIG_IO` |
 | `CallFrame` | Function name, IP, frame base |
 
 ## Data flow
@@ -273,9 +273,10 @@ execution route to this shared allocator instead of the child's private bump.
 3. **Non-root parent, no shared_alloc** (case c): Create a new shared allocator
    on the parent's FiberHeap's `owned_shared`.
 
-**Effect gate (M1)**: Only fibers whose closure has `Effect::Yields` (checked
-via `self.fiber.closure.effect.may_yield()`) get shared allocators. Non-yielding
-fibers skip step 3b entirely.
+**Effect gate (M1)**: Fibers whose closure has `Effect::Yields` or `Effect::io()`
+(checked via `may_yield() || may_io()`) get shared allocators. I/O fibers yield
+`SIG_IO` requests that the parent (scheduler) must read, requiring a shared
+allocator for value exchange. Non-yielding, non-I/O fibers skip step 3b entirely.
 
 **Per-resume creation (M2 tech debt)**: Each resume of a yielding child creates
 a new shared allocator because `shared_alloc` was nulled on the previous

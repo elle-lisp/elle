@@ -14,6 +14,7 @@
 //! - State 3: Buffer empty, fd dead → return nil (EOF) or error
 
 use crate::io::request::{IoOp, IoRequest};
+use crate::io::types::{FdState, FdStatus, PortKey};
 use crate::port::{Direction, Encoding, Port, PortKind};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{error_val, Value};
@@ -21,37 +22,7 @@ use crate::value::{error_val, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::os::unix::io::{AsRawFd, RawFd};
-
-/// Identifies a port's underlying resource for state lookup.
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
-enum PortKey {
-    Stdin,
-    Stdout,
-    Stderr,
-    Fd(RawFd),
-}
-
-/// Per-fd buffered state.
-struct FdState {
-    buffer: Vec<u8>,
-    status: FdStatus,
-}
-
-enum FdStatus {
-    Open,
-    Eof,
-    Error(String),
-}
-
-impl FdState {
-    fn new() -> Self {
-        FdState {
-            buffer: Vec::new(),
-            status: FdStatus::Open,
-        }
-    }
-}
+use std::os::unix::io::AsRawFd;
 
 struct SyncBackendInner {
     states: HashMap<PortKey, FdState>,

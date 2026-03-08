@@ -709,10 +709,13 @@
         (case (fiber/status fiber)
           :dead      (break (fiber/value fiber))
           :error     (fiber/propagate fiber)
-          :suspended (case (fiber/bits fiber)
-                       1   (fiber/propagate fiber)
-                       512 (fiber/resume fiber (io/execute backend (fiber/value fiber)))
-                       (fiber/resume fiber)))))))
+          :suspended (cond
+                       ((not (= 0 (bit/and (fiber/bits fiber) 1)))
+                        (fiber/propagate fiber))
+                       ((not (= 0 (bit/and (fiber/bits fiber) 512)))
+                        (fiber/resume fiber (io/execute backend (fiber/value fiber))))
+                       (true
+                        (fiber/resume fiber))))))))
 
 (def *scheduler* (make-parameter sync-scheduler))
 
@@ -721,3 +724,72 @@
     "Spawn a closure in a new fiber managed by the current scheduler."
     (let ((fiber (fiber/new closure (bit/or 1 512))))
       ((*scheduler*) fiber))))
+
+## ── Async scheduler ─────────────────────────────────────────────────
+
+(defn make-async-scheduler ()
+  "Create an async scheduler. Returns (scheduler-fn pump-fn).
+   scheduler-fn: (fn [fiber]) — registers fiber for async execution.
+   pump-fn: (fn []) — pumps event loop until all fibers complete."
+  (let ((backend  (io/backend :async))
+        (runnable @[])
+        (pending  @{}))
+    (list
+      # scheduler-fn: register fiber
+      (fn (fiber)
+        (push runnable fiber)
+        fiber)
+      # pump-fn: event loop
+      (fn ()
+        (block :loop
+          (forever
+            # 1. Run all runnable fibers
+            (while (> (length runnable) 0)
+              (let ((fiber (pop runnable)))
+                (fiber/resume fiber)
+                (case (fiber/status fiber)
+                  :dead      nil
+                  :error     (fiber/propagate fiber)
+                  :suspended (cond
+                               ((not (= 0 (bit/and (fiber/bits fiber) 1)))
+                                (fiber/propagate fiber))
+                               ((not (= 0 (bit/and (fiber/bits fiber) 512)))
+                                (let ((id (io/submit backend (fiber/value fiber))))
+                                  (put pending id fiber)))
+                               (true
+                                (push runnable fiber))))))
+            # 2. If nothing pending, done
+            (when (= (length pending) 0)
+              (break :loop nil))
+            # 3. Wait for completions
+            (let ((completions (io/wait backend (- 0 1))))
+              (each c in completions
+                (let* ((id    (get c :id))
+                       (fiber (get pending id)))
+                  (when (not (nil? fiber))
+                    (del pending id)
+                    (if (nil? (get c :error))
+                      (begin
+                        (fiber/resume fiber (get c :value))
+                        (case (fiber/status fiber)
+                          :dead      nil
+                          :error     (fiber/propagate fiber)
+                          :suspended (cond
+                                       ((not (= 0 (bit/and (fiber/bits fiber) 1)))
+                                        (fiber/propagate fiber))
+                                       ((not (= 0 (bit/and (fiber/bits fiber) 512)))
+                                        (let ((id2 (io/submit backend (fiber/value fiber))))
+                                          (put pending id2 fiber)))
+                                        (true
+                                         (push runnable fiber)))))
+                      (error (get c :error)))))))))))))
+
+
+(defn ev/run (& thunks)
+  "Run thunks concurrently with async I/O.
+   Creates an async scheduler, spawns each thunk as a fiber, pumps until done."
+  (let (((scheduler-fn pump-fn) (make-async-scheduler)))
+    (parameterize ((*scheduler* scheduler-fn))
+      (each t in thunks
+        (ev/spawn t))
+      (pump-fn))))
