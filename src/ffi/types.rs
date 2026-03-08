@@ -4,7 +4,7 @@
 //! provides the Rust representation and conversion from Elle keywords.
 
 /// Describes a C type for marshalling.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum TypeDesc {
     Void,
     Bool,
@@ -51,7 +51,7 @@ pub enum TypeDesc {
 /// Positional struct descriptor.
 ///
 /// Fields are unnamed and ordered. Created via `ffi/struct` at the Elle level.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct StructDesc {
     pub fields: Vec<TypeDesc>,
 }
@@ -212,7 +212,7 @@ impl TypeDesc {
 /// Created by `ffi/signature`. Contains calling convention, return type,
 /// and argument types. Signatures are cached/reused since creating one
 /// involves libffi prep work.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Signature {
     /// Calling convention (currently only `:default`)
     pub convention: CallingConvention,
@@ -226,7 +226,7 @@ pub struct Signature {
 }
 
 /// Calling convention for FFI functions.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash)]
 pub enum CallingConvention {
     /// Platform default calling convention
     Default,
