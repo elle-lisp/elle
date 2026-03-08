@@ -359,6 +359,22 @@ impl Lowerer {
                 });
                 Ok(dst)
             }
+            Constructor::Set => {
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::IsSet {
+                    dst,
+                    src: value_reg,
+                });
+                Ok(dst)
+            }
+            Constructor::SetMut => {
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::IsSetMut {
+                    dst,
+                    src: value_reg,
+                });
+                Ok(dst)
+            }
         }
     }
 
@@ -1256,6 +1272,48 @@ impl Lowerer {
                 }
 
                 self.current_block = BasicBlock::new(success_label);
+                Ok(())
+            }
+            HirPattern::Set { binding } => {
+                // Type guard: check if value is a set
+                let is_set_reg = self.fresh_reg();
+                self.emit(LirInstr::IsSet {
+                    dst: is_set_reg,
+                    src: value_reg,
+                });
+
+                let type_ok_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
+                    cond: is_set_reg,
+                    then_label: type_ok_label,
+                    else_label: fail_label,
+                });
+                self.finish_block();
+                self.current_block = BasicBlock::new(type_ok_label);
+
+                // Recursively match the binding (if any)
+                self.lower_pattern_match(binding, value_reg, fail_label)?;
+                Ok(())
+            }
+            HirPattern::SetMut { binding } => {
+                // Type guard: check if value is a mutable set
+                let is_set_mut_reg = self.fresh_reg();
+                self.emit(LirInstr::IsSetMut {
+                    dst: is_set_mut_reg,
+                    src: value_reg,
+                });
+
+                let type_ok_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
+                    cond: is_set_mut_reg,
+                    then_label: type_ok_label,
+                    else_label: fail_label,
+                });
+                self.finish_block();
+                self.current_block = BasicBlock::new(type_ok_label);
+
+                // Recursively match the binding (if any)
+                self.lower_pattern_match(binding, value_reg, fail_label)?;
                 Ok(())
             }
         }
