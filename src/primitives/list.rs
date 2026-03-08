@@ -290,9 +290,31 @@ pub fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         }
     } else if let Some(name) = args[0].as_keyword_name() {
         (SIG_OK, Value::int(name.graphemes(true).count() as i64))
+    } else if args[0].is_set() {
+        let set = match args[0].as_set() {
+            Some(s) => s,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val("error", "length: failed to get set".to_string()),
+                )
+            }
+        };
+        (SIG_OK, Value::int(set.len() as i64))
+    } else if args[0].is_set_mut() {
+        let set = match args[0].as_set_mut() {
+            Some(s) => s,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val("error", "length: failed to get mutable set".to_string()),
+                )
+            }
+        };
+        (SIG_OK, Value::int(set.borrow().len() as i64))
     } else {
         (SIG_ERROR, error_val("type-error", format!(
-            "length: expected collection type (list, string, array, tuple, table, struct, symbol, or keyword), got {}",
+            "length: expected collection type (list, string, array, tuple, table, struct, set, symbol, or keyword), got {}",
             args[0].type_name()
         )))
     }
@@ -393,13 +415,35 @@ pub fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         s.is_empty()
+    } else if args[0].is_set() {
+        let set = match args[0].as_set() {
+            Some(s) => s,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val("error", "empty?: failed to get set".to_string()),
+                )
+            }
+        };
+        set.is_empty()
+    } else if args[0].is_set_mut() {
+        let set = match args[0].as_set_mut() {
+            Some(s) => s,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val("error", "empty?: failed to get mutable set".to_string()),
+                )
+            }
+        };
+        set.borrow().is_empty()
     } else {
         return (
             SIG_ERROR,
             error_val(
                 "type-error",
                 format!(
-                "empty?: expected collection type (list, string, array, buffer, table, struct, or tuple), got {}",
+                "empty?: expected collection type (list, string, array, buffer, table, struct, set, or tuple), got {}",
                 args[0].type_name()
             ),
             ),

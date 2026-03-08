@@ -269,15 +269,6 @@ impl SyntaxReader {
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
                     return Ok(Syntax::new(SyntaxKind::List(elements), span));
                 }
-                Some(OwnedToken::Pipe) => {
-                    // Pipe inside a list is an or-pattern separator, not a set literal
-                    let pipe_loc = self.current_location();
-                    let len = self.current_length();
-                    self.advance();
-                    let span = self.source_loc_to_span(&pipe_loc, pipe_loc.col + len);
-                    elements.push(Syntax::new(SyntaxKind::Pipe, span));
-                    continue;
-                }
                 _ => elements.push(self.read()?),
             }
         }
