@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772901586017,
+  "lastUpdate": 1772941731331,
   "repoUrl": "https://github.com/elle-lisp/elle",
   "entries": {
     "Elle Benchmarks": [
@@ -2039,6 +2039,210 @@ window.BENCHMARK_DATA = {
             "name": "memory_operations/list_to_vec",
             "value": 123,
             "range": "± 3",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "disruptek@users.noreply.github.com",
+            "name": "Smooth Operator",
+            "username": "disruptek"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e7f5c5fbcff06f036a5e81aaa45c591e28e3422e",
+          "message": "feat(io): I/O Phase 4 — async scheduler, io_uring backend, SIG_IO propagation (#511)\n\n* Migrate ~870 integration tests from Rust to Elle, delete stale analysis doc\n\nMove tests that are pure eval_source() calls into tests/elle/ scripts,\nwhich run in seconds rather than minutes. Delete PROPERTY_TEST_ANALYSIS.md\n(stale proposal doc). Keep Rust tests that require bytecode inspection,\nRust type APIs, proptest, or process::Command.\n\nNew Elle test files: advanced, arena, brackets, buffer, bytes, concurrency,\nenvironment, ffi, fn-flow, fn-graph (×3), glob, jit-yield, lexical-scope,\nnew-pipeline, pipeline, primitives, table-keys.\n\nExtended: coroutines, destructuring, fibers, macros, splice.\n\nTrimmed Rust files: arena, bracket_errors, buffer, bytes, concurrency,\ndestructuring, environment, ffi, fibers, glob, new_pipeline, parameters,\npipeline_point, primitives, table_keys, thread_transfer.\n\nDeleted Rust files: advanced, coroutines, fn_flow, fn_graph, hygiene,\njit_yield, lexical_scope, splice.\n\nCloses #502\n\n* feat(io): add IoRequest type and src/io/ module\n\n- IoOp enum: ReadLine, Read, ReadAll, Write, Flush\n- IoRequest wraps IoOp + port as ExternalObject(\"io-request\")\n- io-request? and io-backend? type predicates\n- Integration tests for predicates\n\n* feat(io): add SyncBackend with per-fd buffering, io/backend and io/execute\n\nSyncBackend executes IoRequests synchronously using libc::read/write.\nPer-fd FdState buffers preserve data across partial reads (buffer drain\ninvariant). Direction validation rejects reads from write-only ports.\nio/backend creates a backend; io/execute dispatches a single request.\n\n* refactor(io): extract PortKey/FdState/FdStatus to io/types.rs\n\n* feat(io): add BufferPool for pinned kernel I/O buffers\n\n* feat(io): add AsyncBackend with io_uring and thread-pool fallback\n\n* feat(io): add io/submit, io/reap, io/wait primitives and :async backend\n\n* fix(vm): extend shared allocator gate to include I/O fibers\n\n* feat(io): wire stdin thread into AsyncBackend submit/poll/wait\n\n* feat(stdlib): add make-async-scheduler and ev/run for async I/O\n\n* fix(vm): propagate SIG_IO through call stack like SIG_YIELD\n\n* test(io): add async scheduler integration tests and async_io example\n\n* docs(io,vm): document AsyncBackend, BufferPool, SIG_IO propagation\n\n* fix(jit): handle Parameter values in JIT call dispatch\n\n* test(io): migrate async I/O tests from Rust to tests/elle/io.lisp\n\n* fix: correct signal bit checking in async scheduler pump\n\nReplace exact bit value matching (case 1, case 512) with proper bitwise\nAND checks (bit/and bits 1), (bit/and bits 512) to correctly identify\nerror and I/O signals. Use cond instead of case for clearer conditional\nlogic. This fixes a parenthesization bug where error handling was\nexecuting unconditionally instead of as a conditional branch.\n\n* refactor: Make SignalBits a proper newtype with bitwise methods\n\nConvert SignalBits from a type alias to a newtype struct with dedicated\nmethods for signal checking and manipulation. Add .is_ok() for success\nchecks and .contains() for bitwise flag testing. Migrate all equality\nchecks across the VM to use bitwise operations instead of direct\ncomparisons, improving type safety and clarity of signal handling.\n\nThis refactor spans Chunks C and D: signal representation and VM dispatch\nlogic. Changes include:\n- SignalBits newtype definition with bitwise methods\n- VM signal dispatch updated to use .contains() for flag checks\n- Effect system integration with new signal representation\n- JIT dispatch adapted for newtype signal handling\n- Test suite updated for new signal API\n\n* refactor(signals): stream primitives emit SIG_YIELD|SIG_IO; unify yield suspension path\n\nStream I/O operations now emit SIG_YIELD | SIG_IO instead of just SIG_IO,\nmarking them as suspension points. This allows the VM to treat all yielding\nsignals uniformly: any signal containing SIG_YIELD triggers stack preservation\nand frame suspension.\n\nChanges:\n- Stream primitives (read-line, read, read-all, write, flush) now emit\n  SIG_YIELD | SIG_IO to indicate they suspend execution\n- VM signal handler unified: any signal with SIG_YIELD bit set saves the\n  stack and creates a SuspendedFrame, regardless of other signal bits\n- JIT dispatch updated to handle SIG_YIELD with bitwise contains check\n- Error checking order in VM execution adjusted to check SIG_IO before\n  SIG_YIELD for proper error reporting\n\n* fix(rebase): restore SignalBits newtype and SIG_YIELD|SIG_IO suspension fix\n\n* fix(ci): rustfmt ordering, rustdoc HTML tag, io_uring borrow and API fixes\n\n* fix(ci): box large Uring variant, allow too_many_arguments on submit_uring",
+          "timestamp": "2026-03-08T03:05:59Z",
+          "tree_id": "377772c891842095f20d437b8dcc620d1118ecc0",
+          "url": "https://github.com/elle-lisp/elle/commit/e7f5c5fbcff06f036a5e81aaa45c591e28e3422e"
+        },
+        "date": 1772941730804,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parsing/simple_number",
+            "value": 159,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/list_literal",
+            "value": 1279,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/nested_expr",
+            "value": 2219,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/deep_nesting",
+            "value": 1324,
+            "range": "± 22",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parsing/large_list_100",
+            "value": 26497,
+            "range": "± 42",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/first_intern",
+            "value": 75,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/repeat_intern",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "symbol_interning/many_unique",
+            "value": 18689,
+            "range": "± 40",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/simple_arithmetic",
+            "value": 330279,
+            "range": "± 17991",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/conditional",
+            "value": 449534,
+            "range": "± 30166",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compilation/nested_arithmetic",
+            "value": 481866,
+            "range": "± 27235",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/int_add",
+            "value": 574,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/mixed_arithmetic",
+            "value": 425,
+            "range": "± 18",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/comparison",
+            "value": 278,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/cons",
+            "value": 995,
+            "range": "± 14",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "vm_execution/first",
+            "value": 897,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/if_true",
+            "value": 561,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "conditionals/nested_if",
+            "value": 6156,
+            "range": "± 440",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/simple",
+            "value": 623599,
+            "range": "± 40349",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "end_to_end/complex",
+            "value": 669952,
+            "range": "± 33227",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/10",
+            "value": 1854,
+            "range": "± 614",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/10",
+            "value": 800,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/50",
+            "value": 33373,
+            "range": "± 3803",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/50",
+            "value": 23313,
+            "range": "± 2121",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/100",
+            "value": 66302,
+            "range": "± 11656",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/100",
+            "value": 49983,
+            "range": "± 1313",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/list_construction/500",
+            "value": 295387,
+            "range": "± 32638",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "scalability/addition_chain/500",
+            "value": 268103,
+            "range": "± 8589",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/value_clone",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "memory_operations/list_to_vec",
+            "value": 111,
+            "range": "± 2",
             "unit": "ns/iter"
           }
         ]
