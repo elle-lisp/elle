@@ -88,6 +88,23 @@ For `block`: conditions 1-4 plus all break values targeting this block are safe 
 
 **Compile-time scope stats** (`ScopeStats`): The lowerer counts how many scopes were analyzed, how many qualified for scope allocation, and the first-failing condition for each rejected scope (captured, suspends, unsafe-result, outward-set, break). Access via `lowerer.scope_stats()` after `lower()` completes. Set `ELLE_SCOPE_STATS=1` to print stats to stderr during compilation.
 
+**Known limitations and why they exist:**
+
+- **`suspends` (condition 2)**: Any let body that calls a `Polymorphic`-effect
+  function (e.g., `map`, `filter`, `fold` with a callback) fails this condition.
+  Fixing this requires knowing the concrete effect of the callback at the call
+  site — i.e., monomorphization or effect polymorphism tracking. Not feasible
+  without interprocedural analysis.
+
+- **`unsafe-result` (condition 3)**: Calls to user-defined functions fail
+  `result_is_safe` because we don't know their return type at the call site.
+  Fixing this requires return-type inference or a return-type annotation system.
+  The whitelist in `IMMEDIATE_PRIMITIVES` covers built-in primitives only.
+
+These are accepted limitations. The analysis is maximally conservative to
+avoid use-after-free. False negatives (missed optimizations) are preferable
+to false positives (use-after-free bugs).
+
 ## Yield as terminator
 
 `Terminator::Yield { value, resume_label }` correctly models that yield suspends execution and resumes in a new block. The lowerer:
