@@ -5,7 +5,7 @@
 // - Calling a yielding function propagates Yields effect
 // - Polymorphic effects (like map) resolve based on argument effects
 // - Pure functions remain pure
-// - set! invalidates effect tracking
+// - assign invalidates effect tracking
 
 use elle::effects::Effect;
 use elle::hir::HirKind;
@@ -231,28 +231,28 @@ fn test_effect_polymorphic_with_yielding_arg_unknown_global() {
 }
 
 // ============================================================================
-// 4. SET! INVALIDATION TESTS
+// 4. ASSIGN INVALIDATION TESTS
 // ============================================================================
 
 #[test]
 fn test_effect_set_invalidation() {
     // (var f (fn () 42))
-    // (set f (fn () (yield 1)))
-    // After set!, effect tracking for f is invalidated
+    // (assign f (fn () (yield 1)))
+    // After assign, effect tracking for f is invalidated
     // Calling f should be Yields (sound: we can't prove it's pure)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (var f (fn () 42)) (set f (fn () (yield 1))) (f))",
+        "(begin (var f (fn () 42)) (assign f (fn () (yield 1))) (f))",
         &mut symbols,
         &mut vm,
     )
     .unwrap();
-    // After set!, we conservatively treat the effect as Yields
+    // After assign, we conservatively treat the effect as Yields
     // This is sound: we can't prove the new value is pure
     assert_eq!(
         result.hir.effect,
         Effect::yields(),
-        "After set!, effect should be Yields (sound default)"
+        "After assign, effect should be Yields (sound default)"
     );
 }
 
@@ -438,10 +438,10 @@ fn test_lambda_body_effect_nested_yield() {
 fn test_effect_unknown_global_is_yields() {
     // Unknown global functions default to Yields (sound)
     // This is the fix for effect soundness: if we can't prove a global is pure,
-    // we must assume it may yield (since it could be redefined via set!)
+    // we must assume it may yield (since it could be redefined via assign)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (var f (fn () 42)) (set f (fn () (yield 1))) (f))",
+        "(begin (var f (fn () 42)) (assign f (fn () (yield 1))) (f))",
         &mut symbols,
         &mut vm,
     )

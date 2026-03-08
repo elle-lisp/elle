@@ -6,7 +6,7 @@ use crate::common::eval_source;
 
 #[test]
 fn test_def_destructured_bindings_are_immutable() {
-    let result = eval_source("(begin (def (a b) (list 1 2)) (set a 10))");
+    let result = eval_source("(begin (def (a b) (list 1 2)) (assign a 10))");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("immutable"));
 }
