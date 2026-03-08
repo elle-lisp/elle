@@ -250,22 +250,35 @@ Things that look wrong but aren't:
   (in `src/syntax/expand/mod.rs`) and parsed/expanded on each Expander
   creation.
 - Collection literals follow the mutable/immutable split (see `docs/types.md`):
-  bare delimiters are immutable, `@`-prefixed are mutable. `{:key val ...}` →
-  struct (immutable). `@{:key val}` → table (mutable). `[1 2 3]` → tuple
-  (immutable). `@[1 2 3]` → array (mutable). `"hello"` → string (immutable).
-  `@"hello"` → buffer (mutable). Bytes (immutable binary data) and blob
-  (mutable binary data) have no reader literal syntax — they are constructed
-  via primitives: `(bytes 1 2 3)`, `(blob 1 2 3)`, `(string->bytes "hello")`,
-  `(string->blob "hello")`. Display format is `#bytes[hex ...]` and
-  `#blob[hex ...]` (output-only, not readable). `SyntaxKind::Tuple` represents
-  `[...]`, `SyntaxKind::Array` represents `@[...]`, `SyntaxKind::Struct`
-  represents `{...}`, `SyntaxKind::Table` represents `@{...}`. The reader
-  produces all four directly (no desugaring to List with prepended symbols).
-  `@"..."` desugars to `(string->buffer "...")`. In `match`, `[...]` matches
-  tuples (`IsTuple`), `@[...]` matches arrays (`IsArray`), `{...}` matches
-  structs (`IsStruct`), `@{...}` matches tables (`IsTable`). In destructuring
-  (`def`/`let`/`fn`), no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle
-  both mutable and immutable types.
+   bare delimiters are immutable, `@`-prefixed are mutable. `{:key val ...}` →
+   struct (immutable). `@{:key val}` → table (mutable). `[1 2 3]` → tuple
+   (immutable). `@[1 2 3]` → array (mutable). `"hello"` → string (immutable).
+   `@"hello"` → buffer (mutable). `|1 2 3|` → set (immutable). `@|1 2 3|` →
+   mutable set. Bytes (immutable binary data) and blob (mutable binary data)
+   have no reader literal syntax — they are constructed via primitives:
+   `(bytes 1 2 3)`, `(blob 1 2 3)`, `(string->bytes "hello")`,
+   `(string->blob "hello")`. Display format is `#bytes[hex ...]` and
+   `#blob[hex ...]` (output-only, not readable). `SyntaxKind::Tuple` represents
+   `[...]`, `SyntaxKind::Array` represents `@[...]`, `SyntaxKind::Struct`
+   represents `{...}`, `SyntaxKind::Table` represents `@{...}`, `SyntaxKind::Set`
+   represents `|...|`, `SyntaxKind::SetMut` represents `@|...|`. The reader
+   produces all six directly (no desugaring to List with prepended symbols).
+   `@"..."` desugars to `(string->buffer "...")`. In `match`, `[...]` matches
+   tuples (`IsTuple`), `@[...]` matches arrays (`IsArray`), `{...}` matches
+   structs (`IsStruct`), `@{...}` matches tables (`IsTable`), `|x|` matches
+   sets (`IsSet`), `@|x|` matches mutable sets (`IsSetMut`). In destructuring
+   (`def`/`let`/`fn`), no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle
+   both mutable and immutable types.
+- `|...|` is the immutable set literal syntax; `@|...|` is the mutable set
+   literal. `|` is a delimiter (like `(`, `[`, `{`). Inside lists, arrays,
+   structs, and tables, a bare `|` produces a `SyntaxKind::Pipe` marker node
+   (not a set literal). This is used by or-patterns: `(1 | 3 | 5)` splits on
+   `Pipe` markers to create alternatives. Or-patterns previously used `Symbol("|")`
+   — that is no longer valid.
+- `:@name` is valid keyword syntax. The lexer recognizes `:@` as a keyword
+   prefix variant. The `@` is consumed and prepended to the keyword name.
+   Examples: `:@set`, `:@array`, `:@string`. These are used for mutable type
+   keywords returned by `(type-of x)` on mutable collections.
 - `[...]` has dual meaning depending on position. In expression position,
   it's a tuple literal (`SyntaxKind::Tuple`). In structural positions of
   special forms — lambda params, binding lists, binding pairs, cond clauses,

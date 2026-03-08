@@ -7,13 +7,17 @@
 (def *n-layer* 1)
 (def *block-size* 16)
 (def *mlp-hidden* 32)
+(def *eps* 0.00000001)
 
 # Parameter initialization
 
 (defn init-weight [rows cols scale]
-  "Create a rows x cols 2D array of Value nodes with uniform random init."
-  (make-2d rows cols
-     (fn [r c] (make-value (- (* (random/float) 2.0 scale) scale)))))
+    "Create a rows x cols 2D array of Value nodes with uniform random init."
+    (make-2d rows cols
+       (fn [r c] (make-value (- (* (random/float) 2.0 scale) scale)))))
+
+(defn layer-key [i suffix]
+  (string/format "layer{}.{}" i suffix))
 
 (defn init-model [vocab-size]
   "Initialize all model parameters. Returns a table of named weight matrices."
@@ -23,63 +27,43 @@
                   :lm-head (init-weight vocab-size *n-embd* scale)}])
     (var layer 0)
     (while (< layer *n-layer*)
-      (let* ([prefix (string/format "layer{}" layer)])
-        (put model (string/format "{}.attn-wq" prefix) (init-weight *n-embd* *n-embd* scale))
-        (put model (string/format "{}.attn-wk" prefix) (init-weight *n-embd* *n-embd* scale))
-        (put model (string/format "{}.attn-wv" prefix) (init-weight *n-embd* *n-embd* scale))
-        (put model (string/format "{}.attn-wo" prefix) (init-weight *n-embd* *n-embd* scale))
-        (put model (string/format "{}.mlp-fc1" prefix) (init-weight *mlp-hidden* *n-embd* scale))
-        (put model (string/format "{}.mlp-fc2" prefix) (init-weight *n-embd* *mlp-hidden* scale)))
+      (put model (layer-key layer "attn-wq") (init-weight *n-embd* *n-embd* scale))
+      (put model (layer-key layer "attn-wk") (init-weight *n-embd* *n-embd* scale))
+      (put model (layer-key layer "attn-wv") (init-weight *n-embd* *n-embd* scale))
+      (put model (layer-key layer "attn-wo") (init-weight *n-embd* *n-embd* scale))
+      (put model (layer-key layer "mlp-fc1") (init-weight *mlp-hidden* *n-embd* scale))
+      (put model (layer-key layer "mlp-fc2") (init-weight *n-embd* *mlp-hidden* scale))
       (set layer (+ layer 1)))
     model))
 
 # Collect all parameters into a flat array
 
 (defn collect-params [model]
-  "Return a flat array of all Value nodes in the model."
+  "Collect all Value parameter nodes from the model into a flat array."
   (let* ([params @[]])
     (each key in (keys model)
-      (let* ([mat (get model key)]
-             [rows (length mat)])
-        (var r 0)
-        (while (< r rows)
-          (let* ([row (get mat r)])
-            (var c 0)
-            (while (< c (length row))
-              (push params (get row c))
-              (set c (+ c 1))))
-          (set r (+ r 1)))))
+      (each row in (get model key)
+        (each val in row
+          (push params val))))
     params))
 
 # Forward pass building blocks
 
 (defn mat-vec-mul [mat vec-in]
-  "Multiply 2D weight matrix by 1D vector of Value nodes.
-   mat is out_dim x in_dim, vec-in is in_dim. Returns 1D array."
-  (let* ([out-dim (length mat)]
-         [result @[]])
-    (var r 0)
-    (while (< r out-dim)
-      (let* ([row (get mat r)]
-             [acc (v* (get row 0) (get vec-in 0))])
-        (var c 1)
+  "Matrix-vector multiply: mat (2D array of Values) × vec-in (1D array of Values)."
+  (let* ([result @[]])
+    (each row in mat
+      (let* ([acc (make-value 0.0)])
+        (var c 0)
         (while (< c (length row))
           (set acc (v+ acc (v* (get row c) (get vec-in c))))
           (set c (+ c 1)))
-        (push result acc))
-      (set r (+ r 1)))
-    result))
-
-(defn vec-map-fn [f vec-in]
-  "Apply f to each element of array, returning new array."
-  (let* ([result @[]])
-    (each v in vec-in
-      (push result (f v)))
+        (push result acc)))
     result))
 
 (defn vec-add [a b]
-  "Element-wise v+ of two Value-node arrays."
-  (map2 v+ a b))
+  "Element-wise autograd addition of two vectors."
+  (array-map2 v+ a b))
 
 (defn rms-norm [vec-in]
   "RMS normalization: x / sqrt(mean(x^2) + eps)."
@@ -88,7 +72,7 @@
     (each v in vec-in
       (set sum-sq (v+ sum-sq (v* v v))))
     (let* ([mean-sq (v*s sum-sq (/ 1.0 n))]
-           [rms (vpow (v+s mean-sq 0.00000001) 0.5)]
+           [rms (vpow (v+s mean-sq *eps*) 0.5)]
            [result @[]])
       (each v in vec-in
         (push result (v/ v rms)))
@@ -113,6 +97,15 @@
         (push result (v/ e sum-exp)))
       result)))
 
+(defn layer-weights [model i]
+  "Get all weight matrices for transformer layer i."
+  @{:wq  (get model (layer-key i "attn-wq"))
+    :wk  (get model (layer-key i "attn-wk"))
+    :wv  (get model (layer-key i "attn-wv"))
+    :wo  (get model (layer-key i "attn-wo"))
+    :fc1 (get model (layer-key i "mlp-fc1"))
+    :fc2 (get model (layer-key i "mlp-fc2"))})
+
 # Per-token forward pass (incremental, with KV cache)
 # This matches the original CL implementation: process one token at a time,
 # accumulating key/value vectors in per-layer caches.
@@ -133,13 +126,13 @@
     # Transformer layers
     (var li 0)
     (while (< li *n-layer*)
-      (let* ([prefix (string/format "layer{}" li)]
-             [wq (get model (string/format "{}.attn-wq" prefix))]
-             [wk (get model (string/format "{}.attn-wk" prefix))]
-             [wv (get model (string/format "{}.attn-wv" prefix))]
-             [wo (get model (string/format "{}.attn-wo" prefix))]
-             [fc1 (get model (string/format "{}.mlp-fc1" prefix))]
-             [fc2 (get model (string/format "{}.mlp-fc2" prefix))]
+      (let* ([weights (layer-weights model li)]
+             [wq (get weights :wq)]
+             [wk (get weights :wk)]
+             [wv (get weights :wv)]
+             [wo (get weights :wo)]
+             [fc1 (get weights :fc1)]
+             [fc2 (get weights :fc2)]
              [x-residual x])
         # Pre-norm + Q/K/V projections
         (set x (rms-norm x))
@@ -164,11 +157,10 @@
                 (var t-idx 0)
                 (while (< t-idx n-t)
                   (let* ([k-t (get layer-keys t-idx)]
-                         [k-head (slice k-t hs (+ hs *head-dim*))]
                          [dot (make-value 0.0)])
                     (var d 0)
                     (while (< d *head-dim*)
-                      (set dot (v+ dot (v* (get q-head d) (get k-head d))))
+                      (set dot (v+ dot (v* (get q-head d) (get k-t (+ hs d)))))
                       (set d (+ d 1)))
                     (push attn-logits (v*s dot scale-factor)))
                   (set t-idx (+ t-idx 1)))
@@ -178,11 +170,11 @@
                   (var j 0)
                   (while (< j *head-dim*)
                     (let* ([acc (v* (get attn-weights 0)
-                                    (get (slice (get layer-vals 0) hs (+ hs *head-dim*)) j))])
+                                    (get (get layer-vals 0) (+ hs j)))])
                       (var t-idx2 1)
                       (while (< t-idx2 n-t)
                         (set acc (v+ acc (v* (get attn-weights t-idx2)
-                                             (get (slice (get layer-vals t-idx2) hs (+ hs *head-dim*)) j))))
+                                             (get (get layer-vals t-idx2) (+ hs j)))))
                         (set t-idx2 (+ t-idx2 1)))
                       (put x-attn (+ hs j) acc))
                     (set j (+ j 1)))))
@@ -195,7 +187,7 @@
         (let* ([x-residual2 x])
           (set x (rms-norm x))
           (set x (mat-vec-mul fc1 x))
-          (set x (vec-map-fn vrelu x))
+          (set x (array-map vrelu x))
           (set x (mat-vec-mul fc2 x))
           (set x (vec-add x x-residual2))))
       (set li (+ li 1)))
@@ -209,14 +201,7 @@
    tokens includes BOS at start and end.
    Returns a single Value node (the mean loss)."
   (let* ([n (min *block-size* (- (length tokens) 1))]
-         [kv-keys @[]]
-         [kv-values @[]])
-    # Initialize per-layer KV caches
-    (var li 0)
-    (while (< li *n-layer*)
-      (push kv-keys @[])
-      (push kv-values @[])
-      (set li (+ li 1)))
+         [[kv-keys kv-values] (make-kv-caches *n-layer*)])
     # Accumulate loss over positions
     (let* ([total-loss (make-value 0.0)])
       (var pos 0)
@@ -225,7 +210,7 @@
                [target-id (get tokens (+ pos 1))]
                [logits (gpt-forward-token token-id pos kv-keys kv-values model)]
                [probs (softmax-values logits)]
-               [loss-t (v-neg (vlog (get probs target-id)))])
+               [loss-t (vneg (vlog (get probs target-id)))])
           (set total-loss (v+ total-loss loss-t)))
         (set pos (+ pos 1)))
       (v*s total-loss (/ 1.0 (float n))))))
