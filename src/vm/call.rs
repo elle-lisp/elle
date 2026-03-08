@@ -11,7 +11,7 @@ use crate::error::LocationMap;
 use crate::value::error_val;
 use crate::value::fiber::CallFrame;
 use crate::value::{
-    SignalBits, SuspendedFrame, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD,
+    SignalBits, SuspendedFrame, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_YIELD,
 };
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
@@ -153,7 +153,15 @@ impl VM {
     ) -> Option<SignalBits> {
         if let Some(f) = func.as_native_fn() {
             let (bits, value) = f(args.as_slice());
-            return self.handle_primitive_signal(bits, value, bytecode, constants, closure_env, ip);
+            return self.handle_primitive_signal(
+                bits,
+                value,
+                bytecode,
+                constants,
+                closure_env,
+                ip,
+                location_map,
+            );
         }
 
         if let Some((id, default)) = func.as_parameter() {
@@ -204,10 +212,10 @@ impl VM {
                 if let Some(bits) = self.try_jit_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
                     match bits {
-                        Some(SIG_YIELD) => {
-                            // JIT function yielded. fiber.signal and fiber.suspended
-                            // are set by the JIT yield helpers. Build the interpreter-
-                            // level caller frame (same logic as lines 189-205 below).
+                        Some(sig) if sig.contains(SIG_YIELD) || sig.contains(SIG_IO) => {
+                            // JIT function yielded or signaled I/O. fiber.signal
+                            // and fiber.suspended are set by the JIT yield helpers.
+                            // Build the interpreter-level caller frame.
                             if let Some(mut frames) = self.fiber.suspended.take() {
                                 let (_, value) = self.fiber.signal.take().unwrap();
                                 let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -222,10 +230,10 @@ impl VM {
                                     location_map: location_map.clone(),
                                 };
                                 frames.push(caller_frame);
-                                self.fiber.signal = Some((SIG_YIELD, value));
+                                self.fiber.signal = Some((sig, value));
                                 self.fiber.suspended = Some(frames);
                             }
-                            return Some(SIG_YIELD);
+                            return Some(sig);
                         }
                         other => return other,
                     }
@@ -254,46 +262,43 @@ impl VM {
             self.fiber.call_depth -= 1;
 
             let bits = result.bits;
-            match bits {
-                SIG_OK => {
+            if bits.is_ok() {
+                let (_, value) = self.fiber.signal.take().unwrap();
+                self.fiber.stack.push(value);
+                self.fiber.call_stack.pop();
+            } else if bits.contains(SIG_YIELD) || bits.contains(SIG_IO) {
+                // Yield/IO propagated from a nested call. Two cases:
+                //
+                // 1. yield/IO instruction: suspended frames exist — append
+                //    the caller's frame so resume replays the full call
+                //    stack.
+                //
+                // 2. fiber/signal: no suspended frames — just propagate the
+                //    signal. The fiber saves its own context for resumption.
+                if let Some(mut frames) = self.fiber.suspended.take() {
                     let (_, value) = self.fiber.signal.take().unwrap();
-                    self.fiber.stack.push(value);
-                    self.fiber.call_stack.pop();
-                }
-                SIG_YIELD => {
-                    // Yield propagated from a nested call. Two cases:
-                    //
-                    // 1. yield instruction: suspended frames exist — append the
-                    //    caller's frame so resume replays the full call stack.
-                    //
-                    // 2. fiber/signal: no suspended frames — just propagate the
-                    //    signal. The fiber saves its own context for resumption.
-                    if let Some(mut frames) = self.fiber.suspended.take() {
-                        let (_, value) = self.fiber.signal.take().unwrap();
 
-                        let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-                        let caller_frame = SuspendedFrame {
-                            bytecode: bytecode.clone(),
-                            constants: constants.clone(),
-                            env: closure_env.clone(),
-                            ip: *ip,
-                            stack: caller_stack,
-                            active_allocator: crate::value::fiber_heap::save_active_allocator(),
-                            location_map: result.location_map.clone(),
-                        };
+                    let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+                    let caller_frame = SuspendedFrame {
+                        bytecode: bytecode.clone(),
+                        constants: constants.clone(),
+                        env: closure_env.clone(),
+                        ip: *ip,
+                        stack: caller_stack,
+                        active_allocator: crate::value::fiber_heap::save_active_allocator(),
+                        location_map: result.location_map.clone(),
+                    };
 
-                        frames.push(caller_frame);
-                        self.fiber.signal = Some((SIG_YIELD, value));
-                        self.fiber.suspended = Some(frames);
-                    }
-                    self.fiber.call_stack.pop();
-                    return Some(SIG_YIELD);
+                    frames.push(caller_frame);
+                    self.fiber.signal = Some((bits, value));
+                    self.fiber.suspended = Some(frames);
                 }
-                _ => {
-                    // Other signal (error, etc.) — propagate to caller.
-                    // The call frame is preserved on error for stack traces.
-                    return Some(bits);
-                }
+                self.fiber.call_stack.pop();
+                return Some(bits);
+            } else {
+                // Other signal (error, etc.) — propagate to caller.
+                // The call frame is preserved on error for stack traces.
+                return Some(bits);
             }
             return None;
         }
@@ -537,7 +542,12 @@ impl VM {
         let result = self.call_jit(jit_code, closure, args, func);
 
         // Check if the JIT function (or a callee) set an error or halt
-        if matches!(self.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))) {
+        if self
+            .fiber
+            .signal
+            .as_ref()
+            .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT))
+        {
             self.fiber.stack.push(Value::NIL);
             return None; // Let the dispatch loop's signal check deal with it
         }
@@ -559,24 +569,21 @@ impl VM {
                     &tail.env,
                     &tail.location_map,
                 );
-                match exec_result.bits {
-                    SIG_OK | SIG_HALT => {
-                        let (_, val) = self.fiber.signal.take().unwrap();
-                        self.fiber.stack.push(val);
-                        return None;
-                    }
-                    SIG_YIELD => {
-                        // Yield propagated through the tail-called function.
-                        // fiber.signal and fiber.suspended are set.
-                        // Return Some(SIG_YIELD) so call_inner builds the
-                        // interpreter-level caller frame.
-                        return Some(SIG_YIELD);
-                    }
-                    _ => {
-                        // SIG_ERROR — signal already set on fiber
-                        self.fiber.stack.push(Value::NIL);
-                        return None;
-                    }
+                let eb = exec_result.bits;
+                if eb.is_ok() || eb == SIG_HALT {
+                    let (_, val) = self.fiber.signal.take().unwrap();
+                    self.fiber.stack.push(val);
+                    return None;
+                } else if eb.contains(SIG_YIELD) {
+                    // Yield propagated through the tail-called function.
+                    // fiber.signal and fiber.suspended are set.
+                    // Return Some(SIG_YIELD) so call_inner builds the
+                    // interpreter-level caller frame.
+                    return Some(SIG_YIELD);
+                } else {
+                    // SIG_ERROR — signal already set on fiber
+                    self.fiber.stack.push(Value::NIL);
+                    return None;
                 }
             }
         }

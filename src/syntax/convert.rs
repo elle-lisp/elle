@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn test_from_value_rejects_closure() {
         let result = Syntax::from_value(
-            &Value::native_fn(|_| (0, Value::NIL)),
+            &Value::native_fn(|_| (crate::value::SIG_OK, Value::NIL)),
             &SymbolTable::new(),
             test_span(),
         );

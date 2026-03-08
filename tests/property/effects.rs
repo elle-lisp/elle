@@ -8,6 +8,7 @@
 // Converted from property tests to deterministic unit tests with concrete cases.
 
 use elle::effects::Effect;
+use elle::value::SignalBits;
 
 // =========================================================================
 // Effect combine laws: commutativity
@@ -16,11 +17,11 @@ use elle::effects::Effect;
 #[test]
 fn effect_combine_commutative_none_none() {
     let a = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     let b = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     assert_eq!(a.combine(b), b.combine(a));
@@ -29,11 +30,11 @@ fn effect_combine_commutative_none_none() {
 #[test]
 fn effect_combine_commutative_1_2() {
     let a = Effect {
-        bits: 1,
+        bits: SignalBits(1),
         propagates: 0,
     };
     let b = Effect {
-        bits: 2,
+        bits: SignalBits(2),
         propagates: 0,
     };
     assert_eq!(a.combine(b), b.combine(a));
@@ -42,11 +43,11 @@ fn effect_combine_commutative_1_2() {
 #[test]
 fn effect_combine_commutative_3_5() {
     let a = Effect {
-        bits: 3,
+        bits: SignalBits(3),
         propagates: 0,
     };
     let b = Effect {
-        bits: 5,
+        bits: SignalBits(5),
         propagates: 0,
     };
     assert_eq!(a.combine(b), b.combine(a));
@@ -55,11 +56,11 @@ fn effect_combine_commutative_3_5() {
 #[test]
 fn effect_combine_commutative_7_7() {
     let a = Effect {
-        bits: 7,
+        bits: SignalBits(7),
         propagates: 0,
     };
     let b = Effect {
-        bits: 7,
+        bits: SignalBits(7),
         propagates: 0,
     };
     assert_eq!(a.combine(b), b.combine(a));
@@ -72,15 +73,15 @@ fn effect_combine_commutative_7_7() {
 #[test]
 fn effect_combine_associative_none_none_none() {
     let a = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     let b = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     let c = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     assert_eq!(a.combine(b).combine(c), a.combine(b.combine(c)));
@@ -89,15 +90,15 @@ fn effect_combine_associative_none_none_none() {
 #[test]
 fn effect_combine_associative_1_2_4() {
     let a = Effect {
-        bits: 1,
+        bits: SignalBits(1),
         propagates: 0,
     };
     let b = Effect {
-        bits: 2,
+        bits: SignalBits(2),
         propagates: 0,
     };
     let c = Effect {
-        bits: 4,
+        bits: SignalBits(4),
         propagates: 0,
     };
     assert_eq!(a.combine(b).combine(c), a.combine(b.combine(c)));
@@ -106,15 +107,15 @@ fn effect_combine_associative_1_2_4() {
 #[test]
 fn effect_combine_associative_3_5_7() {
     let a = Effect {
-        bits: 3,
+        bits: SignalBits(3),
         propagates: 0,
     };
     let b = Effect {
-        bits: 5,
+        bits: SignalBits(5),
         propagates: 0,
     };
     let c = Effect {
-        bits: 7,
+        bits: SignalBits(7),
         propagates: 0,
     };
     assert_eq!(a.combine(b).combine(c), a.combine(b.combine(c)));
@@ -123,15 +124,15 @@ fn effect_combine_associative_3_5_7() {
 #[test]
 fn effect_combine_associative_all_same() {
     let a = Effect {
-        bits: 7,
+        bits: SignalBits(7),
         propagates: 0,
     };
     let b = Effect {
-        bits: 7,
+        bits: SignalBits(7),
         propagates: 0,
     };
     let c = Effect {
-        bits: 7,
+        bits: SignalBits(7),
         propagates: 0,
     };
     assert_eq!(a.combine(b).combine(c), a.combine(b.combine(c)));
@@ -144,7 +145,7 @@ fn effect_combine_associative_all_same() {
 #[test]
 fn effect_combine_identity_none_right() {
     let e = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     assert_eq!(e.combine(Effect::inert()), e);
@@ -153,7 +154,7 @@ fn effect_combine_identity_none_right() {
 #[test]
 fn effect_combine_identity_none_left() {
     let e = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     assert_eq!(Effect::inert().combine(e), e);
@@ -162,7 +163,7 @@ fn effect_combine_identity_none_left() {
 #[test]
 fn effect_combine_identity_1_right() {
     let e = Effect {
-        bits: 1,
+        bits: SignalBits(1),
         propagates: 0,
     };
     assert_eq!(e.combine(Effect::inert()), e);
@@ -171,7 +172,7 @@ fn effect_combine_identity_1_right() {
 #[test]
 fn effect_combine_identity_1_left() {
     let e = Effect {
-        bits: 1,
+        bits: SignalBits(1),
         propagates: 0,
     };
     assert_eq!(Effect::inert().combine(e), e);
@@ -180,7 +181,7 @@ fn effect_combine_identity_1_left() {
 #[test]
 fn effect_combine_identity_7_right() {
     let e = Effect {
-        bits: 7,
+        bits: SignalBits(7),
         propagates: 0,
     };
     assert_eq!(e.combine(Effect::inert()), e);
@@ -189,7 +190,7 @@ fn effect_combine_identity_7_right() {
 #[test]
 fn effect_combine_identity_7_left() {
     let e = Effect {
-        bits: 7,
+        bits: SignalBits(7),
         propagates: 0,
     };
     assert_eq!(Effect::inert().combine(e), e);
@@ -198,7 +199,7 @@ fn effect_combine_identity_7_left() {
 #[test]
 fn effect_combine_identity_15_right() {
     let e = Effect {
-        bits: 15,
+        bits: SignalBits(15),
         propagates: 0,
     };
     assert_eq!(e.combine(Effect::inert()), e);
@@ -207,7 +208,7 @@ fn effect_combine_identity_15_right() {
 #[test]
 fn effect_combine_identity_15_left() {
     let e = Effect {
-        bits: 15,
+        bits: SignalBits(15),
         propagates: 0,
     };
     assert_eq!(Effect::inert().combine(e), e);
@@ -220,7 +221,7 @@ fn effect_combine_identity_15_left() {
 #[test]
 fn effect_combine_idempotent_none() {
     let e = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -229,7 +230,7 @@ fn effect_combine_idempotent_none() {
 #[test]
 fn effect_combine_idempotent_1() {
     let e = Effect {
-        bits: 1,
+        bits: SignalBits(1),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -238,7 +239,7 @@ fn effect_combine_idempotent_1() {
 #[test]
 fn effect_combine_idempotent_3() {
     let e = Effect {
-        bits: 3,
+        bits: SignalBits(3),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -247,7 +248,7 @@ fn effect_combine_idempotent_3() {
 #[test]
 fn effect_combine_idempotent_5() {
     let e = Effect {
-        bits: 5,
+        bits: SignalBits(5),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -256,7 +257,7 @@ fn effect_combine_idempotent_5() {
 #[test]
 fn effect_combine_idempotent_7() {
     let e = Effect {
-        bits: 7,
+        bits: SignalBits(7),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -265,7 +266,7 @@ fn effect_combine_idempotent_7() {
 #[test]
 fn effect_combine_idempotent_15() {
     let e = Effect {
-        bits: 15,
+        bits: SignalBits(15),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -278,11 +279,11 @@ fn effect_combine_idempotent_15() {
 #[test]
 fn effect_propagates_combine_none_none() {
     let a = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     let b = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 0,
     };
     let combined = a.combine(b);
@@ -292,11 +293,11 @@ fn effect_propagates_combine_none_none() {
 #[test]
 fn effect_propagates_combine_1_2() {
     let a = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 1,
     };
     let b = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 2,
     };
     let combined = a.combine(b);
@@ -306,11 +307,11 @@ fn effect_propagates_combine_1_2() {
 #[test]
 fn effect_propagates_combine_128_255() {
     let a = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 128,
     };
     let b = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 255,
     };
     let combined = a.combine(b);
@@ -320,11 +321,11 @@ fn effect_propagates_combine_128_255() {
 #[test]
 fn effect_propagates_combine_same() {
     let a = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 42,
     };
     let b = Effect {
-        bits: 0,
+        bits: SignalBits(0),
         propagates: 42,
     };
     let combined = a.combine(b);

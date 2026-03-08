@@ -7,7 +7,8 @@
 
 use crate::value::error_val;
 use crate::value::{
-    SignalBits, Value, SIG_CANCEL, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
+    SignalBits, SuspendedFrame, Value, SIG_CANCEL, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
+    SIG_RESUME, SIG_YIELD,
 };
 use std::rc::Rc;
 
@@ -18,6 +19,7 @@ impl VM {
     ///
     /// Returns `None` to continue the dispatch loop, or `Some(bits)` to
     /// return from the dispatch loop (for yields/signals).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn handle_primitive_signal(
         &mut self,
         bits: SignalBits,
@@ -26,6 +28,7 @@ impl VM {
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
         ip: &mut usize,
+        location_map: &Rc<crate::error::LocationMap>,
     ) -> Option<SignalBits> {
         match bits {
             SIG_OK => {
@@ -65,8 +68,25 @@ impl VM {
                 None
             }
             _ => {
-                // Any other signal (SIG_YIELD, user-defined)
-                self.fiber.signal = Some((bits, value));
+                // Any yielding signal (SIG_YIELD, SIG_YIELD|SIG_IO, user-defined suspension).
+                // Save the stack into a SuspendedFrame so call.rs can build the caller
+                // frame chain on the way out. Non-yielding signals don't need a frame.
+                if bits.contains(SIG_YIELD) {
+                    let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+                    let frame = SuspendedFrame {
+                        bytecode: bytecode.clone(),
+                        constants: constants.clone(),
+                        env: closure_env.clone(),
+                        ip: *ip,
+                        stack: saved_stack,
+                        active_allocator: crate::value::fiber_heap::save_active_allocator(),
+                        location_map: location_map.clone(),
+                    };
+                    self.fiber.signal = Some((bits, value));
+                    self.fiber.suspended = Some(vec![frame]);
+                } else {
+                    self.fiber.signal = Some((bits, value));
+                }
                 Some(bits)
             }
         }

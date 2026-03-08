@@ -6,7 +6,7 @@
 //! functions like map/filter/fold).
 
 use crate::value::fiber::SignalBits;
-use crate::value::fiber::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_YIELD};
+use crate::value::fiber::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_IO, SIG_YIELD};
 use std::fmt;
 
 /// Effect classification for expressions and functions.
@@ -38,7 +38,7 @@ impl Effect {
     /// No effects: does not signal, does not propagate.
     pub const fn inert() -> Self {
         Effect {
-            bits: 0,
+            bits: SignalBits::new(0),
             propagates: 0,
         }
     }
@@ -62,7 +62,7 @@ impl Effect {
     /// May yield and may error.
     pub const fn yields_errors() -> Self {
         Effect {
-            bits: SIG_YIELD | SIG_ERROR,
+            bits: SignalBits::new(SIG_YIELD.0 | SIG_ERROR.0),
             propagates: 0,
         }
     }
@@ -70,7 +70,7 @@ impl Effect {
     /// May halt the VM (non-resumable termination with return value).
     pub const fn halts() -> Self {
         Effect {
-            bits: SIG_HALT | SIG_ERROR,
+            bits: SignalBits::new(SIG_HALT.0 | SIG_ERROR.0),
             propagates: 0,
         }
     }
@@ -87,7 +87,7 @@ impl Effect {
     /// Used for FFI primitives that validate arguments before calling C.
     pub const fn ffi_errors() -> Self {
         Effect {
-            bits: SIG_FFI | SIG_ERROR,
+            bits: SignalBits::new(SIG_FFI.0 | SIG_ERROR.0),
             propagates: 0,
         }
     }
@@ -95,7 +95,7 @@ impl Effect {
     /// Polymorphic: effect depends on a single parameter (no error signal).
     pub const fn polymorphic(param: usize) -> Self {
         Effect {
-            bits: 0,
+            bits: SignalBits::new(0),
             propagates: 1 << param,
         }
     }
@@ -112,7 +112,7 @@ impl Effect {
     /// Signal bits are ORed. Propagation masks are ORed.
     pub const fn combine(self, other: Effect) -> Effect {
         Effect {
-            bits: self.bits | other.bits,
+            bits: SignalBits::new(self.bits.0 | other.bits.0),
             propagates: self.propagates | other.propagates,
         }
     }
@@ -134,28 +134,33 @@ impl Effect {
     /// Suspension signals: yield, debug. Polymorphic effects may also
     /// suspend (depends on the argument's effect at the call site).
     pub const fn may_suspend(&self) -> bool {
-        const SUSPENSION_BITS: SignalBits = SIG_YIELD | SIG_DEBUG;
-        (self.bits & SUSPENSION_BITS) != 0 || self.propagates != 0
+        const SUSPENSION_BITS: u32 = SIG_YIELD.0 | SIG_DEBUG.0;
+        (self.bits.0 & SUSPENSION_BITS) != 0 || self.propagates != 0
     }
 
     /// Can this function yield (cooperative suspension)?
     pub const fn may_yield(&self) -> bool {
-        self.bits & SIG_YIELD != 0
+        self.bits.0 & SIG_YIELD.0 != 0
     }
 
     /// Can this function error?
     pub const fn may_error(&self) -> bool {
-        self.bits & SIG_ERROR != 0
+        self.bits.0 & SIG_ERROR.0 != 0
     }
 
     /// Can this function halt the VM?
     pub const fn may_halt(&self) -> bool {
-        self.bits & SIG_HALT != 0
+        self.bits.0 & SIG_HALT.0 != 0
     }
 
     /// Does this function call foreign code?
     pub const fn may_ffi(&self) -> bool {
-        self.bits & SIG_FFI != 0
+        self.bits.0 & SIG_FFI.0 != 0
+    }
+
+    /// Can this function perform I/O?
+    pub const fn may_io(&self) -> bool {
+        self.bits.0 & SIG_IO.0 != 0
     }
 
     /// Does this function's effect depend on its arguments?
@@ -182,7 +187,7 @@ impl fmt::Display for Effect {
         if self.propagates != 0 {
             let indices: Vec<_> = self.propagated_params().map(|i| i.to_string()).collect();
             write!(f, "polymorphic({})", indices.join(","))?;
-        } else if self.bits & SIG_YIELD != 0 {
+        } else if self.bits.contains(SIG_YIELD) {
             write!(f, "yields")?;
         } else {
             write!(f, "inert")?;
@@ -190,16 +195,16 @@ impl fmt::Display for Effect {
 
         // Append capability flags
         let mut flags = Vec::new();
-        if self.bits & SIG_ERROR != 0 {
+        if self.bits.contains(SIG_ERROR) {
             flags.push("errors");
         }
-        if self.bits & SIG_HALT != 0 {
+        if self.bits.contains(SIG_HALT) {
             flags.push("halts");
         }
-        if self.bits & SIG_FFI != 0 {
+        if self.bits.contains(SIG_FFI) {
             flags.push("ffi");
         }
-        if self.bits & SIG_DEBUG != 0 {
+        if self.bits.contains(SIG_DEBUG) {
             flags.push("debug");
         }
         if !flags.is_empty() {
@@ -247,7 +252,7 @@ mod tests {
         assert_eq!(
             combined,
             Effect {
-                bits: 0,
+                bits: SignalBits::new(0),
                 propagates: 0b11,
             }
         );
@@ -276,7 +281,7 @@ mod tests {
         assert!(Effect::polymorphic(0).may_suspend());
         assert!(Effect {
             bits: SIG_DEBUG,
-            propagates: 0
+            propagates: 0,
         }
         .may_suspend());
     }
@@ -342,7 +347,7 @@ mod tests {
     #[test]
     fn test_propagated_params() {
         let e = Effect {
-            bits: 0,
+            bits: SignalBits::new(0),
             propagates: 0b101, // params 0 and 2
         };
         let params: Vec<_> = e.propagated_params().collect();

@@ -73,13 +73,13 @@ impl VM {
         // Initialize active_allocator now that the heap is in its stable Box.
         self.fiber.heap.init_active_allocator();
 
-        // 3b. Provide shared allocator to child (for yielding fibers only).
+        // 3b. Provide shared allocator to child (for yielding or I/O fibers).
         //     After the swap: self.fiber is child, child_fiber is parent.
         //     Three cases:
         //     (a) Parent already has shared_alloc → propagate down the chain.
         //     (b) Root fiber parent (saved_heap is null) → child creates its own.
         //     (c) Non-root parent, no existing shared_alloc → create on parent's heap.
-        if self.fiber.closure.effect.may_yield() {
+        if self.fiber.closure.effect.may_yield() || self.fiber.closure.effect.may_io() {
             let shared_ptr = if !child_fiber.heap.shared_alloc().is_null() {
                 // Case (a): parent has shared_alloc from its own parent — propagate
                 child_fiber.heap.shared_alloc()
@@ -103,7 +103,7 @@ impl VM {
         //    the parent's mask. SIG_HALT is also provisionally Suspended
         //    here — the resume handler promotes to Dead if the mask
         //    doesn't catch it.
-        self.fiber.status = if bits == SIG_OK {
+        self.fiber.status = if bits.is_ok() {
             FiberStatus::Dead
         } else {
             FiberStatus::Suspended
@@ -162,17 +162,17 @@ impl VM {
 
         // SIG_HALT is always terminal — the child fiber is Dead regardless
         // of whether the mask catches it.
-        if result_bits == SIG_HALT {
+        if result_bits.contains(SIG_HALT) {
             handle.with_mut(|f| f.status = FiberStatus::Dead);
         }
 
-        if result_bits == SIG_OK {
+        if result_bits.is_ok() {
             // Child completed normally — clear child chain
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
             None
-        } else if mask & result_bits != 0 {
+        } else if mask.contains(result_bits) {
             // Signal is caught by the mask — parent handles it, clear child chain
             self.fiber.child = None;
             self.fiber.child_value = None;
@@ -182,12 +182,12 @@ impl VM {
             // Signal is NOT caught — propagate to parent.
             // Leave parent.child set (preserves trace chain for stack traces).
             // Mark child as terminally errored (not resumable).
-            if result_bits == SIG_ERROR {
+            if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
             // Check if we're at root fiber
-            if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
                 // At root fiber with non-error signal: no parent to catch it
                 set_error(
                     &mut self.fiber,
@@ -198,7 +198,7 @@ impl VM {
                 None
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits == SIG_ERROR {
+                if result_bits.contains(SIG_ERROR) {
                     self.fiber.stack.push(Value::NIL);
                     None // dispatch loop will see the error signal
                 } else {
@@ -223,11 +223,11 @@ impl VM {
         let mask = handle.with(|fiber| fiber.mask);
 
         // SIG_HALT is always terminal — child fiber is Dead regardless of mask
-        if result_bits == SIG_HALT {
+        if result_bits.contains(SIG_HALT) {
             handle.with_mut(|f| f.status = FiberStatus::Dead);
         }
 
-        let caught = result_bits == SIG_OK || (mask & result_bits != 0);
+        let caught = result_bits.is_ok() || mask.contains(result_bits);
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;
@@ -235,12 +235,12 @@ impl VM {
             SIG_OK
         } else {
             // Uncaught SIG_ERROR → terminal error status on child
-            if result_bits == SIG_ERROR {
+            if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
             // Check if we're at root fiber
-            if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
                 // At root fiber with non-error signal: no parent to catch it
                 set_error(
                     &mut self.fiber,
@@ -343,7 +343,8 @@ impl VM {
         // Use the active bytecode/constants/env from ExecResult, not the
         // original closure fields — a tail call may have switched to a
         // different function's bytecode before the signal occurred.
-        if result.bits != SIG_OK && result.bits != SIG_HALT && self.fiber.suspended.is_none() {
+        if !result.bits.is_ok() && !result.bits.contains(SIG_HALT) && self.fiber.suspended.is_none()
+        {
             self.fiber.suspended = Some(vec![SuspendedFrame {
                 bytecode: result.bytecode,
                 constants: result.constants,
@@ -403,7 +404,7 @@ impl VM {
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
-        if child_bits == SIG_ERROR {
+        if child_bits.contains(SIG_ERROR) {
             self.fiber.stack.push(Value::NIL);
             None
         } else if self.current_fiber_handle.is_none() {
@@ -442,7 +443,7 @@ impl VM {
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
-        if child_bits == SIG_ERROR {
+        if child_bits.contains(SIG_ERROR) {
             child_bits
         } else if self.current_fiber_handle.is_none() {
             // At root fiber: no parent to catch the propagated signal
@@ -480,7 +481,7 @@ impl VM {
         let (result_bits, result_value) = self.do_fiber_cancel(&handle, fiber_value);
 
         let mask = handle.with(|fiber| fiber.mask);
-        let caught = result_bits == SIG_OK || (mask & result_bits != 0);
+        let caught = result_bits.is_ok() || mask.contains(result_bits);
 
         // Cancelled fibers are always terminal regardless of mask
         handle.with_mut(|f| f.status = FiberStatus::Error);
@@ -492,7 +493,7 @@ impl VM {
             None
         } else {
             // Check if we're at root fiber
-            if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
                 // At root fiber with non-error signal: no parent to catch it
                 set_error(
                     &mut self.fiber,
@@ -503,7 +504,7 @@ impl VM {
                 None
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits == SIG_ERROR {
+                if result_bits.contains(SIG_ERROR) {
                     self.fiber.stack.push(Value::NIL);
                     None
                 } else {
@@ -526,7 +527,7 @@ impl VM {
         let (result_bits, result_value) = self.do_fiber_cancel(&handle, fiber_value);
 
         let mask = handle.with(|fiber| fiber.mask);
-        let caught = result_bits == SIG_OK || (mask & result_bits != 0);
+        let caught = result_bits.is_ok() || mask.contains(result_bits);
 
         // Cancelled fibers are always terminal regardless of mask
         handle.with_mut(|f| f.status = FiberStatus::Error);
@@ -537,7 +538,7 @@ impl VM {
             SIG_OK
         } else {
             // Check if we're at root fiber
-            if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
                 // At root fiber with non-error signal: no parent to catch it
                 set_error(
                     &mut self.fiber,
@@ -584,17 +585,17 @@ impl VM {
             handle.with_mut(|f| f.status = FiberStatus::Dead);
         }
 
-        let caught = result_bits == SIG_OK || (mask & result_bits != 0);
+        let caught = result_bits.is_ok() || mask.contains(result_bits);
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;
             result_value.to_bits()
         } else {
-            if result_bits == SIG_ERROR {
+            if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
-            if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
                 set_error(
                     &mut self.fiber,
                     "error",
@@ -603,7 +604,7 @@ impl VM {
                 TAG_NIL
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits == SIG_ERROR {
+                if result_bits.contains(SIG_ERROR) {
                     TAG_NIL
                 } else {
                     // Uncaught non-error signal (yield, etc.) — side-exit
@@ -638,7 +639,7 @@ impl VM {
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
-        if child_bits == SIG_ERROR {
+        if child_bits.contains(SIG_ERROR) {
             TAG_NIL
         } else if self.current_fiber_handle.is_none() {
             set_error(
@@ -668,7 +669,7 @@ impl VM {
         let (result_bits, result_value) = self.do_fiber_cancel(&handle, fiber_value);
 
         let mask = handle.with(|fiber| fiber.mask);
-        let caught = result_bits == SIG_OK || (mask & result_bits != 0);
+        let caught = result_bits.is_ok() || mask.contains(result_bits);
 
         handle.with_mut(|f| f.status = FiberStatus::Error);
 
@@ -676,7 +677,7 @@ impl VM {
             self.fiber.child = None;
             self.fiber.child_value = None;
             result_value.to_bits()
-        } else if self.current_fiber_handle.is_none() && result_bits != SIG_ERROR {
+        } else if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
             set_error(
                 &mut self.fiber,
                 "error",
@@ -685,7 +686,7 @@ impl VM {
             TAG_NIL
         } else {
             self.fiber.signal = Some((result_bits, result_value));
-            if result_bits == SIG_ERROR {
+            if result_bits.contains(SIG_ERROR) {
                 TAG_NIL
             } else {
                 YIELD_SENTINEL

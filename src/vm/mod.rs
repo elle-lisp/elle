@@ -24,7 +24,7 @@ use crate::compiler::bytecode::Bytecode;
 use crate::io::backend::SyncBackend;
 use crate::io::request::IoRequest;
 use crate::symbol::SymbolTable;
-use crate::value::{error_val, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::{error_val, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_YIELD};
 use std::rc::Rc;
 
 impl VM {
@@ -91,25 +91,21 @@ impl VM {
                 current_env = tail.env;
                 current_location_map = tail.location_map;
             } else {
-                return match bits {
-                    SIG_OK | SIG_HALT => {
-                        let (_, value) = self.fiber.signal.take().unwrap();
-                        Ok(value)
-                    }
-                    SIG_YIELD => Err("Unexpected yield outside coroutine context".to_string()),
-                    SIG_IO => {
-                        self.fiber.signal.take();
-                        Err("Unexpected SIG_IO outside scheduler context".to_string())
-                    }
-                    SIG_ERROR => {
-                        // Extract the error from fiber.signal
-                        let (_, err_value) =
-                            self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-                        Err(self.format_error_with_location(err_value))
-                    }
-                    _ => {
-                        panic!("VM bug: Unexpected signal: {}", bits);
-                    }
+                return if bits.is_ok() || bits == SIG_HALT {
+                    let (_, value) = self.fiber.signal.take().unwrap();
+                    Ok(value)
+                } else if bits.contains(SIG_IO) {
+                    self.fiber.signal.take();
+                    Err("Unexpected SIG_IO outside scheduler context".to_string())
+                } else if bits.contains(SIG_YIELD) {
+                    Err("Unexpected yield outside coroutine context".to_string())
+                } else if bits.contains(SIG_ERROR) {
+                    // Extract the error from fiber.signal
+                    let (_, err_value) =
+                        self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
+                    Err(self.format_error_with_location(err_value))
+                } else {
+                    panic!("VM bug: Unexpected signal: {}", bits);
                 };
             }
         }
@@ -178,44 +174,37 @@ impl VM {
                 continue;
             }
 
-            match bits {
-                SIG_OK | SIG_HALT => {
-                    let (_, value) = self.fiber.signal.take().unwrap();
-                    return Ok(value);
-                }
-                SIG_IO => {
-                    // Extract the IoRequest from the signal, execute it
-                    // with the backend, push the result, and resume.
-                    let (_, request_val) = self.fiber.signal.take().unwrap();
-                    let backend = backend.get_or_insert_with(SyncBackend::new);
-                    match request_val.as_external::<IoRequest>() {
-                        Some(req) => {
-                            let (result_bits, result_val) = backend.execute(req);
-                            if result_bits == SIG_ERROR {
-                                return Err(self.format_error_with_location(result_val));
-                            }
-                            self.fiber.stack.push(result_val);
+            if bits.is_ok() || bits == SIG_HALT {
+                let (_, value) = self.fiber.signal.take().unwrap();
+                return Ok(value);
+            } else if bits.contains(SIG_IO) {
+                // Extract the IoRequest from the signal, execute it
+                // with the backend, push the result, and resume.
+                let (_, request_val) = self.fiber.signal.take().unwrap();
+                let backend = backend.get_or_insert_with(SyncBackend::new);
+                match request_val.as_external::<IoRequest>() {
+                    Some(req) => {
+                        let (result_bits, result_val) = backend.execute(req);
+                        if result_bits.contains(SIG_ERROR) {
+                            return Err(self.format_error_with_location(result_val));
                         }
-                        None => {
-                            return Err(format!(
-                                "SIG_IO with non-IoRequest value: {}",
-                                request_val.type_name()
-                            ));
-                        }
+                        self.fiber.stack.push(result_val);
                     }
-                    current_ip = ip;
+                    None => {
+                        return Err(format!(
+                            "SIG_IO with non-IoRequest value: {}",
+                            request_val.type_name()
+                        ));
+                    }
                 }
-                SIG_YIELD => {
-                    return Err("Unexpected yield outside coroutine context".to_string());
-                }
-                SIG_ERROR => {
-                    let (_, err_value) =
-                        self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-                    return Err(self.format_error_with_location(err_value));
-                }
-                _ => {
-                    panic!("VM bug: Unexpected signal: {}", bits);
-                }
+                current_ip = ip;
+            } else if bits.contains(SIG_YIELD) {
+                return Err("Unexpected yield outside coroutine context".to_string());
+            } else if bits.contains(SIG_ERROR) {
+                let (_, err_value) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
+                return Err(self.format_error_with_location(err_value));
+            } else {
+                panic!("VM bug: Unexpected signal: {}", bits);
             }
         }
     }

@@ -142,19 +142,97 @@ pub struct SuspendedFrame {
 }
 
 /// Signal type bits. The first 16 are compiler-reserved.
-pub type SignalBits = u32;
+///
+/// Newtype over `u32` providing named methods (`contains`, `is_ok`, `bits`)
+/// and bitwise operator impls. The inner field is `pub` for `const` contexts
+/// where trait methods cannot be called.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SignalBits(pub u32);
 
-pub const SIG_OK: SignalBits = 0; // no bits set = normal return
-pub const SIG_ERROR: SignalBits = 1 << 0; // exception / panic
-pub const SIG_YIELD: SignalBits = 1 << 1; // cooperative suspension
-pub const SIG_DEBUG: SignalBits = 1 << 2; // breakpoint / trace
-pub const SIG_RESUME: SignalBits = 1 << 3; // fiber resumption (VM-internal)
-pub const SIG_FFI: SignalBits = 1 << 4; // calls foreign code
-pub const SIG_PROPAGATE: SignalBits = 1 << 5; // propagate caught signal (VM-internal)
-pub const SIG_CANCEL: SignalBits = 1 << 6; // inject error into fiber (VM-internal)
-pub const SIG_QUERY: SignalBits = 1 << 7; // VM state query (VM-internal)
-pub const SIG_HALT: SignalBits = 1 << 8; // graceful VM termination
-pub const SIG_IO: SignalBits = 1 << 9; // I/O request to scheduler
+impl SignalBits {
+    pub const fn new(bits: u32) -> Self {
+        SignalBits(bits)
+    }
+    pub fn is_ok(self) -> bool {
+        self.0 == 0
+    }
+    pub fn contains(self, other: SignalBits) -> bool {
+        self.0 & other.0 != 0
+    }
+    pub fn bits(self) -> u32 {
+        self.0
+    }
+}
+
+impl std::ops::BitOr for SignalBits {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        SignalBits(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitAnd for SignalBits {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        SignalBits(self.0 & rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for SignalBits {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl std::ops::BitAndAssign for SignalBits {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
+
+impl std::ops::Not for SignalBits {
+    type Output = Self;
+    fn not(self) -> Self {
+        SignalBits(!self.0)
+    }
+}
+
+impl std::fmt::Debug for SignalBits {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SignalBits(0x{:x})", self.0)
+    }
+}
+
+impl std::fmt::Display for SignalBits {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{:x}", self.0)
+    }
+}
+
+impl From<u32> for SignalBits {
+    fn from(v: u32) -> Self {
+        SignalBits(v)
+    }
+}
+
+impl From<SignalBits> for u32 {
+    fn from(v: SignalBits) -> u32 {
+        v.0
+    }
+}
+
+pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
+pub const SIG_ERROR: SignalBits = SignalBits::new(1 << 0); // exception / panic
+pub const SIG_YIELD: SignalBits = SignalBits::new(1 << 1); // cooperative suspension
+pub const SIG_DEBUG: SignalBits = SignalBits::new(1 << 2); // breakpoint / trace
+pub const SIG_RESUME: SignalBits = SignalBits::new(1 << 3); // fiber resumption (VM-internal)
+pub const SIG_FFI: SignalBits = SignalBits::new(1 << 4); // calls foreign code
+pub const SIG_PROPAGATE: SignalBits = SignalBits::new(1 << 5); // propagate caught signal (VM-internal)
+pub const SIG_CANCEL: SignalBits = SignalBits::new(SIG_ERROR.0 | SIG_TERMINAL.0); // inject error into fiber (VM-internal)
+pub const SIG_QUERY: SignalBits = SignalBits::new(1 << 7); // VM state query (VM-internal)
+pub const SIG_HALT: SignalBits = SignalBits::new(1 << 8); // graceful VM termination
+pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to scheduler
+pub const SIG_TERMINAL: SignalBits = SignalBits::new(1 << 10); // terminal signal (non-resumable)
 
 // Signal bit partitioning:
 //
@@ -361,7 +439,7 @@ mod tests {
 
     #[test]
     fn test_fiber_status_transitions() {
-        let mut fiber = Fiber::new(test_closure(), 0);
+        let mut fiber = Fiber::new(test_closure(), SIG_OK);
         assert_eq!(fiber.status, FiberStatus::New);
 
         fiber.status = FiberStatus::Alive;
@@ -378,7 +456,7 @@ mod tests {
         assert_eq!(fiber.signal, Some((SIG_OK, Value::int(99))));
 
         // Reset and test error path
-        let mut fiber2 = Fiber::new(test_closure(), 0);
+        let mut fiber2 = Fiber::new(test_closure(), SIG_OK);
         fiber2.status = FiberStatus::Error;
         fiber2.signal = Some((SIG_ERROR, Value::string("boom")));
         assert_eq!(fiber2.status, FiberStatus::Error);
@@ -386,7 +464,7 @@ mod tests {
 
     #[test]
     fn test_fiber_stack_operations() {
-        let mut fiber = Fiber::new(test_closure(), 0);
+        let mut fiber = Fiber::new(test_closure(), SIG_OK);
         fiber.stack.push(Value::int(1));
         fiber.stack.push(Value::int(2));
         fiber.stack.push(Value::int(3));
@@ -398,7 +476,7 @@ mod tests {
     #[test]
     fn test_fiber_frame_operations() {
         let closure = test_closure();
-        let mut fiber = Fiber::new(closure.clone(), 0);
+        let mut fiber = Fiber::new(closure.clone(), SIG_OK);
 
         let frame = Frame {
             closure: closure.clone(),
@@ -423,7 +501,7 @@ mod tests {
 
     #[test]
     fn test_fiber_parent_child() {
-        let parent_handle = FiberHandle::new(Fiber::new(test_closure(), 0));
+        let parent_handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
         let child_handle = FiberHandle::new(Fiber::new(test_closure(), SIG_ERROR));
 
         // Wire up parent/child
@@ -478,7 +556,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "fiber already taken")]
     fn test_fiber_handle_double_take_panics() {
-        let handle = FiberHandle::new(Fiber::new(test_closure(), 0));
+        let handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
         let _f1 = handle.take();
         let _f2 = handle.take(); // should panic
     }
@@ -486,29 +564,29 @@ mod tests {
     #[test]
     #[should_panic(expected = "slot already occupied")]
     fn test_fiber_handle_double_put_panics() {
-        let handle = FiberHandle::new(Fiber::new(test_closure(), 0));
-        let fiber = Fiber::new(test_closure(), 0);
+        let handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
+        let fiber = Fiber::new(test_closure(), SIG_OK);
         handle.put(fiber); // should panic — slot already occupied
     }
 
     #[test]
     fn test_signal_bits() {
-        assert_eq!(SIG_OK, 0);
-        assert_eq!(SIG_ERROR, 1);
-        assert_eq!(SIG_YIELD, 2);
-        assert_eq!(SIG_DEBUG, 4);
-        assert_eq!(SIG_RESUME, 8);
+        assert_eq!(SIG_OK.bits(), 0);
+        assert_eq!(SIG_ERROR.bits(), 1);
+        assert_eq!(SIG_YIELD.bits(), 2);
+        assert_eq!(SIG_DEBUG.bits(), 4);
+        assert_eq!(SIG_RESUME.bits(), 8);
 
         // Mask catches error and yield but not debug
         let mask = SIG_ERROR | SIG_YIELD;
-        assert_ne!(mask & SIG_ERROR, 0);
-        assert_ne!(mask & SIG_YIELD, 0);
-        assert_eq!(mask & SIG_DEBUG, 0);
-        assert_eq!(mask & SIG_RESUME, 0);
+        assert!(mask.contains(SIG_ERROR));
+        assert!(mask.contains(SIG_YIELD));
+        assert!(!mask.contains(SIG_DEBUG));
+        assert!(!mask.contains(SIG_RESUME));
 
         // User-defined signals in upper 16 bits
-        let user_sig: SignalBits = 1 << 16;
-        assert_eq!(user_sig & mask, 0);
+        let user_sig = SignalBits::new(1 << 16);
+        assert!(!user_sig.contains(mask));
     }
 
     #[test]
@@ -522,7 +600,7 @@ mod tests {
 
     #[test]
     fn test_fiber_debug_format() {
-        let fiber = Fiber::new(test_closure(), 0);
+        let fiber = Fiber::new(test_closure(), SIG_OK);
         let debug = format!("{:?}", fiber);
         assert!(debug.contains("fiber:new"));
         assert!(debug.contains("frames=0"));
@@ -532,18 +610,18 @@ mod tests {
     #[test]
     fn test_fiber_zero_mask() {
         // A fiber with mask=0 propagates all signals
-        let fiber = Fiber::new(test_closure(), 0);
-        assert_eq!(fiber.mask & SIG_ERROR, 0);
-        assert_eq!(fiber.mask & SIG_YIELD, 0);
+        let fiber = Fiber::new(test_closure(), SIG_OK);
+        assert!(!fiber.mask.contains(SIG_ERROR));
+        assert!(!fiber.mask.contains(SIG_YIELD));
     }
 
     #[test]
     fn test_fiber_full_mask() {
         // A fiber with all bits set catches everything
-        let fiber = Fiber::new(test_closure(), u32::MAX);
-        assert_ne!(fiber.mask & SIG_ERROR, 0);
-        assert_ne!(fiber.mask & SIG_YIELD, 0);
-        assert_ne!(fiber.mask & SIG_DEBUG, 0);
-        assert_ne!(fiber.mask & SIG_RESUME, 0);
+        let fiber = Fiber::new(test_closure(), SignalBits::new(u32::MAX));
+        assert!(fiber.mask.contains(SIG_ERROR));
+        assert!(fiber.mask.contains(SIG_YIELD));
+        assert!(fiber.mask.contains(SIG_DEBUG));
+        assert!(fiber.mask.contains(SIG_RESUME));
     }
 }
