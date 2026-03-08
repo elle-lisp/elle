@@ -626,6 +626,17 @@
   (assert-eq (coro/resume co 20) 44 "multiple yields intermediate: (1+10+3)+(4+20+6)=44"))
 
 # ============================================================================
+# Error tests (from integration/coroutines.rs)
+# ============================================================================
+
+# resume_done_coroutine_fails
+(assert-err (fn ()
+  (let ((co (make-coroutine (fn () 42))))
+    (coro/resume co)
+    (coro/resume co)))
+  "resuming done coroutine fails")
+
+# ============================================================================
 # Runtime effect checks (Pure closure warnings)
 # ============================================================================
 
@@ -685,3 +696,14 @@
   (assert-eq (coro/resume co) 2 "deep call chain: second")
   (assert-eq (coro/resume co) 3 "deep call chain: third")
   (assert-eq (coro/resume co) "done" "deep call chain: final"))
+
+# ============================================================================
+# Error tests (from integration/coroutines.rs)
+# ============================================================================
+
+# resume_done_coroutine_fails
+(assert-err (fn ()
+  (let ((co (make-coroutine (fn () 42))))
+    (coro/resume co)
+    (coro/resume co)))
+  "resuming done coroutine fails")

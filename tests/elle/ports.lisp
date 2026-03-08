@@ -108,3 +108,25 @@
   (assert-true (port? p) "append port is a port")
   (assert-true (port/open? p) "append port is open")
   (port/close p))
+
+# ============================================================================
+# Display and type tests (from integration/ports.rs)
+# ============================================================================
+
+# port_open_file_display
+(let ((p (port/open "/tmp/elle-test-port-display-474" :write)))
+  (let ((s (string p)))
+    (assert-true (string-starts-with? s "#<port:file") "file port display starts with #<port:file")
+    (assert-true (string-contains? s ":write") "file port display contains :write")
+    (assert-true (string-contains? s ":text") "file port display contains :text"))
+  (port/close p))
+
+# port_open_bytes_display
+(let ((p (port/open-bytes "/tmp/elle-test-port-bytes-474" :write)))
+  (let ((s (string p)))
+    (assert-true (string-starts-with? s "#<port:file") "bytes port display starts with #<port:file")
+    (assert-true (string-contains? s ":binary") "bytes port display contains :binary"))
+  (port/close p))
+
+# port_type_of
+(assert-eq (type (port/stdin)) :port "type-of port is :port")

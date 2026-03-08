@@ -25,3 +25,11 @@
 (assert-true
   (nil? (get (environment) :__nonexistent_symbol_42__))
   "environment excludes undefined")
+
+# ============================================================================
+# Error tests (from integration/environment.rs)
+# ============================================================================
+
+# environment_arity_error
+(assert-err (fn () (eval '(environment 1)))
+  "environment rejects arguments")
