@@ -102,6 +102,12 @@ Analyzer (hir)
    alternatives. Previously, or-patterns split on `Symbol("|")` — that is no
    longer valid.
 
+9. **Set literals are desugared during analysis.** `SyntaxKind::Set` and
+   `SyntaxKind::SetMut` pass through expansion unchanged. The Analyzer
+   desugars them to `(set ;elems)` and `(mutable-set ;elems)` calls,
+   respectively. This keeps the Expander simple and defers collection
+   construction to the analysis phase.
+
 ## Hygiene
 
 Each macro expansion creates a fresh `ScopeId`. Identifiers introduced by

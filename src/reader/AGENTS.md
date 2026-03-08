@@ -115,9 +115,12 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
    token, not three. The Analyzer desugars qualified symbols to nested
    `get` calls during analysis.
 
-6. **`|` is a delimiter.** It cannot appear in symbol names. Inside lists,
-   `|` produces `SyntaxKind::Pipe` marker nodes for or-pattern splitting.
-   At the top level, `|...|` starts a set literal.
+6. **`|` is a delimiter for set literals.** `|1 2 3|` is lexed as `Pipe`, elements,
+   `Pipe` (for immutable sets). `@|1 2 3|` is lexed as `AtPipe`, elements, `Pipe`
+   (for mutable sets). Inside lists, `|` marks or-pattern separators and is
+   represented as `SyntaxKind::Pipe` in the syntax tree. The parser distinguishes
+   context: in expression position, `|...|` is a set literal; inside a list,
+   `|` is an or-pattern marker. It cannot appear in symbol names.
 
 7. **`:@name` keywords are valid.** The lexer recognizes `:@` as a keyword
    prefix variant. The `@` is consumed and prepended to the keyword name.
