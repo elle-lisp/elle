@@ -162,7 +162,7 @@
               (begin
                 (let ((,var (first ,g-cur)))
                   ,;body)
-                (set ,g-cur (rest ,g-cur))))))
+                (assign ,g-cur (rest ,g-cur))))))
          ((or (array? ,g-iter) (tuple? ,g-iter) (bytes? ,g-iter) (blob? ,g-iter))
           (let* ((,g-len (length ,g-iter))
                  (,g-idx 0))
@@ -170,7 +170,7 @@
               (begin
                 (let ((,var (get ,g-iter ,g-idx)))
                   ,;body)
-                (set ,g-idx (+ ,g-idx 1))))))
+                (assign ,g-idx (+ ,g-idx 1))))))
          ((or (string? ,g-iter) (buffer? ,g-iter))
           (let* ((,g-len (length ,g-iter))
                  (,g-idx 0))
@@ -178,7 +178,7 @@
               (begin
                 (let ((,var (string/char-at ,g-iter ,g-idx)))
                   ,;body)
-                (set ,g-idx (+ ,g-idx 1))))))
+                (assign ,g-idx (+ ,g-idx 1))))))
          (true (error [:type-error "each: not a sequence"]))))))
 
 ## case - equality dispatch (flat pairs)

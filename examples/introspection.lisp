@@ -154,7 +154,7 @@
   (var t0 (clock/monotonic))
   (var i 0)
   (while (< i n)
-    (begin (thunk) (set i (+ i 1))))
+    (begin (thunk) (assign i (+ i 1))))
   (var elapsed (- (clock/monotonic) t0))
   (var ns-per (/ (* elapsed 1000000000) n))
   (display "  ") (display label) (display ": ")

@@ -130,13 +130,13 @@
              [pt (offset-point seg t tapered-dist)])
         (if first-point
           (begin
-            (set path-str (-> "M " (append (coord-str pt))))
-            (set first-point false))
-          (set path-str (-> path-str
+            (assign path-str (-> "M " (append (coord-str pt))))
+            (assign first-point false))
+          (assign path-str (-> path-str
                             (append " L ")
                             (append (coord-str pt))))))
-      (set i (+ i 1)))
-    (set seg-idx (+ seg-idx 1)))
+      (assign i (+ i 1)))
+    (assign seg-idx (+ seg-idx 1)))
   path-str)
 
 
@@ -246,23 +246,23 @@
            [path-data (fiber-path-data segments dist samples-per-segment)]
            [svg (svg-path path-data color opacity fiber-width)])
       (push paths svg))
-    (set i (+ i 1)))
+    (assign i (+ i 1)))
   paths)
 
 (defn build-svg []
   "Assemble the complete SVG document."
   (var doc "")
-  (set doc (append doc "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\">\n"))
+  (assign doc (append doc "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\">\n"))
 
   # Three strokes — no layering needed, draw order doesn't matter
   (each path in (render-fibers diagonal)
-    (set doc (-> doc (append path) (append "\n"))))
+    (assign doc (-> doc (append path) (append "\n"))))
   (each path in (render-fibers arm)
-    (set doc (-> doc (append path) (append "\n"))))
+    (assign doc (-> doc (append path) (append "\n"))))
   (each path in (render-fibers base)
-    (set doc (-> doc (append path) (append "\n"))))
+    (assign doc (-> doc (append path) (append "\n"))))
 
-  (set doc (append doc "</svg>\n"))
+  (assign doc (append doc "</svg>\n"))
   doc)
 
 

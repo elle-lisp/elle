@@ -141,7 +141,7 @@
 # This is automatic — no gensym needed.
 
 (defmacro my-swap (a b)
-  `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+  `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
 
 (let ([tmp 100] [x 1] [y 2])
   (my-swap x y)

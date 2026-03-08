@@ -158,20 +158,20 @@
 # Count total tags across all contacts
 (var total-tags 0)
 (each c in all-contacts
-  (set total-tags (+ total-tags (length (get c :tags)))))
+  (assign total-tags (+ total-tags (length (get c :tags)))))
 (display "  total tags across all contacts: ") (print total-tags)
 (assert-true (> total-tags 0) "each: summed tag counts")
 
 # each over a tuple (alice's tags)
 (var tag-count 0)
 (each t in (get alice :tags)
-  (set tag-count (+ tag-count 1)))
+  (assign tag-count (+ tag-count 1)))
 (assert-eq tag-count 2 "each over tuple")
 
 # each over a string (by grapheme cluster)
 (var char-count 0)
 (each ch in "hello"
-  (set char-count (+ char-count 1)))
+  (assign char-count (+ char-count 1)))
 (assert-eq char-count 5 "each over string")
 
 
@@ -184,7 +184,7 @@
   (var found false)
   (each t in (get contact :tags)
     (when (= t tag)
-      (set found true)))
+      (assign found true)))
   found)
 
 (assert-true (has-tag? alice :lead) "alice is a lead")
@@ -215,7 +215,7 @@
   "Format a tag tuple as [dev, lead]."
   (var parts (list))
   (each t in tags
-    (set parts (append parts (list (keyword->string t)))))
+    (assign parts (append parts (list (keyword->string t)))))
   (-> "[" (append (string/join parts ", ")) (append "]")))
 
 (defn format-contact [{:name name :email email :tags tags}]

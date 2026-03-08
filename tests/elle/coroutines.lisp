@@ -42,7 +42,7 @@
 (begin
   (def gen2 (fn []
     (let ([acc 0])
-      (set acc (+ acc (yield acc)))
+      (assign acc (+ acc (yield acc)))
       acc)))
   (var co2 (make-coroutine gen2))
   (coro/resume co2)
@@ -52,8 +52,8 @@
 (begin
   (def gen2b (fn []
     (let ([acc 0])
-      (set acc (+ acc (yield acc)))
-      (set acc (+ acc (yield acc)))
+      (assign acc (+ acc (yield acc)))
+      (assign acc (+ acc (yield acc)))
       acc)))
   (var co2b (make-coroutine gen2b))
   (coro/resume co2b)
@@ -89,7 +89,7 @@
       (while (< i 3)
         (begin
           (yield i)
-          (set i (+ i 1))))
+          (assign i (+ i 1))))
       i)))
   (var co4 (make-coroutine gen4))
   (assert-eq (coro/resume co4) 0 "yield in loop: i=0")
@@ -103,7 +103,7 @@
       (while (< i 5)
         (begin
           (yield i)
-          (set i (+ i 1))))
+          (assign i (+ i 1))))
       i)))
   (var co4b (make-coroutine gen4b))
   (assert-eq (coro/resume co4b) 0 "yield in loop 5: i=0")

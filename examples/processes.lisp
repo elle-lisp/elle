@@ -99,14 +99,14 @@
           (begin
             (if (= (get a-links i) b)
               (begin (remove a-links i))
-              (set i (+ i 1)))))
+              (assign i (+ i 1)))))
         # Remove a from b's links
-        (set i 0)
+        (assign i 0)
         (while (< i (length b-links))
           (begin
             (if (= (get b-links i) a)
               (begin (remove b-links i))
-              (set i (+ i 1))))))))
+              (assign i (+ i 1))))))))
 
     # Mark a process as dead with a reason, notify links
     (var process-exit (fn (pid reason)
@@ -126,7 +126,7 @@
                   (put resumes pid msg)
                   (push ready pid)))
               (push still-waiting pid))))
-        (set waiting still-waiting))))
+        (assign waiting still-waiting))))
 
     # Interpret a yielded command
     (var handle-cmd (fn (pid cmd)
@@ -221,7 +221,7 @@
             (error [:deadlock "all processes waiting, no messages pending"]))
 
           (let ([batch ready])
-            (set ready @[])
+            (assign ready @[])
             (each pid in batch
               (run-one pid)))))))
 
@@ -281,14 +281,14 @@
         (begin
           (let ([id i])
             (spawn (fn () (send me id))))
-          (set i (+ i 1))))
+          (assign i (+ i 1))))
 
       (var total 0)
-      (set i 0)
+      (assign i 0)
       (while (< i 5)
         (begin
-          (set total (+ total (recv)))
-          (set i (+ i 1))))
+          (assign total (+ total (recv)))
+          (assign i (+ i 1))))
 
       (display "  fan-in sum of 5 worker ids: ") (print total)
       (assert-eq total 10 "fan-in: 0+1+2+3+4 = 10")))))
