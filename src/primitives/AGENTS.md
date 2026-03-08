@@ -99,7 +99,9 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `structs.rs` | `struct` |
 | `fileio.rs` | `slurp`, `spit` |
 | `path.rs` | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
-| `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?` |
+| `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options` |
+| `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from`, `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
+| `kwarg.rs` | `extract_keyword_timeout` helper function |
 | `display.rs` | `print`, `println`, `display`, `newline` |
 | `types.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `tuple?`, `table?`, `struct?`, `buffer?`, `box?`, `bytes?`, `blob?`, `set?`, `type-of` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
@@ -204,6 +206,60 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 3. **Type safety.** Format specs are validated against value types (e.g., `d` requires integer, `f` requires number).
 4. **Brace escaping.** `{{` and `}}` are unescaped only in literal segments, not inside placeholders.
 
+## Network Primitives
+
+**Location:** `src/primitives/net.rs`
+
+**TCP primitives:**
+- `tcp/listen addr port` — synchronous, returns listener port. Binds to address:port with `SO_REUSEADDR`, listens with backlog 128.
+- `tcp/accept listener` or `tcp/accept listener :timeout ms` — yields `SIG_IO`, accepts incoming connection, returns stream port.
+- `tcp/connect addr port` or `tcp/connect addr port :timeout ms` — yields `SIG_IO`, connects to address:port, returns stream port.
+- `tcp/shutdown port how` — yields `SIG_IO`, gracefully shuts down stream. `how` is keyword `:read`, `:write`, or `:read-write`.
+
+**UDP primitives:**
+- `udp/bind addr port` — synchronous, returns UDP socket port. Binds to address:port with `SO_REUSEADDR`.
+- `udp/send-to socket data addr port` or `udp/send-to socket data addr port :timeout ms` — yields `SIG_IO`, sends datagram, returns bytes sent.
+- `udp/recv-from socket count` or `udp/recv-from socket count :timeout ms` — yields `SIG_IO`, receives datagram, returns struct `{:data bytes :addr string :port int}`.
+
+**Unix domain socket primitives:**
+- `unix/listen path` — synchronous, returns listener port. Creates Unix socket at path (or abstract socket if path starts with `@`). Unlinks existing file before bind.
+- `unix/accept listener` or `unix/accept listener :timeout ms` — yields `SIG_IO`, accepts incoming connection, returns stream port.
+- `unix/connect path` or `unix/connect path :timeout ms` — yields `SIG_IO`, connects to Unix socket at path, returns stream port.
+- `unix/shutdown port how` — yields `SIG_IO`, gracefully shuts down stream. `how` is keyword `:read`, `:write`, or `:read-write`.
+
+**Timeout support:** All yielding network primitives accept optional `:timeout ms` keyword argument. Timeout is resolved at scheduler level: per-call timeout overrides port-level timeout (set via `port/set-options`).
+
+## Keyword Argument Helper
+
+**Location:** `src/primitives/kwarg.rs`
+
+**Function:** `extract_keyword_timeout(args: &[Value], start: usize, prim_name: &str) -> Result<Option<Duration>, (SignalBits, Value)>`
+
+Scans args starting at index `start` for keyword-value pairs. Currently recognizes `:timeout ms` where `ms` is a non-negative integer. Returns `Ok(None)` if `:timeout` is absent, `Ok(Some(duration))` if present, or `Err(...)` on bad keyword, missing value, or bad type.
+
+Used by network primitives and stream primitives to parse optional timeout arguments.
+
+## Port Options Primitive
+
+**Location:** `src/primitives/ports.rs`
+
+**Primitive:** `port/set-options port :timeout ms` (or `:timeout nil` to clear)
+
+Sets port-level options. Currently supports `:timeout ms` (non-negative integer in milliseconds, or nil to clear). Stored as `Cell<Option<u64>>` on Port struct. Unknown keywords signal error. Odd trailing args signal error.
+
+## Stream Primitive Timeout Support
+
+**Location:** `src/primitives/stream.rs`
+
+All 5 stream primitives now accept optional `:timeout ms` keyword argument:
+- `stream/read-line port` or `stream/read-line port :timeout ms`
+- `stream/read port count` or `stream/read port count :timeout ms`
+- `stream/read-all port` or `stream/read-all port :timeout ms`
+- `stream/write port data` or `stream/write port data :timeout ms`
+- `stream/flush port` or `stream/flush port :timeout ms`
+
+Arity changed from `Exact(N)` to `AtLeast(N)` to allow keyword args. Timeout is extracted via `extract_keyword_timeout` and passed to `IoRequest::with_timeout()`.
+
 ## Files
 
 | File | Lines | Content |
@@ -213,4 +269,6 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 | `module_init.rs` | ~170 | `init_stdlib`, module initialization |
 | `chan.rs` | varies | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
 | `format.rs` | ~967 | `string/format` with positional/named modes, format specs, brace escaping |
+| `net.rs` | ~600 | 11 network primitives (TCP, UDP, Unix), PRIMITIVES array, tests |
+| `kwarg.rs` | ~100 | `extract_keyword_timeout` helper, tests |
 | (others) | varies | Individual primitive implementations |

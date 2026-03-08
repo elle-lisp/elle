@@ -8,6 +8,7 @@ use crate::effects::Effect;
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::Port;
 use crate::primitives::def::PrimitiveDef;
+use crate::primitives::kwarg::extract_keyword_timeout;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -26,14 +27,17 @@ fn extract_port_value(value: &Value, prim_name: &str) -> Result<Value, (SignalBi
     Ok(*value)
 }
 
-/// (stream/read-line port) → string | nil
+/// (stream/read-line port [:timeout ms]) → string | nil
 fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
+    if args.is_empty() {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("stream/read-line: expected 1 argument, got {}", args.len()),
+                format!(
+                    "stream/read-line: expected at least 1 argument, got {}",
+                    args.len()
+                ),
             ),
         );
     }
@@ -41,17 +45,27 @@ fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::ReadLine, port))
+    let timeout = match extract_keyword_timeout(args, 1, "stream/read-line") {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::with_timeout(IoOp::ReadLine, port, timeout),
+    )
 }
 
-/// (stream/read port n) → bytes | nil
+/// (stream/read port n [:timeout ms]) → bytes | nil
 fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
+    if args.len() < 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("stream/read: expected 2 arguments, got {}", args.len()),
+                format!(
+                    "stream/read: expected at least 2 arguments, got {}",
+                    args.len()
+                ),
             ),
         );
     }
@@ -83,20 +97,27 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
+    let timeout = match extract_keyword_timeout(args, 2, "stream/read") {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::new(IoOp::Read { count }, port),
+        IoRequest::with_timeout(IoOp::Read { count }, port, timeout),
     )
 }
 
-/// (stream/read-all port) → string | bytes
+/// (stream/read-all port [:timeout ms]) → string | bytes
 fn prim_stream_read_all(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
+    if args.is_empty() {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("stream/read-all: expected 1 argument, got {}", args.len()),
+                format!(
+                    "stream/read-all: expected at least 1 argument, got {}",
+                    args.len()
+                ),
             ),
         );
     }
@@ -104,17 +125,27 @@ fn prim_stream_read_all(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::ReadAll, port))
+    let timeout = match extract_keyword_timeout(args, 1, "stream/read-all") {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::with_timeout(IoOp::ReadAll, port, timeout),
+    )
 }
 
-/// (stream/write port data) → int
+/// (stream/write port data [:timeout ms]) → int
 fn prim_stream_write(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
+    if args.len() < 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("stream/write: expected 2 arguments, got {}", args.len()),
+                format!(
+                    "stream/write: expected at least 2 arguments, got {}",
+                    args.len()
+                ),
             ),
         );
     }
@@ -122,20 +153,27 @@ fn prim_stream_write(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
+    let timeout = match extract_keyword_timeout(args, 2, "stream/write") {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::new(IoOp::Write { data: args[1] }, port),
+        IoRequest::with_timeout(IoOp::Write { data: args[1] }, port, timeout),
     )
 }
 
-/// (stream/flush port) → nil
+/// (stream/flush port [:timeout ms]) → nil
 fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
+    if args.is_empty() {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("stream/flush: expected 1 argument, got {}", args.len()),
+                format!(
+                    "stream/flush: expected at least 1 argument, got {}",
+                    args.len()
+                ),
             ),
         );
     }
@@ -143,7 +181,14 @@ fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::Flush, port))
+    let timeout = match extract_keyword_timeout(args, 1, "stream/flush") {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::with_timeout(IoOp::Flush, port, timeout),
+    )
 }
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[
@@ -151,7 +196,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "stream/read-line",
         func: prim_stream_read_line,
         effect: Effect::errors(),
-        arity: Arity::Exact(1),
+        arity: Arity::AtLeast(1),
         doc: "Read one line from port. Returns string or nil (EOF).",
         params: &["port"],
         category: "stream",
@@ -162,7 +207,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "stream/read",
         func: prim_stream_read,
         effect: Effect::errors(),
-        arity: Arity::Exact(2),
+        arity: Arity::AtLeast(2),
         doc: "Read up to n bytes from port. Returns bytes or nil (EOF).",
         params: &["port", "n"],
         category: "stream",
@@ -173,7 +218,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "stream/read-all",
         func: prim_stream_read_all,
         effect: Effect::errors(),
-        arity: Arity::Exact(1),
+        arity: Arity::AtLeast(1),
         doc: "Read everything remaining from port.",
         params: &["port"],
         category: "stream",
@@ -184,7 +229,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "stream/write",
         func: prim_stream_write,
         effect: Effect::errors(),
-        arity: Arity::Exact(2),
+        arity: Arity::AtLeast(2),
         doc: "Write data to port. Returns bytes written.",
         params: &["port", "data"],
         category: "stream",
@@ -195,7 +240,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "stream/flush",
         func: prim_stream_flush,
         effect: Effect::errors(),
-        arity: Arity::Exact(1),
+        arity: Arity::AtLeast(1),
         doc: "Flush port's write buffer.",
         params: &["port"],
         category: "stream",

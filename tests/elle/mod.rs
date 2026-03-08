@@ -284,3 +284,8 @@ fn regex() {
 fn compliance() {
     run_elle_script("compliance");
 }
+
+#[test]
+fn net() {
+    run_elle_script("net");
+}
