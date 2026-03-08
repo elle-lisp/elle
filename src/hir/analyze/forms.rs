@@ -178,7 +178,7 @@ impl<'a> Analyzer<'a> {
             // Set literal |...| - call set constructor primitive
             SyntaxKind::Set(items) => {
                 let mut args = Vec::new();
-                let mut effect = Effect::none();
+                let mut effect = Effect::inert();
                 for item in items {
                     if matches!(&item.kind, SyntaxKind::Splice(_))
                         || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
@@ -197,7 +197,7 @@ impl<'a> Analyzer<'a> {
                 }
                 let sym = self.symbols.intern("set");
                 let binding = Binding::new(sym, BindingScope::Global);
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::inert());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -212,7 +212,7 @@ impl<'a> Analyzer<'a> {
             // Mutable set literal @|...| - call mutable-set constructor primitive
             SyntaxKind::SetMut(items) => {
                 let mut args = Vec::new();
-                let mut effect = Effect::none();
+                let mut effect = Effect::inert();
                 for item in items {
                     if matches!(&item.kind, SyntaxKind::Splice(_))
                         || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
@@ -231,7 +231,7 @@ impl<'a> Analyzer<'a> {
                 }
                 let sym = self.symbols.intern("@set");
                 let binding = Binding::new(sym, BindingScope::Global);
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::inert());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
