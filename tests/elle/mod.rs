@@ -254,3 +254,13 @@ fn ordering() {
 fn slice() {
     run_elle_script("slice");
 }
+
+#[test]
+fn sets_syntax() {
+    run_elle_script("sets-syntax");
+}
+
+#[test]
+fn sets_values() {
+    run_elle_script("sets-values");
+}
