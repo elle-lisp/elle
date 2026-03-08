@@ -15,6 +15,13 @@
     (set *next-id* (+ *next-id* 1))
     @{:id id :data data :grad 0.0 :children @[] :local-grads @[]}))
 
+(defn make-op [data children local-grads]
+  "Create a Value node that is the result of an operation."
+  (let* ([id *next-id*])
+    (set *next-id* (+ *next-id* 1))
+    @{:id id :data data :grad 0.0
+      :children children :local-grads local-grads}))
+
 # Accessors
 (defn v-data [v] (get v :data))
 (defn v-grad [v] (get v :grad))
@@ -23,56 +30,30 @@
 # Arithmetic operations — each returns a new Value node
 
 (defn v+ [a b]
-  "Add two Value nodes."
-  (let* ([out (make-value (+ (v-data a) (v-data b)))])
-    (put out :children @[a b])
-    (put out :local-grads @[1.0 1.0])
-    out))
+  (make-op (+ (v-data a) (v-data b)) @[a b] @[1.0 1.0]))
 
 (defn v* [a b]
-  "Multiply two Value nodes."
-  (let* ([out (make-value (* (v-data a) (v-data b)))])
-    (put out :children @[a b])
-    (put out :local-grads @[(v-data b) (v-data a)])
-    out))
+  (make-op (* (v-data a) (v-data b)) @[a b] @[(v-data b) (v-data a)]))
 
-(defn v-neg [a]
-  "Negate a Value node."
-  (v* a (make-value -1.0)))
-
-(defn v- [a b]
-  "Subtract two Value nodes."
-  (v+ a (v-neg b)))
+(defn vneg [a]
+  (make-op (- (v-data a)) @[a] @[-1.0]))
 
 (defn vpow [a n]
-  "Raise Value node a to scalar power n (n is a plain number)."
-  (let* ([out (make-value (pow (v-data a) n))])
-    (put out :children @[a])
-    (put out :local-grads @[(* n (pow (v-data a) (- n 1.0)))])
-    out))
+  (make-op (pow (v-data a) n) @[a] @[(* n (pow (v-data a) (- n 1.0)))]))
 
 (defn vexp [a]
-  "e^a."
-  (let* ([ea (exp (v-data a))]
-         [out (make-value ea)])
-    (put out :children @[a])
-    (put out :local-grads @[ea])
-    out))
+  (let* ([ea (exp (v-data a))])
+    (make-op ea @[a] @[ea])))
 
 (defn vlog [a]
-  "ln(a)."
-  (let* ([out (make-value (log (v-data a)))])
-    (put out :children @[a])
-    (put out :local-grads @[(/ 1.0 (v-data a))])
-    out))
+  (make-op (log (v-data a)) @[a] @[(/ 1.0 (v-data a))]))
 
 (defn vrelu [a]
-  "ReLU(a)."
-  (let* ([d (v-data a)]
-         [out (make-value (if (> d 0.0) d 0.0))])
-    (put out :children @[a])
-    (put out :local-grads @[(if (> d 0.0) 1.0 0.0)])
-    out))
+  (let* ([d (v-data a)])
+    (make-op (if (> d 0.0) d 0.0) @[a] @[(if (> d 0.0) 1.0 0.0)])))
+
+(defn v- [a b] (v+ a (vneg b)))
+(defn v/ [a b] (v* a (vpow b -1.0)))
 
 # Scalar-Value mixed ops
 
@@ -84,44 +65,37 @@
   "Add scalar s to Value v."
   (v+ v (make-value s)))
 
-(defn v/ [a b]
-  "Divide Value a by Value b."
-  (v* a (vpow b -1.0)))
-
 # Backward pass
 
-(defn backward [root]
-  "Backpropagate gradients from root."
+(defn topo-sort [root]
+  "Topological sort (DFS, post-order) from root."
   (let* ([topo @[]]
          [visited @{}])
-
-    # Topological sort (DFS, post-order)
-    (letrec ([topo-sort (fn [node]
+    (letrec ([walk (fn [node]
       (when (not (has-key? visited (v-id node)))
         (put visited (v-id node) true)
         (each child in (get node :children)
-          (topo-sort child))
+          (walk child))
         (push topo node)))])
-      (topo-sort root))
+      (walk root))
+    topo))
 
+(defn backward! [root]
+  "Run backpropagation from root. Assumes all grads already zeroed."
+  (let* ([topo (topo-sort root)])
     # Zero all grads
     (each node in topo
       (put node :grad 0.0))
-
     # Seed root gradient
     (put root :grad 1.0)
-
     # Reverse accumulation
-    (var i (- (length topo) 1))
-    (while (>= i 0)
-      (let* ([node (get topo i)]
-             [children (get node :children)]
+    (each node in (reverse topo)
+      (let* ([children   (get node :children)]
              [local-grads (get node :local-grads)]
-             [node-grad (v-grad node)])
+             [node-grad  (v-grad node)])
         (var j 0)
         (while (< j (length children))
           (let* ([child (get children j)]
-                 [lg (get local-grads j)])
+                 [lg    (get local-grads j)])
             (put child :grad (+ (v-grad child) (* node-grad lg))))
-          (set j (+ j 1))))
-      (set i (- i 1)))))
+          (set j (+ j 1)))))))

@@ -32,11 +32,10 @@
       (while (< i (length name))
         (put chars (string/char-at name i) true)
         (set i (+ i 1))))
-    # BTreeMap iteration gives sorted keys
     (let* ([sorted-chars (keys chars)]
            [char->id @{}]
-           [id->char @{}]
-           [idx 0])
+           [id->char @{}])
+      (var idx 0)
       (each ch in sorted-chars
         (put char->id ch idx)
         (put id->char idx ch)
@@ -107,23 +106,23 @@
   "Train the model."
   (let* ([params (collect-params model)]
          [opt (make-adam params lr 0.85 0.99 0.00000001)]
-         [n-names (length names)])
-    (display (string/format "Parameters: {}\n" (length params)))
+         [n-names (length names)]
+         [max-len (+ *block-size* 1)])
+     (display (string/format "Parameters: {}\n" (length params)))
      (var step 0)
-      (while (< step num-steps)
-        # Pick a random name
-        (let* ([idx (floor (* (random/float) n-names))]
-               [name (get names idx)]
+     (while (< step num-steps)
+       # Pick a random name
+       (let* ([idx (floor (* (random/float) n-names))]
+              [name (get names idx)]
               [tokens (tokenize name tokenizer)]
-             # Truncate to block-size+1 if needed
-             [tokens (if (> (length tokens) (+ *block-size* 1))
-                       (slice tokens 0 (+ *block-size* 1))
-                       tokens)])
+              [tokens (if (> (length tokens) max-len)
+                        (slice tokens 0 max-len)
+                        tokens)])
         # Forward + loss (incremental per-token)
         (let* ([loss (cross-entropy-loss-incremental model tokens)]
                [lr-current (* lr (- 1.0 (/ (float step) (float num-steps))))])
           # Backward
-          (backward loss)
+          (backward! loss)
           # Update
           (adam-step opt lr-current)
           # Zero grads
@@ -136,37 +135,34 @@
 
 # ── Inference ───────────────────────────────────────────────────────
 
+(defn softmax-floats [scores]
+  "Numerically stable softmax over an array of floats. Returns [probs sum]."
+  (var max-val (get scores 0))
+  (each s in scores
+    (when (> s max-val) (set max-val s)))
+  (let* ([exps @[]]
+         [sum-exp 0.0])
+    (each s in scores
+      (let* ([e (exp (- s max-val))])
+        (push exps e)
+        (set sum-exp (+ sum-exp e))))
+    [exps sum-exp]))
+
 (defn sample-token [logits temperature]
-  "Sample a token from logit vector using temperature-scaled softmax.
-   logits is an array of Value nodes."
-  (let* ([n (length logits)]
-         [scaled @[]])
-    (each l in logits
-      (push scaled (/ (v-data l) temperature)))
-    # Softmax on plain floats
-    (var max-val (get scaled 0))
-    (var i 1)
-    (while (< i n)
-      (when (> (get scaled i) max-val)
-        (set max-val (get scaled i)))
-      (set i (+ i 1)))
-    (let* ([exps @[]]
-           [sum-exp 0.0])
-      (each s in scaled
-        (let* ([e (exp (- s max-val))])
-          (push exps e)
-           (set sum-exp (+ sum-exp e))))
-        # CDF sampling
-        (let* ([r (random/float)]
-               [cumulative 0.0])
-         (var idx 0)
-        (block :sample
-          (while (< idx n)
-            (set cumulative (+ cumulative (/ (get exps idx) sum-exp)))
-            (when (>= cumulative r)
-              (break :sample idx))
-            (set idx (+ idx 1)))
-          (- n 1))))))
+   "Sample next token from logits using temperature-scaled softmax."
+   (let* ([scaled @[]])
+     (each l in logits
+       (push scaled (/ (v-data l) temperature)))
+     (let* ([[exps sum-exp] (softmax-floats scaled)]
+            [r (random/float)])
+       (var cumulative 0.0)
+       (var idx 0)
+       (block :sample
+         (while (< idx (length exps))
+           (set cumulative (+ cumulative (/ (get exps idx) sum-exp)))
+           (when (>= cumulative r) (break :sample idx))
+           (set idx (+ idx 1)))
+         (- (length exps) 1)))))
 
 (defn generate [model tokenizer n-samples temperature max-len]
   "Generate n-samples names using incremental forward pass."
@@ -175,14 +171,7 @@
     (var sample 0)
     (while (< sample n-samples)
       (let* ([name ""]
-             [kv-keys @[]]
-             [kv-values @[]])
-        # Initialize per-layer KV caches
-        (var li 0)
-        (while (< li *n-layer*)
-          (push kv-keys @[])
-          (push kv-values @[])
-          (set li (+ li 1)))
+             [[kv-keys kv-values] (make-kv-caches *n-layer*)])
         (var token-id bos)
         (var done false)
         (var pos 0)
@@ -205,7 +194,7 @@
   (let* ([a (make-value 3.0)]
          [b (make-value 4.0)]
          [c (v+ (v* a b) (vpow a 2.0))])
-    (backward c)
+    (backward! c)
     # dc/da = b + 2a = 4 + 6 = 10
     # dc/db = a = 3
     (when (> (abs (- (v-grad a) 10.0)) 0.000001)
