@@ -89,7 +89,7 @@
 
 ## ── Conversion ──────────────────────────────────────────────────────
 
-(assert-eq (length (set->list |3 1 2|)) 3 "test")
+(assert-eq (length (set->array |3 1 2|)) 3 "test")
 
 ## ── Freeze on insert ────────────────────────────────────────────────
 

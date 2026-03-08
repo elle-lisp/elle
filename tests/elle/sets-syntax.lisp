@@ -115,7 +115,7 @@
 (assert-eq (length (set |1 2|)) 1
   "set containing a set")
 
-(assert-true (set? (first (set->list (set |1 2|))))
+(assert-true (set? (get (set->array (set |1 2|)) 0))
   "nested set is a set")
 
 # ============================================================================

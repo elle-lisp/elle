@@ -25,15 +25,16 @@
        ()
        (cons (f (first coll)) (map f (rest coll)))))
       ((set? coll)
-       (letrec ((items (set->list coll))
+       (letrec ((items (set->array coll))
+                 (len (length items))
                  (is-immutable (= (type-of coll) :set))
-                 (loop (fn (lst acc)
-                         (if (empty? lst)
+                 (loop (fn (i acc)
+                         (if (= i len)
                            acc
-                           (loop (rest lst) (add acc (f (first lst))))))))
+                           (loop (+ i 1) (add acc (f (get items i))))))))
           (if is-immutable
-            (loop items (set))
-            (loop items (@set)))))
+            (loop 0 (set))
+            (loop 0 (@set)))))
 
     (true (error [:type-error "map: not a sequence"])))))
 

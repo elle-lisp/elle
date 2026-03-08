@@ -296,34 +296,34 @@ pub fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Convert a set to a list
+/// Convert a set to an array or tuple
 ///
-/// (set->list set) -> list
+/// (set->array set) -> array or tuple
 ///
-/// Returns a list of the set's elements in sorted order
-pub fn prim_set_to_list(args: &[Value]) -> (SignalBits, Value) {
+/// Immutable set → tuple, mutable set → array. Elements in sorted order.
+pub fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("set->list: expected 1 argument, got {}", args.len()),
+                format!("set->array: expected 1 argument, got {}", args.len()),
             ),
         );
     }
     if let Some(s) = args[0].as_set() {
         let items: Vec<Value> = s.iter().copied().collect();
-        (SIG_OK, crate::value::list(items))
+        (SIG_OK, Value::tuple(items))
     } else if let Some(s) = args[0].as_set_mut() {
         let items: Vec<Value> = s.borrow().iter().copied().collect();
-        (SIG_OK, crate::value::list(items))
+        (SIG_OK, Value::array(items))
     } else {
         (
             SIG_ERROR,
             error_val(
                 "type-error",
                 format!(
-                    "set->list: expected set or mutable set, got {}",
+                    "set->array: expected set or mutable set, got {}",
                     args[0].type_name()
                 ),
             ),
@@ -331,44 +331,125 @@ pub fn prim_set_to_list(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Convert a list to an immutable set
+/// Convert any sequence to a set
 ///
-/// (list->set list) -> set
+/// (seq->set seq) -> set or @set
 ///
-/// Creates an immutable set from a list, deduplicating elements and freezing mutable values
-pub fn prim_list_to_set(args: &[Value]) -> (SignalBits, Value) {
+/// Immutable inputs (list, tuple, string, bytes, set) → immutable set.
+/// Mutable inputs (array, buffer, blob, @set) → mutable set.
+/// Mutable values are frozen on insertion.
+pub fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("list->set: expected 1 argument, got {}", args.len()),
+                format!("seq->set: expected 1 argument, got {}", args.len()),
             ),
         );
     }
-    let mut set = BTreeSet::new();
-    let mut current = args[0];
-    loop {
-        if current.is_empty_list() || current.is_nil() {
-            break;
-        }
-        if let Some(cons) = current.as_cons() {
-            set.insert(freeze_value(cons.first));
-            current = cons.rest;
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "list->set: expected proper list, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
+    let v = args[0];
+
+    // List (immutable) → immutable set
+    if v.is_empty_list() {
+        return (SIG_OK, Value::set(BTreeSet::new()));
     }
-    (SIG_OK, Value::set(set))
+    if v.as_cons().is_some() {
+        let mut set = BTreeSet::new();
+        let mut current = v;
+        loop {
+            if current.is_empty_list() || current.is_nil() {
+                break;
+            }
+            if let Some(cons) = current.as_cons() {
+                set.insert(freeze_value(cons.first));
+                current = cons.rest;
+            } else {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "seq->set: expected proper list, got improper list ending in {}",
+                            current.type_name()
+                        ),
+                    ),
+                );
+            }
+        }
+        return (SIG_OK, Value::set(set));
+    }
+
+    // Tuple (immutable) → immutable set
+    if let Some(elems) = v.as_tuple() {
+        let set: BTreeSet<Value> = elems.iter().map(|x| freeze_value(*x)).collect();
+        return (SIG_OK, Value::set(set));
+    }
+
+    // String (immutable) → immutable set of single-char strings
+    if v.is_string() {
+        let mut set = BTreeSet::new();
+        v.with_string(|s| {
+            for ch in s.chars() {
+                set.insert(Value::string(ch.to_string()));
+            }
+        });
+        return (SIG_OK, Value::set(set));
+    }
+
+    // Bytes (immutable) → immutable set of ints
+    if let Some(data) = v.as_bytes() {
+        let set: BTreeSet<Value> = data.iter().map(|&b| Value::int(b as i64)).collect();
+        return (SIG_OK, Value::set(set));
+    }
+
+    // Set (immutable) → immutable set (identity)
+    if v.as_set().is_some() {
+        return (SIG_OK, v);
+    }
+
+    // Array (mutable) → mutable set
+    if let Some(arr) = v.as_array() {
+        let set: BTreeSet<Value> = arr.borrow().iter().map(|x| freeze_value(*x)).collect();
+        return (SIG_OK, Value::set_mut(set));
+    }
+
+    // Buffer (mutable) → mutable set of single-char strings
+    if let Some(buf) = v.as_buffer() {
+        let mut set = BTreeSet::new();
+        let bytes = buf.borrow();
+        let s = String::from_utf8_lossy(&bytes);
+        for ch in s.chars() {
+            set.insert(Value::string(ch.to_string()));
+        }
+        return (SIG_OK, Value::set_mut(set));
+    }
+
+    // Blob (mutable) → mutable set of ints
+    if let Some(blob) = v.as_blob() {
+        let set: BTreeSet<Value> = blob
+            .borrow()
+            .iter()
+            .map(|&b| Value::int(b as i64))
+            .collect();
+        return (SIG_OK, Value::set_mut(set));
+    }
+
+    // Mutable set → mutable set (identity)
+    if v.as_set_mut().is_some() {
+        return (SIG_OK, v);
+    }
+
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "seq->set: expected sequence (list, array, tuple, string, buffer, bytes, blob, set, @set), got {}",
+                v.type_name()
+            ),
+        ),
+    )
 }
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[
@@ -472,25 +553,25 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "set->list",
-        func: prim_set_to_list,
+        name: "set->array",
+        func: prim_set_to_array,
         effect: Effect::none(),
         arity: Arity::Exact(1),
-        doc: "Convert a set to a list of its elements in sorted order",
+        doc: "Convert a set to an array/tuple. Immutable set → tuple, mutable set → array.",
         params: &["set"],
         category: "set",
-        example: "(set->list (set 3 1 2)) #=> (1 2 3)",
+        example: "(set->array (set 3 1 2)) #=> [1 2 3]",
         aliases: &[],
     },
     PrimitiveDef {
-        name: "list->set",
-        func: prim_list_to_set,
+        name: "seq->set",
+        func: prim_seq_to_set,
         effect: Effect::none(),
         arity: Arity::Exact(1),
-        doc: "Convert a list to an immutable set (deduplicates, freezes mutable values)",
-        params: &["list"],
+        doc: "Convert any sequence to a set. Immutable inputs (list, tuple, string, bytes, set) → immutable set. Mutable inputs (array, buffer, blob, @set) → mutable set. Freezes mutable values on insertion.",
+        params: &["seq"],
         category: "set",
-        example: "(list->set (list 1 2 3)) #=> |1 2 3|",
+        example: "(seq->set [1 2 3]) #=> |1 2 3|",
         aliases: &[],
     },
 ];

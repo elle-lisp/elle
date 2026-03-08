@@ -493,7 +493,7 @@
 (assert-false (empty? |1|) "empty? on non-empty set")
 
 # Conversion
-(assert-eq (length (set->list |3 1 2|)) 3 "set->list conversion")
+(assert-eq (length (set->array |3 1 2|)) 3 "set->array conversion")
 
 # Freeze/thaw
 (assert-eq (freeze @|1 2 3|) |1 2 3| "freeze mutable set")
