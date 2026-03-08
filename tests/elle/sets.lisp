@@ -4,20 +4,20 @@
 
 ## ── Literal syntax ──────────────────────────────────────────────────
 
-(assert-eq || ||)                          # empty set
-(assert-eq @|| @||)                        # empty mutable set
-(assert-eq |1 2 3| |1 2 3|)               # immutable set
-(assert-eq @|1 2 3| @|1 2 3|)             # mutable set
-(assert-eq |3 1 2| |1 2 3|)               # order doesn't matter
-(assert-eq |1 1 2| |1 2|)                 # deduplication
+(assert-eq || || "test")                          # empty set
+(assert-eq @|| @|| "test")                        # empty mutable set
+(assert-eq |1 2 3| |1 2 3| "test")               # immutable set
+(assert-eq @|1 2 3| @|1 2 3| "test")             # mutable set
+(assert-eq |3 1 2| |1 2 3| "test")               # order doesn't matter
+(assert-eq |1 1 2| |1 2| "test")                 # deduplication
 
 ## ── Constructors ────────────────────────────────────────────────────
 
-(assert-eq (set 1 2 3) |1 2 3|)
-(assert-eq (mutable-set 1 2 3) @|1 2 3|)
-(assert-eq (set) ||)
-(assert-eq (mutable-set) @||)
-(assert-eq (set 1 1 2 2 3) |1 2 3|)       # dedup in constructor
+(assert-eq (set 1 2 3) |1 2 3| "test")
+(assert-eq (mutable-set 1 2 3) @|1 2 3| "test")
+(assert-eq (set) || "test")
+(assert-eq (mutable-set) @|| "test")
+(assert-eq (set 1 1 2 2 3) |1 2 3| "test")       # dedup in constructor
 
 ## ── Predicates ──────────────────────────────────────────────────────
 
@@ -28,8 +28,8 @@
 
 ## ── type-of distinguishes mutable from immutable ────────────────────
 
-(assert-eq (type-of |1 2 3|) :set)
-(assert-eq (type-of @|1 2 3|) :@set)
+(assert-eq (type-of |1 2 3|) :set "test")
+(assert-eq (type-of @|1 2 3|) :@set "test")
 
 ## ── Membership ──────────────────────────────────────────────────────
 
@@ -41,8 +41,8 @@
 ## ── Element operations ──────────────────────────────────────────────
 
 # add on immutable set returns new set
-(assert-eq (add |1 2| 3) |1 2 3|)
-(assert-eq (add |1 2| 2) |1 2|)           # no-op if already present
+(assert-eq (add |1 2| 3) |1 2 3| "test")
+(assert-eq (add |1 2| 2) |1 2| "test")           # no-op if already present
 
 # add on mutable set mutates
 (def ms @|1 2|)
@@ -50,8 +50,8 @@
 (assert-true (contains? ms 3))
 
 # del on immutable set returns new set
-(assert-eq (del |1 2 3| 2) |1 3|)
-(assert-eq (del |1 2 3| 4) |1 2 3|)       # no-op if not present
+(assert-eq (del |1 2 3| 2) |1 3| "test")
+(assert-eq (del |1 2 3| 4) |1 2 3| "test")       # no-op if not present
 
 # del on mutable set mutates
 (def ms2 @|1 2 3|)
@@ -60,36 +60,36 @@
 
 ## ── Set algebra ─────────────────────────────────────────────────────
 
-(assert-eq (union |1 2| |2 3|) |1 2 3|)
-(assert-eq (intersection |1 2 3| |2 3 4|) |2 3|)
-(assert-eq (difference |1 2 3| |2 3|) |1|)
+(assert-eq (union |1 2| |2 3|) |1 2 3| "test")
+(assert-eq (intersection |1 2 3| |2 3 4|) |2 3| "test")
+(assert-eq (difference |1 2 3| |2 3|) |1| "test")
 
 # mutable set algebra
-(assert-eq (union @|1 2| @|2 3|) @|1 2 3|)
-(assert-eq (intersection @|1 2 3| @|2 3 4|) @|2 3|)
-(assert-eq (difference @|1 2 3| @|2 3|) @|1|)
+(assert-eq (union @|1 2| @|2 3|) @|1 2 3| "test")
+(assert-eq (intersection @|1 2 3| @|2 3 4|) @|2 3| "test")
+(assert-eq (difference @|1 2 3| @|2 3|) @|1| "test")
 
 ## ── Length and empty? ───────────────────────────────────────────────
 
-(assert-eq (length |1 2 3|) 3)
-(assert-eq (length ||) 0)
-(assert-eq (length @|1 2|) 2)
+(assert-eq (length |1 2 3|) 3 "test")
+(assert-eq (length ||) 0 "test")
+(assert-eq (length @|1 2|) 2 "test")
 (assert-true (empty? ||))
 (assert-true (empty? @||))
 (assert-false (empty? |1|))
 
 ## ── Freeze and thaw ────────────────────────────────────────────────
 
-(assert-eq (freeze @|1 2 3|) |1 2 3|)
+(assert-eq (freeze @|1 2 3|) |1 2 3| "test")
 (assert-true (set? (freeze @|1 2 3|)))
-(assert-eq (type-of (freeze @|1 2 3|)) :set)
-(assert-eq (thaw |1 2 3|) @|1 2 3|)
+(assert-eq (type-of (freeze @|1 2 3|)) :set "test")
+(assert-eq (thaw |1 2 3|) @|1 2 3| "test")
 (assert-true (set? (thaw |1 2 3|)))
-(assert-eq (type-of (thaw |1 2 3|)) :@set)
+(assert-eq (type-of (thaw |1 2 3|)) :@set "test")
 
 ## ── Conversion ──────────────────────────────────────────────────────
 
-(assert-eq (length (set->list |3 1 2|)) 3)
+(assert-eq (length (set->list |3 1 2|)) 3 "test")
 
 ## ── Freeze on insert ────────────────────────────────────────────────
 
@@ -100,16 +100,19 @@
 ## ── Match type guards ───────────────────────────────────────────────
 
 (assert-eq (match |1 2 3|
-             (|s| (length s)))
+             (|s| (length s))
+             (_ :no-match))
            3)
 
 (assert-eq (match @|1 2|
-             (@|s| (length s)))
+             (@|s| (length s))
+             (_ :no-match))
            2)
 
 (assert-eq (match |1 2 3|
              (@|s| :mutable)
-             (|s| :immutable))
+             (|s| :immutable)
+             (_ :no-match))
            :immutable)
 
 ## ── Each iteration ──────────────────────────────────────────────────
@@ -117,7 +120,7 @@
 (var sum 0)
 (each x |1 2 3|
   (assign sum (+ sum x)))
-(assert-eq sum 6)
+(assert-eq sum 6 "test")
 
 ## ── Map ─────────────────────────────────────────────────────────────
 
@@ -129,5 +132,5 @@
 
 ## ── Display ─────────────────────────────────────────────────────────
 
-(assert-eq (string/format "{}" ||) "||")
-(assert-eq (string/format "{}" @||) "@||")
+(assert-eq (string/format "{}" ||) "||" "test")
+(assert-eq (string/format "{}" @||) "@||" "test")
