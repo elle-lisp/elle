@@ -179,13 +179,15 @@
                 (let ((,var (string/char-at ,g-iter ,g-idx)))
                   ,;body)
                 (assign ,g-idx (+ ,g-idx 1))))))
-          ((set? ,g-iter)
-           (let* ((,g-cur (set->list ,g-iter)))
-             (while (pair? ,g-cur)
-               (begin
-                 (let ((,var (first ,g-cur)))
-                   ,;body)
-                 (assign ,g-cur (rest ,g-cur))))))
+           ((set? ,g-iter)
+            (let* ((,g-cur (set->array ,g-iter))
+                   (,g-len (length ,g-cur))
+                   (,g-idx 0))
+              (while (< ,g-idx ,g-len)
+                (begin
+                  (let ((,var (get ,g-cur ,g-idx)))
+                    ,;body)
+                  (assign ,g-idx (+ ,g-idx 1))))))
          (true (error [:type-error "each: not a sequence"]))))))
 
 ## case - equality dispatch (flat pairs)

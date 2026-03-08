@@ -136,19 +136,19 @@
 # Freezing on insert
 # ============================================================================
 
-(assert-eq (type-of (first (set->list (set @[1 2])))) :tuple
+(assert-eq (type-of (get (set->array (set @[1 2])) 0)) :tuple
   "mutable array is frozen when inserted into set")
 
-(assert-eq (type-of (first (set->list (set @{:a 1})))) :struct
+(assert-eq (type-of (get (set->array (set @{:a 1})) 0)) :struct
   "mutable table is frozen when inserted into set")
 
-(assert-eq (type-of (first (set->list (set @"hello")))) :string
+(assert-eq (type-of (get (set->array (set @"hello")) 0)) :string
   "mutable buffer is frozen when inserted into set")
 
-(assert-false (array? (first (set->list (set @[1 2]))))
+(assert-false (array? (get (set->array (set @[1 2])) 0))
   "frozen array is not an array")
 
-(assert-false (table? (first (set->list (set @{:a 1}))))
+(assert-false (table? (get (set->array (set @{:a 1})) 0))
   "frozen table is not a table")
 
 # ============================================================================
@@ -220,42 +220,57 @@
   "contains? returns false for element in empty set from constructor")
 
 # ============================================================================
-# Conversions: set->list
+# Conversions: set->array
 # ============================================================================
 
-(assert-true (list? (set->list |1 2 3|))
-  "set->list returns a list")
+(assert-true (tuple? (set->array |1 2 3|))
+  "set->array on immutable set returns a tuple")
 
-(assert-eq (length (set->list |1 2 3|)) 3
-  "set->list preserves element count")
+(assert-eq (length (set->array |1 2 3|)) 3
+  "set->array preserves element count")
 
-(assert-eq (length (set->list ||)) 0
-  "set->list of empty set returns empty list")
+(assert-eq (length (set->array ||)) 0
+  "set->array of empty set returns empty tuple")
 
-(assert-true (list? (set->list (set 1 2 3)))
-  "set->list works with constructor-created sets")
+(assert-true (tuple? (set->array (set 1 2 3)))
+  "set->array works with constructor-created sets")
 
-(assert-true (list? (set->list @|1 2 3|))
-  "set->list works with mutable sets")
+(assert-true (array? (set->array @|1 2 3|))
+  "set->array on mutable set returns an array")
 
 # ============================================================================
-# Conversions: list->set
+# Conversions: seq->set
 # ============================================================================
 
-(assert-eq (list->set (list 1 2 3)) |1 2 3|
-  "list->set creates immutable set from list")
+(assert-eq (seq->set (list 1 2 3)) |1 2 3|
+  "seq->set from list creates immutable set")
 
-(assert-eq (list->set (list 1 1 2)) |1 2|
-  "list->set deduplicates elements")
+(assert-eq (seq->set (list 1 1 2)) |1 2|
+  "seq->set deduplicates elements")
 
-(assert-eq (list->set (list)) ||
-  "list->set of empty list creates empty set")
+(assert-eq (seq->set (list)) ||
+  "seq->set of empty list creates empty set")
 
-(assert-true (set? (list->set (list 1 2 3)))
-  "list->set result is a set")
+(assert-true (set? (seq->set (list 1 2 3)))
+  "seq->set from list result is a set")
 
-(assert-eq (type-of (list->set (list 1 2 3))) :set
-  "list->set creates immutable set")
+(assert-eq (type-of (seq->set (list 1 2 3))) :set
+  "seq->set from list creates immutable set")
+
+(assert-eq (seq->set [1 2 3]) |1 2 3|
+  "seq->set from tuple creates immutable set")
+
+(assert-eq (type-of (seq->set @[1 2 3])) :@set
+  "seq->set from array creates mutable set")
+
+(assert-eq (seq->set "abc") (set "a" "b" "c")
+  "seq->set from string creates immutable set of chars")
+
+(assert-eq (type-of (seq->set "abc")) :set
+  "seq->set from string creates immutable set")
+
+(assert-eq (type-of (seq->set @"abc")) :@set
+  "seq->set from buffer creates mutable set")
 
 # ============================================================================
 # Freeze/thaw
@@ -328,11 +343,11 @@
 # ============================================================================
 
 (def original-set |1 2 3|)
-(def converted-list (set->list original-set))
+(def converted-arr (set->array original-set))
 (assert-eq original-set |1 2 3|
-  "set->list does not modify original set")
+  "set->array does not modify original set")
 
 (def original-list (list 1 2 3))
-(def converted-set (list->set original-list))
+(def converted-set (seq->set original-list))
 (assert-eq original-list (list 1 2 3)
-  "list->set does not modify original list")
+  "seq->set does not modify original list")
