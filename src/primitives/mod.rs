@@ -27,6 +27,7 @@ pub mod math;
 pub mod meta;
 pub mod module_init;
 pub mod modules;
+pub mod net;
 pub mod package;
 pub mod parameters;
 pub mod path;
