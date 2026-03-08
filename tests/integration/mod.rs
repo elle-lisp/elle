@@ -123,6 +123,9 @@ mod io {
 mod jit_yield {
     include!("jit_yield.rs");
 }
+mod net {
+    include!("net.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

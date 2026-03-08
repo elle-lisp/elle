@@ -47,9 +47,10 @@ bytecode. Error messages include file:line:col information.
 | Lowerer → Emitter | `LirFunction` | `blocks: Vec<BasicBlock>`, `constants: Vec<LirConst>`, `arity: Arity`, `effect: Effect`, `num_locals: u16`, `num_captures: u16`, `cell_params_mask: u64`, `cell_locals_mask: u64`, `entry: Label`, `num_regs: u32`, `name: Option<String>`, `doc: Option<Value>` |
 | Emitter → VM | `Bytecode` | `instructions: Vec<u8>`, `constants: Vec<Value>`, `location_map: LocationMap`, `symbol_names: HashMap<u32, String>`, `inline_caches: HashMap<usize, CacheEntry>` |
 | VM → caller | `Value` | NaN-boxed 8-byte runtime value |
-| Stream primitive → Scheduler | `(SIG_IO, IoRequest)` | `IoOp`, port `Value` |
-| Scheduler → Backend | `IoRequest` | `IoOp`, port `Value` |
-| Backend → Scheduler | `(SignalBits, Value)` | Result or error |
+| Stream primitive → Scheduler | `(SIG_IO, IoRequest)` | `IoOp` (stream or network), port `Value`, timeout `Option<Duration>` |
+| Network primitive → Scheduler | `(SIG_IO, IoRequest)` | `IoOp` (Accept, Connect, SendTo, RecvFrom, Shutdown), port `Value`, timeout `Option<Duration>` |
+| Scheduler → Backend | `IoRequest` | `IoOp`, port `Value`, timeout `Option<Duration>` |
+| Backend → Scheduler | `(SignalBits, Value)` | Result or error; port kinds: TcpListener, TcpStream, UdpSocket, UnixListener, UnixStream |
 
 **What is preserved across the full pipeline:**
 
@@ -92,7 +93,7 @@ bytecode. Error messages include file:line:col information.
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed) |
 | `effects` | Effect type (`Pure`, `Yields`, `Polymorphic`) |
-| `io` | I/O request types (`IoRequest`, `IoOp`) and backends (`SyncBackend`) |
+| `io` | I/O request types (`IoRequest`, `IoOp` with stream and network ops), backends (`SyncBackend`, `AsyncBackend`), timeout handling |
 | `lint` | Diagnostic types and lint rules (pipeline-agnostic) |
 | `symbols` | Symbol index types for IDE features (pipeline-agnostic) |
 | `primitives` | Built-in functions |
@@ -142,8 +143,22 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 
 ## Verification
 
+Approximate runtimes (for guidance — vary by machine):
+
+| Command | Runtime | What it does |
+|---------|---------|-------------|
+| `make smoke` | ~15s | Elle examples only |
+| `make test` | ~2min | build + examples + elle scripts + unit tests |
+| `cargo test --workspace` | ~30min | full suite (unit + integration ~10min + property ~20min) |
+
+**Rule of thumb**: Before committing, run `make test` locally (~2min). Before
+pushing, run `cargo test --workspace` (~30min) to catch property test failures.
+
 ```bash
-# Full test suite (do this before committing)
+# Fast local test (build + examples + elle scripts + unit tests, ~2min)
+make test
+
+# Full test suite (do this before pushing)
 cargo test --workspace
 
 # Just the main crate
