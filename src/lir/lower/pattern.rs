@@ -34,7 +34,6 @@ impl Lowerer {
                     slot: result_slot,
                     src: nil_reg,
                 });
-                self.emit(LirInstr::Pop { src: nil_reg });
                 self.terminate(Terminator::Jump(done_label));
                 self.finish_block();
                 Ok(())
@@ -62,7 +61,6 @@ impl Lowerer {
                     } else {
                         self.emit(LirInstr::StoreLocal { slot, src: val_reg });
                     }
-                    self.emit(LirInstr::Pop { src: val_reg });
                 }
                 // Lower body
                 let body = &arms[*arm_index].2;
@@ -71,7 +69,6 @@ impl Lowerer {
                     slot: result_slot,
                     src: body_reg,
                 });
-                self.emit(LirInstr::Pop { src: body_reg });
                 self.terminate(Terminator::Jump(done_label));
                 self.finish_block();
                 Ok(())
@@ -98,7 +95,6 @@ impl Lowerer {
                     } else {
                         self.emit(LirInstr::StoreLocal { slot, src: val_reg });
                     }
-                    self.emit(LirInstr::Pop { src: val_reg });
                 }
                 // Evaluate guard
                 let guard_expr = arms[*arm_index]
@@ -124,7 +120,6 @@ impl Lowerer {
                     slot: result_slot,
                     src: body_reg,
                 });
-                self.emit(LirInstr::Pop { src: body_reg });
                 self.terminate(Terminator::Jump(done_label));
                 self.finish_block();
 
@@ -148,7 +143,6 @@ impl Lowerer {
                     slot: temp_slot,
                     src: value_reg,
                 });
-                self.emit(LirInstr::Pop { src: value_reg });
 
                 let default_label = self.fresh_label();
 
@@ -204,7 +198,6 @@ impl Lowerer {
                         slot: result_slot,
                         src: nil_reg,
                     });
-                    self.emit(LirInstr::Pop { src: nil_reg });
                     self.terminate(Terminator::Jump(done_label));
                     self.finish_block();
                 }
@@ -381,16 +374,23 @@ impl Lowerer {
             src: value_reg,
         });
 
+        // Reload for type check (auto-pop consumed value_reg)
+        let reloaded_for_type = self.fresh_reg();
+        self.emit(LirInstr::LoadLocal {
+            dst: reloaded_for_type,
+            slot: val_slot,
+        });
+
         let type_check_reg = self.fresh_reg();
         if is_tuple {
             self.emit(LirInstr::IsTuple {
                 dst: type_check_reg,
-                src: value_reg,
+                src: reloaded_for_type,
             });
         } else {
             self.emit(LirInstr::IsArray {
                 dst: type_check_reg,
-                src: value_reg,
+                src: reloaded_for_type,
             });
         }
 
@@ -443,7 +443,6 @@ impl Lowerer {
             slot: merge_slot,
             src: false_reg,
         });
-        self.emit(LirInstr::Pop { src: false_reg });
         self.terminate(Terminator::Jump(result_label));
         self.finish_block();
 
@@ -454,7 +453,6 @@ impl Lowerer {
             slot: merge_slot,
             src: true_reg,
         });
-        self.emit(LirInstr::Pop { src: true_reg });
         self.terminate(Terminator::Jump(result_label));
         self.finish_block();
 
@@ -582,11 +580,25 @@ impl Lowerer {
                     });
                 }
 
+                // Reload for type check (auto-pop consumed value_reg)
+                let reloaded_for_check = self.fresh_reg();
+                if self.in_lambda {
+                    self.emit(LirInstr::LoadCapture {
+                        dst: reloaded_for_check,
+                        index: temp_slot,
+                    });
+                } else {
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded_for_check,
+                        slot: temp_slot,
+                    });
+                }
+
                 // Check if value is a pair
                 let is_pair_reg = self.fresh_reg();
                 self.emit(LirInstr::IsPair {
                     dst: is_pair_reg,
-                    src: value_reg,
+                    src: reloaded_for_check,
                 });
 
                 let continue_label = self.fresh_label();
@@ -682,11 +694,25 @@ impl Lowerer {
                         });
                     }
 
+                    // Reload for type check (auto-pop consumed current_reg)
+                    let reloaded_for_check = self.fresh_reg();
+                    if self.in_lambda {
+                        self.emit(LirInstr::LoadCapture {
+                            dst: reloaded_for_check,
+                            index: temp_slot,
+                        });
+                    } else {
+                        self.emit(LirInstr::LoadLocal {
+                            dst: reloaded_for_check,
+                            slot: temp_slot,
+                        });
+                    }
+
                     // Check if current is a pair
                     let is_pair_reg = self.fresh_reg();
                     self.emit(LirInstr::IsPair {
                         dst: is_pair_reg,
-                        src: current_reg,
+                        src: reloaded_for_check,
                     });
 
                     let continue_label = self.fresh_label();

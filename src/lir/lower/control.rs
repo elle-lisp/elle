@@ -212,59 +212,53 @@ impl Lowerer {
             return self.lower_expr(&exprs[0]);
         }
 
-        // Use a shared result register. Each branch leaves its result on the stack.
-        // At the merge point, the result is on top of the stack.
-        let result_reg = self.fresh_reg();
+        // Allocate result slot (same pattern as lower_cond/lower_if)
+        let result_slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
         let done_label = self.fresh_label();
 
         for (i, expr) in exprs.iter().enumerate() {
             let val_reg = self.lower_expr(expr)?;
 
-            if i < exprs.len() - 1 {
-                // Not the last expression — branch on truthiness
-                // If falsy, short-circuit to done with this value
-                // If truthy, pop this value and continue to next expression
-                //
-                // Dup the value: one copy for the branch test, one for the result
-                let dup_reg = self.fresh_reg();
-                self.emit(LirInstr::Dup {
-                    dst: dup_reg,
-                    src: val_reg,
-                });
+            // Store value to result slot
+            self.emit(LirInstr::StoreLocal {
+                slot: result_slot,
+                src: val_reg,
+            });
 
-                // Use Move to track the result with result_reg
-                // This ensures the emitter knows result_reg is at the same position as val_reg
-                self.emit(LirInstr::Move {
-                    dst: result_reg,
-                    src: val_reg,
+            if i < exprs.len() - 1 {
+                // Not the last expression: reload for branch test
+                let cond_reg = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: cond_reg,
+                    slot: result_slot,
                 });
 
                 let next_label = self.fresh_label();
-                // Branch on the duplicate (which will be popped by JumpIfFalse)
+                // If falsy, short-circuit to done (value already in slot)
+                // If truthy, continue to next expression
                 self.terminate(Terminator::Branch {
-                    cond: dup_reg,
+                    cond: cond_reg,
                     then_label: next_label,
                     else_label: done_label,
                 });
                 self.finish_block();
 
-                // Next block: pop the original value and continue
                 self.current_block = BasicBlock::new(next_label);
-                self.emit(LirInstr::Pop { src: result_reg });
             } else {
-                // Last expression — this is the result, jump to done
-                self.emit(LirInstr::Move {
-                    dst: result_reg,
-                    src: val_reg,
-                });
+                // Last expression: jump to done (value already in slot)
                 self.terminate(Terminator::Jump(done_label));
                 self.finish_block();
             }
         }
 
-        // Done block (continue here)
-        // The result is on top of the stack from whichever branch was taken
+        // Done block: load result from slot
         self.current_block = BasicBlock::new(done_label);
+        let result_reg = self.fresh_reg();
+        self.emit(LirInstr::LoadLocal {
+            dst: result_reg,
+            slot: result_slot,
+        });
 
         Ok(result_reg)
     }
@@ -277,59 +271,48 @@ impl Lowerer {
             return self.lower_expr(&exprs[0]);
         }
 
-        // Use a shared result register. Each branch leaves its result on the stack.
-        // At the merge point, the result is on top of the stack.
-        let result_reg = self.fresh_reg();
+        let result_slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
         let done_label = self.fresh_label();
 
         for (i, expr) in exprs.iter().enumerate() {
             let val_reg = self.lower_expr(expr)?;
 
-            if i < exprs.len() - 1 {
-                // Not the last expression — branch on truthiness
-                // If truthy, short-circuit to done with this value
-                // If falsy, pop this value and continue to next expression
-                //
-                // Dup the value: one copy for the branch test, one for the result
-                let dup_reg = self.fresh_reg();
-                self.emit(LirInstr::Dup {
-                    dst: dup_reg,
-                    src: val_reg,
-                });
+            self.emit(LirInstr::StoreLocal {
+                slot: result_slot,
+                src: val_reg,
+            });
 
-                // Use Move to track the result with result_reg
-                // This ensures the emitter knows result_reg is at the same position as val_reg
-                self.emit(LirInstr::Move {
-                    dst: result_reg,
-                    src: val_reg,
+            if i < exprs.len() - 1 {
+                let cond_reg = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: cond_reg,
+                    slot: result_slot,
                 });
 
                 let next_label = self.fresh_label();
-                // Branch on the duplicate (which will be popped by JumpIfFalse)
+                // If truthy, short-circuit to done
+                // If falsy, continue to next expression
                 self.terminate(Terminator::Branch {
-                    cond: dup_reg,
-                    then_label: done_label,
-                    else_label: next_label,
+                    cond: cond_reg,
+                    then_label: done_label, // ← inverted from lower_and
+                    else_label: next_label, // ← inverted from lower_and
                 });
                 self.finish_block();
 
-                // Next block: pop the original value and continue
                 self.current_block = BasicBlock::new(next_label);
-                self.emit(LirInstr::Pop { src: result_reg });
             } else {
-                // Last expression — this is the result, jump to done
-                self.emit(LirInstr::Move {
-                    dst: result_reg,
-                    src: val_reg,
-                });
                 self.terminate(Terminator::Jump(done_label));
                 self.finish_block();
             }
         }
 
-        // Done block (continue here)
-        // The result is on top of the stack from whichever branch was taken
         self.current_block = BasicBlock::new(done_label);
+        let result_reg = self.fresh_reg();
+        self.emit(LirInstr::LoadLocal {
+            dst: result_reg,
+            slot: result_slot,
+        });
 
         Ok(result_reg)
     }
@@ -385,10 +368,6 @@ impl Lowerer {
             slot: scrutinee_slot,
             src: value_reg,
         });
-        // Pop the pushed-back value — the scrutinee lives in the local
-        // slot and is reloaded via LoadLocal.  Leaving it on the operand
-        // stack would leak an intermediate between enclosing operands.
-        self.emit(LirInstr::Pop { src: value_reg });
 
         // Allocate result register and result slot
         let result_reg = self.fresh_reg();

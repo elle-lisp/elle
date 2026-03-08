@@ -143,6 +143,10 @@ pub struct Lowerer {
     region_depth: u32,
     /// Compile-time scope allocation statistics.
     scope_stats: ScopeStats,
+    /// Scratch slot for discarding unused intermediate values.
+    /// Lazily allocated on first use. Reused across all discards
+    /// within the same function, so only one extra local slot.
+    discard_slot: Option<u16>,
 }
 
 impl Lowerer {
@@ -163,6 +167,7 @@ impl Lowerer {
             block_lower_contexts: Vec::new(),
             region_depth: 0,
             scope_stats: ScopeStats::default(),
+            discard_slot: None,
         }
     }
 
@@ -190,6 +195,7 @@ impl Lowerer {
         self.next_reg = 0;
         self.next_label = 1;
         self.binding_to_slot.clear();
+        self.discard_slot = None;
 
         let result_reg = self.lower_expr(hir)?;
         self.terminate(Terminator::Return(result_reg));
@@ -288,6 +294,23 @@ impl Lowerer {
     fn emit_region_exit(&mut self) {
         self.emit(LirInstr::RegionExit);
         self.region_depth -= 1;
+    }
+
+    /// Discard an unused value by storing it to a scratch slot.
+    /// The emitter's auto-pop after StoreLocal cleans up the value
+    /// from the operand stack. The scratch slot is lazily allocated
+    /// on first use and reused for all discards in the function.
+    fn discard(&mut self, src: Reg) {
+        let slot = match self.discard_slot {
+            Some(s) => s,
+            None => {
+                let s = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.discard_slot = Some(s);
+                s
+            }
+        };
+        self.emit(LirInstr::StoreLocal { slot, src });
     }
 
     // ── Escape analysis ────────────────────────────────────────────

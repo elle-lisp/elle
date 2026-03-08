@@ -224,8 +224,11 @@ impl Emitter {
                 self.bytecode.emit(Instruction::StoreLocal);
                 self.bytecode.emit_byte(0); // depth 0
                 self.bytecode.emit_byte(*slot as u8);
-                // StoreLocal pops the value, stores it, and pushes it back
-                // So the stack simulation stays the same (value is still on top)
+                // StoreLocal pops the value, stores it, and pushes it back.
+                // Auto-pop: consume the pushed-back value so stores are pure
+                // side effects from the LIR's perspective.
+                self.bytecode.emit(Instruction::Pop);
+                self.pop();
             }
 
             LirInstr::LoadCapture { dst, index } => {
@@ -262,8 +265,10 @@ impl Emitter {
                     self.bytecode.emit_byte(0); // depth (currently unused)
                     self.bytecode.emit_byte(*index as u8);
                 }
-                // Both StoreLocal and StoreUpvalue: pop value, store, push back.
-                // Net stack effect is 0, so don't adjust simulated stack.
+                // Both StoreLocal and StoreUpvalue pop-then-push-back.
+                // Auto-pop: consume the pushed-back value.
+                self.bytecode.emit(Instruction::Pop);
+                self.pop();
             }
 
             LirInstr::LoadGlobal { dst, sym } => {
@@ -281,10 +286,12 @@ impl Emitter {
                 // Add symbol to constants with name for cross-thread portability
                 let name = self.symbol_names.get(&sym.0).cloned().unwrap_or_default();
                 let const_idx = self.bytecode.add_symbol(sym.0, &name);
-                // StoreGlobal pops the value, stores it, and pushes it back.
-                // The stack simulation stays the same (value is still on top).
                 self.bytecode.emit(Instruction::StoreGlobal);
                 self.bytecode.emit_u16(const_idx);
+                // StoreGlobal pops the value, stores it, and pushes it back.
+                // Auto-pop: consume the pushed-back value.
+                self.bytecode.emit(Instruction::Pop);
+                self.pop();
             }
 
             LirInstr::MakeClosure {
@@ -653,52 +660,12 @@ impl Emitter {
                 self.ensure_on_top(*value);
                 self.bytecode.emit(Instruction::UpdateCell);
                 // UpdateCell pops value, pops cell, pushes value back.
-                // Net stack effect: -1 (cell is consumed, value survives).
-                self.pop(); // value (will be re-pushed)
-                self.pop(); // cell (consumed)
-                self.push_reg(*value); // value pushed back by VM
-            }
-
-            LirInstr::Move { dst, src } => {
-                // Move is a logical copy - dst now refers to the same value as src.
-                // We don't emit any bytecode; we just update the register tracking.
-                // This works because in LIR, Move is used to copy a value to a result
-                // register, and the source is typically not used again.
-                //
-                // If src is tracked, dst now refers to the same stack position.
-                // If src is not tracked (e.g., after control flow merge), we assume
-                // the value is on top of the stack and track dst there.
-                if let Some(&pos) = self.reg_to_stack.get(src) {
-                    // dst now refers to the same stack position as src
-                    self.reg_to_stack.insert(*dst, pos);
-                    // Update the stack to show dst at this position
-                    if pos < self.stack.len() {
-                        self.stack[pos] = *dst;
-                    }
-                } else {
-                    // src not tracked - assume value is on top of stack
-                    // This can happen after control flow merges
-                    if !self.stack.is_empty() {
-                        let top = self.stack.len() - 1;
-                        self.stack[top] = *dst;
-                        self.reg_to_stack.insert(*dst, top);
-                    }
-                }
-            }
-
-            LirInstr::Dup { dst, src } => {
-                // Duplicate the value - actually emit a Dup instruction.
-                // This creates a new copy on the stack.
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::Dup);
-                self.push_reg(*dst);
-            }
-
-            LirInstr::Pop { src } => {
-                // Pop the value from the stack (discard it).
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::Pop);
-                self.pop();
+                // Unlike other stores, UpdateCell pushes the value back.
+                // We do NOT auto-pop here because lower_set needs the value.
+                self.pop(); // value (consumed by UpdateCell, re-pushed)
+                self.pop(); // cell (consumed by UpdateCell)
+                            // Value is now on the stack (pushed back by UpdateCell).
+                self.push_reg(*value);
             }
 
             LirInstr::LoadResumeValue { dst } => {

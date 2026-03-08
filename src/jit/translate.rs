@@ -134,16 +134,6 @@ impl<'a> FunctionTranslator<'a> {
                 builder.def_var(var(dst.0), val);
             }
 
-            LirInstr::Move { dst, src } => {
-                let val = builder.use_var(var(src.0));
-                builder.def_var(var(dst.0), val);
-            }
-
-            LirInstr::Dup { dst, src } => {
-                let val = builder.use_var(var(src.0));
-                builder.def_var(var(dst.0), val);
-            }
-
             LirInstr::LoadLocal { dst, slot } => {
                 // In LIR, locals are just registers
                 let val = builder.use_var(var(*slot as u32));
@@ -253,10 +243,6 @@ impl<'a> FunctionTranslator<'a> {
                 let src_val = builder.use_var(var(src.0));
                 let result = self.call_helper_unary(builder, self.helpers.is_pair, src_val)?;
                 builder.def_var(var(dst.0), result);
-            }
-
-            LirInstr::Pop { src: _ } => {
-                // No-op in JIT (stack operations are implicit)
             }
 
             // === Phase 3: Data structures ===
