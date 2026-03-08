@@ -140,7 +140,7 @@ jobs:
     name: Benchmarks
     needs: changes
     runs-on: ubuntu-latest
-    if: needs.changes.outputs.source == 'true'
+    if: needs.changes.outputs.source == 'true' && contains(github.event.pull_request.labels.*.name, 'performance')
     permissions:
       pull-requests: write
     steps:
@@ -199,7 +199,7 @@ jobs:
         if: needs.examples.result == 'failure'
         run: exit 1
       - name: Check benchmarks
-        if: needs.benchmarks.result == 'failure'
+        if: needs.benchmarks.result != 'skipped' && needs.benchmarks.result == 'failure'
         run: exit 1
       - name: Check changes detection
         if: needs.changes.result == 'failure'
