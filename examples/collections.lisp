@@ -463,7 +463,7 @@
 
 # Constructors
 (assert-eq (set 1 2 3) |1 2 3| "set constructor")
-(assert-eq (mutable-set 1 2 3) @|1 2 3| "mutable-set constructor")
+(assert-eq (@set 1 2 3) @|1 2 3| "mutable-set constructor")
 
 # Predicates
 (assert-true (set? |1 2 3|) "set? on immutable set")

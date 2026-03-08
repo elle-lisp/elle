@@ -825,10 +825,33 @@ mod tests {
     }
 
     #[test]
+    fn test_at_symbol() {
+        // @symbol is now a valid symbol with @ prefix
+        let result = lex_and_parse("@set").unwrap();
+        assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "@set"));
+    }
+
+    #[test]
+    fn test_at_symbol_in_call() {
+        // (@set 1 2 3) parses as a call with @set as the function
+        let result = lex_and_parse("(@set 1 2 3)").unwrap();
+        match result.kind {
+            SyntaxKind::List(ref items) => {
+                assert_eq!(items.len(), 4);
+                assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "@set"));
+                assert!(matches!(items[1].kind, SyntaxKind::Int(1)));
+                assert!(matches!(items[2].kind, SyntaxKind::Int(2)));
+                assert!(matches!(items[3].kind, SyntaxKind::Int(3)));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
     fn test_list_sugar_invalid() {
-        let result = lex_and_parse("@foo");
+        // @ followed by something that's not [, {, ", |, or a symbol char
+        let result = lex_and_parse("@)");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("@ must be followed by"));
     }
 
     // Span preservation

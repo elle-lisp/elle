@@ -4,7 +4,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, TableKey, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Declarative table of struct primitives.
 pub const PRIMITIVES: &[PrimitiveDef] = &[
@@ -35,8 +35,8 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_freeze,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Convert a mutable table to an immutable struct",
-        params: &["table"],
+        doc: "Convert a mutable collection to its immutable equivalent (table→struct, @set→set)",
+        params: &["collection"],
         category: "struct",
         example: "(freeze @{:a 1 :b 2})",
         aliases: &[],
@@ -46,8 +46,8 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_thaw,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Convert an immutable struct to a mutable table",
-        params: &["struct"],
+        doc: "Convert an immutable collection to its mutable equivalent (struct→table, set→@set)",
+        params: &["collection"],
         category: "struct",
         example: "(thaw {:a 1 :b 2})",
         aliases: &[],
@@ -360,9 +360,24 @@ pub fn prim_struct_length(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::int(s.len() as i64))
 }
 
-/// Convert a mutable table to an immutable struct
-/// (freeze table)
+/// Convert a mutable collection to its immutable equivalent
+/// (freeze collection) -> immutable collection
+/// Handles: table -> struct, @set -> set
 pub fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
+    // Handle mutable set -> immutable set
+    if let Some(s) = args[0].as_set_mut() {
+        let items: BTreeSet<Value> = s.borrow().iter().copied().collect();
+        return (SIG_OK, Value::set(items));
+    }
+    // Already immutable set — return as-is
+    if args[0].is_set() {
+        return (SIG_OK, args[0]);
+    }
+    // Already immutable struct — return as-is
+    if args[0].is_struct() {
+        return (SIG_OK, args[0]);
+    }
+    // Handle table -> struct (existing behavior)
     let t = match args[0].as_table() {
         Some(t) => t,
         None => {
@@ -370,7 +385,10 @@ pub fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("freeze: expected table, got {}", args[0].type_name()),
+                    format!(
+                        "freeze: expected mutable collection (table, @set), got {}",
+                        args[0].type_name()
+                    ),
                 ),
             );
         }
@@ -380,9 +398,24 @@ pub fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::struct_from(map))
 }
 
-/// Convert an immutable struct to a mutable table
-/// (thaw struct)
+/// Convert an immutable collection to its mutable equivalent
+/// (thaw collection) -> mutable collection
+/// Handles: struct -> table, set -> @set
 pub fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
+    // Handle immutable set -> mutable set
+    if let Some(s) = args[0].as_set() {
+        let items: BTreeSet<Value> = s.iter().copied().collect();
+        return (SIG_OK, Value::set_mut(items));
+    }
+    // Already mutable set — return as-is
+    if args[0].is_set_mut() {
+        return (SIG_OK, args[0]);
+    }
+    // Already mutable table — return as-is
+    if args[0].is_table() {
+        return (SIG_OK, args[0]);
+    }
+    // Handle struct -> table (existing behavior)
     let s = match args[0].as_struct() {
         Some(s) => s,
         None => {
@@ -390,7 +423,10 @@ pub fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("thaw: expected struct, got {}", args[0].type_name()),
+                    format!(
+                        "thaw: expected immutable collection (struct, set), got {}",
+                        args[0].type_name()
+                    ),
                 ),
             );
         }

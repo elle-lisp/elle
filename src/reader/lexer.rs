@@ -318,22 +318,35 @@ impl<'a> Lexer<'a> {
             }
             Some('@') => {
                 self.advance();
-                // Check if next character is |
-                if self.current() == Some('|') {
-                    self.advance();
-                    Ok(Some(TokenWithLoc {
-                        token: Token::AtPipe,
-                        loc,
-                        len: self.pos - start_pos,
-                        byte_offset: start_pos,
-                    }))
-                } else {
-                    Ok(Some(TokenWithLoc {
+                match self.current() {
+                    // @| → mutable set literal delimiter
+                    Some('|') => {
+                        self.advance();
+                        Ok(Some(TokenWithLoc {
+                            token: Token::AtPipe,
+                            loc,
+                            len: self.pos - start_pos,
+                            byte_offset: start_pos,
+                        }))
+                    }
+                    // @symbol → symbol with @ prefix (e.g. @set, @array)
+                    Some(c) if is_symbol_start(c) => {
+                        let (_, end) = self.read_symbol();
+                        let name = self.slice(start_pos, end);
+                        Ok(Some(TokenWithLoc {
+                            token: Token::Symbol(name),
+                            loc,
+                            len: self.pos - start_pos,
+                            byte_offset: start_pos,
+                        }))
+                    }
+                    // @[, @{, @" → collection sugar
+                    _ => Ok(Some(TokenWithLoc {
                         token: Token::ListSugar,
                         loc,
                         len: self.pos - start_pos,
                         byte_offset: start_pos,
-                    }))
+                    })),
                 }
             }
             Some(':') => {

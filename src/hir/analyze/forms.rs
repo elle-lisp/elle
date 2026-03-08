@@ -229,7 +229,7 @@ impl<'a> Analyzer<'a> {
                         spliced: false,
                     });
                 }
-                let sym = self.symbols.intern("mutable-set");
+                let sym = self.symbols.intern("@set");
                 let binding = Binding::new(sym, BindingScope::Global);
                 let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::none());
                 Ok(Hir::new(

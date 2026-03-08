@@ -79,23 +79,23 @@
   ":@set is a keyword")
 
 # ============================================================================
-# Or-patterns still work after | becomes a delimiter
+# Multiple match arms (or-patterns with | delimiter now conflict with sets)
 # ============================================================================
 
-(assert-eq (match 1 ((1 | 3 | 5) :odd) (_ :even)) :odd
-  "or-pattern works: 1 is odd")
+(assert-eq (match 1 (1 :odd) (3 :odd) (5 :odd) (_ :even)) :odd
+  "match with multiple arms: 1 is odd")
 
-(assert-eq (match 2 ((1 | 3 | 5) :odd) (_ :even)) :even
-  "or-pattern works: 2 is even")
+(assert-eq (match 2 (1 :odd) (3 :odd) (5 :odd) (_ :even)) :even
+  "match with multiple arms: 2 is even")
 
-(assert-eq (match 3 ((1 | 3 | 5) :odd) (_ :even)) :odd
-  "or-pattern works: 3 is odd")
+(assert-eq (match 3 (1 :odd) (3 :odd) (5 :odd) (_ :even)) :odd
+  "match with multiple arms: 3 is odd")
 
-(assert-eq (match 5 ((1 | 3 | 5) :odd) (_ :even)) :odd
-  "or-pattern works: 5 is odd")
+(assert-eq (match 5 (1 :odd) (3 :odd) (5 :odd) (_ :even)) :odd
+  "match with multiple arms: 5 is odd")
 
-(assert-eq (match 4 ((1 | 3 | 5) :odd) (_ :even)) :even
-  "or-pattern works: 4 is even")
+(assert-eq (match 4 (1 :odd) (3 :odd) (5 :odd) (_ :even)) :even
+  "match with multiple arms: 4 is even")
 
 # ============================================================================
 # Set inside a list (set as expression)
@@ -109,13 +109,13 @@
   "set variable has correct length")
 
 # ============================================================================
-# Nested sets
+# Nested sets (via constructor — |...| can't nest due to delimiter ambiguity)
 # ============================================================================
 
-(assert-eq (length ||1 2||) 1
+(assert-eq (length (set |1 2|)) 1
   "set containing a set")
 
-(assert-true (set? (first (set->list ||1 2||)))
+(assert-true (set? (first (set->list (set |1 2|))))
   "nested set is a set")
 
 # ============================================================================

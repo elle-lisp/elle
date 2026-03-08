@@ -122,9 +122,10 @@ pub fn prim_table(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::table_from(map))
 }
 
-/// Polymorphic del - works on both tables and structs
+/// Polymorphic del - works on tables, structs, and sets
 /// For tables: mutates in-place and returns the table
 /// For structs: returns a new struct without the field (immutable)
+/// For sets: delegates to set-specific del
 /// `(del collection key)`
 pub fn prim_del(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
@@ -135,6 +136,11 @@ pub fn prim_del(args: &[Value]) -> (SignalBits, Value) {
                 format!("del: expected 2 arguments, got {}", args.len()),
             ),
         );
+    }
+
+    // Delegate to set-specific del for set types
+    if args[0].is_set() || args[0].is_set_mut() {
+        return crate::primitives::sets::prim_del(args);
     }
 
     let key = match TableKey::from_value(&args[1]) {
@@ -186,7 +192,10 @@ pub fn prim_del(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("del: expected table or struct, got {}", args[0].type_name()),
+                format!(
+                    "del: expected table, struct, or set, got {}",
+                    args[0].type_name()
+                ),
             ),
         )
     }

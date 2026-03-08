@@ -12,25 +12,25 @@
 (assert-true (set? (set 1 2 3))
   "set constructor creates a set")
 
-(assert-true (set? (mutable-set 1 2 3))
-  "mutable-set constructor creates a mutable set")
+(assert-true (set? (@set 1 2 3))
+  "@set constructor creates a mutable set")
 
 (assert-eq (type (set 1 2 3)) :set
   "set constructor produces :set type")
 
-(assert-eq (type (mutable-set 1 2 3)) :@set
-  "mutable-set constructor produces :@set type")
+(assert-eq (type (@set 1 2 3)) :@set
+  "@set constructor produces :@set type")
 
 (assert-eq (string (set 1 2 3)) "|1 2 3|"
   "set displays as |1 2 3|")
 
-(assert-eq (string (mutable-set 1 2 3)) "@|1 2 3|"
+(assert-eq (string (@set 1 2 3)) "@|1 2 3|"
   "mutable set displays as @|1 2 3|")
 
 (assert-eq (string (set)) "||"
   "empty set displays as ||")
 
-(assert-eq (string (mutable-set)) "@||"
+(assert-eq (string (@set)) "@||"
   "empty mutable set displays as @||")
 
 # ============================================================================
@@ -43,8 +43,8 @@
 (assert-eq (length (set 1 2 3 1 2 3)) 3
   "set deduplicates multiple duplicates")
 
-(assert-eq (length (mutable-set 1 1 2)) 2
-  "mutable-set deduplicates: (mutable-set 1 1 2) has 2 elements")
+(assert-eq (length (@set 1 1 2)) 2
+  "@set deduplicates: (@set 1 1 2) has 2 elements")
 
 (assert-eq (length (set)) 0
   "empty set has 0 elements")
@@ -62,8 +62,8 @@
 (assert-true (set? (set 1 2 3))
   "set? returns true for set constructor result")
 
-(assert-true (set? (mutable-set 1 2 3))
-  "set? returns true for mutable-set constructor result")
+(assert-true (set? (@set 1 2 3))
+  "set? returns true for @set constructor result")
 
 (assert-false (set? [1 2 3])
   "set? returns false for tuple")
@@ -89,8 +89,8 @@
 (assert-eq (type-of (set 1 2 3)) :set
   "type-of returns :set for set constructor result")
 
-(assert-eq (type-of (mutable-set 1 2 3)) :@set
-  "type-of returns :@set for mutable-set constructor result")
+(assert-eq (type-of (@set 1 2 3)) :@set
+  "type-of returns :@set for @set constructor result")
 
 # ============================================================================
 # Equality
@@ -129,7 +129,7 @@
 (assert-eq (set 1 2 3) (set 3 2 1)
   "sets created with constructor are equal regardless of order")
 
-(assert-false (= (set 1 2 3) (mutable-set 1 2 3))
+(assert-false (= (set 1 2 3) (@set 1 2 3))
   "immutable and mutable sets from constructors are not equal")
 
 # ============================================================================
@@ -182,7 +182,7 @@
 (assert-true (empty? @||)
   "empty? returns true for empty mutable set")
 
-(assert-true (empty? (mutable-set))
+(assert-true (empty? (@set))
   "empty? returns true for empty mutable set from constructor")
 
 (assert-false (empty? @|1|)

@@ -26,12 +26,14 @@
        (cons (f (first coll)) (map f (rest coll)))))
       ((set? coll)
        (letrec ((items (set->list coll))
-                 (seed (if (= (type-of coll) :set) (set) (mutable-set)))
-                (loop (fn (lst acc)
-                        (if (empty? lst)
-                          acc
-                          (loop (rest lst) (add acc (f (first lst))))))))
-         (loop items seed)))
+                 (is-immutable (= (type-of coll) :set))
+                 (loop (fn (lst acc)
+                         (if (empty? lst)
+                           acc
+                           (loop (rest lst) (add acc (f (first lst))))))))
+          (if is-immutable
+            (loop items (set))
+            (loop items (@set)))))
 
     (true (error [:type-error "map: not a sequence"])))))
 

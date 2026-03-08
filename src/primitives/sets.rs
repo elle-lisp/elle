@@ -54,10 +54,10 @@ pub fn prim_set(args: &[Value]) -> (SignalBits, Value) {
 
 /// Create a mutable set from elements
 ///
-/// (mutable-set elem1 elem2 ...) -> @set
+/// (@set elem1 elem2 ...) -> @set
 ///
 /// Creates a mutable set, deduplicating elements and freezing mutable values
-pub fn prim_mutable_set(args: &[Value]) -> (SignalBits, Value) {
+pub fn prim_at_set(args: &[Value]) -> (SignalBits, Value) {
     let mut set = BTreeSet::new();
     for arg in args {
         set.insert(freeze_value(*arg));
@@ -331,6 +331,46 @@ pub fn prim_set_to_list(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// Convert a list to an immutable set
+///
+/// (list->set list) -> set
+///
+/// Creates an immutable set from a list, deduplicating elements and freezing mutable values
+pub fn prim_list_to_set(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("list->set: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let mut set = BTreeSet::new();
+    let mut current = args[0];
+    loop {
+        if current.is_empty_list() || current.is_nil() {
+            break;
+        }
+        if let Some(cons) = current.as_cons() {
+            set.insert(freeze_value(cons.first));
+            current = cons.rest;
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "list->set: expected proper list, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+    (SIG_OK, Value::set(set))
+}
+
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "set",
@@ -344,14 +384,14 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "mutable-set",
-        func: prim_mutable_set,
+        name: "@set",
+        func: prim_at_set,
         effect: Effect::none(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable set from elements (deduplicates, freezes mutable values)",
         params: &[],
         category: "set",
-        example: "(mutable-set 1 2 3)",
+        example: "(@set 1 2 3)",
         aliases: &[],
     },
     PrimitiveDef {
@@ -440,6 +480,17 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["set"],
         category: "set",
         example: "(set->list (set 3 1 2)) #=> (1 2 3)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "list->set",
+        func: prim_list_to_set,
+        effect: Effect::none(),
+        arity: Arity::Exact(1),
+        doc: "Convert a list to an immutable set (deduplicates, freezes mutable values)",
+        params: &["list"],
+        category: "set",
+        example: "(list->set (list 1 2 3)) #=> |1 2 3|",
         aliases: &[],
     },
 ];

@@ -14,17 +14,17 @@
 ## ── Constructors ────────────────────────────────────────────────────
 
 (assert-eq (set 1 2 3) |1 2 3| "test")
-(assert-eq (mutable-set 1 2 3) @|1 2 3| "test")
+(assert-eq (@set 1 2 3) @|1 2 3| "test")
 (assert-eq (set) || "test")
-(assert-eq (mutable-set) @|| "test")
+(assert-eq (@set) @|| "test")
 (assert-eq (set 1 1 2 2 3) |1 2 3| "test")       # dedup in constructor
 
 ## ── Predicates ──────────────────────────────────────────────────────
 
-(assert-true (set? |1 2 3|))
-(assert-true (set? @|1 2 3|))             # set? covers both types
-(assert-false (set? [1 2 3]))
-(assert-false (set? "hello"))
+(assert-true (set? |1 2 3|) "test")
+(assert-true (set? @|1 2 3|) "test")             # set? covers both types
+(assert-false (set? [1 2 3]) "test")
+(assert-false (set? "hello") "test")
 
 ## ── type-of distinguishes mutable from immutable ────────────────────
 
@@ -33,10 +33,10 @@
 
 ## ── Membership ──────────────────────────────────────────────────────
 
-(assert-true (contains? |1 2 3| 2))
-(assert-false (contains? |1 2 3| 4))
-(assert-true (contains? @|1 2 3| 1))
-(assert-false (contains? || 1))
+(assert-true (contains? |1 2 3| 2) "test")
+(assert-false (contains? |1 2 3| 4) "test")
+(assert-true (contains? @|1 2 3| 1) "test")
+(assert-false (contains? || 1) "test")
 
 ## ── Element operations ──────────────────────────────────────────────
 
@@ -47,7 +47,7 @@
 # add on mutable set mutates
 (def ms @|1 2|)
 (add ms 3)
-(assert-true (contains? ms 3))
+(assert-true (contains? ms 3) "test")
 
 # del on immutable set returns new set
 (assert-eq (del |1 2 3| 2) |1 3| "test")
@@ -56,7 +56,7 @@
 # del on mutable set mutates
 (def ms2 @|1 2 3|)
 (del ms2 2)
-(assert-false (contains? ms2 2))
+(assert-false (contains? ms2 2) "test")
 
 ## ── Set algebra ─────────────────────────────────────────────────────
 
@@ -74,17 +74,17 @@
 (assert-eq (length |1 2 3|) 3 "test")
 (assert-eq (length ||) 0 "test")
 (assert-eq (length @|1 2|) 2 "test")
-(assert-true (empty? ||))
-(assert-true (empty? @||))
-(assert-false (empty? |1|))
+(assert-true (empty? ||) "test")
+(assert-true (empty? @||) "test")
+(assert-false (empty? |1|) "test")
 
 ## ── Freeze and thaw ────────────────────────────────────────────────
 
 (assert-eq (freeze @|1 2 3|) |1 2 3| "test")
-(assert-true (set? (freeze @|1 2 3|)))
+(assert-true (set? (freeze @|1 2 3|)) "test")
 (assert-eq (type-of (freeze @|1 2 3|)) :set "test")
 (assert-eq (thaw |1 2 3|) @|1 2 3| "test")
-(assert-true (set? (thaw |1 2 3|)))
+(assert-true (set? (thaw |1 2 3|)) "test")
 (assert-eq (type-of (thaw |1 2 3|)) :@set "test")
 
 ## ── Conversion ──────────────────────────────────────────────────────
@@ -94,26 +94,29 @@
 ## ── Freeze on insert ────────────────────────────────────────────────
 
 # Mutable values are frozen when inserted
-(assert-true (contains? (set @[1 2]) [1 2]))
-(assert-true (contains? |1 2 3| 2))
+(assert-true (contains? (set @[1 2]) [1 2]) "test")
+(assert-true (contains? |1 2 3| 2) "test")
 
 ## ── Match type guards ───────────────────────────────────────────────
 
 (assert-eq (match |1 2 3|
              (|s| (length s))
              (_ :no-match))
-           3)
+           3
+           "match immutable set")
 
 (assert-eq (match @|1 2|
              (@|s| (length s))
              (_ :no-match))
-           2)
+           2
+           "match mutable set")
 
 (assert-eq (match |1 2 3|
              (@|s| :mutable)
              (|s| :immutable)
              (_ :no-match))
-           :immutable)
+           :immutable
+           "match distinguishes set types")
 
 ## ── Each iteration ──────────────────────────────────────────────────
 
@@ -125,10 +128,10 @@
 ## ── Map ─────────────────────────────────────────────────────────────
 
 (def doubled (map (fn (x) (* x 2)) |1 2 3|))
-(assert-true (set? doubled))
-(assert-true (contains? doubled 2))
-(assert-true (contains? doubled 4))
-(assert-true (contains? doubled 6))
+(assert-true (set? doubled) "test")
+(assert-true (contains? doubled 2) "test")
+(assert-true (contains? doubled 4) "test")
+(assert-true (contains? doubled 6) "test")
 
 ## ── Display ─────────────────────────────────────────────────────────
 

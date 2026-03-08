@@ -101,8 +101,8 @@ impl Syntax {
                 crate::value::list(values)
             }
             SyntaxKind::SetMut(items) => {
-                // Convert to (mutable-set e1 e2 ...) list
-                let set_mut_sym = symbols.intern("mutable-set");
+                // Convert to (@set e1 e2 ...) list
+                let set_mut_sym = symbols.intern("@set");
                 let mut values = vec![Value::symbol(set_mut_sym.0)];
                 values.extend(items.iter().map(|item| item.to_value(symbols)));
                 crate::value::list(values)
