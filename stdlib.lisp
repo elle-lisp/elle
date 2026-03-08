@@ -652,7 +652,7 @@
                # Build node content with compact instructions
                (content (-> (append "block" lbl)
                           (append "<br/>"))))
-          # Add each instruction
+           # Add each instruction
           (each instr display
             (set content (-> content
                            (append "<br/>")

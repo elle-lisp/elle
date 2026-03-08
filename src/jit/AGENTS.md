@@ -81,6 +81,7 @@ Supported instructions:
 
 Unsupported (returns JitError::UnsupportedInstruction):
 - `MakeClosure` — rare in hot loops, deferred
+- Variadic functions with `Struct`/`StrictStruct` varargs — need fiber for keyword error reporting
 
 Supported in yielding functions (via side-exit):
 - `LoadResumeValue` — emitted as dead code (unreachable in JIT, resume goes through interpreter)
@@ -320,9 +321,17 @@ No errors are silently swallowed.
     without copying. If `Value`'s representation changes, these casts break.
 
 12. **Yield helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`
-    and `elle_jit_yield_through_call` are responsible for building the
-    `SuspendedFrame` and setting `fiber.signal = (SIG_YIELD, value)` and
-    `fiber.suspended`. The JIT caller must not modify these fields.
+     and `elle_jit_yield_through_call` are responsible for building the
+     `SuspendedFrame` and setting `fiber.signal = (SIG_YIELD, value)` and
+     `fiber.suspended`. The JIT caller must not modify these fields.
+
+13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
+     entry block emits a Cranelift cons-building loop that iterates over
+     `args[fixed..nargs]` in reverse, calling `elle_jit_cons` to build the
+     rest-arg list. `cell_params_mask` is checked for the rest param slot.
+     Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are
+     still rejected (they require fiber access for keyword error reporting)
+     and fall back to the interpreter.
 
 ## Cell Optimization for Locally-Defined Variables
 
