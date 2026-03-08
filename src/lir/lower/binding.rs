@@ -37,11 +37,6 @@ impl Lowerer {
                     index: slot,
                     src: init_reg,
                 });
-                // StoreCapture (via StoreUpvalue) pops the value, stores it,
-                // and pushes it back. For let bindings, we don't need the
-                // pushed-back value (the body loads from the closure env),
-                // so pop it to keep the stack clean.
-                self.emit(LirInstr::Pop { src: init_reg });
             } else {
                 // Outside lambdas, use stack-based locals
                 if needs_cell {
@@ -169,7 +164,13 @@ impl Lowerer {
                 sym,
                 src: value_reg,
             });
-            Ok(value_reg)
+            // Reload: auto-pop consumed value_reg from the stack
+            let result_reg = self.fresh_reg();
+            self.emit(LirInstr::LoadGlobal {
+                dst: result_reg,
+                sym,
+            });
+            Ok(result_reg)
         } else {
             // Local define
             // Allocate the slot BEFORE lowering the value so that recursive
@@ -199,27 +200,44 @@ impl Lowerer {
                     index: slot,
                     src: value_reg,
                 });
+                let result = self.fresh_reg();
+                self.emit(LirInstr::LoadCapture {
+                    dst: result,
+                    index: slot,
+                });
+                Ok(result)
+            } else if needs_cell {
+                // The cell was already created in the Begin pre-pass
+                let cell_reg = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: cell_reg,
+                    slot,
+                });
+                self.emit(LirInstr::StoreCell {
+                    cell: cell_reg,
+                    value: value_reg,
+                });
+                // Reload from cell
+                let cell_reg2 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: cell_reg2,
+                    slot,
+                });
+                let result = self.fresh_reg();
+                self.emit(LirInstr::LoadCell {
+                    dst: result,
+                    cell: cell_reg2,
+                });
+                Ok(result)
             } else {
-                // Outside lambdas (at top level), use stack-based locals
-                if needs_cell {
-                    // The cell was already created in the Begin pre-pass
-                    let cell_reg = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: cell_reg,
-                        slot,
-                    });
-                    self.emit(LirInstr::StoreCell {
-                        cell: cell_reg,
-                        value: value_reg,
-                    });
-                } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot,
-                        src: value_reg,
-                    });
-                }
+                self.emit(LirInstr::StoreLocal {
+                    slot,
+                    src: value_reg,
+                });
+                let result = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal { dst: result, slot });
+                Ok(result)
             }
-            Ok(value_reg)
         }
     }
 
@@ -240,6 +258,12 @@ impl Lowerer {
                     index: slot,
                     src: value_reg,
                 });
+                let result = self.fresh_reg();
+                self.emit(LirInstr::LoadCapture {
+                    dst: result,
+                    index: slot,
+                });
+                Ok(result)
             } else if needs_cell {
                 // For local variables that need cells, load the cell and update it
                 let cell_reg = self.fresh_reg();
@@ -251,22 +275,39 @@ impl Lowerer {
                     cell: cell_reg,
                     value: value_reg,
                 });
+                let cell_reg2 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: cell_reg2,
+                    slot,
+                });
+                let result = self.fresh_reg();
+                self.emit(LirInstr::LoadCell {
+                    dst: result,
+                    cell: cell_reg2,
+                });
+                Ok(result)
             } else {
                 // For simple local variables, store directly
                 self.emit(LirInstr::StoreLocal {
                     slot,
                     src: value_reg,
                 });
+                let result = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal { dst: result, slot });
+                Ok(result)
             }
         } else if target.is_global() {
+            let sym = target.name();
             self.emit(LirInstr::StoreGlobal {
-                sym: target.name(),
+                sym,
                 src: value_reg,
             });
+            let result = self.fresh_reg();
+            self.emit(LirInstr::LoadGlobal { dst: result, sym });
+            Ok(result)
         } else {
-            return Err(format!("Unknown binding: {:?}", target));
+            Err(format!("Unknown binding: {:?}", target))
         }
-        Ok(value_reg)
     }
 
     /// Lower a Destructure node: evaluate the value, then destructure into bindings.
@@ -284,11 +325,7 @@ impl Lowerer {
     }
 
     /// Recursively destructure a value into pattern bindings.
-    fn lower_destructure(
-        &mut self,
-        pattern: &HirPattern,
-        mut value_reg: Reg,
-    ) -> Result<(), String> {
+    fn lower_destructure(&mut self, pattern: &HirPattern, value_reg: Reg) -> Result<(), String> {
         match pattern {
             HirPattern::Wildcard => {
                 // Discard the value — don't bind it
@@ -301,6 +338,11 @@ impl Lowerer {
             HirPattern::List { elements, rest } => {
                 let mut current = value_reg;
                 let has_rest = rest.is_some();
+
+                // Allocate one temp slot for the entire list traversal
+                let temp_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+
                 for (i, element) in elements.iter().enumerate() {
                     let is_last = i == elements.len() - 1 && !has_rest;
                     if is_last {
@@ -312,21 +354,34 @@ impl Lowerer {
                         });
                         self.lower_destructure(element, car)?;
                     } else {
-                        // Need both car and cdr. Dup first so we have
-                        // two copies — CdrOrNil consumes the original, CarOrNil
-                        // consumes the dup.
-                        let dup = self.fresh_reg();
-                        self.emit(LirInstr::Dup {
-                            dst: dup,
+                        // Store current to temp slot, reload for each extraction
+                        self.emit(LirInstr::StoreLocal {
+                            slot: temp_slot,
                             src: current,
+                        });
+
+                        let load_for_cdr = self.fresh_reg();
+                        self.emit(LirInstr::LoadLocal {
+                            dst: load_for_cdr,
+                            slot: temp_slot,
                         });
                         let cdr = self.fresh_reg();
                         self.emit(LirInstr::CdrOrNil {
                             dst: cdr,
-                            src: current,
+                            src: load_for_cdr,
+                        });
+
+                        let load_for_car = self.fresh_reg();
+                        self.emit(LirInstr::LoadLocal {
+                            dst: load_for_car,
+                            slot: temp_slot,
                         });
                         let car = self.fresh_reg();
-                        self.emit(LirInstr::CarOrNil { dst: car, src: dup });
+                        self.emit(LirInstr::CarOrNil {
+                            dst: car,
+                            src: load_for_car,
+                        });
+
                         self.lower_destructure(element, car)?;
                         current = cdr;
                     }
@@ -338,28 +393,25 @@ impl Lowerer {
                 Ok(())
             }
             HirPattern::Array { elements, rest } => {
-                let mut current = value_reg;
-                let need_rest = rest.is_some();
+                // Allocate one temp slot for the array
+                let temp_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
+
                 for (i, element) in elements.iter().enumerate() {
-                    let is_last = i == elements.len() - 1 && !need_rest;
-                    let src = if is_last {
-                        // Last element, no rest: consume the array directly
-                        current
-                    } else {
-                        // Not last (or has rest): dup the array
-                        let dup = self.fresh_reg();
-                        self.emit(LirInstr::Dup {
-                            dst: dup,
-                            src: current,
-                        });
-                        let src = current;
-                        current = dup;
-                        src
-                    };
+                    // Reload from slot for each extraction
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
                     let elem = self.fresh_reg();
                     self.emit(LirInstr::ArrayRefOrNil {
                         dst: elem,
-                        src,
+                        src: reloaded,
                         index: i as u16,
                     });
                     self.lower_destructure(element, elem)?;
@@ -368,10 +420,15 @@ impl Lowerer {
                 // For arrays, we need a slice-from-index operation.
                 // Use ArraySliceFrom instruction (to be added).
                 if let Some(rest_pat) = rest {
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
                     let slice = self.fresh_reg();
                     self.emit(LirInstr::ArraySliceFrom {
                         dst: slice,
-                        src: current,
+                        src: reloaded,
                         index: elements.len() as u16,
                     });
                     self.lower_destructure(rest_pat, slice)?;
@@ -380,38 +437,38 @@ impl Lowerer {
             }
             HirPattern::Tuple { elements, rest } => {
                 // Tuples are immutable indexed sequences, like arrays
-                let mut current = value_reg;
-                let need_rest = rest.is_some();
+                let temp_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
+
                 for (i, element) in elements.iter().enumerate() {
-                    let is_last = i == elements.len() - 1 && !need_rest;
-                    let src = if is_last {
-                        // Last element, no rest: consume the tuple directly
-                        current
-                    } else {
-                        // Not last (or has rest): dup the tuple
-                        let dup = self.fresh_reg();
-                        self.emit(LirInstr::Dup {
-                            dst: dup,
-                            src: current,
-                        });
-                        let src = current;
-                        current = dup;
-                        src
-                    };
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
                     let elem = self.fresh_reg();
                     self.emit(LirInstr::ArrayRefOrNil {
                         dst: elem,
-                        src,
+                        src: reloaded,
                         index: i as u16,
                     });
                     self.lower_destructure(element, elem)?;
                 }
                 // Bind the remaining tuple slice to the rest pattern.
                 if let Some(rest_pat) = rest {
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
                     let slice = self.fresh_reg();
                     self.emit(LirInstr::ArraySliceFrom {
                         dst: slice,
-                        src: current,
+                        src: reloaded,
                         index: elements.len() as u16,
                     });
                     self.lower_destructure(rest_pat, slice)?;
@@ -420,22 +477,19 @@ impl Lowerer {
             }
             HirPattern::Struct { entries } => {
                 // Structs are immutable key-value maps, like tables
-                for (i, (key, sub_pattern)) in entries.iter().enumerate() {
-                    let is_last = i == entries.len() - 1;
-                    let src = if is_last {
-                        // Last entry: consume the struct directly
-                        value_reg
-                    } else {
-                        // Not last: dup the struct
-                        let dup = self.fresh_reg();
-                        self.emit(LirInstr::Dup {
-                            dst: dup,
-                            src: value_reg,
-                        });
-                        let src = value_reg;
-                        value_reg = dup;
-                        src
-                    };
+                let temp_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
+
+                for (key, sub_pattern) in entries {
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
                     let elem = self.fresh_reg();
                     let lir_key = match key {
                         PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
@@ -443,7 +497,7 @@ impl Lowerer {
                     };
                     self.emit(LirInstr::TableGetOrNil {
                         dst: elem,
-                        src,
+                        src: reloaded,
                         key: lir_key,
                     });
                     self.lower_destructure(sub_pattern, elem)?;
@@ -451,22 +505,19 @@ impl Lowerer {
                 Ok(())
             }
             HirPattern::Table { entries } => {
-                for (i, (key, sub_pattern)) in entries.iter().enumerate() {
-                    let is_last = i == entries.len() - 1;
-                    let src = if is_last {
-                        // Last entry: consume the table directly
-                        value_reg
-                    } else {
-                        // Not last: dup the table
-                        let dup = self.fresh_reg();
-                        self.emit(LirInstr::Dup {
-                            dst: dup,
-                            src: value_reg,
-                        });
-                        let src = value_reg;
-                        value_reg = dup;
-                        src
-                    };
+                let temp_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
+
+                for (key, sub_pattern) in entries {
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
                     let elem = self.fresh_reg();
                     let lir_key = match key {
                         PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
@@ -474,7 +525,7 @@ impl Lowerer {
                     };
                     self.emit(LirInstr::TableGetOrNil {
                         dst: elem,
-                        src,
+                        src: reloaded,
                         key: lir_key,
                     });
                     self.lower_destructure(sub_pattern, elem)?;
@@ -493,9 +544,6 @@ impl Lowerer {
                 sym: binding.name(),
                 src: value_reg,
             });
-            // Pop the pushed-back value — destructuring doesn't need it
-            // as an expression result.
-            self.emit(LirInstr::Pop { src: value_reg });
             Ok(value_reg)
         } else {
             // Allocate slot if not already done (Begin pre-pass may have done it)

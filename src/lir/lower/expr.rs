@@ -137,7 +137,11 @@ impl Lowerer {
         else_branch: &Hir,
     ) -> Result<Reg, String> {
         let cond_reg = self.lower_expr(cond)?;
+
+        // Allocate result slot (same pattern as lower_cond)
         let result_reg = self.fresh_reg();
+        let result_slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
 
         let then_label = self.fresh_label();
         let else_label = self.fresh_label();
@@ -151,28 +155,32 @@ impl Lowerer {
         });
         self.finish_block();
 
-        // Then block
+        // Then block: store result to slot, jump to merge
         self.current_block = BasicBlock::new(then_label);
         let then_reg = self.lower_expr(then_branch)?;
-        self.emit(LirInstr::Move {
-            dst: result_reg,
+        self.emit(LirInstr::StoreLocal {
+            slot: result_slot,
             src: then_reg,
         });
         self.terminate(Terminator::Jump(merge_label));
         self.finish_block();
 
-        // Else block
+        // Else block: store result to slot, jump to merge
         self.current_block = BasicBlock::new(else_label);
         let else_reg = self.lower_expr(else_branch)?;
-        self.emit(LirInstr::Move {
-            dst: result_reg,
+        self.emit(LirInstr::StoreLocal {
+            slot: result_slot,
             src: else_reg,
         });
         self.terminate(Terminator::Jump(merge_label));
         self.finish_block();
 
-        // Merge block (continue here)
+        // Merge block: load result from slot
         self.current_block = BasicBlock::new(merge_label);
+        self.emit(LirInstr::LoadLocal {
+            dst: result_reg,
+            slot: result_slot,
+        });
 
         Ok(result_reg)
     }
@@ -232,8 +240,8 @@ impl Lowerer {
         }
         let mut last_reg = self.lower_expr(&exprs[0])?;
         for expr in exprs.iter().skip(1) {
-            // Pop the previous result before evaluating the next expression
-            self.emit(LirInstr::Pop { src: last_reg });
+            // Discard the previous result before evaluating the next expression
+            self.discard(last_reg);
             last_reg = self.lower_expr(expr)?;
         }
         Ok(last_reg)
@@ -273,7 +281,7 @@ impl Lowerer {
         } else {
             let mut last_reg = self.lower_expr(&body[0])?;
             for expr in body.iter().skip(1) {
-                self.emit(LirInstr::Pop { src: last_reg });
+                self.discard(last_reg);
                 last_reg = self.lower_expr(expr)?;
             }
             self.emit(LirInstr::StoreLocal {

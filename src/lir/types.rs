@@ -277,18 +277,6 @@ pub enum LirInstr {
     /// Store value into cell
     StoreCell { cell: Reg, value: Reg },
 
-    // === Control Flow Helpers ===
-    /// Copy a register (for phi-like operations)
-    /// This is a logical copy - dst now refers to the same value as src.
-    /// No bytecode is emitted; this just updates register tracking.
-    Move { dst: Reg, src: Reg },
-    /// Duplicate a register's value on the stack.
-    /// Unlike Move, this actually emits a Dup instruction.
-    /// Use this when you need both the original and a copy.
-    Dup { dst: Reg, src: Reg },
-    /// Pop a register's value from the stack (discard it).
-    Pop { src: Reg },
-
     // === Destructuring (silent nil) ===
     /// Car with silent nil: returns nil if not a cons cell
     CarOrNil { dst: Reg, src: Reg },

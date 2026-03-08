@@ -142,6 +142,7 @@ impl Lowerer {
         let saved_in_lambda = self.in_lambda;
         let saved_num_captures = self.num_captures;
         let saved_upvalue_bindings = std::mem::take(&mut self.upvalue_bindings);
+        let saved_discard_slot = self.discard_slot;
 
         self.next_reg = 0;
         self.next_label = 1;
@@ -153,6 +154,7 @@ impl Lowerer {
         self.current_func.num_captures = captures.len() as u16;
         self.in_lambda = true;
         self.num_captures = captures.len() as u16;
+        self.discard_slot = None;
         self.current_func.doc = doc;
         self.current_func.vararg_kind = vararg_kind.clone();
         self.current_func.num_params = params.len();
@@ -208,6 +210,7 @@ impl Lowerer {
         self.in_lambda = saved_in_lambda;
         self.num_captures = saved_num_captures;
         self.upvalue_bindings = saved_upvalue_bindings;
+        self.discard_slot = saved_discard_slot;
 
         Ok(func)
     }

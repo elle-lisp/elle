@@ -167,11 +167,6 @@ impl fmt::Display for LirInstr {
             LirInstr::LoadCell { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
             LirInstr::StoreCell { cell, value } => write!(f, "deref({}) ← {}", cell, value),
 
-            // === Control Flow Helpers ===
-            LirInstr::Move { dst, src } => write!(f, "{} ← {}", dst, src),
-            LirInstr::Dup { dst, src } => write!(f, "{} ← dup({})", dst, src),
-            LirInstr::Pop { src } => write!(f, "pop {}", src),
-
             // === Destructuring (silent nil) ===
             LirInstr::CarOrNil { dst, src } => write!(f, "{} ← car?({})", dst, src),
             LirInstr::CdrOrNil { dst, src } => write!(f, "{} ← cdr?({})", dst, src),
@@ -365,15 +360,6 @@ mod tests {
             src: Reg(0),
         };
         assert_eq!(format!("{}", instr), "r1 ← tuple?(r0)");
-    }
-
-    #[test]
-    fn test_instr_move() {
-        let instr = LirInstr::Move {
-            dst: Reg(1),
-            src: Reg(0),
-        };
-        assert_eq!(format!("{}", instr), "r1 ← r0");
     }
 
     #[test]
