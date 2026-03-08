@@ -715,7 +715,7 @@ impl AsyncBackend {
                     ref mut platform,
                     ref mut network_pool,
                     ref mut pending,
-                    buffer_pool: _,
+                    ref mut buffer_pool,
                     ..
                 } = *inner;
 
@@ -733,6 +733,7 @@ impl AsyncBackend {
                         )?;
                     }
                     _ => {
+                        let _ = buffer_pool; // Used only in io_uring path
                         network_pool.submit(id, fd, TP_OP_SEND_TO, payload, 0)?;
                     }
                 }
@@ -859,7 +860,7 @@ impl AsyncBackend {
 
                 let AsyncBackendInner {
                     ref mut platform,
-                    buffer_pool: _,
+                    ref mut buffer_pool,
                     ref mut pending,
                     ..
                 } = *inner;
@@ -876,10 +877,10 @@ impl AsyncBackend {
                             read_size,
                             buffer_pool,
                             buf_handle,
-                            request.timeout,
                         )?;
                     }
                     PlatformBackend::ThreadPool(pool) => {
+                        let _ = buffer_pool; // Used only in io_uring path
                         pool.submit(id, fd, op_kind, write_data, read_size)?;
                     }
                 }
@@ -1028,7 +1029,6 @@ impl AsyncBackend {
         id: u64,
         fd: RawFd,
         timeout: Option<Duration>,
-        _buffer_pool: &mut BufferPool,
     ) -> Result<(), String> {
         use io_uring::opcode;
         use io_uring::types::Fd;
@@ -1076,10 +1076,6 @@ impl AsyncBackend {
         timeout: Option<Duration>,
         _buffer_pool: &mut BufferPool,
     ) -> Result<(), String> {
-        use io_uring::opcode;
-        use io_uring::types::Fd;
-        use std::net::ToSocketAddrs;
-
         // For io_uring connect, we need to resolve the address and create a socket
         // This is complex, so we'll keep the thread-pool fallback for now
         // and just return an error to fall back to thread pool
@@ -1139,15 +1135,11 @@ impl AsyncBackend {
                 let buf = buffer_pool.get_mut(buf_handle);
                 buf.extend_from_slice(data);
 
-                let sendto_sqe = opcode::SendTo::new(
-                    Fd(fd),
-                    buf.as_ptr(),
-                    buf.len() as u32,
-                    sockaddr,
-                    sockaddr_len,
-                )
-                .build()
-                .user_data(id);
+                let sendto_sqe = opcode::Send::new(Fd(fd), buf.as_ptr(), buf.len() as u32)
+                    .dest_addr(sockaddr)
+                    .dest_addr_len(sockaddr_len)
+                    .build()
+                    .user_data(id);
 
                 let sendto_sqe = if timeout.is_some() {
                     sendto_sqe.flags(io_uring::squeue::Flags::IO_LINK)
@@ -1200,7 +1192,7 @@ impl AsyncBackend {
         let buf = buffer_pool.get_mut(buf_handle);
         buf.resize(count, 0);
 
-        let recvfrom_sqe = opcode::RecvFrom::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
+        let recvfrom_sqe = opcode::Recv::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
             .build()
             .user_data(id);
 
