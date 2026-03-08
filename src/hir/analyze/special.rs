@@ -322,9 +322,7 @@ impl<'a> Analyzer<'a> {
                     binding: Box::new(binding),
                 })
             }
-            SyntaxKind::Pipe => {
-                return Err(format!("{}: unexpected | in pattern", syntax.span));
-            }
+            SyntaxKind::Pipe => Err(format!("{}: unexpected | in pattern", syntax.span)),
             _ => Err(format!("{}: invalid pattern", syntax.span)),
         }
     }

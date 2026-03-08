@@ -173,7 +173,12 @@ impl Syntax {
             let name = symbols
                 .name(crate::value::SymbolId(id))
                 .ok_or("Unknown symbol")?;
-            SyntaxKind::Symbol(name.to_string())
+            // Restore Pipe marker that was converted to symbol "|" by to_value
+            if name == "|" {
+                SyntaxKind::Pipe
+            } else {
+                SyntaxKind::Symbol(name.to_string())
+            }
         } else if let Some(name) = value.as_keyword_name() {
             SyntaxKind::Keyword(name.to_string())
         } else if let Some(s) = value.with_string(|s| s.to_string()) {
