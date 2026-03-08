@@ -15,7 +15,7 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
 use crate::lir::{Label, LirFunction, LirInstr};
-use crate::value::SymbolId;
+use crate::value::{Arity, SymbolId};
 
 use super::code::JitCode;
 use super::dispatch;
@@ -344,6 +344,15 @@ impl JitCompiler {
             return Err(JitError::Polymorphic);
         }
 
+        // Variadic functions (AtLeast arity) require rest-arg collection
+        // that the JIT entry block does not implement. Reject so the
+        // interpreter handles the call correctly.
+        if matches!(lir.arity, Arity::AtLeast(_)) {
+            return Err(JitError::UnsupportedInstruction(
+                "variadic function (AtLeast arity)".to_string(),
+            ));
+        }
+
         // Create function signature
         let sig = self.make_jit_signature();
 
@@ -467,6 +476,11 @@ impl JitCompiler {
             }
             if member.lir.effect.may_suspend() {
                 return Err(JitError::Yielding);
+            }
+            if matches!(member.lir.arity, Arity::AtLeast(_)) {
+                return Err(JitError::UnsupportedInstruction(
+                    "variadic function (AtLeast arity)".to_string(),
+                ));
             }
         }
 
@@ -1070,5 +1084,37 @@ mod tests {
             result.err()
         );
         assert_eq!(result.unwrap().yield_points.len(), 1);
+    }
+
+    #[test]
+    fn test_reject_variadic() {
+        let mut lir = make_simple_lir();
+        lir.arity = Arity::AtLeast(1);
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let result = compiler.compile(&lir, None);
+        assert!(
+            matches!(result, Err(JitError::UnsupportedInstruction(_))),
+            "Variadic functions should be rejected: {:?}",
+            result,
+        );
+    }
+
+    #[test]
+    fn test_compile_batch_rejects_variadic() {
+        let mut lir = make_simple_lir();
+        lir.arity = Arity::AtLeast(1);
+
+        let compiler = JitCompiler::new().expect("Failed to create compiler");
+        let members = vec![BatchMember {
+            sym: SymbolId(0),
+            lir: &lir,
+        }];
+        let result = compiler.compile_batch(&members);
+        assert!(
+            matches!(result, Err(JitError::UnsupportedInstruction(_))),
+            "Variadic functions should be rejected from batch: {:?}",
+            result,
+        );
     }
 }
