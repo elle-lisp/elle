@@ -1,14 +1,5 @@
 # Utility functions for microgpt
 
-(defn slice [arr start end]
-  "Return a new mutable array containing arr[start..end)."
-  (let* ([result @[]])
-    (var i start)
-    (while (< i end)
-      (push result (get arr i))
-      (set i (+ i 1)))
-    result))
-
 (defn map2 [f a b]
   "Apply f element-wise to two arrays, returning a new mutable array."
   (let* ([n (length a)]
