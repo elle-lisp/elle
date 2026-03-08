@@ -274,3 +274,13 @@ fn sets_syntax() {
 fn sets_values() {
     run_elle_script("sets-values");
 }
+
+#[test]
+fn regex() {
+    run_elle_script("regex");
+}
+
+#[test]
+fn compliance() {
+    run_elle_script("compliance");
+}

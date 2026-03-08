@@ -161,6 +161,22 @@
       (assign outer (+ outer 1))))
   (assert-eq total 6 "break in nested while inner"))
 
+# ============================================================================
+# Compile-time error tests (from integration/blocks.rs)
+# ============================================================================
+
+# break_outside_block_error
+(assert-err (fn () (eval '(break 42)))
+  "break outside block is compile error")
+
+# break_unknown_name_error
+(assert-err (fn () (eval '(block :a (break :b 42))))
+  "break with unknown block name is compile error")
+
+# break_across_fn_boundary_error
+(assert-err (fn () (eval '(block :done ((fn () (break :done 42))))))
+  "break across function boundary is compile error")
+
 (begin
   (var sum 0)
   (var i 0)
@@ -204,3 +220,19 @@
         (assign count (+ count 1))
         (if (= ch "l") (break count) nil)))])
     (assert-eq result 3 "break in each string")))
+
+# ============================================================================
+# Compile-time error tests (from integration/blocks.rs)
+# ============================================================================
+
+# break_outside_block_error
+(assert-err (fn () (eval '(break 42)))
+  "break outside block is compile error")
+
+# break_unknown_name_error
+(assert-err (fn () (eval '(block :a (break :b 42))))
+  "break with unknown block name is compile error")
+
+# break_across_fn_boundary_error
+(assert-err (fn () (eval '(block :done ((fn () (break :done 42))))))
+  "break across function boundary is compile error")

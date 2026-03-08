@@ -89,3 +89,23 @@
     (fiber/value f))
   99
   "child fiber sees parent default outside parameterize")
+
+# ============================================================================
+# Type and error tests (from integration/parameters.rs)
+# ============================================================================
+
+# make_parameter_returns_parameter
+(assert-true (parameter? (make-parameter 42))
+  "make-parameter returns parameter type")
+
+# parameter_type_of
+(assert-eq (type (make-parameter 0)) :parameter
+  "type-of parameter is :parameter")
+
+# parameter_call_with_args_errors
+(assert-err (fn () ((make-parameter 42) 1))
+  "parameter call with args errors")
+
+# parameterize_non_parameter_errors
+(assert-err (fn () (eval '(parameterize ((42 1)) 0)))
+  "parameterize with non-parameter errors")

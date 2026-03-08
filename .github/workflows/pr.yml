@@ -1,0 +1,208 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      source: ${{ steps.filter.outputs.source }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for source changes
+        id: filter
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          CHANGED=$(git diff --name-only "$BASE" HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '\.(rs|lisp)$|^Cargo\.|^Makefile$|^\.cargo/'; then
+            echo "source=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "source=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  fmt:
+    name: Rustfmt
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt -- --check
+
+  clippy:
+    name: Clippy
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Run clippy on workspace
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  examples:
+    name: Examples
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release
+      - name: Test all Lisp examples with release build
+        run: |
+          ELLE_BIN="./target/release/elle"
+          # Try TMPDIR, then TMP, then fallback to /tmp
+          TEMP_DIR="${TMPDIR:-${TMP:-/tmp}}/elle-examples-$$"
+          mkdir -p "$TEMP_DIR"
+
+          echo "Testing all Lisp examples with release build:"
+          echo "=============================================="
+
+          TOTAL=0
+          PASSED=0
+          FAILED=0
+
+          for example in examples/*.lisp; do
+            if [ ! -f "$example" ]; then
+              continue
+            fi
+
+            TOTAL=$((TOTAL + 1))
+            EXAMPLE_NAME=$(basename "$example")
+
+            echo ""
+            echo "Running: $EXAMPLE_NAME"
+            echo "---"
+
+            OUTPUT_FILE="$TEMP_DIR/output_$EXAMPLE_NAME.txt"
+            if timeout 10s "$ELLE_BIN" "$example" > "$OUTPUT_FILE" 2>&1; then
+              PASSED=$((PASSED + 1))
+              echo "✓ $EXAMPLE_NAME PASSED"
+              # Show first few lines of output
+              head -5 "$OUTPUT_FILE" | sed 's/^/  /'
+            else
+              FAILED=$((FAILED + 1))
+              echo "✗ $EXAMPLE_NAME FAILED"
+              # Show error details
+              head -10 "$OUTPUT_FILE" | sed 's/^/  /'
+              # Don't exit on failure - continue testing all examples
+            fi
+          done
+
+          # Cleanup
+          rm -rf "$TEMP_DIR"
+
+          echo ""
+          echo "=============================================="
+          echo "Results: $PASSED/$TOTAL passed, $FAILED failed"
+
+           if [ $FAILED -gt 0 ]; then
+             echo "✗ Some examples failed"
+             exit 1
+           else
+             echo "✓ All examples passed"
+            fi
+      - name: Run Elle script tests
+        run: |
+          echo "Running Elle script tests:"
+          echo "=========================="
+          for f in tests/elle/*.lisp; do
+            echo "  $f"
+            ./target/release/elle "$f" || exit 1
+          done
+          echo "✓ All Elle script tests passed"
+
+  benchmarks:
+    name: Benchmarks
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install gnuplot
+        run: sudo apt-get install -y gnuplot
+      - name: Run Criterion benchmarks
+        run: |
+          cargo bench --bench benchmarks -- \
+            --sample-size 10 --warm-up-time 1 --measurement-time 2 \
+            --nresamples 100 --noplot --output-format bencher \
+            'parsing|symbol_interning|compilation|vm_execution|conditionals|end_to_end' \
+            | tee output.txt
+        env:
+          RAYON_NUM_THREADS: 1
+      - name: Post benchmark comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo '## Benchmark Results'
+            echo ''
+            echo '```'
+            cat output.txt
+            echo '```'
+            echo ''
+            echo "_Commit: ${{ github.event.pull_request.head.sha }}_"
+          } > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Elle Benchmarks
+          tool: cargo
+          output-file-path: output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          alert-threshold: '150%'
+          fail-on-alert: true
+          auto-push: false
+
+  all-checks:
+    name: All Checks Passed
+    needs: [changes, fmt, clippy, examples, benchmarks]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check fmt
+        if: needs.fmt.result == 'failure'
+        run: exit 1
+      - name: Check clippy
+        if: needs.clippy.result == 'failure'
+        run: exit 1
+      - name: Check examples
+        if: needs.examples.result == 'failure'
+        run: exit 1
+      - name: Check benchmarks
+        if: needs.benchmarks.result == 'failure'
+        run: exit 1
+      - name: Check changes detection
+        if: needs.changes.result == 'failure'
+        run: exit 1
+      - name: Success
+        run: echo "All checks passed"

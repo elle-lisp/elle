@@ -974,3 +974,19 @@
 # match_mutable_table
 (var mt-mut (match @{:val 42} (@{:val v} v) (_ :fail)))
 (assert-eq mt-mut 42 "match mutable table (property)")
+
+# ============================================================================
+# Error tests (from integration/destructuring.rs)
+# ============================================================================
+
+# def_destructured_bindings_are_immutable
+(assert-err (fn () (eval '(begin (def (a b) (list 1 2)) (assign a 10))))
+  "def destructured bindings are immutable")
+
+# variadic_arity_check_too_few
+(assert-err (fn () (eval '((fn (a b & rest) a) 1)))
+  "variadic arity check: too few args")
+
+# keys_duplicate_keys
+(assert-err (fn () ((fn (a &keys opts) (get opts :x)) 1 :x 10 :x 20))
+  "duplicate keyword keys error")
