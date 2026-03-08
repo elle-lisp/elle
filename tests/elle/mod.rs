@@ -249,3 +249,8 @@ fn new_pipeline() {
 fn ordering() {
     run_elle_script("ordering");
 }
+
+#[test]
+fn slice() {
+    run_elle_script("slice");
+}

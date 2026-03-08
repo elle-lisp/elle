@@ -4,6 +4,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Create immutable bytes from integer arguments
 pub fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
@@ -438,8 +439,11 @@ pub fn prim_blob_put(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, args[0])
 }
 
-/// Slice a bytes or blob. Returns same type as input.
+/// Slice a sequence. Returns same type as input.
 /// (slice coll start end)
+///
+/// Supports: bytes, blob, tuple, array, list, string, buffer.
+/// Indices are 0-based, clamped to length. start >= end returns empty.
 pub fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 3 {
         return (
@@ -492,19 +496,23 @@ pub fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
+
+    // Bytes (immutable)
     if let Some(b) = args[0].as_bytes() {
         let clamped_start = start.min(b.len());
         let clamped_end = end.min(b.len());
-        if clamped_start > clamped_end {
+        if clamped_start >= clamped_end {
             return (SIG_OK, Value::bytes(vec![]));
         }
         return (SIG_OK, Value::bytes(b[clamped_start..clamped_end].to_vec()));
     }
+
+    // Blob (mutable)
     if let Some(blob_ref) = args[0].as_blob() {
         let borrowed = blob_ref.borrow();
         let clamped_start = start.min(borrowed.len());
         let clamped_end = end.min(borrowed.len());
-        if clamped_start > clamped_end {
+        if clamped_start >= clamped_end {
             return (SIG_OK, Value::blob(vec![]));
         }
         return (
@@ -512,13 +520,106 @@ pub fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
             Value::blob(borrowed[clamped_start..clamped_end].to_vec()),
         );
     }
+
+    // Tuple (immutable)
+    if let Some(elems) = args[0].as_tuple() {
+        let clamped_start = start.min(elems.len());
+        let clamped_end = end.min(elems.len());
+        if clamped_start >= clamped_end {
+            return (SIG_OK, Value::tuple(vec![]));
+        }
+        return (
+            SIG_OK,
+            Value::tuple(elems[clamped_start..clamped_end].to_vec()),
+        );
+    }
+
+    // Array (mutable)
+    if let Some(arr_ref) = args[0].as_array() {
+        let borrowed = arr_ref.borrow();
+        let clamped_start = start.min(borrowed.len());
+        let clamped_end = end.min(borrowed.len());
+        if clamped_start >= clamped_end {
+            return (SIG_OK, Value::array(vec![]));
+        }
+        return (
+            SIG_OK,
+            Value::array(borrowed[clamped_start..clamped_end].to_vec()),
+        );
+    }
+
+    // String (immutable, grapheme-aware)
+    if args[0].is_string() {
+        return args[0]
+            .with_string(|s| slice_graphemes(s, start, end, false))
+            .unwrap();
+    }
+
+    // Buffer (mutable, grapheme-aware)
+    if let Some(buf_ref) = args[0].as_buffer() {
+        let borrowed = buf_ref.borrow();
+        // Buffer is valid UTF-8 by construction
+        let s = unsafe { std::str::from_utf8_unchecked(&borrowed) };
+        return slice_graphemes(s, start, end, true);
+    }
+
+    // List
+    if args[0].is_empty_list() || args[0].is_cons() {
+        match args[0].list_to_vec() {
+            Ok(elems) => {
+                let clamped_start = start.min(elems.len());
+                let clamped_end = end.min(elems.len());
+                if clamped_start >= clamped_end {
+                    return (SIG_OK, Value::EMPTY_LIST);
+                }
+                let mut result = Value::EMPTY_LIST;
+                for v in elems[clamped_start..clamped_end].iter().rev() {
+                    result = Value::cons(*v, result);
+                }
+                return (SIG_OK, result);
+            }
+            Err(_) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("slice: expected proper list, got {}", args[0].type_name()),
+                    ),
+                );
+            }
+        }
+    }
+
     (
         SIG_ERROR,
         error_val(
             "type-error",
-            format!("slice: expected bytes or blob, got {}", args[0].type_name()),
+            format!(
+                "slice: expected sequence (bytes, blob, tuple, array, list, string, or buffer), got {}",
+                args[0].type_name()
+            ),
         ),
     )
+}
+
+/// Grapheme-aware slicing for strings and buffers.
+fn slice_graphemes(s: &str, start: usize, end: usize, is_buffer: bool) -> (SignalBits, Value) {
+    let graphemes: Vec<&str> = s.graphemes(true).collect();
+    let clamped_start = start.min(graphemes.len());
+    let clamped_end = end.min(graphemes.len());
+    if clamped_start >= clamped_end {
+        if is_buffer {
+            return (SIG_OK, Value::buffer(vec![]));
+        } else {
+            return (SIG_OK, Value::string(""));
+        }
+    }
+    let result: String = graphemes[clamped_start..clamped_end].concat();
+    if is_buffer {
+        (SIG_OK, Value::buffer(result.into_bytes()))
+    } else {
+        (SIG_OK, Value::string(result))
+    }
 }
 
 /// buffer->bytes: convert buffer to immutable bytes
@@ -747,10 +848,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_slice,
         effect: Effect::inert(),
         arity: Arity::Exact(3),
-        doc: "Slice bytes or blob from start to end index.",
+        doc: "Slice a sequence from start to end index. Works on bytes, blob, tuple, array, list, string, and buffer. Returns same type as input.",
         params: &["coll", "start", "end"],
         category: "bytes",
-        example: "(slice (bytes 1 2 3 4 5) 1 3)",
+        example: "(slice [1 2 3 4 5] 1 3)",
         aliases: &[],
     },
     PrimitiveDef {

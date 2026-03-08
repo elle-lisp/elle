@@ -19,7 +19,7 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `Lexer` | Tokenizes input string |
-| `Token` | Token variants (LParen, Int, Symbol, etc.) |
+| `Token` | Token variants (LParen, Int, Symbol, Pipe, AtPipe, etc.) |
 | `SourceLoc` | Line/column position |
 | `Reader` | Parses tokens to `Value` |
 | `SyntaxReader` | Parses tokens to `Syntax` |
@@ -63,6 +63,43 @@ Syntax / Value tree
 - `repl.rs` - uses `read_str`
 - `main.rs` - file execution
 
+## Delimiters
+
+The lexer recognizes these delimiters (characters that cannot appear in symbol names):
+
+| Delimiter | Token | Purpose |
+|-----------|-------|---------|
+| `(` `)` | `LParen`, `RParen` | List forms |
+| `[` `]` | `LBracket`, `RBracket` | Tuple literals (immutable) |
+| `{` `}` | `LBrace`, `RBrace` | Struct literals (immutable) |
+| `\|` | `Pipe` | Set literal delimiter; or-pattern separator inside lists |
+| `@[` | `AtBracket` | Mutable array literal prefix |
+| `@{` | `AtBrace` | Mutable table literal prefix |
+| `@\|` | `AtPipe` | Mutable set literal prefix |
+| `'` | `Quote` | Quote reader macro |
+| `` ` `` | `Quasiquote` | Quasiquote reader macro |
+| `,` | `Unquote` | Unquote reader macro (inside quasiquote) |
+| `;` | `Splice` | Splice reader macro |
+| `:` | `Colon` | Keyword prefix; also `:@name` for mutable type keywords |
+| `@` | `At` | Mutable collection prefix (when not followed by `[`, `{`, or `\|`) |
+| `#` | Comment | Line comment (not a token) |
+
+## Keyword syntax
+
+Keywords are prefixed with `:`. The lexer supports `:@name` syntax for mutable type keywords:
+- `:set` — immutable set type keyword
+- `:@set` — mutable set type keyword
+- `:@array` — mutable array type keyword
+- `:@string` — mutable string (buffer) type keyword
+
+The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
+
+## Set literals
+
+- `|...|` reads as `SyntaxKind::Set(Vec<Syntax>)` — immutable set literal
+- `@|...|` reads as `SyntaxKind::SetMut(Vec<Syntax>)` — mutable set literal
+- Inside a list `(...)`, `[...]`, `{...}`, or `@{...}`, a bare `|` produces a `SyntaxKind::Pipe` marker node (not a set literal). This is used by or-patterns: `(1 | 3 | 5)` splits on `Pipe` markers.
+
 ## Invariants
 
 1. **Shebang lines are stripped.** `#!` at start of input is ignored.
@@ -77,6 +114,13 @@ Syntax / Value tree
 5. **Qualified symbols are single tokens.** `module:name` is lexed as one
    token, not three. The Analyzer desugars qualified symbols to nested
    `get` calls during analysis.
+
+6. **`|` is a delimiter.** It cannot appear in symbol names. Inside lists,
+   `|` produces `SyntaxKind::Pipe` marker nodes for or-pattern splitting.
+   At the top level, `|...|` starts a set literal.
+
+7. **`:@name` keywords are valid.** The lexer recognizes `:@` as a keyword
+   prefix variant. The `@` is consumed and prepended to the keyword name.
 
 ## Files
 
