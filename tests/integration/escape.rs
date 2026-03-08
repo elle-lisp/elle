@@ -1189,3 +1189,68 @@ fn correct_while_as_let_body() {
     let result = eval_source("(let ((x 1)) (while false x))").unwrap();
     assert_eq!(result, Value::NIL);
 }
+
+// ── Region instruction emission (let*/letrec) ──────────────────────
+
+fn count_in_bytecode(source: &str, needle: &str) -> usize {
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols).expect("compilation failed");
+    let lines = disassemble_lines(&compiled.bytecode.instructions);
+    lines.iter().filter(|line| line.contains(needle)).count()
+}
+
+#[test]
+fn region_emitted_for_let_star_with_immediate_init() {
+    // Body returns scope binding whose init is immediate (1).
+    // Tier 3 recognizes this as safe → scope allocation fires.
+    assert!(has_region("(let* ((x 1)) x)"));
+}
+
+#[test]
+fn no_region_for_let_star_with_heap_init() {
+    // Body returns scope binding whose init is (list 1 2 3) — heap.
+    // result_is_safe returns false → no scope allocation.
+    assert!(!has_region("(let* ((x (list 1 2 3))) x)"));
+}
+
+#[test]
+fn nested_let_star_regions_for_safe_body() {
+    // Inner let: body is (+ x y) — intrinsic call, result is immediate.
+    // No captures, pure body → inner let qualifies for scope allocation.
+    // Outer let: body is the inner let — Tier 4 recurses into its body,
+    // finds (+ x y) is safe, so outer let ALSO scope-allocates.
+    let source = "(let* ((x 1)) (let* ((y 2)) (+ x y)))";
+    let enters = count_in_bytecode(source, "RegionEnter");
+    let exits = count_in_bytecode(source, "RegionExit");
+    assert_eq!(enters, 2, "both lets should emit RegionEnter");
+    assert_eq!(exits, 2, "both lets should emit RegionExit");
+}
+
+#[test]
+fn region_emitted_for_block_with_literal_body() {
+    // Block body is a literal → result is immediate, no suspension,
+    // no breaks, no outward set. Block qualifies for scope allocation.
+    assert!(has_region("(block :done 42)"));
+}
+
+#[test]
+fn no_region_for_fn_body() {
+    // Function bodies should NOT emit region instructions (per plan)
+    // The function itself is a closure in the constant pool, so we check
+    // that the top-level bytecode does NOT contain RegionEnter
+    // (the fn expression compiles to MakeClosure, not region instructions)
+    assert!(!has_region("(fn (x) (+ x 1))"));
+}
+
+#[test]
+fn break_compensating_exits() {
+    // Tier 6: the block qualifies for scope allocation because the break
+    // value (42) is an immediate. The break emits one compensating
+    // RegionExit, and the normal exit path emits another.
+    let source = "(block :done (let* ((x 1)) (break :done 42)))";
+    let exits = count_in_bytecode(source, "RegionExit");
+    assert_eq!(
+        exits, 2,
+        "block scope-allocates: 1 compensating + 1 normal RegionExit"
+    );
+}

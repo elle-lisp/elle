@@ -126,6 +126,27 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     // Type introspection → keyword
     "type",
     "type-of",
+    // Arena introspection → int (via SIG_QUERY)
+    "arena/count",
+    "arena-count",
+    "arena/bytes",
+    // Closure introspection → int or nil (canonical + aliases)
+    "fn/bytecode-size",
+    "bytecode-size",
+    "fn/captures",
+    "captures",
+    // String → int or nil (nil is also immediate)
+    "string/find",
+    "string-find",
+    "string-index",
+    "string/index",
+    // Identity → bool
+    "identical?",
+    // Port predicates → bool
+    "port?",
+    "port/open?",
+    // Parameter predicate → bool
+    "parameter?",
 ];
 
 /// Build the set of primitive SymbolIds known to return immediates.

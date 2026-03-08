@@ -31,6 +31,17 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             TAG_NIL
         }
         SIG_QUERY => {
+            // arena/allocs needs mutable VM access to call the thunk —
+            // handle before dispatch_query (which takes &self).
+            if let Some(cons) = value.as_cons() {
+                if cons.first.as_keyword_name() == Some("arena/allocs") {
+                    let thunk = cons.rest;
+                    match vm.handle_arena_allocs(thunk) {
+                        Ok(val) => return val.to_bits(),
+                        Err(_bits) => return TAG_NIL,
+                    }
+                }
+            }
             // Dispatch VM state query and return the result.
             let (sig, result) = vm.dispatch_query(value);
             if sig == SIG_ERROR {

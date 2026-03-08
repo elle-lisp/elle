@@ -57,7 +57,7 @@ inner dispatch loop):
 - `SIG_RESUME` (8): VM-internal. Fiber primitive requests VM-side execution.
 - `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-signals caught signal.
 - `SIG_CANCEL` (64): VM-internal. `fiber/cancel` injects error into fiber.
-- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (e.g., call counts, global bindings, arena stats, environment).
+- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (call counts, global bindings, arena stats/count/scope-stats/fiber-stats, environment). `arena/allocs` is intercepted before dispatch (re-entrant).
 - `SIG_HALT` (256): Graceful VM termination. Value in `fiber.signal`. Non-resumable; fiber is Dead.
 
 The public `execute_bytecode` method is the translation boundary — it converts
@@ -94,7 +94,7 @@ dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
 - `SIG_RESUME` → dispatch to fiber handler
 - `SIG_PROPAGATE` → propagate child fiber's signal, preserve child chain
 - `SIG_CANCEL` → inject error into target fiber
-- `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack
+- `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack. Operations: `arena/allocs` (re-entrant, handled before dispatch), `arena/stats`, `arena/count`, `arena/scope-stats`, `arena/fiber-stats`, `call-count`, `doc`, `global?`, `fiber/self`, `list-primitives`, `primitive-meta`, `environment`
 
 All SIG_RESUME primitives (including coroutine wrappers) return
 `(SIG_RESUME, fiber_value)`. The VM uses `FiberHandle::take()`/`put()` to swap
@@ -172,6 +172,34 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `parent_value` | `Option<Value>` | Cached NaN-boxed Value for parent (identity-preserving) |
 | `child` | `Option<FiberHandle>` | Strong pointer to child fiber |
 | `child_value` | `Option<Value>` | Cached NaN-boxed Value for child (identity-preserving) |
+
+## Re-entrancy
+
+`execute_bytecode_saving_stack` makes the VM re-entrant. It saves the caller's
+operand stack and active allocator pointer, runs inner bytecode from IP 0, then
+restores both on return. The inner execution sees an empty stack and runs on the
+same fiber (same heap, globals, parameter frames).
+
+### Callers
+
+| Caller | File | Context |
+|--------|------|---------|
+| `eval` primitive | `eval.rs` | Compiles and runs Elle source from within running code |
+| Non-yielding `fiber/resume` | `call.rs` | Runs a child fiber inline on the current thread |
+| `arena/allocs` SIG_QUERY handler | `signal.rs` | Runs a thunk to measure its allocations |
+| JIT trampolines | `call.rs` | Re-enters interpreter for uncompiled hot paths |
+| Coroutine resume | `call.rs` | Resumes a suspended coroutine |
+
+### Yield hazard
+
+If the inner closure yields (`SIG_YIELD`), the saved outer stack is restored but
+the fiber is suspended mid-inner-execution. Callers that invoke user-provided
+closures (`eval`, `arena/allocs`) do not handle yield — they propagate the signal
+upward. Closures passed to these must be non-yielding (Pure effect). This is not
+currently enforced at the call site.
+
+See `execute.rs` module doc for the full rules on what is preserved, what is
+overwritten, and how to add new callers.
 
 ## Suspension mechanism
 
@@ -308,11 +336,11 @@ to see parent-established parameter bindings.
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | ~100 | VM struct, VmResult, public interface |
-| `dispatch.rs` | ~373 | Main execution loop, instruction dispatch, returns `(SignalBits, usize)` |
+| `dispatch.rs` | ~373 | Main execution loop, instruction dispatch, allocation error check, returns `(SignalBits, usize)` |
 | `call.rs` | ~823 | Call, TailCall, JIT dispatch (solo + batch), environment building |
-| `signal.rs` | ~177 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch |
+| `signal.rs` | ~530 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch (arena/stats, arena/count, arena/scope-stats, arena/fiber-stats, arena/allocs), re-entrant thunk execution |
 | `fiber.rs` | ~555 | Fiber resume/propagate/cancel, shared swap protocol, shared alloc provisioning |
-| `execute.rs` | ~147 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack` |
+| `execute.rs` | ~250 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack`, re-entrancy documentation |
 | `core.rs` | ~456 | VM struct, `resume_suspended`, stack trace helpers |
 | `stack.rs` | ~100 | Stack operations: LoadConst, Pop, Dup |
 | `variables.rs` | ~150 | LoadGlobal, StoreGlobal, LoadUpvalue, etc. |

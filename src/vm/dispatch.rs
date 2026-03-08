@@ -47,6 +47,34 @@ impl VM {
                 }
             }
 
+            // Check for allocation limit violation from previous instruction.
+            // Temporarily remove the limit so the error struct can be allocated.
+            if let Some((count, limit)) = crate::value::heap::take_alloc_error() {
+                let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+                let saved_limit = if heap_ptr.is_null() {
+                    crate::value::heap::heap_arena_set_object_limit(None)
+                } else {
+                    unsafe { (*heap_ptr).set_object_limit(None) }
+                };
+                let err = crate::value::error_val(
+                    "allocation-error",
+                    format!(
+                        "heap object limit exceeded ({} objects, limit {})",
+                        count, limit
+                    ),
+                );
+                if heap_ptr.is_null() {
+                    crate::value::heap::heap_arena_set_object_limit(saved_limit);
+                } else {
+                    unsafe { (*heap_ptr).set_object_limit(saved_limit) };
+                }
+                self.fiber.signal = Some((SIG_ERROR, err));
+                if self.error_loc.is_none() {
+                    self.error_loc = location_map.get(&instr_ip).cloned();
+                }
+                return (SIG_ERROR, ip);
+            }
+
             if ip >= bc.len() {
                 panic!("VM bug: Unexpected end of bytecode");
             }

@@ -41,15 +41,15 @@
        (b (arena/count)))
   (assert-eq (- b a) 1 "arena/count overhead is exactly 1"))
 
-# ── arena/allocs (stdlib helper) ────────────────────────────────────
+# ── arena/allocs (primitive) ────────────────────────────────────────
 
 # test_arena_allocs_nil_thunk
 # A no-op thunk should allocate 0 net objects
-(let ((result (first (rest (arena/allocs (fn () nil))))))
+(let ((result (rest (arena/allocs (fn () nil)))))
   (assert-eq result 0 "nil thunk allocates 0 net objects"))
 
 # test_arena_allocs_cons
-(let ((result (first (rest (arena/allocs (fn () (cons 1 2)))))))
+(let ((result (rest (arena/allocs (fn () (cons 1 2))))))
   (assert-eq result 1 "cons allocates 1 object"))
 
 # test_arena_allocs_preserves_result
@@ -57,7 +57,7 @@
   (assert-eq result 42 "arena/allocs preserves return value"))
 
 # test_arena_allocs_list
-(let ((result (first (rest (arena/allocs (fn () (list 1 2 3 4 5)))))))
+(let ((result (rest (arena/allocs (fn () (list 1 2 3 4 5))))))
   (assert-eq result 5 "list of 5 allocates 5 cons cells"))
 
 # ── Fiber heap isolation ────────────────────────────────────────────
