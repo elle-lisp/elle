@@ -19,7 +19,7 @@ pub use crate::value::closure::Closure;
 pub use crate::value::types::{Arity, NativeFn, TableKey};
 
 /// Cons cell for list construction using NaN-boxed values.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cons {
     pub first: Value,
     pub rest: Value,
@@ -31,9 +31,30 @@ impl Cons {
     }
 }
 
+impl std::hash::Hash for Cons {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.first.hash(state);
+        self.rest.hash(state);
+    }
+}
+
+impl PartialOrd for Cons {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Cons {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.first
+            .cmp(&other.first)
+            .then_with(|| self.rest.cmp(&other.rest))
+    }
+}
+
 /// Discriminant for heap object types.
 /// Used for fast type checking without full pattern matching.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum HeapTag {
     String = 0,

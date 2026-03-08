@@ -244,3 +244,8 @@ fn arena() {
 fn new_pipeline() {
     run_elle_script("new-pipeline");
 }
+
+#[test]
+fn ordering() {
+    run_elle_script("ordering");
+}
