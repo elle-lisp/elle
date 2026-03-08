@@ -66,7 +66,7 @@ struct AsyncBackendInner {
 
 enum PlatformBackend {
     #[cfg(all(target_os = "linux", feature = "io-uring"))]
-    Uring(io_uring::IoUring),
+    Uring(Box<io_uring::IoUring>),
     ThreadPool(ThreadPoolBackend),
 }
 
@@ -356,7 +356,7 @@ impl AsyncBackend {
     #[cfg(all(target_os = "linux", feature = "io-uring"))]
     fn create_platform_backend() -> PlatformBackend {
         match io_uring::IoUring::new(256) {
-            Ok(ring) => PlatformBackend::Uring(ring),
+            Ok(ring) => PlatformBackend::Uring(Box::new(ring)),
             Err(_) => PlatformBackend::ThreadPool(ThreadPoolBackend::new()),
         }
     }
@@ -463,6 +463,7 @@ impl AsyncBackend {
     }
 
     #[cfg(all(target_os = "linux", feature = "io-uring"))]
+    #[allow(clippy::too_many_arguments)]
     fn submit_uring(
         ring: &mut io_uring::IoUring,
         id: u64,
