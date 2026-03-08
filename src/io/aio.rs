@@ -400,12 +400,18 @@ impl AsyncBackend {
 
         // Determine op_kind and write data
         let (op_kind, write_data) = match &request.op {
-            IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll => (0u8, Vec::new()),
-            IoOp::Write { data } => {
+            IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll | IoOp::RecvFrom { .. } => {
+                (0u8, Vec::new())
+            }
+            IoOp::Write { data } | IoOp::SendTo { data, .. } => {
                 let bytes = Self::extract_write_bytes(data);
                 (1u8, bytes)
             }
             IoOp::Flush => (2u8, Vec::new()),
+            // Network ops that don't map to simple read/write/flush
+            IoOp::Accept | IoOp::Connect { .. } | IoOp::Shutdown { .. } => {
+                return Err("async backend: network ops not yet implemented".into())
+            }
         };
 
         let read_size = match &request.op {
@@ -452,6 +458,18 @@ impl AsyncBackend {
                     IoOp::ReadAll => IoOp::ReadAll,
                     IoOp::Write { data } => IoOp::Write { data: *data },
                     IoOp::Flush => IoOp::Flush,
+                    IoOp::RecvFrom { count } => IoOp::RecvFrom { count: *count },
+                    IoOp::SendTo {
+                        addr,
+                        port_num,
+                        data,
+                    } => IoOp::SendTo {
+                        addr: addr.clone(),
+                        port_num: *port_num,
+                        data: *data,
+                    },
+                    // These return early above, so unreachable here
+                    IoOp::Accept | IoOp::Connect { .. } | IoOp::Shutdown { .. } => unreachable!(),
                 },
                 port_key,
                 port: request.port,
@@ -611,8 +629,18 @@ impl AsyncBackend {
                                             Value::string(String::from_utf8_lossy(&data).as_ref())
                                         }
                                     }
-                                    IoOp::Write { .. } => Value::int(result_code as i64),
-                                    IoOp::Flush => Value::NIL,
+                                    IoOp::Write { .. } | IoOp::SendTo { .. } => {
+                                        Value::int(result_code as i64)
+                                    }
+                                    IoOp::Flush | IoOp::Shutdown { .. } => Value::NIL,
+                                    IoOp::RecvFrom { .. } => {
+                                        // Raw bytes from recvfrom — placeholder
+                                        Value::bytes(data)
+                                    }
+                                    IoOp::Accept | IoOp::Connect { .. } => {
+                                        // Network ops not yet routed through async
+                                        Value::NIL
+                                    }
                                 };
                                 Completion {
                                     id,
@@ -745,8 +773,10 @@ impl AsyncBackend {
                         Value::string(String::from_utf8_lossy(&data).as_ref())
                     }
                 }
-                IoOp::Write { .. } => Value::int(result_code as i64),
-                IoOp::Flush => Value::NIL,
+                IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
+                IoOp::Flush | IoOp::Shutdown { .. } => Value::NIL,
+                IoOp::RecvFrom { .. } => Value::bytes(data),
+                IoOp::Accept | IoOp::Connect { .. } => Value::NIL,
             };
             Completion {
                 id,
@@ -774,7 +804,12 @@ impl AsyncBackend {
             PortKind::Stdin => PortKey::Stdin,
             PortKind::Stdout => PortKey::Stdout,
             PortKind::Stderr => PortKey::Stderr,
-            PortKind::File => match port.with_fd(|fd| fd.as_raw_fd()) {
+            PortKind::File
+            | PortKind::TcpListener
+            | PortKind::TcpStream
+            | PortKind::UdpSocket
+            | PortKind::UnixListener
+            | PortKind::UnixStream => match port.with_fd(|fd| fd.as_raw_fd()) {
                 Some(raw) => PortKey::Fd(raw),
                 None => PortKey::Fd(-1),
             },
@@ -847,8 +882,15 @@ impl AsyncBackendInner {
             IoOp::ReadLine => StdinOpKind::ReadLine,
             IoOp::Read { count } => StdinOpKind::Read { count: *count },
             IoOp::ReadAll => StdinOpKind::ReadAll,
-            IoOp::Write { .. } => return Err("io/submit: cannot write to stdin".into()),
-            IoOp::Flush => return Err("io/submit: cannot flush stdin".into()),
+            IoOp::Write { .. }
+            | IoOp::Flush
+            | IoOp::Accept
+            | IoOp::Connect { .. }
+            | IoOp::SendTo { .. }
+            | IoOp::RecvFrom { .. }
+            | IoOp::Shutdown { .. } => {
+                return Err("io/submit: unsupported operation on stdin".into())
+            }
         };
         stdin_thread.submit(id, op_kind)?;
         // No buffer needed for stdin (thread manages its own)
@@ -963,10 +1005,12 @@ mod tests {
         let req1 = IoRequest {
             op: IoOp::ReadAll,
             port,
+            timeout: None,
         };
         let req2 = IoRequest {
             op: IoOp::ReadAll,
             port,
+            timeout: None,
         };
 
         let id1 = backend.submit(&req1).unwrap();
@@ -987,6 +1031,7 @@ mod tests {
         let req = IoRequest {
             op: IoOp::ReadAll,
             port: port_val,
+            timeout: None,
         };
         let result = backend.submit(&req);
         assert!(result.is_err());
@@ -1010,6 +1055,7 @@ mod tests {
         let req = IoRequest {
             op: IoOp::ReadAll,
             port,
+            timeout: None,
         };
         let id = backend.submit(&req).unwrap();
 
@@ -1032,6 +1078,7 @@ mod tests {
                 data: Value::string("async write"),
             },
             port,
+            timeout: None,
         };
         let id = backend.submit(&req).unwrap();
 

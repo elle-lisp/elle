@@ -80,6 +80,15 @@ impl SyncBackend {
             IoOp::ReadAll => self.execute_read_all(port),
             IoOp::Write { data } => self.execute_write(port, data),
             IoOp::Flush => self.execute_flush(port),
+            // Network ops — real implementations in Chunk 2
+            IoOp::Accept
+            | IoOp::Connect { .. }
+            | IoOp::SendTo { .. }
+            | IoOp::RecvFrom { .. }
+            | IoOp::Shutdown { .. } => (
+                SIG_ERROR,
+                error_val("io-error", "network I/O not yet implemented"),
+            ),
         }
     }
 
@@ -88,7 +97,12 @@ impl SyncBackend {
             PortKind::Stdin => PortKey::Stdin,
             PortKind::Stdout => PortKey::Stdout,
             PortKind::Stderr => PortKey::Stderr,
-            PortKind::File => {
+            PortKind::File
+            | PortKind::TcpListener
+            | PortKind::TcpStream
+            | PortKind::UdpSocket
+            | PortKind::UnixListener
+            | PortKind::UnixStream => {
                 match port.with_fd(|fd| fd.as_raw_fd()) {
                     Some(raw) => PortKey::Fd(raw),
                     None => PortKey::Fd(-1), // closed, will error elsewhere
@@ -319,8 +333,8 @@ impl SyncBackend {
                 io::ErrorKind::InvalidInput,
                 "cannot read from output port",
             )),
-            PortKind::File => port
-                .with_fd(|fd| {
+            PortKind::File | PortKind::TcpStream | PortKind::UdpSocket | PortKind::UnixStream => {
+                port.with_fd(|fd| {
                     let raw = fd.as_raw_fd();
                     let ret = unsafe {
                         libc::read(raw, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
@@ -336,7 +350,12 @@ impl SyncBackend {
                         io::ErrorKind::BrokenPipe,
                         "port fd unavailable",
                     ))
-                }),
+                })
+            }
+            PortKind::TcpListener | PortKind::UnixListener => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot read from listener port",
+            )),
         }
     }
 
@@ -361,8 +380,8 @@ impl SyncBackend {
                 io::ErrorKind::InvalidInput,
                 "cannot write to input port",
             )),
-            PortKind::File => port
-                .with_fd(|fd| {
+            PortKind::File | PortKind::TcpStream | PortKind::UdpSocket | PortKind::UnixStream => {
+                port.with_fd(|fd| {
                     let raw = fd.as_raw_fd();
                     let ret = unsafe {
                         libc::write(raw, data.as_ptr() as *const libc::c_void, data.len())
@@ -378,7 +397,12 @@ impl SyncBackend {
                         io::ErrorKind::BrokenPipe,
                         "port fd unavailable",
                     ))
-                }),
+                })
+            }
+            PortKind::TcpListener | PortKind::UnixListener => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot write to listener port",
+            )),
         }
     }
 
@@ -388,8 +412,8 @@ impl SyncBackend {
             PortKind::Stdout => io::stdout().lock().flush(),
             PortKind::Stderr => io::stderr().lock().flush(),
             PortKind::Stdin => Ok(()), // no-op
-            PortKind::File => port
-                .with_fd(|fd| {
+            PortKind::File | PortKind::TcpStream | PortKind::UdpSocket | PortKind::UnixStream => {
+                port.with_fd(|fd| {
                     let raw = fd.as_raw_fd();
                     let ret = unsafe { libc::fsync(raw) };
                     if ret < 0 {
@@ -403,7 +427,9 @@ impl SyncBackend {
                         io::ErrorKind::BrokenPipe,
                         "port fd unavailable",
                     ))
-                }),
+                })
+            }
+            PortKind::TcpListener | PortKind::UnixListener => Ok(()), // no-op for listeners
         }
     }
 
@@ -472,6 +498,7 @@ mod tests {
         let req = IoRequest {
             op: IoOp::ReadLine,
             port,
+            timeout: None,
         };
         let (bits, val) = backend.execute(&req);
         assert_eq!(bits, SIG_OK);
@@ -489,6 +516,7 @@ mod tests {
         let req = IoRequest {
             op: IoOp::ReadLine,
             port,
+            timeout: None,
         };
         let (bits, val) = backend.execute(&req);
         assert_eq!(bits, SIG_OK);
@@ -506,6 +534,7 @@ mod tests {
         let req = IoRequest {
             op: IoOp::ReadLine,
             port,
+            timeout: None,
         };
         let (bits, val) = backend.execute(&req);
         assert_eq!(bits, SIG_OK);
@@ -523,6 +552,7 @@ mod tests {
         let req = IoRequest {
             op: IoOp::ReadAll,
             port,
+            timeout: None,
         };
         let (bits, val) = backend.execute(&req);
         assert_eq!(bits, SIG_OK);
@@ -542,6 +572,7 @@ mod tests {
                 data: Value::string("hello"),
             },
             port,
+            timeout: None,
         };
         let (bits, val) = backend.execute(&req);
         assert_eq!(bits, SIG_OK);
@@ -564,6 +595,7 @@ mod tests {
         let req = IoRequest {
             op: IoOp::ReadLine,
             port: port_val,
+            timeout: None,
         };
         let (bits, _) = backend.execute(&req);
         assert_eq!(bits, SIG_ERROR);
@@ -581,6 +613,7 @@ mod tests {
         let req = IoRequest {
             op: IoOp::ReadLine,
             port,
+            timeout: None,
         };
         let (bits, _) = backend.execute(&req);
         assert_eq!(bits, SIG_ERROR);
