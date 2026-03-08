@@ -22,7 +22,7 @@
               [tmp (get arr i)])
        (put arr i (get arr j))
       (put arr j tmp))
-    (set i (- i 1)))
+     (assign i (- i 1)))
   arr)
 
 (defn make-2d [rows cols init-fn]

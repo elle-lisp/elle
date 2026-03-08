@@ -435,7 +435,7 @@ fn no_region_when_body_yields() {
 fn no_region_when_set_to_global() {
     // Body contains set to outer var → outward mutation → unsafe
     assert!(!has_region(
-        "(begin (var holder nil) (let ((x (list 1 2 3))) (set holder x) 42))"
+        "(begin (var holder nil) (let ((x (list 1 2 3))) (assign holder x) 42))"
     ));
 }
 
@@ -539,7 +539,7 @@ fn region_for_block_with_immediate_set() {
     // Block body with set to outer binding, but value is immediate (42).
     // Tier 8: outward set with immediate value is harmless → qualifies.
     assert!(has_region(
-        "(begin (var holder nil) (block :done (set holder 42) 0))"
+        "(begin (var holder nil) (block :done (assign holder 42) 0))"
     ));
 }
 
@@ -548,7 +548,7 @@ fn no_region_for_block_with_heap_set() {
     // Block body with set to outer binding where value is heap-allocated.
     // Even with Tier 8, this is dangerous → rejected.
     assert!(!has_region(
-        "(begin (var holder nil) (block :done (set holder (list 1 2 3)) 0))"
+        "(begin (var holder nil) (block :done (assign holder (list 1 2 3)) 0))"
     ));
 }
 
@@ -671,11 +671,11 @@ fn no_region_for_inner_let_with_outward_set() {
     // The inner let sets an outer binding — condition 4 rejects the inner let.
     // But the outer let can scope-allocate (Tier 4): its result is the inner
     // let whose result is 42 (safe), holder doesn't escape (no captures,
-    // result is immediate), and (set holder x) is a set to holder which IS
+    // result is immediate), and (assign holder x) is a set to holder which IS
     // in the outer let's scope (not outward for the outer let).
     // So has_region returns true (the outer let emits RegionEnter/Exit).
     assert!(has_region(
-        "(let ((holder nil)) (let ((x (list 1 2 3))) (set holder x) 42))"
+        "(let ((holder nil)) (let ((x (list 1 2 3))) (assign holder x) 42))"
     ));
 }
 
@@ -690,35 +690,35 @@ fn no_region_when_intrinsic_has_spliced_args() {
 
 #[test]
 fn region_emitted_for_outward_set_with_immediate_value() {
-    // (set counter (+ counter 1)) sets an outer binding, but the value
+    // (assign counter (+ counter 1)) sets an outer binding, but the value
     // is an intrinsic call returning an immediate. Tier 8: harmless.
     assert!(has_region(
-        "(begin (var counter 0) (let ((temp (list 1 2 3))) (set counter (+ counter 1)) (length temp)))"
+        "(begin (var counter 0) (let ((temp (list 1 2 3))) (assign counter (+ counter 1)) (length temp)))"
     ));
 }
 
 #[test]
 fn region_emitted_for_outward_set_with_bool_literal() {
-    // (set flag true) — immediate assignment to outer binding.
+    // (assign flag true) — immediate assignment to outer binding.
     assert!(has_region(
-        "(begin (var flag false) (let ((temp (list 1 2 3))) (set flag true) (length temp)))"
+        "(begin (var flag false) (let ((temp (list 1 2 3))) (assign flag true) (length temp)))"
     ));
 }
 
 #[test]
 fn no_region_when_outward_set_assigns_scope_heap_var() {
-    // (set holder temp) where temp is a scope binding with heap init.
+    // (assign holder temp) where temp is a scope binding with heap init.
     // The value is a Var referencing a scope binding whose init is (list ...) — unsafe.
     assert!(!has_region(
-        "(begin (var holder nil) (let ((temp (list 1 2 3))) (set holder temp) 42))"
+        "(begin (var holder nil) (let ((temp (list 1 2 3))) (assign holder temp) 42))"
     ));
 }
 
 #[test]
 fn no_region_when_outward_set_assigns_heap_call() {
-    // (set holder (list 4 5 6)) — the value is a non-intrinsic call.
+    // (assign holder (list 4 5 6)) — the value is a non-intrinsic call.
     assert!(!has_region(
-        "(begin (var holder nil) (let ((temp 1)) (set holder (list 4 5 6)) 42))"
+        "(begin (var holder nil) (let ((temp 1)) (assign holder (list 4 5 6)) 42))"
     ));
 }
 
@@ -727,7 +727,7 @@ fn region_emitted_for_inner_let_set_to_inner_binding() {
     // Inner let sets its own binding — not outward for the inner let.
     // Tier 8: inner bindings are extended into scope_bindings.
     assert!(has_region(
-        "(let ((x 1)) (let ((y 2)) (set y (+ y 1)) (+ x y)))"
+        "(let ((x 1)) (let ((y 2)) (assign y (+ y 1)) (+ x y)))"
     ));
 }
 
@@ -736,7 +736,7 @@ fn no_region_when_inner_let_sets_outer_with_heap_value() {
     // Inner let sets outer binding with a heap value.
     // Even with scope extension, the value is heap-allocated.
     assert!(!has_region(
-        "(begin (var holder nil) (let ((x 1)) (let ((y (list 1))) (set holder y) 42)))"
+        "(begin (var holder nil) (let ((x 1)) (let ((y (list 1))) (assign holder y) 42)))"
     ));
 }
 
@@ -744,12 +744,12 @@ fn no_region_when_inner_let_sets_outer_with_heap_value() {
 
 #[test]
 fn correct_outward_set_immediate_in_scope() {
-    // Verify the set! actually takes effect when scope-allocated.
+    // Verify the assign actually takes effect when scope-allocated.
     let result = eval_source(
         "(begin
            (var counter 0)
            (let ((temp (list 1 2 3)))
-             (set counter (+ counter 1))
+             (assign counter (+ counter 1))
              (length temp))
            counter)",
     )
@@ -763,7 +763,7 @@ fn correct_outward_set_bool_in_scope() {
         "(begin
            (var flag false)
            (let ((temp (list 1 2 3)))
-             (set flag true)
+             (assign flag true)
              (length temp))
            flag)",
     )
@@ -780,8 +780,8 @@ fn correct_loop_with_outward_set_counter() {
            (var i 0)
            (while (< i 100)
              (let ((temp @[1 2 3]))
-               (set total (+ total (length temp)))
-               (set i (+ i 1))))
+               (assign total (+ total (length temp)))
+               (assign i (+ i 1))))
            total)",
     )
     .unwrap();
@@ -794,7 +794,7 @@ fn correct_inner_let_set_own_binding() {
     let result = eval_source(
         "(let ((x 10))
            (let ((y 5))
-             (set y (+ y x))
+             (assign y (+ y x))
              (+ x y)))",
     )
     .unwrap();
@@ -1014,7 +1014,7 @@ fn regression_global_set_not_freed() {
     let result = eval_source(
         "(var holder nil)
          (let ((x (list 1 2 3)))
-           (set holder x)
+           (assign holder x)
            42)
          (length holder)",
     )
@@ -1053,7 +1053,7 @@ fn regression_yielded_value_not_freed() {
 #[test]
 fn stress_loop_with_scope_allocation() {
     // Tight loop where each iteration scope-allocates and releases.
-    // Note: the let body does `(set i ...)` which is an outward set.
+    // Note: the let body does `(assign i ...)` which is an outward set.
     // The let itself does NOT scope-allocate (Set in result position is
     // conservatively unsafe in result_is_safe). However, the implicit
     // while-block DOES scope-allocate since Tier 8 recognizes the outward
@@ -1062,7 +1062,7 @@ fn stress_loop_with_scope_allocation() {
         "(var i 0)
          (while (< i 1000)
            (let ((a i) (b (+ i 1)))
-             (set i (+ a b))))",
+             (assign i (+ a b))))",
     )
     .unwrap();
     assert!(result.is_nil());
@@ -1076,8 +1076,8 @@ fn stress_nested_scope_allocation() {
          (while (< i 100)
            (let ((a i))
              (let ((b (+ a 1)))
-               (set sum (+ sum (+ a b)))))
-           (set i (+ i 1)))
+               (assign sum (+ sum (+ a b)))))
+           (assign i (+ i 1)))
          sum",
     )
     .unwrap();
@@ -1123,7 +1123,7 @@ fn correct_let_with_while_break() {
            (var i 0)
            (while (< i n)
              (if (= i 5) (break :while i))
-             (set i (+ i 1)))
+             (assign i (+ i 1)))
            i)",
     )
     .unwrap();
@@ -1150,8 +1150,8 @@ fn correct_while_in_scoped_let() {
         "(var sum 0)
          (let ((x 10))
            (while (> x 0)
-             (set sum (+ sum x))
-             (set x (- x 1)))
+             (assign sum (+ sum x))
+             (assign x (- x 1)))
            nil)
          sum",
     )
@@ -1176,7 +1176,7 @@ fn correct_block_with_while_and_break() {
          (block :loop
            (while (< i 10)
              (if (= i 5) (break :loop :found))
-             (set i (+ i 1)))
+             (assign i (+ i 1)))
            :not-found)",
     )
     .unwrap();

@@ -122,7 +122,7 @@ fn test_unterminated_struct_location() {
 #[test]
 fn test_list_sugar_error_location() {
     let mut symbols = SymbolTable::new();
-    let input = "@invalid";
+    let input = "@)";
 
     let mut lexer = Lexer::new(input);
     let mut tokens = Vec::new();

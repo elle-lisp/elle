@@ -109,6 +109,12 @@ impl PartialEq for Value {
                 // Blob comparison (compare contents)
                 (HeapObject::Blob(b1), HeapObject::Blob(b2)) => *b1.borrow() == *b2.borrow(),
 
+                // Set comparison (compare contents)
+                (HeapObject::LSet(s1), HeapObject::LSet(s2)) => s1 == s2,
+
+                // Mutable set comparison (compare contents)
+                (HeapObject::LSetMut(s1), HeapObject::LSetMut(s2)) => *s1.borrow() == *s2.borrow(),
+
                 // Different types are not equal
                 _ => false,
             }
@@ -273,10 +279,12 @@ fn type_rank(v: &Value) -> u8 {
             HeapTag::ManagedPointer => 27,
             HeapTag::External => 28,
             HeapTag::Parameter => 29,
+            HeapTag::LSet => 30,
+            HeapTag::LSetMut => 31,
         }
     } else {
         // Unknown — should not happen
-        30
+        32
     }
 }
 
@@ -332,7 +340,7 @@ fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
         // String (SSO + heap) — lexicographic by content
         8 => a.compare_str(b).unwrap_or(Ordering::Equal),
 
-        // Heap types (ranks 9–29) — deref and compare
+        // Heap types (ranks 9–31) — deref and compare
         _ => unsafe { cmp_heap(a, b) },
     }
 }
@@ -391,10 +399,19 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         // LibHandle — by u32 ID
         (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1.cmp(h2),
 
+        // LSet — element-wise lexicographic (BTreeSet iteration is sorted)
+        (HeapObject::LSet(s1), HeapObject::LSet(s2)) => s1.iter().cmp(s2.iter()),
+
+        // LSetMut — element-wise lexicographic (borrow)
+        (HeapObject::LSetMut(s1), HeapObject::LSetMut(s2)) => {
+            let b1 = s1.borrow();
+            let b2 = s2.borrow();
+            b1.iter().cmp(b2.iter())
+        }
+
         // All reference-identity types — by raw pointer bits
         _ => a.0.cmp(&b.0),
     }
 }
-
 // Debug is implemented in display.rs alongside Display, since both
 // share the resolve_name helper for symbol/keyword resolution.

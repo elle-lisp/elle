@@ -406,6 +406,46 @@ impl Value {
         self.as_tuple().is_some()
     }
 
+    /// Extract as set if this is a set.
+    #[inline]
+    pub fn as_set(&self) -> Option<&std::collections::BTreeSet<Value>> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::LSet(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Check if this value is a set.
+    #[inline]
+    pub fn is_set(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::LSet)
+    }
+
+    /// Extract as mutable set if this is a mutable set.
+    #[inline]
+    pub fn as_set_mut(&self) -> Option<&std::cell::RefCell<std::collections::BTreeSet<Value>>> {
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::LSetMut(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Check if this value is a mutable set.
+    #[inline]
+    pub fn is_set_mut(&self) -> bool {
+        use crate::value::heap::HeapTag;
+        self.heap_tag() == Some(HeapTag::LSetMut)
+    }
+
     /// Extract as buffer if this is a buffer.
     #[inline]
     pub fn as_buffer(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {

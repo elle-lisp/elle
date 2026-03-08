@@ -82,14 +82,14 @@
 
 (assert-eq (let ((sum 0))
              (each b (bytes 1 2 3)
-               (set sum (+ sum b)))
+               (assign sum (+ sum b)))
              sum)
            6
            "each over bytes")
 
 (assert-eq (let ((sum 0))
              (each b (blob 10 20 30)
-               (set sum (+ sum b)))
+               (assign sum (+ sum b)))
              sum)
            60
            "each over blob")

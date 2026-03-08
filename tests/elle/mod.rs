@@ -121,6 +121,11 @@ fn matching() {
 }
 
 #[test]
+fn sets() {
+    run_elle_script("sets");
+}
+
+#[test]
 fn coroutines() {
     run_elle_script("coroutines");
 }
@@ -258,4 +263,14 @@ fn slice() {
 #[test]
 fn jit_variadic() {
     run_elle_script("jit-variadic");
+}
+
+#[test]
+fn sets_syntax() {
+    run_elle_script("sets-syntax");
+}
+
+#[test]
+fn sets_values() {
+    run_elle_script("sets-values");
 }

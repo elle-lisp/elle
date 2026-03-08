@@ -80,7 +80,9 @@ impl Syntax {
             | SyntaxKind::Tuple(items)
             | SyntaxKind::Array(items)
             | SyntaxKind::Struct(items)
-            | SyntaxKind::Table(items) => {
+            | SyntaxKind::Table(items)
+            | SyntaxKind::Set(items)
+            | SyntaxKind::SetMut(items) => {
                 for item in items {
                     item.set_scopes_recursive(scopes);
                 }
@@ -156,6 +158,8 @@ impl Syntax {
             SyntaxKind::Array(_) => "array",
             SyntaxKind::Struct(_) => "struct",
             SyntaxKind::Table(_) => "table",
+            SyntaxKind::Set(_) => "set",
+            SyntaxKind::SetMut(_) => "mutable set",
             SyntaxKind::Quote(_) => "quote",
             SyntaxKind::Quasiquote(_) => "quasiquote",
             SyntaxKind::Unquote(_) => "unquote",
@@ -187,6 +191,10 @@ pub enum SyntaxKind {
     Struct(Vec<Syntax>),
     /// Brace-delimited mutable table: `@{...}`
     Table(Vec<Syntax>),
+    /// Pipe-delimited immutable set literal: `|...|`
+    Set(Vec<Syntax>),
+    /// Pipe-delimited mutable set literal: `@|...|`
+    SetMut(Vec<Syntax>),
 
     // Quote forms - preserved as structure for macro handling
     Quote(Box<Syntax>),

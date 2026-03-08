@@ -24,7 +24,7 @@
     (def warmup-c (make-coroutine run))
     (coro/resume warmup-c)
     (coro/resume warmup-c)
-    (set warmup-i (+ warmup-i 1)))
+    (assign warmup-i (+ warmup-i 1)))
 
   # Now outer should be JIT-compiled. Test it.
   (def c (make-coroutine run))
@@ -49,7 +49,7 @@
     (def warmup-c (make-coroutine run))
     (coro/resume warmup-c)
     (coro/resume warmup-c 0)
-    (set warmup-i (+ warmup-i 1)))
+    (assign warmup-i (+ warmup-i 1)))
 
   (def c (make-coroutine run))
   (coro/resume c)
@@ -73,7 +73,7 @@
     (coro/resume warmup-c)
     (coro/resume warmup-c)
     (coro/resume warmup-c)
-    (set warmup-i (+ warmup-i 1)))
+    (assign warmup-i (+ warmup-i 1)))
 
   (def c (make-coroutine run))
   (assert-eq (coro/resume c) 1 "JIT multiple yields: first")
@@ -97,7 +97,7 @@
     (def warmup-c (make-coroutine run))
     (coro/resume warmup-c)
     (coro/resume warmup-c)
-    (set warmup-i (+ warmup-i 1)))
+    (assign warmup-i (+ warmup-i 1)))
 
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
@@ -122,7 +122,7 @@
     (def warmup-c (make-coroutine run))
     (coro/resume warmup-c)
     (coro/resume warmup-c)
-    (set warmup-i (+ warmup-i 1)))
+    (assign warmup-i (+ warmup-i 1)))
 
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
@@ -147,7 +147,7 @@
     (def warmup-c (make-coroutine run))
     (coro/resume warmup-c)
     (coro/resume warmup-c)
-    (set warmup-i (+ warmup-i 1)))
+    (assign warmup-i (+ warmup-i 1)))
 
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
@@ -174,7 +174,7 @@
     (def warmup-c (make-coroutine run))
     (coro/resume warmup-c)
     (coro/resume warmup-c)
-    (set warmup-i (+ warmup-i 1)))
+    (assign warmup-i (+ warmup-i 1)))
 
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
@@ -203,7 +203,7 @@
     (def warmup-c (make-coroutine run))
     (coro/resume warmup-c)
     (coro/resume warmup-c)
-    (set warmup-i (+ warmup-i 1)))
+    (assign warmup-i (+ warmup-i 1)))
 
   (def c (make-coroutine run))
   (def v1 (coro/resume c))

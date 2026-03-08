@@ -158,20 +158,20 @@
 # Count total tags across all contacts
 (var total-tags 0)
 (each c in all-contacts
-  (set total-tags (+ total-tags (length (get c :tags)))))
+  (assign total-tags (+ total-tags (length (get c :tags)))))
 (display "  total tags across all contacts: ") (print total-tags)
 (assert-true (> total-tags 0) "each: summed tag counts")
 
 # each over a tuple (alice's tags)
 (var tag-count 0)
 (each t in (get alice :tags)
-  (set tag-count (+ tag-count 1)))
+  (assign tag-count (+ tag-count 1)))
 (assert-eq tag-count 2 "each over tuple")
 
 # each over a string (by grapheme cluster)
 (var char-count 0)
 (each ch in "hello"
-  (set char-count (+ char-count 1)))
+  (assign char-count (+ char-count 1)))
 (assert-eq char-count 5 "each over string")
 
 
@@ -184,7 +184,7 @@
   (var found false)
   (each t in (get contact :tags)
     (when (= t tag)
-      (set found true)))
+      (assign found true)))
   found)
 
 (assert-true (has-tag? alice :lead) "alice is a lead")
@@ -215,7 +215,7 @@
   "Format a tag tuple as [dev, lead]."
   (var parts (list))
   (each t in tags
-    (set parts (append parts (list (keyword->string t)))))
+    (assign parts (append parts (list (keyword->string t)))))
   (-> "[" (append (string/join parts ", ")) (append "]")))
 
 (defn format-contact [{:name name :email email :tags tags}]
@@ -440,4 +440,78 @@
 
 
 (print "")
+
+# ========================================
+# 15. Sets — immutable and mutable
+# ========================================
+#
+# Sets are unordered collections of unique values.
+# Immutable sets: |1 2 3|
+# Mutable sets: @|1 2 3|
+
+# Literal syntax
+(assert-eq || || "empty immutable set")
+(assert-eq @|| @|| "empty mutable set")
+(assert-eq (set 1 2 3) (set 1 2 3) "immutable set")
+(assert-eq @|1 2 3| @|1 2 3| "mutable set")
+
+# Order doesn't matter in sets
+(assert-eq (set 3 1 2) (set 1 2 3) "set order independence")
+
+# Deduplication
+(assert-eq (set 1 1 2 2 3) (set 1 2 3) "set deduplication")
+
+# Constructors
+(assert-eq (set 1 2 3) (set 1 2 3) "set constructor")
+(assert-eq (@set 1 2 3) @|1 2 3| "mutable-set constructor")
+
+# Predicates
+(assert-true (set? (set 1 2 3)) "set? on immutable set")
+(assert-true (set? @|1 2 3|) "set? on mutable set")
+(assert-false (set? [1 2 3]) "set? on tuple")
+
+# Type discrimination
+(assert-eq (type-of (set 1 2 3)) :set "type-of immutable set")
+(assert-eq (type-of @|1 2 3|) :@set "type-of mutable set")
+
+# Membership
+(assert-true (contains? (set 1 2 3) 2) "contains? true")
+(assert-false (contains? (set 1 2 3) 4) "contains? false")
+
+# Element operations
+(assert-eq (add (set 1 2) 3) (set 1 2 3) "add to immutable set")
+(assert-eq (del (set 1 2 3) 2) (set 1 3) "del from immutable set")
+
+# Set algebra
+(assert-eq (union (set 1 2) (set 2 3)) (set 1 2 3) "union")
+(assert-eq (intersection (set 1 2 3) (set 2 3 4)) (set 2 3) "intersection")
+(assert-eq (difference (set 1 2 3) (set 2 3)) (set 1) "difference")
+
+# Length and empty?
+(assert-eq (length (set 1 2 3)) 3 "set length")
+(assert-true (empty? ||) "empty? on empty set")
+(assert-false (empty? (set 1)) "empty? on non-empty set")
+
+# Conversion
+(assert-eq (length (set->array (set 3 1 2))) 3 "set->array conversion")
+
+# Freeze/thaw
+(assert-eq (freeze @|1 2 3|) (set 1 2 3) "freeze mutable set")
+(assert-eq (type-of (freeze @|1 2 3|)) :set "freeze returns immutable")
+(assert-eq (thaw (set 1 2 3)) @|1 2 3| "thaw immutable set")
+(assert-eq (type-of (thaw (set 1 2 3))) :@set "thaw returns mutable")
+
+# Iteration with each
+(var set-sum 0)
+(each x (set 1 2 3)
+  (assign set-sum (+ set-sum x)))
+(assert-eq set-sum 6 "each on set")
+
+# Mapping over sets
+(def doubled (map (fn (x) (* x 2)) (set 1 2 3)))
+(assert-true (set? doubled) "map returns set")
+(assert-true (contains? doubled 2) "map: 1*2=2")
+(assert-true (contains? doubled 4) "map: 2*2=4")
+(assert-true (contains? doubled 6) "map: 3*2=6")
+
 (print "all collections passed.")

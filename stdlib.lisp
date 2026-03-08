@@ -24,6 +24,18 @@
      (if (empty? coll)
        ()
        (cons (f (first coll)) (map f (rest coll)))))
+      ((set? coll)
+       (letrec ((items (set->array coll))
+                 (len (length items))
+                 (is-immutable (= (type-of coll) :set))
+                 (loop (fn (i acc)
+                         (if (= i len)
+                           acc
+                           (loop (+ i 1) (add acc (f (get items i))))))))
+          (if is-immutable
+            (loop 0 (set))
+            (loop 0 (@set)))))
+
     (true (error [:type-error "map: not a sequence"])))))
 
 
@@ -585,24 +597,24 @@
                         ((= term-kind :branch) "#cc8800")
                         ((= term-kind :yield)  "#008844")
                         (true                  "#444444"))))
-          (set result (-> result
+          (assign result (-> result
                         (append "  block")
                         (append lbl)
                         (append " [color=\"")
                         (append color)
                         (append "\" label=\"{block")
                         (append lbl)))
-          (set result (append result "|"))
+          (assign result (append result "|"))
           (each instr display
-            (set result (-> result
+            (assign result (-> result
                           (append (dot-escape instr))
                           (append "\\l"))))
-          (set result (-> result
+          (assign result (-> result
                         (append "|")
                         (append (dot-escape term-display))
                         (append "}\"];\n")))
           (each edge edges
-            (set result (-> result
+            (assign result (-> result
                           (append "  block")
                           (append lbl)
                           (append " -> block")
@@ -654,15 +666,15 @@
                           (append "<br/>"))))
            # Add each instruction
           (each instr display
-            (set content (-> content
+            (assign content (-> content
                            (append "<br/>")
                            (append (mmd-escape instr)))))
           # Add terminator separator and terminator
-          (set content (-> content
+          (assign content (-> content
                          (append "<br/>---<br/>")
                          (append (mmd-escape term-display))))
           # Emit node with shape
-          (set result (-> result
+          (assign result (-> result
                         (append "  block")
                         (append lbl)
                         (append open-delim)
@@ -676,7 +688,7 @@
                        ((= term-kind :branch)  "branch")
                        ((= term-kind :yield)   "yield_block")
                        (true                   "normal"))))
-            (set result (-> result
+            (assign result (-> result
                           (append "  class block")
                           (append lbl)
                           (append " ")
@@ -684,7 +696,7 @@
                           (append "\n"))))
            # Emit edges
            (each edge edges
-             (set result (-> result
+             (assign result (-> result
                            (append "  block")
                            (append lbl)
                            (append " --> block")

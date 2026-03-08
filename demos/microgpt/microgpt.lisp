@@ -36,9 +36,9 @@
         (var j (- i 1))
         (while (and (>= j 0) (> (get result j) key))
           (put result (+ j 1) (get result j))
-          (set j (- j 1)))
-        (put result (+ j 1) key))
-      (set i (+ i 1)))
+           (assign j (- j 1)))
+         (put result (+ j 1) key))
+       (assign i (+ i 1)))
     result))
 
 (defn build-tokenizer [names]
@@ -50,8 +50,8 @@
     (each name in names
       (var i 0)
       (while (< i (length name))
-        (put chars (string/char-at name i) true)
-        (set i (+ i 1))))
+         (put chars (string/char-at name i) true)
+         (assign i (+ i 1))))
     (let* ([sorted-chars (sort-strings (keys chars))]
            [char->id @{}]
            [id->char @{}])
@@ -59,7 +59,7 @@
       (each ch in sorted-chars
         (put char->id ch idx)
         (put id->char idx ch)
-        (set idx (+ idx 1)))
+         (assign idx (+ idx 1)))
       # BOS/EOS is the last index
       (let* ([bos idx])
         (put id->char bos "<BOS>")
@@ -75,8 +75,8 @@
          [ids @[bos]])
     (var i 0)
     (while (< i (length name))
-      (push ids (get char->id (string/char-at name i)))
-      (set i (+ i 1)))
+       (push ids (get char->id (string/char-at name i)))
+       (assign i (+ i 1)))
     (push ids bos)
     ids))
 
@@ -113,7 +113,7 @@
         (put m-arr i m-new)
         (put v-arr i v-new)
         (put p :data (- (v-data p) (* lr-current (/ m-hat (+ (sqrt v-hat) eps))))))
-      (set i (+ i 1)))))
+             (assign i (+ i 1)))))
 
 # ── Training ────────────────────────────────────────────────────────
 
@@ -151,7 +151,7 @@
           (when (= (mod step 100) 0)
             (display (string/format "step {:>4d} / {} | loss {:.4f}\n"
                                     step num-steps (v-data loss))))))
-      (set step (+ step 1)))))
+      (assign step (+ step 1)))))
 
 # ── Inference ───────────────────────────────────────────────────────
 
@@ -159,13 +159,13 @@
   "Numerically stable softmax over an array of floats. Returns [probs sum]."
   (var max-val (get scores 0))
   (each s in scores
-    (when (> s max-val) (set max-val s)))
+     (when (> s max-val) (assign max-val s)))
   (let* ([exps @[]]
          [sum-exp 0.0])
     (each s in scores
       (let* ([e (exp (- s max-val))])
         (push exps e)
-        (set sum-exp (+ sum-exp e))))
+         (assign sum-exp (+ sum-exp e))))
     [exps sum-exp]))
 
 (defn sample-token [logits temperature]
@@ -179,9 +179,9 @@
        (var idx 0)
        (block :sample
          (while (< idx (length exps))
-           (set cumulative (+ cumulative (/ (get exps idx) sum-exp)))
+            (assign cumulative (+ cumulative (/ (get exps idx) sum-exp)))
            (when (>= cumulative r) (break :sample idx))
-           (set idx (+ idx 1)))
+           (assign idx (+ idx 1)))
          (- (length exps) 1)))))
 
 (defn generate [model tokenizer n-samples temperature max-len]
@@ -198,14 +198,14 @@
         (while (and (not done) (< pos max-len))
           (let* ([logits (gpt-forward-token token-id pos kv-keys kv-values model)]
                  [next-tok (sample-token logits temperature)])
-            (if (= next-tok bos)
-              (set done true)
-              (begin
-                (set token-id next-tok)
-                (set name (append name (get id->char next-tok)))
-                (set pos (+ pos 1))))))
-        (display (string/format "  {}\n" name)))
-      (set sample (+ sample 1)))))
+             (if (= next-tok bos)
+               (assign done true)
+               (begin
+                 (assign token-id next-tok)
+                 (assign name (append name (get id->char next-tok)))
+                 (assign pos (+ pos 1))))))
+         (display (string/format "  {}\n" name)))
+       (assign sample (+ sample 1)))))
 
 # ── Gradient check ──────────────────────────────────────────────────
 

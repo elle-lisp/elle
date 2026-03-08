@@ -42,13 +42,13 @@
 # Or-pattern membership
 # ============================================================================
 
-(assert-eq (match 1 ((1 | 3 | 5 | 7 | 9) :odd) ((0 | 2 | 4 | 6 | 8) :even) (_ :out)) :odd
+(assert-eq (match 1 ((or 1 3 5 7 9) :odd) ((or 0 2 4 6 8) :even) (_ :out)) :odd
   "or-pattern: 1 is odd")
-(assert-eq (match 2 ((1 | 3 | 5 | 7 | 9) :odd) ((0 | 2 | 4 | 6 | 8) :even) (_ :out)) :even
+(assert-eq (match 2 ((or 1 3 5 7 9) :odd) ((or 0 2 4 6 8) :even) (_ :out)) :even
   "or-pattern: 2 is even")
-(assert-eq (match 0 ((1 | 3 | 5 | 7 | 9) :odd) ((0 | 2 | 4 | 6 | 8) :even) (_ :out)) :even
+(assert-eq (match 0 ((or 1 3 5 7 9) :odd) ((or 0 2 4 6 8) :even) (_ :out)) :even
   "or-pattern: 0 is even")
-(assert-eq (match 9 ((1 | 3 | 5 | 7 | 9) :odd) ((0 | 2 | 4 | 6 | 8) :even) (_ :out)) :odd
+(assert-eq (match 9 ((or 1 3 5 7 9) :odd) ((or 0 2 4 6 8) :even) (_ :out)) :odd
   "or-pattern: 9 is odd")
-(assert-eq (match 4 ((1 | 3 | 5 | 7 | 9) :odd) ((0 | 2 | 4 | 6 | 8) :even) (_ :out)) :even
+(assert-eq (match 4 ((or 1 3 5 7 9) :odd) ((or 0 2 4 6 8) :even) (_ :out)) :even
   "or-pattern: 4 is even")

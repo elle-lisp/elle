@@ -341,7 +341,7 @@
   (var i 0)
   (while (< i 50)
     (yield (list i (+ i 1)))
-    (set i (+ i 1))))))
+    (assign i (+ i 1))))))
 (var results @[])
 (while (not (coro/done? gen))
   (coro/resume gen nil)

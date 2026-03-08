@@ -515,7 +515,7 @@
 # The macro's `tmp` must not shadow the caller's `tmp`.
 (begin
   (defmacro my-swap (a b)
-    `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+    `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
 
   (let ((tmp 10) (x 1) (y 2))
     (my-swap x y)
@@ -593,7 +593,7 @@
 # Verify the swap macro actually swaps values, not just that it's hygienic.
 (begin
   (defmacro my-swap2 (a b)
-    `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+    `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
 
   (let ((x 1) (y 2))
     (my-swap2 x y)
@@ -602,7 +602,7 @@
 # The real hygiene test: swap when caller has a variable named `tmp`.
 (begin
   (defmacro my-swap3 (a b)
-    `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+    `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
 
   (let ((tmp 100) (x 1) (y 2))
     (my-swap3 x y)

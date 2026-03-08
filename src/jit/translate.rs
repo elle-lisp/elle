@@ -666,6 +666,12 @@ impl<'a> FunctionTranslator<'a> {
                     "PushParamFrame/PopParamFrame".to_string(),
                 ));
             }
+            LirInstr::IsSet { .. } | LirInstr::IsSetMut { .. } => {
+                return Err(JitError::UnsupportedInstruction(format!(
+                    "JIT does not support set type checks: {:?}",
+                    instr
+                )));
+            }
         }
         Ok(false)
     }

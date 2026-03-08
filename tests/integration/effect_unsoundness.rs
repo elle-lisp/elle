@@ -20,30 +20,30 @@ fn setup() -> (SymbolTable, VM) {
     (symbols, vm)
 }
 
-/// After set!, effect tracking is invalidated and the call is conservatively Yields.
+/// After assign, effect tracking is invalidated and the call is conservatively Yields.
 ///
 /// The code:
 ///   (begin
 ///     (var f (fn () 42))      ; f is Pure, stored in effect_env
-///     (set f (fn () (yield 1))) ; set! removes f from effect_env
+///     (assign f (fn () (yield 1))) ; assign removes f from effect_env
 ///     (f))                       ; f is now unknown global → defaults to Yields
 ///
-/// Result: Effect::yields() (conservative, since we don't know f's effect after set!)
+/// Result: Effect::yields() (conservative, since we don't know f's effect after assign)
 #[test]
 fn test_unsound_effect_after_set() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (var f (fn () 42)) (set f (fn () (yield 1))) (f))",
+        "(begin (var f (fn () 42)) (assign f (fn () (yield 1))) (f))",
         &mut symbols,
         &mut vm,
     )
     .unwrap();
 
-    // After set!, the effect is conservatively Yields (sound)
+    // After assign, the effect is conservatively Yields (sound)
     assert_eq!(
         result.hir.effect,
         Effect::yields(),
-        "After set!, unknown global defaults to Yields (sound)"
+        "After assign, unknown global defaults to Yields (sound)"
     );
 }
 
