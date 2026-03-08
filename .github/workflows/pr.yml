@@ -136,6 +136,32 @@ jobs:
           done
           echo "✓ All Elle script tests passed"
 
+  tests-integration:
+    name: Integration Tests
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run integration and unit tests
+        run: cargo test --lib && cargo test --test '*' --skip property
+
+  tests-property:
+    name: Property Tests
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      PROPTEST_CASES: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run property tests
+        run: cargo test --test property
+
   benchmarks:
     name: Benchmarks
     needs: changes
@@ -185,7 +211,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, fmt, clippy, examples, benchmarks]
+    needs: [changes, fmt, clippy, examples, tests-integration, tests-property, benchmarks]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -197,6 +223,12 @@ jobs:
         run: exit 1
       - name: Check examples
         if: needs.examples.result == 'failure'
+        run: exit 1
+      - name: Check integration tests
+        if: needs.tests-integration.result == 'failure'
+        run: exit 1
+      - name: Check property tests
+        if: needs.tests-property.result == 'failure'
         run: exit 1
       - name: Check benchmarks
         if: needs.benchmarks.result == 'failure'
