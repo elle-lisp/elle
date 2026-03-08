@@ -1,6 +1,7 @@
 //! Value constructors for immediate and heap-allocated types.
 
 use std::any::Any;
+use std::collections::BTreeSet;
 
 use super::{
     Value, INT_MAX, INT_MIN, PAYLOAD_MASK, PTRVAL_CPOINTER_BIT, PTRVAL_PAYLOAD_MASK, QNAN,
@@ -377,5 +378,20 @@ impl Value {
             is_captured: false,
             is_immutable: false,
         })))
+    }
+
+    /// Create an immutable set value.
+    #[inline]
+    pub fn set(items: BTreeSet<Value>) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
+        alloc(HeapObject::LSet(items))
+    }
+
+    /// Create a mutable set value.
+    #[inline]
+    pub fn set_mut(items: BTreeSet<Value>) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
+        use std::cell::RefCell;
+        alloc(HeapObject::LSetMut(RefCell::new(items)))
     }
 }

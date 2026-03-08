@@ -58,7 +58,7 @@ impl Lowerer {
                 is_tail,
             } => self.lower_call(func, args.as_slice(), *is_tail),
 
-            HirKind::Set { target, value } => self.lower_set(target, value),
+            HirKind::Assign { target, value } => self.lower_assign(target, value),
             HirKind::Define { binding, value } => self.lower_define(*binding, value),
             HirKind::Destructure { pattern, value } => {
                 self.lower_destructure_expr(pattern, value, &hir.span)

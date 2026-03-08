@@ -53,34 +53,34 @@
 # ============================================================================
 
 (assert-eq (let ((x 0))
-             (let ((inc (fn () (begin (set x (+ x 1)) x))))
-               (begin (inc) (inc) (inc)))) 3 "test_set_on_let_bound_capture")
+              (let ((inc (fn () (begin (assign x (+ x 1)) x))))
+                (begin (inc) (inc) (inc)))) 3 "test_set_on_let_bound_capture")
 
 (assert-eq ((fn ()
               (begin
                 (var counter 0)
-                (def inc (fn () (begin (set counter (+ counter 1)) counter)))
+                 (def inc (fn () (begin (assign counter (+ counter 1)) counter)))
                 (begin (inc) (inc) (inc))))) 3 "test_set_on_locally_defined_capture")
 
 (assert-eq (let ((x 0))
-             (let ((inc (fn () (set x (+ x 1))))
-                   (get (fn () x)))
-               (begin (inc) (inc) (get)))) 2 "test_multiple_closures_share_mutable_capture")
+              (let ((inc (fn () (assign x (+ x 1))))
+                    (get (fn () x)))
+                (begin (inc) (inc) (get)))) 2 "test_multiple_closures_share_mutable_capture")
 
 (assert-eq (let ((x 0))
              (let ((f (fn () (let ((y 0))
-                               (fn () (begin (set x (+ x 1)) (set y (+ y 1)) (+ x y)))))))
+                                (fn () (begin (assign x (+ x 1)) (assign y (+ y 1)) (+ x y)))))))
                (let ((g (f)))
                  (begin (g) (g) (g))))) 6 "test_nested_mutable_captures")
 
 (assert-eq (let ((counter 0))
-             (let ((f (fn () (fn () (begin (set counter (+ counter 1)) counter)))))
+              (let ((f (fn () (fn () (begin (assign counter (+ counter 1)) counter)))))
                (let ((g (f)))
                  (begin (g) (g) (g))))) 3 "test_mutable_capture_across_lambda_levels")
 
 (assert-eq (let ((x 0) (y 0))
-             (let ((inc-x (fn () (set x (+ x 1))))
-                   (inc-y (fn () (set y (+ y 1))))
+              (let ((inc-x (fn () (assign x (+ x 1))))
+                    (inc-y (fn () (assign y (+ y 1))))
                    (sum (fn () (+ x y))))
                (begin (inc-x) (inc-y) (inc-x) (sum)))) 3 "test_multiple_mutable_captures")
 
@@ -106,7 +106,7 @@
                      (coro/resume co)))) 20)) 10) 30 "test_coroutine_captures_multiple_levels")
 
 (assert-eq (let ((counter 0))
-             (let ((gen (fn () (begin (set counter (+ counter 1)) (yield counter)))))
+              (let ((gen (fn () (begin (assign counter (+ counter 1)) (yield counter)))))
                (let ((co (make-coroutine gen)))
                  (coro/resume co)))) 1 "test_coroutine_with_mutable_capture")
 
@@ -146,8 +146,8 @@
                  (g)))) 10 "test_capture_in_conditional")
 
 (assert-eq (let ((x 0))
-             (let ((f (fn () (begin (set x (+ x 1)) x))))
-               (begin (f) (f) (f) x))) 3 "test_capture_in_loop_body")
+              (let ((f (fn () (begin (assign x (+ x 1)) x))))
+                (begin (f) (f) (f) x))) 3 "test_capture_in_loop_body")
 
 # ============================================================================
 # SECTION 6: Edge Cases and Stress Tests
@@ -214,7 +214,7 @@
               (begin
                 (var value initial)
                 (def getter (fn () value))
-                (def setter (fn (new-val) (set value new-val)))
+                 (def setter (fn (new-val) (assign value new-val)))
                 (setter 42)
                 (getter))) 0) 42 "test_multiple_closures_sharing_mutable_state_via_define")
 
@@ -266,23 +266,23 @@
                (checker msg))) true "test_closure_let_with_string_operations")
 
 # ============================================================================
-# SECTION 9: `set` form (without the `!`)
+# SECTION 9: `assign` form (variable mutation)
 # ============================================================================
 
 (assert-eq (let ((x 0))
-             (begin (set x 10) x)) 10 "test_set_basic")
+             (begin (assign x 10) x)) 10 "test_set_basic")
 
 (assert-eq (let ((x 0))
-             (let ((inc (fn () (begin (set x (+ x 1)) x))))
+             (let ((inc (fn () (begin (assign x (+ x 1)) x))))
                (begin (inc) (inc) (inc)))) 3 "test_set_in_closure")
 
 (assert-eq (let ((x 5))
-             (begin (set x 10) (set x 20) (set x 30) x)) 30 "test_set_multiple_times")
+             (begin (assign x 10) (assign x 20) (assign x 30) x)) 30 "test_set_multiple_times")
 
 (assert-eq (let ((x 5))
-             (begin (set x (+ x 10)) x)) 15 "test_set_with_expression")
+             (begin (assign x (+ x 10)) x)) 15 "test_set_with_expression")
 
 (assert-eq (let ((x 0))
-             (let ((inc (fn () (set x (+ x 1))))
+             (let ((inc (fn () (assign x (+ x 1))))
                    (get (fn () x)))
                (begin (inc) (inc) (get)))) 2 "test_set_shared_capture")

@@ -271,10 +271,8 @@ Things that look wrong but aren't:
    both mutable and immutable types.
 - `|...|` is the immutable set literal syntax; `@|...|` is the mutable set
    literal. `|` is a delimiter (like `(`, `[`, `{`). Inside lists, arrays,
-   structs, and tables, a bare `|` produces a `SyntaxKind::Pipe` marker node
-   (not a set literal). This is used by or-patterns: `(1 | 3 | 5)` splits on
-   `Pipe` markers to create alternatives. Or-patterns previously used `Symbol("|")`
-   — that is no longer valid.
+   structs, and tables, a bare `|` starts a nested set literal (delegates to
+   `read_set`), not a special marker node.
 - `:@name` is valid keyword syntax. The lexer recognizes `:@` as a keyword
    prefix variant. The `@` is consumed and prepended to the keyword name.
    Examples: `:@set`, `:@array`, `:@string`. These are used for mutable type
@@ -294,7 +292,15 @@ Things that look wrong but aren't:
   instead of the normal `Call` instruction. Arity checking is disabled for
   spliced calls.
 - `#` is the comment character (not `;`). `true`/`false` are the boolean
-  literals (not `#t`/`#f`).
+   literals (not `#t`/`#f`).
+- `|` is a delimiter for set literals (`|1 2 3|` for immutable sets, `@|1 2 3|`
+   for mutable sets). `|` always starts a set literal, including inside lists,
+   arrays, structs, and tables (delegates to `read_set`). Or-patterns use
+   `(or pat1 pat2 pat3)` syntax — the `or` symbol in pattern position is
+   recognized by the match analyzer in `special.rs`.
+- `assign` is the form for variable mutation (was named `set` before set types
+   were added). Syntax: `(assign var value)`. This is distinct from the `set`
+   constructor primitive for creating set values.
 - `begin` and `block` are distinct forms. `begin` sequences expressions
   without creating a scope (bindings leak into the enclosing scope). `block`
   sequences expressions within a new lexical scope (bindings are contained).
@@ -340,8 +346,11 @@ file means a broken build, a silent bug, or an incomplete feature.
 
 ### Adding a new heap type
 
-Example: Buffer (mutable byte sequence), added alongside the existing
-Array, Table, Tuple, Struct, Closure types.
+Example: Set types (`LSet` and `LSetMut`), added alongside the existing
+Array, Table, Tuple, Struct, Closure, Buffer types. Sets follow the
+immutable/mutable split: `LSet(BTreeSet<Value>)` for immutable sets,
+`LSetMut(RefCell<BTreeSet<Value>>)` for mutable sets. Display as `|1 2 3|`
+and `@|1 2 3|` respectively.
 
 - [ ] `src/value/heap.rs` — add variant to `HeapObject` enum, add
       discriminant to `HeapTag` enum, add arms to `HeapObject::tag()`,
@@ -440,46 +449,55 @@ checklist above.
 
 This is the most invasive change. It touches every layer of the pipeline.
 
+**Example: Sets (issue #509)** — all items completed:
+
 Reader (source → tokens → syntax):
-- [ ] `src/reader/lexer.rs` — add delimiter handling (e.g., `@[` for
-      arrays, `@{` for tables)
-- [ ] `src/reader/token.rs` — add token variant if needed
-- [ ] `src/reader/syntax.rs` — add parsing to `SyntaxKind`
-- [ ] `src/reader/parser.rs` — add parsing to `Value` (legacy reader)
+- [x] `src/reader/lexer.rs` — added `|` delimiter, `Pipe`/`AtPipe` tokens
+- [x] `src/reader/token.rs` — added `Pipe` and `AtPipe` variants
+- [x] `src/reader/syntax.rs` — added `read_set()` and `read_set_mut()`
+- [x] `src/reader/parser.rs` — set parsing in legacy reader
 
 Syntax (expansion):
-- [ ] `src/syntax/mod.rs` — add `SyntaxKind` variant, update
-      `kind_label()`, `set_scopes_recursive()`
-- [ ] `src/syntax/display.rs` — add display arm
-- [ ] `src/syntax/convert.rs` — add arms to `to_value()` and
-      `from_value()` (Syntax ↔ Value conversion)
-- [ ] `src/syntax/expand/` — handle in expansion if the literal's
-      elements need expanding
+- [x] `src/syntax/mod.rs` — added `SyntaxKind::Set`, `SetMut`
+- [x] `src/syntax/display.rs` — display for set literals
+- [x] `src/syntax/convert.rs` — `to_value()` and `from_value()` for sets
+- [x] `src/syntax/expand/` — or-patterns use `(or ...)` syntax (no Pipe marker)
 
 HIR (analysis):
-- [ ] `src/hir/analyze/forms.rs` — add `SyntaxKind::YourType` arm in
-      `analyze_expr` (typically desugars to a call to a constructor
-      primitive)
-- [ ] `src/hir/analyze/destructure.rs` — add destructuring support if
-      the collection can appear in binding patterns
-- [ ] `src/hir/analyze/special.rs` — add `match` pattern analysis for
-      the collection type
-- [ ] `src/hir/pattern.rs` — add `HirPattern` variant for pattern
-      matching
+- [x] `src/hir/analyze/forms.rs` — desugaring to `(set ;elems)` and `(mutable-set ;elems)`
+- [x] `src/hir/analyze/destructure.rs` — set destructuring support
+- [x] `src/hir/analyze/special.rs` — pattern analysis for sets
+- [x] `src/hir/pattern.rs` — `HirPattern::Set` and `SetMut` variants
 
 Value (runtime representation):
-- [ ] Follow the "Adding a new heap type" checklist above
+- [x] `src/value/heap.rs` — `LSet` and `LSetMut` heap types
+- [x] `src/value/repr/constructors.rs` — `Value::set()` and `set_mut()`
+- [x] `src/value/repr/accessors.rs` — `is_set()`, `as_set()`, etc.
+- [x] `src/value/repr/traits.rs` — equality, hash, ord for sets
+- [x] `src/value/display.rs` — display format `|...|` and `@|...|`
+- [x] `src/value/send.rs` — sendable value conversion
 
 LIR (lowering):
-- [ ] `src/lir/lower/pattern.rs` — add pattern matching lowering (type
-      guard + element extraction)
-- [ ] `src/lir/lower/control.rs` — update destructuring lowering if
-      needed
+- [x] `src/lir/lower/pattern.rs` — set pattern matching lowering
+- [x] `src/lir/lower/decision.rs` — `Constructor::Set` and `SetMut`
 
-If the collection needs dedicated bytecode (type guards, element access):
-- [ ] Follow the "Adding a new bytecode instruction" checklist above
-      (e.g., `IsYourType`, `YourTypeGetOrNil` for pattern matching
-      and destructuring)
+Bytecode (type guards):
+- [x] `src/compiler/bytecode.rs` — `Instruction::IsSet`, `IsSetMut`
+- [x] `src/compiler/bytecode_debug.rs` — disassembly for set instructions
+- [x] `src/lir/types.rs` — `LirInstr::IsSet`, `IsSetMut`
+- [x] `src/lir/emit.rs` — emit logic for set instructions
+- [x] `src/vm/dispatch.rs` — dispatch to set handlers
+- [x] `src/vm/types.rs` — `handle_is_set()`, `handle_is_set_mut()`
+
+Primitives:
+- [x] `src/primitives/sets.rs` — all set operations (constructors, predicates, algebra)
+- [x] `src/primitives/registration.rs` — registered in `ALL_TABLES`
+
+Elle-level:
+- [x] `prelude.lisp` — set support in `each` macro
+- [x] `stdlib.lisp` — set support in `map` function
+- [x] `tests/elle/sets.lisp` — comprehensive test suite
+- [x] `examples/collections.lisp` — set examples
 
 ## Maintaining documentation
 

@@ -37,7 +37,7 @@
       (put model (layer-key layer "attn-wo") (init-weight *n-embd* *n-embd* scale))
       (put model (layer-key layer "mlp-fc1") (init-weight *mlp-hidden* *n-embd* scale))
       (put model (layer-key layer "mlp-fc2") (init-weight *n-embd* *mlp-hidden* scale))
-      (set layer (+ layer 1)))
+      (assign layer (+ layer 1)))
     model))
 
 # Collect all parameters into a flat array
@@ -60,8 +60,8 @@
       (let* ([acc (make-value 0.0)])
         (var c 0)
         (while (< c (length row))
-          (set acc (v+ acc (v* (get row c) (get vec-in c))))
-          (set c (+ c 1)))
+           (assign acc (v+ acc (v* (get row c) (get vec-in c))))
+           (assign c (+ c 1)))
         (push result acc)))
     result))
 
@@ -73,8 +73,8 @@
   "RMS normalization: x / sqrt(mean(x^2) + eps)."
   (let* ([n (length vec-in)]
          [sum-sq (make-value 0.0)])
-    (each v in vec-in
-      (set sum-sq (v+ sum-sq (v* v v))))
+     (each v in vec-in
+       (assign sum-sq (v+ sum-sq (v* v v))))
     (let* ([mean-sq (v*s sum-sq (/ 1.0 n))]
            [rms (vpow (v+s mean-sq *eps*) 0.5)]
            [result @[]])
@@ -88,14 +88,14 @@
   (var i 1)
   (while (< i (length scores))
     (let* ([d (v-data (get scores i))])
-      (when (> d max-val) (set max-val d)))
-    (set i (+ i 1)))
+       (when (> d max-val) (assign max-val d)))
+     (assign i (+ i 1)))
   (let* ([exps @[]]
          [sum-exp (make-value 0.0)])
     (each s in scores
       (let* ([e (vexp (v+s s (- 0.0 max-val)))])
         (push exps e)
-        (set sum-exp (v+ sum-exp e))))
+         (assign sum-exp (v+ sum-exp e))))
     (let* ([result @[]])
       (each e in exps
         (push result (v/ e sum-exp)))
@@ -126,7 +126,7 @@
          [tok-emb (get wte token-id)]
          [pos-emb (get wpe pos-id)]
          [x (vec-add tok-emb pos-emb)])
-    (set x (rms-norm x))
+     (assign x (rms-norm x))
     # Transformer layers
     (var li 0)
     (while (< li *n-layer*)
@@ -139,7 +139,7 @@
              [fc2 (get weights :fc2)]
              [x-residual x])
         # Pre-norm + Q/K/V projections
-        (set x (rms-norm x))
+        (assign x (rms-norm x))
         (let* ([q (mat-vec-mul wq x)]
                [k (mat-vec-mul wk x)]
                [v (mat-vec-mul wv x)])
@@ -164,10 +164,10 @@
                          [dot (make-value 0.0)])
                     (var d 0)
                     (while (< d *head-dim*)
-                      (set dot (v+ dot (v* (get q-head d) (get k-t (+ hs d)))))
-                      (set d (+ d 1)))
+                       (assign dot (v+ dot (v* (get q-head d) (get k-t (+ hs d)))))
+                       (assign d (+ d 1)))
                     (push attn-logits (v*s dot scale-factor)))
-                  (set t-idx (+ t-idx 1)))
+                   (assign t-idx (+ t-idx 1)))
                 # Softmax
                 (let* ([attn-weights (softmax-values attn-logits)])
                   # Weighted sum of values
@@ -177,24 +177,24 @@
                                     (get (get layer-vals 0) (+ hs j)))])
                       (var t-idx2 1)
                       (while (< t-idx2 n-t)
-                        (set acc (v+ acc (v* (get attn-weights t-idx2)
-                                             (get (get layer-vals t-idx2) (+ hs j)))))
-                        (set t-idx2 (+ t-idx2 1)))
+                         (assign acc (v+ acc (v* (get attn-weights t-idx2)
+                                              (get (get layer-vals t-idx2) (+ hs j)))))
+                         (assign t-idx2 (+ t-idx2 1)))
                       (put x-attn (+ hs j) acc))
-                    (set j (+ j 1)))))
-              (set h (+ h 1)))
+                     (assign j (+ j 1)))))
+               (assign h (+ h 1)))
             # Project attention output
-            (set x (mat-vec-mul wo x-attn))
+            (assign x (mat-vec-mul wo x-attn))
             # Residual
-            (set x (vec-add x x-residual))))
+            (assign x (vec-add x x-residual))))
         # MLP block
         (let* ([x-residual2 x])
-          (set x (rms-norm x))
-          (set x (mat-vec-mul fc1 x))
-          (set x (array-map vrelu x))
-          (set x (mat-vec-mul fc2 x))
-          (set x (vec-add x x-residual2))))
-      (set li (+ li 1)))
+           (assign x (rms-norm x))
+           (assign x (mat-vec-mul fc1 x))
+           (assign x (array-map vrelu x))
+           (assign x (mat-vec-mul fc2 x))
+           (assign x (vec-add x x-residual2))))
+       (assign li (+ li 1)))
     # Project to vocab
     (mat-vec-mul lm-head x)))
 
@@ -215,6 +215,6 @@
                [logits (gpt-forward-token token-id pos kv-keys kv-values model)]
                [probs (softmax-values logits)]
                [loss-t (vneg (vlog (get probs target-id)))])
-          (set total-loss (v+ total-loss loss-t)))
-        (set pos (+ pos 1)))
+           (assign total-loss (v+ total-loss loss-t)))
+         (assign pos (+ pos 1)))
       (v*s total-loss (/ 1.0 (float n))))))

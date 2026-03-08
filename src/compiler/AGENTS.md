@@ -44,6 +44,19 @@ Bytecode instruction definitions and debug formatting.
 | `bytecode.rs` | ~200 | Instruction enum, Bytecode struct |
 | `bytecode_debug.rs` | ~150 | Debug formatting |
 
+## Type guard instructions
+
+Type guard instructions are used in pattern matching to check value types:
+
+- `IsNil`, `IsEmptyList`, `IsPair`, `IsTuple`, `IsArray`, `IsStruct`, `IsTable`
+  — check immutable collection types
+- `IsSet`, `IsSetMut` — check set types (immutable and mutable)
+- `IsNumber`, `IsSymbol` — check scalar types
+
+These instructions pop a value from the operand stack, check its type, and push
+a boolean result. They are emitted by the pattern lowering logic when a `match`
+expression has type guards.
+
 ## Parameter instructions
 
 `PushParamFrame` and `PopParamFrame` manage dynamic parameter binding frames:

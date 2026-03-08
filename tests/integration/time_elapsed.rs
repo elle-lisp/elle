@@ -82,8 +82,8 @@ fn stopwatch_samples_are_monotonic() {
               (i 0))
           (while (< i 20)
             (begin
-              (set samples (cons (coro/resume sw) samples))
-              (set i (+ i 1))))
+              (assign samples (cons (coro/resume sw) samples))
+              (assign i (+ i 1))))
           samples)
     "#;
 

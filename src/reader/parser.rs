@@ -177,6 +177,20 @@ impl Reader {
                 self.advance();
                 Ok(Value::keyword(s))
             }
+            OwnedToken::Pipe => {
+                let loc = self.current_location();
+                Err(format!(
+                    "{}: unexpected | (set literals not yet supported)",
+                    loc.position()
+                ))
+            }
+            OwnedToken::AtPipe => {
+                let loc = self.current_location();
+                Err(format!(
+                    "{}: unexpected @| (mutable set literals not yet supported)",
+                    loc.position()
+                ))
+            }
             OwnedToken::RightParen => {
                 let loc = self.current_location();
                 Err(format!(

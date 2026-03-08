@@ -70,7 +70,7 @@
       (while true
         (begin
           (if (= i 5) (break :done i) nil)
-          (set i (+ i 1)))))])
+          (assign i (+ i 1)))))])
     (assert-eq result 5 "break in loop")))
 
 # ============================================================================
@@ -118,7 +118,7 @@
     (while true
       (begin
         (if (= i 5) (break :while i) nil)
-        (set i (+ i 1))))])
+        (assign i (+ i 1))))])
     (assert-eq result 5 "break in while")))
 
 (begin
@@ -126,12 +126,12 @@
   (while true
     (begin
       (if (= i 3) (break nil) nil)
-      (set i (+ i 1))))
+      (assign i (+ i 1))))
   (assert-eq i 3 "break in while unnamed"))
 
 (begin
   (var i 0)
-  (let ([result (while (< i 3) (set i (+ i 1)))])
+  (let ([result (while (< i 3) (assign i (+ i 1)))])
     (assert-eq result nil "while without break")))
 
 # ============================================================================
@@ -143,7 +143,7 @@
   (let ([result
     (while true
       (begin
-        (set i (+ i 1))
+        (assign i (+ i 1))
         (if (= i 3) (break 42) nil)))])
     (assert-eq result 42 "break in while with value")))
 
@@ -156,9 +156,9 @@
       (while true
         (begin
           (if (= inner 2) (break) nil)
-          (set total (+ total 1))
-          (set inner (+ inner 1))))
-      (set outer (+ outer 1))))
+          (assign total (+ total 1))
+          (assign inner (+ inner 1))))
+      (assign outer (+ outer 1))))
   (assert-eq total 6 "break in nested while inner"))
 
 (begin
@@ -167,8 +167,8 @@
   (while (< i 3)
     (begin
       (let ([inner-result (while true (break 10))])
-        (set sum (+ sum inner-result)))
-      (set i (+ i 1))))
+        (assign sum (+ sum inner-result)))
+      (assign i (+ i 1))))
   (assert-eq sum 30 "break in nested while with value"))
 
 # ============================================================================
@@ -179,7 +179,7 @@
   (var last nil)
   (each x '(1 2 3 4 5)
     (begin
-      (set last x)
+      (assign last x)
       (if (= x 3) (break) nil)))
   (assert-eq last 3 "break in each list"))
 
@@ -201,6 +201,6 @@
   (let ([result
     (each ch "hello"
       (begin
-        (set count (+ count 1))
+        (assign count (+ count 1))
         (if (= ch "l") (break count) nil)))])
     (assert-eq result 3 "break in each string")))

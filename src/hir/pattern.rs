@@ -52,6 +52,12 @@ pub enum HirPattern {
         entries: Vec<(PatternKey, HirPattern)>,
     },
 
+    /// Match a set |x| pattern (emits IsSet guard, binds whole set)
+    Set { binding: Box<HirPattern> },
+
+    /// Match a mutable set @|x| pattern (emits IsSetMut guard, binds whole set)
+    SetMut { binding: Box<HirPattern> },
+
     /// Match any of the alternative patterns.
     /// All alternatives must bind the same set of variable names.
     Or(Vec<HirPattern>),
@@ -126,6 +132,9 @@ impl HirPattern {
                     pattern.collect_bindings(out);
                 }
             }
+            HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+                binding.collect_bindings(out);
+            }
             HirPattern::Or(alternatives) => {
                 // All alternatives bind the same variables; collect from the first
                 if let Some(first) = alternatives.first() {
@@ -166,6 +175,9 @@ impl HirPattern {
                 for (_, pattern) in entries {
                     pattern.collect_binding_names(out);
                 }
+            }
+            HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+                binding.collect_binding_names(out);
             }
             HirPattern::Or(alts) => {
                 if let Some(first) = alts.first() {

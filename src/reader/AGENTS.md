@@ -72,7 +72,7 @@ The lexer recognizes these delimiters (characters that cannot appear in symbol n
 | `(` `)` | `LParen`, `RParen` | List forms |
 | `[` `]` | `LBracket`, `RBracket` | Tuple literals (immutable) |
 | `{` `}` | `LBrace`, `RBrace` | Struct literals (immutable) |
-| `\|` | `Pipe` | Set literal delimiter; or-pattern separator inside lists |
+| `\|` | `Pipe` | Set literal delimiter |
 | `@[` | `AtBracket` | Mutable array literal prefix |
 | `@{` | `AtBrace` | Mutable table literal prefix |
 | `@\|` | `AtPipe` | Mutable set literal prefix |
@@ -98,7 +98,9 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
 
 - `|...|` reads as `SyntaxKind::Set(Vec<Syntax>)` — immutable set literal
 - `@|...|` reads as `SyntaxKind::SetMut(Vec<Syntax>)` — mutable set literal
-- Inside a list `(...)`, `[...]`, `{...}`, or `@{...}`, a bare `|` produces a `SyntaxKind::Pipe` marker node (not a set literal). This is used by or-patterns: `(1 | 3 | 5)` splits on `Pipe` markers.
+- Inside a list `(...)`, `[...]`, `{...}`, or `@{...}`, a bare `|` starts a
+  nested set literal (delegates to `read_set`), producing a `SyntaxKind::Set`
+  node. `|` is purely a set delimiter in all contexts.
 
 ## Invariants
 
@@ -115,9 +117,11 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
    token, not three. The Analyzer desugars qualified symbols to nested
    `get` calls during analysis.
 
-6. **`|` is a delimiter.** It cannot appear in symbol names. Inside lists,
-   `|` produces `SyntaxKind::Pipe` marker nodes for or-pattern splitting.
-   At the top level, `|...|` starts a set literal.
+6. **`|` is a delimiter for set literals.** `|1 2 3|` is lexed as `Pipe`, elements,
+   `Pipe` (for immutable sets). `@|1 2 3|` is lexed as `AtPipe`, elements, `Pipe`
+   (for mutable sets). Inside lists, `|` starts a nested set literal (delegates
+   to `read_set`), producing a `SyntaxKind::Set` node. `|` is purely a set
+   delimiter in all contexts. It cannot appear in symbol names.
 
 7. **`:@name` keywords are valid.** The lexer recognizes `:@` as a keyword
    prefix variant. The `@` is consumed and prepended to the keyword name.

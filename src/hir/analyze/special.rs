@@ -136,8 +136,11 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Keyword(k) => Ok(HirPattern::Literal(PatternLiteral::Keyword(k.clone()))),
             SyntaxKind::List(items) => {
                 // Or-pattern check FIRST — before any other list pattern logic
-                if items.iter().any(|s| s.as_symbol() == Some("|")) {
-                    return self.analyze_or_pattern(items, &syntax.span, resolve_var);
+                if items
+                    .first()
+                    .is_some_and(|s| matches!(&s.kind, SyntaxKind::Symbol(name) if name == "or"))
+                {
+                    return self.analyze_or_pattern(&items[1..], &syntax.span, resolve_var);
                 }
                 if items.is_empty() {
                     return Ok(HirPattern::List {
@@ -296,48 +299,61 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok(HirPattern::Table { entries })
             }
+            SyntaxKind::Set(items) => {
+                // Set pattern |x| - matches sets (immutable)
+                if items.len() != 1 {
+                    return Err(format!(
+                        "{}: set pattern must contain exactly 1 element (the binding pattern)",
+                        syntax.span
+                    ));
+                }
+                let binding = self.analyze_pattern_inner(&items[0], resolve_var)?;
+                Ok(HirPattern::Set {
+                    binding: Box::new(binding),
+                })
+            }
+            SyntaxKind::SetMut(items) => {
+                // Mutable set pattern @|x| - matches mutable sets
+                if items.len() != 1 {
+                    return Err(format!(
+                        "{}: mutable set pattern must contain exactly 1 element (the binding pattern)",
+                        syntax.span
+                    ));
+                }
+                let binding = self.analyze_pattern_inner(&items[0], resolve_var)?;
+                Ok(HirPattern::SetMut {
+                    binding: Box::new(binding),
+                })
+            }
             _ => Err(format!("{}: invalid pattern", syntax.span)),
         }
     }
 
-    /// Analyze an or-pattern: `(p1 | p2 | p3)`.
+    /// Analyze an or-pattern: `(or p1 p2 p3)`.
+    /// `alternatives` is the slice after the `or` symbol — each element is one pattern.
     fn analyze_or_pattern(
         &mut self,
-        items: &[Syntax],
+        alternatives: &[Syntax],
         span: &Span,
         resolve_var: &ResolveVar<'_>,
     ) -> Result<HirPattern, String> {
         use crate::hir::pattern::validate_or_pattern_bindings;
 
-        let groups: Vec<&[Syntax]> = items.split(|s| s.as_symbol() == Some("|")).collect();
-
-        if groups.len() < 2 {
+        if alternatives.len() < 2 {
             return Err(format!(
                 "{}: or-pattern requires at least two alternatives",
                 span
             ));
         }
 
-        for group in &groups {
-            if group.is_empty() {
-                return Err(format!("{}: empty alternative in or-pattern", span));
-            }
-            if group.len() != 1 {
-                return Err(format!(
-                    "{}: each alternative in an or-pattern must be a single pattern",
-                    span
-                ));
-            }
-        }
-
         let mut patterns = Vec::new();
 
         // First alternative: use the provided resolve_var (creates bindings in normal mode)
-        patterns.push(self.analyze_pattern_inner(&groups[0][0], resolve_var)?);
+        patterns.push(self.analyze_pattern_inner(&alternatives[0], resolve_var)?);
 
         // Subsequent alternatives: resolve to existing bindings
-        for group in &groups[1..] {
-            patterns.push(self.analyze_pattern_reuse(&group[0])?);
+        for alt in &alternatives[1..] {
+            patterns.push(self.analyze_pattern_reuse(alt)?);
         }
 
         validate_or_pattern_bindings(&patterns, span)?;

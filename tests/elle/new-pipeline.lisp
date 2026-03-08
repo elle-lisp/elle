@@ -9,11 +9,11 @@
 # ============ Loop Tests ============
 
 # test_each_simple
-(assert-eq (let ((sum 0)) (each x '(1 2 3) (set sum (+ sum x))) sum) 6
+(assert-eq (let ((sum 0)) (each x '(1 2 3) (assign sum (+ sum x))) sum) 6
   "each simple")
 
 # test_each_with_in
-(assert-eq (let ((sum 0)) (each x in '(1 2 3) (set sum (+ sum x))) sum) 6
+(assert-eq (let ((sum 0)) (each x in '(1 2 3) (assign sum (+ sum x))) sum) 6
   "each with in")
 
 

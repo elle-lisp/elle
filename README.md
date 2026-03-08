@@ -51,7 +51,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
   ```janet
   (defmacro my-swap (a b)
-    `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+    `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
 
   (let ((tmp 100) (x 1) (y 2))
     (my-swap x y)
@@ -155,7 +155,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   (defn make-counter [start]
     (var n start)
     (fn []
-      (set n (+ n 1))
+      (assign n (+ n 1))
       n))
 
   (def c (make-counter 0))
@@ -419,7 +419,7 @@ Exactly two values are falsy. Everything else is truthy.
   ```janet
   (while (< i 10)
     (print i)
-    (set i (+ i 1)))
+    (assign i (+ i 1)))
 
   (forever
     (if (done?) (break) (step)))
