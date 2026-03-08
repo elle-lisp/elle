@@ -254,3 +254,8 @@ fn ordering() {
 fn slice() {
     run_elle_script("slice");
 }
+
+#[test]
+fn jit_variadic() {
+    run_elle_script("jit-variadic");
+}

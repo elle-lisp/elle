@@ -1,0 +1,30 @@
+# Redefine fn/cfg locally (copy-paste from stdlib)
+(defn my-cfg2 (target & opts)
+  "Render a closure or fiber's control flow graph as text."
+  (let* ((fmt (if (empty? opts)
+                :mermaid
+                (if (> (length opts) 1)
+                  (error [:arity-error "fn/cfg: expected at most 1 format keyword"])
+                  (first opts))))
+         (cfg (fn/flow target)))
+    (when (nil? cfg)
+      (error [:type-error "fn/cfg: target has no LIR"]))
+    (cond
+      ((= fmt :mermaid) (fn/cfg-mermaid cfg))
+      ((= fmt :dot)     (fn/cfg-dot cfg))
+      (true (error [:type-error "fn/cfg: unknown format"])))))
+
+(defn f1 () 1)
+
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")
+(display (type (my-cfg2 f1))) (display "\n")

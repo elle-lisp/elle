@@ -2,7 +2,7 @@
 
 ## fn/cfg integration tests - Part 1
 ## Tests the control flow graph visualization (DOT and Mermaid formats)
-## Note: Due to a resource limit in fn/cfg, we split tests into two files
+## Tests DOT format, error handling, and fiber support.
 
 ## ── DOT format tests (via fn/cfg with :dot) ─────────────────────────
 
