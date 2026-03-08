@@ -109,6 +109,12 @@ impl PartialEq for Value {
                 // Blob comparison (compare contents)
                 (HeapObject::Blob(b1), HeapObject::Blob(b2)) => *b1.borrow() == *b2.borrow(),
 
+                // Set comparison (compare contents)
+                (HeapObject::LSet(s1), HeapObject::LSet(s2)) => s1 == s2,
+
+                // Mutable set comparison (compare contents)
+                (HeapObject::LSetMut(s1), HeapObject::LSetMut(s2)) => *s1.borrow() == *s2.borrow(),
+
                 // Different types are not equal
                 _ => false,
             }

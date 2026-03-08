@@ -210,6 +210,31 @@ impl fmt::Display for Value {
             return write!(f, "]");
         }
 
+        // Set (immutable)
+        if let Some(set) = self.as_set() {
+            write!(f, "|")?;
+            for (i, v) in set.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}", v)?;
+            }
+            return write!(f, "|");
+        }
+
+        // Set (mutable)
+        if let Some(set_ref) = self.as_set_mut() {
+            let set = set_ref.borrow();
+            write!(f, "@|")?;
+            for (i, v) in set.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}", v)?;
+            }
+            return write!(f, "|");
+        }
+
         // FFI signature
         if self.as_ffi_signature().is_some() {
             return write!(f, "<ffi-signature>");
@@ -342,6 +367,40 @@ impl fmt::Debug for Value {
                 write!(f, "{:02x}", byte)?;
             }
             return write!(f, "]");
+        }
+        // Tuple
+        if let Some(elems) = self.as_tuple() {
+            write!(f, "[")?;
+            for (i, v) in elems.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{:?}", v)?;
+            }
+            return write!(f, "]");
+        }
+        // Set (immutable)
+        if let Some(set) = self.as_set() {
+            write!(f, "|")?;
+            for (i, v) in set.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{:?}", v)?;
+            }
+            return write!(f, "|");
+        }
+        // Set (mutable)
+        if let Some(set_ref) = self.as_set_mut() {
+            let set = set_ref.borrow();
+            write!(f, "@|")?;
+            for (i, v) in set.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{:?}", v)?;
+            }
+            return write!(f, "|");
         }
         // Everything else — delegate to Display
         write!(f, "{}", self)

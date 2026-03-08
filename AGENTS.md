@@ -340,8 +340,11 @@ file means a broken build, a silent bug, or an incomplete feature.
 
 ### Adding a new heap type
 
-Example: Buffer (mutable byte sequence), added alongside the existing
-Array, Table, Tuple, Struct, Closure types.
+Example: Set types (`LSet` and `LSetMut`), added alongside the existing
+Array, Table, Tuple, Struct, Closure, Buffer types. Sets follow the
+immutable/mutable split: `LSet(BTreeSet<Value>)` for immutable sets,
+`LSetMut(RefCell<BTreeSet<Value>>)` for mutable sets. Display as `|1 2 3|`
+and `@|1 2 3|` respectively.
 
 - [ ] `src/value/heap.rs` — add variant to `HeapObject` enum, add
       discriminant to `HeapTag` enum, add arms to `HeapObject::tag()`,

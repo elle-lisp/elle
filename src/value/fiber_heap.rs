@@ -457,6 +457,10 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::External => true,
         // Parameter contains a Value (Copy) — no inner heap allocations
         HeapTag::Parameter => false,
+        // Sets (immutable) contain BTreeSet which needs Drop
+        HeapTag::LSet => true,
+        // Sets (mutable) contain RefCell<BTreeSet> which needs Drop
+        HeapTag::LSetMut => true,
     }
 }
 

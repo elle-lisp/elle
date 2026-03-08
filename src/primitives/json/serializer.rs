@@ -134,6 +134,25 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             HeapTag::Blob => Err("Cannot serialize blobs to JSON".to_string()),
             HeapTag::External => Err("Cannot serialize external objects to JSON".to_string()),
             HeapTag::Parameter => Err("Cannot serialize parameters to JSON".to_string()),
+            HeapTag::LSet => {
+                if let Some(s) = value.as_set() {
+                    let items: Result<Vec<String>, String> =
+                        s.iter().map(serialize_value).collect();
+                    Ok(format!("[{}]", items?.join(",")))
+                } else {
+                    Err("Set should have been accessible".to_string())
+                }
+            }
+            HeapTag::LSetMut => {
+                if let Some(s_ref) = value.as_set_mut() {
+                    let s = s_ref.borrow();
+                    let items: Result<Vec<String>, String> =
+                        s.iter().map(serialize_value).collect();
+                    Ok(format!("[{}]", items?.join(",")))
+                } else {
+                    Err("Mutable set should have been accessible".to_string())
+                }
+            }
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())
@@ -298,6 +317,39 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             HeapTag::Blob => Err("Cannot serialize blobs to JSON".to_string()),
             HeapTag::External => Err("Cannot serialize external objects to JSON".to_string()),
             HeapTag::Parameter => Err("Cannot serialize parameters to JSON".to_string()),
+            HeapTag::LSet => {
+                if let Some(s) = value.as_set() {
+                    let items: Result<Vec<String>, String> = s
+                        .iter()
+                        .map(|v| serialize_value_pretty(v, indent_level + 1))
+                        .collect();
+                    Ok(format!(
+                        "[\n{}{}\n{}]",
+                        next_indent,
+                        items?.join(&format!(",\n{}", next_indent)),
+                        indent
+                    ))
+                } else {
+                    Err("Set should have been accessible".to_string())
+                }
+            }
+            HeapTag::LSetMut => {
+                if let Some(s_ref) = value.as_set_mut() {
+                    let s = s_ref.borrow();
+                    let items: Result<Vec<String>, String> = s
+                        .iter()
+                        .map(|v| serialize_value_pretty(v, indent_level + 1))
+                        .collect();
+                    Ok(format!(
+                        "[\n{}{}\n{}]",
+                        next_indent,
+                        items?.join(&format!(",\n{}", next_indent)),
+                        indent
+                    ))
+                } else {
+                    Err("Mutable set should have been accessible".to_string())
+                }
+            }
         }
     } else {
         Err("Cannot serialize unknown value type to JSON".to_string())
