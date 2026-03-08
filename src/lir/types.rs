@@ -117,6 +117,7 @@ pub struct CallSiteInfo {
 
 impl LirFunction {
     pub fn new(arity: Arity) -> Self {
+        let num_params = arity.fixed_params();
         LirFunction {
             name: None,
             arity,
@@ -131,7 +132,7 @@ impl LirFunction {
             effect: Effect::inert(),
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
+            num_params,
             yield_points: Vec::new(),
             call_sites: Vec::new(),
         }

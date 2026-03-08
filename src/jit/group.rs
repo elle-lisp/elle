@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
 use crate::lir::{LirFunction, LirInstr, Reg};
-use crate::value::{SymbolId, Value};
+use crate::value::{Arity, SymbolId, Value};
 
 /// Maximum number of functions in a compilation group.
 /// Prevents Cranelift compilation time from spiking on large call graphs.
@@ -74,6 +74,14 @@ pub fn discover_compilation_group(
 
         // Phase 1: must be capture-free
         if lir.num_captures > 0 {
+            continue;
+        }
+
+        // Variadic functions with struct/named varargs can't be JIT-compiled
+        // (need fiber access for keyword error reporting). List variadics are OK.
+        if matches!(lir.arity, Arity::AtLeast(_))
+            && !matches!(lir.vararg_kind, crate::hir::VarargKind::List)
+        {
             continue;
         }
 
