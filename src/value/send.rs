@@ -11,7 +11,7 @@
 
 use super::heap::{alloc, deref, Cons, HeapObject};
 use super::repr::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A thread-safe wrapper around Value that deep-copies heap data.
 ///
@@ -60,6 +60,12 @@ pub enum SendValue {
 
     /// Deep copy of FFI type descriptor (pure data, no Rc)
     FFIType(crate::ffi::types::TypeDesc),
+
+    /// Deep copy of immutable sets
+    LSet(Vec<SendValue>),
+
+    /// Deep copy of mutable sets
+    LSetMut(Vec<SendValue>),
 }
 
 impl SendValue {
@@ -202,6 +208,23 @@ impl SendValue {
                     .map_err(|_| "Cannot borrow blob for sending".to_string())?;
                 Ok(SendValue::Blob(borrowed.clone()))
             }
+
+            // Sets (immutable) - deep copy all elements
+            HeapObject::LSet(s) => {
+                let copied: Result<Vec<SendValue>, String> =
+                    s.iter().map(|v| SendValue::from_value(*v)).collect();
+                Ok(SendValue::LSet(copied?))
+            }
+
+            // Sets (mutable) - deep copy all elements
+            HeapObject::LSetMut(s_ref) => {
+                let borrowed = s_ref
+                    .try_borrow()
+                    .map_err(|_| "Cannot borrow mutable set for sending".to_string())?;
+                let copied: Result<Vec<SendValue>, String> =
+                    borrowed.iter().map(|v| SendValue::from_value(*v)).collect();
+                Ok(SendValue::LSetMut(copied?))
+            }
         }
     }
 
@@ -242,6 +265,14 @@ impl SendValue {
             }
             SendValue::Float(f) => alloc(HeapObject::Float(f)),
             SendValue::FFIType(desc) => alloc(HeapObject::FFIType(desc)),
+            SendValue::LSet(items) => {
+                let set: BTreeSet<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
+                alloc(HeapObject::LSet(set))
+            }
+            SendValue::LSetMut(items) => {
+                let set: BTreeSet<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
+                alloc(HeapObject::LSetMut(std::cell::RefCell::new(set)))
+            }
         }
     }
 }
