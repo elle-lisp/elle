@@ -94,11 +94,11 @@ impl VM {
                 return if bits.is_ok() || bits == SIG_HALT {
                     let (_, value) = self.fiber.signal.take().unwrap();
                     Ok(value)
-                } else if bits.contains(SIG_YIELD) {
-                    Err("Unexpected yield outside coroutine context".to_string())
                 } else if bits.contains(SIG_IO) {
                     self.fiber.signal.take();
                     Err("Unexpected SIG_IO outside scheduler context".to_string())
+                } else if bits.contains(SIG_YIELD) {
+                    Err("Unexpected yield outside coroutine context".to_string())
                 } else if bits.contains(SIG_ERROR) {
                     // Extract the error from fiber.signal
                     let (_, err_value) =
