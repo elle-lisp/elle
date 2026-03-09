@@ -32,7 +32,7 @@ pub struct Syntax {
     pub span: Span,
     /// Scope set for hygiene. Two identifiers match only if their
     /// scope sets are compatible (implementation: subset check).
-    pub scopes: Vec<ScopeId>,
+    pub(crate) scopes: Vec<ScopeId>,
     /// When true, `add_scope_recursive` skips this node and its children.
     /// Set by `datum->syntax` to prevent the intro scope from being added
     /// to nodes that should resolve at the call site (hygiene escape hatch).
@@ -52,7 +52,7 @@ impl Syntax {
     }
 
     /// Create a new Syntax node with given scope set
-    pub fn with_scopes(kind: SyntaxKind, span: Span, scopes: Vec<ScopeId>) -> Self {
+    pub(crate) fn with_scopes(kind: SyntaxKind, span: Span, scopes: Vec<ScopeId>) -> Self {
         Syntax {
             kind,
             span,
@@ -62,7 +62,7 @@ impl Syntax {
     }
 
     /// Add a scope to this node's scope set
-    pub fn add_scope(&mut self, scope: ScopeId) {
+    pub(crate) fn add_scope(&mut self, scope: ScopeId) {
         if !self.scopes.contains(&scope) {
             self.scopes.push(scope);
         }
@@ -72,7 +72,7 @@ impl Syntax {
     /// scopes, and mark all nodes as scope-exempt. Used by `datum->syntax`
     /// to give a datum the lexical context of another syntax object while
     /// preventing `add_scope_recursive` from overriding those scopes.
-    pub fn set_scopes_recursive(&mut self, scopes: &[ScopeId]) {
+    pub(crate) fn set_scopes_recursive(&mut self, scopes: &[ScopeId]) {
         self.scopes = scopes.to_vec();
         self.scope_exempt = true;
         match &mut self.kind {

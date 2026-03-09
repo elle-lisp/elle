@@ -21,7 +21,7 @@ pub struct MacroDef {
     pub params: Vec<String>,
     pub rest_param: Option<String>,
     pub template: Syntax,
-    pub definition_scope: ScopeId,
+    pub(crate) definition_scope: ScopeId,
 }
 
 /// Hygienic macro expander
@@ -66,7 +66,7 @@ impl Expander {
     }
 
     /// Generate a fresh scope ID
-    pub fn fresh_scope(&mut self) -> ScopeId {
+    pub(crate) fn fresh_scope(&mut self) -> ScopeId {
         let id = ScopeId(self.next_scope_id);
         self.next_scope_id += 1;
         id

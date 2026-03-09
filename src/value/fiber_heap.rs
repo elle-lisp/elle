@@ -434,7 +434,9 @@ impl FiberHeap {
     /// Returns a raw pointer to the shared allocator. The `Box` in the Vec
     /// provides pointer stability — the pointer remains valid even if the
     /// Vec grows (Box stores the data on the heap, Vec stores the Box pointer).
-    pub fn create_shared_allocator(&mut self) -> *mut crate::value::shared_alloc::SharedAllocator {
+    pub(crate) fn create_shared_allocator(
+        &mut self,
+    ) -> *mut crate::value::shared_alloc::SharedAllocator {
         let mut sa = Box::new(crate::value::shared_alloc::SharedAllocator::new());
         let ptr = &mut *sa as *mut crate::value::shared_alloc::SharedAllocator;
         self.owned_shared.push(sa);
@@ -442,13 +444,16 @@ impl FiberHeap {
     }
 
     /// Current shared allocator pointer. Returns null if none is set.
-    pub fn shared_alloc(&self) -> *mut crate::value::shared_alloc::SharedAllocator {
+    pub(crate) fn shared_alloc(&self) -> *mut crate::value::shared_alloc::SharedAllocator {
         self.shared_alloc
     }
 
     /// Set the shared allocator pointer for this fiber.
     /// When non-null, `alloc()` routes all allocations to the shared allocator.
-    pub fn set_shared_alloc(&mut self, ptr: *mut crate::value::shared_alloc::SharedAllocator) {
+    pub(crate) fn set_shared_alloc(
+        &mut self,
+        ptr: *mut crate::value::shared_alloc::SharedAllocator,
+    ) {
         self.shared_alloc = ptr;
     }
 

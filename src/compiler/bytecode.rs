@@ -240,7 +240,7 @@ pub(crate) struct CacheEntry {
 pub struct Bytecode {
     pub instructions: Vec<u8>,
     pub constants: Vec<Value>,
-    pub inline_caches: std::collections::HashMap<usize, CacheEntry>,
+    pub(crate) inline_caches: std::collections::HashMap<usize, CacheEntry>,
     /// Symbol ID → name mapping for cross-thread portability.
     /// When bytecode is sent to a new thread, symbol IDs may differ.
     /// This map allows remapping globals to the correct IDs.

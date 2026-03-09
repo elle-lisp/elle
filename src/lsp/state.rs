@@ -117,7 +117,7 @@ impl CompilerState {
     }
 
     /// Get document state
-    pub fn get_document(&self, uri: &str) -> Option<&DocumentState> {
+    pub(crate) fn get_document(&self, uri: &str) -> Option<&DocumentState> {
         self.documents.get(uri)
     }
 
@@ -132,7 +132,7 @@ impl CompilerState {
     }
 
     /// Get all open documents
-    pub fn documents(&self) -> impl Iterator<Item = &DocumentState> {
+    pub(crate) fn documents(&self) -> impl Iterator<Item = &DocumentState> {
         self.documents.values()
     }
 }

@@ -33,7 +33,7 @@ pub struct VM {
     /// fiber. Used to set `child.parent_value` during resume chain wiring,
     /// so `fiber/parent` can return the original Value without re-allocating.
     pub current_fiber_value: Option<Value>,
-    pub ffi: FFISubsystem,
+    pub(crate) ffi: FFISubsystem,
     /// Modules currently being loaded (circular-import guard).
     /// Added before execution, removed after. If a module is in this set
     /// when import-file is called, it's a circular dependency.
@@ -42,7 +42,7 @@ pub struct VM {
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
-    pub pending_tail_call: Option<TailCallInfo>,
+    pub(crate) pending_tail_call: Option<TailCallInfo>,
     /// Source location of the instruction that produced the current error.
     /// Resolved by the dispatch loop using the current closure's LocationMap.
     /// Reset to None at each translation boundary entry.
@@ -354,11 +354,11 @@ impl VM {
         self.read_u16(bytecode, ip) as i16
     }
 
-    pub fn ffi(&self) -> &FFISubsystem {
+    pub(crate) fn ffi(&self) -> &FFISubsystem {
         &self.ffi
     }
 
-    pub fn ffi_mut(&mut self) -> &mut FFISubsystem {
+    pub(crate) fn ffi_mut(&mut self) -> &mut FFISubsystem {
         &mut self.ffi
     }
 
