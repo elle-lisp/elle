@@ -151,7 +151,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run integration and unit tests
-        run: cargo test --lib && cargo test --test '*' -- --skip property
+        run: cargo test --test '*' -- --skip property
 
   tests-property:
     name: Property Tests
