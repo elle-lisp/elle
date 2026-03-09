@@ -43,8 +43,8 @@ fn test_print_lir_failing_case() {
 
     // Lower — configure with intrinsics and primitive values like the pipeline does
     let prim_values = analyzer.primitive_values().clone();
-    let intrinsics = elle::lir::intrinsics::build_intrinsics(&mut symbols);
-    let imm_prims = elle::lir::intrinsics::build_immediate_primitives(&mut symbols);
+    let intrinsics = elle::lir::intrinsics::build_intrinsics(&symbols);
+    let imm_prims = elle::lir::intrinsics::build_immediate_primitives(&symbols);
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new()
         .with_intrinsics(intrinsics)
