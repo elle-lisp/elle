@@ -162,7 +162,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run property tests
-        run: cargo test --test property
+        run: cargo test --test lib property::
 
   benchmarks:
     name: Benchmarks
