@@ -211,3 +211,9 @@ with `may_error = false` (optimistic) and iterate until stable.
 `(fn/errors? value)` reads `closure.effect.may_error()` (checks `SIG_ERROR`
 in the effect's signal bits). Returns `true` if the closure may signal an error,
 `false` otherwise.
+
+## 4. Docgen Site
+
+`demos/docgen/generate.lisp` generates the documentation site. CI builds it as part of the docs job. Because it's written in Elle, any change to language semantics can break it.
+
+When the docs CI job fails, check `demos/docgen/generate.lisp` and `demos/docgen/lib/`. Common failure: using `nil?` instead of `empty?` for list termination (see nil vs empty list distinction in root AGENTS.md and `docs/oddities.md`).

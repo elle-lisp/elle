@@ -27,3 +27,4 @@ jobs:
         env:
           # Weekly scheduled run: thorough coverage across beta/nightly toolchains.
           PROPTEST_CASES: 128
+          RUST_TEST_THREADS: 4

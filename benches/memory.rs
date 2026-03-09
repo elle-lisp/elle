@@ -9,11 +9,12 @@
 //! These benchmarks report allocation counts and bytes, not timing.
 //! The output format is compatible with `bencher` for CI regression tracking.
 
-use stats_alloc::{Region, StatsAlloc, INSTRUMENTED_SYSTEM};
-use std::alloc::System;
+use mimalloc::MiMalloc;
+use stats_alloc::{Region, StatsAlloc};
 
-#[global_allocator]
-static GLOBAL: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
+static INSTRUMENTED: StatsAlloc<MiMalloc> = StatsAlloc::new(MiMalloc);
+
+static GLOBAL: &StatsAlloc<MiMalloc> = &INSTRUMENTED;
 
 use elle::pipeline::eval;
 use elle::primitives::register_primitives;

@@ -13,8 +13,8 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  ci:
-    name: CI
+  test-examples:
+    name: Elle Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,14 +70,12 @@ jobs:
           echo "=============================================="
           echo "Results: $PASSED/$TOTAL passed, $FAILED failed"
 
-           if [ $FAILED -gt 0 ]; then
-             echo "✗ Some examples failed"
-             exit 1
-           else
-             echo "✓ All examples passed"
-           fi
-      - name: Build plugins
-        run: cargo build --release -p elle-glob -p elle-regex
+          if [ $FAILED -gt 0 ]; then
+            echo "✗ Some examples failed"
+            exit 1
+          else
+            echo "✓ All examples passed"
+          fi
       - name: Run Elle script tests
         run: |
           echo "Running Elle script tests:"
@@ -87,6 +85,25 @@ jobs:
             ./target/release/elle "$f" || exit 1
           done
           echo "✓ All Elle script tests passed"
+
+  tests-plugins:
+    name: Plugin Tests
+    runs-on: ubuntu-latest
+    needs: test-examples
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release
+      - name: Build plugins
+        run: make plugins
+      - name: Run plugin tests
+        run: |
+          for f in tests/elle/plugins/*.lisp; do
+            echo "  $f"
+            ./target/release/elle "$f" || exit 1
+          done
 
   docs:
     name: Build Documentation
