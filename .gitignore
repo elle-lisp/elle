@@ -1,7 +1,5 @@
 /target
 /.cargo/
-/elle-lint/target
-/elle-lsp/target
 site/
 
 # Profiling data
