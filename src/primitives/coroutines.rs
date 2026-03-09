@@ -356,23 +356,26 @@ mod tests {
         ];
 
         Value::closure(Closure {
-            bytecode: Rc::new(bytecode),
-            arity: Arity::Exact(0),
+            template: Rc::new(crate::value::ClosureTemplate {
+                bytecode: Rc::new(bytecode),
+                arity: Arity::Exact(0),
+                num_locals: 0,
+                num_captures: 0,
+                num_params: 0,
+                constants: Rc::new(vec![Value::NIL]),
+                effect: Effect::inert(),
+                cell_params_mask: 0,
+                cell_locals_mask: 0,
+                symbol_names: Rc::new(std::collections::HashMap::new()),
+                location_map: Rc::new(crate::error::LocationMap::new()),
+                jit_code: None,
+                lir_function: None,
+                doc: None,
+                syntax: None,
+                vararg_kind: crate::hir::VarargKind::List,
+                name: None,
+            }),
             env: Rc::new(vec![]),
-            num_locals: 0,
-            num_captures: 0,
-            constants: Rc::new(vec![Value::NIL]),
-            effect: Effect::inert(),
-            cell_params_mask: 0,
-            cell_locals_mask: 0,
-            symbol_names: Rc::new(std::collections::HashMap::new()),
-            location_map: Rc::new(crate::error::LocationMap::new()),
-            jit_code: None,
-            lir_function: None,
-            doc: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
-            name: None,
         })
     }
 

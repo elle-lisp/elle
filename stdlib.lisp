@@ -800,3 +800,27 @@
       (each t in thunks
         (ev/spawn t))
       (pump-fn))))
+
+## ── Module export closure ───────────────────────────────────────────
+## Last expression: a closure returning a struct of all exports.
+## Called by init_stdlib to register stdlib functions as primitives.
+
+(fn []
+  {:map map :filter filter :fold fold :reduce reduce :keep keep
+   :identity identity :complement complement :constantly constantly
+   :compose compose :comp comp :partial partial :juxt juxt
+   :all? all? :any? any? :find find :find-index find-index
+   :count count :nth nth :zip zip :flatten flatten
+   :take-while take-while :drop-while drop-while :distinct distinct
+   :frequencies frequencies :mapcat mapcat :group-by group-by
+   :map-indexed map-indexed :partition partition :interpose interpose
+   :min-key min-key :max-key max-key :memoize memoize :sort-by sort-by
+   :time/stopwatch time/stopwatch :time/elapsed time/elapsed
+   :call-count call-count :global? global? :fiber/self fiber/self
+   :arena/allocs arena/allocs
+   :fn/cfg fn/cfg :fn/cfg-label fn/cfg-label
+   :fn/cfg-dot fn/cfg-dot :fn/cfg-mermaid fn/cfg-mermaid
+   :*stdin* *stdin* :*stdout* *stdout* :*stderr* *stderr*
+   :sync-scheduler sync-scheduler :*scheduler* *scheduler*
+   :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
+   :ev/run ev/run})

@@ -10,7 +10,7 @@
 #   chan/select           — multiplexed wait on multiple receivers
 #   Keyword messages      — sending :ok, :empty etc. as values (no ambiguity)
 
-(import-file "./examples/assertions.lisp")
+(def {:assert-eq assert-eq} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================

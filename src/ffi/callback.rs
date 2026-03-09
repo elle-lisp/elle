@@ -137,10 +137,10 @@ unsafe extern "C" fn trampoline_callback(
 
     vm.fiber.call_depth += 1;
     let exec = vm.execute_bytecode_saving_stack(
-        &closure.bytecode,
-        &closure.constants,
+        &closure.template.bytecode,
+        &closure.template.constants,
         &new_env_rc,
-        &closure.location_map,
+        &closure.template.location_map,
     );
     vm.fiber.call_depth -= 1;
 
@@ -261,10 +261,10 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
     env.extend(closure.env.iter().copied());
 
     // Add parameters with cell wrapping as needed
-    match closure.arity {
+    match closure.template.arity {
         crate::value::Arity::AtLeast(n) => {
             for (i, arg) in args[..n.min(args.len())].iter().enumerate() {
-                if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                if i < 64 && (closure.template.cell_params_mask & (1 << i)) != 0 {
                     env.push(Value::local_cell(*arg));
                 } else {
                     env.push(*arg);
@@ -274,7 +274,7 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
             let rest_args = if args.len() > n { &args[n..] } else { &[] };
             let rest = args_to_list(rest_args);
             let rest_idx = n;
-            if rest_idx < 64 && (closure.cell_params_mask & (1 << rest_idx)) != 0 {
+            if rest_idx < 64 && (closure.template.cell_params_mask & (1 << rest_idx)) != 0 {
                 env.push(Value::local_cell(rest));
             } else {
                 env.push(rest);
@@ -282,7 +282,7 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
         }
         _ => {
             for (i, arg) in args.iter().enumerate() {
-                if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+                if i < 64 && (closure.template.cell_params_mask & (1 << i)) != 0 {
                     env.push(Value::local_cell(*arg));
                 } else {
                     env.push(*arg);
@@ -294,14 +294,14 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
     // Add slots for locally-defined variables.
     // Cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
     // Beyond index 63, conservatively use LocalCell.
-    let num_param_slots = match closure.arity {
+    let num_param_slots = match closure.template.arity {
         crate::value::Arity::Exact(n) => n,
         crate::value::Arity::AtLeast(n) => n + 1,
         crate::value::Arity::Range(min, _) => min,
     };
-    let num_locally_defined = closure.num_locals.saturating_sub(num_param_slots);
+    let num_locally_defined = closure.template.num_locals.saturating_sub(num_param_slots);
     for i in 0..num_locally_defined {
-        if i >= 64 || (closure.cell_locals_mask & (1 << i)) != 0 {
+        if i >= 64 || (closure.template.cell_locals_mask & (1 << i)) != 0 {
             env.push(Value::local_cell(Value::NIL));
         } else {
             env.push(Value::NIL);
@@ -432,12 +432,13 @@ mod tests {
         use crate::effects::Effect;
         use crate::error::LocationMap;
         use crate::value::types::Arity;
-        Rc::new(Closure {
+        use crate::value::ClosureTemplate;
+        let template = Rc::new(ClosureTemplate {
             bytecode: Rc::new(vec![]),
             arity: Arity::Exact(arity),
-            env: Rc::new(vec![]),
             num_locals: arity,
             num_captures: 0,
+            num_params: arity,
             constants: Rc::new(vec![]),
             effect: Effect::inert(),
             cell_params_mask: 0,
@@ -447,9 +448,13 @@ mod tests {
             jit_code: None,
             lir_function: None,
             doc: None,
+            syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: arity,
             name: None,
+        });
+        Rc::new(Closure {
+            template,
+            env: Rc::new(vec![]),
         })
     }
 
@@ -527,13 +532,14 @@ mod tests {
         use crate::effects::Effect;
         use crate::error::LocationMap;
         use crate::value::types::Arity;
+        use crate::value::ClosureTemplate;
 
-        let closure = Rc::new(Closure {
+        let template = Rc::new(ClosureTemplate {
             bytecode: Rc::new(vec![]),
             arity: Arity::Exact(1),
-            env: Rc::new(vec![Value::int(99)]), // 1 capture
-            num_locals: 2,                      // 1 param + 1 local
+            num_locals: 2, // 1 param + 1 local
             num_captures: 1,
+            num_params: 1,
             constants: Rc::new(vec![]),
             effect: Effect::inert(),
             cell_params_mask: 0,
@@ -543,9 +549,14 @@ mod tests {
             jit_code: None,
             lir_function: None,
             doc: None,
+            syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: 1,
             name: None,
+        });
+
+        let closure = Rc::new(Closure {
+            template,
+            env: Rc::new(vec![Value::int(99)]), // 1 capture
         });
         let args = vec![Value::int(42)];
         let env = build_callback_env(&closure, &args);

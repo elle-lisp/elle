@@ -396,12 +396,12 @@ mod tests {
 
     #[test]
     fn test_serialize_errors() {
-        let closure = Value::closure(crate::value::Closure {
+        let template = Rc::new(crate::value::ClosureTemplate {
             bytecode: Rc::new(vec![]),
             arity: crate::value::Arity::Exact(0),
-            env: Rc::new(vec![]),
             num_locals: 0,
             num_captures: 0,
+            num_params: 0,
             constants: Rc::new(vec![]),
             effect: crate::effects::Effect::inert(),
             cell_params_mask: 0,
@@ -412,8 +412,12 @@ mod tests {
             lir_function: None,
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
             name: None,
+            syntax: None,
+        });
+        let closure = Value::closure(crate::value::Closure {
+            template,
+            env: Rc::new(vec![]),
         });
         assert!(serialize_value(&closure).is_err());
 

@@ -189,6 +189,7 @@ impl VM {
             // Push call frame for stack traces
             self.fiber.call_stack.push(CallFrame {
                 name: closure
+                    .template
                     .name
                     .clone()
                     .unwrap_or_else(|| Rc::from("<anonymous>")),
@@ -198,7 +199,7 @@ impl VM {
             });
 
             // Validate argument count
-            if !self.check_arity(&closure.arity, args.len()) {
+            if !self.check_arity(&closure.template.arity, args.len()) {
                 self.fiber.call_depth -= 1;
                 self.fiber.call_stack.pop();
                 self.fiber.stack.push(Value::NIL);
@@ -208,7 +209,7 @@ impl VM {
             // JIT compilation and dispatch.
             // Polymorphic closures are rejected by the JIT compiler itself.
             // Skip profiling for primitives (no LIR means not JIT-compilable).
-            if closure.lir_function.is_some() {
+            if closure.template.lir_function.is_some() {
                 if let Some(bits) = self.try_jit_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
                     match bits {
@@ -253,10 +254,10 @@ impl VM {
             // Execute the closure, saving/restoring the caller's stack.
             // Essential for fiber/signal propagation and yield-through-nested-calls.
             let result = self.execute_bytecode_saving_stack(
-                &closure.bytecode,
-                &closure.constants,
+                &closure.template.bytecode,
+                &closure.template.constants,
                 &new_env_rc,
-                &closure.location_map,
+                &closure.template.location_map,
             );
 
             self.fiber.call_depth -= 1;
@@ -415,7 +416,7 @@ impl VM {
 
         if let Some(closure) = func.as_closure() {
             // Validate argument count
-            if !self.check_arity(&closure.arity, args.len()) {
+            if !self.check_arity(&closure.template.arity, args.len()) {
                 // check_arity sets fiber.signal to (SIG_ERROR, ...)
                 return Some(SIG_ERROR);
             }
@@ -433,10 +434,10 @@ impl VM {
 
             // Store the tail call information (Rc clones, not data copies)
             self.pending_tail_call = Some(crate::vm::core::TailCallInfo {
-                bytecode: closure.bytecode.clone(),
-                constants: closure.constants.clone(),
+                bytecode: closure.template.bytecode.clone(),
+                constants: closure.template.constants.clone(),
                 env: new_env_rc,
-                location_map: closure.location_map.clone(),
+                location_map: closure.template.location_map.clone(),
             });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));
@@ -466,7 +467,7 @@ impl VM {
         args: &[Value],
         func: Value,
     ) -> Option<Option<SignalBits>> {
-        let bytecode_ptr = closure.bytecode.as_ptr();
+        let bytecode_ptr = closure.template.bytecode.as_ptr();
         let is_hot = self.record_closure_call(bytecode_ptr);
 
         // Check if we already have JIT code for this closure
@@ -476,7 +477,7 @@ impl VM {
 
         // If hot, attempt JIT compilation
         if is_hot {
-            if let Some(ref lir_func) = closure.lir_function {
+            if let Some(ref lir_func) = closure.template.lir_function {
                 // Hoist the SymbolId lookup — needed for both batch and solo paths
                 let self_sym = self.find_global_sym_for_bytecode(bytecode_ptr);
 
@@ -509,6 +510,7 @@ impl VM {
                                 panic!(
                                     "JIT compilation failed for function: {}. Error: {}",
                                     closure
+                                        .template
                                         .lir_function
                                         .as_ref()
                                         .map(|f| f.name.as_deref().unwrap_or("<anon>"))
@@ -646,7 +648,9 @@ impl VM {
         func: Value,
         hot_sym: Option<SymbolId>,
     ) -> Option<Option<SignalBits>> {
-        let group = crate::jit::discover_compilation_group(lir_func, &self.globals);
+        // With globals removed, discover_compilation_group always returns
+        // empty — batch JIT requires compile-time peer discovery (future work).
+        let group = crate::jit::discover_compilation_group(lir_func, &[]);
         if group.is_empty() {
             return None;
         }
@@ -681,10 +685,6 @@ impl VM {
             Err(e) => match &e {
                 crate::jit::JitError::UnsupportedInstruction(_)
                 | crate::jit::JitError::Yielding => {
-                    // Some member has an instruction the JIT can't handle,
-                    // or a member has yielding effect (yield metadata not
-                    // propagated to shared JitCode).
-                    // Fall through to solo compilation for the hot function.
                     return None;
                 }
                 _ => {
@@ -697,19 +697,14 @@ impl VM {
             },
         };
 
-        // Insert all compiled functions into cache
+        // Insert all compiled functions into cache and find the hot one
         let mut hot_jit_code = None;
         for (sym, jit_code) in results {
             let jit_code = Rc::new(jit_code);
-            let idx = sym.0 as usize;
-            if let Some(val) = self.globals.get(idx) {
-                if let Some(peer_closure) = val.as_closure() {
-                    let peer_bc_ptr = peer_closure.bytecode.as_ptr();
-                    self.jit_cache.insert(peer_bc_ptr, jit_code.clone());
-                    if sym == hot_sym {
-                        hot_jit_code = Some(jit_code);
-                    }
-                }
+            if sym == hot_sym {
+                let bc_ptr = closure.template.bytecode.as_ptr();
+                self.jit_cache.insert(bc_ptr, jit_code.clone());
+                hot_jit_code = Some(jit_code);
             }
         }
 
@@ -720,18 +715,12 @@ impl VM {
         None
     }
 
-    /// Find the SymbolId for a global closure matching the given bytecode pointer.
+    /// Find the SymbolId for a closure matching the given bytecode pointer.
     ///
-    /// O(n) over globals, but runs at most once per hot function (subsequent
-    /// calls hit the jit_cache).
-    fn find_global_sym_for_bytecode(&self, bytecode_ptr: *const u8) -> Option<SymbolId> {
-        for (i, val) in self.globals.iter().enumerate() {
-            if let Some(closure) = val.as_closure() {
-                if closure.bytecode.as_ptr() == bytecode_ptr {
-                    return Some(SymbolId(i as u32));
-                }
-            }
-        }
+    /// With globals removed, there is no global symbol table to scan.
+    /// Always returns `None`. Solo JIT compilation still works — it just
+    /// won't emit direct self-calls (falls back to `elle_jit_call`).
+    fn find_global_sym_for_bytecode(&self, _bytecode_ptr: *const u8) -> Option<SymbolId> {
         None
     }
 
@@ -773,17 +762,17 @@ impl VM {
         }
         buf.extend((*closure.env).iter().cloned());
 
-        match closure.arity {
+        match closure.template.arity {
             crate::value::Arity::AtLeast(min) => {
                 // Total fixed slots = num_params - 1 (rest slot is last param)
-                let fixed_slots = closure.num_params - 1;
+                let fixed_slots = closure.template.num_params - 1;
 
                 // Determine how many positional args to consume for fixed slots.
                 // For &keys/&named, keyword args should not fill optional slots —
                 // once we see a keyword past the required params, the rest are
                 // keyword arguments for the collector.
                 let collects_keywords = matches!(
-                    closure.vararg_kind,
+                    closure.template.vararg_kind,
                     crate::hir::VarargKind::Struct | crate::hir::VarargKind::StrictStruct(_)
                 );
                 let provided_fixed = if collects_keywords {
@@ -816,7 +805,7 @@ impl VM {
                 } else {
                     &[]
                 };
-                let collected = match &closure.vararg_kind {
+                let collected = match &closure.template.vararg_kind {
                     crate::hir::VarargKind::List => Self::args_to_list(rest_args),
                     crate::hir::VarargKind::Struct => {
                         match Self::args_to_struct_static(fiber, rest_args, None) {
@@ -857,9 +846,12 @@ impl VM {
         // and the env slot is never accessed.
         // Beyond index 63, the mask can't represent the local — conservatively
         // use LocalCell (matches the emitter's fallback to StoreUpvalue).
-        let num_locally_defined = closure.num_locals.saturating_sub(closure.num_params);
+        let num_locally_defined = closure
+            .template
+            .num_locals
+            .saturating_sub(closure.template.num_params);
         for i in 0..num_locally_defined {
-            if i >= 64 || (closure.cell_locals_mask & (1 << i)) != 0 {
+            if i >= 64 || (closure.template.cell_locals_mask & (1 << i)) != 0 {
                 buf.push(Value::local_cell(Value::NIL));
             } else {
                 buf.push(Value::NIL);
@@ -873,7 +865,7 @@ impl VM {
     /// LocalCell if the cell_params_mask indicates it's needed.
     #[inline]
     fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, val: Value) {
-        if i < 64 && (closure.cell_params_mask & (1 << i)) != 0 {
+        if i < 64 && (closure.template.cell_params_mask & (1 << i)) != 0 {
             buf.push(Value::local_cell(val));
         } else {
             buf.push(val);

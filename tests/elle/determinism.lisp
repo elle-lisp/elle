@@ -4,7 +4,7 @@
 # The compiler is either deterministic or it isn't — varying input
 # values doesn't help detect nondeterminism. One example per form suffices.
 
-(import-file "tests/elle/assert.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Arithmetic

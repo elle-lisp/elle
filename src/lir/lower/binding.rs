@@ -75,7 +75,7 @@ impl Lowerer {
         }
 
         // First allocate all slots with nil (or cells containing nil)
-        for (binding, _) in bindings {
+        for (binding, _) in bindings.iter() {
             let nil_reg = self.emit_const(LirConst::Nil)?;
             let slot = self.allocate_slot(*binding);
 
@@ -111,7 +111,7 @@ impl Lowerer {
             }
         }
         // Then initialize
-        for (binding, init) in bindings {
+        for (binding, init) in bindings.iter() {
             let init_reg = self.lower_expr(init)?;
             let slot = self.binding_to_slot[binding];
 
@@ -149,95 +149,71 @@ impl Lowerer {
     }
 
     pub(super) fn lower_define(&mut self, binding: Binding, value: &Hir) -> Result<Reg, String> {
-        if binding.is_global() {
-            let sym = binding.name();
+        // Local define
+        // Allocate the slot BEFORE lowering the value so that recursive
+        // references can find the binding (like letrec)
+        // The slot might already be allocated by the Begin pre-pass
+        let slot = if let Some(&existing_slot) = self.binding_to_slot.get(&binding) {
+            existing_slot
+        } else {
+            self.allocate_slot(binding)
+        };
 
-            // For immutable bindings with literal values, record for LoadConst optimization
-            if binding.is_immutable() {
-                if let Some(literal_value) = Self::hir_to_literal_value(value) {
-                    self.immutable_values.insert(binding, literal_value);
-                }
-            }
+        // Inside lambdas, local variables are part of the closure environment
+        if self.in_lambda {
+            self.upvalue_bindings.insert(binding);
+        }
 
-            let value_reg = self.lower_expr(value)?;
-            self.emit(LirInstr::StoreGlobal {
-                sym,
+        // Check if this binding needs to be wrapped in a cell
+        let needs_cell = binding.needs_cell();
+
+        // Now lower the value (which can reference the binding)
+        let value_reg = self.lower_expr(value)?;
+
+        if self.in_lambda {
+            // Inside a lambda, use closure environment via StoreCapture
+            // StoreCapture handles cells automatically
+            self.emit(LirInstr::StoreCapture {
+                index: slot,
                 src: value_reg,
             });
-            // Reload: auto-pop consumed value_reg from the stack
-            let result_reg = self.fresh_reg();
-            self.emit(LirInstr::LoadGlobal {
-                dst: result_reg,
-                sym,
+            let result = self.fresh_reg();
+            self.emit(LirInstr::LoadCapture {
+                dst: result,
+                index: slot,
             });
-            Ok(result_reg)
+            Ok(result)
+        } else if needs_cell {
+            // The cell was already created in the Begin pre-pass
+            let cell_reg = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal {
+                dst: cell_reg,
+                slot,
+            });
+            self.emit(LirInstr::StoreCell {
+                cell: cell_reg,
+                value: value_reg,
+            });
+            // Reload from cell
+            let cell_reg2 = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal {
+                dst: cell_reg2,
+                slot,
+            });
+            let result = self.fresh_reg();
+            self.emit(LirInstr::LoadCell {
+                dst: result,
+                cell: cell_reg2,
+            });
+            Ok(result)
         } else {
-            // Local define
-            // Allocate the slot BEFORE lowering the value so that recursive
-            // references can find the binding (like letrec)
-            // The slot might already be allocated by the Begin pre-pass
-            let slot = if let Some(&existing_slot) = self.binding_to_slot.get(&binding) {
-                existing_slot
-            } else {
-                self.allocate_slot(binding)
-            };
-
-            // Inside lambdas, local variables are part of the closure environment
-            if self.in_lambda {
-                self.upvalue_bindings.insert(binding);
-            }
-
-            // Check if this binding needs to be wrapped in a cell
-            let needs_cell = binding.needs_cell();
-
-            // Now lower the value (which can reference the binding)
-            let value_reg = self.lower_expr(value)?;
-
-            if self.in_lambda {
-                // Inside a lambda, use closure environment via StoreCapture
-                // StoreCapture handles cells automatically
-                self.emit(LirInstr::StoreCapture {
-                    index: slot,
-                    src: value_reg,
-                });
-                let result = self.fresh_reg();
-                self.emit(LirInstr::LoadCapture {
-                    dst: result,
-                    index: slot,
-                });
-                Ok(result)
-            } else if needs_cell {
-                // The cell was already created in the Begin pre-pass
-                let cell_reg = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: cell_reg,
-                    slot,
-                });
-                self.emit(LirInstr::StoreCell {
-                    cell: cell_reg,
-                    value: value_reg,
-                });
-                // Reload from cell
-                let cell_reg2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: cell_reg2,
-                    slot,
-                });
-                let result = self.fresh_reg();
-                self.emit(LirInstr::LoadCell {
-                    dst: result,
-                    cell: cell_reg2,
-                });
-                Ok(result)
-            } else {
-                self.emit(LirInstr::StoreLocal {
-                    slot,
-                    src: value_reg,
-                });
-                let result = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal { dst: result, slot });
-                Ok(result)
-            }
+            self.emit(LirInstr::StoreLocal {
+                slot,
+                src: value_reg,
+            });
+            let result = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal { dst: result, slot });
+            Ok(result)
         }
     }
 
@@ -296,15 +272,6 @@ impl Lowerer {
                 self.emit(LirInstr::LoadLocal { dst: result, slot });
                 Ok(result)
             }
-        } else if target.is_global() {
-            let sym = target.name();
-            self.emit(LirInstr::StoreGlobal {
-                sym,
-                src: value_reg,
-            });
-            let result = self.fresh_reg();
-            self.emit(LirInstr::LoadGlobal { dst: result, sym });
-            Ok(result)
         } else {
             Err(format!("Unknown binding: {:?}", target))
         }
@@ -539,61 +506,39 @@ impl Lowerer {
     /// Store a value into a binding, consuming it from the stack.
     /// Used by lower_destructure.
     fn lower_bind_value(&mut self, binding: Binding, value_reg: Reg) -> Result<Reg, String> {
-        if binding.is_global() {
-            self.emit(LirInstr::StoreGlobal {
-                sym: binding.name(),
+        // Allocate slot if not already done (Begin pre-pass may have done it)
+        let slot = if let Some(&existing_slot) = self.binding_to_slot.get(&binding) {
+            existing_slot
+        } else {
+            self.allocate_slot(binding)
+        };
+
+        if self.in_lambda {
+            self.upvalue_bindings.insert(binding);
+            self.emit(LirInstr::StoreCapture {
+                index: slot,
                 src: value_reg,
             });
-            Ok(value_reg)
         } else {
-            // Allocate slot if not already done (Begin pre-pass may have done it)
-            let slot = if let Some(&existing_slot) = self.binding_to_slot.get(&binding) {
-                existing_slot
-            } else {
-                self.allocate_slot(binding)
-            };
-
-            if self.in_lambda {
-                self.upvalue_bindings.insert(binding);
-                self.emit(LirInstr::StoreCapture {
-                    index: slot,
-                    src: value_reg,
+            let needs_cell = binding.needs_cell();
+            if needs_cell {
+                // Cell was already created in Begin pre-pass
+                let cell_reg = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: cell_reg,
+                    slot,
+                });
+                self.emit(LirInstr::StoreCell {
+                    cell: cell_reg,
+                    value: value_reg,
                 });
             } else {
-                let needs_cell = binding.needs_cell();
-                if needs_cell {
-                    // Cell was already created in Begin pre-pass
-                    let cell_reg = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: cell_reg,
-                        slot,
-                    });
-                    self.emit(LirInstr::StoreCell {
-                        cell: cell_reg,
-                        value: value_reg,
-                    });
-                } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot,
-                        src: value_reg,
-                    });
-                }
+                self.emit(LirInstr::StoreLocal {
+                    slot,
+                    src: value_reg,
+                });
             }
-            Ok(value_reg)
         }
-    }
-
-    /// Extract a compile-time literal Value from a HIR node, if it is a literal.
-    fn hir_to_literal_value(hir: &Hir) -> Option<Value> {
-        match &hir.kind {
-            HirKind::Int(n) => Some(Value::int(*n)),
-            HirKind::Float(f) => Some(Value::float(*f)),
-            HirKind::String(s) => Some(Value::string(s.as_str())),
-            HirKind::Bool(b) => Some(Value::bool(*b)),
-            HirKind::Nil => Some(Value::NIL),
-            HirKind::Keyword(name) => Some(Value::keyword(name)),
-            HirKind::EmptyList => Some(Value::EMPTY_LIST),
-            _ => None,
-        }
+        Ok(value_reg)
     }
 }

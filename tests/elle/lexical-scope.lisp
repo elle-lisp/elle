@@ -1,4 +1,4 @@
-(import-file "tests/elle/assert.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # SECTION 1: Deeply Nested Captures (4+ levels)
@@ -185,9 +185,8 @@
                (f))) 15 "test_capture_with_define_in_lambda")
 
 (assert-eq (let ((limit 4))
-             (begin
-               (def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
-               (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
+             (letrec ((is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
+                      (is-odd (fn (n) (if (= n 0) false (is-even (- n 1))))))
                (is-even limit))) true "test_mutual_recursion_with_captures")
 
 (assert-eq (let ((x 10))

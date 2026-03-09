@@ -73,8 +73,31 @@ impl HirLinter {
 
             HirKind::Var(_) => {}
 
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+            HirKind::Let { bindings, body } => {
                 for (_, init) in bindings {
+                    self.check(init, symbols);
+                }
+                self.check(body, symbols);
+            }
+
+            HirKind::Letrec { bindings, body } => {
+                for (binding, init) in bindings {
+                    // Check naming convention on file-level def/var bindings.
+                    // Skip gensyms (__file_expr_N) and primitive bindings
+                    // (identified by their initializer being a quoted NativeFn).
+                    let is_primitive = matches!(&init.kind, HirKind::Quote(v) if v.is_native_fn());
+                    if !is_primitive {
+                        if let Some(sym_name) = symbols.name(binding.name()) {
+                            if !sym_name.starts_with("__") {
+                                let binding_loc = Self::span_to_loc(&init.span);
+                                rules::check_naming_convention(
+                                    sym_name,
+                                    &binding_loc,
+                                    &mut self.diagnostics,
+                                );
+                            }
+                        }
+                    }
                     self.check(init, symbols);
                 }
                 self.check(body, symbols);
@@ -128,19 +151,17 @@ impl HirLinter {
                 for arg in args {
                     self.check(&arg.expr, symbols);
                 }
-                // Check arity if calling a known global (skip if any spliced args)
+                // Check arity if calling a known primitive (skip if any spliced args)
                 let has_splice = args.iter().any(|a| a.spliced);
                 if !has_splice {
                     if let HirKind::Var(binding) = &func.kind {
-                        if binding.is_global() {
-                            rules::check_call_arity(
-                                binding.name(),
-                                args.len(),
-                                &loc,
-                                symbols,
-                                &mut self.diagnostics,
-                            );
-                        }
+                        rules::check_call_arity(
+                            binding.name(),
+                            args.len(),
+                            &loc,
+                            symbols,
+                            &mut self.diagnostics,
+                        );
                     }
                 }
             }

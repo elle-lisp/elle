@@ -7,8 +7,7 @@ pub fn handle_load_const(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants
 }
 
 pub fn handle_load_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
-    let _depth = vm.read_u8(bytecode, ip); // depth (currently unused)
-    let idx = vm.read_u8(bytecode, ip) as usize;
+    let idx = vm.read_u16(bytecode, ip) as usize;
     let frame_base = vm.current_frame_base();
     let abs_idx = frame_base + idx;
     if abs_idx >= vm.fiber.stack.len() {
