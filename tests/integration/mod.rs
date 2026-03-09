@@ -35,18 +35,14 @@ mod effect_unsoundness {
 mod jit {
     include!("jit.rs");
 }
-mod fibers {
-    include!("fibers.rs");
-}
+// fibers tests migrated to tests/elle/fibers.lisp
 mod time_property {
     include!("time_property.rs");
 }
 mod time_elapsed {
     include!("time_elapsed.rs");
 }
-mod destructuring {
-    include!("destructuring.rs");
-}
+// destructuring tests migrated to tests/elle/destructuring.lisp
 mod blocks {
     include!("blocks.rs");
 }
@@ -90,9 +86,7 @@ mod glob {
 }
 // fn_flow tests migrated to tests/elle/fn-flow.lisp
 // fn_graph tests migrated to tests/elle/fn-graph.lisp
-mod table_keys {
-    include!("table_keys.rs");
-}
+// table_keys tests migrated to tests/elle/table-keys.lisp
 mod arena {
     include!("arena.rs");
 }
@@ -102,9 +96,7 @@ mod escape {
 mod allocator {
     include!("allocator.rs");
 }
-mod parameters {
-    include!("parameters.rs");
-}
+// parameters tests migrated to tests/elle/parameters.lisp
 mod ports {
     include!("ports.rs");
 }
