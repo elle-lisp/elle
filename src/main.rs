@@ -1,6 +1,3 @@
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use elle::context::{clear_vm_context, set_symbol_table, set_vm_context};
 use elle::pipeline::{compile, compile_file};
 use elle::primitives::set_length_symbol_table;

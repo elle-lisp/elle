@@ -32,6 +32,9 @@
 //! - Symbol interning for O(1) symbol comparison
 //! - SmallVec optimization to avoid heap allocation
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub mod arithmetic;
 pub mod compiler;
 pub mod context;
