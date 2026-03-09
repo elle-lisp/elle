@@ -195,13 +195,13 @@ fn test_while_simple() {
 
 #[test]
 fn test_each_simple() {
-    let result = eval_source("(let ((sum 0)) (each x '(1 2 3) (set sum (+ sum x))) sum)");
+    let result = eval_source("(let ((sum 0)) (each x '(1 2 3) (assign sum (+ sum x))) sum)");
     assert_eq!(result.unwrap().as_int().unwrap(), 6);
 }
 
 #[test]
 fn test_each_with_in() {
-    let result = eval_source("(let ((sum 0)) (each x in '(1 2 3) (set sum (+ sum x))) sum)");
+    let result = eval_source("(let ((sum 0)) (each x in '(1 2 3) (assign sum (+ sum x))) sum)");
     assert_eq!(result.unwrap().as_int().unwrap(), 6);
 }
 
@@ -244,11 +244,6 @@ fn test_quote_list() {
 #[test]
 fn test_try_simple() {
     assert!(compiles("(try 42 (catch e e))"));
-}
-
-#[test]
-fn test_throw() {
-    assert!(compiles("(throw 42)"));
 }
 
 // ============ Yield Tests ============

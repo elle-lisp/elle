@@ -80,9 +80,9 @@ fn test_file_side_effect_ordering() {
 
 #[test]
 fn test_file_def_immutability() {
-    // def bindings are immutable — (set x ...) on a def should fail.
-    let result = compile_file_source("(def x 1) (set x 2)");
-    assert!(result.is_err(), "expected compile error for set on def");
+    // def bindings are immutable — (assign x ...) on a def should fail.
+    let result = compile_file_source("(def x 1) (assign x 2)");
+    assert!(result.is_err(), "expected compile error for assign on def");
     let err = result.unwrap_err();
     assert!(
         err.contains("immutable"),
@@ -95,27 +95,27 @@ fn test_file_def_immutability() {
 fn test_file_var_mutability() {
     // var bindings are mutable.
     assert_eq!(
-        eval_file_source("(var x 1) (set x 2) x").unwrap(),
+        eval_file_source("(var x 1) (assign x 2) x").unwrap(),
         Value::int(2)
     );
 }
 
 #[test]
 fn test_file_var_set_from_later_expression() {
-    // var can be set from a later bare expression.
+    // var can be assigned from a later bare expression.
     assert_eq!(
-        eval_file_source("(var count 0) (set count (+ count 1)) count").unwrap(),
+        eval_file_source("(var count 0) (assign count (+ count 1)) count").unwrap(),
         Value::int(1)
     );
 }
 
 #[test]
 fn test_file_primitive_immutability() {
-    // Primitives are immutable — (set + 42) should fail.
-    let result = compile_file_source("(set + 42)");
+    // Primitives are immutable — (assign + 42) should fail.
+    let result = compile_file_source("(assign + 42)");
     assert!(
         result.is_err(),
-        "expected compile error for set on primitive"
+        "expected compile error for assign on primitive"
     );
     let err = result.unwrap_err();
     assert!(
@@ -393,7 +393,7 @@ fn test_mutable_var_captured_by_closure() {
     let code = r#"
         (begin
           (var x 1)
-          (def f (fn () (begin (set x 2) x)))
+          (def f (fn () (begin (assign x 2) x)))
           (f))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(2));
@@ -405,7 +405,7 @@ fn test_mutable_var_shared_between_closures() {
     let code = r#"
         (begin
           (var x 0)
-          (def inc (fn () (set x (+ x 1))))
+          (def inc (fn () (assign x (+ x 1))))
           (def get (fn () x))
           (inc)
           (inc)
@@ -420,7 +420,7 @@ fn test_mutable_var_mutation_visible_after_call() {
     let code = r#"
         (begin
           (var x 0)
-          (def inc (fn () (set x (+ x 1))))
+          (def inc (fn () (assign x (+ x 1))))
           (inc)
           (inc)
           (inc)
@@ -440,7 +440,7 @@ fn test_mixed_def_and_var_captures() {
         (begin
           (def base 10)
           (var count 0)
-          (def f (fn () (begin (set count (+ count 1)) (+ base count))))
+          (def f (fn () (begin (assign count (+ count 1)) (+ base count))))
           (f)
           (f)
           (f))

@@ -381,6 +381,59 @@ impl VM {
                 );
                 (SIG_OK, Value::struct_from(fields))
             }
+            "arena/fiber-stats" => {
+                use crate::value::heap::TableKey;
+                use std::collections::BTreeMap;
+                let fiber_handle = match arg.as_fiber() {
+                    Some(h) => h,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                format!(
+                                    "arena/fiber-stats: expected fiber, got {}",
+                                    arg.type_name()
+                                ),
+                            ),
+                        );
+                    }
+                };
+                match fiber_handle.try_with(|fiber| {
+                    let heap = &fiber.heap;
+                    let mut fields = BTreeMap::new();
+                    fields.insert(
+                        TableKey::Keyword("count".to_string()),
+                        Value::int(heap.len() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("bytes".to_string()),
+                        Value::int((heap.len() * 128) as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("peak".to_string()),
+                        Value::int(heap.peak_alloc_count() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("scope-enters".to_string()),
+                        Value::int(heap.scope_enters() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("dtors-run".to_string()),
+                        Value::int(heap.scope_dtors_run() as i64),
+                    );
+                    Value::struct_from(fields)
+                }) {
+                    Some(v) => (SIG_OK, v),
+                    None => (
+                        SIG_ERROR,
+                        error_val(
+                            "error",
+                            "arena/fiber-stats: fiber is currently executing".to_string(),
+                        ),
+                    ),
+                }
+            }
             _ => (
                 SIG_ERROR,
                 error_val(

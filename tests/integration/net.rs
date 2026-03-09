@@ -1,5 +1,5 @@
 use elle::context::{set_symbol_table, set_vm_context};
-use elle::{compile_all, init_stdlib, register_primitives, SymbolTable, Value, VM};
+use elle::{compile_file, init_stdlib, register_primitives, SymbolTable, Value, VM};
 
 /// Evaluate Elle source with `execute_scheduled` so SIG_IO is handled.
 fn eval_scheduled(input: &str) -> Result<Value, String> {
@@ -9,13 +9,10 @@ fn eval_scheduled(input: &str) -> Result<Value, String> {
     set_vm_context(&mut vm as *mut VM);
     set_symbol_table(&mut symbols as *mut SymbolTable);
     init_stdlib(&mut vm, &mut symbols);
-    let results = compile_all(input, &mut symbols)?;
-    let mut last_value = Value::NIL;
-    for result in results {
-        last_value = vm.execute_scheduled(&result.bytecode, &symbols)?;
-    }
+    let result = compile_file(input, &mut symbols)?;
+    let value = vm.execute_scheduled(&result.bytecode, &symbols)?;
     set_vm_context(std::ptr::null_mut());
-    Ok(last_value)
+    Ok(value)
 }
 
 // --- Minimal SIG_IO test ---

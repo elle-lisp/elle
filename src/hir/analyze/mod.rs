@@ -121,9 +121,10 @@ pub struct Analyzer<'a> {
     /// Built from `register_primitive_effects` and passed in at construction
     primitive_effects: HashMap<SymbolId, Effect>,
     /// Arity environment: maps local function bindings to their arity.
+    /// Populated by `bind_primitives` for primitive bindings; user
+    /// shadows create new bindings that won't be in this map,
+    /// correctly disabling the primitive arity check.
     arity_env: HashMap<Binding, Arity>,
-    /// Known arities of primitive functions, from PrimitiveMeta.
-    primitive_arities: HashMap<SymbolId, Arity>,
 
     /// Tracks effect sources within the current lambda body for polymorphic inference
     current_effect_sources: EffectSources,
@@ -167,7 +168,7 @@ impl<'a> Analyzer<'a> {
     pub fn new_with_primitives(
         symbols: &'a mut SymbolTable,
         primitive_effects: HashMap<SymbolId, Effect>,
-        primitive_arities: HashMap<SymbolId, Arity>,
+        _primitive_arities: HashMap<SymbolId, Arity>,
     ) -> Self {
         let mut analyzer = Analyzer {
             symbols,
@@ -177,7 +178,6 @@ impl<'a> Analyzer<'a> {
             effect_env: HashMap::new(),
             primitive_effects,
             arity_env: HashMap::new(),
-            primitive_arities,
 
             current_effect_sources: EffectSources::default(),
             current_lambda_params: Vec::new(),

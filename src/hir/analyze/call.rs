@@ -93,16 +93,11 @@ impl<'a> Analyzer<'a> {
                 params.len(),
             )),
             HirKind::Var(binding) => {
-                // Check arity env (covers both user-defined and primitive bindings)
-                if let Some(arity) = self.arity_env.get(binding) {
-                    return Some(*arity);
-                }
-                // Fall back to primitive arities by symbol name
-                // (for code paths that don't call bind_primitives)
-                if let Some(arity) = self.primitive_arities.get(&binding.name()) {
-                    return Some(*arity);
-                }
-                None
+                // Check arity env (covers both user-defined and primitive bindings).
+                // bind_primitives populates this for primitive bindings; user
+                // shadows create new bindings that won't be in arity_env,
+                // correctly disabling the primitive arity check.
+                self.arity_env.get(binding).copied()
             }
             _ => None,
         }

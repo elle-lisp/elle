@@ -50,9 +50,6 @@ pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult,
         .with_symbol_names(symbol_names.clone());
     let lir_func = lowerer.lower(&analysis.hir)?;
 
-    // Debug: print scope stats
-    eprintln!("{}", lowerer.scope_stats());
-
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
     let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);

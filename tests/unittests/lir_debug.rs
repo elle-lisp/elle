@@ -35,11 +35,22 @@ fn test_print_lir_failing_case() {
         .expect("expand failed");
 
     // Analyze
-    let mut analyzer = Analyzer::new(&mut symbols);
+    let meta = elle::primitives::cached_primitive_meta(&mut symbols);
+    let mut analyzer =
+        Analyzer::new_with_primitives(&mut symbols, meta.effects.clone(), meta.arities.clone());
+    analyzer.bind_primitives(&meta);
     let analysis = analyzer.analyze(&expanded).expect("analyze failed");
 
-    // Lower
-    let mut lowerer = Lowerer::new();
+    // Lower — configure with intrinsics and primitive values like the pipeline does
+    let prim_values = analyzer.primitive_values().clone();
+    let intrinsics = elle::lir::intrinsics::build_intrinsics(&mut symbols);
+    let imm_prims = elle::lir::intrinsics::build_immediate_primitives(&mut symbols);
+    let symbol_names = symbols.all_names();
+    let mut lowerer = Lowerer::new()
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims)
+        .with_primitive_values(prim_values)
+        .with_symbol_names(symbol_names);
     let lir = lowerer.lower(&analysis.hir).expect("lower failed");
 
     println!("=== LIR MAIN FUNCTION ===");

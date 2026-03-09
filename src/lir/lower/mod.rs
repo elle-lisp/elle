@@ -429,6 +429,7 @@ impl Lowerer {
     /// 3. All break values targeting this block are safe immediates
     /// 4. No `set!` to non-local bindings (blocks have no own bindings)
     fn can_scope_allocate_block(&mut self, block_id: &BlockId, body: &[Hir]) -> bool {
+        self.scope_stats.scopes_analyzed += 1;
         // Condition 1: no suspension
         if body.iter().any(|e| e.effect.may_suspend()) {
             self.scope_stats.rejected_suspends += 1;
