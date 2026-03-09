@@ -586,3 +586,11 @@
 (assert-eq (length (append (list 1 2) (list))) 2 "append list to empty list")
 (assert-eq (append (list) (list)) () "append empty lists")
 (assert-err (fn () (append (list 1 2) @[3 4])) "append lists mismatched type error")
+
+## === Loop iteration ===
+
+(assert-eq (let ((sum 0)) (each x '(1 2 3) (assign sum (+ sum x))) sum) 6
+  "each simple")
+
+(assert-eq (let ((sum 0)) (each x in '(1 2 3) (assign sum (+ sum x))) sum) 6
+  "each with in")
