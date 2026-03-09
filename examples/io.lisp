@@ -18,7 +18,7 @@
 # import-file loads another .lisp file and returns its last expression's
 # value. assertions.lisp is loaded at the top of every example — this
 # line IS the module-loading demonstration.
-(import-file "./examples/assertions.lisp")
+(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
 # All temp files live under a unique directory relative to the working dir.

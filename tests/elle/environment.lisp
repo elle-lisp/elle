@@ -1,35 +1,7 @@
 # Tests for the environment primitive
 
-(import-file "tests/elle/assert.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
-(assert-true (struct? (environment)) "environment returns struct")
-
-(assert-true
-  (not (nil? (get (environment) :+)))
-  "environment contains primitives")
-
-(assert-eq
-  (begin (def my-val 42) (get (environment) :my-val))
-  42
-  "environment contains user defined global")
-
-(assert-eq
-  (begin (var x 1) (assign x 2) (get (environment) :x))
-  2
-  "environment reflects mutation")
-
-(assert-true
-  (struct? (vm/query "environment" nil))
-  "environment via vm query")
-
-(assert-true
-  (nil? (get (environment) :__nonexistent_symbol_42__))
-  "environment excludes undefined")
-
-# ============================================================================
-# Error tests (from integration/environment.rs)
-# ============================================================================
-
-# environment_arity_error
-(assert-err (fn () (eval '(environment 1)))
-  "environment rejects arguments")
+# (environment) was removed in the file-as-letrec model.
+# Verify it signals an error.
+(assert-err (fn [] (environment)) "environment is no longer available")

@@ -13,7 +13,7 @@
 # Spawned threads get a fresh VM with primitives only; globals are not
 # shared. Values the thread needs must be captured via closure scope.
 
-(import-file "./examples/assertions.lisp")
+(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================
@@ -56,15 +56,12 @@
 # Spawned closures capture immutable values from the enclosing scope.
 # Strings, numbers, tuples, structs — all fine.
 (let* ([name "Alice"]
-       [greeting (join (spawn (fn []
-         (-> "Hello, "
-             (append name)
-             (append "! You are ")
-             (append (string 30))
-             (append " years old.")))))])
-  (display "  ") (print greeting)
-  (assert-true (string/contains? greeting "Alice") "captured string in thread")
-  (assert-true (string/contains? greeting "30") "captured number conversion"))
+       [age 30])
+   (let* ([result (join (spawn (fn [] [name age])))]
+           [greeting (string/join ["Hello, " (get result 0) "! You are " (string (get result 1)) " years old."] "")])
+     (display "  ") (print greeting)
+     (assert-true (string/contains? greeting "Alice") "captured string in thread")
+     (assert-true (string/contains? greeting "30") "captured number conversion")))
 
 # Tuples are immutable, so they cross thread boundaries.
 (let* ([nums [10 20 30]]

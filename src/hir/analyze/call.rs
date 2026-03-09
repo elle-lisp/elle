@@ -93,22 +93,11 @@ impl<'a> Analyzer<'a> {
                 params.len(),
             )),
             HirKind::Var(binding) => {
-                // Check local arity env first
-                if let Some(arity) = self.arity_env.get(binding) {
-                    return Some(*arity);
-                }
-                // Fall back to primitive/global arities,
-                // but only if this binding was NOT explicitly defined by the user
-                // (user definitions shadow primitives even for non-lambda values)
-                if binding.is_global() && !self.user_defined_globals.contains(binding) {
-                    if let Some(arity) = self.primitive_arities.get(&binding.name()) {
-                        return Some(*arity);
-                    }
-                    if let Some(arity) = self.global_arities.get(&binding.name()) {
-                        return Some(*arity);
-                    }
-                }
-                None
+                // Check arity env (covers both user-defined and primitive bindings).
+                // bind_primitives populates this for primitive bindings; user
+                // shadows create new bindings that won't be in arity_env,
+                // correctly disabling the primitive arity check.
+                self.arity_env.get(binding).copied()
             }
             _ => None,
         }
@@ -137,15 +126,11 @@ impl<'a> Analyzer<'a> {
             HirKind::Var(binding) => {
                 if let Some(effect) = self.effect_env.get(binding) {
                     *effect
-                } else if binding.is_global() {
-                    // Check primitive effects first, then global effects from previous forms
+                } else {
                     self.primitive_effects
                         .get(&binding.name())
-                        .or_else(|| self.global_effects.get(&binding.name()))
                         .cloned()
                         .unwrap_or(Effect::yields())
-                } else {
-                    Effect::yields()
                 }
             }
             _ => Effect::yields(),
@@ -230,17 +215,7 @@ impl<'a> Analyzer<'a> {
                 .effect_env
                 .get(binding)
                 .cloned()
-                .or_else(|| {
-                    if binding.is_global() {
-                        // Check primitive effects first, then global effects from previous forms
-                        self.primitive_effects
-                            .get(&binding.name())
-                            .or_else(|| self.global_effects.get(&binding.name()))
-                            .cloned()
-                    } else {
-                        None
-                    }
-                })
+                .or_else(|| self.primitive_effects.get(&binding.name()).cloned())
                 .unwrap_or(Effect::yields()),
             // Unknown argument effect - conservatively Yields for soundness
             _ => Effect::yields(),

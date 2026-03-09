@@ -1,6 +1,6 @@
 ## Content block rendering
 
-(import-file "elle-doc/lib/html.lisp")
+(def {:html-escape html-escape} ((import-file "elle-doc/lib/html.lisp")))
 
 ## Render a paragraph block
 (var render-paragraph
@@ -125,3 +125,6 @@
         (append acc (render-section section)))
       ""
       sections)))
+
+## Module exports
+(fn [] {:render-paragraph render-paragraph :render-code render-code :render-list render-list :render-blockquote render-blockquote :render-table render-table :render-note render-note :render-block render-block :render-section render-section :render-sections render-sections})

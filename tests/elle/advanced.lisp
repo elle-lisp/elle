@@ -4,7 +4,7 @@
 ## Tests import-file, spawn, join, sleep, debug-print, trace, memory-usage,
 ## pattern matching, guards, or-patterns, decision trees, and exhaustiveness.
 
-(import-file "tests/elle/assert.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Phase 5: Advanced Runtime Features - Integration Tests
@@ -245,7 +245,7 @@
 # ============================================================================
 
 # error in trace argument
-(assert-err (fn () (trace "bad" (undefined-var)))
+(assert-err (fn () (eval '(trace "bad" (undefined-var))))
   "trace with undefined variable fails")
 
 # debug and trace chain
@@ -661,9 +661,9 @@
   "decision tree deeply nested")
 
 # decision tree match in loop
-(def test-result (list))
+(var test-result (list))
 (each i (list 1 2 3)
-  (def test-result (cons (match i
+  (assign test-result (cons (match i
                            (1 :one)
                            (2 :two)
                            (3 :three)

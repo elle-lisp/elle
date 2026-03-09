@@ -4,7 +4,7 @@
 ## Tests sequential yields, resume values, conditionals, loops, state
 ## transitions, interleaving, and effect threading.
 
-(import-file "tests/elle/assert.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Sequential yields in order
@@ -682,15 +682,15 @@
 
 # test_deep_call_chain_with_multiple_yields
 (begin
-  (def level1 (fn []
-    (yield 1)
-    (level2)))
-  (def level2 (fn []
-    (yield 2)
-    (level3)))
   (def level3 (fn []
     (yield 3)
     "done"))
+  (def level2 (fn []
+    (yield 2)
+    (level3)))
+  (def level1 (fn []
+    (yield 1)
+    (level2)))
   (var co (make-coroutine level1))
   (assert-eq (coro/resume co) 1 "deep call chain: first")
   (assert-eq (coro/resume co) 2 "deep call chain: second")

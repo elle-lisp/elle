@@ -6,7 +6,7 @@
 
 use crate::effects::Effect;
 use crate::value::types::{Arity, NativeFn};
-use crate::value::SymbolId;
+use crate::value::{SymbolId, Value};
 use std::collections::HashMap;
 
 /// Declarative definition of a primitive function.
@@ -129,6 +129,11 @@ pub struct PrimitiveMeta {
     pub effects: HashMap<SymbolId, Effect>,
     pub arities: HashMap<SymbolId, Arity>,
     pub docs: HashMap<SymbolId, Doc>,
+    /// NativeFn values for each primitive, keyed by SymbolId.
+    /// Used by `bind_primitives` to record compile-time constant
+    /// values so the lowerer can emit `LoadConst` instead of
+    /// `LoadGlobal`.
+    pub functions: HashMap<SymbolId, Value>,
 }
 
 impl PrimitiveMeta {
@@ -137,6 +142,7 @@ impl PrimitiveMeta {
             effects: HashMap::new(),
             arities: HashMap::new(),
             docs: HashMap::new(),
+            functions: HashMap::new(),
         }
     }
 }

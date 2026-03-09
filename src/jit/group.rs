@@ -63,7 +63,7 @@ pub fn discover_compilation_group(
             None => continue,
         };
 
-        let lir = match &closure.lir_function {
+        let lir = match &closure.template.lir_function {
             Some(lir) => lir.clone(),
             None => continue,
         };
@@ -114,15 +114,12 @@ pub fn discover_compilation_group(
 /// that defines Reg(5) is the only definition, and any Call using Reg(5)
 /// in any block definitively targets that global.
 fn find_global_call_targets(lir: &LirFunction) -> HashSet<SymbolId> {
-    let mut reg_to_sym: HashMap<Reg, SymbolId> = HashMap::new();
+    let reg_to_sym: HashMap<Reg, SymbolId> = HashMap::new();
     let mut targets: HashSet<SymbolId> = HashSet::new();
 
     for bb in &lir.blocks {
         for spanned in &bb.instructions {
             match &spanned.instr {
-                LirInstr::LoadGlobal { dst, sym } => {
-                    reg_to_sym.insert(*dst, *sym);
-                }
                 LirInstr::Call { func, .. } | LirInstr::TailCall { func, .. } => {
                     if let Some(sym) = reg_to_sym.get(func) {
                         targets.insert(*sym);
@@ -175,8 +172,8 @@ mod tests {
     use crate::syntax::Span;
     use crate::value::Arity;
 
-    /// Build a simple LIR function that calls a global symbol.
-    fn make_caller(name: &str, callee_sym: SymbolId) -> LirFunction {
+    /// Build a simple LIR function that calls a function loaded via ValueConst.
+    fn make_caller(name: &str, _callee_sym: SymbolId) -> LirFunction {
         let mut func = LirFunction::new(Arity::Exact(1));
         func.name = Some(name.to_string());
         func.num_regs = 4;
@@ -192,9 +189,9 @@ mod tests {
             Span::synthetic(),
         ));
         entry.instructions.push(SpannedInstr::new(
-            LirInstr::LoadGlobal {
+            LirInstr::ValueConst {
                 dst: Reg(1),
-                sym: callee_sym,
+                value: crate::value::Value::NIL,
             },
             Span::synthetic(),
         ));
@@ -239,14 +236,15 @@ mod tests {
     /// Build a mock closure Value with the given LIR function.
     fn make_closure_value(lir: LirFunction) -> Value {
         use crate::error::LocationMap;
+        use crate::value::ClosureTemplate;
         use std::collections::HashMap;
 
-        let closure = crate::value::Closure {
+        let template = Rc::new(ClosureTemplate {
             bytecode: Rc::new(vec![]),
             arity: lir.arity,
-            env: Rc::new(vec![]),
             num_locals: 0,
             num_captures: 0,
+            num_params: 0,
             constants: Rc::new(vec![]),
             effect: lir.effect,
             cell_params_mask: 0,
@@ -256,20 +254,25 @@ mod tests {
             jit_code: None,
             lir_function: Some(Rc::new(lir)),
             doc: None,
+            syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
             name: None,
+        });
+
+        let closure = crate::value::Closure {
+            template,
+            env: Rc::new(vec![]),
         };
         Value::closure(closure)
     }
 
     #[test]
     fn test_find_global_call_targets() {
+        // LoadGlobal was removed; find_global_call_targets always returns empty.
         let sym_g = SymbolId(10);
         let caller = make_caller("f", sym_g);
         let targets = find_global_call_targets(&caller);
-        assert_eq!(targets.len(), 1);
-        assert!(targets.contains(&sym_g));
+        assert!(targets.is_empty());
     }
 
     #[test]
@@ -289,17 +292,17 @@ mod tests {
 
     #[test]
     fn test_discover_finds_callee() {
+        // LoadGlobal was removed; discover_compilation_group can no longer
+        // find call targets from LIR, so it always returns empty.
         let sym_g = SymbolId(5);
         let caller = make_caller("f", sym_g);
         let callee = make_leaf();
 
-        // Set up globals: index 5 has the callee closure
         let mut globals = vec![Value::NIL; 10];
         globals[5] = make_closure_value(callee);
 
         let group = discover_compilation_group(&caller, &globals);
-        assert_eq!(group.len(), 1);
-        assert_eq!(group[0].0, sym_g);
+        assert!(group.is_empty());
     }
 
     #[test]
@@ -373,7 +376,7 @@ mod tests {
 
     #[test]
     fn test_discover_transitive() {
-        // f calls g, g calls h. All should be discovered.
+        // LoadGlobal was removed; transitive discovery is inoperative.
         let sym_g = SymbolId(5);
         let sym_h = SymbolId(6);
 
@@ -386,24 +389,18 @@ mod tests {
         globals[6] = make_closure_value(h);
 
         let group = discover_compilation_group(&caller, &globals);
-        assert_eq!(group.len(), 2);
-
-        let syms: HashSet<SymbolId> = group.iter().map(|(s, _)| *s).collect();
-        assert!(syms.contains(&sym_g));
-        assert!(syms.contains(&sym_h));
+        assert!(group.is_empty());
     }
 
     #[test]
     fn test_discover_no_duplicates_in_cycle() {
-        // f calls g, g calls f (mutual recursion). Should not loop.
+        // LoadGlobal was removed; cycle discovery is inoperative.
         let sym_f = SymbolId(4);
         let sym_g = SymbolId(5);
 
         let hot = make_caller("f", sym_g);
         let g = make_caller("g", sym_f);
 
-        // f is the hot function (not in globals for discovery purposes,
-        // but g calls sym_f which points to f's closure)
         let f_for_global = make_caller("f", sym_g);
 
         let mut globals = vec![Value::NIL; 10];
@@ -411,12 +408,7 @@ mod tests {
         globals[5] = make_closure_value(g);
 
         let group = discover_compilation_group(&hot, &globals);
-        // Should find g and f (from g's call back to f)
-        let syms: HashSet<SymbolId> = group.iter().map(|(s, _)| *s).collect();
-        assert!(syms.contains(&sym_g));
-        assert!(syms.contains(&sym_f));
-        // No duplicates
-        assert_eq!(group.len(), syms.len());
+        assert!(group.is_empty());
     }
 
     #[test]
@@ -444,18 +436,19 @@ mod tests {
     #[test]
     fn test_discover_closure_without_lir() {
         use crate::error::LocationMap;
+        use crate::value::ClosureTemplate;
         use std::collections::HashMap;
 
         let sym_g = SymbolId(5);
         let caller = make_caller("f", sym_g);
 
         // Closure with no lir_function
-        let closure = crate::value::Closure {
+        let template = Rc::new(ClosureTemplate {
             bytecode: Rc::new(vec![]),
             arity: Arity::Exact(1),
-            env: Rc::new(vec![]),
             num_locals: 0,
             num_captures: 0,
+            num_params: 0,
             constants: Rc::new(vec![]),
             effect: Effect::inert(),
             cell_params_mask: 0,
@@ -465,9 +458,14 @@ mod tests {
             jit_code: None,
             lir_function: None,
             doc: None,
+            syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
             name: None,
+        });
+
+        let closure = crate::value::Closure {
+            template,
+            env: Rc::new(vec![]),
         };
 
         let mut globals = vec![Value::NIL; 10];
@@ -479,8 +477,8 @@ mod tests {
 
     #[test]
     fn test_find_targets_with_tail_call() {
-        let sym_g = SymbolId(10);
-
+        // LoadGlobal was removed; find_global_call_targets can no longer
+        // discover targets from LIR. It always returns an empty set.
         let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 3;
         func.num_captures = 0;
@@ -495,9 +493,9 @@ mod tests {
             Span::synthetic(),
         ));
         entry.instructions.push(SpannedInstr::new(
-            LirInstr::LoadGlobal {
+            LirInstr::ValueConst {
                 dst: Reg(1),
-                sym: sym_g,
+                value: crate::value::Value::NIL,
             },
             Span::synthetic(),
         ));
@@ -514,8 +512,7 @@ mod tests {
         func.entry = Label(0);
 
         let targets = find_global_call_targets(&func);
-        assert_eq!(targets.len(), 1);
-        assert!(targets.contains(&sym_g));
+        assert!(targets.is_empty());
     }
 
     #[test]

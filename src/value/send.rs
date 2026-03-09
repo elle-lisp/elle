@@ -66,6 +66,9 @@ pub enum SendValue {
 
     /// Deep copy of mutable sets
     LSetMut(Vec<SendValue>),
+
+    /// Native function pointer (inherently Send + Sync)
+    NativeFn(crate::value::types::NativeFn),
 }
 
 impl SendValue {
@@ -165,8 +168,8 @@ impl SendValue {
             // Unsafe: closures (contain function pointers and mutable state)
             HeapObject::Closure(_) => Err("Cannot send closure directly".to_string()),
 
-            // Unsafe: native functions (contain function pointers)
-            HeapObject::NativeFn(_) => Err("Cannot send native function".to_string()),
+            // Native function pointers are inherently Send + Sync
+            HeapObject::NativeFn(f) => Ok(SendValue::NativeFn(*f)),
 
             // Unsafe: FFI handles
             HeapObject::LibHandle(_) => Err("Cannot send library handle".to_string()),
@@ -273,6 +276,7 @@ impl SendValue {
                 let set: BTreeSet<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
                 alloc(HeapObject::LSetMut(std::cell::RefCell::new(set)))
             }
+            SendValue::NativeFn(f) => Value::native_fn(f),
         }
     }
 }

@@ -2,7 +2,7 @@
 ##
 ## Demonstrates ev/run with multiple concurrent I/O thunks.
 
-(import "examples/assertions.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true} ((import-file "examples/assertions.lisp")))
 
 (spit "/tmp/elle-async-example-1" "hello from file one")
 (spit "/tmp/elle-async-example-2" "hello from file two")

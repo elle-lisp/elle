@@ -222,12 +222,11 @@ mod jit_tests {
     fn test_jit_tail_call_mutual_recursion() {
         // Mutual recursion via tail calls
         let result = eval_source(
-            r#"(begin
-            (defn is-even (n)
+            r#"(defn is-even (n)
                 (if (= n 0) true (is-odd (- n 1))))
             (defn is-odd (n)
                 (if (= n 0) false (is-even (- n 1))))
-            (is-even 100))"#,
+            (is-even 100)"#,
         );
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
         assert_eq!(result.unwrap().as_bool(), Some(true));

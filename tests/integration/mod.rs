@@ -108,9 +108,6 @@ mod elle_scripts {
 mod allocator {
     include!("allocator.rs");
 }
-mod environment {
-    include!("environment.rs");
-}
 mod parameters {
     include!("parameters.rs");
 }
@@ -125,6 +122,9 @@ mod jit_yield {
 }
 mod net {
     include!("net.rs");
+}
+mod file_scope {
+    include!("file_scope.rs");
 }
 
 // Temporarily disabled while sorting out compilation caching.

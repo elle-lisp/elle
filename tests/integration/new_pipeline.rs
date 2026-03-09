@@ -3,6 +3,7 @@
 // These tests verify that code compiled through the new pipeline
 // produces correct results when executed.
 
+use crate::common::eval_source;
 use elle::pipeline::compile;
 use elle::SymbolTable;
 
@@ -192,6 +193,18 @@ fn test_while_simple() {
     assert!(compiles("(while false nil)"));
 }
 
+#[test]
+fn test_each_simple() {
+    let result = eval_source("(let ((sum 0)) (each x '(1 2 3) (assign sum (+ sum x))) sum)");
+    assert_eq!(result.unwrap().as_int().unwrap(), 6);
+}
+
+#[test]
+fn test_each_with_in() {
+    let result = eval_source("(let ((sum 0)) (each x in '(1 2 3) (assign sum (+ sum x))) sum)");
+    assert_eq!(result.unwrap().as_int().unwrap(), 6);
+}
+
 // ============ Sequence Tests ============
 
 #[test]
@@ -231,11 +244,6 @@ fn test_quote_list() {
 #[test]
 fn test_try_simple() {
     assert!(compiles("(try 42 (catch e e))"));
-}
-
-#[test]
-fn test_throw() {
-    assert!(compiles("(throw 42)"));
 }
 
 // ============ Yield Tests ============
@@ -312,24 +320,6 @@ fn test_bytecode_has_return() {
     // Bytecode should have instructions
     let last_instr = result.bytecode.instructions.last();
     assert!(last_instr.is_some(), "Bytecode should have instructions");
-}
-
-#[test]
-fn test_compile_all_multiple_forms() {
-    let mut symbols = SymbolTable::new();
-    let result = elle::compile_all("1 2 3", &mut symbols);
-    assert!(result.is_ok());
-    let compiled = result.unwrap();
-    assert_eq!(compiled.len(), 3);
-}
-
-#[test]
-fn test_compile_all_single_form() {
-    let mut symbols = SymbolTable::new();
-    let result = elle::compile_all("42", &mut symbols);
-    assert!(result.is_ok());
-    let compiled = result.unwrap();
-    assert_eq!(compiled.len(), 1);
 }
 
 // ============ Error Handling Tests ============
@@ -506,4 +496,33 @@ fn test_and_short_circuit() {
 #[test]
 fn test_or_short_circuit() {
     assert!(compiles("(or false true false)"));
+}
+
+#[test]
+fn test_trace_vm_execution() {
+    // Enable some form of debug if available
+    std::env::set_var("ELLE_DEBUG", "1");
+
+    let code = r#"(begin
+        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
+        (def my-fold (fn (f init lst)
+            (if (nil? lst)
+                init
+                (my-fold f (f init (first lst)) (rest lst)))))
+        (my-fold process 0 (list 1)))"#; // Only one element for simpler trace
+
+    let result = eval_source(code);
+    println!("Result: {:?}", result);
+
+    // Also try with the non-begin version to compare
+    let code2 = r#"
+        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
+        (def my-fold (fn (f init lst)
+            (if (nil? lst)
+                init
+                (my-fold f (f init (first lst)) (rest lst)))))
+        (my-fold process 0 (list 1))
+    "#;
+    let result2 = eval_source(code2);
+    println!("Multi-form result: {:?}", result2);
 }

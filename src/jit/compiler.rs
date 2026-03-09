@@ -15,7 +15,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
-use crate::lir::{Label, LirFunction, LirInstr};
+use crate::lir::{Label, LirFunction};
 use crate::value::{Arity, SymbolId};
 
 use super::code::JitCode;
@@ -32,7 +32,7 @@ fn var(n: u32) -> Variable {
 
 /// A member of a compilation group (SCC) for batch JIT compilation.
 pub struct BatchMember<'a> {
-    /// Symbol ID for this function (used to identify it in LoadGlobal)
+    /// Symbol ID for this function (used to identify it for direct calls)
     pub sym: SymbolId,
     /// The LIR function to compile
     pub lir: &'a LirFunction,
@@ -79,8 +79,6 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) load_capture: FuncId,
     pub(crate) store_cell: FuncId,
     pub(crate) store_capture: FuncId,
-    pub(crate) load_global: FuncId,
-    pub(crate) store_global: FuncId,
     pub(crate) call: FuncId,
     pub(crate) tail_call: FuncId,
     pub(crate) has_exception: FuncId,
@@ -170,14 +168,6 @@ impl JitCompiler {
         builder.symbol(
             "elle_jit_store_capture",
             dispatch::elle_jit_store_capture as *const u8,
-        );
-        builder.symbol(
-            "elle_jit_load_global",
-            dispatch::elle_jit_load_global as *const u8,
-        );
-        builder.symbol(
-            "elle_jit_store_global",
-            dispatch::elle_jit_store_global as *const u8,
         );
         builder.symbol("elle_jit_call", dispatch::elle_jit_call as *const u8);
         builder.symbol(
@@ -319,8 +309,6 @@ impl JitCompiler {
             load_capture: declare(module, "elle_jit_load_capture", &unary_sig)?,
             store_cell: declare(module, "elle_jit_store_cell", &binary_sig)?,
             store_capture: declare(module, "elle_jit_store_capture", &ternary_sig)?,
-            load_global: declare(module, "elle_jit_load_global", &binary_sig)?,
-            store_global: declare(module, "elle_jit_store_global", &ternary_sig)?,
             call: declare(module, "elle_jit_call", &call_sig)?,
             tail_call: declare(module, "elle_jit_tail_call", &call_sig)?,
             has_exception: declare(module, "elle_jit_has_exception", &unary_sig)?,
@@ -593,15 +581,8 @@ impl JitCompiler {
         // Set up SCC peer map for direct calls between mutually recursive functions
         if let Some(peers) = scc_peers {
             translator.scc_peers = peers.clone();
-            // Build global_load_map: scan all blocks for LoadGlobal instructions
-            // to map Reg -> SymbolId. Since LIR is SSA, each Reg is assigned once.
-            for bb in &lir.blocks {
-                for spanned in &bb.instructions {
-                    if let LirInstr::LoadGlobal { dst, sym } = &spanned.instr {
-                        translator.global_load_map.insert(*dst, *sym);
-                    }
-                }
-            }
+            // SCC peer detection relies on the scc_peers map passed in from
+            // the batch compilation caller.
         }
 
         // Declare variables for all registers, local slots, arg variables, and locally-defined variables
@@ -983,7 +964,7 @@ mod tests {
 
     #[test]
     fn test_compile_batch_mutual_calls() {
-        // Two functions that call each other via LoadGlobal + Call.
+        // Two functions that call each other via ValueConst + Call.
         // f(x) = if x <= 0 then x else g(x - 1)
         // g(x) = f(x)  (just forwards to f)
         //
@@ -1059,9 +1040,9 @@ mod tests {
             Span::synthetic(),
         ));
         b2.instructions.push(SpannedInstr::new(
-            LirInstr::LoadGlobal {
+            LirInstr::ValueConst {
                 dst: Reg(5),
-                sym: sym_g,
+                value: crate::value::Value::NIL,
             },
             Span::synthetic(),
         ));
@@ -1094,9 +1075,9 @@ mod tests {
             Span::synthetic(),
         ));
         gb0.instructions.push(SpannedInstr::new(
-            LirInstr::LoadGlobal {
+            LirInstr::ValueConst {
                 dst: Reg(1),
-                sym: sym_f,
+                value: crate::value::Value::NIL,
             },
             Span::synthetic(),
         ));

@@ -49,7 +49,7 @@ pub type PluginInitFn = unsafe extern "C" fn(ctx: &mut PluginContext) -> Value;
 /// The library handle is intentionally leaked — plugins are never unloaded.
 /// This avoids use-after-free if Elle code holds values created by the plugin.
 ///
-/// The caller is responsible for deduplication (e.g., via `is_module_loaded`).
+/// The caller is responsible for deduplication (e.g., via `is_module_loading`).
 /// Calling this twice with the same path will register primitives twice and
 /// leak a second library handle.
 pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResult<Value> {
@@ -67,17 +67,16 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
     let mut ctx = PluginContext::new();
     let return_value = unsafe { init_fn(&mut ctx) };
 
-    // Register collected primitives into the VM's globals and docs.
+    // Register collected primitives into the VM's docs.
     //
     // Note: plugin effects and arities are NOT registered in PrimitiveMeta
     // because plugins are loaded at runtime (via `import-file`), after the
     // static analyzer has already processed the calling code. The analyzer
-    // will see plugin primitives as unknown globals, not as primitives with
+    // will see plugin primitives as unknown locals, not as primitives with
     // known effects or arities. This is the same limitation as any runtime
     // import — a pre-existing constraint, not a plugin-specific gap.
     for def in &ctx.primitives {
-        let sym_id = symbols.intern(def.name);
-        vm.set_global(sym_id.0, Value::native_fn(def.func));
+        let _sym_id = symbols.intern(def.name);
 
         let doc = Doc {
             name: def.name,
@@ -92,8 +91,7 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
         vm.docs.insert(def.name.to_string(), doc.clone());
 
         for alias in def.aliases {
-            let alias_id = symbols.intern(alias);
-            vm.set_global(alias_id.0, Value::native_fn(def.func));
+            let _alias_id = symbols.intern(alias);
             vm.docs.insert((*alias).to_string(), doc.clone());
         }
     }

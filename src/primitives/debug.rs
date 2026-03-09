@@ -45,7 +45,7 @@ pub fn prim_is_jit(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.jit_code.is_some()))
+        (SIG_OK, Value::bool(closure.template.jit_code.is_some()))
     } else {
         (SIG_OK, Value::FALSE)
     }
@@ -63,7 +63,7 @@ pub fn prim_is_pure(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(!closure.effect.may_suspend()))
+        (SIG_OK, Value::bool(!closure.effect().may_suspend()))
     } else {
         (SIG_OK, Value::FALSE)
     }
@@ -81,7 +81,7 @@ pub fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.cell_params_mask != 0))
+        (SIG_OK, Value::bool(closure.template.cell_params_mask != 0))
     } else {
         (SIG_OK, Value::FALSE)
     }
@@ -99,7 +99,7 @@ pub fn prim_errors(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.effect.may_error()))
+        (SIG_OK, Value::bool(closure.template.effect.may_error()))
     } else {
         (SIG_OK, Value::FALSE)
     }
@@ -121,7 +121,7 @@ pub fn prim_arity(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        let result = match closure.arity {
+        let result = match closure.template.arity {
             Arity::Exact(n) => Value::int(n as i64),
             Arity::AtLeast(n) => Value::cons(Value::int(n as i64), Value::NIL),
             Arity::Range(min, max) => Value::cons(Value::int(min as i64), Value::int(max as i64)),
@@ -162,7 +162,7 @@ pub fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::int(closure.bytecode.len() as i64))
+        (SIG_OK, Value::int(closure.template.bytecode.len() as i64))
     } else {
         (SIG_OK, Value::NIL)
     }
@@ -172,10 +172,11 @@ pub fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
 // VM-access introspection (SIG_QUERY)
 // ============================================================================
 
-/// (doc name) — look up documentation for any named form (primitive, special form, or macro)
+/// (doc target) — look up documentation for a closure, primitive, special form, or macro
 ///
-/// Sends a SIG_QUERY to the VM which looks up the name in its
-/// `docs` map and returns a formatted doc string.
+/// If `target` is a closure, returns its docstring directly (or "No documentation found").
+/// If `target` is a string or keyword, sends a SIG_QUERY to the VM to look up
+/// builtin docs by name.
 pub fn prim_doc(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -186,6 +187,19 @@ pub fn prim_doc(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
+    // Closure: extract docstring directly — no VM query needed.
+    if let Some(closure) = args[0].as_closure() {
+        return if let Some(doc) = closure.template.doc {
+            (SIG_OK, doc)
+        } else {
+            let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
+            (
+                SIG_OK,
+                Value::string(format!("No documentation found for '{}'", name)),
+            )
+        };
+    }
+    // String or keyword: look up builtin docs via SIG_QUERY.
     (SIG_QUERY, Value::cons(Value::keyword("doc"), args[0]))
 }
 
@@ -377,8 +391,8 @@ pub fn prim_disbit(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        let mut lines = crate::compiler::disassemble_lines(&closure.bytecode);
-        for (i, c) in closure.constants.iter().enumerate() {
+        let mut lines = crate::compiler::disassemble_lines(&closure.template.bytecode);
+        for (i, c) in closure.template.constants.iter().enumerate() {
             lines.push(format!("const[{}] = {:?}", i, c));
         }
         (
@@ -408,7 +422,7 @@ pub fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        let lir = match &closure.lir_function {
+        let lir = match &closure.template.lir_function {
             Some(lir) => lir.clone(),
             None => return (SIG_OK, Value::NIL),
         };
@@ -436,7 +450,7 @@ pub fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
 
 /// Build the CFG struct from a closure's LIR.
 fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (SignalBits, Value) {
-    let lir = match &closure.lir_function {
+    let lir = match &closure.template.lir_function {
         Some(lir) => lir,
         None => return (SIG_OK, Value::NIL),
     };
@@ -456,7 +470,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
     // :doc
     fields.insert(
         TableKey::Keyword("doc".to_string()),
-        closure.doc.unwrap_or(Value::NIL),
+        closure.template.doc.unwrap_or(Value::NIL),
     );
 
     // :arity — use Display impl: "2", "1+", "2-4"
@@ -1314,10 +1328,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_doc,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Look up documentation for a primitive.",
-        params: &["name"],
+        doc: "Look up documentation for a closure (by value) or a builtin (by name string).",
+        params: &["target"],
         category: "meta",
-        example: "(doc \"cons\")",
+        example: "(doc my-fn)",
         aliases: &[],
     },
     PrimitiveDef {

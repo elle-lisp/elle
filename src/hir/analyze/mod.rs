@@ -24,12 +24,26 @@ mod special;
 use super::binding::{Binding, CaptureInfo, CaptureKind};
 use super::expr::{BlockId, Hir, HirKind};
 use crate::effects::Effect;
+use crate::primitives::def::PrimitiveMeta;
 use crate::symbol::SymbolTable;
-use crate::syntax::{ScopeId, Span};
+use crate::syntax::{ScopeId, Span, Syntax};
 use crate::value::heap::BindingScope;
 use crate::value::types::Arity;
-use crate::value::SymbolId;
+use crate::value::{SymbolId, Value};
 use std::collections::{HashMap, HashSet};
+
+/// A classified top-level form for file-as-letrec compilation.
+///
+/// The pipeline classifies each expanded top-level form into one of
+/// these variants before passing them to `Analyzer::analyze_file_letrec`.
+pub enum FileForm<'a> {
+    /// `(def name value)` or `(def pattern value)` — immutable binding
+    Def(&'a Syntax, &'a Syntax),
+    /// `(var name value)` or `(var pattern value)` — mutable binding
+    Var(&'a Syntax, &'a Syntax),
+    /// Bare expression — gets a gensym name
+    Expr(&'a Syntax),
+}
 
 /// Tracks an active block for `break` targeting.
 struct BlockContext {
@@ -106,31 +120,16 @@ pub struct Analyzer<'a> {
     /// Maps SymbolId -> Effect for primitive functions
     /// Built from `register_primitive_effects` and passed in at construction
     primitive_effects: HashMap<SymbolId, Effect>,
-    /// Maps SymbolId -> Effect for user-defined global functions from previous forms.
-    /// This enables cross-form effect tracking in compile_all.
-    global_effects: HashMap<SymbolId, Effect>,
-    /// Effects of globally-defined functions in this form (for cross-form tracking)
-    /// Populated during analysis, extracted after analysis completes.
-    defined_global_effects: HashMap<SymbolId, Effect>,
     /// Arity environment: maps local function bindings to their arity.
+    /// Populated by `bind_primitives` for primitive bindings; user
+    /// shadows create new bindings that won't be in this map,
+    /// correctly disabling the primitive arity check.
     arity_env: HashMap<Binding, Arity>,
-    /// Known arities of primitive functions, from PrimitiveMeta.
-    primitive_arities: HashMap<SymbolId, Arity>,
-    /// Known arities of global functions, from cross-form scanning.
-    global_arities: HashMap<SymbolId, Arity>,
-    /// Arities defined during this analysis pass, for fixpoint iteration.
-    defined_global_arities: HashMap<SymbolId, Arity>,
-    /// Bindings explicitly created by var/def forms (to distinguish from
-    /// implicit global references when checking primitive arities).
-    user_defined_globals: HashSet<Binding>,
+
     /// Tracks effect sources within the current lambda body for polymorphic inference
     current_effect_sources: EffectSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
     current_lambda_params: Vec<Binding>,
-    /// Immutable global bindings from previous forms (for cross-form const tracking)
-    immutable_globals: std::collections::HashSet<SymbolId>,
-    /// Immutable global bindings defined in this form (for cross-form tracking)
-    defined_immutable_globals: std::collections::HashSet<SymbolId>,
     /// Stack of active blocks for `break` targeting
     block_contexts: Vec<BlockContext>,
     /// Next block ID to allocate
@@ -138,6 +137,16 @@ pub struct Analyzer<'a> {
     /// Current function nesting depth (incremented in analyze_lambda).
     /// Used to prevent `break` from crossing function boundaries.
     fn_depth: u32,
+    /// Pre-created bindings from letrec pass 1 for destructured forms.
+    /// When set, `analyze_destructure_pattern` uses these instead of
+    /// `lookup_in_current_scope` to avoid binding identity mismatch
+    /// when the same name appears in multiple file-scope forms.
+    pre_bindings: HashMap<String, Binding>,
+    /// Compile-time constant values for primitive bindings.
+    /// Populated by `bind_primitives`. The lowerer seeds its
+    /// `immutable_values` map from this so primitive references
+    /// emit `LoadConst` instead of `LoadGlobal`.
+    primitive_values: HashMap<Binding, Value>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -159,7 +168,7 @@ impl<'a> Analyzer<'a> {
     pub fn new_with_primitives(
         symbols: &'a mut SymbolTable,
         primitive_effects: HashMap<SymbolId, Effect>,
-        primitive_arities: HashMap<SymbolId, Arity>,
+        _primitive_arities: HashMap<SymbolId, Arity>,
     ) -> Self {
         let mut analyzer = Analyzer {
             symbols,
@@ -168,63 +177,58 @@ impl<'a> Analyzer<'a> {
             parent_captures: Vec::new(),
             effect_env: HashMap::new(),
             primitive_effects,
-            global_effects: HashMap::new(),
-            defined_global_effects: HashMap::new(),
             arity_env: HashMap::new(),
-            primitive_arities,
-            global_arities: HashMap::new(),
-            defined_global_arities: HashMap::new(),
-            user_defined_globals: HashSet::new(),
+
             current_effect_sources: EffectSources::default(),
             current_lambda_params: Vec::new(),
-            immutable_globals: std::collections::HashSet::new(),
-            defined_immutable_globals: std::collections::HashSet::new(),
             block_contexts: Vec::new(),
             next_block_id: 0,
             fn_depth: 0,
+            pre_bindings: HashMap::new(),
+            primitive_values: HashMap::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
         analyzer
     }
 
-    /// Set global effects from previous forms (for cross-form effect tracking)
-    pub fn set_global_effects(&mut self, global_effects: HashMap<SymbolId, Effect>) {
-        self.global_effects = global_effects;
-    }
-
-    /// Take the defined global effects (consumes them, for use after analysis)
-    pub fn take_defined_global_effects(&mut self) -> HashMap<SymbolId, Effect> {
-        std::mem::take(&mut self.defined_global_effects)
-    }
-
-    /// Set global arities from previous forms (for cross-form arity tracking)
-    pub fn set_global_arities(&mut self, arities: HashMap<SymbolId, Arity>) {
-        self.global_arities = arities;
-    }
-
-    /// Take the defined global arities (consumes them, for use after analysis)
-    pub fn take_defined_global_arities(&mut self) -> HashMap<SymbolId, Arity> {
-        std::mem::take(&mut self.defined_global_arities)
-    }
-
-    /// Set immutable globals from previous forms (for cross-form const tracking)
-    pub fn set_immutable_globals(
-        &mut self,
-        immutable_globals: std::collections::HashSet<SymbolId>,
-    ) {
-        self.immutable_globals = immutable_globals;
-    }
-
-    /// Take the defined immutable globals (consumes them, for use after analysis)
-    pub fn take_defined_immutable_globals(&mut self) -> std::collections::HashSet<SymbolId> {
-        std::mem::take(&mut self.defined_immutable_globals)
-    }
-
     /// Analyze a syntax tree into HIR
     pub fn analyze(&mut self, syntax: &crate::syntax::Syntax) -> Result<AnalysisResult, String> {
         let hir = self.analyze_expr(syntax)?;
         Ok(AnalysisResult { hir })
+    }
+
+    /// Bind all registered primitives as immutable Local bindings in the
+    /// analyzer's initial scope.
+    ///
+    /// Called before `analyze_file_letrec` so that primitives are in scope
+    /// during file analysis. Primitives are `BindingScope::Local` with
+    /// `mark_immutable()` set. File-level `def` bindings shadow primitives
+    /// because `analyze_file_letrec` pushes a new scope.
+    ///
+    /// The lowerer uses `immutable_values` to emit `LoadConst` for these
+    /// bindings — the `NativeFn` values are baked into the constant pool.
+    /// No slot allocation is needed.
+    pub fn bind_primitives(&mut self, meta: &PrimitiveMeta) {
+        for (&sym_id, &effect) in &meta.effects {
+            let binding = self.bind_by_sym(sym_id, BindingScope::Local);
+            binding.mark_immutable();
+            self.effect_env.insert(binding, effect);
+            if let Some(&arity) = meta.arities.get(&sym_id) {
+                self.arity_env.insert(binding, arity);
+            }
+            if let Some(&func_value) = meta.functions.get(&sym_id) {
+                self.primitive_values.insert(binding, func_value);
+            }
+        }
+    }
+
+    /// Return the primitive binding→value map for the lowerer.
+    ///
+    /// The lowerer seeds its `immutable_values` from this so that
+    /// primitive references compile to `LoadConst`.
+    pub fn primitive_values(&self) -> &HashMap<Binding, Value> {
+        &self.primitive_values
     }
 
     // === Scope Management ===
@@ -264,6 +268,54 @@ impl<'a> Analyzer<'a> {
         binding
     }
 
+    /// Register an already-created binding in the current scope without
+    /// creating a new one. Used by `analyze_file_letrec` Pass 2 to add
+    /// deferred duplicate-name bindings at the correct sequential point.
+    fn register_binding(&mut self, name: &str, scopes: &[ScopeId], binding: Binding) {
+        if let Some(scope_frame) = self.scopes.last_mut() {
+            scope_frame
+                .bindings
+                .entry(name.to_string())
+                .or_default()
+                .push(ScopedBinding {
+                    scopes: scopes.to_vec(),
+                    binding,
+                });
+            if matches!(binding.scope(), BindingScope::Local) {
+                scope_frame.next_local += 1;
+            }
+        }
+    }
+
+    /// Bind a symbol by its already-interned SymbolId.
+    ///
+    /// Used by `bind_primitives` where we already have SymbolIds from
+    /// PrimitiveMeta and need to resolve the name for scope registration.
+    fn bind_by_sym(&mut self, sym: SymbolId, scope: BindingScope) -> Binding {
+        let name = self
+            .symbols
+            .name(sym)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("sym#{}", sym.0));
+        let binding = Binding::new(sym, scope);
+
+        if let Some(scope_frame) = self.scopes.last_mut() {
+            scope_frame
+                .bindings
+                .entry(name)
+                .or_default()
+                .push(ScopedBinding {
+                    scopes: Vec::new(), // primitives have empty scopes (visible everywhere)
+                    binding,
+                });
+            if matches!(scope, BindingScope::Local) {
+                scope_frame.next_local += 1;
+            }
+        }
+
+        binding
+    }
+
     fn lookup(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding> {
         let mut found_in_scope = None;
         let mut crossed_function_boundary = false;
@@ -273,21 +325,14 @@ impl<'a> Analyzer<'a> {
             if let Some(candidates) = scope.bindings.get(name) {
                 // Find the best candidate: binding's scopes must be a subset of
                 // the reference's scopes, and the largest scope set wins.
+                // When multiple candidates share the largest scope-set size,
+                // max_by_key returns the last one (the most recently bound),
+                // which gives correct file-level redefinition semantics.
                 let best = candidates
                     .iter()
                     .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = best {
-                    debug_assert!(
-                        candidates
-                            .iter()
-                            .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
-                            .filter(|c| c.scopes.len() == winner.scopes.len())
-                            .count()
-                            == 1,
-                        "Ambiguous binding: multiple candidates with same scope-set size for '{}'",
-                        name
-                    );
                     found_in_scope = Some((depth, winner.binding, crossed_function_boundary));
                     break;
                 }
@@ -299,29 +344,18 @@ impl<'a> Analyzer<'a> {
 
         if let Some((_found_depth, binding, needs_capture)) = found_in_scope {
             if needs_capture {
-                // Check if this is a global - globals are not captured, accessed directly
-                if binding.is_global() {
+                // Primitives are immutable locals with known constant values.
+                // They don't need capturing — the lowerer emits LoadConst
+                // for them directly from immutable_values.
+                if self.primitive_values.contains_key(&binding) {
                     return Some(binding);
                 }
 
                 // Mark as captured
                 binding.mark_captured();
 
-                // Determine capture kind based on where it was found
-                let capture_kind = match binding.scope() {
-                    BindingScope::Parameter | BindingScope::Local => {
-                        // Direct capture from parent's locals
-                        // Use binding_to_slot in the lowerer to find the actual index
-                        // For now, use 0 as placeholder — the lowerer resolves this
-                        CaptureKind::Local
-                    }
-                    BindingScope::Global => {
-                        // This should not happen due to the check above
-                        CaptureKind::Global {
-                            sym: binding.name(),
-                        }
-                    }
-                };
+                // Determine capture kind
+                let capture_kind = CaptureKind::Local;
 
                 // Add to current captures if not already present
                 if !self.current_captures.iter().any(|c| c.binding == binding) {
@@ -488,6 +522,8 @@ mod tests {
     fn test_analyze_call() {
         let mut symbols = SymbolTable::new();
         let mut analyzer = Analyzer::new(&mut symbols);
+        // Pre-bind "+" so it resolves during analysis
+        analyzer.bind("+", &[], BindingScope::Local);
 
         let syntax = make_list(vec![make_symbol("+"), make_int(1), make_int(2)]);
 
@@ -510,6 +546,64 @@ mod tests {
         binding.mark_captured();
         assert!(binding.is_captured());
         assert!(binding.needs_cell());
+    }
+
+    #[test]
+    fn test_immutable_captured_local_no_cell() {
+        // An immutable local (let-bound) that is captured should NOT need a cell.
+        // Immutable captures are captured by value directly.
+        let binding = Binding::new(SymbolId(2), BindingScope::Local);
+        binding.mark_immutable();
+        binding.mark_captured();
+        assert!(binding.is_immutable());
+        assert!(binding.is_captured());
+        assert!(!binding.is_prebound());
+        assert!(!binding.needs_cell());
+    }
+
+    #[test]
+    fn test_immutable_prebound_captured_local_needs_cell() {
+        // An immutable local that is prebound (def in begin, letrec) AND
+        // captured DOES need a cell — the capture may happen before the
+        // binding is initialized (self-recursion, forward references).
+        let binding = Binding::new(SymbolId(2), BindingScope::Local);
+        binding.mark_prebound();
+        binding.mark_immutable();
+        binding.mark_captured();
+        assert!(binding.is_immutable());
+        assert!(binding.is_captured());
+        assert!(binding.is_prebound());
+        assert!(binding.needs_cell());
+    }
+
+    #[test]
+    fn test_mutable_captured_local_needs_cell() {
+        // A mutable local (var) that is captured DOES need a cell.
+        let binding = Binding::new(SymbolId(3), BindingScope::Local);
+        binding.mark_captured();
+        assert!(!binding.is_immutable());
+        assert!(binding.is_captured());
+        assert!(binding.needs_cell());
+    }
+
+    #[test]
+    fn test_immutable_uncaptured_local_no_cell() {
+        // An immutable local that is NOT captured should not need a cell.
+        let binding = Binding::new(SymbolId(4), BindingScope::Local);
+        binding.mark_immutable();
+        assert!(!binding.needs_cell());
+    }
+
+    #[test]
+    fn test_immutable_mutated_captured_local_needs_cell() {
+        // Edge case: a binding marked immutable but also mutated and captured.
+        // Immutable wins — no cell needed. (In practice, the analyzer would
+        // reject set on an immutable binding, so this shouldn't happen.)
+        let binding = Binding::new(SymbolId(5), BindingScope::Local);
+        binding.mark_immutable();
+        binding.mark_mutated();
+        binding.mark_captured();
+        assert!(!binding.needs_cell());
     }
 
     // === Scope-aware binding resolution tests ===

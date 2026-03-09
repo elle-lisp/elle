@@ -75,7 +75,9 @@ jobs:
              exit 1
            else
              echo "✓ All examples passed"
-            fi
+           fi
+      - name: Build plugins
+        run: cargo build --release -p elle-glob -p elle-regex
       - name: Run Elle script tests
         run: |
           echo "Running Elle script tests:"

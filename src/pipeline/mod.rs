@@ -6,13 +6,12 @@ mod analyze;
 mod cache;
 mod compile;
 mod eval;
-mod fixpoint;
-mod scan;
 
-// Re-export public API — unchanged signatures
-pub use analyze::{analyze, analyze_all};
-pub use compile::{compile, compile_all};
-pub use eval::{eval, eval_all, eval_syntax};
+// Re-export public API
+pub use analyze::{analyze, analyze_file};
+pub use cache::update_cache_with_stdlib;
+pub use compile::{compile, compile_file};
+pub use eval::{eval, eval_all, eval_file, eval_syntax};
 
 /// Compilation result
 #[derive(Debug)]

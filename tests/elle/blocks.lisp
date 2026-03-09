@@ -3,7 +3,7 @@
 # Note: block expressions containing break must be bound to a var before
 # passing to assert-eq, due to the closure-return bug (same as match).
 
-(import-file "tests/elle/assert.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Anonymous blocks

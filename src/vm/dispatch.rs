@@ -103,12 +103,12 @@ impl VM {
                     stack::handle_dup_n(self, bc, &mut ip);
                 }
 
-                // Variable access
+                // Dead instructions — never emitted after primitives-as-locals.
                 Instruction::LoadGlobal => {
-                    variables::handle_load_global(self, bc, &mut ip, consts);
+                    unreachable!("dead instruction: LoadGlobal")
                 }
                 Instruction::StoreGlobal => {
-                    variables::handle_store_global(self, bc, &mut ip, consts);
+                    unreachable!("dead instruction: StoreGlobal")
                 }
                 Instruction::StoreLocal => {
                     variables::handle_store_local(self, bc, &mut ip);

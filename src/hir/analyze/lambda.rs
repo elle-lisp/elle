@@ -3,6 +3,7 @@
 use super::*;
 use crate::syntax::{Syntax, SyntaxKind};
 use crate::value::Value;
+use std::rc::Rc;
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_lambda(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
@@ -232,6 +233,12 @@ impl<'a> Analyzer<'a> {
             self.current_captures.push(propagated_cap);
         }
 
+        // Capture the original lambda syntax for eval environment reconstruction
+        let original_syntax = Some(Rc::new(Syntax::new(
+            SyntaxKind::List(items.to_vec()),
+            span.clone(),
+        )));
+
         // Lambda itself is pure, but captures the body's effect
         Ok(Hir::new(
             HirKind::Lambda {
@@ -244,6 +251,7 @@ impl<'a> Analyzer<'a> {
                 num_locals,
                 inferred_effect,
                 doc,
+                syntax: original_syntax,
             },
             span,
             Effect::inert(),

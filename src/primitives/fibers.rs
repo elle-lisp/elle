@@ -646,6 +646,7 @@ mod tests {
 
     fn make_test_closure() -> Value {
         use crate::compiler::bytecode::Instruction;
+        use crate::value::ClosureTemplate;
         let bytecode = vec![
             Instruction::LoadConst as u8,
             0,
@@ -653,12 +654,12 @@ mod tests {
             Instruction::Return as u8,
         ];
 
-        Value::closure(Closure {
+        let template = Rc::new(ClosureTemplate {
             bytecode: Rc::new(bytecode),
             arity: Arity::Exact(0),
-            env: Rc::new(vec![]),
             num_locals: 0,
             num_captures: 0,
+            num_params: 0,
             constants: Rc::new(vec![Value::int(42)]),
             effect: Effect::inert(),
             cell_params_mask: 0,
@@ -668,9 +669,14 @@ mod tests {
             jit_code: None,
             lir_function: None,
             doc: None,
+            syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
-            num_params: 0,
             name: None,
+        });
+
+        Value::closure(Closure {
+            template,
+            env: Rc::new(vec![]),
         })
     }
 

@@ -328,11 +328,12 @@ proptest! {
     #[test]
     fn mutual_recursion_even_odd(n in 0u32..10000) {
         let expected = n % 2 == 0;
+        // Multi-form input: compile_file wraps top-level defs in a letrec,
+        // enabling mutual recursion. (begin ...) does NOT create a letrec scope.
         let expr = format!(
-            "(begin
-               (def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
-               (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
-               (= (is-even {}) {}))",
+            "(def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
+             (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
+             (= (is-even {}) {})",
             n, if expected { "true" } else { "false" }
         );
         let result = eval_source(&expr);

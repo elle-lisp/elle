@@ -983,7 +983,7 @@ pub fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
 
     // Validate arity: closure must accept the right number of arguments
     let expected_args = sig.args.len();
-    let arity_ok = match closure_rc.arity {
+    let arity_ok = match closure_rc.template.arity {
         Arity::Exact(n) => n == expected_args,
         Arity::AtLeast(n) => expected_args >= n,
         Arity::Range(min, max) => expected_args >= min && expected_args <= max,
@@ -995,7 +995,7 @@ pub fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
                 "arity-error",
                 format!(
                     "ffi/callback: signature has {} args but closure has arity {}",
-                    expected_args, closure_rc.arity
+                    expected_args, closure_rc.template.arity
                 ),
             ),
         );

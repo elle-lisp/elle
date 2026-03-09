@@ -19,7 +19,7 @@ Does NOT:
 
 | Type | Purpose |
 |------|---------|
-| `LirFunction` | Compilation unit: blocks, constants, metadata, docstring, yield/call-site info |
+| `LirFunction` | Compilation unit: blocks, constants, metadata, docstring, syntax, yield/call-site info |
 | `BasicBlock` | Instructions + terminator |
 | `LirInstr` | Individual operation |
 | `SpannedInstr` | `LirInstr` + `Span` for source tracking |
@@ -122,9 +122,10 @@ stored in `Closure.location_map` and used by the VM for error reporting.
     begins. The resume block starts with `LoadResumeValue` to capture the value
     passed to `coro/resume`.
 
-8. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from
-    `HirKind::Lambda.doc` during lowering. The emitter preserves it into
-    `Closure.doc` without encoding it in bytecode.
+8. **Docstring and syntax are threaded from HIR.** `LirFunction.doc` and
+     `LirFunction.syntax` are copied from `HirKind::Lambda.doc` and
+     `HirKind::Lambda.syntax` during lowering. The emitter preserves both
+     into `Closure.doc` and `Closure.syntax` without encoding them in bytecode.
 
 9. **Yield point metadata is collected during emission.** `Emitter::emit()`
     returns `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller

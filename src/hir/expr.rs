@@ -5,6 +5,7 @@ use super::pattern::HirPattern;
 use crate::effects::Effect;
 use crate::syntax::Span;
 use crate::value::Value;
+use std::rc::Rc;
 
 /// HIR expression with source location and effect
 #[derive(Debug, Clone)]
@@ -109,6 +110,8 @@ pub enum HirKind {
         inferred_effect: Effect,
         /// Optional docstring extracted from the lambda body
         doc: Option<Value>,
+        /// Original lambda Syntax node for eval environment reconstruction
+        syntax: Option<Rc<crate::syntax::Syntax>>,
     },
 
     // === Control Flow ===
@@ -156,8 +159,7 @@ pub enum HirKind {
         value: Box<Hir>,
     },
 
-    /// Define - create/update a binding (global or local).
-    /// The lowerer checks binding.is_global() to decide StoreGlobal vs StoreLocal.
+    /// Define - create/update a local binding.
     Define {
         binding: Binding,
         value: Box<Hir>,

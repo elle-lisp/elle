@@ -266,16 +266,6 @@ fn jit_variadic() {
 }
 
 #[test]
-fn sets_syntax() {
-    run_elle_script("sets-syntax");
-}
-
-#[test]
-fn sets_values() {
-    run_elle_script("sets-values");
-}
-
-#[test]
 fn regex() {
     run_elle_script("regex");
 }

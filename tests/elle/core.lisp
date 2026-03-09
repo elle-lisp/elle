@@ -4,14 +4,7 @@
 # Tests that require float precision checks (.as_float() with tolerance)
 # or error message substring matching remain in the Rust file.
 
-(import-file "tests/elle/assert.lisp")
-
-# Helper: assert that a thunk signals an error
-(defn assert-err [thunk msg]
-  "Assert that (thunk) signals an error"
-  (let ([result (try (begin (thunk) :no-error)
-                  (catch (e) :got-error))])
-    (assert-eq result :got-error msg)))
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Basic arithmetic
@@ -157,7 +150,7 @@
 (assert-err (fn [] (+ 1 nil)) "type error on + 1 nil")
 
 # test_undefined_variable
-(assert-err (fn [] undefined-var) "undefined variable errors")
+(assert-err (fn [] (eval 'undefined-var)) "undefined variable errors")
 
 # test_arity_error
 # + accepts 0 args (identity)

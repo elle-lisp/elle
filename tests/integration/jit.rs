@@ -1895,9 +1895,9 @@ fn test_jit_mutual_recursion_even_odd() {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     let result = eval(
-        r#"(begin
-        (var is-even? (fn (n) (if (= n 0) true (is-odd? (- n 1)))))
-        (var is-odd? (fn (n) (if (= n 0) false (is-even? (- n 1)))))
+        r#"(letrec
+        ((is-even? (fn (n) (if (= n 0) true (is-odd? (- n 1)))))
+         (is-odd? (fn (n) (if (= n 0) false (is-even? (- n 1))))))
         (list (is-even? 10) (is-odd? 10) (is-even? 11) (is-odd? 11)))"#,
         &mut symbols,
         &mut vm,
@@ -1937,9 +1937,9 @@ fn test_jit_mutual_recursion_deep() {
     // ping-pong: ping(n) -> pong(n-1), pong(n) -> ping(n-1)
     // Both are tail calls, so this should handle deep recursion
     let result = eval(
-        r#"(begin
-        (var ping (fn (n) (if (= n 0) "ping" (pong (- n 1)))))
-        (var pong (fn (n) (if (= n 0) "pong" (ping (- n 1)))))
+        r#"(letrec
+        ((ping (fn (n) (if (= n 0) "ping" (pong (- n 1)))))
+         (pong (fn (n) (if (= n 0) "pong" (ping (- n 1))))))
         (list (ping 0) (pong 0) (ping 1) (pong 1) (ping 100) (pong 100)))"#,
         &mut symbols,
         &mut vm,
@@ -1971,8 +1971,8 @@ fn test_jit_mutual_recursion_nqueens_small() {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     let result = eval(
-        r#"(begin
-         (var check-safe-helper
+        r#"(letrec
+         ((check-safe-helper
            (fn (col remaining row-offset)
              (if (empty? remaining)
                true
@@ -1982,11 +1982,11 @@ fn test_jit_mutual_recursion_nqueens_small() {
                    false
                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
 
-         (var safe?
+         (safe?
            (fn (col queens)
              (check-safe-helper col queens 1)))
 
-        (var try-cols-helper
+        (try-cols-helper
           (fn (n col queens row)
             (if (= col n)
               (list)
@@ -1996,15 +1996,15 @@ fn test_jit_mutual_recursion_nqueens_small() {
                           (try-cols-helper n (+ col 1) queens row)))
                 (try-cols-helper n (+ col 1) queens row)))))
 
-        (var solve-helper
+        (solve-helper
           (fn (n row queens)
             (if (= row n)
               (list (reverse queens))
               (try-cols-helper n 0 queens row))))
 
-        (var solve-nqueens
+        (solve-nqueens
           (fn (n)
-            (solve-helper n 0 (list))))
+            (solve-helper n 0 (list)))))
 
         (length (solve-nqueens 8)))"#,
         &mut symbols,
@@ -2028,10 +2028,10 @@ fn test_jit_mutual_recursion_three_way() {
     let _effects = register_primitives(&mut vm, &mut symbols);
 
     let result = eval(
-        r#"(begin
-        (var fa (fn (n) (if (= n 0) "a" (fb (- n 1)))))
-        (var fb (fn (n) (if (= n 0) "b" (fc (- n 1)))))
-        (var fc (fn (n) (if (= n 0) "c" (fa (- n 1)))))
+        r#"(letrec
+        ((fa (fn (n) (if (= n 0) "a" (fb (- n 1)))))
+         (fb (fn (n) (if (= n 0) "b" (fc (- n 1)))))
+         (fc (fn (n) (if (= n 0) "c" (fa (- n 1))))))
         (list (fa 0) (fa 1) (fa 2) (fa 3) (fa 6) (fa 9)))"#,
         &mut symbols,
         &mut vm,

@@ -147,6 +147,8 @@ pub struct Lowerer {
     /// Lazily allocated on first use. Reused across all discards
     /// within the same function, so only one extra local slot.
     discard_slot: Option<u16>,
+    /// Symbol ID → name mapping for error messages.
+    symbol_names: HashMap<u32, String>,
 }
 
 impl Lowerer {
@@ -168,6 +170,7 @@ impl Lowerer {
             region_depth: 0,
             scope_stats: ScopeStats::default(),
             discard_slot: None,
+            symbol_names: HashMap::new(),
         }
     }
 
@@ -180,6 +183,23 @@ impl Lowerer {
     /// Set the whitelist of primitives known to return immediates
     pub fn with_immediate_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
         self.immediate_primitives = set;
+        self
+    }
+
+    /// Set symbol names for error messages.
+    pub fn with_symbol_names(mut self, names: HashMap<u32, String>) -> Self {
+        self.symbol_names = names;
+        self
+    }
+
+    /// Seed `immutable_values` with primitive binding→value pairs.
+    ///
+    /// Primitive bindings are `BindingScope::Local` with `mark_immutable()`.
+    /// The lowerer never allocates slots for them — instead, `lower_var`
+    /// checks `immutable_values` first and emits `LoadConst` for any
+    /// binding with a known constant value.
+    pub fn with_primitive_values(mut self, values: HashMap<Binding, Value>) -> Self {
+        self.immutable_values.extend(values);
         self
     }
 
@@ -409,6 +429,7 @@ impl Lowerer {
     /// 3. All break values targeting this block are safe immediates
     /// 4. No `set!` to non-local bindings (blocks have no own bindings)
     fn can_scope_allocate_block(&mut self, block_id: &BlockId, body: &[Hir]) -> bool {
+        self.scope_stats.scopes_analyzed += 1;
         // Condition 1: no suspension
         if body.iter().any(|e| e.effect.may_suspend()) {
             self.scope_stats.rejected_suspends += 1;
