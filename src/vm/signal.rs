@@ -168,7 +168,6 @@ impl VM {
     /// - (:"arena/stats" . _) — return struct with heap arena :count and :capacity
     /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
     /// - (:"arena/scope-stats" . _) — return scope allocation stats {:enters N :dtors-run N}
-    /// - (:"environment" . _) — return global environment as struct
     pub(crate) fn dispatch_query(&self, value: Value) -> (SignalBits, Value) {
         let cons = match value.as_cons() {
             Some(c) => c,
@@ -199,18 +198,16 @@ impl VM {
         match op_name.as_str() {
             "call-count" => {
                 if let Some(closure) = arg.as_closure() {
-                    let ptr = closure.bytecode.as_ptr();
+                    let ptr = closure.template.bytecode.as_ptr();
                     (SIG_OK, Value::int(self.get_closure_call_count(ptr) as i64))
                 } else {
                     (SIG_OK, Value::int(0))
                 }
             }
             "global?" => {
-                if let Some(sym_id) = arg.as_symbol() {
-                    (SIG_OK, Value::bool(self.get_global(sym_id).is_some()))
-                } else {
-                    (SIG_OK, Value::FALSE)
-                }
+                // No global mutable state — always false.
+                let _ = arg;
+                (SIG_OK, Value::FALSE)
             }
             "doc" => {
                 let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
@@ -223,16 +220,10 @@ impl VM {
                         error_val("type-error", "doc: expected string or keyword".to_string()),
                     );
                 };
-                // First, check if the named global is a closure with a doc field
-                let user_doc = unsafe { crate::context::get_symbol_table() }
-                    .and_then(|st_ptr| unsafe { (*st_ptr).get(&name) })
-                    .and_then(|sym_id| self.get_global(sym_id.0))
-                    .and_then(|val| val.as_closure().cloned())
-                    .and_then(|closure| closure.doc)
-                    .and_then(|doc_val| doc_val.with_string(|s| s.to_string()));
-                if let Some(doc_str) = user_doc {
-                    (SIG_OK, Value::string(doc_str))
-                } else if let Some(doc) = self.docs.get(&name) {
+                // Look up builtin docs by name.
+                // TODO(chunk-8): user-defined closure docs are no longer
+                // accessible via globals; needs eval-scoped lookup.
+                if let Some(doc) = self.docs.get(&name) {
                     (SIG_OK, Value::string(doc.format()))
                 } else {
                     (
@@ -390,25 +381,9 @@ impl VM {
                 );
                 (SIG_OK, Value::struct_from(fields))
             }
-            "environment" => {
+            "arena/fiber-stats" => {
                 use crate::value::heap::TableKey;
                 use std::collections::BTreeMap;
-                let mut fields = BTreeMap::new();
-                let st_ptr = unsafe { crate::context::get_symbol_table() };
-                if let Some(st_ptr) = st_ptr {
-                    let st = unsafe { &*st_ptr };
-                    for (idx, &defined) in self.defined_globals.iter().enumerate() {
-                        if !defined {
-                            continue;
-                        }
-                        if let Some(name) = st.name(crate::value::SymbolId(idx as u32)) {
-                            fields.insert(TableKey::Keyword(name.to_string()), self.globals[idx]);
-                        }
-                    }
-                }
-                (SIG_OK, Value::struct_from(fields))
-            }
-            "arena/fiber-stats" => {
                 let fiber_handle = match arg.as_fiber() {
                     Some(h) => h,
                     None => {
@@ -416,49 +391,45 @@ impl VM {
                             SIG_ERROR,
                             error_val(
                                 "type-error",
-                                "arena/fiber-stats: expected a fiber".to_string(),
+                                format!(
+                                    "arena/fiber-stats: expected fiber, got {}",
+                                    arg.type_name()
+                                ),
                             ),
-                        )
+                        );
                     }
                 };
                 match fiber_handle.try_with(|fiber| {
-                    use crate::value::heap::TableKey;
-                    use std::collections::BTreeMap;
+                    let heap = &fiber.heap;
                     let mut fields = BTreeMap::new();
                     fields.insert(
                         TableKey::Keyword("count".to_string()),
-                        Value::int(fiber.heap.len() as i64),
+                        Value::int(heap.len() as i64),
                     );
                     fields.insert(
                         TableKey::Keyword("bytes".to_string()),
-                        Value::int(fiber.heap.allocated_bytes() as i64),
+                        Value::int((heap.len() * 128) as i64),
                     );
                     fields.insert(
                         TableKey::Keyword("peak".to_string()),
-                        Value::int(fiber.heap.peak_alloc_count() as i64),
+                        Value::int(heap.peak_alloc_count() as i64),
                     );
-                    let limit_val = match fiber.heap.object_limit() {
-                        Some(n) => Value::int(n as i64),
-                        None => Value::NIL,
-                    };
-                    fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
                     fields.insert(
                         TableKey::Keyword("scope-enters".to_string()),
-                        Value::int(fiber.heap.scope_enters() as i64),
+                        Value::int(heap.scope_enters() as i64),
                     );
                     fields.insert(
                         TableKey::Keyword("dtors-run".to_string()),
-                        Value::int(fiber.heap.scope_dtors_run() as i64),
+                        Value::int(heap.scope_dtors_run() as i64),
                     );
                     Value::struct_from(fields)
                 }) {
-                    Some(val) => (SIG_OK, val),
+                    Some(v) => (SIG_OK, v),
                     None => (
                         SIG_ERROR,
                         error_val(
-                            "state-error",
-                            "arena/fiber-stats: cannot inspect a currently-executing fiber"
-                                .to_string(),
+                            "error",
+                            "arena/fiber-stats: fiber is currently executing".to_string(),
                         ),
                     ),
                 }
@@ -516,10 +487,10 @@ impl VM {
 
         // Execute the thunk via execute_bytecode_saving_stack
         let exec_result = self.execute_bytecode_saving_stack(
-            &closure.bytecode,
-            &closure.constants,
+            &closure.template.bytecode,
+            &closure.template.constants,
             &thunk_env,
-            &closure.location_map,
+            &closure.template.location_map,
         );
 
         if exec_result.bits.contains(SIG_ERROR) {

@@ -177,8 +177,8 @@ impl Lowerer {
             return false;
         };
 
-        // Must be a non-mutated global (same check as try_lower_intrinsic)
-        if !binding.is_global() || binding.is_mutated() {
+        // Must be an immutable, non-mutated binding (same check as try_lower_intrinsic)
+        if !binding.is_immutable() || binding.is_mutated() {
             return false;
         }
 

@@ -1,4 +1,4 @@
-(import-file "tests/elle/assert.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # eval property tests
 # Migrated from tests/property/eval.rs
@@ -22,10 +22,9 @@
 (assert-eq (eval '(* -3 4)) -12 "eval quoted multiplication -3*4")
 (assert-eq (eval '(* 0 100)) 0 "eval quoted multiplication 0*100")
 
-# eval_env_binding_addition
-# eval with environment bindings resolves variables correctly
-(assert-eq (eval '(+ x y) {:x 10 :y 20}) 30 "eval env binding 10+20")
-(assert-eq (eval '(+ x y) {:x -5 :y 5}) 0 "eval env binding -5+5")
+# eval_env_binding_addition (REMOVED)
+# Environment argument support was intentionally removed from eval.
+# Tests that relied on (eval expr env) have been removed.
 
 # eval_list_construction_matches_quoted
 # eval with dynamically constructed list matches eval with quoted list

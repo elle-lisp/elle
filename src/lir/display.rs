@@ -110,8 +110,6 @@ impl fmt::Display for LirInstr {
                 write!(f, "{} ← cap[{}] (raw)", dst, index)
             }
             LirInstr::StoreCapture { index, src } => write!(f, "cap[{}] ← {}", index, src),
-            LirInstr::LoadGlobal { dst, sym } => write!(f, "{} ← global({})", dst, sym.0),
-            LirInstr::StoreGlobal { sym, src } => write!(f, "global({}) ← {}", sym.0, src),
 
             // === Closures ===
             LirInstr::MakeClosure { dst, captures, .. } => {

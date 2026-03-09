@@ -301,3 +301,6 @@ tbody tr:nth-child(even) {
 }
 "
 ))
+
+## Module exports
+(fn [] {:generate-css generate-css})

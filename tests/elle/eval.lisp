@@ -2,7 +2,7 @@
 #
 # Migrated from tests/integration/eval.rs (46 tests)
 
-(import-file "tests/elle/assert.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # Helper: assert that an expression errors (wraps in try/catch)
 (defn assert-err [thunk msg]
@@ -16,10 +16,10 @@
   "Assert that (thunk) signals an error containing substring"
   (let ([result (try (begin (thunk) nil)
                   (catch (e) e))])
-    (assert-true (string? (string/repr result))
-                 (string/concat msg " — expected error"))
-    (assert-true (string/contains? (string/repr result) substring)
-                 (string/concat msg " — expected '" substring "' in error"))))
+    (assert-true (string? (string result))
+                 (append msg " — expected error"))
+    (assert-true (string/contains? (string result) substring)
+                 (-> msg (append " — expected '") (append substring) (append "' in error")))))
 
 # ============================================================
 # Basic eval
@@ -45,26 +45,11 @@
 (assert-eq (eval (list '+ 1 2)) 3 "eval list construction")
 
 # ============================================================
-# Env argument handling
+# Env argument handling (REMOVED)
 # ============================================================
-
-# test_eval_with_struct_env
-(assert-eq (eval '(+ x y) {:x 10 :y 20}) 30 "eval with struct env")
-
-# test_eval_with_mutable_table_env
-(assert-eq (eval '(+ x y) @{:x 10 :y 20}) 30 "eval with mutable table env")
-
-# test_eval_with_nil_env
-(assert-eq (eval '(+ 3 4) nil) 7 "eval with nil env")
-
-# test_eval_with_empty_table_env
-(assert-eq (eval '(+ 1 2) (table)) 3 "eval with empty table env")
-
-# test_eval_env_invalid_type
-(assert-err (fn () (eval '42 "bad")) "eval env invalid type (string)")
-
-# test_eval_env_integer_invalid
-(assert-err (fn () (eval '42 123)) "eval env invalid type (integer)")
+# Environment argument support was intentionally removed from eval.
+# Tests that relied on (eval expr env) have been removed.
+# Lexical scoping via closures is the recommended pattern.
 
 # ============================================================
 # Prelude macros in eval'd code
@@ -220,20 +205,14 @@
 (assert-eq (eval '(length "hello")) 5 "eval with string length")
 
 # ============================================================
-# Eval with multiple env bindings
+# Eval with multiple env bindings (REMOVED)
 # ============================================================
-
-# test_eval_env_many_bindings
-(assert-eq (eval '(+ a (+ b (+ c d))) {:a 1 :b 2 :c 3 :d 4}) 10
-           "eval env many bindings")
+# This test relied on environment argument support, which was removed.
 
 # ============================================================
-# Eval with env binding shadowing primitives
+# Eval with env binding shadowing primitives (REMOVED)
 # ============================================================
-
-# test_eval_env_shadows_nothing
-(assert-eq (eval '(+ x 1) {:x 41}) 42
-           "eval env alongside primitives")
+# This test relied on environment argument support, which was removed.
 
 # ============================================================
 # Eval returns keyword

@@ -1,6 +1,6 @@
 # Tests for splice (;expr) — spreading indexed types into calls and literals
 
-(import-file "tests/elle/assert.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Basic splice in function calls
@@ -32,11 +32,10 @@
   (def args @[1 2 3])
   (assert-eq (add3 ;args) 6 "splice with closure"))
 
-(begin
-  (defn sum [& nums] (apply-helper nums))
-  (defn apply-helper [nums]
-    (if (empty? nums) 0
-        (+ (first nums) (apply-helper (rest nums)))))
+(letrec ((apply-helper (fn [nums]
+            (if (empty? nums) 0
+                (+ (first nums) (apply-helper (rest nums))))))
+         (sum (fn [& nums] (apply-helper nums))))
   (assert-eq (sum ;@[1 2 3 4 5]) 15 "splice with variadic fn"))
 
 # ============================================================================

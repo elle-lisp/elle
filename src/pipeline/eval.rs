@@ -1,7 +1,7 @@
 //! Evaluation pipeline: source -> value.
 
 use super::cache;
-use super::compile::compile_all;
+use super::compile::compile_file;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::Analyzer;
 use crate::lir::{Emitter, Lowerer};
@@ -26,19 +26,24 @@ pub fn eval_syntax(
     let expanded = expander.expand(syntax, symbols, vm)?;
 
     let meta = cached_primitive_meta(symbols);
-    let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
+    let mut analyzer =
+        Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+    analyzer.bind_primitives(&meta);
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);
+    let prim_values = analyzer.primitive_values().clone();
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new()
         .with_intrinsics(intrinsics)
-        .with_immediate_primitives(imm_prims);
+        .with_immediate_primitives(imm_prims)
+        .with_primitive_values(prim_values)
+        .with_symbol_names(symbol_names.clone());
     let lir_func = lowerer.lower(&analysis.hir)?;
 
-    let symbol_snapshot = symbols.all_names();
-    let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
+    let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
 
     vm.execute(&bytecode).map_err(|e| e.to_string())
@@ -59,19 +64,24 @@ pub fn eval(
 
     let expanded = expander.expand(syntax, symbols, vm)?;
 
-    let mut analyzer = Analyzer::new_with_primitives(symbols, meta.effects, meta.arities);
+    let mut analyzer =
+        Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+    analyzer.bind_primitives(&meta);
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);
+    let prim_values = analyzer.primitive_values().clone();
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new()
         .with_intrinsics(intrinsics)
-        .with_immediate_primitives(imm_prims);
+        .with_immediate_primitives(imm_prims)
+        .with_primitive_values(prim_values)
+        .with_symbol_names(symbol_names.clone());
     let lir_func = lowerer.lower(&analysis.hir)?;
 
-    let symbol_snapshot = symbols.all_names();
-    let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
+    let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
 
     vm.execute(&bytecode).map_err(|e| e.to_string())
@@ -79,18 +89,27 @@ pub fn eval(
 
 /// Compile and execute multiple top-level forms.
 ///
-/// Each form is compiled with fixpoint effect inference (like `compile_all`)
-/// then executed sequentially. Returns the value of the last form.
+/// All forms are compiled as a single synthetic letrec (via `compile_file`)
+/// then executed as one unit. Returns the value of the last form.
 /// Returns `Ok(Value::NIL)` for empty input.
 pub fn eval_all(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
 ) -> Result<crate::value::Value, String> {
-    let results = compile_all(source, symbols)?;
-    let mut last_value = crate::value::Value::NIL;
-    for result in results {
-        last_value = vm.execute(&result.bytecode).map_err(|e| e.to_string())?;
-    }
-    Ok(last_value)
+    let result = compile_file(source, symbols)?;
+    vm.execute(&result.bytecode).map_err(|e| e.to_string())
+}
+
+/// Compile and execute a file as a single synthetic letrec.
+///
+/// Returns the value of the last expression. Primitives are pre-bound
+/// as immutable Global bindings.
+pub fn eval_file(
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+) -> Result<crate::value::Value, String> {
+    let result = super::compile::compile_file(source, symbols)?;
+    vm.execute(&result.bytecode).map_err(|e| e.to_string())
 }

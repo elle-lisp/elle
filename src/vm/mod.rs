@@ -137,10 +137,9 @@ impl VM {
     ) -> Result<Value, String> {
         // Check if *scheduler* exists as a gate: if stdlib hasn't loaded
         // yet, fall back to direct execution (no I/O support needed).
-        let has_scheduler = symbols
-            .get("*scheduler*")
-            .and_then(|id| self.get_global(id.0))
-            .is_some();
+        // In the file-as-letrec model, *scheduler* is a parameter defined in stdlib.
+        // If the symbol exists in the symbol table, stdlib has been loaded.
+        let has_scheduler = symbols.get("*scheduler*").is_some();
 
         if !has_scheduler {
             return self.execute(bytecode);

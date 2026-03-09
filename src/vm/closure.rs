@@ -23,25 +23,10 @@ pub fn handle_make_closure(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constan
     }
     captured.reverse();
 
-    // Create closure with captured values in environment
+    // Create closure with shared template and captured environment
     let closure = Closure {
-        bytecode: template_closure.bytecode.clone(),
-        arity: template_closure.arity,
+        template: template_closure.template.clone(),
         env: Rc::new(captured),
-        num_locals: template_closure.num_locals,
-        num_captures: template_closure.num_captures,
-        constants: template_closure.constants.clone(),
-        effect: template_closure.effect,
-        cell_params_mask: template_closure.cell_params_mask,
-        cell_locals_mask: template_closure.cell_locals_mask,
-        symbol_names: template_closure.symbol_names.clone(),
-        location_map: template_closure.location_map.clone(),
-        jit_code: template_closure.jit_code.clone(),
-        lir_function: template_closure.lir_function.clone(),
-        doc: template_closure.doc,
-        vararg_kind: template_closure.vararg_kind.clone(),
-        num_params: template_closure.num_params,
-        name: template_closure.name.clone(),
     };
 
     vm.fiber.stack.push(Value::closure(closure));

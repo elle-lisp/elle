@@ -377,6 +377,7 @@ impl Value {
             is_mutated: false,
             is_captured: false,
             is_immutable: false,
+            is_prebound: false,
         })))
     }
 

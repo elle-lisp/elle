@@ -8,7 +8,7 @@ use crate::value::{
     SIG_YIELD,
 };
 use rustc_hash::FxHashMap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::jit::JitCode;
@@ -33,14 +33,11 @@ pub struct VM {
     /// fiber. Used to set `child.parent_value` during resume chain wiring,
     /// so `fiber/parent` can return the original Value without re-allocating.
     pub current_fiber_value: Option<Value>,
-    /// Global variable bindings (shared across all fibers)
-    pub globals: Vec<Value>,
-    /// Tracks which global slots have been assigned. Same length as
-    /// `globals`. Used by `(environment)` to enumerate defined globals
-    /// without scanning the full sparse vector.
-    pub defined_globals: Vec<bool>,
     pub ffi: FFISubsystem,
-    pub loaded_modules: HashSet<String>,
+    /// Modules currently being loaded (circular-import guard).
+    /// Added before execution, removed after. If a module is in this set
+    /// when import-file is called, it's a circular dependency.
+    pub loading_modules: std::collections::HashSet<String>,
     pub closure_call_counts: FxHashMap<*const u8, usize>,
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
@@ -70,24 +67,28 @@ pub struct VM {
 fn root_closure() -> Rc<Closure> {
     use crate::effects::Effect;
     use crate::value::types::Arity;
+    use crate::value::ClosureTemplate;
     Rc::new(Closure {
-        bytecode: Rc::new(vec![]),
-        arity: Arity::Exact(0),
+        template: Rc::new(ClosureTemplate {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Exact(0),
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 0,
+            constants: Rc::new(vec![]),
+            effect: Effect::inert(),
+            cell_params_mask: 0,
+            cell_locals_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+            doc: None,
+            syntax: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            name: None,
+        }),
         env: Rc::new(vec![]),
-        num_locals: 0,
-        num_captures: 0,
-        constants: Rc::new(vec![]),
-        effect: Effect::inert(),
-        cell_params_mask: 0,
-        cell_locals_mask: 0,
-        symbol_names: Rc::new(HashMap::new()),
-        location_map: Rc::new(LocationMap::new()),
-        jit_code: None,
-        lir_function: None,
-        doc: None,
-        vararg_kind: crate::hir::VarargKind::List,
-        num_params: 0,
-        name: None,
     })
 }
 
@@ -101,10 +102,8 @@ impl VM {
             fiber,
             current_fiber_handle: None, // root fiber has no handle
             current_fiber_value: None,  // root fiber has no Value
-            globals: vec![Value::UNDEFINED; 256],
-            defined_globals: vec![false; 256],
             ffi: FFISubsystem::new(),
-            loaded_modules: HashSet::new(),
+            loading_modules: std::collections::HashSet::new(),
             closure_call_counts: FxHashMap::default(),
             location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),
@@ -119,9 +118,8 @@ impl VM {
 
     /// Reset the VM's fiber and transient state for reuse.
     ///
-    /// Preserves: globals (primitives), docs, ffi, jit_cache,
-    /// eval_expander, env_cache, tail_call_env_cache, fiber heap Box
-    /// (reused for pointer stability).
+    /// Preserves: docs, ffi, jit_cache, eval_expander, env_cache,
+    /// tail_call_env_cache, fiber heap Box (reused for pointer stability).
     /// Resets: fiber, call state, location map,
     /// loaded modules, closure call counts.
     pub fn reset_fiber(&mut self) {
@@ -141,22 +139,7 @@ impl VM {
         self.error_loc = None;
         self.closure_call_counts.clear();
         self.location_map = LocationMap::new();
-        self.loaded_modules.clear();
-    }
-
-    pub fn set_global(&mut self, sym_id: u32, value: Value) {
-        let idx = sym_id as usize;
-        if idx >= self.globals.len() {
-            self.globals.resize(idx + 1, Value::UNDEFINED);
-            self.defined_globals.resize(idx + 1, false);
-        }
-        self.globals[idx] = value;
-        self.defined_globals[idx] = true;
-    }
-
-    pub fn get_global(&self, sym_id: u32) -> Option<&Value> {
-        let idx = sym_id as usize;
-        self.globals.get(idx).filter(|v| !v.is_undefined())
+        self.loading_modules.clear();
     }
 
     /// Set the location map for mapping bytecode instructions to source locations
@@ -237,14 +220,19 @@ impl VM {
             .unwrap_or(0)
     }
 
-    /// Check if module is already loaded
-    pub fn is_module_loaded(&self, module_path: &str) -> bool {
-        self.loaded_modules.contains(module_path)
+    /// Check if a module is currently being loaded (circular dependency).
+    pub fn is_module_loading(&self, module_path: &str) -> bool {
+        self.loading_modules.contains(module_path)
     }
 
-    /// Mark module as loaded
-    pub fn mark_module_loaded(&mut self, module_path: String) {
-        self.loaded_modules.insert(module_path);
+    /// Mark a module as currently loading (for circular-import detection).
+    pub fn mark_module_loading(&mut self, module_path: String) {
+        self.loading_modules.insert(module_path);
+    }
+
+    /// Unmark a module as loading (after execution completes).
+    pub fn unmark_module_loading(&mut self, module_path: &str) {
+        self.loading_modules.remove(module_path);
     }
 
     /// Get the frame base for the current call frame
@@ -529,30 +517,5 @@ mod tests {
         let wrapped = vm.wrap_error(error_msg.clone());
 
         assert_eq!(wrapped, error_msg);
-    }
-
-    #[test]
-    fn test_defined_globals_tracks_set_global() {
-        let mut vm = VM::new();
-        // Initially all false
-        assert!(vm.defined_globals.iter().all(|&d| !d));
-        // Set a global in the pre-allocated range
-        vm.set_global(5, Value::int(42));
-        assert!(vm.defined_globals[5]);
-        // Adjacent slots remain false
-        assert!(!vm.defined_globals[4]);
-        assert!(!vm.defined_globals[6]);
-    }
-
-    #[test]
-    fn test_defined_globals_grows_with_globals() {
-        let mut vm = VM::new();
-        let big_idx = 500u32;
-        vm.set_global(big_idx, Value::int(99));
-        // Both vectors grew to the same length
-        assert_eq!(vm.globals.len(), vm.defined_globals.len());
-        assert!(vm.defined_globals[big_idx as usize]);
-        // Slots between old capacity and new index are false
-        assert!(!vm.defined_globals[big_idx as usize - 1]);
     }
 }

@@ -15,7 +15,7 @@
 #   Nested parameterize — shadowing and revert
 #   Fiber inheritance   — child fibers inherit parent's parameter bindings
 
-(import-file "./examples/assertions.lisp")
+(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================

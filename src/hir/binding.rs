@@ -47,17 +47,18 @@ impl Binding {
     pub fn is_immutable(&self) -> bool {
         self.inner().borrow().is_immutable
     }
-    pub fn is_global(&self) -> bool {
-        self.scope() == BindingScope::Global
-    }
 
-    /// A binding needs a cell if captured (for locals) or mutated (for params)
+    /// A binding needs a cell if captured (for locals) or mutated (for params).
+    ///
+    /// Immutable locals skip cell wrapping — they are captured by value.
+    /// Exception: pre-bound immutable locals (from begin pass 1 or letrec
+    /// pass 1) still need cells because they may be captured before their
+    /// initializer runs (self-recursion, forward references).
     pub fn needs_cell(&self) -> bool {
         let inner = self.inner().borrow();
         match inner.scope {
-            BindingScope::Local => inner.is_captured,
+            BindingScope::Local => inner.is_captured && (!inner.is_immutable || inner.is_prebound),
             BindingScope::Parameter => inner.is_mutated,
-            BindingScope::Global => false,
         }
     }
 
@@ -70,6 +71,12 @@ impl Binding {
     }
     pub fn mark_immutable(&self) {
         self.inner().borrow_mut().is_immutable = true;
+    }
+    pub fn mark_prebound(&self) {
+        self.inner().borrow_mut().is_prebound = true;
+    }
+    pub fn is_prebound(&self) -> bool {
+        self.inner().borrow().is_prebound
     }
 }
 
@@ -110,6 +117,4 @@ pub enum CaptureKind {
     Local,
     /// Capture from parent's capture (transitive capture)
     Capture { index: u16 },
-    /// Capture from global scope
-    Global { sym: SymbolId },
 }

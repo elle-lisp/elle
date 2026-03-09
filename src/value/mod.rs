@@ -39,7 +39,7 @@ pub use types::{Arity, NativeFn, SymbolId, TableKey};
 pub use fiber_heap::FiberHeap;
 
 // Export closure and fiber types
-pub use closure::Closure;
+pub use closure::{Closure, ClosureTemplate};
 pub use fiber::{
     CallFrame, Fiber, FiberHandle, FiberStatus, Frame, SignalBits, SuspendedFrame, WeakFiberHandle,
     SIG_CANCEL, SIG_DEBUG, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_PROPAGATE, SIG_QUERY,

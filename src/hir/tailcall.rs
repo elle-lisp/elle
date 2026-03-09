@@ -222,17 +222,26 @@ mod tests {
     use crate::syntax::Expander;
     use crate::vm::VM;
 
+    /// Wrap source in a letrec that pre-defines common free variables
+    /// (f, g, h) so they resolve during analysis. The tail-call tests
+    /// use these as placeholder callees.
     fn analyze_and_mark(source: &str) -> Hir {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
-        let _effects = register_primitives(&mut vm, &mut symbols);
+        let meta = register_primitives(&mut vm, &mut symbols);
 
-        let syntax = read_syntax(source).expect("parse failed");
+        // Wrap in letrec to define free variables used by tail-call tests
+        let wrapped = format!(
+            "(letrec ((f (fn (& args) nil)) (g (fn (& args) nil)) (h (fn (& args) nil))) {})",
+            source
+        );
+        let syntax = read_syntax(&wrapped).expect("parse failed");
         let mut expander = Expander::new();
         let expanded = expander
             .expand(syntax, &mut symbols, &mut vm)
             .expect("expand failed");
         let mut analyzer = Analyzer::new(&mut symbols);
+        analyzer.bind_primitives(&meta);
         let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
         mark_tail_calls(&mut analysis.hir);
         analysis.hir

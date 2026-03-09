@@ -56,6 +56,8 @@ pub struct LirFunction {
     pub effect: Effect,
     /// Optional docstring from the source lambda
     pub doc: Option<Value>,
+    /// Original lambda Syntax node for eval environment reconstruction
+    pub syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
     /// How varargs are collected: List (cons chain) or Struct (immutable struct).
     /// Only meaningful when arity is AtLeast.
     pub vararg_kind: crate::hir::VarargKind,
@@ -131,6 +133,7 @@ impl LirFunction {
             cell_locals_mask: 0,
             effect: Effect::inert(),
             doc: None,
+            syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params,
             yield_points: Vec::new(),
@@ -206,11 +209,6 @@ pub enum LirInstr {
     LoadCaptureRaw { dst: Reg, index: u16 },
     /// Store to capture (handles cells automatically)
     StoreCapture { index: u16, src: Reg },
-    /// Load global by symbol
-    LoadGlobal { dst: Reg, sym: SymbolId },
-    /// Store global by symbol
-    StoreGlobal { sym: SymbolId, src: Reg },
-
     // === Closures ===
     /// Create a closure
     MakeClosure {

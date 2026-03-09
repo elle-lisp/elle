@@ -11,8 +11,11 @@ wrong results or panicked.
 
 Follow these when writing or editing examples:
 
-- `(import-file "./examples/assertions.lisp")` at the top. Never define
-  assertions inline.
+- Import assertions at the top using the closure import pattern, destructuring
+  only the names the file uses. Never define assertions inline.
+  ```lisp
+  (def {:assert-eq assert-eq :assert-true assert-true} ((import-file "./examples/assertions.lisp")))
+  ```
 - `defn` with `[bracket params]` and a docstring as the first body form.
 - Literal syntax: `@[...]` arrays, `[...]` tuples, `{...}` structs,
   `@{...}` tables, `@"..."` buffers.

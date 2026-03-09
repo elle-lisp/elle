@@ -47,7 +47,7 @@ pub(crate) struct FunctionTranslator<'a> {
     /// When a Call/TailCall targets a global in this map, we emit a direct
     /// Cranelift call instead of going through elle_jit_call.
     pub(crate) scc_peers: HashMap<SymbolId, FuncId>,
-    /// Map from register to the SymbolId it was loaded from (for LoadGlobal).
+    /// Map from register to the SymbolId it was loaded from.
     /// Used to detect when a Call/TailCall targets an SCC peer.
     pub(crate) global_load_map: HashMap<Reg, SymbolId>,
     /// SymbolId of the function being compiled (for self-call detection)
@@ -359,32 +359,6 @@ impl<'a> FunctionTranslator<'a> {
                         builder.def_var(var(self.local_var_base + local_index as u32), val);
                     }
                 }
-            }
-
-            // === Phase 3: Global variables ===
-            LirInstr::LoadGlobal { dst, sym } => {
-                let sym_bits = builder.ins().iconst(I64, sym.0 as i64);
-                let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("LoadGlobal without vm pointer".to_string())
-                })?;
-                let result =
-                    self.call_helper_binary(builder, self.helpers.load_global, sym_bits, vm)?;
-                builder.def_var(var(dst.0), result);
-            }
-
-            LirInstr::StoreGlobal { sym, src } => {
-                let sym_bits = builder.ins().iconst(I64, sym.0 as i64);
-                let val = builder.use_var(var(src.0));
-                let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("StoreGlobal without vm pointer".to_string())
-                })?;
-                let _result = self.call_helper_ternary(
-                    builder,
-                    self.helpers.store_global,
-                    sym_bits,
-                    val,
-                    vm,
-                )?;
             }
 
             // === Phase 3: Function calls ===

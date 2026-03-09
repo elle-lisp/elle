@@ -358,7 +358,7 @@ pub fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
 
     // Closure
     if let Some(closure) = val.as_closure() {
-        let arity_str = match closure.arity {
+        let arity_str = match closure.template.arity {
             Arity::Exact(n) => format!("{}", n),
             Arity::AtLeast(n) => format!("{} or more", n),
             Arity::Range(min, max) => format!("{}-{}", min, max),

@@ -8,7 +8,7 @@ elle:  ## Build the Elle binary (release)
 	cargo build --release -p elle
 
 plugins:  ## Build all native plugins (.so)
-	@for p in regex sqlite crypto random selkie; do \
+	@for p in glob regex sqlite crypto random selkie; do \
 		cargo build --release -p elle-$$p; \
 	done
 
@@ -44,6 +44,12 @@ test:  ## Fast local test (build + examples + elle scripts + unit tests, ~2min)
 		timeout 10s ./target/release/elle "$$f" || exit 1; \
 	done
 	@for f in tests/elle/*.lisp; do \
+		case "$$f" in \
+			tests/elle/regex.lisp) \
+				ls target/*/libelle_regex.so >/dev/null 2>&1 || continue ;; \
+			tests/elle/glob.lisp) \
+				ls target/*/libelle_glob.so >/dev/null 2>&1 || continue ;; \
+		esac; \
 		./target/release/elle "$$f" || exit 1; \
 	done
 	cargo test --workspace --lib

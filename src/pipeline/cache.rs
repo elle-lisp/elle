@@ -15,7 +15,7 @@ use crate::vm::VM;
 ///
 /// - Prelude must be 100% defmacro (no runtime definitions)
 /// - Primitives must be registered before any pipeline function call
-/// - Pipeline functions are not re-entrant (no nested compile/compile_all)
+/// - Pipeline functions are not re-entrant (no nested compile calls)
 /// - Primitive registration order is deterministic (ALL_TABLES)
 struct CompilationCache {
     /// VM with primitives registered. Fiber always reset between uses.
@@ -73,7 +73,7 @@ pub(super) fn get_compilation_cache() -> (*mut VM, Expander, PrimitiveMeta) {
 
 /// Get a cloned Expander and PrimitiveMeta from the cache without
 /// borrowing the cached VM. Used by functions that have their own VM
-/// (eval, analyze, analyze_all).
+/// (eval, analyze, analyze_file).
 pub(super) fn get_cached_expander_and_meta() -> (Expander, PrimitiveMeta) {
     COMPILATION_CACHE.with(|cache| {
         let mut cache_ref = cache.borrow_mut();
@@ -89,4 +89,34 @@ pub(super) fn get_cached_expander_and_meta() -> (Expander, PrimitiveMeta) {
         });
         (c.expander.clone(), c.meta.clone())
     })
+}
+
+/// Add stdlib exports to the cached PrimitiveMeta.
+///
+/// Called by `init_stdlib` after compiling and executing stdlib.lisp.
+/// Each export is added to `meta.effects` and `meta.functions` so that
+/// `bind_primitives` will pre-bind them for all subsequent compilations.
+pub fn update_cache_with_stdlib(
+    exports: std::collections::HashMap<
+        crate::value::SymbolId,
+        (crate::value::Value, crate::effects::Effect),
+    >,
+) {
+    COMPILATION_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        let c = cache_ref.get_or_insert_with(|| {
+            let mut vm = VM::new();
+            let mut init_symbols = SymbolTable::new();
+            let meta = register_primitives(&mut vm, &mut init_symbols);
+            let mut expander = Expander::new();
+            expander
+                .load_prelude(&mut init_symbols, &mut vm)
+                .expect("prelude loading must succeed");
+            CompilationCache { vm, expander, meta }
+        });
+        for (sym_id, (value, effect)) in &exports {
+            c.meta.effects.insert(*sym_id, *effect);
+            c.meta.functions.insert(*sym_id, *value);
+        }
+    });
 }
