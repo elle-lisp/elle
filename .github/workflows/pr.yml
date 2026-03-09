@@ -195,6 +195,9 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true' && contains(github.event.pull_request.labels.*.name, 'performance')
+    concurrency:
+      group: benchmarks-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       pull-requests: write
     steps:
