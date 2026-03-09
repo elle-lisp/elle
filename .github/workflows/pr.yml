@@ -154,9 +154,9 @@ jobs:
       - name: Run integration and unit tests
         run: cargo test --test '*' -- --skip property
 
-   tests-property:
-     name: Property Tests
-     needs: [changes, examples, tests-integration]
+  tests-property:
+    name: Property Tests
+    needs: [changes, examples, tests-integration]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
