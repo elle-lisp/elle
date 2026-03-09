@@ -3,7 +3,7 @@
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a register-based VM.
 
 This is not a toy. The implementation targets correctness, performance, and
-clarity - in that order. We compile through multiple IRs, we have proper
+clarity — in that order. We compile through multiple IRs, we have proper
 lexical scoping with closure capture analysis, and we have an effect system.
 
 You are an LLM. You will make mistakes. The test suite will catch them. Run the
@@ -14,18 +14,12 @@ tests. Read the error messages. They are designed to be helpful.
 - [Architecture](#architecture)
 - [Products](#products)
 - [Directories](#directories)
-- [Verification](#verification)
-- [Branch health](#branch-health)
+- [Testing](#testing)
 - [Invariants](#invariants)
 - [Intentional oddities](#intentional-oddities)
 - [Conventions](#conventions)
-- [Blast radius](#blast-radius)
 - [Maintaining documentation](#maintaining-documentation)
-- [docgen: the documentation site generator](#docgen-the-documentation-site-generator)
-- [Failure triage](#failure-triage)
-- [What not to do](#what-not-to-do)
 - [Where to start](#where-to-start)
-- [Agent specs](#agent-specs)
 
 ## Architecture
 
@@ -37,51 +31,6 @@ This is the only compilation pipeline. Source locations flow through the entire
 pipeline: Syntax spans → HIR spans → LIR `SpannedInstr` → `LocationMap` in
 bytecode. Error messages include file:line:col information.
 
-### Data flow across boundaries
-
-| Boundary | Output type | Key fields |
-|----------|-------------|------------|
-| Reader → Expander | `Syntax` | `kind: SyntaxKind`, `span: Span`, `scopes: Vec<ScopeId>`, `scope_exempt: bool` |
-| Expander → Analyzer | `Syntax` (expanded) | Same shape; macros resolved, scopes stamped |
-| Analyzer → Lowerer | `Hir` (via `AnalysisResult`) | `kind: HirKind`, `span: Span`, `effect: Effect` |
-| Lowerer → Emitter | `LirFunction` | `blocks: Vec<BasicBlock>`, `constants: Vec<LirConst>`, `arity: Arity`, `effect: Effect`, `num_locals: u16`, `num_captures: u16`, `cell_params_mask: u64`, `cell_locals_mask: u64`, `entry: Label`, `num_regs: u32`, `name: Option<String>`, `doc: Option<Value>`, `syntax: Option<Rc<Syntax>>` |
-| Emitter → VM | `Bytecode` | `instructions: Vec<u8>`, `constants: Vec<Value>`, `location_map: LocationMap`, `symbol_names: HashMap<u32, String>`, `inline_caches: HashMap<usize, CacheEntry>` |
-| VM → caller | `Value` | NaN-boxed 8-byte runtime value |
-| Stream primitive → Scheduler | `(SIG_IO, IoRequest)` | `IoOp` (stream or network), port `Value`, timeout `Option<Duration>` |
-| Network primitive → Scheduler | `(SIG_IO, IoRequest)` | `IoOp` (Accept, Connect, SendTo, RecvFrom, Shutdown), port `Value`, timeout `Option<Duration>` |
-| Scheduler → Backend | `IoRequest` | `IoOp`, port `Value`, timeout `Option<Duration>` |
-| Backend → Scheduler | `(SignalBits, Value)` | Result or error; port kinds: TcpListener, TcpStream, UdpSocket, UnixListener, UnixStream |
-
-**What is preserved across the full pipeline:**
-
-| Data | Syntax | HIR | LIR | Bytecode | Runtime |
-|------|--------|-----|-----|----------|---------|
-| Source spans | `Span` on each node | `Span` on each `Hir` | `SpannedInstr` / `SpannedTerminator` | `LocationMap` (`HashMap<usize, SourceLoc>`) | `Closure.location_map` |
-| Effects | — | `Effect` on each `Hir` | `LirFunction.effect` | — | `Closure.effect` |
-| Arity | — | `Lambda.params.len()` | `LirFunction.arity` | — | `Closure.arity` |
-| Cell mask (params) | — | `Binding.needs_cell()` | `LirFunction.cell_params_mask` | — | `Closure.cell_params_mask` |
-| Cell mask (locals) | — | `Binding.needs_cell()` (mutable captures only) | `LirFunction.cell_locals_mask` | — | JIT only (not on `Closure`) |
-| Docstring | — | `Lambda.doc` | `LirFunction.doc` | — | `Closure.doc` |
-| Syntax | — | `Lambda.syntax` | `LirFunction.syntax` | — | `Closure.syntax` |
-
-**What is transformed at each boundary:**
-
-| Boundary | Transformation |
-|----------|----------------|
-| Syntax → HIR | Symbol names (`String`) → `Binding(Value)` (NaN-boxed heap pointer to `BindingInner`). Scope sets used for resolution, then no longer needed. |
-| HIR → LIR | `Binding` → `u16` slot index (via `binding_to_slot: HashMap<Binding, u16>`). `HirKind` control flow → `BasicBlock` + `Terminator` (explicit jumps). Captures → `LoadCapture`/`LoadCaptureRaw` instructions. |
-| LIR → Bytecode | `Reg` (virtual registers) → stack positions (emitter simulates stack). `Label` → byte offsets (jump patching). `LirConst` → `Value` in constant pool. `LirFunction` (nested closures) → `Value::closure()` in constant pool. |
-| Bytecode → Runtime | `Bytecode` struct → `Closure` fields: `bytecode: Rc<Vec<u8>>`, `constants: Rc<Vec<Value>>`, `location_map: Rc<LocationMap>`. Globals addressed by `SymbolId` index into `VM.globals: Vec<Value>`. |
-
-**What is discarded:**
-
-| Boundary | Discarded |
-|----------|-----------|
-| Syntax → HIR | Variable names (replaced by `Binding` identity), scope sets (`Vec<ScopeId>`), macro definitions |
-| HIR → LIR | `Binding` objects (replaced by slot indices), `HirKind` structure (replaced by flat instructions) |
-| LIR → Bytecode | Virtual register names (`Reg`), block labels (`Label`), `LirConst` enum (replaced by `Value`) |
-| Bytecode → Runtime | `inline_caches` (not carried on `Closure`). Note: `LirFunction` survives into `Closure.lir_function` for deferred JIT compilation |
-
 ### Key modules
 
 | Module | Responsibility |
@@ -90,35 +39,32 @@ bytecode. Error messages include file:line:col information.
 | `syntax` | Syntax types, macro expansion |
 | `hir` | Binding resolution, capture analysis, effect inference, linting, symbol extraction, docstring extraction |
 | `lir` | SSA form with virtual registers, basic blocks, `SpannedInstr` for source tracking |
-| `compiler` | Bytecode instruction definitions (`bytecode.rs`), debug formatting (`bytecode_debug.rs`) |
+| `compiler` | Bytecode instruction definitions, debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed) |
 | `effects` | Effect type (`Pure`, `Yields`, `Polymorphic`) |
-| `io` | I/O request types (`IoRequest`, `IoOp` with stream and network ops), backends (`SyncBackend`, `AsyncBackend`), timeout handling |
-| `lint` | Diagnostic types and lint rules (pipeline-agnostic) |
-| `symbols` | Symbol index types for IDE features (pipeline-agnostic) |
+| `io` | I/O request types, backends, timeout handling |
+| `lint` | Diagnostic types and lint rules |
+| `symbols` | Symbol index types for IDE features |
 | `primitives` | Built-in functions |
 | `ffi` | C interop via libloading/bindgen |
-| `jit` | JIT compilation via Cranelift for non-suspending functions |
+| `jit` | JIT compilation via Cranelift |
 | `formatter` | Code formatting for Elle source |
 | `plugin` | Dynamic plugin loading for Rust cdylib primitives |
-| `path` | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
-| `pipeline` | Compilation entry points. Single-form: `compile`, `analyze`, `eval`. File-level: `compile_file`, `analyze_file`, `eval_file`. Multi-form convenience: `eval_all` (delegates to `compile_file`). See [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md). |
+| `path` | UTF-8 path operations |
+| `pipeline` | Compilation entry points (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md)) |
 | `error` | `LocationMap` for bytecode offset → source location mapping |
 
 ### The Value type
 
-`Value` is the runtime representation. It uses NaN-boxing for efficient
-representation. Create values via methods like `Value::int()`, `Value::cons()`,
-`Value::closure()` rather than enum variants. Notable types:
-- `Closure` - bytecode + captured environment + arity + effect + `location_map: Rc<LocationMap>` + `doc: Option<Value>` + `syntax: Option<Rc<Syntax>>`
-- `Cell` / `LocalCell` - mutable cells for captured variables
-- `Fiber` - independent execution context with stack, frames, signal mask, and per-fiber `FiberHeap`
-- `Parameter` - dynamic binding with default value (id, default), looked up at runtime from parameter frame stack
-- `External` - opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
+`Value` is the runtime representation using NaN-boxing. Create values via methods like `Value::int()`, `Value::cons()`, `Value::closure()` rather than enum variants. Notable types:
+- `Closure` — bytecode + captured environment + arity + effect + `location_map` + `doc` + `syntax`
+- `Cell` / `LocalCell` — mutable cells for captured variables
+- `Fiber` — independent execution context with stack, frames, signal mask
+- `Parameter` — dynamic binding with default value, looked up at runtime
+- `External` — opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
 
-All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
-`SendValue` wrapper exists for thread-safety when needed.
+All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 
 ## Products
 
@@ -142,61 +88,18 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`. The
 | `plugins/` | Dynamically-loaded plugin crates (cdylib) |
 | `site/` | Generated documentation site |
 
-## Verification
+## Testing
 
-Approximate runtimes (for guidance — vary by machine):
+**⚠️ NEVER run `cargo test --workspace` without explicit user instruction.** It takes ~30 minutes. Use `make test` (~2min) for pre-commit verification.
 
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `make smoke` | ~15s | Elle examples only |
 | `make test` | ~2min | build + examples + elle scripts + unit tests |
-| `cargo test --workspace` | ~30min | full suite (unit + integration ~10min + property ~20min) |
+| `cargo test --workspace` | ~30min | full suite — **ask first** |
 
-**Rule of thumb**: Before committing, run `make test` locally (~2min). Before
-pushing, run `cargo test --workspace` (~30min) to catch property test failures.
-
-```bash
-# Fast local test (build + examples + elle scripts + unit tests, ~2min)
-make test
-
-# Full test suite (do this before pushing)
-cargo test --workspace
-
-# Just the main crate
-cargo test
-
-# Specific test
-cargo test test_name
-
-# Run all examples (they are tests)
-cargo test --test '*'
-
-# Check formatting
-cargo fmt -- --check
-
-# Lint (warnings will turn into errors in the CI and fail the build)
-cargo clippy --workspace --all-targets -- -D warnings
-
-# Run a single example
-cargo run -- examples/closures.lisp
-
-# Generate documentation site (this runs Elle code — catches runtime bugs)
-cargo build --release && ./target/release/elle demos/docgen/generate.lisp
-
-# Rust API docs with warnings as errors
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-```
-
-CI runs on PRs: tests (stable/beta/nightly), fmt, clippy, examples,
-benchmarks (with regression reporting), rustdoc, docgen site generation.
-All must pass. Main-push runs coverage, benchmark publishing, docs generation,
-and Pages deployment.
-
-## Branch health
-
-Main is always green. If tests fail locally, the failure is caused by
-local changes, not by upstream breakage. Do not waste time investigating
-whether main is broken — it isn't. Fix your code.
+For test organization, helpers, and how to add tests: [`docs/testing.md`](docs/testing.md).
+For CI structure and failure triage: [`docs/debugging.md`](docs/debugging.md).
 
 ## Invariants
 
@@ -224,324 +127,41 @@ These must remain true. Violating them breaks the system:
 
 ## Intentional oddities
 
-Things that look wrong but aren't:
+Things that look wrong but aren't. The 4 most critical (agents get these wrong):
 
-- Two cell types exist: `Cell` (user-created via `box`, explicit) and
-  `LocalCell` (compiler-created for mutable captures, auto-unwrapped).
-- Coroutine primitives (`coro/resume`) are implemented as fiber wrappers.
-  They return `(SIG_RESUME, fiber_value)` and the VM's SIG_RESUME handler in
-  `vm/call.rs` performs the actual fiber execution. This avoids primitives
-  needing VM access.
-- The `Cons` type in `value/heap.rs` is the heap-allocated cons cell data.
-  `Value::cons(car, cdr)` creates a NaN-boxed pointer to a heap Cons.
-- `nil` and empty list `()` are distinct values with different truthiness:
-  - `Value::NIL` is falsy (represents absence)
-  - `Value::EMPTY_LIST` is truthy (it's a list, just empty)
-- Lists are `EMPTY_LIST`-terminated, not `NIL`-terminated. `(rest (list 1))`
-  returns `EMPTY_LIST`. Use `empty?` (not `nil?`) to check for end-of-list.
-  `nil?` only matches `Value::NIL`. This distinction matters in recursive
-  list functions and affects `demos/docgen/` and `examples/`.
-- Signal bits are partitioned: Bits 0-2 are user-facing (error, yield, debug),
-  Bits 3-8 are VM-internal (resume, FFI, propagate, cancel, query, halt),
-  Bit 9 is SIG_IO (I/O request to scheduler), Bits 10-15 are reserved,
-  and Bits 16-31 are for user-defined signal types.
-  See `src/value/fiber.rs` lines 138-165 for the constants and partitioning
-  comment.
-- Destructuring uses **silent nil semantics**: missing values become `nil`,
-  except `CdrOrNil` which returns `EMPTY_LIST` for non-cons inputs (the rest
-  of an exhausted list is an empty list, not absence).
-  Wrong types produce `nil`, no runtime errors. This is separate from `match`
-  pattern matching which is conditional. `CarOrNil`/`CdrOrNil`/`ArrayRefOrNil`/
-  `ArraySliceFrom`/`TableGetOrNil` are dedicated bytecode instructions for
-  this — they never signal errors. `ArrayRefOrNil` and `ArraySliceFrom` handle
-  both arrays and tuples — bracket destructuring works on any indexed sequential
-  type. In `match`, however, `[a b]` patterns only match arrays (the `IsArray`
-  guard rejects tuples before element extraction). In `match`, compound patterns
-  (`Cons`, `List`, `Array`, `Table`) emit type guards (`IsPair`, `IsArray`,
-  `IsTable`) that branch to the fail label before extracting elements.
-- `defn`, `let*`, `->`, `->>`, `when`, `unless`, `try`/`catch`, `protect`,
-  `defer`, `with`, `yield*`, `case`, `if-let`, `when-let`, and `forever`
-  are prelude macros defined in
-  [`prelude.lisp`](prelude.lisp) (project root), loaded by the Expander
-  before user code expansion. The prelude is embedded via `include_str!`
-  (in `src/syntax/expand/mod.rs`) and parsed/expanded on each Expander
-  creation.
-- Collection literals follow the mutable/immutable split (see `docs/types.md`):
-   bare delimiters are immutable, `@`-prefixed are mutable. `{:key val ...}` →
-   struct (immutable). `@{:key val}` → table (mutable). `[1 2 3]` → tuple
-   (immutable). `@[1 2 3]` → array (mutable). `"hello"` → string (immutable).
-   `@"hello"` → buffer (mutable). `|1 2 3|` → set (immutable). `@|1 2 3|` →
-   mutable set. Bytes (immutable binary data) and blob (mutable binary data)
-   have no reader literal syntax — they are constructed via primitives:
-   `(bytes 1 2 3)`, `(blob 1 2 3)`, `(string->bytes "hello")`,
-   `(string->blob "hello")`. Display format is `#bytes[hex ...]` and
-   `#blob[hex ...]` (output-only, not readable). `SyntaxKind::Tuple` represents
-   `[...]`, `SyntaxKind::Array` represents `@[...]`, `SyntaxKind::Struct`
-   represents `{...}`, `SyntaxKind::Table` represents `@{...}`, `SyntaxKind::Set`
-   represents `|...|`, `SyntaxKind::SetMut` represents `@|...|`. The reader
-   produces all six directly (no desugaring to List with prepended symbols).
-   `@"..."` desugars to `(string->buffer "...")`. In `match`, `[...]` matches
-   tuples (`IsTuple`), `@[...]` matches arrays (`IsArray`), `{...}` matches
-   structs (`IsStruct`), `@{...}` matches tables (`IsTable`), `|x|` matches
-   sets (`IsSet`), `@|x|` matches mutable sets (`IsSetMut`). In destructuring
-   (`def`/`let`/`fn`), no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle
-   both mutable and immutable types.
-- `|...|` is the immutable set literal syntax; `@|...|` is the mutable set
-   literal. `|` is a delimiter (like `(`, `[`, `{`). Inside lists, arrays,
-   structs, and tables, a bare `|` starts a nested set literal (delegates to
-   `read_set`), not a special marker node.
-- `:@name` is valid keyword syntax. The lexer recognizes `:@` as a keyword
-   prefix variant. The `@` is consumed and prepended to the keyword name.
-   Examples: `:@set`, `:@array`, `:@string`. These are used for mutable type
-   keywords returned by `(type-of x)` on mutable collections.
-- `[...]` has dual meaning depending on position. In expression position,
-  it's a tuple literal (`SyntaxKind::Tuple`). In structural positions of
-  special forms — lambda params, binding lists, binding pairs, cond clauses,
-  match arms, defmacro params — it's accepted interchangeably with `(...)`.
-  `@[...]` (mutable array) is intentionally rejected in structural positions.
-- `;expr` is the splice reader macro (Janet-style). It marks a value for
-  array-spreading at call sites and data constructors. `(splice expr)` is the
-  long form. `;` is a delimiter, so `a;b` is three tokens. `,;` is
-  unquote-splicing (inside quasiquote), not comma + splice. Splice works
-  on arrays, tuples, and lists. Structs and tables reject splice at
-  compile time (key-value semantics). When a call has spliced args, the lowerer
-  builds an args array (`MakeArray` → `ArrayExtend`/`ArrayPush` → `CallArray`)
-  instead of the normal `Call` instruction. Arity checking is disabled for
-  spliced calls.
-- `#` is the comment character (not `;`). `true`/`false` are the boolean
-   literals (not `#t`/`#f`).
-- `|` is a delimiter for set literals (`|1 2 3|` for immutable sets, `@|1 2 3|`
-   for mutable sets). `|` always starts a set literal, including inside lists,
-   arrays, structs, and tables (delegates to `read_set`). Or-patterns use
-   `(or pat1 pat2 pat3)` syntax — the `or` symbol in pattern position is
-   recognized by the match analyzer in `special.rs`.
-- `assign` is the form for variable mutation (was named `set` before set types
-   were added). Syntax: `(assign var value)`. This is distinct from the `set`
-   constructor primitive for creating set values.
-- `begin` and `block` are distinct forms. `begin` sequences expressions
-  without creating a scope (bindings leak into the enclosing scope). `block`
-  sequences expressions within a new lexical scope (bindings are contained).
-  `block` supports an optional keyword name and `break` for early exit:
-  `(block :name body...)` / `(break :name value)`. `break` is validated at
-  compile time — it must be inside a block and cannot cross function boundaries.
-- `ExternalObject` uses `Rc<dyn Any>` despite the general preference for typed values.
-  This is intentional — plugins are dynamically loaded and the core compiler cannot
-  know their types at compile time. The `type_name` field provides Elle-side identity,
-  and `downcast_ref` is used only within the plugin that created the type.
-- **Module convention (Chunk 3)**: Module files (`.lisp`) follow a standard pattern.
-  The last expression in a module is a closure that returns a struct of exports.
-  This allows parameterized modules in the future. Example:
-  ```lisp
-  # module defines functions...
-  (defn assert-eq [a b] ...)
-  (defn assert-true [x] ...)
-  
-  # last expression is a closure returning exports
-  (fn [] {:assert-eq assert-eq :assert-true assert-true})
-  ```
-  When imported via `import-file`, the module's last expression (a closure) is
-  returned. Call it to get the exports struct:
-  ```lisp
-  (def asserts ((import-file "assertions.lisp")))
-  (asserts :assert-eq 1 1)
-  ```
-  Or destructure directly:
-  ```lisp
-  (def {:assert-eq assert-eq :assert-true assert-true} ((import-file "assertions.lisp")))
-  ```
-  The `import-file` primitive (Chunk 3) uses `eval_file` to compile and execute
-  the module, returning its last expression's value. For `.so` plugins, it
-  returns `true`.
-- Docstrings are extracted from leading string literals in function bodies.
-  `HirKind::Lambda` has a `doc: Option<Value>` field, threaded through LIR
-  and into `Closure.doc`. The `(doc name)` primitive checks closure doc fields
-  on globals before falling back to builtin docs. LSP hover shows user-defined
-  docstrings and builtin docs via `vm.docs`.
-- `parameterize` is a special form that creates a dynamic binding frame.
-  Unlike lexical bindings (`let`, `fn` params), parameters are looked up at
-  runtime from a stack of frames. `(make-parameter default)` creates a parameter;
-  calling it reads the current value. `(parameterize ((p1 v1) (p2 v2) ...) body ...)`
-  pushes a frame, executes the body, then pops the frame. Child fibers inherit
-  parent parameter frames. Parameters are useful for simulating I/O ports,
-  configuration, and other dynamic context.
+- **`nil` vs `()` are distinct.** `nil` is falsy (absence). `()` is truthy (empty list).
+  Lists terminate with `EMPTY_LIST`. Use `empty?` (not `nil?`) for end-of-list.
+  **Getting this wrong causes infinite recursion.**
+
+- **`#` is comment, `;` is splice.** `#` starts a comment. `;expr` is the splice operator
+  (array-spreading). `true`/`false` are booleans (not `#t`/`#f`).
+
+- **`assign` not `set` for mutation.** `(assign var value)` mutates. `(set x val)` creates
+  a set value. Agents reflexively write `(set x val)` — this is wrong.
+
+- **Collection literals: bare = immutable, `@` = mutable.** `[...]` → tuple, `@[...]` → array.
+  `{...}` → struct, `@{...}` → table. `|...|` → set, `@|...|` → mutable set.
+  `"..."` → string, `@"..."` → buffer.
+
+For the full list of oddities (17 items): [`docs/oddities.md`](docs/oddities.md).
 
 ## Conventions
 
 - Files and directories: lowercase, single-word when possible.
-- Target file size: 500 lines / 15KB. Dispatch tables (match-heavy) up to
-  800 lines. Primitive collections up to 400 lines. Refactor when exceeded.
+- Target file size: 500 lines / 15KB. Dispatch tables up to 800 lines.
 - Prefer formal types over hashes/maps for structured data.
 - Validation at boundaries, not recovery at use sites.
 - Tests reflect architecture: unit tests for modules, integration tests for
   pipelines, property tests for invariants.
-- Examples in `examples/` serve as both documentation and executable tests.
-
-## Blast radius
-
-Common extension patterns and every file that must be touched. Missing a
-file means a broken build, a silent bug, or an incomplete feature.
-
-### Adding a new heap type
-
-Example: Set types (`LSet` and `LSetMut`), added alongside the existing
-Array, Table, Tuple, Struct, Closure, Buffer types. Sets follow the
-immutable/mutable split: `LSet(BTreeSet<Value>)` for immutable sets,
-`LSetMut(RefCell<BTreeSet<Value>>)` for mutable sets. Display as `|1 2 3|`
-and `@|1 2 3|` respectively.
-
-- [ ] `src/value/heap.rs` — add variant to `HeapObject` enum, add
-      discriminant to `HeapTag` enum, add arms to `HeapObject::tag()`,
-      `HeapObject::type_name()`, and `Debug for HeapObject`
-- [ ] `src/value/repr/constructors.rs` — add `Value::your_type()` constructor
-- [ ] `src/value/repr/accessors.rs` — add `is_your_type()` predicate,
-      `as_your_type()` extractor, and arm in `Value::type_name()`
-- [ ] `src/value/repr/traits.rs` — add arm to `PartialEq for Value`
-      (structural vs reference equality)
-- [ ] `src/value/display.rs` — add arms to both `Display` and `Debug`
-      for `Value`
-- [ ] `src/value/send.rs` — add variant to `SendValue` enum, add arms to
-      `SendValue::from_value()` and `SendValue::into_value()` (or return
-      error if not sendable)
-- [ ] `src/value/mod.rs` — re-export new types if needed
-- [ ] `src/primitives/types.rs` — add `your_type?` predicate function
-      and entry in `PRIMITIVES` array
-- [ ] `src/primitives/registration.rs` — add your module to `ALL_TABLES`
-      if you created a new primitives file
-- [ ] `src/primitives/` — create operations module (e.g., `buffer.rs`)
-      with `PRIMITIVES` array
-- [ ] `src/primitives/list.rs` — update `prim_length` if the type has a
-      meaningful length
-- [ ] `src/primitives/table.rs` — update `prim_get` / `prim_put` if the
-      type supports indexed or keyed access
-- [ ] `src/primitives/json/serializer.rs` — add arm to `serialize_value`
-      and `serialize_value_pretty` (both functions have exhaustive
-      `HeapTag` matches)
-- [ ] `src/formatter/core.rs` — add arm to `format_value` (exhaustive
-      `HeapObject` match)
-- [ ] `src/syntax/convert.rs` — update `Syntax::from_value()` if the type
-      can appear in macro results (Value → Syntax conversion)
-- [ ] `src/value/AGENTS.md` — document the new type
-
-If the type needs new bytecode instructions (construction, access):
-- [ ] `src/compiler/bytecode.rs` — add variant(s) to `Instruction` enum
-- [ ] `src/compiler/bytecode_debug.rs` — add arm(s) to `disassemble_lines`
-- [ ] `src/lir/types.rs` — add variant(s) to `LirInstr` enum
-- [ ] `src/lir/emit.rs` — add arm(s) to `emit_instr`
-- [ ] `src/vm/dispatch.rs` — add arm(s) to the dispatch `match`
-- [ ] `src/vm/data.rs` (or new handler file) — implement handler function(s)
-
-### Adding a new bytecode instruction
-
-- [ ] `src/compiler/bytecode.rs` — add variant to `Instruction` enum
-      (append at end; byte values are positional via `repr(u8)`)
-- [ ] `src/compiler/bytecode_debug.rs` — add arm to `disassemble_lines`
-      with operand decoding
-- [ ] `src/lir/types.rs` — add variant to `LirInstr` enum (and/or
-      `Terminator` if it's a control flow instruction)
-- [ ] `src/lir/emit.rs` — add arm to `emit_instr` (or `emit_terminator`)
-      that emits the `Instruction` byte and operands
-- [ ] `src/lir/lower/` — add lowering logic in the appropriate file:
-      `expr.rs` (expressions), `control.rs` (control flow, calls),
-      `binding.rs` (binding forms), `pattern.rs` (pattern matching),
-      `lambda.rs` (closures)
-- [ ] `src/vm/dispatch.rs` — add arm to the dispatch `match` in
-      `execute_bytecode_inner_impl`, delegating to a handler
-- [ ] `src/vm/` — implement handler in the appropriate file:
-      `data.rs` (data ops), `arithmetic.rs`, `comparison.rs`,
-      `types.rs` (type checks), `stack.rs`, `variables.rs`,
-      `control.rs` (jumps), `closure.rs`, `scope/` (scope ops)
-- [ ] `src/compiler/AGENTS.md` — document the new instruction
-
-If JIT support is needed, also update:
-- [ ] `src/jit/dispatch.rs` — add arm to the JIT dispatch
-- [ ] `src/jit/compiler.rs` — add compilation logic
-- [ ] `src/jit/translate.rs` — add instruction translation
-
-### Adding a new special form
-
-- [ ] `src/hir/analyze/forms.rs` — add `match` arm in `analyze_expr` for
-      the new form name, and implement `analyze_your_form` method
-- [ ] `src/hir/expr.rs` — add variant to `HirKind` enum
-- [ ] `src/lir/lower/expr.rs` — add arm to `lower_expr` dispatch
-- [ ] `src/lir/lower/` — implement `lower_your_form` in the appropriate
-      file (`control.rs` for control flow, `binding.rs` for binding forms)
-- [ ] `src/hir/tailcall.rs` — add arm to the tail-call marking pass if
-      the form has sub-expressions that could be in tail position
-- [ ] `src/hir/lint.rs` — add arm to the HIR linter walk if the form
-      has sub-expressions to lint
-- [ ] `src/hir/symbols.rs` — add arm to symbol extraction if the form
-      introduces or references symbols
-
-If the form needs new syntax:
-- [ ] `src/syntax/mod.rs` — add variant to `SyntaxKind`, update
-      `kind_label()`, `set_scopes_recursive()`
-- [ ] `src/syntax/display.rs` — add display arm
-- [ ] `src/reader/syntax.rs` — add parsing logic
-- [ ] `src/reader/lexer.rs` — add token type if new delimiter needed
-
-If the form needs new bytecode instructions, follow the bytecode
-checklist above.
-
-### Adding a new collection literal
-
-This is the most invasive change. It touches every layer of the pipeline.
-
-**Example: Sets (issue #509)** — all items completed:
-
-Reader (source → tokens → syntax):
-- [x] `src/reader/lexer.rs` — added `|` delimiter, `Pipe`/`AtPipe` tokens
-- [x] `src/reader/token.rs` — added `Pipe` and `AtPipe` variants
-- [x] `src/reader/syntax.rs` — added `read_set()` and `read_set_mut()`
-- [x] `src/reader/parser.rs` — set parsing in legacy reader
-
-Syntax (expansion):
-- [x] `src/syntax/mod.rs` — added `SyntaxKind::Set`, `SetMut`
-- [x] `src/syntax/display.rs` — display for set literals
-- [x] `src/syntax/convert.rs` — `to_value()` and `from_value()` for sets
-- [x] `src/syntax/expand/` — or-patterns use `(or ...)` syntax (no Pipe marker)
-
-HIR (analysis):
-- [x] `src/hir/analyze/forms.rs` — desugaring to `(set ;elems)` and `(mutable-set ;elems)`
-- [x] `src/hir/analyze/destructure.rs` — set destructuring support
-- [x] `src/hir/analyze/special.rs` — pattern analysis for sets
-- [x] `src/hir/pattern.rs` — `HirPattern::Set` and `SetMut` variants
-
-Value (runtime representation):
-- [x] `src/value/heap.rs` — `LSet` and `LSetMut` heap types
-- [x] `src/value/repr/constructors.rs` — `Value::set()` and `set_mut()`
-- [x] `src/value/repr/accessors.rs` — `is_set()`, `as_set()`, etc.
-- [x] `src/value/repr/traits.rs` — equality, hash, ord for sets
-- [x] `src/value/display.rs` — display format `|...|` and `@|...|`
-- [x] `src/value/send.rs` — sendable value conversion
-
-LIR (lowering):
-- [x] `src/lir/lower/pattern.rs` — set pattern matching lowering
-- [x] `src/lir/lower/decision.rs` — `Constructor::Set` and `SetMut`
-
-Bytecode (type guards):
-- [x] `src/compiler/bytecode.rs` — `Instruction::IsSet`, `IsSetMut`
-- [x] `src/compiler/bytecode_debug.rs` — disassembly for set instructions
-- [x] `src/lir/types.rs` — `LirInstr::IsSet`, `IsSetMut`
-- [x] `src/lir/emit.rs` — emit logic for set instructions
-- [x] `src/vm/dispatch.rs` — dispatch to set handlers
-- [x] `src/vm/types.rs` — `handle_is_set()`, `handle_is_set_mut()`
-
-Primitives:
-- [x] `src/primitives/sets.rs` — all set operations (constructors, predicates, algebra)
-- [x] `src/primitives/registration.rs` — registered in `ALL_TABLES`
-
-Elle-level:
-- [x] `prelude.lisp` — set support in `each` macro
-- [x] `stdlib.lisp` — set support in `map` function
-- [x] `tests/elle/sets.lisp` — comprehensive test suite
-- [x] `examples/collections.lisp` — set examples
+- Do not add backward compatibility machinery. Breaking changes are fine.
+- Do not silently swallow errors. Propagate or log with context.
 
 ## Maintaining documentation
 
 AGENTS.md and README.md files exist throughout the codebase. Keep them current:
 
 - **When you change a module's interface**, update its AGENTS.md. Changed
-  exports, new invariants, altered data flow - these matter to the next agent.
+  exports, new invariants, altered data flow — these matter to the next agent.
 
 - **When you add a new module**, create AGENTS.md (for agents) and README.md
   (for humans). Copy structure from a sibling module.
@@ -550,65 +170,18 @@ AGENTS.md and README.md files exist throughout the codebase. Keep them current:
   the invariant. Stale invariants are worse than none.
 
 - **When you discover undocumented behavior**, document it. If it's intentional,
-  add to "Intentional oddities." If it's a bug, file an issue.
+  add to `docs/oddities.md`. If it's a bug, file an issue.
 
 Documentation debt compounds. A few minutes now saves hours of confusion later.
 
-## docgen: the documentation site generator
-
-`demos/docgen/generate.lisp` is an Elle program that generates the documentation
-site. CI builds it with `./target/release/elle demos/docgen/generate.lisp` as part
-of the docs job. Because it's written in Elle, it exercises the runtime — any
-change to the language semantics (value representation, list operations,
-string handling) can break it.
-
-When the docs CI job fails, check `demos/docgen/generate.lisp` and its library
-files in `demos/docgen/lib/`. Common failure: using `nil?` instead of `empty?`
-for list termination.
-
-## Failure triage
-
-When CI fails or tests break, use this to find the cause fast.
-
-| Failure | Symptom | Likely cause | Fix |
-|---------|---------|--------------|-----|
-| **docgen generation** | `docs` job fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. `nil?` only matches `Value::NIL`. | Use `empty?` for list termination checks. Check `demos/docgen/generate.lisp` and `demos/docgen/lib/` for recursive list functions. Also check: string operations, `get` on tables returning nil for missing keys (line 603 pattern: `(if (nil? existing) (list) existing)`). |
-| **Clippy** | `clippy` job fails | Any Rust warning. CI runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. Common hits: unused imports, unused variables, redundant clones, missing `#[allow(...)]` on intentionally dead code. |
-| **Property tests** | `test` job fails with `proptest` output showing a shrunk counterexample | The shrunk output shows the *minimal* failing input. Read the `Minimal failing input:` line — it gives concrete values for each `in` clause in the `proptest!` block. | Reproduce with the exact shrunk values as a unit test. Check `proptest-regressions/` files — proptest persists failing seeds there. The strategies live in `tests/property/strategies.rs`. |
-| **Integration tests** | `test` job fails in `tests/integration/` | Tests use `eval_source()` from `tests/common/mod.rs`, which runs the full pipeline: VM + primitives + stdlib + symbol table. Failures mean the pipeline produces wrong results or panics. | Read the assertion: `eval_source("(expr)")` returns `Result<Value, String>`. Check whether the test expects `.unwrap()` (success) or `.is_err()` (compile/runtime error). Common trap: `Value::EMPTY_LIST` is truthy, `Value::NIL` is falsy. |
-| **Formatting** | `fmt` job fails | Unformatted Rust code. | Run `cargo fmt`. No arguments needed. CI runs `cargo fmt -- --check`. |
-| **Rustdoc** | `docs` job fails on `cargo doc` step | Broken intra-doc links, malformed doc comments, or doc warnings. CI sets `RUSTDOCFLAGS="-D warnings"` with `--document-private-items`. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` locally. Common: referencing a renamed/removed type in a `///` comment. |
-| **Examples** | `examples` job fails | Each `.lisp` file in `examples/` runs with `timeout 10s`. Failures are either: (1) runtime error (assertion failure via `assert-eq` from `examples/assertions.lisp`, exits with code 1), (2) timeout (infinite loop or unbounded recursion), (3) semantic change broke expected output. | Run `cargo run -- examples/failing.lisp` locally. Examples use `assert-eq`, `assert-true`, etc. from `assertions.lisp` — check the assertion message for which invariant broke. Timeouts usually mean a recursive function hit the `nil?` vs `empty?` trap and never terminates. |
-| **Benchmarks** | `benchmarks` job fails | Compilation error in bench code, or benchmark binary panics. Regressions are reported but don't fail CI (`fail-on-alert: false`). | Run `cargo bench --bench benchmarks` locally. Bench failures are usually compilation errors from changed APIs, not performance regressions. |
-| **Tests on nightly** | `test` job fails only on nightly, passes on stable/beta | Nightly Rust introduced a new warning or changed behavior. | Check the nightly-specific error. If it's a new clippy lint or warning, add a targeted `#[allow(...)]` or fix the code. File an issue if it's a Rust regression. |
-
-## What not to do
-
-- Do not add backward compatibility machinery. Breaking changes are fine;
-  we'll write a migration tool.
-- Do not optimize prematurely. Correctness first. Profile before optimizing.
-- Do not add features "for the future." Build what's needed now.
-- Do not silently swallow errors. Propagate or log with context.
-- Do not bypass the type system with excessive use of `Any` or downcasting.
-- Do not leave behind research notes, analysis summaries, plan drafts, or any
-  other working files in the repository. The codebase is not a scratch pad.
-  Temporary artifacts belong in `/run/user/1000/` or similar — never committed,
-  never left untracked in the working tree.
-
 ## Where to start
 
-1. Read `pipeline.rs` - it shows the full compilation flow in 50 lines.
+1. Read `pipeline.rs` — it shows the full compilation flow in 50 lines.
 2. Read an example in `examples/` to understand the surface syntax.
 3. Read `value.rs` to understand runtime representation.
 4. Read a failing test to understand what's expected.
 
 When in doubt, run the tests.
 
-5. Read [`docs/cookbook.md`](docs/cookbook.md) for step-by-step recipes for common cross-cutting changes (new primitives, heap types, bytecode instructions, special forms, lint rules, prelude macros).
-6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization, helpers, and how to add new tests.
-
-## Agent specs
-
-Agent spec files live in `.opencode/agents/`. Some runtimes rewrite this path
-in the system prompt (e.g. to `.Claude/agents/`). If a rewritten path doesn't
-resolve, always check `.opencode/agents/` — that is the canonical location.
+5. Read [`docs/cookbook.md`](docs/cookbook.md) for step-by-step recipes for common cross-cutting changes.
+6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization and how to add new tests.

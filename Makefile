@@ -32,27 +32,18 @@ examples: elle  ## Run all examples
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    ~15s   Elle examples only
-#   make test     ~2min  build + examples + elle scripts + unit tests
-#   cargo test    ~30min full suite (unit + integration ~10min + property ~20min)
+#   make smoke    ~1min  examples + plugins + elle scripts + docgen
+#   make test     ~2min  smoke + rust unit tests (PROPTEST_CASES=8)
+#   cargo test    ~30min full suite (unit + integration + property)
 
-smoke: examples  ## Run Elle examples (~15s)
-
-test:  ## Fast local test (build + examples + elle scripts + unit tests, ~2min)
-	cargo build --release -p elle
-	@for f in examples/*.lisp; do \
-		timeout 10s ./target/release/elle "$$f" || exit 1; \
-	done
+smoke: examples  ## Run examples, elle scripts, and docgen (~1min)
 	@for f in tests/elle/*.lisp; do \
-		case "$$f" in \
-			tests/elle/regex.lisp) \
-				ls target/*/libelle_regex.so >/dev/null 2>&1 || continue ;; \
-			tests/elle/glob.lisp) \
-				ls target/*/libelle_glob.so >/dev/null 2>&1 || continue ;; \
-		esac; \
 		./target/release/elle "$$f" || exit 1; \
 	done
-	cargo test --workspace --lib
+	./target/release/elle demos/docgen/generate.lisp
+
+test: smoke  ## Rust unit tests after smoke (PROPTEST_CASES=8, ~2min)
+	PROPTEST_CASES=8 cargo test --workspace --lib
 
 # ── Clean ───────────────────────────────────────────────────────────
 

@@ -72,7 +72,7 @@ Tests are organized by feature area in separate files:
 | `concurrency.rs` | Fibers, coroutines, thread transfer |
 | `error_reporting.rs` | Error messages with source locations |
 | `repl_exit_codes.rs` | REPL exit code behavior |
-| `coroutines.rs` | Coroutine primitives (coro/resume) |
+| ~~`coroutines.rs`~~ | Migrated to `tests/elle/coroutines.lisp` |
 | `lexical_scope.rs` | Lexical scoping and closures |
 | `new_pipeline.rs` | New pipeline features |
 | `new_pipeline_property.rs` | Property-based pipeline tests |
@@ -83,11 +83,11 @@ Tests are organized by feature area in separate files:
 | `effect_enforcement.rs` | Effect system enforcement |
 | `effect_unsoundness.rs` | Effect system edge cases |
 | `jit.rs` | JIT compilation |
-| `fibers.rs` | Fiber operations |
+| ~~`fibers.rs`~~ | Migrated to `tests/elle/fibers.lisp` |
 | `time_property.rs` | Time-based property tests |
 | `time_elapsed.rs` | Time measurement |
 | `hygiene.rs` | Macro hygiene |
-| `destructuring.rs` | Destructuring patterns |
+| ~~`destructuring.rs`~~ | Migrated to `tests/elle/destructuring.lisp` |
 | `blocks.rs` | Block and break control flow |
 | `primitives.rs` | Primitive function behavior |
 | `ffi.rs` | FFI integration |
@@ -100,14 +100,14 @@ Tests are organized by feature area in separate files:
 | `splice.rs` | Splice syntax |
 | `bytes.rs` | Bytes operations |
 | `regex.rs` | Regular expressions |
-| `table_keys.rs` | Table key operations |
+| ~~`table_keys.rs`~~ | Migrated to `tests/elle/table-keys.lisp` |
 | `glob.rs` | Glob patterns |
 | `elle_scripts.rs` | Elle script tests |
 | `environment.rs` | Environment variables |
 | `escape.rs` | Escape analysis |
 | `arena.rs` | Arena allocation |
 | `allocator.rs` | Memory allocation |
-| `parameters.rs` | Dynamic parameters |
+| ~~`parameters.rs`~~ | Migrated to `tests/elle/parameters.lisp` |
 | `ports.rs` | I/O ports |
 | `fn_graph.rs` | Function call graphs |
 | `fn_flow.rs` | Function control flow |

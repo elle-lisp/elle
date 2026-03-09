@@ -22,6 +22,7 @@ Design documents, language references, and contributor guides for Elle.
 | `testing.md` | Testing strategy: decision tree, test categories, property tests, CI structure, running tests | Root AGENTS.md |
 | `pipeline.md` | Compilation pipeline: entry points, VM ownership, expander lifecycle, fixpoint loop, caching | Root AGENTS.md |
 | `debugging.md` | Debugging toolkit: introspection primitives, time API, effect system, memory profiling | Root AGENTS.md |
+| `oddities.md` | Intentional design choices that look wrong: nil vs empty list, comment/splice syntax, mutation, collection literals | Root AGENTS.md |
 
 ### Design Documents
 
@@ -117,9 +118,10 @@ Root AGENTS.md references these docs:
 | `macros.md` | 334 | Macro system design |
 | `except.md` | 196 | Exception handling |
 | `cookbook.md` | 647 | Recipes for common changes |
-| `testing.md` | 455 | Testing strategy |
+| `testing.md` | 472 | Testing strategy |
 | `pipeline.md` | 256 | Compilation pipeline |
-| `debugging.md` | 206 | Debugging toolkit |
+| `debugging.md` | 220 | Debugging toolkit |
+| `oddities.md` | 280 | Intentional design oddities |
 | `effects.md` | 761 | Effect system design |
 | `fibers.md` | 312 | Fiber architecture |
 | `ffi.md` | 455 | FFI design |

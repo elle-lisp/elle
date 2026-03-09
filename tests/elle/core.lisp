@@ -717,3 +717,56 @@
 
 # NOTE: halt tests stay in Rust — halt terminates the entire program,
 # so it cannot be tested in a script that runs multiple assertions.
+# NOTE: error message content test (issue #300) stays in Rust — requires
+# checking that error strings contain specific substrings.
+
+# ============================================================================
+# Float precision tests (migrated from integration/core.rs)
+# ============================================================================
+
+# test_int_float_mixing
+(assert-true (< (abs (- (+ 1 2.5) 3.5)) 0.0000000001) "int+float mixing: 1+2.5=3.5")
+(assert-true (< (abs (- (* 2 3.5) 7.0)) 0.0000000001) "int*float mixing: 2*3.5=7.0")
+
+# test_min_max_float
+(assert-true (< (abs (- (min 1.5 2 0.5) 0.5)) 0.0000000001) "min float: min(1.5,2,0.5)=0.5")
+
+# test_abs_float
+(assert-true (< (abs (- (abs -3.5) 3.5)) 0.0000000001) "abs float: abs(-3.5)=3.5")
+
+# test_type_conversions_float
+(assert-true (< (abs (- (float 5) 5.0)) 0.0000000001) "float conversion: (float 5)=5.0")
+
+# test_sqrt
+(assert-eq (sqrt 4) 2.0 "sqrt 4 = 2.0")
+(assert-eq (sqrt 9) 3.0 "sqrt 9 = 3.0")
+(assert-true (< (abs (- (sqrt 16.0) 4.0)) 0.0001) "sqrt 16.0 ≈ 4.0")
+
+# test_trigonometric
+(assert-true (< (abs (sin 0)) 0.0001) "sin(0) ≈ 0")
+(assert-true (< (abs (- (cos 0) 1.0)) 0.0001) "cos(0) ≈ 1")
+(assert-true (< (abs (tan 0)) 0.0001) "tan(0) ≈ 0")
+
+# test_log_functions
+(assert-true (< (abs (log 1)) 0.0001) "log(1) ≈ 0")
+(assert-true (< (abs (- (log 8 2) 3.0)) 0.0001) "log(8,2) ≈ 3")
+
+# test_exp
+(assert-true (< (abs (- (exp 0) 1.0)) 0.0001) "exp(0) ≈ 1")
+(assert-true (< (abs (- (exp 1) 2.718281828)) 0.0001) "exp(1) ≈ e")
+
+# test_pow
+(assert-eq (pow 2 3) 8 "pow 2 3 = 8")
+(assert-true (< (abs (- (pow 2 -1) 0.5)) 0.0001) "pow(2,-1) ≈ 0.5")
+(assert-true (< (abs (- (pow 2.0 3.0) 8.0)) 0.0001) "pow(2.0,3.0) ≈ 8.0")
+
+# test_math_constants
+(assert-true (< (abs (- (pi) 3.14159265)) 0.0001) "pi ≈ 3.14159")
+(assert-true (< (abs (- (e) 2.71828182)) 0.0001) "e ≈ 2.71828")
+
+# ============================================================================
+# Stress tests (migrated from integration/core.rs)
+# ============================================================================
+
+# test_deep_arithmetic — 50 nested additions
+(assert-eq (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ 1 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 51 "deep arithmetic: 50 nested additions")

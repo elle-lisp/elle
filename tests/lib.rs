@@ -9,6 +9,3 @@ mod integration {
 mod property {
     include!("property/mod.rs");
 }
-mod elle_scripts {
-    include!("elle/mod.rs");
-}

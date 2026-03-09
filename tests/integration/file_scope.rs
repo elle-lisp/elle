@@ -243,10 +243,10 @@ fn test_eval_file_module_closure_callable() {
 
 #[test]
 fn test_import_file_returns_closure() {
-    // import-file on test-modules/test.lisp returns a closure (the last
+    // import-file on tests/modules/test.lisp returns a closure (the last
     // expression in the file). Under compile_file, the file's letrec body
     // is the last expression, which is `(fn [] {...})`.
-    let code = r#"(import-file "test-modules/test.lisp")"#;
+    let code = r#"(import-file "tests/modules/test.lisp")"#;
     let result = eval_file_source_with_stdlib(code).unwrap();
     assert!(
         result.is_closure(),
@@ -259,7 +259,7 @@ fn test_import_file_returns_closure() {
 fn test_import_file_closure_returns_exports() {
     // Calling the closure returned by import-file yields the exports struct.
     let code = r#"
-        (def exports ((import-file "test-modules/test.lisp")))
+        (def exports ((import-file "tests/modules/test.lisp")))
         (get exports :test-var)
     "#;
     let result = eval_file_source_with_stdlib(code).unwrap();
@@ -271,7 +271,7 @@ fn test_import_file_destructure_exports() {
     // Destructuring the closure result gives access to individual exports.
     let code = r#"
         (def {:test-var tv :test-string ts}
-          ((import-file "test-modules/test.lisp")))
+          ((import-file "tests/modules/test.lisp")))
         (list tv ts)
     "#;
     let result = eval_file_source_with_stdlib(code).unwrap();
@@ -566,8 +566,8 @@ fn test_import_file_twice_reruns_module() {
     // If import-file caches, both imports share the same counter.
     let result = eval_file_source_with_stdlib(
         r#"
-        (def {:inc inc1 :count count1} ((import-file "test-modules/counter.lisp")))
-        (def {:inc inc2 :count count2} ((import-file "test-modules/counter.lisp")))
+         (def {:inc inc1 :count count1} ((import-file "tests/modules/counter.lisp")))
+         (def {:inc inc2 :count count2} ((import-file "tests/modules/counter.lisp")))
         (inc1)
         (inc1)
         (inc1)

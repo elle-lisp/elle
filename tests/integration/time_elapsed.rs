@@ -5,7 +5,7 @@
 // - Stopwatches maintain monotonicity across multiple samples
 // - time/elapsed captures the thunk's return value
 
-use crate::common::eval_source;
+use crate::common::eval_reuse;
 use elle::Value;
 use proptest::prelude::*;
 
@@ -43,7 +43,7 @@ proptest! {
               (first (rest result)))
         "#;
 
-        let result = eval_source(expr);
+        let result = eval_reuse(expr);
         prop_assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
         let elapsed = result.unwrap();
@@ -65,7 +65,7 @@ fn elapsed_time_captures_result() {
           (first result))
     "#;
 
-    let result = eval_source(expr);
+    let result = eval_reuse(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
     assert_eq!(result.unwrap(), Value::int(42));
 }
@@ -87,7 +87,7 @@ fn stopwatch_samples_are_monotonic() {
           samples)
     "#;
 
-    let result = eval_source(expr);
+    let result = eval_reuse(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
     let samples = extract_float_list(result.unwrap());
