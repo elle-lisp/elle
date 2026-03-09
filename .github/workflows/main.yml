@@ -187,6 +187,10 @@ jobs:
         run: cargo bench --bench benchmarks -- --sample-size 10 --warm-up-time 1 --measurement-time 2 --nresamples 100 --output-format bencher | tee output.txt
         env:
           RAYON_NUM_THREADS: 1
+      - name: Run memory benchmarks
+        run: cargo bench --bench memory | tee memory-output.txt
+        env:
+          RAYON_NUM_THREADS: 1
       - name: Upload benchmark reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -194,7 +198,7 @@ jobs:
           name: criterion-reports
           path: target/criterion/
           retention-days: 30
-      - name: Store benchmark result
+      - name: Store Criterion benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: Elle Benchmarks
@@ -203,4 +207,14 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           benchmark-data-dir-path: dev/bench
+          gh-pages-branch: gh-pages
+      - name: Store memory benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Elle Memory Benchmarks
+          tool: cargo
+          output-file-path: memory-output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          benchmark-data-dir-path: dev/bench/memory
           gh-pages-branch: gh-pages
