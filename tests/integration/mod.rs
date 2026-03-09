@@ -2,9 +2,7 @@
 mod core {
     include!("core.rs");
 }
-mod concurrency {
-    include!("concurrency.rs");
-}
+// concurrency tests migrated to tests/elle/concurrency.lisp
 mod error_reporting {
     include!("error_reporting.rs");
 }
@@ -46,17 +44,13 @@ mod time_elapsed {
 mod blocks {
     include!("blocks.rs");
 }
-mod primitives {
-    include!("primitives.rs");
-}
+// primitives tests migrated to tests/elle/primitives.lisp
 // ffi tests migrated to tests/elle/ffi.lisp
 // Keeping only epsilon tolerance and error message tests in Rust
 mod ffi {
     include!("ffi.rs");
 }
-mod bracket_syntax {
-    include!("bracket_errors.rs");
-}
+// bracket_errors tests migrated to tests/elle/brackets.lisp
 mod dispatch {
     include!("dispatch.rs");
 }
@@ -73,23 +67,13 @@ mod buffer {
     include!("buffer.rs");
 }
 // splice tests migrated to tests/elle/splice.lisp
-mod bytes {
-    include!("bytes.rs");
-}
-mod regex {
-    include!("regex.rs");
-}
-// glob tests migrated to tests/elle/glob.lisp
-// Keeping only plugin availability tests in Rust
-mod glob {
-    include!("glob.rs");
-}
+// bytes/crypto tests migrated to tests/elle/bytes.lisp and tests/elle/plugins/crypto.lisp
+// regex tests migrated to tests/elle/plugins/regex.lisp
+// glob tests migrated to tests/elle/plugins/glob.lisp
 // fn_flow tests migrated to tests/elle/fn-flow.lisp
 // fn_graph tests migrated to tests/elle/fn-graph.lisp
 // table_keys tests migrated to tests/elle/table-keys.lisp
-mod arena {
-    include!("arena.rs");
-}
+// arena tests removed (arena semantics tested in Elle)
 mod escape {
     include!("escape.rs");
 }
@@ -97,9 +81,7 @@ mod allocator {
     include!("allocator.rs");
 }
 // parameters tests migrated to tests/elle/parameters.lisp
-mod ports {
-    include!("ports.rs");
-}
+// ports tests migrated to tests/elle/ports.lisp
 mod io {
     include!("io.rs");
 }
