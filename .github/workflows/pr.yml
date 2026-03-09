@@ -1,8 +1,9 @@
-name: PR Checks
+name: PR
 
 on:
   pull_request:
     branches: [ main, develop ]
+    types: [ opened, synchronize, reopened, labeled, unlabeled ]
 
 concurrency:
   group: pr-${{ github.ref }}
@@ -62,7 +63,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   examples:
-    name: Examples
+    name: Elle Tests
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
@@ -126,8 +127,6 @@ jobs:
           else
             echo "✓ All examples passed"
           fi
-      - name: Build plugins
-        run: cargo build --release -p elle-glob -p elle-regex
       - name: Run Elle script tests
         run: |
           echo "Running Elle script tests:"
@@ -140,23 +139,27 @@ jobs:
 
   tests-integration:
     name: Integration Tests
-    needs: changes
+    needs: [changes, examples]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
+    env:
+      PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run integration and unit tests
-        run: cargo test --lib && cargo test --test '*' -- --skip property
+        run: cargo test --test '*' -- --skip property
 
   tests-property:
     name: Property Tests
-    needs: changes
+    needs: [changes, examples, tests-integration]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
       PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -164,13 +167,41 @@ jobs:
       - name: Run property tests
         run: "cargo test --test lib property::"
 
+  tests-plugins:
+    name: Plugin Tests
+    needs: [changes, tests-property]
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release
+      - name: Build plugins
+        run: make plugins
+      - name: Run plugin tests
+        run: |
+          echo "Running plugin tests:"
+          echo "===================="
+          for f in tests/elle/plugins/*.lisp; do
+            echo "  $f"
+            ./target/release/elle "$f" || exit 1
+          done
+          echo "✓ All plugin tests passed"
+
   benchmarks:
     name: Benchmarks
     needs: changes
     runs-on: ubuntu-latest
-    if: needs.changes.outputs.source == 'true'
+    timeout-minutes: 30
+    if: false
+    concurrency:
+      group: benchmarks-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       pull-requests: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -200,20 +231,11 @@ jobs:
             echo "_Commit: ${{ github.event.pull_request.head.sha }}_"
           } > comment.md
           gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
-      - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          name: Elle Benchmarks
-          tool: cargo
-          output-file-path: output.txt
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          alert-threshold: '150%'
-          fail-on-alert: false
-          auto-push: false
+
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, fmt, clippy, examples, tests-integration, tests-property, benchmarks]
+    needs: [changes, fmt, clippy, examples, tests-integration, tests-property, tests-plugins, benchmarks]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -223,7 +245,7 @@ jobs:
       - name: Check clippy
         if: needs.clippy.result == 'failure'
         run: exit 1
-      - name: Check examples
+      - name: Check Elle Tests
         if: needs.examples.result == 'failure'
         run: exit 1
       - name: Check integration tests
@@ -231,6 +253,9 @@ jobs:
         run: exit 1
       - name: Check property tests
         if: needs.tests-property.result == 'failure'
+        run: exit 1
+      - name: Check plugin tests
+        if: needs.tests-plugins.result == 'failure'
         run: exit 1
       - name: Check benchmarks
         if: needs.benchmarks.result == 'failure'

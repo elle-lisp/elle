@@ -1,6 +1,6 @@
 # Elle
 
-[![CI](https://github.com/elle-lisp/elle/actions/workflows/ci.yml/badge.svg)](https://github.com/elle-lisp/elle/actions/workflows/ci.yml)
+[![CI](https://github.com/elle-lisp/elle/actions/workflows/main.yml/badge.svg)](https://github.com/elle-lisp/elle/actions/workflows/main.yml)
 
 Elle is a Lisp. What separates it from other Lisps is the depth of its static analysis: full binding resolution, capture analysis, and effect inference happen at compile time, before any code runs. This gives Elle a sound effect system, fully hygienic macros, colorless concurrency via fibers, and deterministic memory management — all derived from the same analysis pass.
 

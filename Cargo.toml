@@ -9,6 +9,7 @@ edition = "2021"
 
 [dependencies]
 bumpalo = "3"
+mimalloc = "0.1"
 rustc-hash = "2.0"
 smallvec = "1.11"
 libloading = "0.8"
@@ -39,7 +40,7 @@ target-lexicon = "0.13"
 criterion = "0.5"
 proptest = "1.4"
 iai-callgrind = "0.11"
-stats_alloc = "0.1.10"
+stats_alloc = { version = "0.1.10", features = ["nightly"] }
 
 [features]
 default = []

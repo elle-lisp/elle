@@ -81,6 +81,7 @@ pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
 
     proptest::prelude::ProptestConfig {
         cases,
+        max_shrink_iters: 128,
         failure_persistence: Some(Box::new(FileFailurePersistence::Direct(
             "tests/proptest-regressions",
         ))),

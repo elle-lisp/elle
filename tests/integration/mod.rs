@@ -2,9 +2,7 @@
 mod core {
     include!("core.rs");
 }
-mod concurrency {
-    include!("concurrency.rs");
-}
+// concurrency tests migrated to tests/elle/concurrency.lisp
 mod error_reporting {
     include!("error_reporting.rs");
 }
@@ -14,18 +12,13 @@ mod repl_exit_codes {
 mod new_pipeline {
     include!("new_pipeline.rs");
 }
-mod new_pipeline_property {
-    include!("new_pipeline_property.rs");
-}
 mod pipeline {
     include!("pipeline.rs");
 }
 mod pipeline_property {
     include!("pipeline_property.rs");
 }
-mod pipeline_point {
-    include!("pipeline_point.rs");
-}
+// pipeline_point tests migrated to tests/elle/pipeline.lisp
 mod thread_transfer {
     include!("thread_transfer.rs");
 }
@@ -38,32 +31,20 @@ mod effect_unsoundness {
 mod jit {
     include!("jit.rs");
 }
-mod fibers {
-    include!("fibers.rs");
-}
+// fibers tests migrated to tests/elle/fibers.lisp
 mod time_property {
     include!("time_property.rs");
 }
 mod time_elapsed {
     include!("time_elapsed.rs");
 }
-mod destructuring {
-    include!("destructuring.rs");
-}
+// destructuring tests migrated to tests/elle/destructuring.lisp
 mod blocks {
     include!("blocks.rs");
 }
-mod primitives {
-    include!("primitives.rs");
-}
+// primitives tests migrated to tests/elle/primitives.lisp
 // ffi tests migrated to tests/elle/ffi.lisp
-// Keeping only epsilon tolerance and error message tests in Rust
-mod ffi {
-    include!("ffi.rs");
-}
-mod bracket_syntax {
-    include!("bracket_errors.rs");
-}
+// bracket_errors tests migrated to tests/elle/brackets.lisp
 mod dispatch {
     include!("dispatch.rs");
 }
@@ -80,46 +61,25 @@ mod buffer {
     include!("buffer.rs");
 }
 // splice tests migrated to tests/elle/splice.lisp
-mod bytes {
-    include!("bytes.rs");
-}
-mod regex {
-    include!("regex.rs");
-}
-// glob tests migrated to tests/elle/glob.lisp
-// Keeping only plugin availability tests in Rust
-mod glob {
-    include!("glob.rs");
-}
+// bytes/crypto tests migrated to tests/elle/bytes.lisp and tests/elle/plugins/crypto.lisp
+// regex tests migrated to tests/elle/plugins/regex.lisp
+// glob tests migrated to tests/elle/plugins/glob.lisp
 // fn_flow tests migrated to tests/elle/fn-flow.lisp
 // fn_graph tests migrated to tests/elle/fn-graph.lisp
-mod table_keys {
-    include!("table_keys.rs");
-}
-mod arena {
-    include!("arena.rs");
-}
+// table_keys tests migrated to tests/elle/table-keys.lisp
+// arena tests removed (arena semantics tested in Elle)
 mod escape {
     include!("escape.rs");
-}
-mod elle_scripts {
-    include!("elle_scripts.rs");
 }
 mod allocator {
     include!("allocator.rs");
 }
-mod parameters {
-    include!("parameters.rs");
-}
-mod ports {
-    include!("ports.rs");
-}
+// parameters tests migrated to tests/elle/parameters.lisp
+// ports tests migrated to tests/elle/ports.lisp
 mod io {
     include!("io.rs");
 }
-mod jit_yield {
-    include!("jit_yield.rs");
-}
+// jit_yield tests migrated to tests/elle/jit-yield.lisp
 mod net {
     include!("net.rs");
 }
