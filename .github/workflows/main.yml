@@ -77,7 +77,7 @@ jobs:
              echo "✓ All examples passed"
            fi
       - name: Build plugins
-        run: cargo build --release -p elle-glob -p elle-regex
+        run: make plugins
       - name: Run Elle script tests
         run: |
           echo "Running Elle script tests:"
