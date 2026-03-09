@@ -99,9 +99,6 @@ mod arena {
 mod escape {
     include!("escape.rs");
 }
-mod elle_scripts {
-    include!("elle_scripts.rs");
-}
 mod allocator {
     include!("allocator.rs");
 }
