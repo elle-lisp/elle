@@ -231,17 +231,7 @@ jobs:
             echo "_Commit: ${{ github.event.pull_request.head.sha }}_"
           } > comment.md
           gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
-      - name: Store benchmark result
-        if: false
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          name: Elle Benchmarks
-          tool: cargo
-          output-file-path: output.txt
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          alert-threshold: '150%'
-          fail-on-alert: false
-          auto-push: false
+
 
   all-checks:
     name: All Checks Passed
