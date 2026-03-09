@@ -194,12 +194,14 @@ jobs:
     name: Benchmarks
     needs: changes
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: needs.changes.outputs.source == 'true' && contains(github.event.pull_request.labels.*.name, 'performance')
     concurrency:
       group: benchmarks-${{ github.ref }}
       cancel-in-progress: false
     permissions:
       pull-requests: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
