@@ -295,7 +295,12 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
 /// Table/struct get with silent nil: returns nil if key missing or wrong type.
 /// Operand: u16 constant pool index (keyword key).
 /// Used by destructuring — missing keys become nil, no errors.
-pub(crate) fn handle_table_get_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
+pub(crate) fn handle_table_get_or_nil(
+    vm: &mut VM,
+    bytecode: &[u8],
+    ip: &mut usize,
+    constants: &[Value],
+) {
     let const_idx = vm.read_u16(bytecode, ip) as usize;
     let key_value = constants[const_idx];
     let val = vm

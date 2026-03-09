@@ -2,7 +2,12 @@ use super::core::VM;
 use crate::value::{Closure, Value};
 use std::rc::Rc;
 
-pub(crate) fn handle_make_closure(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
+pub(crate) fn handle_make_closure(
+    vm: &mut VM,
+    bytecode: &[u8],
+    ip: &mut usize,
+    constants: &[Value],
+) {
     let idx = vm.read_u16(bytecode, ip) as usize;
     let num_upvalues = vm.read_u8(bytecode, ip) as usize;
 
