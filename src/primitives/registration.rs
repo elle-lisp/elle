@@ -4,21 +4,24 @@ use crate::vm::VM;
 
 use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
 use super::{
-    allocator, arithmetic, array, bitwise, buffer, bytes, cell, chan, comparison, concurrency,
-    convert, coroutines, debug, display, ffi, fibers, fileio, format, io, json, list, logic, math,
-    meta, modules, net, package, parameters, path, ports, process, read, sets, sort, stream,
-    string, structs, table, time, types,
+    allocator, arena, arithmetic, array, bitwise, buffer, bytes, calling, cell, chan, comparison,
+    concurrency, convert, coroutines, debug, disassembly, display, fibers, fileio, format,
+    introspection, io, json, list, loading, logic, math, memory, meta, modules, net, package,
+    parameters, path, ports, process, read, sets, sort, stream, string, structs, table, time,
+    types,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
 /// array; this list is the single place that enumerates them.
 pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     allocator::PRIMITIVES,
+    arena::PRIMITIVES,
     arithmetic::PRIMITIVES,
     array::PRIMITIVES,
     bitwise::PRIMITIVES,
     buffer::PRIMITIVES,
     bytes::PRIMITIVES,
+    calling::PRIMITIVES,
     cell::PRIMITIVES,
     chan::PRIMITIVES,
     comparison::PRIMITIVES,
@@ -26,16 +29,19 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     concurrency::PRIMITIVES,
     coroutines::PRIMITIVES,
     debug::PRIMITIVES,
+    disassembly::PRIMITIVES,
     display::PRIMITIVES,
-    ffi::PRIMITIVES,
     fibers::PRIMITIVES,
     fileio::PRIMITIVES,
     format::PRIMITIVES,
+    introspection::PRIMITIVES,
     io::PRIMITIVES,
     json::PRIMITIVES,
     list::PRIMITIVES,
+    loading::PRIMITIVES,
     logic::PRIMITIVES,
     math::PRIMITIVES,
+    memory::PRIMITIVES,
     meta::PRIMITIVES,
     modules::PRIMITIVES,
     net::PRIMITIVES,
