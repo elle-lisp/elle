@@ -3,21 +3,6 @@
 use crate::formatter::{format_code, FormatterConfig};
 use serde_json::{json, Value};
 
-/// Result of a formatting operation
-pub(crate) struct TextEdit {
-    pub range: Range,
-    pub new_text: String,
-}
-
-/// A range in a document
-#[derive(Debug, Clone)]
-pub(crate) struct Range {
-    pub start_line: u32,
-    pub start_character: u32,
-    pub end_line: u32,
-    pub end_character: u32,
-}
-
 /// Format an entire document
 pub(crate) fn format_document(
     source: &str,

@@ -34,6 +34,7 @@ pub(crate) fn load_source_for_loc(loc: &SourceLoc) -> Option<String> {
 ///  5 | (+ x 1)
 ///    |    ^
 /// ```
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn format_source_context(source: &str, location: &SourceLoc) -> String {
     if location.is_unknown() {
         return String::new();

@@ -151,7 +151,7 @@ by code pointer, stored in `FFISubsystem`.
 
 Top-level FFI state. Holds `libraries: HashMap<u32, LibraryHandle>` and
 `callbacks: CallbackStore`. Methods: `load_library`, `load_self`,
-`get_library`, `loaded_libraries`, `callbacks_mut`.
+`get_library`, `callbacks_mut`.
 
 ## Invariants
 

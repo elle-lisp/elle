@@ -14,12 +14,14 @@ pub(crate) trait RewriteRule {
 }
 
 /// Rename symbols by exact match. Data-driven from a HashMap.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct RenameSymbol {
     rule_name: String,
     renames: HashMap<String, String>,
 }
 
 impl RenameSymbol {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(name: impl Into<String>, renames: HashMap<String, String>) -> Self {
         RenameSymbol {
             rule_name: name.into(),

@@ -57,16 +57,19 @@ impl SharedAllocator {
         self.bump.reset();
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn len(&self) -> usize {
         self.alloc_count
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_empty(&self) -> bool {
         self.alloc_count == 0
     }
 
     /// Access the underlying bump allocator.
     /// Needed for future `active_allocator` tightening phases.
+    #[allow(dead_code)]
     pub fn bump(&self) -> &bumpalo::Bump {
         &self.bump
     }

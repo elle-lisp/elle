@@ -21,6 +21,7 @@ pub struct MacroDef {
     pub params: Vec<String>,
     pub rest_param: Option<String>,
     pub template: Syntax,
+    #[allow(dead_code)] // set during construction; read access planned for hygiene
     pub(crate) definition_scope: ScopeId,
 }
 

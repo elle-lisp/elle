@@ -14,16 +14,14 @@ use std::collections::HashMap;
 
 /// Document state: source + diagnostics + symbol index
 pub(crate) struct DocumentState {
-    pub uri: String,
     pub source_text: String,
     pub symbol_index: SymbolIndex,
     pub diagnostics: Vec<Diagnostic>,
 }
 
 impl DocumentState {
-    fn new(uri: String) -> Self {
+    fn new() -> Self {
         Self {
-            uri,
             source_text: String::new(),
             symbol_index: SymbolIndex::new(),
             diagnostics: Vec::new(),
@@ -62,7 +60,7 @@ impl CompilerState {
 
     /// Handle document open
     pub fn on_document_open(&mut self, uri: String, text: String) {
-        let mut doc = DocumentState::new(uri.clone());
+        let mut doc = DocumentState::new();
         doc.update(text);
         self.documents.insert(uri, doc);
     }
@@ -129,11 +127,6 @@ impl CompilerState {
     /// Get the VM's documentation map
     pub fn docs(&self) -> &std::collections::HashMap<String, Doc> {
         &self.vm.docs
-    }
-
-    /// Get all open documents
-    pub(crate) fn documents(&self) -> impl Iterator<Item = &DocumentState> {
-        self.documents.values()
     }
 }
 

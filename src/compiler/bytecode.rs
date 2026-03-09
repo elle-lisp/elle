@@ -228,19 +228,11 @@ pub enum Instruction {
     IsSetMut,
 }
 
-/// Inline cache entry for function lookups
-#[derive(Debug, Clone)]
-pub(crate) struct CacheEntry {
-    pub symbol_id: u32,
-    pub cached_value: Option<Value>,
-}
-
 /// Compiled bytecode with constants
 #[derive(Debug, Clone)]
 pub struct Bytecode {
     pub instructions: Vec<u8>,
     pub constants: Vec<Value>,
-    pub(crate) inline_caches: std::collections::HashMap<usize, CacheEntry>,
     /// Symbol ID → name mapping for cross-thread portability.
     /// When bytecode is sent to a new thread, symbol IDs may differ.
     /// This map allows remapping globals to the correct IDs.
@@ -255,7 +247,6 @@ impl Bytecode {
         Bytecode {
             instructions: Vec::new(),
             constants: Vec::new(),
-            inline_caches: std::collections::HashMap::new(),
             symbol_names: std::collections::HashMap::new(),
             location_map: LocationMap::new(),
         }

@@ -59,14 +59,6 @@ impl FFISubsystem {
         self.libraries.get(&id)
     }
 
-    /// List all loaded libraries.
-    pub fn loaded_libraries(&self) -> Vec<(u32, String)> {
-        self.libraries
-            .iter()
-            .map(|(id, lib)| (*id, lib.path.clone()))
-            .collect()
-    }
-
     /// Get mutable access to the callback store.
     pub fn callbacks_mut(&mut self) -> &mut CallbackStore {
         &mut self.callbacks
