@@ -3,14 +3,26 @@ use elle::{compile_file, init_stdlib, register_primitives, SymbolTable, Value, V
 
 /// Evaluate Elle source with `execute_scheduled` so SIG_IO is handled.
 fn eval_scheduled(input: &str) -> Result<Value, String> {
+    let (mut vm, mut symbols) = setup_scheduled();
+    run_scheduled(input, &mut vm, &mut symbols)
+}
+
+/// Initialize a VM with primitives and stdlib for scheduled execution.
+/// This is the expensive part (~4s) — call it before spawning helper threads.
+fn setup_scheduled() -> (VM, SymbolTable) {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     let _effects = register_primitives(&mut vm, &mut symbols);
     set_vm_context(&mut vm as *mut VM);
     set_symbol_table(&mut symbols as *mut SymbolTable);
     init_stdlib(&mut vm, &mut symbols);
-    let result = compile_file(input, &mut symbols)?;
-    let value = vm.execute_scheduled(&result.bytecode, &symbols)?;
+    (vm, symbols)
+}
+
+/// Compile and execute Elle source on an already-initialized VM.
+fn run_scheduled(input: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<Value, String> {
+    let result = compile_file(input, symbols)?;
+    let value = vm.execute_scheduled(&result.bytecode, symbols)?;
     set_vm_context(std::ptr::null_mut());
     Ok(value)
 }
@@ -36,6 +48,9 @@ fn test_tcp_echo_roundtrip() {
     // Listen on OS-assigned port, spawn a thread that connects and writes,
     // accept in Elle, read the line.
     use std::io::Write;
+
+    // Do expensive VM setup before reserving the port.
+    let (mut vm, mut symbols) = setup_scheduled();
 
     // Create listener in Rust to get the port number
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -67,7 +82,7 @@ fn test_tcp_echo_roundtrip() {
         port = port
     );
 
-    let result = eval_scheduled(&code).unwrap();
+    let result = run_scheduled(&code, &mut vm, &mut symbols).unwrap();
     result.with_string(|s| assert_eq!(s, "hello-net")).unwrap();
 
     connect_thread.join().unwrap();
@@ -76,10 +91,10 @@ fn test_tcp_echo_roundtrip() {
 #[test]
 fn test_udp_roundtrip() {
     // Bind two UDP sockets, send from A to B, recv on B.
-    // Strategy: reserve a port with a Rust socket using SO_REUSEADDR,
-    // then bind the same port from Elle (also SO_REUSEADDR). The Rust
-    // thread sends repeatedly until the Elle side receives one packet.
     use std::net::UdpSocket;
+
+    // Do expensive VM setup before reserving the port.
+    let (mut vm, mut symbols) = setup_scheduled();
 
     let sock_b = UdpSocket::bind("127.0.0.1:0").unwrap();
     let addr_b = sock_b.local_addr().unwrap();
@@ -106,7 +121,7 @@ fn test_udp_roundtrip() {
         port = port_b
     );
 
-    let result = eval_scheduled(&code).unwrap();
+    let result = run_scheduled(&code, &mut vm, &mut symbols).unwrap();
     // Result is a struct with :data, :addr, :port
     let fields = result.as_struct().expect("expected struct result");
     use elle::value::heap::TableKey;
@@ -120,6 +135,9 @@ fn test_udp_roundtrip() {
 #[test]
 fn test_unix_echo_roundtrip() {
     use std::io::Write;
+
+    // Do expensive VM setup before creating the socket.
+    let (mut vm, mut symbols) = setup_scheduled();
 
     let sock_path = format!("/tmp/elle-test-net-unix-{}.sock", std::process::id());
     let _ = std::fs::remove_file(&sock_path);
@@ -149,7 +167,7 @@ fn test_unix_echo_roundtrip() {
         path = sock_path
     );
 
-    let result = eval_scheduled(&code).unwrap();
+    let result = run_scheduled(&code, &mut vm, &mut symbols).unwrap();
     result.with_string(|s| assert_eq!(s, "unix-hello")).unwrap();
 
     connect_thread.join().unwrap();
@@ -159,6 +177,9 @@ fn test_unix_echo_roundtrip() {
 #[test]
 fn test_tcp_graceful_shutdown() {
     use std::io::Write;
+
+    // Do expensive VM setup before reserving the port.
+    let (mut vm, mut symbols) = setup_scheduled();
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -191,7 +212,7 @@ fn test_tcp_graceful_shutdown() {
         port = port
     );
 
-    let result = eval_scheduled(&code).unwrap();
+    let result = run_scheduled(&code, &mut vm, &mut symbols).unwrap();
     result
         .with_string(|s| assert_eq!(s, "before-shutdown"))
         .unwrap();
