@@ -8,7 +8,7 @@ elle:  ## Build the Elle binary (release)
 	cargo build --release -p elle
 
 plugins:  ## Build all native plugins (.so)
-	@for p in regex sqlite crypto random selkie; do \
+	@for p in glob regex sqlite crypto random selkie; do \
 		cargo build --release -p elle-$$p; \
 	done
 

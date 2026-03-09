@@ -120,12 +120,14 @@ jobs:
           echo "=============================================="
           echo "Results: $PASSED/$TOTAL passed, $FAILED failed"
 
-           if [ $FAILED -gt 0 ]; then
-             echo "✗ Some examples failed"
-             exit 1
-           else
-             echo "✓ All examples passed"
-            fi
+          if [ $FAILED -gt 0 ]; then
+            echo "✗ Some examples failed"
+            exit 1
+          else
+            echo "✓ All examples passed"
+          fi
+      - name: Build plugins
+        run: cargo build --release -p elle-glob -p elle-regex
       - name: Run Elle script tests
         run: |
           echo "Running Elle script tests:"
