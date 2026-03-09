@@ -11,7 +11,7 @@
 # ============================================================================
 
 # import-file tests
-(assert-true (fn () (import-file "test-modules/test.lisp"))
+(assert-true (fn () (import-file "tests/modules/test.lisp"))
   "import-file with valid file succeeds")
 (assert-err (fn () (import-file "./lib/nonexistent.lisp"))
   "import-file with non-existent relative path fails")
@@ -64,7 +64,7 @@
 # module and arithmetic combination
 (assert-eq (+ 1 2) 3
   "arithmetic before import-file")
-(assert-true (fn () (import-file "test-modules/test.lisp"))
+(assert-true (fn () (import-file "tests/modules/test.lisp"))
   "import-file succeeds")
 (assert-eq (+ 1 2) 3
   "arithmetic after import-file")
@@ -80,7 +80,7 @@
   "debug-print with arrays")
 
 # phase 5 feature availability
-(assert-true (fn () (import-file "test-modules/test.lisp"))
+(assert-true (fn () (import-file "tests/modules/test.lisp"))
   "import-file available")
 (assert-true (fn () (spawn (fn () 42)))
   "spawn available")
@@ -257,30 +257,30 @@
   "sleep result cannot be used in arithmetic")
 
 # import-file returns last value
-(assert-true (fn () (let ((result (import-file "test-modules/test.lisp")))
+(assert-true (fn () (let ((result (import-file "tests/modules/test.lisp")))
                       (list? result)))
   "import-file returns list")
 
 # import-file with variable definitions
-(assert-true (fn () (import-file "test-modules/test.lisp"))
+(assert-true (fn () (import-file "tests/modules/test.lisp"))
   "import-file with variable definitions")
 
 # import multiple files sequentially
-(assert-true (fn () (import-file "test-modules/test.lisp"))
+(assert-true (fn () (import-file "tests/modules/test.lisp"))
   "first import-file succeeds")
-(assert-true (fn () (import-file "test-modules/test.lisp"))
+(assert-true (fn () (import-file "tests/modules/test.lisp"))
   "second import-file succeeds")
 
 # import same file twice idempotent
-(assert-true (fn () (let ((r1 (import-file "test-modules/test.lisp"))
-                          (r2 (import-file "test-modules/test.lisp")))
+(assert-true (fn () (let ((r1 (import-file "tests/modules/test.lisp"))
+                          (r2 (import-file "tests/modules/test.lisp")))
                       (and (list? r1) (= r2 true))))
   "import-file idempotent: first returns list, second returns true")
 
 # import-file with relative paths
-(assert-true (fn () (import-file "./test-modules/test.lisp"))
+(assert-true (fn () (import-file "./tests/modules/test.lisp"))
   "import-file with ./ relative path")
-(assert-true (fn () (import-file "test-modules/test.lisp"))
+(assert-true (fn () (import-file "tests/modules/test.lisp"))
   "import-file with relative path")
 
 # ============================================================================

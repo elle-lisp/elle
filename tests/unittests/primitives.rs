@@ -1071,7 +1071,7 @@ fn test_import_file_with_valid_file() {
     use elle::{register_primitives, SymbolTable, VM};
 
     // Use the test module in the repo
-    let module_path = "test-modules/test.lisp";
+    let module_path = "tests/modules/test.lisp";
 
     // Set up VM and register primitives
     let mut vm = VM::new();
@@ -1116,7 +1116,7 @@ fn test_import_file_with_invalid_file() {
 fn test_import_file_circular_dependency_prevention() {
     use elle::{register_primitives, SymbolTable, VM};
 
-    let module_path = "test-modules/test.lisp";
+    let module_path = "tests/modules/test.lisp";
 
     // Set up VM
     let mut vm = VM::new();
