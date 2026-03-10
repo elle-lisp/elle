@@ -30,7 +30,7 @@ pub enum HirPattern {
         rest: Option<Box<HirPattern>>,
     },
 
-    /// Match a tuple \[...\] pattern with optional rest (emits IsArray guard)
+    /// Match an array \[...\] pattern with optional rest (emits IsArray guard)
     Tuple {
         elements: Vec<HirPattern>,
         rest: Option<Box<HirPattern>>,
@@ -47,7 +47,7 @@ pub enum HirPattern {
         entries: Vec<(PatternKey, HirPattern)>,
     },
 
-    /// Match a mutable struct @{...} by keyword or symbol keys (emits IsTable guard)
+    /// Match a mutable @struct @{...} by keyword or symbol keys (emits IsTable guard)
     Table {
         entries: Vec<(PatternKey, HirPattern)>,
     },

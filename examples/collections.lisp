@@ -4,8 +4,8 @@
 #
 # We build a contact book from scratch, exercising every collection type
 # and operation the language offers. Contacts are immutable structs, the
-# book is a mutable table, and we query, format, and export it using
-# lists, arrays, tuples, strings, and grapheme-aware text processing.
+# book is a mutable @struct, and we query, format, and export it using
+# lists, arrays, arrays, strings, and grapheme-aware text processing.
 #
 # Demonstrates:
 #   Literal syntax    — [array]  @[array]  {struct}  @{struct}  "string"  @"string"
@@ -15,7 +15,7 @@
 #   Iteration         — each ... in ... (prelude macro)
 #   Destructuring     — {:key var} and [a b] patterns in let/def/fn
 #   Threading macros  — ->  ->>
-#   Splice            — ;expr for spreading arrays/tuples into calls
+#   Splice            — ;expr for spreading arrays into calls
 #   Key-value ops     — put, del, keys, values, has?
 #   List ops          — cons, first, rest, reverse, take, drop, last, butlast
 #   Array mutation    — push, pop, insert, remove
@@ -42,12 +42,12 @@
 (def carol {:name "Carol" :email "carol@example.com" :tags [:ops :lead]})
 (def dave  {:name "Dave"  :email "dave@example.com"  :tags [:ops :dev]})
 
-# The book is a mutable table — entries come and go.
+# The book is a mutable @struct — entries come and go.
 (def book @{})
 
-# put on a mutable table mutates it in place and returns the same object.
+# put on a mutable @struct mutates it in place and returns the same object.
 (def same-book (put book "alice" alice))
-(assert-eq same-book book "put on table: same object returned")
+(assert-eq same-book book "put on @struct: same object returned")
 
 # put on an immutable struct returns a NEW struct — original unchanged.
 (def alice-with-phone (put alice :phone "555-0100"))
@@ -69,13 +69,13 @@
 # get works on every collection type with the same interface.
 
 # By string key (@struct)
-(assert-eq (get (get book "alice") :name) "Alice" "get: table → struct")
+(assert-eq (get (get book "alice") :name) "Alice" "get: @struct → struct")
 
 # By keyword (struct)
 (assert-eq (get alice :email) "alice@example.com" "get: struct by keyword")
 
 # By index (@array)
-(assert-eq (get (get alice :tags) 0) :dev "get: tuple by index")
+(assert-eq (get (get alice :tags) 0) :dev "get: array by index")
 
 # By index (string — returns a grapheme cluster)
 (assert-eq (get "hello" 0) "h" "get: string by index")
@@ -94,7 +94,7 @@
 # 3. Destructuring contacts
 # ========================================
 #
-# Structs destructure by key; tuples by position.
+# Structs destructure by key; arrays by position.
 
 # Unpack a contact's fields
 (def {:name aname :email aemail :tags atags}
@@ -162,11 +162,11 @@
 (display "  total tags across all contacts: ") (print total-tags)
 (assert-true (> total-tags 0) "each: summed tag counts")
 
-# each over a tuple (alice's tags)
+# each over an array (alice's tags)
 (var tag-count 0)
 (each t in (get alice :tags)
   (assign tag-count (+ tag-count 1)))
-(assert-eq tag-count 2 "each over tuple")
+(assert-eq tag-count 2 "each over array")
 
 # each over a string (by grapheme cluster)
 (var char-count 0)
@@ -212,7 +212,7 @@
 # ========================================
 
 (defn format-tags [tags]
-  "Format a tag tuple as [dev, lead]."
+  "Format a tag array as [dev, lead]."
   (var parts (list))
   (each t in tags
     (assign parts (append parts (list (string t)))))
@@ -389,13 +389,13 @@
 # 13. Splice — spreading into calls and constructors
 # ========================================
 #
-# ;expr spreads an array or tuple into a function call's arguments.
+# ;expr spreads an array into a function call's arguments.
 
 (def nums @[1 2 3])
 (assert-eq (+ ;nums) 6 "splice: spread array into +")
 
 (def more [10 20])
-(assert-eq (+ ;more) 30 "splice: spread tuple into +")
+(assert-eq (+ ;more) 30 "splice: spread array into +")
 
 # Splice in data constructors
 (def base @[1 2])
@@ -468,7 +468,7 @@
 # Predicates
 (assert-true (set? (set 1 2 3)) "set? on immutable set")
 (assert-true (set? @|1 2 3|) "set? on mutable set")
-(assert-false (set? [1 2 3]) "set? on tuple")
+(assert-false (set? [1 2 3]) "set? on array")
 
 # Type discrimination
 (assert-eq (type-of (set 1 2 3)) :set "type-of immutable set")

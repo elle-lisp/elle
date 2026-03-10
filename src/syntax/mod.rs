@@ -131,11 +131,11 @@ impl Syntax {
         }
     }
 
-    /// Get contents if this is a list or tuple.
+    /// Get contents if this is a list or array.
     ///
     /// Structural positions in special forms (params, bindings, clauses,
     /// arms) accept both `(...)` and `[...]`. Expression-position uses
-    /// of `[...]` remain tuple literals.
+    /// of `[...]` remain array literals.
     pub fn as_list_or_tuple(&self) -> Option<&[Syntax]> {
         match &self.kind {
             SyntaxKind::List(items) | SyntaxKind::Array(items) => Some(items),

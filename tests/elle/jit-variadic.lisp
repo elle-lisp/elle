@@ -37,8 +37,8 @@
 
 ## Test rest arg is a proper list (not NIL)
 (defn check-rest-type (& rest)
-  "Returns a tuple of (list? rest, length rest, empty? rest)."
-  (list (list? rest) (length rest) (empty? rest)))
+   "Returns an array of (list? rest, length rest, empty? rest)."
+   (list (list? rest) (length rest) (empty? rest)))
 
 (assert-eq (check-rest-type) (list true 0 true) "zero rest args: list? true, length 0, empty? true")
 (assert-eq (check-rest-type 1) (list true 1 false) "one rest arg: list? true, length 1, empty? false")

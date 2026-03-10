@@ -635,7 +635,7 @@ request backend execution. Separating them allows:
 (fiber/stack fiber) → array
 
 ;# Dynamic bindings (fiber-scoped state)
-(fiber/env fiber) → table | nil
+(fiber/env fiber) → @struct | nil
 ```
 
 ### Sugar and Aliases
@@ -753,20 +753,20 @@ don't resume. No special syntax or VM support is needed.
 ```janet
 ;# The callee: signals with available recovery options
 (def (safe-divide a b)
-  (if (= b 0)
-    (fiber/signal :error
-      (table :error :division-by-zero
-             :options [:use-value :return-zero]))
-    (/ a b)))
+   (if (= b 0)
+     (fiber/signal :error
+       (@struct :error :division-by-zero
+                :options [:use-value :return-zero]))
+     (/ a b)))
 
 ;# The handler: catches the signal, picks a recovery option
 (def (compute)
-  (let ((f (fiber/new (fn () (safe-divide 10 0)) :error)))
-    (let ((result (fiber/resume f nil)))
-      (if (= (fiber/status f) :suspended)
-        ;# Child is suspended — we can resume it with a recovery choice
-        (fiber/resume f (table :option :use-value :value 1))
-        result))))
+   (let ((f (fiber/new (fn () (safe-divide 10 0)) :error)))
+     (let ((result (fiber/resume f nil)))
+       (if (= (fiber/status f) :suspended)
+         ;# Child is suspended — we can resume it with a recovery choice
+         (fiber/resume f (@struct :option :use-value :value 1))
+         result))))
 ```
 
 

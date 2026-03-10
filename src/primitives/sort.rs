@@ -8,7 +8,7 @@ use crate::value::{error_val, list, Value};
 /// Sort a collection of numbers in ascending order.
 ///
 /// Type-preserving: lists return new sorted lists, arrays are mutated
-/// in place and returned, tuples return new sorted tuples.
+/// in place and returned, arrays return new sorted arrays.
 /// All elements must be numbers.
 pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -49,7 +49,7 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]);
     }
 
-    // Tuple — return new sorted tuple
+    // Array — return new sorted array
     if let Some(elems) = args[0].as_array() {
         let mut vec = elems.to_vec();
         for (i, v) in vec.iter().enumerate() {
@@ -262,7 +262,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_sort,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Sort a collection of numbers in ascending order. Type-preserving: arrays mutated in place, lists/tuples return new values.",
+        doc: "Sort a collection of numbers in ascending order. Type-preserving: arrays mutated in place, lists return new values.",
         params: &["coll"],
         category: "collection",
         example: "(sort @[3 1 2]) #=> @[1 2 3]",

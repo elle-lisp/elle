@@ -181,7 +181,7 @@ impl Value {
         alloc(HeapObject::LArrayMut(RefCell::new(elements)))
     }
 
-    /// Create an empty mutable table.
+    /// Create an empty mutable @struct.
     #[inline]
     pub fn struct_mut() -> Self {
         use crate::value::heap::{alloc, HeapObject};
@@ -190,7 +190,7 @@ impl Value {
         alloc(HeapObject::LStructMut(RefCell::new(BTreeMap::new())))
     }
 
-    /// Create a table with initial entries.
+    /// Create an @struct with initial entries.
     #[inline]
     pub fn struct_mut_from(
         entries: std::collections::BTreeMap<crate::value::heap::TableKey, Value>,
@@ -249,7 +249,7 @@ impl Value {
         alloc(HeapObject::LArray(elements))
     }
 
-    /// Create a mutable buffer value.
+    /// Create a mutable @string value.
     #[inline]
     pub fn string_mut(bytes: Vec<u8>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
@@ -264,7 +264,7 @@ impl Value {
         alloc(HeapObject::LBytes(data))
     }
 
-    /// Create a mutable blob value.
+    /// Create a mutable @bytes value.
     #[inline]
     pub fn bytes_mut(data: Vec<u8>) -> Self {
         use crate::value::heap::{alloc, HeapObject};

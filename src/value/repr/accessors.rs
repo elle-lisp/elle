@@ -137,7 +137,7 @@ impl Value {
         self.heap_tag() == Some(HeapTag::LArrayMut)
     }
 
-    /// Check if this is a table.
+    /// Check if this is an @struct.
     #[inline]
     pub fn is_struct_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
@@ -172,7 +172,7 @@ impl Value {
         self.heap_tag() == Some(HeapTag::Fiber)
     }
 
-    /// Check if this is a buffer.
+    /// Check if this is an @string.
     #[inline]
     pub fn is_string_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
@@ -186,7 +186,7 @@ impl Value {
         self.heap_tag() == Some(HeapTag::LBytes)
     }
 
-    /// Check if this is a blob value.
+    /// Check if this is an @bytes value.
     #[inline]
     pub fn is_bytes_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
@@ -266,7 +266,7 @@ impl Value {
 
     /// Compare two string values lexicographically.
     /// Returns None if either value is not a string.
-    /// Note: `with_string` returns None for keywords and buffers,
+    /// Note: `with_string` returns None for keywords and @strings,
     /// so this only matches string-string pairs.
     pub fn compare_str(&self, other: &Value) -> Option<std::cmp::Ordering> {
         self.with_string(|sa| other.with_string(|sb| sa.cmp(sb)))
@@ -308,7 +308,7 @@ impl Value {
         }
     }
 
-    /// Extract as table if this is a table.
+    /// Extract as @struct if this is an @struct.
     #[inline]
     pub fn as_struct_mut(
         &self,
@@ -388,7 +388,7 @@ impl Value {
         }
     }
 
-    /// Extract as array (immutable tuple) if this is one.
+    /// Extract as array (immutable) if this is one.
     #[inline]
     pub fn as_array(&self) -> Option<&[Value]> {
         use crate::value::heap::{deref, HeapObject};
@@ -401,7 +401,7 @@ impl Value {
         }
     }
 
-    /// Check if this value is an array (immutable tuple).
+    /// Check if this value is an array (immutable).
     #[inline]
     pub fn is_array(&self) -> bool {
         self.as_array().is_some()
@@ -447,7 +447,7 @@ impl Value {
         self.heap_tag() == Some(HeapTag::LSetMut)
     }
 
-    /// Extract as buffer if this is a buffer.
+    /// Extract as @string if this is an @string.
     #[inline]
     pub fn as_string_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
         use crate::value::heap::{deref, HeapObject};
@@ -473,7 +473,7 @@ impl Value {
         }
     }
 
-    /// Extract as blob if this is a blob value.
+    /// Extract as @bytes if this is an @bytes value.
     #[inline]
     pub fn as_bytes_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
         use crate::value::heap::{deref, HeapObject};

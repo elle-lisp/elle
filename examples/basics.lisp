@@ -9,9 +9,9 @@
 #   Math             — math/sqrt, math/sin, math/cos, math/pow, math/pi, ...
 #   Comparison/logic — =, <, >, not, and, or (short-circuiting)
 #   Bitwise          — bit/and, bit/or, bit/xor, bit/not, bit/shl, bit/shr
-#   Type conversions — number->string, string->integer, integer, float, ...
+#   Type conversions — number->string, integer, float, ...
 #   Mutability split — [array] vs @[array], {struct} vs @{struct}, "str" vs @"str"
-#   Bytes and blobs  — immutable/mutable binary data
+#   Bytes and @bytes  — immutable/mutable binary data
 #   Boxes            — first-class mutable cells
 #   Equality         — = does structural equality on data, reference on functions
 
@@ -78,7 +78,7 @@
 (assert-true (if 0 true false) "0 is truthy")           # unlike C/Python
 (assert-true (if "" true false) "empty string is truthy")
 (assert-true (if (list) true false) "empty list () is truthy")  # unlike nil!
-(assert-true (if [] true false) "empty tuple is truthy")
+(assert-true (if [] true false) "empty array is truthy")
 (assert-true (if @[] true false) "empty array is truthy")
 (assert-true (if :keyword true false) "keyword is truthy")
 (assert-true (if 'symbol true false) "symbol is truthy")
@@ -191,10 +191,10 @@
 
 # number->string and back
 (display "  42 → \"") (display (number->string 42)) (print "\"")
-(display "  \"42\" → ") (print (string->integer "42"))
+(display "  \"42\" → ") (print (integer "42"))
 (assert-eq (number->string 42) "42" "number->string int")
-(assert-eq (string->integer "42") 42 "string->integer")     # parse string → int
-(assert-eq (string->float "3.14") 3.14 "string->float")     # parse string → float
+(assert-eq (integer "42") 42 "integer from string")          # parse string → int
+(assert-eq (float "3.14") 3.14 "float from string")          # parse string → float
 
 # Generic converters — named after the target type
 (assert-eq (integer 3.7) 3 "integer truncates float")  # truncates, doesn't round
@@ -205,7 +205,7 @@
 (assert-eq (string :hello) "hello" "string keyword (no colon)")
 
 # Round-trip: int → string → int
-(assert-eq (string->integer (number->string 99)) 99 "round-trip int")
+(assert-eq (integer (number->string 99)) 99 "round-trip int")
 
 
 # ========================================
@@ -254,8 +254,8 @@
 # Conversions: string ↔ bytes ↔ @bytes ↔ @string
 (def b2 (string->bytes "hi"))        # string → bytes
 (assert-eq (bytes->string b2) "hi" "round-trip string->bytes->string")
-(def bl2 (bytes->blob b2))          # bytes → @bytes (mutable copy)
-(assert-eq (type bl2) :@bytes "bytes->@bytes")
+(def bl2 (thaw b2))                  # bytes → @bytes (mutable copy)
+(assert-eq (type bl2) :@bytes "thaw bytes to @bytes")
 (def buf (bytes->buffer (string->bytes "test")))  # string → bytes → @string
 (assert-eq (type buf) :@string "bytes->@string")
 
@@ -301,7 +301,7 @@
 # ========================================
 
 # = does structural equality on data types
-(assert-true (= [1 2 3] [1 2 3]) "= on equal tuples")          # same contents → equal
+(assert-true (= [1 2 3] [1 2 3]) "= on equal arrays")          # same contents → equal
 (assert-true (= @[1 2 3] @[1 2 3]) "= on equal arrays (structural)")
 (assert-true (= {:a 1 :b 2} {:a 1 :b 2}) "= on equal structs")
 (assert-true (= "hello" "hello") "= on equal strings")
@@ -313,10 +313,10 @@
 (assert-true (= f f) "same closure is equal to itself")
 
 # Destructuring works on any compound type
-(def [a b c] [10 20 30])            # unpack a tuple into bindings
+(def [a b c] [10 20 30])            # unpack an array into bindings
 (display "  [10 20 30] → a=") (display a) (display " b=") (display b) (display " c=") (print c)
-(assert-eq a 10 "tuple destructure: first")
-(assert-eq c 30 "tuple destructure: third")
+(assert-eq a 10 "array destructure: first")
+(assert-eq c 30 "array destructure: third")
 
 (def {:x px :y py} {:x 5 :y 10})    # unpack a struct by key
 (display "  {:x 5 :y 10} → px=") (display px) (display " py=") (print py)

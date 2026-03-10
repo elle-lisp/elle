@@ -24,7 +24,7 @@
   (string/format "layer{}.{}" i suffix))
 
 (defn init-model [vocab-size]
-  "Initialize all model parameters. Returns a table of named weight matrices."
+   "Initialize all model parameters. Returns an @struct of named weight matrices."
   (let* ([scale (/ 1.0 (sqrt (float *n-embd*)))]
          [model @{:wte (init-weight vocab-size *n-embd* scale)
                   :wpe (init-weight *block-size* *n-embd* scale)

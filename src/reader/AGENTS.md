@@ -89,8 +89,8 @@ The lexer recognizes these delimiters (characters that cannot appear in symbol n
 Keywords are prefixed with `:`. The lexer supports `:@name` syntax for mutable type keywords:
 - `:set` — immutable set type keyword
 - `:@set` — mutable set type keyword
-- `:@array` — mutable array type keyword
-- `:@string` — mutable string (buffer) type keyword
+- `:@array` — mutable @array type keyword
+- `:@string` — mutable @string type keyword
 
 The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
 

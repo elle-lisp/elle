@@ -52,7 +52,7 @@ Result<Value, String>  ← translation boundary
 Internal VM methods return `SignalBits` (or `(SignalBits, usize)` for the
 inner dispatch loop):
 - `SIG_OK` (0): Normal completion. Value in `fiber.signal`.
-- `SIG_ERROR` (1): Error. Error tuple in `fiber.signal` as `[:keyword "message"]`.
+- `SIG_ERROR` (1): Error. Error array in `fiber.signal` as `[:keyword "message"]`.
 - `SIG_YIELD` (2): Fiber yield. Value in `fiber.signal`, suspended frames in `fiber.suspended`.
 - `SIG_RESUME` (8): VM-internal. Fiber primitive requests VM-side execution.
 - `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-signals caught signal.
@@ -62,7 +62,7 @@ inner dispatch loop):
 
 The public `execute_bytecode` method is the translation boundary — it converts
 `SignalBits` to `Result<Value, String>` for external callers. On `SIG_ERROR`,
-it extracts the error tuple from `fiber.signal` and formats the error message.
+it extracts the error struct from `fiber.signal` and formats the error message.
 
 Instruction handlers no longer return `Result<(), String>`. VM bugs panic
 immediately. User errors set `fiber.signal` to `(SIG_ERROR, error_val(kind, msg))`

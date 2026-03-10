@@ -99,7 +99,7 @@ Example: confirming division by zero signals an error with kind
 ```
 (def [ok? err] (protect (/ 1 0)))
 (assert-false ok? "division by zero should error")
-(assert-eq (get err 0) :division-by-zero "error kind")
+(assert-eq (get err :error) :division-by-zero "error kind")
 ```
 
 **6. Does the test use random input generation to find bugs?**
@@ -164,7 +164,7 @@ For runtime error checking, use `protect`:
 ```janet
 (def [ok? err] (protect (/ 1 0)))
 (assert-false ok? "division by zero should error")
-(assert-eq (get err 0) :division-by-zero "error kind")
+(assert-eq (get err :error) :division-by-zero "error kind")
 ```
 
 ### Naming

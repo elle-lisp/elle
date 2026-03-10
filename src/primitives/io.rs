@@ -171,7 +171,7 @@ fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (io/reap backend) → tuple-of-completion-structs
+/// (io/reap backend) → array-of-completion-structs
 fn prim_io_reap(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -199,7 +199,7 @@ fn prim_io_reap(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::array(values))
 }
 
-/// (io/wait backend timeout-ms) → tuple-of-completion-structs
+/// (io/wait backend timeout-ms) → array-of-completion-structs
 fn prim_io_wait(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -307,7 +307,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_io_reap,
         effect: Effect::errors(),
         arity: Arity::Exact(1),
-        doc: "Non-blocking poll for async I/O completions. Returns tuple of completion structs.",
+        doc: "Non-blocking poll for async I/O completions. Returns array of completion structs.",
         params: &["backend"],
         category: "io",
         example: "(io/reap backend)",
@@ -318,7 +318,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_io_wait,
         effect: Effect::errors(),
         arity: Arity::Exact(2),
-        doc: "Wait for async I/O completions. timeout-ms: negative=forever, 0=poll, positive=ms. Returns tuple of completion structs.",
+        doc: "Wait for async I/O completions. timeout-ms: negative=forever, 0=poll, positive=ms. Returns array of completion structs.",
         params: &["backend", "timeout-ms"],
         category: "io",
         example: "(io/wait backend 1000)",

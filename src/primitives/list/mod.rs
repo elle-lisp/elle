@@ -66,7 +66,7 @@ pub(crate) fn prim_cons(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, crate::value::cons(args[0], args[1]))
 }
 
-/// Get the first element of a sequence (list, tuple, array, string)
+/// Get the first element of a sequence (list, array, @array, string)
 pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -85,7 +85,7 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
     if args[0].is_empty_list() {
         return (SIG_OK, Value::NIL);
     }
-    // Tuple
+    // Array
     if let Some(elems) = args[0].as_array() {
         return if elems.is_empty() {
             (SIG_OK, Value::NIL)
@@ -123,14 +123,14 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "first: expected sequence (list, tuple, array, or string), got {}",
+                "first: expected sequence (list, array, or string), got {}",
                 args[0].type_name()
             ),
         ),
     )
 }
 
-/// Get the rest of a sequence (list, tuple, array, string)
+/// Get the rest of a sequence (list, array, @array, string)
 pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -149,7 +149,7 @@ pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
     if args[0].is_empty_list() {
         return (SIG_OK, Value::EMPTY_LIST);
     }
-    // Tuple — return tuple
+    // Array — return array
     if let Some(elems) = args[0].as_array() {
         return if elems.len() <= 1 {
             (SIG_OK, Value::array(vec![]))
@@ -193,7 +193,7 @@ pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "rest: expected sequence (list, tuple, array, or string), got {}",
+                "rest: expected sequence (list, array, or string), got {}",
                 args[0].type_name()
             ),
         ),
@@ -321,7 +321,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         (SIG_OK, Value::int(set.borrow().len() as i64))
     } else {
         (SIG_ERROR, error_val("type-error", format!(
-            "length: expected collection type (list, string, array, tuple, table, struct, set, symbol, or keyword), got {}",
+            "length: expected collection type (list, string, array, @array, @struct, struct, set, symbol, or keyword), got {}",
             args[0].type_name()
         )))
     }
@@ -345,7 +345,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                "empty?: expected collection type (list, string, array, buffer, table, struct, or tuple), got nil"
+                "empty?: expected collection type (list, string, array, @array, @string, @struct, struct, or set), got nil"
                     .to_string(),
             ),
         );
@@ -360,7 +360,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "empty?: expected collection type (list, string, array, buffer, table, struct, or tuple), got {}",
+                        "empty?: expected collection type (list, string, array, @array, @string, @struct, struct, or set), got {}",
                         args[0].type_name()
                     ),
                 ),
@@ -395,7 +395,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "empty?: failed to get tuple".to_string()),
+                    error_val("error", "empty?: failed to get array".to_string()),
                 )
             }
         };
@@ -450,7 +450,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "type-error",
                 format!(
-                "empty?: expected collection type (list, string, array, buffer, table, struct, set, or tuple), got {}",
+                "empty?: expected collection type (list, string, array, @array, @string, @struct, struct, set, or @set), got {}",
                 args[0].type_name()
             ),
             ),
@@ -478,7 +478,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_first,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Get the first element of a sequence (list, tuple, array, string). Returns nil for empty.",
+        doc: "Get the first element of a sequence (list, array, string). Returns nil for empty.",
         params: &["sequence"],
         category: "list",
         example: "(first (list 1 2 3))",
@@ -533,7 +533,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_append,
         effect: Effect::inert(),
         arity: Arity::Exact(2),
-        doc: "Append two collections. For arrays: mutates first arg, returns it. For tuples/strings: returns new value.",
+        doc: "Append two collections. For arrays: mutates first arg, returns it. For strings: returns new value.",
         params: &["collection1", "collection2"],
         category: "list",
         example: "(append @[1 2] @[3 4])",
@@ -555,7 +555,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_reverse,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Reverse a sequence (list, tuple, array, string). Returns same type.",
+        doc: "Reverse a sequence (list, array, string). Returns same type.",
         params: &["sequence"],
         category: "list",
         example: "(reverse (list 1 2 3))",

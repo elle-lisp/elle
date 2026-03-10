@@ -9,7 +9,7 @@ use crate::value::{error_val, Value};
 /// Resolve a type descriptor from a keyword or FFIType value.
 ///
 /// Used by ffi/read, ffi/write, ffi/size, ffi/align, ffi/signature.
-/// Returns the TypeDesc or an error tuple.
+/// Returns the TypeDesc or an error array.
 pub(crate) fn resolve_type_desc(
     value: &Value,
     context: &str,

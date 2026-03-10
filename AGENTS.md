@@ -140,8 +140,8 @@ Things that look wrong but aren't. The 4 most critical (agents get these wrong):
   a set value. Agents reflexively write `(set x val)` — this is wrong.
 
 - **Collection literals: bare = immutable, `@` = mutable.** `[...]` → array, `@[...]` → @array.
-  `{...}` → struct, `@{...}` → @struct. `|...|` → set, `@|...|` → @set.
-  `"..."` → string, `@"..."` → @string.
+   `{...}` → struct, `@{...}` → @struct. `|...|` → set, `@|...|` → @set.
+   `"..."` → string, `@"..."` → @string. `(bytes ...)` → bytes, `(@bytes ...)` → @bytes.
 
 For the full list of oddities (17 items): [`docs/oddities.md`](docs/oddities.md).
 

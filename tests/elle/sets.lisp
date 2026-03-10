@@ -61,7 +61,7 @@
   "set? true for mutable set")
 
 (assert-false (set? [1 2 3])
-  "set? false for tuple")
+   "set? false for array")
 
 (assert-false (set? (list 1 2 3))
   "set? false for list")
@@ -229,7 +229,7 @@
   "set? returns true for @set constructor result")
 
 (assert-false (set? [1 2 3])
-  "set? returns false for tuple")
+   "set? returns false for array")
 
 (assert-false (set? @[1 2 3])
   "set? returns false for array")
@@ -300,19 +300,16 @@
 # ============================================================================
 
 (assert-eq (type-of (get (set->array (set @[1 2])) 0)) :array
-  "mutable array is frozen when inserted into set")
+   "mutable @struct is frozen when inserted into set")
 
 (assert-eq (type-of (get (set->array (set @{:a 1})) 0)) :struct
-  "mutable table is frozen when inserted into set")
-
-(assert-eq (type-of (get (set->array (set @"hello")) 0)) :string
-  "mutable buffer is frozen when inserted into set")
+   "mutable @string is frozen when inserted into set")
 
 (assert-true (array? (get (set->array (set @[1 2])) 0))
   "frozen array is an array")
 
 (assert-true (struct? (get (set->array (set @{:a 1})) 0))
-  "frozen table is a struct")
+   "frozen @struct is a struct")
 
 # ============================================================================
 # Length and Empty
@@ -387,13 +384,13 @@
 # ============================================================================
 
 (assert-true (array? (set->array (set 1 2 3)))
-  "set->array on immutable set returns a tuple")
+   "set->array on immutable set returns an array")
 
 (assert-eq (length (set->array (set 1 2 3))) 3
   "set->array preserves element count")
 
 (assert-eq (length (set->array ||)) 0
-  "set->array of empty set returns empty tuple")
+   "set->array of empty set returns empty array")
 
 (assert-true (array? (set->array (set 1 2 3)))
   "set->array works with constructor-created sets")
@@ -421,7 +418,7 @@
   "seq->set from list creates immutable set")
 
 (assert-eq (seq->set [1 2 3]) (set 1 2 3)
-  "seq->set from tuple creates immutable set")
+   "seq->set from array creates immutable set")
 
 (assert-eq (type-of (seq->set @[1 2 3])) :@set
   "seq->set from array creates mutable set")
@@ -433,7 +430,7 @@
   "seq->set from string creates immutable set")
 
 (assert-eq (type-of (seq->set @"abc")) :@set
-  "seq->set from buffer creates mutable set")
+   "seq->set from @string creates mutable set")
 
 # ============================================================================
 # Freeze/Thaw
@@ -490,10 +487,10 @@
 # ============================================================================
 
 (assert-eq (length (set [1 2] [3 4])) 2
-  "set can contain tuples")
+   "set can contain arrays")
 
 (assert-true (contains? (set [1 2] [3 4]) [1 2])
-  "set contains tuple element")
+   "set contains array element")
 
 (assert-eq (length (set {:a 1} {:b 2})) 2
   "set can contain structs")

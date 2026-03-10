@@ -16,7 +16,7 @@
 # ============================================================================
 
 (defn make-matrix [rows cols initial-value]
-  "Create an m×n matrix (@array of tuples, row-major)."
+  "Create an m×n matrix (@array of arrays, row-major)."
   (@array ;(map (fn [_] (@array ;(map (fn [_] initial-value) (range cols))))
                (range rows))))
 
@@ -92,7 +92,7 @@
          [clamped (if (> scaled 9) 9 scaled)]
          [chars " .:-=+*#%@"]
          [idx (if (< clamped 0) 0 clamped)])
-    (string/char-at chars idx)))
+    (get chars idx)))
 
 (defn find-max [m]
   "Find the maximum value in the matrix."

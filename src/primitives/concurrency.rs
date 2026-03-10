@@ -70,7 +70,7 @@ fn is_value_sendable(value: &Value) -> bool {
                 && closure.template.constants.iter().all(is_value_sendable)
         }
 
-        // Unsafe: mutable tables
+        // Unsafe: mutable @structs
         HeapObject::LStructMut(_) => false,
 
         // Native function pointers are inherently Send + Sync
@@ -275,7 +275,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 /// (spawn closure)
 ///
 /// The closure must:
-/// 1. Capture only immutable values (no tables, native functions, or FFI handles)
+/// 1. Capture only immutable values (no @structs, native functions, or FFI handles)
 /// 2. Take no arguments
 /// 3. Return a value
 ///

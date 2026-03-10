@@ -7,20 +7,20 @@ the implemented error model.
 
 ## Error Representation
 
-Errors are tuples: `[:keyword "message"]`.
+Errors are structs: `{:error :keyword :message "message"}`.
 
 ```rust
 // Construct an error value
 error_val("type-error", "car: expected pair, got integer")
-// → [:type-error "car: expected pair, got integer"]
+// → {:error :type-error :message "car: expected pair, got integer"}
 
 // Extract human-readable message
 format_error(value)
 // → "type-error: car: expected pair, got integer"
 ```
 
-The keyword classifies the error. The string describes it. Both are
-ordinary Elle values — no special types.
+The `:error` keyword classifies the error. The `:message` string describes it.
+Both are ordinary Elle values — no special types.
 
 
 ## Two Failure Modes
@@ -67,7 +67,7 @@ immediately on `SIG_ERROR`.
 ### From Elle code
 
 ```lisp
-(fiber/signal 1 [:division-by-zero "cannot divide by zero"])
+(fiber/signal 1 {:error :division-by-zero :message "cannot divide by zero"})
 ```
 
 `fiber/signal` with bit 0 (`SIG_ERROR`) emits an error signal. The fiber
@@ -82,7 +82,7 @@ Error handling is fiber signal handling. The pattern:
 2. Resume the child
 3. Check the signal bits:
    - `SIG_OK` (0): child completed normally, read `fiber/value`
-   - `SIG_ERROR` (1): child errored, read `fiber/value` for the error tuple
+    - `SIG_ERROR` (1): child errored, read `fiber/value` for the error struct
 
 ```lisp
 ;# Manual error handling (try macro will sugar this)
@@ -91,7 +91,7 @@ Error handling is fiber signal handling. The pattern:
   (if (= (fiber/status f) :dead)
     (fiber/value f)                        # normal result
     (begin
-      (println "caught:" (fiber/value f))  # error tuple
+      (println "caught:" (fiber/value f))  # error struct
       :recovered)))
 ```
 
@@ -102,7 +102,7 @@ it with a recovery value:
 
 ```lisp
 (let ((f (fiber/new (fn ()
-           (let ((x (fiber/signal 1 [:need-value "provide a default"])))
+           (let ((x (fiber/signal 1 {:error :need-value :message "provide a default"})))
              (* x 2)))
          1)))
   (fiber/resume f nil)          # child signals, suspends

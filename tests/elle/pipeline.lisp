@@ -70,9 +70,9 @@
 (assert-true (symbol? 'foo:bar) "qualified symbol quoted preserved")
 
 (assert-eq (let ((t @{:x 10}))
-             t:x)
-           10
-           "qualified symbol with table")
+              t:x)
+            10
+            "qualified symbol with @struct")
 
 (assert-err (fn () (eval 'unbound:foo)) "qualified symbol unbound first segment")
 

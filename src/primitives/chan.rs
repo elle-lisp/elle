@@ -71,7 +71,7 @@ fn extract_receiver<'a>(
 
 /// `(chan)` or `(chan capacity)`
 ///
-/// Returns `[sender receiver]` as a tuple.
+/// Returns `[sender receiver]` as an array.
 fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
     let (tx, rx) = match args.len() {
         0 => crossbeam_channel::unbounded(),

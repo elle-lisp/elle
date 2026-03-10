@@ -76,7 +76,7 @@ Use `number?` to test for numeric values. Use `type-of` to get the type name:
 
 ### Strings
 
-Strings are immutable sequences of characters:
+Strings are immutable sequences of grapheme clusters:
 
 ```janet
 "hello"                    # String literal
@@ -137,11 +137,11 @@ Arrays are ordered collections optimized for random access:
 
 ### Tables
 
-Tables are mutable hash maps:
+@structs are mutable hash maps:
 
 ```janet
-(table)                    # Empty table
-(table "x" 10 "y" 20)     # Table with entries
+(@struct)                  # Empty @struct
+(@struct "x" 10 "y" 20)   # @struct with entries
 (get tbl "x")             # Get value by key
 (put tbl "z" 30)          # Set/update key
 (del tbl "x")             # Delete key
@@ -941,7 +941,7 @@ Cleanup code runs here
 Use `exception` to create exception values and `throw` to signal them:
 
 ```janet
-(var my-error (exception "Invalid input" (table "code" 42)))
+(var my-error (exception "Invalid input" (@struct "code" 42)))
 (throw my-error)
 
 # Or throw directly:
@@ -951,9 +951,9 @@ Use `exception` to create exception values and `throw` to signal them:
 Get information from exceptions:
 
 ```janet
-(var e (exception "Test error" (table "context" "validation")))
+(var e (exception "Test error" (@struct "context" "validation")))
 (exception-message e) ⟹ "Test error"
-(exception-data e)    ⟹ #<table String("context")="validation">
+(exception-data e)    ⟹ @{context validation}
 ```
 
 ---
@@ -987,14 +987,14 @@ Common list operations:
 (nil? nil)             ⟹ true
 ```
 
-### Working with Tables
+### Working with @structs
 
-Tables are mutable:
+@structs are mutable:
 
 ```janet
 # Creation
-(var t (table))
-(var t2 (table "x" 10 "y" 20))
+(var t (@struct))
+(var t2 (@struct "x" 10 "y" 20))
 
 # Retrieval
 (get t2 "x")           ⟹ 10
@@ -1084,7 +1084,7 @@ e                  ⟹ 2.71828...
 (string-downcase "HELLO")          ⟹ "hello"
 (substring "hello" 1 4)            ⟹ "ell"
 (string-index "hello" "ll")        ⟹ 2
-(char-at "hello" 0)                ⟹ "h"
+(get "hello" 0)                    ⟹ "h"
 (string-split "a,b,c" ",")         ⟹ ("a" "b" "c")
 (string-replace "hello" "l" "L")   ⟹ "heLLo"
 (string-trim "  hello  ")          ⟹ "hello"
@@ -1129,14 +1129,16 @@ e                  ⟹ 2.71828...
 
 ```janet
 (json-parse "{\"x\": 42, \"y\": \"hello\"}")
-⟹ #<table String("x")=42 String("y")="hello">
+⟹ @{x 42 y hello}
 
-(json-serialize (table "x" 42 "y" "hello"))
+(json-serialize (@struct "x" 42 "y" "hello"))
 ⟹ "{\"x\":42,\"y\":\"hello\"}"
 
-(json-serialize-pretty (table "x" 42 "y" "hello"))
+(json-serialize-pretty (@struct "x" 42 "y" "hello"))
 ⟹ "{\n  \"x\": 42,\n  \"y\": \"hello\"\n}"
 ```
+
+Note: `json-parse` returns an @struct (mutable), and `json-serialize` accepts @structs.
 
 ### Type Conversions
 
@@ -1195,8 +1197,8 @@ Pattern matching destructures data:
   (_ "no match"))
 ⟹ 6
 
-(match (table "x" 10 "y" 20)
-  ((table :x x :y y) (+ x y))
+(match (@struct "x" 10 "y" 20)
+  ((@struct :x x :y y) (+ x y))  # Match @struct by key
   (_ "no match"))
 ⟹ 30
 ```
@@ -1247,14 +1249,14 @@ Prefer `let` and `let*` over global definitions for local work:
 
 ### Prefer Immutable Operations
 
-Use `struct` instead of `table` when you don't need mutation:
+Use `struct` instead of `@struct` when you don't need mutation:
 
 ```janet
 # Better for functional style
 (var-constant user (struct "id" 1 "name" "Alice"))
 
-# Use table only when mutation is needed
-(var cache (table))
+# Use @struct only when mutation is needed
+(var cache (@struct))
 (put cache "key" "value")
 ```
 

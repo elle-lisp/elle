@@ -3,7 +3,7 @@
 # Control flow — building an expression evaluator
 #
 # We build a small calculator that evaluates arithmetic expression trees
-# represented as tagged tuples: [:lit 42], [:add a b], [:mul a b], etc.
+# represented as tagged arrays: [:lit 42], [:add a b], [:mul a b], etc.
 # Each section introduces a control flow form by using it to build or
 # extend the evaluator.
 #
@@ -17,7 +17,7 @@
 #   forever / break — infinite loop with early exit
 #   block / break   — named scopes with values, early return
 #   match           — pattern matching: literals, wildcards, binding,
-#                     list/tuple/struct patterns, nested, guards
+#                     list/array/struct patterns, nested, guards
 #   each            — iteration macro (brief — see collections.lisp)
 #   -> / ->>        — threading macros
 
@@ -28,7 +28,7 @@
 # Expression language
 # ========================================
 #
-# Arithmetic expressions are tagged tuples:
+# Arithmetic expressions are tagged arrays:
 #   [:lit n]     — literal number
 #   [:add a b]   — addition
 #   [:sub a b]   — subtraction
@@ -92,7 +92,7 @@
 (assert-eq (expr-type [:lit 5]) :literal "cond: literal")
 (assert-eq (expr-type [:neg [:lit 3]]) :unary "cond: unary")
 (assert-eq (expr-type [:add [:lit 1] [:lit 2]]) :binary "cond: binary")
-(assert-eq (expr-type 42) :invalid "cond: not a tuple")
+(assert-eq (expr-type 42) :invalid "cond: not an array")
 (display "  expr-type([:add ...]) = ") (print (expr-type [:add [:lit 1] [:lit 2]]))
 
 # The operator symbol for pretty-printing
@@ -432,11 +432,11 @@
   (_ nil)))
 (assert-eq m-cons 1 "match: cons head")
 
-# --- Tuple, struct, guard ---
+# --- Array, struct, guard ---
 (var m-tup (match [10 20]
   ([a b] (+ a b))
   (_ 0)))
-(assert-eq m-tup 30 "match: tuple binding")
+(assert-eq m-tup 30 "match: array binding")
 
 (var m-struct (match {:x 1 :y 2}
   ({:x x :y y} (+ x y))
@@ -469,7 +469,7 @@
       (let* ([divisor (eval-expr b)]
              [dividend (eval-expr a)])
         (if (= divisor 0)
-          (error [:division-by-zero "division by zero in expression"])
+          (error {:error :division-by-zero :message "division by zero in expression"})
           (/ dividend divisor))))
     (_ (error "unknown expression"))))
 
@@ -563,11 +563,11 @@
 (assert-eq outputs @[10 7 42 -5 5] "each: evaluated program")
 (display "  program outputs: ") (print outputs)
 
-# each over a tuple
+# each over an array
 (var tuple-sum 0)
 (each x in [10 20 30]
   (assign tuple-sum (+ tuple-sum x)))
-(assert-eq tuple-sum 60 "each: tuple sum")
+(assert-eq tuple-sum 60 "each: array sum")
 
 
 # ========================================

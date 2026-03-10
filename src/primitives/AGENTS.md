@@ -72,7 +72,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
    for arity or type errors. Never panic.
 
 2. **All primitives return `(SignalBits, Value)`.** No exceptions. Errors are
-   signaled via SIG_ERROR with an error tuple `[:keyword "message"]`.
+    signaled via SIG_ERROR with an error struct `{:error :keyword :message "message"}`.
 
 3. **No primitive has VM access.** Operations that need the VM (fiber
    execution) return SIG_RESUME and let the VM dispatch loop handle it.
@@ -90,11 +90,11 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `comparison.rs` | `=` (numeric-aware), `identical?` (strict), `<`, `>`, `<=`, `>=` |
 | `logic.rs` | `not` |
 | `list.rs` | `cons`, `first`, `rest`, `list`, `length`, `empty?`, `append`, `concat`, `reverse`, `last`, `butlast`, `take`, `drop` |
-| `array.rs` | `tuple`, `array`, `array/new`, `push`, `pop`, `popn`, `insert`, `remove` |
-| `buffer.rs` | `buffer`, `string->buffer`, `buffer->string` |
-| `string.rs` | `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/char-at`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
+| `array.rs` | `array`, `@array`, `array/new`, `push`, `pop`, `popn`, `insert`, `remove` |
+| `buffer.rs` | `@string` (constructor) |
+| `string.rs` | `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
 | `format.rs` | `string/format` |
-| `table.rs` | `table`, `del`, `keys`, `values`, `has-key?` (imports `get`/`put` from `access.rs`) |
+| `table.rs` | `@struct`, `del`, `keys`, `values`, `has-key?` (imports `get`/`put` from `access.rs`) |
 | `access.rs` | `get`, `put` — polymorphic collection access |
 | `sets.rs` | `set`, `@set`, `set?`, `contains?`, `add`, `del`, `union`, `intersection`, `difference`, `set->array`, `seq->set` |
 | `structs.rs` | `struct` |
@@ -105,7 +105,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `unix.rs` | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
 | `kwarg.rs` | `extract_keyword_timeout` helper function |
 | `display.rs` | `print`, `println`, `display`, `newline` |
-| `types.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `tuple?`, `table?`, `struct?`, `buffer?`, `box?`, `bytes?`, `blob?`, `set?`, `type-of` |
+| `types.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `@array?`, `@struct?`, `struct?`, `@string?`, `box?`, `bytes?`, `@bytes?`, `set?`, `type-of` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
 | `chan.rs` | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
 | `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro/>iterator` |
@@ -115,7 +115,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
 | `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` |
-| `introspection.rs` | `closure?`, `jit?`, `pure?`, `coroutine?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `string->keyword` |
+| `introspection.rs` | `closure?`, `jit?`, `pure?`, `coroutine?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `keyword` (alias: `string->keyword`) |
 | `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
 | `arena.rs` | `arena/count`, `arena/stats`, `arena/scope-stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `arena/fiber-stats`, `environment` |
 | `debug.rs` | `debug/print`, `debug/trace`, `debug/memory` |

@@ -150,7 +150,7 @@ jobs:
 
   tests-combined:
     name: Integration & Property Tests
-    needs: [changes, elle-tests]
+    needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:

@@ -17,7 +17,7 @@
 # 1. Unbounded channel basics
 # ========================================
 
-# chan returns [sender receiver] as a tuple.
+# chan returns [sender receiver] as an array.
 # chan/send is non-blocking: returns [:ok], [:full], or [:disconnected].
 # chan/recv is non-blocking: returns [:ok msg], [:empty], or [:disconnected].
 (let* (([s r] (chan))
@@ -63,7 +63,7 @@
 # ========================================
 
 # This is the critical test: sending :empty, :ok, :full, :disconnected
-# as message values. The tuple protocol keeps status and message separate.
+# as message values. The array protocol keeps status and message separate.
 (let (([s r] (chan)))
   (chan/send s :empty)
   (chan/send s :ok)
