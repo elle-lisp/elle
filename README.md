@@ -199,20 +199,6 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 Every Elle value is a NaN-boxed 64-bit word. Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a reference-counted pointer into a heap.
 
-### Design principle: mutable/immutable split
-
-Every collection type has an immutable variant and a mutable variant. Bare literal syntax is immutable; the `@` prefix makes it mutable.
-
-| Immutable | Mutable | Literal | `@`-literal |
-|-----------|---------|---------|-------------|
-| array | @array | `[1 2 3]` | `@[1 2 3]` |
-| struct | @struct | `{:a 1}` | `@{:a 1}` |
-| string | @string | `"hello"` | `@"hello"` |
-| bytes | @bytes | *(no literal)* | *(no literal)* |
-| set | @set | `\|1 2 3\|` | `@\|1 2 3\|` |
-
-The `@` prefix means "mutable version of this literal." The types within each pair share the same logical structure but differ in mutability.
-
 ### Immediate types
 
 | Type | Literal | Notes |
@@ -228,34 +214,117 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 ### Collections
 
+#### Design principle: mutable/immutable split
+
+Every collection type has an immutable variant and a mutable variant. Bare literal syntax is immutable; the `@` prefix makes it mutable.
+
+| Immutable | Mutable | Literal | `@`-literal |
+|-----------|---------|---------|-------------|
+| array | @array | `[1 2 3]` | `@[1 2 3]` |
+| struct | @struct | `{:a 1}` | `@{:a 1}` |
+| string | @string | `"hello"` | `@"hello"` |
+| bytes | @bytes | *(no literal)* | *(no literal)* |
+| set | @set | `\|1 2 3\|` | `@\|1 2 3\|` |
+
+The `@` prefix means "mutable version of this literal." The types within each pair share the same logical structure but differ in mutability.
+
+**string** — immutable interned text. Equality is O(1) via interning. Indexing and length count grapheme clusters, not bytes.
+
 ```janet
-# Immutable                        # Mutable
-[1 2 3]                             @[1 2 3]
-{:name "Bob" :age 25}               @{:name "Bob" :age 25}
-"hello"                             @"hello"
-(bytes 1 2 3)                       (@bytes 1 2 3)
-|1 2 3|                             @|1 2 3|
+(def s "café")
+(length s)              # => 4 (grapheme clusters, not bytes)
+(string/char-at s 3)    # => "é"
+(slice s 0 2)           # => "ca"
+(string/concat s "!")   # => "café!" (new string)
 ```
 
-**Array** — fixed-length immutable sequence. Error values are arrays: `[:division-by-zero "message"]`. Bracket destructuring works on both arrays and @arrays.
+**@string** — mutable text buffer. `@"hello"` is literal syntax.
 
-**@Array** — mutable resizable sequence. `(array-set! a 0 99)`, `(array-ref a 0)`, `(array-length a)`.
+```janet
+(def buf @"hello")
+(push buf " world")
+(length buf)            # => 11
+(get buf 0)             # => "h"
+(pop buf)               # => "d"
+```
 
-**Struct** — immutable ordered dictionary. `(get s :key)`. Keys are typically keywords.
+**array** — fixed-length immutable sequence. Error values are arrays: `[:division-by-zero "message"]`. Bracket destructuring works on both arrays and @arrays.
 
-**@Struct** — mutable ordered dictionary. `(get t :key)`, `(put t :key val)`, `(del t :key)`, `(keys t)`, `(values t)`, `(has? t :key)`.
+```janet
+(def a [1 2 3])
+(get a 0)               # => 1
+(length a)              # => 3
+(def [x _ z] a)         # destructuring
+```
 
-**String** — immutable interned text. Equality is O(1). Indexing and length count grapheme clusters, not bytes.
+**@array** — mutable resizable sequence.
 
-**@String** — mutable byte sequence. `@"hello"` desugars to `(string->@string "hello")`. Supports `get`, `put`, `push`, `pop`, `length`, `append`, `concat`.
+```janet
+(def a @[1 2 3])
+(push a 4)              # a is now @[1 2 3 4]
+(array-set! a 0 99)     # a is now @[99 2 3 4]
+(array-ref a 0)         # => 99
+(pop a)                 # => 4
+(array-length a)        # => 3
+```
 
-**Bytes** — immutable binary data. No literal syntax; constructed via `(bytes 1 2 3)` or `(string->bytes "hello")`. Displays as `#bytes[hex ...]`.
+**structure** — immutable ordered dictionary. Keys are typically keywords.
 
-**@Bytes** — mutable binary data. No literal syntax; constructed via `(@bytes 1 2 3)` or `(string->@bytes "hello")`. Displays as `#@bytes[hex ...]`.
+```janet
+(def s {:name "Bob" :age 25})
+(get s :name)           # => "Bob"
+(keys s)                # => (:name :age)
+(values s)              # => ("Bob" 25)
+(has? s :name)          # => true
+```
 
-**Set** — immutable unordered collection of unique values. `|1 2 3|` literal syntax. `(set 1 2 3)` constructor. `(contains? s val)`, `(add s val)`, `(del s val)`, `(union s1 s2)`, `(intersection s1 s2)`, `(difference s1 s2)`. Mutable values are frozen on insertion.
+**@structure** — mutable ordered dictionary.
 
-**Mutable set** — mutable unordered collection of unique values. `@|1 2 3|` literal syntax. `(@set 1 2 3)` constructor. Same operations as immutable set but mutates in place.
+```janet
+(def t @{:name "Bob"})
+(put t :age 25)         # t is now @{:name "Bob" :age 25}
+(del t :name)           # t is now @{:age 25}
+(get t :age)            # => 25
+```
+
+**set** — immutable unordered collection of unique values. Mutable values are frozen on insertion.
+
+```janet
+(def s |1 2 3|)
+(contains? s 2)         # => true
+(add s 4)               # => |1 2 3 4| (new set)
+(del s 1)               # => |2 3| (new set)
+(union |1 2| |2 3|)     # => |1 2 3|
+(intersection |1 2| |2 3|)  # => |2|
+(difference |1 2| |2 3|)    # => |1|
+```
+
+**@set** — mutable unordered collection of unique values. Same operations as immutable set but mutates in place.
+
+```janet
+(def ms @|1 2 3|)
+(add ms 4)              # ms is now @|1 2 3 4|
+(del ms 1)              # ms is now @|2 3 4|
+(contains? ms 2)        # => true
+```
+
+**bytes** — immutable binary data. No literal syntax. Displays as `#bytes[hex ...]`.
+
+```janet
+(def b (bytes 1 2 3))
+(def b2 (string->bytes "hello"))
+(get b 0)               # => 1
+(length b)              # => 3
+```
+
+**@bytes** — mutable binary data. No literal syntax. Displays as `#@bytes[hex ...]`.
+
+```janet
+(def bl (@bytes 1 2 3))
+(push bl 4)
+(length bl)             # => 4
+(def bl2 (string->@bytes "hello"))
+```
 
 ### Lists
 
