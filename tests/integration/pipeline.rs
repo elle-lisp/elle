@@ -429,7 +429,7 @@ fn test_eval_closure_captures_multiple() {
 fn test_eval_nested_closure() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        "(let ((x 10)) ((fn () ((fn () x))))",
+        "(let ((x 10)) ((fn () ((fn () x)))))",
         &mut symbols,
         &mut vm,
         "<test>",

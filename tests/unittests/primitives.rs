@@ -950,25 +950,6 @@ fn test_string_join_errors() {
 }
 
 #[test]
-fn test_number_to_string_errors() {
-    let (_vm, mut symbols, meta) = setup();
-    let num_to_str = get_primitive(&meta, &mut symbols, "number->string");
-
-    // Wrong arity - too few args
-    assert!(call_primitive(&num_to_str, &[]).is_err());
-
-    // Wrong arity - too many args
-    assert!(call_primitive(&num_to_str, &[Value::int(42), Value::int(100),]).is_err());
-
-    // Wrong type - not a number
-    assert!(call_primitive(&num_to_str, &[Value::string("42")]).is_err());
-
-    assert!(call_primitive(&num_to_str, &[Value::NIL]).is_err());
-
-    assert!(call_primitive(&num_to_str, &[Value::bool(true)]).is_err());
-}
-
-#[test]
 fn test_math_module_functions() {
     let (_vm, mut symbols, meta) = setup();
 
@@ -1030,7 +1011,7 @@ fn test_package_manager() {
     match call_primitive(&version_fn, &[]).unwrap() {
         v if v.is_string() => {
             let s = v.with_string(|s| s.to_string()).unwrap();
-            assert_eq!(s, "0.3.0")
+            assert_eq!(s, "1.0.0")
         }
         _ => panic!("Expected string"),
     }

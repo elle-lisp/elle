@@ -556,7 +556,7 @@ fn test_polymorphic_inference_resolves_pure() {
     // Calling apply-fn with a pure function should be Pure
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (def maybe-yield (fn (x) (if x (yield 1) 2))) (maybe-yield true))",
+        "(begin (def apply-fn (fn (f x) (f x))) (apply-fn + 42))",
         &mut symbols,
         &mut vm,
         "<test>",

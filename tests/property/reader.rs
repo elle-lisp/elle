@@ -51,6 +51,16 @@ fn kind_eq(a: &SyntaxKind, b: &SyntaxKind) -> bool {
             // SyntaxLiteral is internal-only, shouldn't appear in normal roundtrips
             true
         }
+        (SyntaxKind::ArrayMut(a), SyntaxKind::ArrayMut(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
+        }
+        (SyntaxKind::Set(a), SyntaxKind::Set(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
+        }
+        (SyntaxKind::SetMut(a), SyntaxKind::SetMut(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
+        }
+        (SyntaxKind::Splice(a), SyntaxKind::Splice(b)) => syntax_eq(a, b),
         _ => false,
     }
 }

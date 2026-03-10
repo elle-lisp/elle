@@ -2012,7 +2012,7 @@ fn test_jit_mutual_recursion_nqueens_small() {
            (fn (n)
              (solve-helper n 0 (list)))))
 
-         (length (solve-nqueens 8))"#,
+         (length (solve-nqueens 8)))"#,
         &mut symbols,
         &mut vm,
         "<test>",
