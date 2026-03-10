@@ -159,7 +159,7 @@ impl Value {
         } else {
             // Heap alloc without interning
             use crate::value::heap::{alloc, HeapObject};
-            alloc(HeapObject::String(boxed))
+            alloc(HeapObject::LString(boxed))
         }
     }
 
@@ -206,7 +206,7 @@ impl Value {
         fields: std::collections::BTreeMap<crate::value::heap::TableKey, Value>,
     ) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::Struct(fields))
+        alloc(HeapObject::LStruct(fields))
     }
 
     /// Create a closure.
@@ -242,11 +242,11 @@ impl Value {
         alloc_permanent(HeapObject::NativeFn(f))
     }
 
-    /// Create an immutable tuple value.
+    /// Create an immutable array value.
     #[inline]
-    pub fn tuple(elements: Vec<Value>) -> Self {
+    pub fn array(elements: Vec<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::Tuple(elements))
+        alloc(HeapObject::LArray(elements))
     }
 
     /// Create a mutable buffer value.
@@ -261,7 +261,7 @@ impl Value {
     #[inline]
     pub fn bytes(data: Vec<u8>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::Bytes(data))
+        alloc(HeapObject::LBytes(data))
     }
 
     /// Create a mutable blob value.

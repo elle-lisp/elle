@@ -49,14 +49,14 @@ pub(crate) enum Constructor {
     Nil,
     /// Empty list `()`.
     EmptyList,
-    /// Tuple of exactly `n` elements.
-    Tuple(usize),
-    /// Tuple of at least `n` fixed elements (has `& rest`).
-    TupleRest(usize),
-    /// Array of exactly `n` elements.
+    /// Immutable array of exactly `n` elements.
     Array(usize),
-    /// Array of at least `n` fixed elements (has `& rest`).
+    /// Immutable array of at least `n` fixed elements (has `& rest`).
     ArrayRest(usize),
+    /// Mutable array of exactly `n` elements.
+    ArrayMut(usize),
+    /// Mutable array of at least `n` fixed elements (has `& rest`).
+    ArrayMutRest(usize),
     /// Struct with these keys (open match — presence, not exclusivity).
     Struct(Vec<PatternKey>),
     /// Table with these keys (open match).
@@ -73,9 +73,9 @@ impl Constructor {
         match self {
             Constructor::Literal(_) | Constructor::Nil | Constructor::EmptyList => 0,
             Constructor::Cons => 2,
-            Constructor::Tuple(n) | Constructor::Array(n) => *n,
+            Constructor::Array(n) | Constructor::ArrayMut(n) => *n,
             // Rest variants include the rest element as an extra sub-pattern.
-            Constructor::TupleRest(n) | Constructor::ArrayRest(n) => *n + 1,
+            Constructor::ArrayRest(n) | Constructor::ArrayMutRest(n) => *n + 1,
             Constructor::Struct(keys) | Constructor::Table(keys) => keys.len(),
             Constructor::Set | Constructor::SetMut => 1,
         }
@@ -203,16 +203,16 @@ fn pattern_constructor(pat: &HirPattern) -> Option<Constructor> {
         }
         HirPattern::Tuple { elements, rest } => {
             if rest.is_some() {
-                Some(Constructor::TupleRest(elements.len()))
+                Some(Constructor::ArrayRest(elements.len()))
             } else {
-                Some(Constructor::Tuple(elements.len()))
+                Some(Constructor::Array(elements.len()))
             }
         }
         HirPattern::Array { elements, rest } => {
             if rest.is_some() {
-                Some(Constructor::ArrayRest(elements.len()))
+                Some(Constructor::ArrayMutRest(elements.len()))
             } else {
-                Some(Constructor::Array(elements.len()))
+                Some(Constructor::ArrayMut(elements.len()))
             }
         }
         HirPattern::Struct { entries } => Some(Constructor::Struct(
@@ -455,7 +455,10 @@ fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<HirPattern>
         HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => {
             let mut sub = elements.clone();
             // For rest constructors, include the rest pattern as an extra sub-pattern.
-            if matches!(ctor, Constructor::TupleRest(_) | Constructor::ArrayRest(_)) {
+            if matches!(
+                ctor,
+                Constructor::ArrayRest(_) | Constructor::ArrayMutRest(_)
+            ) {
                 sub.push(rest.as_deref().cloned().unwrap_or(HirPattern::Wildcard));
             }
             sub
@@ -625,12 +628,12 @@ fn expand_access(col_access: &[AccessPath], col: usize, ctor: &Constructor) -> V
             new_access.push(AccessPath::Car(Box::new(base.clone())));
             new_access.push(AccessPath::Cdr(Box::new(base.clone())));
         }
-        Constructor::Tuple(n) | Constructor::Array(n) => {
+        Constructor::Array(n) | Constructor::ArrayMut(n) => {
             for i in 0..*n {
                 new_access.push(AccessPath::Index(Box::new(base.clone()), i));
             }
         }
-        Constructor::TupleRest(n) | Constructor::ArrayRest(n) => {
+        Constructor::ArrayRest(n) | Constructor::ArrayMutRest(n) => {
             for i in 0..*n {
                 new_access.push(AccessPath::Index(Box::new(base.clone()), i));
             }

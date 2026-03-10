@@ -154,7 +154,7 @@ impl fmt::Display for LirInstr {
             // === Type Checks ===
             LirInstr::IsNil { dst, src } => write!(f, "{} ← nil?({})", dst, src),
             LirInstr::IsPair { dst, src } => write!(f, "{} ← pair?({})", dst, src),
-            LirInstr::IsTuple { dst, src } => write!(f, "{} ← tuple?({})", dst, src),
+            LirInstr::IsArray { dst, src } => write!(f, "{} ← tuple?({})", dst, src),
             LirInstr::IsArrayMut { dst, src } => write!(f, "{} ← array?({})", dst, src),
             LirInstr::IsStruct { dst, src } => write!(f, "{} ← struct?({})", dst, src),
             LirInstr::IsTable { dst, src } => write!(f, "{} ← table?({})", dst, src),
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_instr_type_check() {
-        let instr = LirInstr::IsTuple {
+        let instr = LirInstr::IsArray {
             dst: Reg(1),
             src: Reg(0),
         };

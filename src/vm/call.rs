@@ -104,7 +104,7 @@ impl VM {
         // Extract args from the array
         let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
             arr.borrow().to_vec()
-        } else if let Some(tup) = args_val.as_tuple() {
+        } else if let Some(tup) = args_val.as_array() {
             tup.to_vec()
         } else {
             set_error(
@@ -369,7 +369,7 @@ impl VM {
         // Extract args from the array
         let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
             arr.borrow().to_vec()
-        } else if let Some(tup) = args_val.as_tuple() {
+        } else if let Some(tup) = args_val.as_array() {
             tup.to_vec()
         } else {
             set_error(

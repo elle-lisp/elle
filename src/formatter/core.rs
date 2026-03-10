@@ -116,14 +116,14 @@ fn format_value(
                 // For Phase 1, just return a placeholder
                 return "{{...}}".to_string();
             }
-            HeapObject::Struct(_) => {
+            HeapObject::LStruct(_) => {
                 // For Phase 1, just return a placeholder
                 return "{{...}}".to_string();
             }
             HeapObject::Closure(_) => return "#<closure>".to_string(),
             HeapObject::NativeFn(_) => return "#<native-fn>".to_string(),
             HeapObject::LibHandle(_) => return "#<lib-handle>".to_string(),
-            HeapObject::Tuple(elems) => {
+            HeapObject::LArray(elems) => {
                 let items: Vec<String> = elems
                     .iter()
                     .map(|e| format_value(e, indent, config, symbol_table))
@@ -139,7 +139,7 @@ fn format_value(
             HeapObject::FFISignature(_, _) => return "<ffi-signature>".to_string(),
             HeapObject::FFIType(_) => return "<ffi-type>".to_string(),
             HeapObject::LStringMut(_) => return "@\"...\"".to_string(),
-            HeapObject::Bytes(_) => return "#bytes[...]".to_string(),
+            HeapObject::LBytes(_) => return "#bytes[...]".to_string(),
             HeapObject::LBytesMut(_) => return "#blob[...]".to_string(),
             HeapObject::ManagedPointer(cell) => {
                 return match cell.get() {
@@ -149,7 +149,7 @@ fn format_value(
             }
             HeapObject::External(ext) => return format!("#<{}>", ext.type_name),
             HeapObject::Parameter { id, .. } => return format!("<parameter:{}>", id),
-            HeapObject::String(s) => return format!("\"{}\"", s.escape_default()),
+            HeapObject::LString(s) => return format!("\"{}\"", s.escape_default()),
             HeapObject::LSet(s) => {
                 let items: Vec<String> = s
                     .iter()

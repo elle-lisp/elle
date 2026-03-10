@@ -193,7 +193,7 @@ pub(crate) fn prim_is_pointer(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Check if value is an array (mutable indexed sequence)
-pub(crate) fn prim_is_array(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_is_array_mut(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -207,7 +207,7 @@ pub(crate) fn prim_is_array(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Check if value is a tuple (immutable indexed sequence)
-pub(crate) fn prim_is_tuple(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_is_array(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -217,7 +217,7 @@ pub(crate) fn prim_is_tuple(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].as_tuple().is_some()))
+    (SIG_OK, Value::bool(args[0].as_array().is_some()))
 }
 
 /// Check if value is a table (mutable key-value map)
@@ -477,7 +477,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     },
     PrimitiveDef {
         name: "array?",
-        func: prim_is_array,
+        func: prim_is_array_mut,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is an array (mutable indexed sequence).",
@@ -488,7 +488,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     },
     PrimitiveDef {
         name: "tuple?",
-        func: prim_is_tuple,
+        func: prim_is_array,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a tuple (immutable indexed sequence).",

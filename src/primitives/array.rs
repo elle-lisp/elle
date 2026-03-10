@@ -12,7 +12,7 @@ pub(crate) fn prim_array(args: &[Value]) -> (SignalBits, Value) {
 
 /// Create a tuple from arguments
 pub(crate) fn prim_tuple(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::tuple(args.to_vec()))
+    (SIG_OK, Value::array(args.to_vec()))
 }
 
 /// Create an array of n elements, all set to fill

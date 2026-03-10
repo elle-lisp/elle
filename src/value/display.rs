@@ -199,7 +199,7 @@ impl fmt::Display for Value {
         }
 
         // Tuple
-        if let Some(elems) = self.as_tuple() {
+        if let Some(elems) = self.as_array() {
             write!(f, "[")?;
             for (i, v) in elems.iter().enumerate() {
                 if i > 0 {
@@ -369,7 +369,7 @@ impl fmt::Debug for Value {
             return write!(f, "]");
         }
         // Tuple
-        if let Some(elems) = self.as_tuple() {
+        if let Some(elems) = self.as_array() {
             write!(f, "[")?;
             for (i, v) in elems.iter().enumerate() {
                 if i > 0 {

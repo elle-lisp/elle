@@ -179,7 +179,7 @@ fn extract_elements(val: &Value) -> Option<Vec<Value>> {
     if let Some(arr) = val.as_array_mut() {
         return Some(arr.borrow().clone());
     }
-    if let Some(tup) = val.as_tuple() {
+    if let Some(tup) = val.as_array() {
         return Some(tup.to_vec());
     }
     None

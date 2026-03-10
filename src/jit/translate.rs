@@ -595,8 +595,8 @@ impl<'a> FunctionTranslator<'a> {
                     "ArrayMutSliceFrom".to_string(),
                 ));
             }
-            LirInstr::IsTuple { .. } => {
-                return Err(JitError::UnsupportedInstruction("IsTuple".to_string()));
+            LirInstr::IsArray { .. } => {
+                return Err(JitError::UnsupportedInstruction("IsArray".to_string()));
             }
             LirInstr::IsArrayMut { .. } => {
                 return Err(JitError::UnsupportedInstruction("IsArrayMut".to_string()));
@@ -619,7 +619,9 @@ impl<'a> FunctionTranslator<'a> {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
             }
             LirInstr::ArrayMutExtend { .. } => {
-                return Err(JitError::UnsupportedInstruction("ArrayMutExtend".to_string()));
+                return Err(JitError::UnsupportedInstruction(
+                    "ArrayMutExtend".to_string(),
+                ));
             }
             LirInstr::ArrayMutPush { .. } => {
                 return Err(JitError::UnsupportedInstruction("ArrayMutPush".to_string()));

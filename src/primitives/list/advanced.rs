@@ -65,11 +65,11 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Tuple (immutable) - return new tuple
-    if let Some(elems) = args[0].as_tuple() {
-        if let Some(other_elems) = args[1].as_tuple() {
+    if let Some(elems) = args[0].as_array() {
+        if let Some(other_elems) = args[1].as_array() {
             let mut result = elems.to_vec();
             result.extend(other_elems.iter().cloned());
-            return (SIG_OK, Value::tuple(result));
+            return (SIG_OK, Value::array(result));
         } else {
             return (
                 SIG_ERROR,
@@ -251,11 +251,11 @@ pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Tuple - return new tuple
-    if let Some(elems) = args[0].as_tuple() {
-        if let Some(other_elems) = args[1].as_tuple() {
+    if let Some(elems) = args[0].as_array() {
+        if let Some(other_elems) = args[1].as_array() {
             let mut result = elems.to_vec();
             result.extend(other_elems.iter().cloned());
-            return (SIG_OK, Value::tuple(result));
+            return (SIG_OK, Value::array(result));
         } else {
             return (
                 SIG_ERROR,
@@ -352,10 +352,10 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::array_mut(vec));
     }
     // Tuple — return new tuple
-    if let Some(elems) = args[0].as_tuple() {
+    if let Some(elems) = args[0].as_array() {
         let mut vec = elems.to_vec();
         vec.reverse();
-        return (SIG_OK, Value::tuple(vec));
+        return (SIG_OK, Value::array(vec));
     }
     // String — reverse grapheme clusters
     if let Some(result) = args[0].with_string(|s| {

@@ -196,7 +196,7 @@ fn prim_io_reap(args: &[Value]) -> (SignalBits, Value) {
     };
     let completions = backend.poll();
     let values: Vec<Value> = completions.iter().map(|c| c.to_value()).collect();
-    (SIG_OK, Value::tuple(values))
+    (SIG_OK, Value::array(values))
 }
 
 /// (io/wait backend timeout-ms) → tuple-of-completion-structs
@@ -240,7 +240,7 @@ fn prim_io_wait(args: &[Value]) -> (SignalBits, Value) {
     match backend.wait(timeout_ms) {
         Ok(completions) => {
             let values: Vec<Value> = completions.iter().map(|c| c.to_value()).collect();
-            (SIG_OK, Value::tuple(values))
+            (SIG_OK, Value::array(values))
         }
         Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
     }

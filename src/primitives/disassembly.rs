@@ -192,7 +192,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                 .collect();
             block_fields.insert(
                 TableKey::Keyword("instrs".to_string()),
-                Value::tuple(instrs),
+                Value::array(instrs),
             );
 
             // :display — tuple of compact human-readable instruction strings
@@ -203,7 +203,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                 .collect();
             block_fields.insert(
                 TableKey::Keyword("display".to_string()),
-                Value::tuple(display),
+                Value::array(display),
             );
 
             // :spans — tuple of "line:col" strings (nil for synthetic spans)
@@ -218,7 +218,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                     }
                 })
                 .collect();
-            block_fields.insert(TableKey::Keyword("spans".to_string()), Value::tuple(spans));
+            block_fields.insert(TableKey::Keyword("spans".to_string()), Value::array(spans));
 
             // :annotated — display strings with span annotations for CFG rendering
             let annotated: Vec<Value> = block
@@ -235,7 +235,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                 .collect();
             block_fields.insert(
                 TableKey::Keyword("annotated".to_string()),
-                Value::tuple(annotated),
+                Value::array(annotated),
             );
 
             // :term — Debug-formatted terminator string
@@ -285,7 +285,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                     vec![Value::int(resume_label.0 as i64)]
                 }
             };
-            block_fields.insert(TableKey::Keyword("edges".to_string()), Value::tuple(edges));
+            block_fields.insert(TableKey::Keyword("edges".to_string()), Value::array(edges));
 
             Value::struct_from(block_fields)
         })
@@ -293,7 +293,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
 
     fields.insert(
         TableKey::Keyword("blocks".to_string()),
-        Value::tuple(blocks),
+        Value::array(blocks),
     );
 
     (SIG_OK, Value::struct_from(fields))

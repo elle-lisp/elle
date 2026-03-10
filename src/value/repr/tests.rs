@@ -271,7 +271,10 @@ fn test_truthiness_semantics() {
     assert!(Value::EMPTY_LIST.is_truthy(), "empty list is truthy");
 
     // Empty array is truthy
-    assert!(Value::array_mut(vec![]).is_truthy(), "empty array is truthy");
+    assert!(
+        Value::array_mut(vec![]).is_truthy(),
+        "empty array is truthy"
+    );
 
     // Regular values are truthy
     assert!(Value::int(1).is_truthy(), "1 is truthy");

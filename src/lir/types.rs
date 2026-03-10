@@ -257,7 +257,7 @@ pub enum LirInstr {
     /// Check if value is a pair
     IsPair { dst: Reg, src: Reg },
     /// Check if value is a tuple (for pattern matching)
-    IsTuple { dst: Reg, src: Reg },
+    IsArray { dst: Reg, src: Reg },
     /// Check if value is an array (for pattern matching)
     IsArrayMut { dst: Reg, src: Reg },
     /// Check if value is a struct (for pattern matching)

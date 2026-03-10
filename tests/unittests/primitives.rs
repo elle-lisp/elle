@@ -499,8 +499,8 @@ fn test_string_split() {
 
     // Basic split
     let result = call_primitive(&split_fn, &[Value::string("a,b,c"), Value::string(",")]).unwrap();
-    assert!(result.is_tuple());
-    let vec = result.as_tuple().unwrap();
+    assert!(result.is_array());
+    let vec = result.as_array().unwrap();
     assert_eq!(vec.len(), 3);
     assert_eq!(vec[0], Value::string("a"));
     assert_eq!(vec[1], Value::string("b"));
@@ -508,7 +508,7 @@ fn test_string_split() {
 
     // Split with multi-char delimiter
     let result = call_primitive(&split_fn, &[Value::string("hello"), Value::string("ll")]).unwrap();
-    let vec = result.as_tuple().unwrap();
+    let vec = result.as_array().unwrap();
     assert_eq!(vec.len(), 2);
     assert_eq!(vec[0], Value::string("he"));
     assert_eq!(vec[1], Value::string("o"));
@@ -516,7 +516,7 @@ fn test_string_split() {
     // No match returns original in tuple
     let result =
         call_primitive(&split_fn, &[Value::string("hello"), Value::string("xyz")]).unwrap();
-    let vec = result.as_tuple().unwrap();
+    let vec = result.as_array().unwrap();
     assert_eq!(vec.len(), 1);
     assert_eq!(vec[0], Value::string("hello"));
 }

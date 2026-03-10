@@ -372,15 +372,15 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Tuple (immutable)
-    if let Some(elems) = args[0].as_tuple() {
+    if let Some(elems) = args[0].as_array() {
         let clamped_start = start.min(elems.len());
         let clamped_end = end.min(elems.len());
         if clamped_start >= clamped_end {
-            return (SIG_OK, Value::tuple(vec![]));
+            return (SIG_OK, Value::array(vec![]));
         }
         return (
             SIG_OK,
-            Value::tuple(elems[clamped_start..clamped_end].to_vec()),
+            Value::array(elems[clamped_start..clamped_end].to_vec()),
         );
     }
 

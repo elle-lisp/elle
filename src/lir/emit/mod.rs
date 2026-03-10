@@ -583,9 +583,9 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsTuple { dst, src } => {
+            LirInstr::IsArray { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsTuple);
+                self.bytecode.emit(Instruction::IsArray);
                 self.pop();
                 self.push_reg(*dst);
             }

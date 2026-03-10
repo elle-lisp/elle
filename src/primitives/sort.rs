@@ -50,7 +50,7 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Tuple — return new sorted tuple
-    if let Some(elems) = args[0].as_tuple() {
+    if let Some(elems) = args[0].as_array() {
         let mut vec = elems.to_vec();
         for (i, v) in vec.iter().enumerate() {
             if v.as_number().is_none() {
@@ -72,7 +72,7 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
             let fb = b.as_number().unwrap();
             fa.total_cmp(&fb)
         });
-        return (SIG_OK, Value::tuple(vec));
+        return (SIG_OK, Value::array(vec));
     }
 
     // Empty list

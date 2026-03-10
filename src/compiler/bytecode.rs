@@ -173,7 +173,7 @@ pub enum Instruction {
     ArrayMutSliceFrom,
 
     /// Type check: is value a tuple?
-    IsTuple,
+    IsArray,
     /// Type check: is value an array?
     IsArrayMut,
     /// Type check: is value a struct?

@@ -254,7 +254,7 @@ pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usi
         .expect("VM bug: Stack underflow on ArrayMutRefOrNil");
     let result = if let Some(vec_ref) = val.as_array_mut() {
         vec_ref.borrow().get(index).copied()
-    } else if let Some(elems) = val.as_tuple() {
+    } else if let Some(elems) = val.as_array() {
         elems.get(index).copied()
     } else {
         None
@@ -280,11 +280,11 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
         } else {
             Value::array_mut(vec![])
         }
-    } else if let Some(elems) = val.as_tuple() {
+    } else if let Some(elems) = val.as_array() {
         if index < elems.len() {
-            Value::tuple(elems[index..].to_vec())
+            Value::array(elems[index..].to_vec())
         } else {
-            Value::tuple(vec![])
+            Value::array(vec![])
         }
     } else {
         Value::array_mut(vec![])
@@ -354,7 +354,7 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
     // Get the source elements
     let source_elems: Vec<Value> = if let Some(arr) = source.as_array_mut() {
         arr.borrow().to_vec()
-    } else if let Some(tup) = source.as_tuple() {
+    } else if let Some(tup) = source.as_array() {
         tup.to_vec()
     } else if source.as_cons().is_some() || source.is_empty_list() {
         match source.list_to_vec() {

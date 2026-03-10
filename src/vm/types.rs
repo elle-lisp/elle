@@ -46,16 +46,16 @@ pub(crate) fn handle_not(vm: &mut VM) {
     vm.fiber.stack.push(Value::bool(!val.is_truthy()));
 }
 
-pub(crate) fn handle_is_tuple(vm: &mut VM) {
+pub(crate) fn handle_is_array(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on IsTuple");
-    vm.fiber.stack.push(Value::bool(val.is_tuple()));
+        .expect("VM bug: Stack underflow on IsArray");
+    vm.fiber.stack.push(Value::bool(val.is_array()));
 }
 
-pub(crate) fn handle_is_array(vm: &mut VM) {
+pub(crate) fn handle_is_array_mut(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
@@ -81,7 +81,7 @@ pub(crate) fn handle_array_len(vm: &mut VM) {
         .expect("VM bug: Stack underflow on ArrayMutLen");
     let len = if let Some(a) = val.as_array_mut() {
         a.borrow().len() as i64
-    } else if let Some(t) = val.as_tuple() {
+    } else if let Some(t) = val.as_array() {
         t.len() as i64
     } else {
         0

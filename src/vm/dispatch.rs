@@ -278,11 +278,11 @@ impl VM {
                 Instruction::IsPair => {
                     types::handle_is_pair(self);
                 }
-                Instruction::IsTuple => {
-                    types::handle_is_tuple(self);
+                Instruction::IsArray => {
+                    types::handle_is_array(self);
                 }
                 Instruction::IsArrayMut => {
-                    types::handle_is_array(self);
+                    types::handle_is_array_mut(self);
                 }
                 Instruction::IsStruct => {
                     types::handle_is_struct(self);

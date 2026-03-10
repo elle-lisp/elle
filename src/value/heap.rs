@@ -57,14 +57,14 @@ impl Ord for Cons {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum HeapTag {
-    String = 0,
+    LString = 0,
     Cons = 1,
     LArrayMut = 2,
     LStructMut = 3,
-    Struct = 4,
+    LStruct = 4,
     Closure = 5,
     Syntax = 6,
-    Tuple = 7,
+    LArray = 7,
     Cell = 8,
     Float = 9, // For NaN values that can't be inline
     NativeFn = 10,
@@ -76,7 +76,7 @@ pub enum HeapTag {
     FFIType = 19,
     ManagedPointer = 20,
     LStringMut = 21,
-    Bytes = 22,
+    LBytes = 22,
     LBytesMut = 23,
     External = 24,
     Parameter = 25,
@@ -91,7 +91,7 @@ pub enum HeapTag {
 /// via pointer.
 pub enum HeapObject {
     /// Immutable string
-    String(Box<str>),
+    LString(Box<str>),
 
     /// Cons cell (list pair)
     Cons(Cons),
@@ -103,19 +103,19 @@ pub enum HeapObject {
     LStructMut(RefCell<BTreeMap<TableKey, Value>>),
 
     /// Immutable struct
-    Struct(BTreeMap<TableKey, Value>),
+    LStruct(BTreeMap<TableKey, Value>),
 
     /// Function closure (interpreted)
     Closure(Rc<Closure>),
 
-    /// Immutable tuple (fixed-length sequence)
-    Tuple(Vec<Value>),
+    /// Immutable array (fixed-length sequence)
+    LArray(Vec<Value>),
 
     /// Mutable buffer (byte sequence)
     LStringMut(RefCell<Vec<u8>>),
 
     /// Immutable byte sequence (binary data)
-    Bytes(Vec<u8>),
+    LBytes(Vec<u8>),
 
     /// Mutable byte sequence (binary data workspace)
     LBytesMut(RefCell<Vec<u8>>),
@@ -260,15 +260,15 @@ impl HeapObject {
     #[inline]
     pub fn tag(&self) -> HeapTag {
         match self {
-            HeapObject::String(_) => HeapTag::String,
+            HeapObject::LString(_) => HeapTag::LString,
             HeapObject::Cons(_) => HeapTag::Cons,
             HeapObject::LArrayMut(_) => HeapTag::LArrayMut,
             HeapObject::LStructMut(_) => HeapTag::LStructMut,
-            HeapObject::Struct(_) => HeapTag::Struct,
+            HeapObject::LStruct(_) => HeapTag::LStruct,
             HeapObject::Closure(_) => HeapTag::Closure,
-            HeapObject::Tuple(_) => HeapTag::Tuple,
+            HeapObject::LArray(_) => HeapTag::LArray,
             HeapObject::LStringMut(_) => HeapTag::LStringMut,
-            HeapObject::Bytes(_) => HeapTag::Bytes,
+            HeapObject::LBytes(_) => HeapTag::LBytes,
             HeapObject::LBytesMut(_) => HeapTag::LBytesMut,
             HeapObject::Cell(_, _) => HeapTag::Cell,
             HeapObject::Float(_) => HeapTag::Float,
@@ -291,15 +291,15 @@ impl HeapObject {
     /// Get a human-readable type name.
     pub fn type_name(&self) -> &'static str {
         match self {
-            HeapObject::String(_) => "string",
+            HeapObject::LString(_) => "string",
             HeapObject::Cons(_) => "list",
             HeapObject::LArrayMut(_) => "array",
             HeapObject::LStructMut(_) => "table",
-            HeapObject::Struct(_) => "struct",
+            HeapObject::LStruct(_) => "struct",
             HeapObject::Closure(_) => "closure",
-            HeapObject::Tuple(_) => "tuple",
+            HeapObject::LArray(_) => "tuple",
             HeapObject::LStringMut(_) => "buffer",
-            HeapObject::Bytes(_) => "bytes",
+            HeapObject::LBytes(_) => "bytes",
             HeapObject::LBytesMut(_) => "blob",
             HeapObject::Cell(_, _) => "cell",
             HeapObject::Float(_) => "float",
@@ -323,7 +323,7 @@ impl HeapObject {
 impl std::fmt::Debug for HeapObject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HeapObject::String(s) => write!(f, "\"{}\"", s),
+            HeapObject::LString(s) => write!(f, "\"{}\"", s),
             HeapObject::Cons(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
             HeapObject::LArrayMut(v) => {
                 if let Ok(borrowed) = v.try_borrow() {
@@ -333,9 +333,9 @@ impl std::fmt::Debug for HeapObject {
                 }
             }
             HeapObject::LStructMut(_) => write!(f, "<table>"),
-            HeapObject::Struct(_) => write!(f, "<struct>"),
+            HeapObject::LStruct(_) => write!(f, "<struct>"),
             HeapObject::Closure(_) => write!(f, "<closure>"),
-            HeapObject::Tuple(elems) => {
+            HeapObject::LArray(elems) => {
                 write!(f, "[")?;
                 for (i, v) in elems.iter().enumerate() {
                     if i > 0 {
@@ -352,7 +352,7 @@ impl std::fmt::Debug for HeapObject {
                     write!(f, "@\"<borrowed>\"")
                 }
             }
-            HeapObject::Bytes(b) => {
+            HeapObject::LBytes(b) => {
                 write!(f, "#bytes[")?;
                 for (i, byte) in b.iter().enumerate() {
                     if i > 0 {
@@ -416,26 +416,26 @@ mod tests {
 
     #[test]
     fn test_alloc_string() {
-        let v = alloc(HeapObject::String("hello".into()));
+        let v = alloc(HeapObject::LString("hello".into()));
         assert!(v.is_heap());
         unsafe {
             let obj = deref(v);
             match obj {
-                HeapObject::String(s) => assert_eq!(&**s, "hello"),
-                _ => panic!("Expected String"),
+                HeapObject::LString(s) => assert_eq!(&**s, "hello"),
+                _ => panic!("Expected LString"),
             }
         }
     }
 
     #[test]
     fn test_alloc_permanent_string() {
-        let v = alloc_permanent(HeapObject::String("permanent".into()));
+        let v = alloc_permanent(HeapObject::LString("permanent".into()));
         assert!(v.is_heap());
         unsafe {
             let obj = deref(v);
             match obj {
-                HeapObject::String(s) => assert_eq!(&**s, "permanent"),
-                _ => panic!("Expected String"),
+                HeapObject::LString(s) => assert_eq!(&**s, "permanent"),
+                _ => panic!("Expected LString"),
             }
             drop_heap(v);
         }
@@ -444,13 +444,13 @@ mod tests {
     #[test]
     fn test_arena_mark_release() {
         let mark = heap_arena_mark();
-        let v = alloc(HeapObject::String("temporary".into()));
+        let v = alloc(HeapObject::LString("temporary".into()));
         assert!(v.is_heap());
         unsafe {
             let obj = deref(v);
             match obj {
-                HeapObject::String(s) => assert_eq!(&**s, "temporary"),
-                _ => panic!("Expected String"),
+                HeapObject::LString(s) => assert_eq!(&**s, "temporary"),
+                _ => panic!("Expected LString"),
             }
         }
         heap_arena_release(mark);
@@ -461,7 +461,7 @@ mod tests {
         let before = heap_arena_len();
         {
             let _guard = ArenaGuard::new();
-            alloc(HeapObject::String("guarded".into()));
+            alloc(HeapObject::LString("guarded".into()));
             alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
             let during = heap_arena_len();
             assert_eq!(during, before + 2);
@@ -475,10 +475,10 @@ mod tests {
         let before = heap_arena_len();
         {
             let _outer = ArenaGuard::new();
-            alloc(HeapObject::String("outer alloc".into()));
+            alloc(HeapObject::LString("outer alloc".into()));
             {
                 let _inner = ArenaGuard::new();
-                alloc(HeapObject::String("inner alloc".into()));
+                alloc(HeapObject::LString("inner alloc".into()));
                 let during_inner = heap_arena_len();
                 assert_eq!(during_inner, before + 2);
             }
@@ -494,7 +494,7 @@ mod tests {
         let before = heap_arena_len();
         let result: Result<(), String> = {
             let _guard = ArenaGuard::new();
-            alloc(HeapObject::String("will be freed".into()));
+            alloc(HeapObject::LString("will be freed".into()));
             alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
             Err("simulated error".to_string())
         };
@@ -505,8 +505,8 @@ mod tests {
 
     #[test]
     fn test_heap_tag() {
-        let s = HeapObject::String("test".into());
-        assert_eq!(s.tag(), HeapTag::String);
+        let s = HeapObject::LString("test".into());
+        assert_eq!(s.tag(), HeapTag::LString);
         assert_eq!(s.type_name(), "string");
     }
 }

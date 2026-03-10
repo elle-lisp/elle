@@ -48,7 +48,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Tuple (immutable indexed collection)
-    if let Some(elems) = args[0].as_tuple() {
+    if let Some(elems) = args[0].as_array() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -474,7 +474,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Tuple (immutable indexed collection) - return new tuple
-    if let Some(elems) = args[0].as_tuple() {
+    if let Some(elems) = args[0].as_array() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -505,7 +505,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         }
         let mut new_elems = elems.to_vec();
         new_elems[index as usize] = args[2];
-        return (SIG_OK, Value::tuple(new_elems));
+        return (SIG_OK, Value::array(new_elems));
     }
 
     // String (immutable character sequence) - return new string

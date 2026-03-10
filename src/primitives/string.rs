@@ -261,7 +261,7 @@ pub(crate) fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
 
     let parts: Vec<Value> = s.split(&delimiter).map(Value::string).collect();
 
-    (SIG_OK, Value::tuple(parts))
+    (SIG_OK, Value::array(parts))
 }
 
 /// Replace all occurrences of old with new in a string or buffer
@@ -511,7 +511,7 @@ pub(crate) fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
     };
 
     // Try tuple first
-    let vec = if let Some(elems) = seq.as_tuple() {
+    let vec = if let Some(elems) = seq.as_array() {
         elems.to_vec()
     } else if let Some(arr) = seq.as_array_mut() {
         arr.borrow().clone()

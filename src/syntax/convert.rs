@@ -73,7 +73,7 @@ impl Syntax {
             }
             SyntaxKind::Tuple(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
-                Value::tuple(values)
+                Value::array(values)
             }
             SyntaxKind::Array(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
@@ -182,7 +182,7 @@ impl Syntax {
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
             SyntaxKind::List(syntaxes?)
-        } else if let Some(elems) = value.as_tuple() {
+        } else if let Some(elems) = value.as_array() {
             let syntaxes: Result<Vec<Syntax>, String> = elems
                 .iter()
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))

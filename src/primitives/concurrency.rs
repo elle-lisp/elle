@@ -45,7 +45,7 @@ fn is_value_sendable(value: &Value) -> bool {
 
     match unsafe { deref(*value) } {
         // Strings are immutable and safe
-        HeapObject::String(_) => true,
+        HeapObject::LString(_) => true,
 
         // Immutable collections are safe
         HeapObject::LArrayMut(vec) => {
@@ -55,10 +55,10 @@ fn is_value_sendable(value: &Value) -> bool {
                 false
             }
         }
-        HeapObject::Struct(s) => s.iter().all(|(_, v)| is_value_sendable(v)),
+        HeapObject::LStruct(s) => s.iter().all(|(_, v)| is_value_sendable(v)),
 
         // Tuples are safe if their contents are
-        HeapObject::Tuple(elems) => elems.iter().all(is_value_sendable),
+        HeapObject::LArray(elems) => elems.iter().all(is_value_sendable),
 
         // Cons cells are safe if their contents are
         HeapObject::Cons(cons) => is_value_sendable(&cons.first) && is_value_sendable(&cons.rest),
@@ -114,7 +114,7 @@ fn is_value_sendable(value: &Value) -> bool {
         HeapObject::LStringMut(buf) => buf.try_borrow().is_ok(),
 
         // Bytes are immutable and sendable
-        HeapObject::Bytes(_) => true,
+        HeapObject::LBytes(_) => true,
 
         // Blobs are sendable if we deep-copy
         HeapObject::LBytesMut(blob) => blob.try_borrow().is_ok(),

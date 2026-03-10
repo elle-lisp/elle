@@ -33,8 +33,8 @@ impl StringInterner {
             return Rc::as_ptr(rc);
         }
 
-        // Allocate new HeapObject::String
-        let rc = Rc::new(HeapObject::String(s.into()));
+        // Allocate new HeapObject::LString
+        let rc = Rc::new(HeapObject::LString(s.into()));
         let ptr = Rc::as_ptr(&rc);
 
         // Store in table
@@ -257,8 +257,8 @@ mod tests {
         let ptr = intern_string("verification test");
         let heap_obj = unsafe { &*ptr };
         match heap_obj {
-            HeapObject::String(s) => assert_eq!(&**s, "verification test"),
-            _ => panic!("Expected HeapObject::String"),
+            HeapObject::LString(s) => assert_eq!(&**s, "verification test"),
+            _ => panic!("Expected HeapObject::LString"),
         }
     }
 
@@ -275,8 +275,8 @@ mod tests {
         // Verify content is still accessible
         let heap_obj = unsafe { &*ptr1 };
         match heap_obj {
-            HeapObject::String(s) => assert_eq!(&**s, "scoped string"),
-            _ => panic!("Expected HeapObject::String"),
+            HeapObject::LString(s) => assert_eq!(&**s, "scoped string"),
+            _ => panic!("Expected HeapObject::LString"),
         }
     }
 
@@ -313,8 +313,8 @@ mod tests {
         // Verify content
         let heap_obj = unsafe { &*ptr1 };
         match heap_obj {
-            HeapObject::String(s) => assert_eq!(s.len(), 10000),
-            _ => panic!("Expected HeapObject::String"),
+            HeapObject::LString(s) => assert_eq!(s.len(), 10000),
+            _ => panic!("Expected HeapObject::LString"),
         }
     }
 

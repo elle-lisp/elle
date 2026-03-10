@@ -17,7 +17,7 @@ use crate::value::{error_val, Value};
 fn freeze_value(v: Value) -> Value {
     if let Some(arr) = v.as_array_mut() {
         let items: Vec<Value> = arr.borrow().iter().map(|x| freeze_value(*x)).collect();
-        Value::tuple(items)
+        Value::array(items)
     } else if let Some(tbl) = v.as_struct_mut() {
         let map: std::collections::BTreeMap<crate::value::TableKey, Value> = tbl
             .borrow()
@@ -313,7 +313,7 @@ pub(crate) fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
     }
     if let Some(s) = args[0].as_set() {
         let items: Vec<Value> = s.iter().copied().collect();
-        (SIG_OK, Value::tuple(items))
+        (SIG_OK, Value::array(items))
     } else if let Some(s) = args[0].as_set_mut() {
         let items: Vec<Value> = s.borrow().iter().copied().collect();
         (SIG_OK, Value::array_mut(items))
@@ -381,7 +381,7 @@ pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Tuple (immutable) → immutable set
-    if let Some(elems) = v.as_tuple() {
+    if let Some(elems) = v.as_array() {
         let set: BTreeSet<Value> = elems.iter().map(|x| freeze_value(*x)).collect();
         return (SIG_OK, Value::set(set));
     }

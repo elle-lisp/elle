@@ -326,14 +326,14 @@ impl Lowerer {
                 });
                 Ok(dst)
             }
-            Constructor::Tuple(n) => self.emit_type_and_length_test(value_reg, *n, true, CmpOp::Eq),
-            Constructor::TupleRest(n) => {
+            Constructor::Array(n) => self.emit_type_and_length_test(value_reg, *n, true, CmpOp::Eq),
+            Constructor::ArrayRest(n) => {
                 self.emit_type_and_length_test(value_reg, *n, true, CmpOp::Ge)
             }
-            Constructor::Array(n) => {
+            Constructor::ArrayMut(n) => {
                 self.emit_type_and_length_test(value_reg, *n, false, CmpOp::Eq)
             }
-            Constructor::ArrayRest(n) => {
+            Constructor::ArrayMutRest(n) => {
                 self.emit_type_and_length_test(value_reg, *n, false, CmpOp::Ge)
             }
             Constructor::Struct(_) => {
@@ -399,7 +399,7 @@ impl Lowerer {
 
         let type_check_reg = self.fresh_reg();
         if is_tuple {
-            self.emit(LirInstr::IsTuple {
+            self.emit(LirInstr::IsArray {
                 dst: type_check_reg,
                 src: reloaded_for_type,
             });
@@ -843,7 +843,7 @@ impl Lowerer {
 
                 // Step 2: Check if value is a tuple
                 let is_tuple_reg = self.fresh_reg();
-                self.emit(LirInstr::IsTuple {
+                self.emit(LirInstr::IsArray {
                     dst: is_tuple_reg,
                     src: value_reg,
                 });

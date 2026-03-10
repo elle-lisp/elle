@@ -104,7 +104,7 @@ impl SendValue {
 
         match unsafe { deref(value) } {
             // Strings are immutable and safe
-            HeapObject::String(s) => Ok(SendValue::String(s.to_string())),
+            HeapObject::LString(s) => Ok(SendValue::String(s.to_string())),
 
             // Cons cells - deep copy both first and rest
             HeapObject::Cons(cons) => {
@@ -124,7 +124,7 @@ impl SendValue {
             }
 
             // Structs - deep copy all values
-            HeapObject::Struct(s) => {
+            HeapObject::LStruct(s) => {
                 let mut copied = BTreeMap::new();
                 for (k, v) in s.iter() {
                     if !k.is_sendable() {
@@ -136,7 +136,7 @@ impl SendValue {
             }
 
             // Tuples - deep copy all elements
-            HeapObject::Tuple(elems) => {
+            HeapObject::LArray(elems) => {
                 let copied: Result<Vec<SendValue>, String> =
                     elems.iter().map(|v| SendValue::from_value(*v)).collect();
                 Ok(SendValue::Tuple(copied?))
@@ -202,7 +202,7 @@ impl SendValue {
             HeapObject::FFIType(desc) => Ok(SendValue::FFIType(desc.clone())),
 
             // Bytes - immutable and safe to send
-            HeapObject::Bytes(b) => Ok(SendValue::Bytes(b.clone())),
+            HeapObject::LBytes(b) => Ok(SendValue::Bytes(b.clone())),
 
             // Blobs - deep copy the bytes
             HeapObject::LBytesMut(blob_ref) => {
@@ -252,14 +252,16 @@ impl SendValue {
                     .into_iter()
                     .map(|(k, sv)| (k, sv.into_value()))
                     .collect();
-                alloc(HeapObject::Struct(values))
+                alloc(HeapObject::LStruct(values))
             }
             SendValue::Tuple(items) => {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
-                alloc(HeapObject::Tuple(values))
+                alloc(HeapObject::LArray(values))
             }
-            SendValue::Buffer(bytes) => alloc(HeapObject::LStringMut(std::cell::RefCell::new(bytes))),
-            SendValue::Bytes(bytes) => alloc(HeapObject::Bytes(bytes)),
+            SendValue::Buffer(bytes) => {
+                alloc(HeapObject::LStringMut(std::cell::RefCell::new(bytes)))
+            }
+            SendValue::Bytes(bytes) => alloc(HeapObject::LBytes(bytes)),
             SendValue::Blob(bytes) => alloc(HeapObject::LBytesMut(std::cell::RefCell::new(bytes))),
             SendValue::Cell(contents, is_local) => {
                 let val = contents.into_value();

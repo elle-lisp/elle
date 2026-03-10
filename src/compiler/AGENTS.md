@@ -48,7 +48,7 @@ Bytecode instruction definitions and debug formatting.
 
 Type guard instructions are used in pattern matching to check value types:
 
-- `IsNil`, `IsEmptyList`, `IsPair`, `IsTuple`, `IsArray`, `IsStruct`, `IsTable`
+- `IsNil`, `IsEmptyList`, `IsPair`, `IsArray`, `IsArrayMut`, `IsStruct`, `IsTable`
   — check immutable collection types
 - `IsSet`, `IsSetMut` — check set types (immutable and mutable)
 - `IsNumber`, `IsSymbol` — check scalar types

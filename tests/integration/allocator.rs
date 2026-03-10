@@ -74,7 +74,7 @@ fn test_custom_alloc_dispatch() {
 
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::String("hello".into()));
+    heap.alloc(HeapObject::LString("hello".into()));
 
     // All 3 allocations should have gone through the custom allocator.
     assert_eq!(heap.len(), 3);
@@ -147,7 +147,7 @@ fn test_custom_alloc_counts() {
     heap.push_custom_allocator(alloc);
 
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::String("test".into()));
+    heap.alloc(HeapObject::LString("test".into()));
     heap.alloc(HeapObject::Float(42.5));
 
     assert_eq!(alloc_count(), 3);
@@ -173,7 +173,7 @@ fn test_scope_exit_deallocs_custom_objects() {
 
     // Enter scope, allocate inside, then exit scope
     heap.push_scope_mark();
-    heap.alloc(HeapObject::String("scoped".into()));
+    heap.alloc(HeapObject::LString("scoped".into()));
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(alloc_count(), 3);
     assert_eq!(dealloc_count(), 0);
@@ -199,7 +199,7 @@ fn test_form_exit_deallocs_remaining() {
     heap.push_custom_allocator(alloc);
 
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::String("stays".into()));
+    heap.alloc(HeapObject::LString("stays".into()));
     assert_eq!(alloc_count(), 2);
 
     heap.pop_custom_allocator();
@@ -217,8 +217,8 @@ fn test_clear_cleans_up_custom_allocators() {
     let alloc = Rc::new(AllocatorBox::new(TlCountingAllocator));
     heap.push_custom_allocator(alloc);
 
-    heap.alloc(HeapObject::String("a".into()));
-    heap.alloc(HeapObject::String("b".into()));
+    heap.alloc(HeapObject::LString("a".into()));
+    heap.alloc(HeapObject::LString("b".into()));
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(alloc_count(), 3);
 
@@ -281,7 +281,7 @@ fn test_nested_allocators() {
     // Push inner
     heap.push_custom_allocator(Rc::new(AllocatorBox::new(InnerAlloc)));
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::String("inner".into()));
+    heap.alloc(HeapObject::LString("inner".into()));
     assert_eq!(INNER_ALLOCS.with(|c| c.get()), 2);
     assert_eq!(OUTER_ALLOCS.with(|c| c.get()), 1); // outer unchanged
 
@@ -314,13 +314,13 @@ fn test_shared_alloc_priority() {
     heap.set_shared_alloc(sa_ptr);
 
     // Allocations should go to shared, not custom
-    heap.alloc(HeapObject::String("shared-routed".into()));
+    heap.alloc(HeapObject::LString("shared-routed".into()));
     assert_eq!(alloc_count(), 0); // custom alloc NOT called
     assert_eq!(unsafe { &*sa_ptr }.len(), 1); // went to shared
 
     // Clear shared, allocations should now go to custom
     heap.clear_shared_alloc();
-    heap.alloc(HeapObject::String("custom-routed".into()));
+    heap.alloc(HeapObject::LString("custom-routed".into()));
     assert_eq!(alloc_count(), 1); // now custom is called
 
     // Cleanup
@@ -337,7 +337,7 @@ fn test_drop_cleans_up_custom_allocators() {
     let alloc = Rc::new(AllocatorBox::new(TlCountingAllocator));
     heap.push_custom_allocator(alloc);
 
-    heap.alloc(HeapObject::String("will-drop".into()));
+    heap.alloc(HeapObject::LString("will-drop".into()));
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(alloc_count(), 2);
 
@@ -350,7 +350,7 @@ fn test_no_custom_allocator_unchanged_behavior() {
     // Without custom allocator, behavior is unchanged.
     let mut heap = make_heap();
     let mark = heap.mark();
-    heap.alloc(HeapObject::String("normal".into()));
+    heap.alloc(HeapObject::LString("normal".into()));
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(heap.len(), 2);
     heap.release(mark);
@@ -369,10 +369,10 @@ fn test_nested_scopes_with_custom_allocator() {
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
 
     heap.push_scope_mark(); // outer scope
-    heap.alloc(HeapObject::String("outer-scoped".into()));
+    heap.alloc(HeapObject::LString("outer-scoped".into()));
 
     heap.push_scope_mark(); // inner scope
-    heap.alloc(HeapObject::String("inner-scoped".into()));
+    heap.alloc(HeapObject::LString("inner-scoped".into()));
     assert_eq!(alloc_count(), 3);
 
     heap.pop_scope_mark_and_release(); // exit inner scope

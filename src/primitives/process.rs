@@ -77,7 +77,7 @@ pub(crate) fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
 /// (sys/args) => ["arg1" "arg2" ...]
 pub(crate) fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {
     let args: Vec<Value> = std::env::args().skip(2).map(Value::string).collect();
-    (SIG_OK, Value::tuple(args))
+    (SIG_OK, Value::array(args))
 }
 
 /// Declarative primitive definitions for process operations

@@ -322,7 +322,7 @@ fn test_tuple_pattern() {
     match &tree {
         DecisionTree::Switch { cases, .. } => {
             assert_eq!(cases.len(), 1);
-            assert_eq!(cases[0].0, Constructor::Tuple(2));
+            assert_eq!(cases[0].0, Constructor::Array(2));
         }
         _ => panic!("expected Switch"),
     }
@@ -393,8 +393,8 @@ fn test_constructor_arity() {
     assert_eq!(Constructor::Nil.arity(), 0);
     assert_eq!(Constructor::EmptyList.arity(), 0);
     assert_eq!(Constructor::Cons.arity(), 2);
-    assert_eq!(Constructor::Tuple(3).arity(), 3);
-    assert_eq!(Constructor::Array(2).arity(), 2);
+    assert_eq!(Constructor::Array(3).arity(), 3);
+    assert_eq!(Constructor::ArrayMut(2).arity(), 2);
     assert_eq!(
         Constructor::Struct(vec![
             PatternKey::Keyword("a".into()),
