@@ -24,7 +24,7 @@ Lists are `EMPTY_LIST`-terminated, not `NIL`-terminated. `(rest (list 1))` retur
 
 `restrict` only appears inside lambda bodies as a preamble declaration (after optional docstring, before first non-declaration expression). It is NOT a general expression form. Using `restrict` outside a lambda body is a regular function call (to a function named `restrict`), not a special form. This is not an error — it's just a function call.
 
-```elle
+```janet
 # Correct: restrict in lambda body preamble
 (fn (f x)
   (restrict f)

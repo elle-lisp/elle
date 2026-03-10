@@ -610,7 +610,7 @@ Bits 3, 5, 6, 7, 10–15 are reserved for VM-internal use and are not user-visib
 
 User-defined effects are registered via the `(effect :keyword)` form and allocated bits 16–31. Up to 16 user effects are supported per compilation unit.
 
-```elle
+```janet
 # Register a user-defined effect
 (effect :heartbeat)
 (effect :rate-limit)
@@ -628,7 +628,7 @@ Duplicate registration is a compile-time error. Typos in effect keywords used in
 Registers a new user-defined effect keyword and returns the keyword value.
 
 **Syntax:**
-```elle
+```janet
 (effect :keyword)
 ```
 
@@ -640,7 +640,7 @@ Registers a new user-defined effect keyword and returns the keyword value.
 - Built-in effects (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`) cannot be re-registered
 
 **Examples:**
-```elle
+```janet
 # File scope
 (effect :heartbeat)
 (effect :rate-limit)
@@ -657,7 +657,7 @@ my-effect  # ⟹ :custom
 Declares effect bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
 
 **Syntax:**
-```elle
+```janet
 # Function-level restriction (no signals)
 (restrict)
 
@@ -686,7 +686,7 @@ Declares effect bounds on a function or its parameters. Appears as a preamble de
 **Outside lambda bodies**, `restrict` is a regular function call (not a special form). This is not an error — it's just a function call to a function named `restrict`.
 
 **Examples:**
-```elle
+```janet
 # Pure function
 (defn add (x y)
   (restrict)
@@ -732,7 +732,7 @@ Every lambda has an `inferred_effect` — the minimum guaranteed set of effects 
 The `declared_effect: Option<Effects>` is the programmer-supplied ceiling constraint from `(restrict)` or `(restrict :kw ...)`. When present, the compiler checks that `inferred_effect.bits ⊆ declared_effect.bits`. If the check passes, the lambda's final effect is the declared bound (tighter). If it fails, compile-time error.
 
 **Example:**
-```elle
+```janet
 # Function with parameter bound
 (defn apply-inert (f x)
   (restrict f)  # f must be inert
@@ -753,7 +753,7 @@ The `declared_effect: Option<Effects>` is the programmer-supplied ceiling constr
 A function with `(restrict f)` is no longer polymorphic with respect to `f`. The compiler knows `f` must be inert, so the function's effect is determined by its own body only, not by what `f` might do.
 
 **Example:**
-```elle
+```janet
 # Without bound: polymorphic
 (defn map-any (f xs)
   (map f xs))
@@ -771,7 +771,7 @@ A function with `(restrict f)` is no longer polymorphic with respect to `f`. The
 When a concrete function is passed to a parameter with a bound, the analyzer checks the argument's effect against the bound at compile time.
 
 **Example:**
-```elle
+```janet
 (defn apply-inert (f x)
   (restrict f)
   (f x))
@@ -794,7 +794,7 @@ When a closure is passed to a function with an effect bound, the runtime checks 
 - If the check fails, the VM signals `:error` with a descriptive message
 
 **Example:**
-```elle
+```janet
 (defn apply-inert (f x)
   (restrict f)
   (f x))
@@ -814,7 +814,7 @@ Effect bounds enable JIT optimizations:
 3. **Elimination of polymorphism**: Bounded parameters eliminate the need to track polymorphic effects, simplifying JIT compilation
 
 **Example:**
-```elle
+```janet
 # Without bounds: JIT cannot specialize
 (defn map-any (f xs)
   (map f xs))
@@ -830,7 +830,7 @@ Effect bounds enable JIT optimizations:
 Returns the full signal registry as a struct with effect keywords as keys and bit positions as values.
 
 **Syntax:**
-```elle
+```janet
 (effects)
 ```
 
@@ -838,7 +838,7 @@ Returns the full signal registry as a struct with effect keywords as keys and bi
 A struct mapping effect keywords to bit positions. Includes both built-in and user-defined effects.
 
 **Example:**
-```elle
+```janet
 (effects)
 # ⟹ {:error 0 :yield 1 :debug 2 :ffi 4 :halt 8 :io 9 :heartbeat 16 :rate-limit 17}
 
