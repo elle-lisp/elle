@@ -13,7 +13,7 @@ use crate::reader::SourceLoc;
 ///
 /// # Returns
 /// The source code contents if the file exists and is readable, None otherwise
-pub fn load_source_for_loc(loc: &SourceLoc) -> Option<String> {
+pub(crate) fn load_source_for_loc(loc: &SourceLoc) -> Option<String> {
     if loc.is_unknown() || loc.file.starts_with('<') {
         return None;
     }
@@ -34,7 +34,8 @@ pub fn load_source_for_loc(loc: &SourceLoc) -> Option<String> {
 ///  5 | (+ x 1)
 ///    |    ^
 /// ```
-pub fn format_source_context(source: &str, location: &SourceLoc) -> String {
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn format_source_context(source: &str, location: &SourceLoc) -> String {
     if location.is_unknown() {
         return String::new();
     }
@@ -66,7 +67,7 @@ pub fn format_source_context(source: &str, location: &SourceLoc) -> String {
 ///
 /// # Returns
 /// The requested line without trailing newline, or None if line doesn't exist
-pub fn extract_source_line(source: &str, line_num: usize) -> Option<String> {
+pub(crate) fn extract_source_line(source: &str, line_num: usize) -> Option<String> {
     if line_num == 0 {
         return None;
     }
@@ -89,7 +90,7 @@ pub fn extract_source_line(source: &str, line_num: usize) -> Option<String> {
 /// # Example
 /// For `col=4` in a line "hello world":
 /// Returns `"   ^"` (3 spaces + caret)
-pub fn highlight_column(line: &str, col: usize) -> String {
+pub(crate) fn highlight_column(line: &str, col: usize) -> String {
     if col == 0 {
         return "^".to_string();
     }

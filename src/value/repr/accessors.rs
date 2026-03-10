@@ -93,7 +93,7 @@ impl Value {
         if self.is_keyword() {
             let ptr = (self.0 & PTRVAL_PAYLOAD_MASK) as *const crate::value::heap::HeapObject;
             match unsafe { &*ptr } {
-                crate::value::heap::HeapObject::String(s) => Some(s),
+                crate::value::heap::HeapObject::LString(s) => Some(s),
                 _ => None,
             }
         } else {
@@ -119,7 +119,8 @@ impl Value {
     #[inline]
     pub fn is_string(&self) -> bool {
         use crate::value::heap::HeapTag;
-        (self.0 & super::TAG_SSO_MASK) == super::TAG_SSO || self.heap_tag() == Some(HeapTag::String)
+        (self.0 & super::TAG_SSO_MASK) == super::TAG_SSO
+            || self.heap_tag() == Some(HeapTag::LString)
     }
 
     /// Check if this is a cons cell.
@@ -131,23 +132,23 @@ impl Value {
 
     /// Check if this is an array.
     #[inline]
-    pub fn is_array(&self) -> bool {
+    pub fn is_array_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Array)
+        self.heap_tag() == Some(HeapTag::LArrayMut)
     }
 
     /// Check if this is a table.
     #[inline]
-    pub fn is_table(&self) -> bool {
+    pub fn is_struct_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Table)
+        self.heap_tag() == Some(HeapTag::LStructMut)
     }
 
     /// Check if this is a struct.
     #[inline]
     pub fn is_struct(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Struct)
+        self.heap_tag() == Some(HeapTag::LStruct)
     }
 
     /// Check if this is a closure.
@@ -173,23 +174,23 @@ impl Value {
 
     /// Check if this is a buffer.
     #[inline]
-    pub fn is_buffer(&self) -> bool {
+    pub fn is_string_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Buffer)
+        self.heap_tag() == Some(HeapTag::LStringMut)
     }
 
     /// Check if this is a bytes value.
     #[inline]
     pub fn is_bytes(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Bytes)
+        self.heap_tag() == Some(HeapTag::LBytes)
     }
 
     /// Check if this is a blob value.
     #[inline]
-    pub fn is_blob(&self) -> bool {
+    pub fn is_bytes_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Blob)
+        self.heap_tag() == Some(HeapTag::LBytesMut)
     }
 
     /// Check if this is a syntax object.
@@ -257,7 +258,7 @@ impl Value {
                 return None;
             }
             match unsafe { deref(*self) } {
-                HeapObject::String(s) => Some(f(s)),
+                HeapObject::LString(s) => Some(f(s)),
                 _ => None,
             }
         }
@@ -296,20 +297,20 @@ impl Value {
 
     /// Extract as array if this is an array.
     #[inline]
-    pub fn as_array(&self) -> Option<&std::cell::RefCell<Vec<Value>>> {
+    pub fn as_array_mut(&self) -> Option<&std::cell::RefCell<Vec<Value>>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Array(v) => Some(v),
+            HeapObject::LArrayMut(v) => Some(v),
             _ => None,
         }
     }
 
     /// Extract as table if this is a table.
     #[inline]
-    pub fn as_table(
+    pub fn as_struct_mut(
         &self,
     ) -> Option<&std::cell::RefCell<std::collections::BTreeMap<crate::value::heap::TableKey, Value>>>
     {
@@ -318,7 +319,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Table(t) => Some(t),
+            HeapObject::LStructMut(t) => Some(t),
             _ => None,
         }
     }
@@ -333,7 +334,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Struct(s) => Some(s),
+            HeapObject::LStruct(s) => Some(s),
             _ => None,
         }
     }
@@ -387,23 +388,23 @@ impl Value {
         }
     }
 
-    /// Extract as tuple if this is a tuple.
+    /// Extract as array (immutable tuple) if this is one.
     #[inline]
-    pub fn as_tuple(&self) -> Option<&[Value]> {
+    pub fn as_array(&self) -> Option<&[Value]> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Tuple(elems) => Some(elems),
+            HeapObject::LArray(elems) => Some(elems),
             _ => None,
         }
     }
 
-    /// Check if this value is a tuple.
+    /// Check if this value is an array (immutable tuple).
     #[inline]
-    pub fn is_tuple(&self) -> bool {
-        self.as_tuple().is_some()
+    pub fn is_array(&self) -> bool {
+        self.as_array().is_some()
     }
 
     /// Extract as set if this is a set.
@@ -448,13 +449,13 @@ impl Value {
 
     /// Extract as buffer if this is a buffer.
     #[inline]
-    pub fn as_buffer(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
+    pub fn as_string_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Buffer(b) => Some(b),
+            HeapObject::LStringMut(b) => Some(b),
             _ => None,
         }
     }
@@ -467,20 +468,20 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Bytes(b) => Some(b),
+            HeapObject::LBytes(b) => Some(b),
             _ => None,
         }
     }
 
     /// Extract as blob if this is a blob value.
     #[inline]
-    pub fn as_blob(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
+    pub fn as_bytes_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Blob(b) => Some(b),
+            HeapObject::LBytesMut(b) => Some(b),
             _ => None,
         }
     }

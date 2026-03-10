@@ -24,7 +24,7 @@ use crate::value::{error_val, Value};
 /// (coro/new fn) → fiber
 ///
 /// Creates a fiber with SIG_YIELD mask from a closure.
-pub fn prim_make_coroutine(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_make_coroutine(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -54,7 +54,7 @@ pub fn prim_make_coroutine(args: &[Value]) -> (SignalBits, Value) {
 /// Returns the fiber's status as a keyword, mapped to coroutine names:
 /// :new → :created, :alive → :running, :dead → :done,
 /// :suspended and :error unchanged.
-pub fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -83,10 +83,10 @@ pub fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
 
     let status = handle.with(|fiber| fiber.status);
     let name = match status {
-        FiberStatus::New => "created",
-        FiberStatus::Alive => "running",
-        FiberStatus::Suspended => "suspended",
-        FiberStatus::Dead => "done",
+        FiberStatus::New => "new",
+        FiberStatus::Alive => "alive",
+        FiberStatus::Paused => "paused",
+        FiberStatus::Dead => "dead",
         FiberStatus::Error => "error",
     };
 
@@ -94,7 +94,7 @@ pub fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (coro/done? co) → bool
-pub fn prim_coroutine_done(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_coroutine_done(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -131,7 +131,7 @@ pub fn prim_coroutine_done(args: &[Value]) -> (SignalBits, Value) {
 /// (coro/value co) → value
 ///
 /// Returns the signal payload from the fiber's last signal.
-pub fn prim_coroutine_value(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_coroutine_value(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -165,7 +165,7 @@ pub fn prim_coroutine_value(args: &[Value]) -> (SignalBits, Value) {
 /// (coro? val) → bool
 ///
 /// Returns true if the value is a fiber (coroutines are fibers).
-pub fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -183,7 +183,7 @@ pub fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
 /// (coro/resume co val) → value
 ///
 /// Resume a fiber. Returns SIG_RESUME for the VM to handle.
-pub fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() || args.len() > 2 {
         return (
             SIG_ERROR,
@@ -214,7 +214,7 @@ pub fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
 
     // Validate status and store resume value
     let status_err = handle.with_mut(|fiber| match fiber.status {
-        FiberStatus::New | FiberStatus::Suspended => {
+        FiberStatus::New | FiberStatus::Paused => {
             fiber.signal = Some((SIG_OK, resume_value));
             None
         }
@@ -242,7 +242,7 @@ pub fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
 /// (coro/>iterator co) → co
 ///
 /// Identity — fibers are iterable.
-pub fn prim_coroutine_to_iterator(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_coroutine_to_iterator(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -270,7 +270,7 @@ pub fn prim_coroutine_to_iterator(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for coroutine operations
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "coro/new",
         func: prim_make_coroutine,
@@ -287,7 +287,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_coroutine_status,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Get the status of a coroutine (:created, :running, :suspended, :done, :error)",
+        doc: "Get the status of a coroutine (:new, :alive, :paused, :dead, :error)",
         params: &["coroutine"],
         category: "coro",
         example: "(coro/status co)",

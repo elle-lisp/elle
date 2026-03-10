@@ -106,7 +106,7 @@ impl VM {
         self.fiber.status = if bits.is_ok() {
             FiberStatus::Dead
         } else {
-            FiberStatus::Suspended
+            FiberStatus::Paused
         };
 
         // 6. Extract the result before swapping back

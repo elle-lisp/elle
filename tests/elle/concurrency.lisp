@@ -160,9 +160,9 @@
 
 # spawn_rejects_mutable_table_capture
 (assert-err (fn ()
-  (let ((t (table)))
+  (let ((t (@struct)))
     (spawn (fn () t))))
-  "spawn rejects mutable table capture")
+  "spawn rejects mutable @struct capture")
 
 # spawn_rejects_native_function
 (assert-err (fn () (spawn +))

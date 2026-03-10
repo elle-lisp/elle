@@ -5,7 +5,7 @@ use crate::symbols::SymbolIndex;
 use serde_json::{json, Value};
 
 /// Find definition location for a symbol at a given position
-pub fn find_definition(
+pub(crate) fn find_definition(
     line: u32,
     character: u32,
     symbol_index: &SymbolIndex,

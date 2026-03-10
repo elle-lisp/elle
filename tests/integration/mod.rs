@@ -51,9 +51,6 @@ mod dispatch {
 mod lint {
     include!("lint.rs");
 }
-mod lsp {
-    include!("lsp.rs");
-}
 mod compliance {
     include!("compliance.rs");
 }

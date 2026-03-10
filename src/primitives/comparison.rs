@@ -66,7 +66,7 @@ fn chain_cmp(
 /// If both values are numbers, compares numerically (int 1 == float 1.0).
 /// Otherwise, uses structural equality (PartialEq).
 /// Chained: (= a b c) means all pairs are equal.
-pub fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 {
         return (
             SIG_ERROR,
@@ -98,7 +98,7 @@ pub fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
 
 /// Strict identity comparison — bitwise/structural equality with no coercion.
 /// This is what `=` used to be: (identical? 1 1.0) is false.
-pub fn prim_identical(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_identical(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -119,27 +119,27 @@ pub fn prim_identical(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Less than comparison (chained)
-pub fn prim_lt(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_lt(args: &[Value]) -> (SignalBits, Value) {
     chain_cmp("<", args, |a, b| a < b, |a, b| a < b, |ord| ord.is_lt())
 }
 
 /// Greater than comparison (chained)
-pub fn prim_gt(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_gt(args: &[Value]) -> (SignalBits, Value) {
     chain_cmp(">", args, |a, b| a > b, |a, b| a > b, |ord| ord.is_gt())
 }
 
 /// Less than or equal comparison (chained)
-pub fn prim_le(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_le(args: &[Value]) -> (SignalBits, Value) {
     chain_cmp("<=", args, |a, b| a <= b, |a, b| a <= b, |ord| ord.is_le())
 }
 
 /// Greater than or equal comparison (chained)
-pub fn prim_ge(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_ge(args: &[Value]) -> (SignalBits, Value) {
     chain_cmp(">=", args, |a, b| a >= b, |a, b| a >= b, |ord| ord.is_ge())
 }
 
 /// Declarative primitive definitions for comparison functions.
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "=",
         func: prim_eq,

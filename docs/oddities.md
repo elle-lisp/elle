@@ -23,14 +23,14 @@ Lists are `EMPTY_LIST`-terminated, not `NIL`-terminated. `(rest (list 1))` retur
 ### Collection literal mutable/immutable split
 
 Bare delimiters are immutable, `@`-prefixed are mutable:
-- `[...]` → tuple (immutable), `@[...]` → array (mutable)
-- `{...}` → struct (immutable), `@{...}` → table (mutable)
-- `|...|` → set (immutable), `@|...|` → mutable set
-- `"..."` → string (immutable), `@"..."` → buffer (mutable)
+- `[...]` → array (immutable), `@[...]` → @array (mutable)
+- `{...}` → struct (immutable), `@{...}` → @struct (mutable)
+- `|...|` → set (immutable), `@|...|` → @set (mutable)
+- `"..."` → string (immutable), `@"..."` → @string (mutable)
 
-Bytes (immutable binary data) and blob (mutable binary data) have no reader literal syntax — they are constructed via primitives: `(bytes 1 2 3)`, `(blob 1 2 3)`, `(string->bytes "hello")`, `(string->blob "hello")`. Display format is `#bytes[hex ...]` and `#blob[hex ...]` (output-only, not readable).
+Bytes (immutable binary data) and @bytes (mutable binary data) have no reader literal syntax — they are constructed via primitives: `(bytes 1 2 3)`, `(@bytes 1 2 3)`, `(string->bytes "hello")`, `(string->@bytes "hello")`. Display format is `#bytes[hex ...]` and `#@bytes[hex ...]` (output-only, not readable).
 
-In `match`, `[...]` matches tuples (`IsTuple`), `@[...]` matches arrays (`IsArray`), `{...}` matches structs (`IsStruct`), `@{...}` matches tables (`IsTable`), `|x|` matches sets (`IsSet`), `@|x|` matches mutable sets (`IsSetMut`). In destructuring (`def`/`let`/`fn`), no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle both mutable and immutable types.
+In `match`, `[...]` matches arrays (`IsArray`), `@[...]` matches @arrays (`IsArrayMut`), `{...}` matches structs (`IsStruct`), `@{...}` matches @structs (`IsStructMut`), `|x|` matches sets (`IsSet`), `@|x|` matches @sets (`IsSetMut`). In destructuring (`def`/`let`/`fn`), no type guards — `ArrayRefOrNil`/`TableGetOrNil` handle both mutable and immutable types.
 
 ## Implementation details
 

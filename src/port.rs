@@ -10,7 +10,7 @@ use std::os::unix::io::OwnedFd;
 
 /// The kind of underlying OS resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PortKind {
+pub(crate) enum PortKind {
     File,
     Stdin,
     Stdout,
@@ -24,7 +24,7 @@ pub enum PortKind {
 
 /// Which operations are permitted on this port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Direction {
+pub(crate) enum Direction {
     Read,
     Write,
     ReadWrite,
@@ -32,7 +32,7 @@ pub enum Direction {
 
 /// How bytes are interpreted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Encoding {
+pub(crate) enum Encoding {
     Text,   // UTF-8
     Binary, // raw bytes
 }
@@ -51,7 +51,7 @@ pub enum Encoding {
 /// Stdio ports do NOT own their fd — `fd` is `None` from construction.
 /// `port/close` on a stdio port just sets the `closed` flag. Drop is
 /// a no-op (nothing to drop when `fd` is `None`).
-pub struct Port {
+pub(crate) struct Port {
     fd: RefCell<Option<OwnedFd>>,
     kind: PortKind,
     direction: Direction,
@@ -209,6 +209,7 @@ impl Port {
     }
 
     /// The original file path, if this is a file port.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn path(&self) -> Option<&str> {
         self.path.as_deref()
     }

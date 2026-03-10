@@ -1,7 +1,7 @@
 use super::core::VM;
 use crate::value::{cons, error_val, TableKey, Value, SIG_ERROR};
 
-pub fn handle_cons(vm: &mut VM) {
+pub(crate) fn handle_cons(vm: &mut VM) {
     let rest = vm
         .fiber
         .stack
@@ -15,7 +15,7 @@ pub fn handle_cons(vm: &mut VM) {
     vm.fiber.stack.push(cons(first, rest));
 }
 
-pub fn handle_car(vm: &mut VM) {
+pub(crate) fn handle_car(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
@@ -57,7 +57,7 @@ pub fn handle_car(vm: &mut VM) {
     }
 }
 
-pub fn handle_cdr(vm: &mut VM) {
+pub(crate) fn handle_cdr(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
@@ -99,7 +99,7 @@ pub fn handle_cdr(vm: &mut VM) {
     }
 }
 
-pub fn handle_make_array(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+pub(crate) fn handle_make_array(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let size = vm.read_u8(bytecode, ip) as usize;
     let mut vec = Vec::with_capacity(size);
     for _ in 0..size {
@@ -107,24 +107,24 @@ pub fn handle_make_array(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
             vm.fiber
                 .stack
                 .pop()
-                .expect("VM bug: Stack underflow on MakeArray"),
+                .expect("VM bug: Stack underflow on MakeArrayMut"),
         );
     }
     vec.reverse();
-    vm.fiber.stack.push(Value::array(vec));
+    vm.fiber.stack.push(Value::array_mut(vec));
 }
 
-pub fn handle_array_ref(vm: &mut VM) {
+pub(crate) fn handle_array_ref(vm: &mut VM) {
     let idx = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayRef");
+        .expect("VM bug: Stack underflow on ArrayMutRef");
     let vec = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayRef");
+        .expect("VM bug: Stack underflow on ArrayMutRef");
     let Some(idx_val) = idx.as_int() else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -136,7 +136,7 @@ pub fn handle_array_ref(vm: &mut VM) {
         vm.fiber.stack.push(Value::NIL);
         return;
     };
-    let Some(vec_ref) = vec.as_array() else {
+    let Some(vec_ref) = vec.as_array_mut() else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
@@ -169,22 +169,22 @@ pub fn handle_array_ref(vm: &mut VM) {
     }
 }
 
-pub fn handle_array_set(vm: &mut VM) {
+pub(crate) fn handle_array_set(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArraySet");
+        .expect("VM bug: Stack underflow on ArrayMutSet");
     let idx = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArraySet");
+        .expect("VM bug: Stack underflow on ArrayMutSet");
     let vec = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArraySet");
+        .expect("VM bug: Stack underflow on ArrayMutSet");
     let Some(_idx_val) = idx.as_int() else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -199,7 +199,7 @@ pub fn handle_array_set(vm: &mut VM) {
         vm.fiber.stack.push(Value::NIL);
         return;
     };
-    if vec.as_array().is_none() {
+    if vec.as_array_mut().is_none() {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
@@ -216,7 +216,7 @@ pub fn handle_array_set(vm: &mut VM) {
 
 /// Car with silent nil: returns nil if not a cons cell.
 /// Used by destructuring — missing values become nil, no errors.
-pub fn handle_car_or_nil(vm: &mut VM) {
+pub(crate) fn handle_car_or_nil(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
@@ -230,7 +230,7 @@ pub fn handle_car_or_nil(vm: &mut VM) {
 
 /// Cdr with silent empty-list: returns EMPTY_LIST if not a cons cell.
 /// Used by destructuring — rest of an exhausted list is empty list, not nil.
-pub fn handle_cdr_or_nil(vm: &mut VM) {
+pub(crate) fn handle_cdr_or_nil(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
@@ -245,16 +245,16 @@ pub fn handle_cdr_or_nil(vm: &mut VM) {
 /// Indexed ref with silent nil: returns nil if out of bounds or not an array/tuple.
 /// Operand: u16 index (immediate, read from bytecode).
 /// Used by destructuring — missing values become nil, no errors.
-pub fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let index = vm.read_u16(bytecode, ip) as usize;
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayRefOrNil");
-    let result = if let Some(vec_ref) = val.as_array() {
+        .expect("VM bug: Stack underflow on ArrayMutRefOrNil");
+    let result = if let Some(vec_ref) = val.as_array_mut() {
         vec_ref.borrow().get(index).copied()
-    } else if let Some(elems) = val.as_tuple() {
+    } else if let Some(elems) = val.as_array() {
         elems.get(index).copied()
     } else {
         None
@@ -266,28 +266,28 @@ pub fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
 /// Works on both arrays and tuples; result type matches input type.
 /// Operand: u16 index (immediate, read from bytecode).
 /// Used by & rest destructuring — collects remaining elements.
-pub fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let index = vm.read_u16(bytecode, ip) as usize;
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArraySliceFrom");
-    let result = if let Some(vec_ref) = val.as_array() {
+        .expect("VM bug: Stack underflow on ArrayMutSliceFrom");
+    let result = if let Some(vec_ref) = val.as_array_mut() {
         let borrowed = vec_ref.borrow();
         if index < borrowed.len() {
-            Value::array(borrowed[index..].to_vec())
+            Value::array_mut(borrowed[index..].to_vec())
+        } else {
+            Value::array_mut(vec![])
+        }
+    } else if let Some(elems) = val.as_array() {
+        if index < elems.len() {
+            Value::array(elems[index..].to_vec())
         } else {
             Value::array(vec![])
         }
-    } else if let Some(elems) = val.as_tuple() {
-        if index < elems.len() {
-            Value::tuple(elems[index..].to_vec())
-        } else {
-            Value::tuple(vec![])
-        }
     } else {
-        Value::array(vec![])
+        Value::array_mut(vec![])
     };
     vm.fiber.stack.push(result);
 }
@@ -295,7 +295,12 @@ pub fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
 /// Table/struct get with silent nil: returns nil if key missing or wrong type.
 /// Operand: u16 constant pool index (keyword key).
 /// Used by destructuring — missing keys become nil, no errors.
-pub fn handle_table_get_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
+pub(crate) fn handle_table_get_or_nil(
+    vm: &mut VM,
+    bytecode: &[u8],
+    ip: &mut usize,
+    constants: &[Value],
+) {
     let const_idx = vm.read_u16(bytecode, ip) as usize;
     let key_value = constants[const_idx];
     let val = vm
@@ -321,7 +326,7 @@ pub fn handle_table_get_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize, con
         }
     }
     // Try table (mutable)
-    if let Some(table_ref) = val.as_table() {
+    if let Some(table_ref) = val.as_struct_mut() {
         if let Some(value) = table_ref.borrow().get(&key) {
             vm.fiber.stack.push(*value);
             return;
@@ -334,22 +339,22 @@ pub fn handle_table_get_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize, con
 /// Extend an array with all elements from an indexed source (array or tuple).
 /// Stack: \[array, source\] → \[extended_array\]
 /// Used by splice: builds the args array incrementally.
-pub fn handle_array_extend(vm: &mut VM) {
+pub(crate) fn handle_array_extend(vm: &mut VM) {
     let source = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayExtend");
+        .expect("VM bug: Stack underflow on ArrayMutExtend");
     let array = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayExtend");
+        .expect("VM bug: Stack underflow on ArrayMutExtend");
 
     // Get the source elements
-    let source_elems: Vec<Value> = if let Some(arr) = source.as_array() {
+    let source_elems: Vec<Value> = if let Some(arr) = source.as_array_mut() {
         arr.borrow().to_vec()
-    } else if let Some(tup) = source.as_tuple() {
+    } else if let Some(tup) = source.as_array() {
         tup.to_vec()
     } else if source.as_cons().is_some() || source.is_empty_list() {
         match source.list_to_vec() {
@@ -382,10 +387,10 @@ pub fn handle_array_extend(vm: &mut VM) {
     };
 
     // Get the target array and extend it
-    if let Some(arr) = array.as_array() {
+    if let Some(arr) = array.as_array_mut() {
         let mut vec = arr.borrow().to_vec();
         vec.extend(source_elems);
-        vm.fiber.stack.push(Value::array(vec));
+        vm.fiber.stack.push(Value::array_mut(vec));
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -404,22 +409,22 @@ pub fn handle_array_extend(vm: &mut VM) {
 /// Push a single value onto an array.
 /// Stack: \[array, value\] → \[extended_array\]
 /// Used by splice: adds non-spliced args to the args array.
-pub fn handle_array_push(vm: &mut VM) {
+pub(crate) fn handle_array_push(vm: &mut VM) {
     let value = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayPush");
+        .expect("VM bug: Stack underflow on ArrayMutPush");
     let array = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayPush");
+        .expect("VM bug: Stack underflow on ArrayMutPush");
 
-    if let Some(arr) = array.as_array() {
+    if let Some(arr) = array.as_array_mut() {
         let mut vec = arr.borrow().to_vec();
         vec.push(value);
-        vm.fiber.stack.push(Value::array(vec));
+        vm.fiber.stack.push(Value::array_mut(vec));
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,

@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn test_hir_linter_naming_convention() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(var camelCase 42)", &mut symbols, &mut vm);
+        let result = analyze("(var camelCase 42)", &mut symbols, &mut vm, "<test>");
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn test_hir_linter_valid_naming() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(var valid-name 42)", &mut symbols, &mut vm);
+        let result = analyze("(var valid-name 42)", &mut symbols, &mut vm, "<test>");
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -302,7 +302,7 @@ mod tests {
     fn test_hir_linter_arity_check() {
         let (mut symbols, mut vm) = setup();
         // cons expects 2 arguments — the analyzer catches this as a hard error
-        let result = analyze("(cons 1)", &mut symbols, &mut vm);
+        let result = analyze("(cons 1)", &mut symbols, &mut vm, "<test>");
         match result {
             Err(ref msg) => assert!(
                 msg.contains("arity error"),
@@ -319,6 +319,7 @@ mod tests {
             "(let ((camelCase 1)) (if true camelCase 0))",
             &mut symbols,
             &mut vm,
+            "<test>",
         );
         assert!(result.is_ok());
         let analysis = result.unwrap();

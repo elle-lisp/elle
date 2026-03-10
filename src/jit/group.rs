@@ -31,7 +31,7 @@ const MAX_DISCOVERY_DEPTH: usize = 4;
 ///
 /// Phase 1 restriction: only includes capture-free functions
 /// (num_captures == 0) since direct SCC calls pass null env.
-pub fn discover_compilation_group(
+pub(crate) fn discover_compilation_group(
     hot_lir: &LirFunction,
     globals: &[Value],
 ) -> Vec<(SymbolId, Rc<LirFunction>)> {
@@ -148,11 +148,11 @@ fn has_unsupported_instructions(lir: &LirFunction) -> bool {
                 LirInstr::MakeClosure { .. }
                 | LirInstr::CarOrNil { .. }
                 | LirInstr::CdrOrNil { .. }
-                | LirInstr::ArrayRefOrNil { .. }
-                | LirInstr::ArraySliceFrom { .. }
-                | LirInstr::IsArray { .. }
+                | LirInstr::ArrayMutRefOrNil { .. }
+                | LirInstr::ArrayMutSliceFrom { .. }
+                | LirInstr::IsArrayMut { .. }
                 | LirInstr::IsTable { .. }
-                | LirInstr::ArrayLen { .. }
+                | LirInstr::ArrayMutLen { .. }
                 | LirInstr::TableGetOrNil { .. }
                 | LirInstr::Eval { .. } => return true,
                 _ => {}

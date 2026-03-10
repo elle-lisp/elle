@@ -1,17 +1,20 @@
 //! Marshalling between Elle Values and C-typed data for libffi calls.
 //!
-//! Two concerns:
-//! - **Argument marshalling**: Elle `Value` -> C-typed storage -> `libffi::middle::Arg`
-//! - **Return conversion**: C return value -> Elle `Value`
+//! Shared types and helpers. Value→C conversion is in `to_c.rs`,
+//! C→Value conversion is in `from_c.rs`.
 
 use crate::error::{LError, LResult};
-use crate::ffi::types::{StructDesc, TypeDesc};
+use crate::ffi::types::TypeDesc;
 use crate::value::Value;
 use libffi::middle::Type;
-use std::ffi::{c_void, CString};
+
+// Re-export moved items so existing callers don't break.
+pub(crate) use crate::ffi::from_c::read_value_from_buffer;
+pub(crate) use crate::ffi::to_c::write_value_to_buffer;
+pub use crate::ffi::to_c::MarshalledArg;
 
 /// Convert a `TypeDesc` to the corresponding `libffi::middle::Type`.
-pub fn to_libffi_type(desc: &TypeDesc) -> Type {
+pub(crate) fn to_libffi_type(desc: &TypeDesc) -> Type {
     match desc {
         TypeDesc::Void => Type::void(),
         TypeDesc::Bool => Type::c_int(),
@@ -90,600 +93,9 @@ impl Drop for AlignedBuffer {
     }
 }
 
-// ── Argument marshalling ────────────────────────────────────────────
-
-/// Holds C-typed data for an FFI argument.
-///
-/// Must live as long as the `libffi::middle::Arg` references it.
-/// Created from an Elle `Value` and a `TypeDesc`, then passed to
-/// `ffi_call` via `as_arg()`.
-pub struct MarshalledArg {
-    storage: ArgStorage,
-}
-
-#[allow(dead_code)]
-enum ArgStorage {
-    I8(i8),
-    U8(u8),
-    I16(i16),
-    U16(u16),
-    I32(i32),
-    U32(u32),
-    I64(i64),
-    U64(u64),
-    F32(f32),
-    F64(f64),
-    Ptr(*const c_void),
-    /// Owned CString for `:string` type. The `*const c_char` is the
-    /// pointer that libffi reads through (it's a `char*` argument).
-    /// The CString must outlive the Arg.
-    Str(CString, *const std::ffi::c_char),
-    /// Struct/array data in an aligned buffer. The `Vec<MarshalledArg>`
-    /// keeps CStrings and nested buffers alive for the buffer's lifetime.
-    Struct(AlignedBuffer, Vec<MarshalledArg>),
-}
-
-impl MarshalledArg {
-    /// Create from an Elle Value and a type descriptor.
-    pub fn new(value: &Value, desc: &TypeDesc) -> LResult<Self> {
-        let storage = match desc {
-            TypeDesc::Void => {
-                return Err(LError::ffi_type_error(
-                    "void",
-                    "void is not valid for arguments",
-                ));
-            }
-
-            TypeDesc::Bool => ArgStorage::I32(if value.is_truthy() { 1 } else { 0 }),
-
-            TypeDesc::I8 => {
-                let n = extract_int(value, "i8")?;
-                range_check(n, i8::MIN as i64, i8::MAX as i64, "i8")?;
-                ArgStorage::I8(n as i8)
-            }
-            TypeDesc::U8 | TypeDesc::UChar => {
-                let n = extract_int(value, desc_name(desc))?;
-                range_check(n, u8::MIN as i64, u8::MAX as i64, desc_name(desc))?;
-                ArgStorage::U8(n as u8)
-            }
-            TypeDesc::I16 => {
-                let n = extract_int(value, "i16")?;
-                range_check(n, i16::MIN as i64, i16::MAX as i64, "i16")?;
-                ArgStorage::I16(n as i16)
-            }
-            TypeDesc::U16 => {
-                let n = extract_int(value, "u16")?;
-                range_check(n, u16::MIN as i64, u16::MAX as i64, "u16")?;
-                ArgStorage::U16(n as u16)
-            }
-            TypeDesc::I32 => {
-                let n = extract_int(value, "i32")?;
-                range_check(n, i32::MIN as i64, i32::MAX as i64, "i32")?;
-                ArgStorage::I32(n as i32)
-            }
-            TypeDesc::U32 => {
-                let n = extract_int(value, "u32")?;
-                range_check(n, u32::MIN as i64, u32::MAX as i64, "u32")?;
-                ArgStorage::U32(n as u32)
-            }
-            TypeDesc::I64 => {
-                let n = extract_int(value, "i64")?;
-                ArgStorage::I64(n)
-            }
-            TypeDesc::U64 => {
-                let n = extract_int(value, "u64")?;
-                ArgStorage::U64(n as u64)
-            }
-            TypeDesc::Int => {
-                let n = extract_int(value, "int")?;
-                range_check(
-                    n,
-                    std::ffi::c_int::MIN as i64,
-                    std::ffi::c_int::MAX as i64,
-                    "int",
-                )?;
-                ArgStorage::I32(n as i32)
-            }
-            TypeDesc::UInt => {
-                let n = extract_int(value, "uint")?;
-                range_check(n, 0, std::ffi::c_uint::MAX as i64, "uint")?;
-                ArgStorage::U32(n as u32)
-            }
-            TypeDesc::Long => {
-                let n = extract_int(value, "long")?;
-                ArgStorage::I64(n as std::ffi::c_long as i64)
-            }
-            TypeDesc::ULong => {
-                let n = extract_int(value, "ulong")?;
-                ArgStorage::U64(n as std::ffi::c_ulong as u64)
-            }
-            TypeDesc::Char => {
-                let n = extract_int(value, "char")?;
-                range_check(n, i8::MIN as i64, i8::MAX as i64, "char")?;
-                ArgStorage::I8(n as i8)
-            }
-            TypeDesc::Short => {
-                let n = extract_int(value, "short")?;
-                range_check(
-                    n,
-                    std::ffi::c_short::MIN as i64,
-                    std::ffi::c_short::MAX as i64,
-                    "short",
-                )?;
-                ArgStorage::I16(n as i16)
-            }
-            TypeDesc::UShort => {
-                let n = extract_int(value, "ushort")?;
-                range_check(n, 0, std::ffi::c_ushort::MAX as i64, "ushort")?;
-                ArgStorage::U16(n as u16)
-            }
-            TypeDesc::Size => {
-                let n = extract_int(value, "size")?;
-                ArgStorage::U64(n as usize as u64)
-            }
-            TypeDesc::SSize => {
-                let n = extract_int(value, "ssize")?;
-                ArgStorage::I64(n as isize as i64)
-            }
-
-            TypeDesc::Float => {
-                let f = value
-                    .as_float()
-                    .or_else(|| value.as_int().map(|i| i as f64))
-                    .ok_or_else(|| {
-                        LError::ffi_type_error(
-                            "float",
-                            format!("expected number, got {}", value.type_name()),
-                        )
-                    })?;
-                ArgStorage::F32(f as f32)
-            }
-            TypeDesc::Double => {
-                let f = value
-                    .as_float()
-                    .or_else(|| value.as_int().map(|i| i as f64))
-                    .ok_or_else(|| {
-                        LError::ffi_type_error(
-                            "double",
-                            format!("expected number, got {}", value.type_name()),
-                        )
-                    })?;
-                ArgStorage::F64(f)
-            }
-
-            TypeDesc::Ptr => {
-                if value.is_nil() {
-                    ArgStorage::Ptr(std::ptr::null())
-                } else if let Some(addr) = value.as_pointer() {
-                    ArgStorage::Ptr(addr as *const c_void)
-                } else if let Some(cell) = value.as_managed_pointer() {
-                    match cell.get() {
-                        Some(addr) => ArgStorage::Ptr(addr as *const c_void),
-                        None => {
-                            return Err(LError::ffi_type_error("ptr", "pointer has been freed"));
-                        }
-                    }
-                } else {
-                    return Err(LError::ffi_type_error(
-                        "ptr",
-                        format!("expected pointer or nil, got {}", value.type_name()),
-                    ));
-                }
-            }
-
-            TypeDesc::Str => {
-                let s = value.with_string(|s| s.to_string()).ok_or_else(|| {
-                    LError::ffi_type_error(
-                        "string",
-                        format!("expected string, got {}", value.type_name()),
-                    )
-                })?;
-                let cstring = CString::new(s.as_str())
-                    .map_err(|_| LError::ffi_type_error("string", "contains interior null byte"))?;
-                let ptr = cstring.as_ptr();
-                ArgStorage::Str(cstring, ptr)
-            }
-
-            TypeDesc::Struct(sd) => {
-                return marshal_struct(value, sd, desc);
-            }
-            TypeDesc::Array(elem_desc, count) => {
-                return marshal_array(value, elem_desc, *count);
-            }
-        };
-        Ok(MarshalledArg { storage })
-    }
-
-    /// Get a libffi Arg referencing this storage.
-    pub fn as_arg(&self) -> libffi::middle::Arg<'_> {
-        match &self.storage {
-            ArgStorage::I8(v) => libffi::middle::arg(v),
-            ArgStorage::U8(v) => libffi::middle::arg(v),
-            ArgStorage::I16(v) => libffi::middle::arg(v),
-            ArgStorage::U16(v) => libffi::middle::arg(v),
-            ArgStorage::I32(v) => libffi::middle::arg(v),
-            ArgStorage::U32(v) => libffi::middle::arg(v),
-            ArgStorage::I64(v) => libffi::middle::arg(v),
-            ArgStorage::U64(v) => libffi::middle::arg(v),
-            ArgStorage::F32(v) => libffi::middle::arg(v),
-            ArgStorage::F64(v) => libffi::middle::arg(v),
-            ArgStorage::Ptr(v) => libffi::middle::arg(v),
-            ArgStorage::Str(_, ptr) => libffi::middle::arg(ptr),
-            ArgStorage::Struct(buf, _) => {
-                // Safety: buf.ptr points to valid, aligned struct data that
-                // outlives this Arg (the AlignedBuffer lives in ArgStorage).
-                // Arg::new stores buf.ptr as *mut c_void; libffi reads the
-                // struct data starting at that address.
-                unsafe { libffi::middle::arg(&*buf.ptr) }
-            }
-        }
-    }
-}
-
-// ── Struct/array marshalling ────────────────────────────────────────
-
-fn marshal_struct(value: &Value, sd: &StructDesc, desc: &TypeDesc) -> LResult<MarshalledArg> {
-    let arr = value.as_array().ok_or_else(|| {
-        LError::ffi_type_error(
-            "struct",
-            format!("expected array, got {}", value.type_name()),
-        )
-    })?;
-    let elems = arr.borrow();
-    if elems.len() != sd.fields.len() {
-        return Err(LError::ffi_type_error(
-            "struct",
-            format!(
-                "struct has {} fields, got {} values",
-                sd.fields.len(),
-                elems.len()
-            ),
-        ));
-    }
-    let (offsets, total_size) = sd.field_offsets().ok_or_else(|| {
-        LError::ffi_error("marshal", "cannot compute struct layout (contains void?)")
-    })?;
-    let align = desc.align().unwrap_or(1);
-    let buf = AlignedBuffer::new(total_size, align);
-    let mut owned = Vec::new();
-    for (i, (field_desc, &field_offset)) in sd.fields.iter().zip(offsets.iter()).enumerate() {
-        let field_owned =
-            write_value_to_buffer(unsafe { buf.ptr.add(field_offset) }, &elems[i], field_desc)?;
-        owned.extend(field_owned);
-    }
-    Ok(MarshalledArg {
-        storage: ArgStorage::Struct(buf, owned),
-    })
-}
-
-fn marshal_array(value: &Value, elem_desc: &TypeDesc, count: usize) -> LResult<MarshalledArg> {
-    let arr = value.as_array().ok_or_else(|| {
-        LError::ffi_type_error(
-            "array",
-            format!("expected array, got {}", value.type_name()),
-        )
-    })?;
-    let elems = arr.borrow();
-    if elems.len() != count {
-        return Err(LError::ffi_type_error(
-            "array",
-            format!("array has {} elements, got {} values", count, elems.len()),
-        ));
-    }
-    let elem_size = elem_desc
-        .size()
-        .ok_or_else(|| LError::ffi_error("marshal", "cannot compute array element size"))?;
-    let total_size = elem_size * count;
-    let align = elem_desc.align().unwrap_or(1);
-    let buf = AlignedBuffer::new(total_size, align);
-    let mut owned = Vec::new();
-    for (i, elem_val) in elems.iter().enumerate() {
-        let elem_owned =
-            write_value_to_buffer(unsafe { buf.ptr.add(i * elem_size) }, elem_val, elem_desc)?;
-        owned.extend(elem_owned);
-    }
-    Ok(MarshalledArg {
-        storage: ArgStorage::Struct(buf, owned),
-    })
-}
-
-/// Write a single Elle Value into a C buffer at the given pointer.
-///
-/// Returns owned data (MarshalledArgs) that must outlive the buffer —
-/// this is needed for CString fields whose pointers are written into
-/// the buffer.
-///
-/// # Safety
-/// `ptr` must point to a writable region of at least `desc.size()` bytes
-/// with appropriate alignment.
-pub(crate) fn write_value_to_buffer(
-    ptr: *mut u8,
-    value: &Value,
-    desc: &TypeDesc,
-) -> LResult<Vec<MarshalledArg>> {
-    match desc {
-        TypeDesc::Void => Err(LError::ffi_error("marshal", "cannot write void to buffer")),
-
-        TypeDesc::Bool => {
-            let v: std::ffi::c_int = if value.is_truthy() { 1 } else { 0 };
-            unsafe { *(ptr as *mut std::ffi::c_int) = v };
-            Ok(Vec::new())
-        }
-
-        TypeDesc::I8 | TypeDesc::Char => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, i8::MIN as i64, i8::MAX as i64, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut i8) = n as i8 };
-            Ok(Vec::new())
-        }
-        TypeDesc::U8 | TypeDesc::UChar => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, u8::MIN as i64, u8::MAX as i64, desc_name_full(desc))?;
-            unsafe { *ptr = n as u8 };
-            Ok(Vec::new())
-        }
-        TypeDesc::I16 | TypeDesc::Short => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, i16::MIN as i64, i16::MAX as i64, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut i16) = n as i16 };
-            Ok(Vec::new())
-        }
-        TypeDesc::U16 | TypeDesc::UShort => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, u16::MIN as i64, u16::MAX as i64, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut u16) = n as u16 };
-            Ok(Vec::new())
-        }
-        TypeDesc::I32 | TypeDesc::Int => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(
-                n,
-                std::ffi::c_int::MIN as i64,
-                std::ffi::c_int::MAX as i64,
-                desc_name_full(desc),
-            )?;
-            unsafe { *(ptr as *mut i32) = n as i32 };
-            Ok(Vec::new())
-        }
-        TypeDesc::U32 | TypeDesc::UInt => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, 0, std::ffi::c_uint::MAX as i64, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut u32) = n as u32 };
-            Ok(Vec::new())
-        }
-        TypeDesc::I64 | TypeDesc::Long | TypeDesc::SSize => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut i64) = n };
-            Ok(Vec::new())
-        }
-        TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut u64) = n as u64 };
-            Ok(Vec::new())
-        }
-
-        TypeDesc::Float => {
-            let f = value
-                .as_float()
-                .or_else(|| value.as_int().map(|i| i as f64))
-                .ok_or_else(|| {
-                    LError::ffi_type_error(
-                        "float",
-                        format!("expected number, got {}", value.type_name()),
-                    )
-                })?;
-            unsafe { *(ptr as *mut f32) = f as f32 };
-            Ok(Vec::new())
-        }
-        TypeDesc::Double => {
-            let f = value
-                .as_float()
-                .or_else(|| value.as_int().map(|i| i as f64))
-                .ok_or_else(|| {
-                    LError::ffi_type_error(
-                        "double",
-                        format!("expected number, got {}", value.type_name()),
-                    )
-                })?;
-            unsafe { *(ptr as *mut f64) = f };
-            Ok(Vec::new())
-        }
-
-        TypeDesc::Ptr => {
-            let p = if value.is_nil() {
-                std::ptr::null::<c_void>()
-            } else if let Some(addr) = value.as_pointer() {
-                addr as *const c_void
-            } else if let Some(cell) = value.as_managed_pointer() {
-                match cell.get() {
-                    Some(addr) => addr as *const c_void,
-                    None => {
-                        return Err(LError::ffi_type_error("ptr", "pointer has been freed"));
-                    }
-                }
-            } else {
-                return Err(LError::ffi_type_error(
-                    "ptr",
-                    format!("expected pointer or nil, got {}", value.type_name()),
-                ));
-            };
-            unsafe { *(ptr as *mut *const c_void) = p };
-            Ok(Vec::new())
-        }
-
-        TypeDesc::Str => {
-            // Create a CString, write its pointer into the buffer, and
-            // return a MarshalledArg that owns the CString.
-            let s = value.with_string(|s| s.to_string()).ok_or_else(|| {
-                LError::ffi_type_error(
-                    "string",
-                    format!("expected string, got {}", value.type_name()),
-                )
-            })?;
-            let cstring = CString::new(s.as_str())
-                .map_err(|_| LError::ffi_type_error("string", "contains interior null byte"))?;
-            let cstr_ptr = cstring.as_ptr();
-            unsafe { *(ptr as *mut *const std::ffi::c_char) = cstr_ptr };
-            // The CString must outlive the buffer. Wrap it in a MarshalledArg.
-            let owned = MarshalledArg {
-                storage: ArgStorage::Str(cstring, cstr_ptr),
-            };
-            Ok(vec![owned])
-        }
-
-        TypeDesc::Struct(sd) => {
-            let arr = value.as_array().ok_or_else(|| {
-                LError::ffi_type_error(
-                    "struct",
-                    format!("expected array, got {}", value.type_name()),
-                )
-            })?;
-            let elems = arr.borrow();
-            if elems.len() != sd.fields.len() {
-                return Err(LError::ffi_type_error(
-                    "struct",
-                    format!(
-                        "struct has {} fields, got {} values",
-                        sd.fields.len(),
-                        elems.len()
-                    ),
-                ));
-            }
-            let (offsets, _) = sd.field_offsets().ok_or_else(|| {
-                LError::ffi_error("marshal", "cannot compute struct layout (contains void?)")
-            })?;
-            let mut owned = Vec::new();
-            for (i, (field_desc, &field_offset)) in sd.fields.iter().zip(offsets.iter()).enumerate()
-            {
-                let field_owned =
-                    write_value_to_buffer(unsafe { ptr.add(field_offset) }, &elems[i], field_desc)?;
-                owned.extend(field_owned);
-            }
-            Ok(owned)
-        }
-
-        TypeDesc::Array(elem_desc, count) => {
-            let arr = value.as_array().ok_or_else(|| {
-                LError::ffi_type_error(
-                    "array",
-                    format!("expected array, got {}", value.type_name()),
-                )
-            })?;
-            let elems = arr.borrow();
-            if elems.len() != *count {
-                return Err(LError::ffi_type_error(
-                    "array",
-                    format!("array has {} elements, got {} values", count, elems.len()),
-                ));
-            }
-            let elem_size = elem_desc
-                .size()
-                .ok_or_else(|| LError::ffi_error("marshal", "cannot compute array element size"))?;
-            let mut owned = Vec::new();
-            for (i, elem_val) in elems.iter().enumerate() {
-                let elem_owned =
-                    write_value_to_buffer(unsafe { ptr.add(i * elem_size) }, elem_val, elem_desc)?;
-                owned.extend(elem_owned);
-            }
-            Ok(owned)
-        }
-    }
-}
-
-/// Read a C value from a buffer at the given pointer, returning an Elle Value.
-///
-/// For struct/array types, returns an Elle array of field/element values.
-///
-/// # Safety
-/// `ptr` must point to a readable region of at least `desc.size()` bytes
-/// with appropriate alignment and valid data for the described type.
-pub(crate) fn read_value_from_buffer(ptr: *const u8, desc: &TypeDesc) -> LResult<Value> {
-    match desc {
-        TypeDesc::Void => Ok(Value::NIL),
-
-        TypeDesc::Bool => {
-            let v = unsafe { *(ptr as *const std::ffi::c_int) };
-            Ok(Value::bool(v != 0))
-        }
-
-        TypeDesc::I8 | TypeDesc::Char => {
-            let v = unsafe { *(ptr as *const i8) };
-            Ok(Value::int(v as i64))
-        }
-        TypeDesc::U8 | TypeDesc::UChar => {
-            let v = unsafe { *ptr };
-            Ok(Value::int(v as i64))
-        }
-        TypeDesc::I16 | TypeDesc::Short => {
-            let v = unsafe { *(ptr as *const i16) };
-            Ok(Value::int(v as i64))
-        }
-        TypeDesc::U16 | TypeDesc::UShort => {
-            let v = unsafe { *(ptr as *const u16) };
-            Ok(Value::int(v as i64))
-        }
-        TypeDesc::I32 | TypeDesc::Int => {
-            let v = unsafe { *(ptr as *const i32) };
-            Ok(Value::int(v as i64))
-        }
-        TypeDesc::U32 | TypeDesc::UInt => {
-            let v = unsafe { *(ptr as *const u32) };
-            Ok(Value::int(v as i64))
-        }
-        TypeDesc::I64 | TypeDesc::Long | TypeDesc::SSize => {
-            let v = unsafe { *(ptr as *const i64) };
-            Ok(Value::int(v))
-        }
-        TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
-            let v = unsafe { *(ptr as *const u64) };
-            Ok(Value::int(v as i64))
-        }
-
-        TypeDesc::Float => {
-            let v = unsafe { *(ptr as *const f32) };
-            Ok(Value::float(v as f64))
-        }
-        TypeDesc::Double => {
-            let v = unsafe { *(ptr as *const f64) };
-            Ok(Value::float(v))
-        }
-
-        TypeDesc::Ptr | TypeDesc::Str => {
-            let v = unsafe { *(ptr as *const *const c_void) };
-            Ok(Value::pointer(v as usize))
-        }
-
-        TypeDesc::Struct(sd) => {
-            let (offsets, _) = sd.field_offsets().ok_or_else(|| {
-                LError::ffi_error("marshal", "cannot compute struct layout for read")
-            })?;
-            let mut values = Vec::with_capacity(sd.fields.len());
-            for (field_desc, &field_offset) in sd.fields.iter().zip(offsets.iter()) {
-                let field_val =
-                    read_value_from_buffer(unsafe { ptr.add(field_offset) }, field_desc)?;
-                values.push(field_val);
-            }
-            Ok(Value::array(values))
-        }
-
-        TypeDesc::Array(elem_desc, count) => {
-            let elem_size = elem_desc.size().ok_or_else(|| {
-                LError::ffi_error("marshal", "cannot compute array element size for read")
-            })?;
-            let mut values = Vec::with_capacity(*count);
-            for i in 0..*count {
-                let elem_val =
-                    read_value_from_buffer(unsafe { ptr.add(i * elem_size) }, elem_desc)?;
-                values.push(elem_val);
-            }
-            Ok(Value::array(values))
-        }
-    }
-}
-
 // ── Helpers ─────────────────────────────────────────────────────────
 
-fn extract_int(value: &Value, type_name: &str) -> LResult<i64> {
+pub(crate) fn extract_int(value: &Value, type_name: &str) -> LResult<i64> {
     value.as_int().ok_or_else(|| {
         LError::ffi_type_error(
             type_name,
@@ -692,7 +104,7 @@ fn extract_int(value: &Value, type_name: &str) -> LResult<i64> {
     })
 }
 
-fn range_check(n: i64, min: i64, max: i64, type_name: &str) -> LResult<()> {
+pub(crate) fn range_check(n: i64, min: i64, max: i64, type_name: &str) -> LResult<()> {
     if n < min || n > max {
         Err(LError::ffi_type_error(
             type_name,
@@ -703,7 +115,7 @@ fn range_check(n: i64, min: i64, max: i64, type_name: &str) -> LResult<()> {
     }
 }
 
-fn desc_name(desc: &TypeDesc) -> &'static str {
+pub(crate) fn desc_name(desc: &TypeDesc) -> &'static str {
     match desc {
         TypeDesc::UChar => "uchar",
         TypeDesc::U8 => "u8",
@@ -711,7 +123,7 @@ fn desc_name(desc: &TypeDesc) -> &'static str {
     }
 }
 
-fn desc_name_full(desc: &TypeDesc) -> &'static str {
+pub(crate) fn desc_name_full(desc: &TypeDesc) -> &'static str {
     match desc {
         TypeDesc::I8 => "i8",
         TypeDesc::U8 => "u8",
@@ -880,7 +292,7 @@ mod tests {
         let desc = TypeDesc::Struct(StructDesc {
             fields: vec![TypeDesc::I32, TypeDesc::Double],
         });
-        let val = Value::array(vec![Value::int(42), Value::float(1.5)]);
+        let val = Value::array_mut(vec![Value::int(42), Value::float(1.5)]);
         let m = MarshalledArg::new(&val, &desc).unwrap();
         let _ = m.as_arg(); // Should not panic
     }
@@ -890,7 +302,7 @@ mod tests {
         let desc = TypeDesc::Struct(StructDesc {
             fields: vec![TypeDesc::I32, TypeDesc::Double],
         });
-        let val = Value::array(vec![Value::int(42)]); // Only 1 value for 2 fields
+        let val = Value::array_mut(vec![Value::int(42)]); // Only 1 value for 2 fields
         assert!(MarshalledArg::new(&val, &desc).is_err());
     }
 
@@ -906,7 +318,7 @@ mod tests {
     #[test]
     fn test_marshal_array() {
         let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 3);
-        let val = Value::array(vec![Value::int(1), Value::int(2), Value::int(3)]);
+        let val = Value::array_mut(vec![Value::int(1), Value::int(2), Value::int(3)]);
         let m = MarshalledArg::new(&val, &desc).unwrap();
         let _ = m.as_arg();
     }
@@ -914,7 +326,7 @@ mod tests {
     #[test]
     fn test_marshal_array_wrong_count() {
         let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 3);
-        let val = Value::array(vec![Value::int(1), Value::int(2)]);
+        let val = Value::array_mut(vec![Value::int(1), Value::int(2)]);
         assert!(MarshalledArg::new(&val, &desc).is_err());
     }
 
@@ -924,23 +336,27 @@ mod tests {
             fields: vec![TypeDesc::I32, TypeDesc::Double, TypeDesc::I64],
         };
         let desc = TypeDesc::Struct(sd.clone());
-        let values = Value::array(vec![Value::int(42), Value::float(1.5), Value::int(-100)]);
+        let values = Value::array_mut(vec![Value::int(42), Value::float(1.5), Value::int(-100)]);
 
         let (offsets, total_size) = sd.field_offsets().unwrap();
         let align = desc.align().unwrap();
         let buf = AlignedBuffer::new(total_size, align);
 
         // Write each field
-        let arr = values.as_array().unwrap();
+        let arr = values.as_array_mut().unwrap();
         let elems = arr.borrow();
         for (i, (field_desc, &offset)) in sd.fields.iter().zip(offsets.iter()).enumerate() {
-            let _ = write_value_to_buffer(unsafe { buf.ptr.add(offset) }, &elems[i], field_desc)
-                .unwrap();
+            let _ = write_value_to_buffer(
+                unsafe { buf.as_mut_ptr().add(offset) },
+                &elems[i],
+                field_desc,
+            )
+            .unwrap();
         }
 
         // Read back
-        let result = read_value_from_buffer(buf.ptr, &desc).unwrap();
-        let result_arr = result.as_array().unwrap();
+        let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
+        let result_arr = result.as_array_mut().unwrap();
         let result_elems = result_arr.borrow();
         assert_eq!(result_elems[0].as_int(), Some(42));
         assert!((result_elems[1].as_float().unwrap() - 1.5).abs() < 1e-10);
@@ -950,7 +366,7 @@ mod tests {
     #[test]
     fn test_read_write_array_roundtrip() {
         let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 4);
-        let values = Value::array(vec![
+        let values = Value::array_mut(vec![
             Value::int(10),
             Value::int(20),
             Value::int(30),
@@ -962,19 +378,19 @@ mod tests {
         let align = TypeDesc::I32.align().unwrap();
         let buf = AlignedBuffer::new(total_size, align);
 
-        let arr = values.as_array().unwrap();
+        let arr = values.as_array_mut().unwrap();
         let elems = arr.borrow();
         for (i, elem_val) in elems.iter().enumerate() {
             let _ = write_value_to_buffer(
-                unsafe { buf.ptr.add(i * elem_size) },
+                unsafe { buf.as_mut_ptr().add(i * elem_size) },
                 elem_val,
                 &TypeDesc::I32,
             )
             .unwrap();
         }
 
-        let result = read_value_from_buffer(buf.ptr, &desc).unwrap();
-        let result_arr = result.as_array().unwrap();
+        let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
+        let result_arr = result.as_array_mut().unwrap();
         let result_elems = result_arr.borrow();
         assert_eq!(result_elems.len(), 4);
         assert_eq!(result_elems[0].as_int(), Some(10));
@@ -993,8 +409,8 @@ mod tests {
         };
         let desc = TypeDesc::Struct(outer_sd.clone());
 
-        let inner_val = Value::array(vec![Value::int(7), Value::int(999)]);
-        let outer_val = Value::array(vec![Value::int(123456), inner_val]);
+        let inner_val = Value::array_mut(vec![Value::int(7), Value::int(999)]);
+        let outer_val = Value::array_mut(vec![Value::int(123456), inner_val]);
 
         // Marshal via MarshalledArg
         let m = MarshalledArg::new(&outer_val, &desc).unwrap();
@@ -1005,19 +421,23 @@ mod tests {
         let align = desc.align().unwrap();
         let buf = AlignedBuffer::new(total_size, align);
 
-        let arr = outer_val.as_array().unwrap();
+        let arr = outer_val.as_array_mut().unwrap();
         let elems = arr.borrow();
         for (i, (field_desc, &offset)) in outer_sd.fields.iter().zip(offsets.iter()).enumerate() {
-            let _ = write_value_to_buffer(unsafe { buf.ptr.add(offset) }, &elems[i], field_desc)
-                .unwrap();
+            let _ = write_value_to_buffer(
+                unsafe { buf.as_mut_ptr().add(offset) },
+                &elems[i],
+                field_desc,
+            )
+            .unwrap();
         }
 
-        let result = read_value_from_buffer(buf.ptr, &desc).unwrap();
-        let result_arr = result.as_array().unwrap();
+        let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
+        let result_arr = result.as_array_mut().unwrap();
         let result_elems = result_arr.borrow();
         assert_eq!(result_elems[0].as_int(), Some(123456));
 
-        let inner_result = result_elems[1].as_array().unwrap();
+        let inner_result = result_elems[1].as_array_mut().unwrap();
         let inner_elems = inner_result.borrow();
         assert_eq!(inner_elems[0].as_int(), Some(7));
         assert_eq!(inner_elems[1].as_int(), Some(999));

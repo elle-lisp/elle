@@ -307,10 +307,10 @@
 # String functions
 # ============================================================================
 
-# test_substring
-(assert-string-eq (substring "hello" 1 4) "ell" "substring middle")
-(assert-string-eq (substring "hello" 2) "llo" "substring to end")
-(assert-string-eq (substring "hello" 0 2) "he" "substring from start")
+# test_slice
+(assert-string-eq (slice "hello" 1 4) "ell" "slice middle")
+(assert-string-eq (slice "hello" 2 5) "llo" "slice to end")
+(assert-string-eq (slice "hello" 0 2) "he" "slice from start")
 
 # test_string_index
 (assert-eq (string-index "hello" "l") 2 "string-index found")
@@ -326,36 +326,36 @@
 # ============================================================================
 
 # test_array_creation
-(var arr (array 1 2 3))
+(var arr (@array 1 2 3))
 (assert-eq (length arr) 3 "array length 3")
 (assert-eq (get arr 0) 1 "array get 0")
 (assert-eq (get arr 1) 2 "array get 1")
 (assert-eq (get arr 2) 3 "array get 2")
 
 # empty array
-(assert-eq (length (array)) 0 "empty array length")
+(assert-eq (length (@array)) 0 "empty array length")
 
 # test_array_length
-(assert-eq (length (array 1 2 3)) 3 "array length")
-(assert-eq (length (array)) 0 "array length empty")
-(assert-eq (length (array 10 20 30 40 50)) 5 "array length 5")
+(assert-eq (length (@array 1 2 3)) 3 "array length")
+(assert-eq (length (@array)) 0 "array length empty")
+(assert-eq (length (@array 10 20 30 40 50)) 5 "array length 5")
 
 # test_array_get
-(assert-eq (get (array 10 20 30) 0) 10 "array get 0")
-(assert-eq (get (array 10 20 30) 1) 20 "array get 1")
-(assert-eq (get (array 10 20 30) 2) 30 "array get 2")
+(assert-eq (get (@array 10 20 30) 0) 10 "array get 0")
+(assert-eq (get (@array 10 20 30) 1) 20 "array get 1")
+(assert-eq (get (@array 10 20 30) 2) 30 "array get 2")
 
 # test_array_put
-(var arr-put (put (array 1 2 3) 1 99))
+(var arr-put (put (@array 1 2 3) 1 99))
 (assert-eq (get arr-put 0) 1 "array put keeps 0")
 (assert-eq (get arr-put 1) 99 "array put sets 1")
 (assert-eq (get arr-put 2) 3 "array put keeps 2")
 
 # put at beginning
-(assert-eq (get (put (array 1 2 3) 0 100) 0) 100 "array put at beginning")
+(assert-eq (get (put (@array 1 2 3) 0 100) 0) 100 "array put at beginning")
 
 # put at end
-(assert-eq (get (put (array 1 2 3) 2 200) 2) 200 "array put at end")
+(assert-eq (get (put (@array 1 2 3) 2 200) 2) 200 "array put at end")
 
 # ============================================================================
 # Math: mod, rem, even?, odd?

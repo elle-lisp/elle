@@ -3,7 +3,7 @@
 //! Supports loading .so files on Linux and provides stubs for other platforms.
 
 /// Handle to a loaded shared library.
-pub struct LibraryHandle {
+pub(crate) struct LibraryHandle {
     /// Unique ID for this library in the FFI subsystem
     pub id: u32,
     /// Path to the library file
@@ -60,7 +60,7 @@ impl LibraryHandle {
 /// let lib = load_library("/lib/x86_64-linux-gnu/libc.so.6")?;
 /// let strlen_ptr = lib.get_symbol("strlen")?;
 /// ```
-pub fn load_library(path: &str) -> Result<LibraryHandle, String> {
+pub(crate) fn load_library(path: &str) -> Result<LibraryHandle, String> {
     #[cfg(target_os = "linux")]
     {
         // Only check existence for absolute/relative paths.
@@ -106,7 +106,7 @@ pub fn load_library(path: &str) -> Result<LibraryHandle, String> {
 /// let lib = load_self()?;
 /// let strlen_ptr = lib.get_symbol("strlen")?;
 /// ```
-pub fn load_self() -> Result<LibraryHandle, String> {
+pub(crate) fn load_self() -> Result<LibraryHandle, String> {
     #[cfg(target_os = "linux")]
     {
         use libloading::os::unix::Library as UnixLibrary;

@@ -89,7 +89,7 @@ fn check_rename_conflict(
 }
 
 /// Rename a symbol at a given position to a new name
-pub fn rename_symbol(
+pub(crate) fn rename_symbol(
     line: u32,
     character: u32,
     new_name: &str,

@@ -5,7 +5,7 @@ use elle::SymbolTable;
 
 fn run_err(input: &str) -> String {
     let mut symbols = SymbolTable::new();
-    compile(input, &mut symbols).unwrap_err()
+    compile(input, &mut symbols, "<test>").unwrap_err()
 }
 
 #[test]

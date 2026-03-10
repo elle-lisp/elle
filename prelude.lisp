@@ -163,7 +163,7 @@
                 (let ((,var (first ,g-cur)))
                   ,;body)
                 (assign ,g-cur (rest ,g-cur))))))
-         ((or (array? ,g-iter) (tuple? ,g-iter) (bytes? ,g-iter) (blob? ,g-iter))
+         ((or (array? ,g-iter) (array? ,g-iter) (bytes? ,g-iter) (bytes? ,g-iter))
           (let* ((,g-len (length ,g-iter))
                  (,g-idx 0))
             (while (< ,g-idx ,g-len)
@@ -171,7 +171,7 @@
                 (let ((,var (get ,g-iter ,g-idx)))
                   ,;body)
                 (assign ,g-idx (+ ,g-idx 1))))))
-         ((or (string? ,g-iter) (buffer? ,g-iter))
+         ((or (string? ,g-iter) (string? ,g-iter))
           (let* ((,g-len (length ,g-iter))
                  (,g-idx 0))
             (while (< ,g-idx ,g-len)
@@ -256,7 +256,7 @@
 ## Do not retain references to these objects beyond the form's dynamic extent.
 (defmacro with-allocator (allocator & body)
   `(begin
-     (%install-allocator ,allocator)
-     (defer (%uninstall-allocator)
+     (allocator/install ,allocator)
+     (defer (allocator/uninstall)
        ,;body)))
 

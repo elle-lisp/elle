@@ -20,7 +20,7 @@ const STDLIB: &str = include_str!("../../stdlib.lisp");
 /// export into the compilation cache's PrimitiveMeta so that
 /// `bind_primitives` pre-binds them for all subsequent compilations.
 pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable) {
-    let result = match compile_file(STDLIB, symbols) {
+    let result = match compile_file(STDLIB, symbols, "<stdlib>") {
         Ok(r) => r,
         Err(e) => panic!("stdlib compilation failed: {}", e),
     };

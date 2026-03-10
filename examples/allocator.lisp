@@ -36,14 +36,14 @@
 # 2. Measurement overhead
 # ========================================
 
-# Each (arena/count) call has 1 object of overhead (SIG_QUERY cons)
+# arena/count now operates directly on thread-local state (no SIG_QUERY overhead)
 (let* ((a (arena/count))
        (b (arena/count))
        (c (arena/count)))
-  (assert-eq (- b a) 1 "arena/count overhead is 1")
-  (assert-eq (- c b) 1 "arena/count overhead is stable"))
+  (assert-eq (- b a) 0 "arena/count has zero overhead")
+  (assert-eq (- c b) 0 "arena/count overhead is stable"))
 
-(display "  arena/count overhead: 1 object per call\n")
+(display "  arena/count overhead: 0 objects per call\n")
 
 # arena/allocs compensates for this
 (let* ((m (arena/allocs (fn () nil)))
@@ -281,7 +281,7 @@
                        (eval expr)
                        (loop (+ i 1))))))
       (loop 0))
-    (/ (- (arena/count) before 1) n)))
+    (/ (- (arena/count) before) n)))
 
 (let* ((e '(let ((a 0)) (each x (list 1 2 3) (assign a (+ a x))) a))
        (p5 (measure-per-iter 5 e))
@@ -363,8 +363,7 @@
 # are no longer reachable.
 
 # Take checkpoint, allocate, measure growth, reset, verify reclamation.
-# arena/count has 1 object overhead (SIG_QUERY cons), so after reset
-# the count reads as mark + 1.
+# arena/count now has zero overhead (operates directly on thread-local state).
 (var cp-mark (arena/checkpoint))
 (cons 1 2)
 (cons 3 4)
@@ -375,9 +374,9 @@
 (display "  after alloc:  ") (display (- cp-after cp-mark)) (print " new objects")
 (arena/reset cp-mark)
 (var cp-reset (arena/count))
-# arena/count itself allocates 1 cons (SIG_QUERY overhead)
-(assert-eq (- cp-reset cp-mark) 1 "arena/reset restored count (modulo measurement overhead)")
-(display "  after reset:  +") (display (- cp-reset cp-mark)) (print " (measurement overhead)")
+# arena/count has zero overhead, so count should equal mark after reset
+(assert-eq (- cp-reset cp-mark) 0 "arena/reset restored count exactly")
+(display "  after reset:  ") (display (- cp-reset cp-mark)) (print " (no overhead)")
 
 # Verify reset with invalid mark errors
 (let ((result (try

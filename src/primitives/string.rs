@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 fn as_text(val: &Value, prim_name: &str) -> Result<(String, bool), (SignalBits, Value)> {
     if let Some(s) = val.with_string(|s| s.to_string()) {
         Ok((s, false))
-    } else if let Some(buf_ref) = val.as_buffer() {
+    } else if let Some(buf_ref) = val.as_string_mut() {
         let borrowed = buf_ref.borrow();
         match String::from_utf8(borrowed.clone()) {
             Ok(s) => Ok((s, true)),
@@ -39,7 +39,7 @@ fn as_text(val: &Value, prim_name: &str) -> Result<(String, bool), (SignalBits, 
 }
 
 /// Convert string or buffer to uppercase
-pub fn prim_string_upcase(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_upcase(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -55,14 +55,14 @@ pub fn prim_string_upcase(args: &[Value]) -> (SignalBits, Value) {
     };
     let upper = s.to_uppercase();
     if is_buffer {
-        (SIG_OK, Value::buffer(upper.into_bytes()))
+        (SIG_OK, Value::string_mut(upper.into_bytes()))
     } else {
         (SIG_OK, Value::string(upper))
     }
 }
 
 /// Convert string or buffer to lowercase
-pub fn prim_string_downcase(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_downcase(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -78,73 +78,14 @@ pub fn prim_string_downcase(args: &[Value]) -> (SignalBits, Value) {
     };
     let lower = s.to_lowercase();
     if is_buffer {
-        (SIG_OK, Value::buffer(lower.into_bytes()))
+        (SIG_OK, Value::string_mut(lower.into_bytes()))
     } else {
         (SIG_OK, Value::string(lower))
     }
 }
 
-/// Get a substring from a string or buffer
-pub fn prim_substring(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("substring: expected 2-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let (s, _is_buffer) = match as_text(&args[0], "substring") {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let s = s.as_str();
-
-    let start = match args[1].as_int() {
-        Some(n) => n as usize,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("substring: expected integer, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
-    let graphemes: Vec<&str> = s.graphemes(true).collect();
-    let grapheme_count = graphemes.len();
-    let end = if args.len() == 3 {
-        match args[2].as_int() {
-            Some(n) => n as usize,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("substring: expected integer, got {}", args[2].type_name()),
-                    ),
-                )
-            }
-        }
-    } else {
-        grapheme_count
-    };
-
-    if start > grapheme_count || end > grapheme_count || start > end {
-        return (SIG_OK, Value::NIL);
-    }
-
-    // Convert grapheme indices to byte indices
-    let byte_start: usize = graphemes[..start].iter().map(|g| g.len()).sum();
-    let byte_end: usize = graphemes[..end].iter().map(|g| g.len()).sum();
-    (SIG_OK, Value::string(&s[byte_start..byte_end]))
-}
-
 /// Find the grapheme index of a substring, with optional start offset
-pub fn prim_string_find(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_find(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 || args.len() > 3 {
         return (
             SIG_ERROR,
@@ -221,7 +162,7 @@ pub fn prim_string_find(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Get a character at an index from a string or buffer
-pub fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -280,7 +221,7 @@ pub fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Split string or buffer on delimiter, returning a tuple
-pub fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -320,11 +261,11 @@ pub fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
 
     let parts: Vec<Value> = s.split(&delimiter).map(Value::string).collect();
 
-    (SIG_OK, Value::tuple(parts))
+    (SIG_OK, Value::array(parts))
 }
 
 /// Replace all occurrences of old with new in a string or buffer
-pub fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 3 {
         return (
             SIG_ERROR,
@@ -382,14 +323,14 @@ pub fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
 
     let replaced = s.replace(&*old, &new);
     if is_buffer {
-        (SIG_OK, Value::buffer(replaced.into_bytes()))
+        (SIG_OK, Value::string_mut(replaced.into_bytes()))
     } else {
         (SIG_OK, Value::string(replaced))
     }
 }
 
 /// Trim leading and trailing whitespace from a string or buffer
-pub fn prim_string_trim(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_trim(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -406,14 +347,14 @@ pub fn prim_string_trim(args: &[Value]) -> (SignalBits, Value) {
     };
     let trimmed = s.trim().to_string();
     if is_buffer {
-        (SIG_OK, Value::buffer(trimmed.into_bytes()))
+        (SIG_OK, Value::string_mut(trimmed.into_bytes()))
     } else {
         (SIG_OK, Value::string(trimmed))
     }
 }
 
 /// Check if string or buffer contains substring
-pub fn prim_string_contains(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_contains(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -455,7 +396,7 @@ pub fn prim_string_contains(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Check if string or buffer starts with prefix
-pub fn prim_string_starts_with(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_starts_with(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -500,7 +441,7 @@ pub fn prim_string_starts_with(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Check if string or buffer ends with suffix
-pub fn prim_string_ends_with(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_ends_with(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -545,7 +486,7 @@ pub fn prim_string_ends_with(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Join sequence of strings with separator
-pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -570,9 +511,9 @@ pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
     };
 
     // Try tuple first
-    let vec = if let Some(elems) = seq.as_tuple() {
+    let vec = if let Some(elems) = seq.as_array() {
         elems.to_vec()
-    } else if let Some(arr) = seq.as_array() {
+    } else if let Some(arr) = seq.as_array_mut() {
         arr.borrow().clone()
     } else {
         // Fall back to list_to_vec for lists and syntax
@@ -616,7 +557,7 @@ pub fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
 /// Percent-encode a string per RFC 3986.
 /// Unreserved characters (A-Z, a-z, 0-9, '-', '.', '_', '~') pass through.
 /// All others are percent-encoded as %XX with uppercase hex.
-pub fn prim_uri_encode(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_uri_encode(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -664,7 +605,7 @@ pub fn prim_uri_encode(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for string module.
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/upcase",
         func: prim_string_upcase,
@@ -686,17 +627,6 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/downcase \"HELLO\") #=> \"hello\"",
         aliases: &["string-downcase"],
-    },
-    PrimitiveDef {
-        name: "string/slice",
-        func: prim_substring,
-        effect: Effect::inert(),
-        arity: Arity::Range(2, 3),
-        doc: "Extract substring from start to end (exclusive). End defaults to string length.",
-        params: &["s", "start", "end"],
-        category: "string",
-        example: "(string/slice \"hello\" 1 4) #=> \"ell\"",
-        aliases: &["substring"],
     },
     PrimitiveDef {
         name: "string/find",

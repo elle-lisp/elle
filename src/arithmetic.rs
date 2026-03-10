@@ -8,7 +8,7 @@ use crate::error::{LError, LResult};
 use crate::value::Value;
 
 /// Add two numeric values, automatically promoting Int to Float when needed
-pub fn add_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn add_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Ok(Value::int(x + y)),
         _ => match (a.as_float(), b.as_float()) {
@@ -28,7 +28,7 @@ pub fn add_values(a: &Value, b: &Value) -> LResult<Value> {
 }
 
 /// Subtract two numeric values, automatically promoting Int to Float when needed
-pub fn sub_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn sub_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Ok(Value::int(x - y)),
         _ => match (a.as_float(), b.as_float()) {
@@ -48,7 +48,7 @@ pub fn sub_values(a: &Value, b: &Value) -> LResult<Value> {
 }
 
 /// Multiply two numeric values, automatically promoting Int to Float when needed
-pub fn mul_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn mul_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Ok(Value::int(x * y)),
         _ => match (a.as_float(), b.as_float()) {
@@ -68,7 +68,7 @@ pub fn mul_values(a: &Value, b: &Value) -> LResult<Value> {
 }
 
 /// Divide two numeric values, automatically promoting Int to Float when needed
-pub fn div_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn div_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => {
             if y == 0 {
@@ -98,7 +98,7 @@ pub fn div_values(a: &Value, b: &Value) -> LResult<Value> {
 }
 
 /// Negate a numeric value
-pub fn negate_value(a: &Value) -> LResult<Value> {
+pub(crate) fn negate_value(a: &Value) -> LResult<Value> {
     match a.as_int() {
         Some(n) => Ok(Value::int(-n)),
         None => match a.as_float() {
@@ -109,7 +109,7 @@ pub fn negate_value(a: &Value) -> LResult<Value> {
 }
 
 /// Reciprocal of a numeric value (1/x)
-pub fn reciprocal_value(a: &Value) -> LResult<Value> {
+pub(crate) fn reciprocal_value(a: &Value) -> LResult<Value> {
     match a.as_int() {
         Some(n) => {
             if n == 0 {
@@ -126,7 +126,7 @@ pub fn reciprocal_value(a: &Value) -> LResult<Value> {
 }
 
 /// Modulo operation (Euclidean modulo - result has same sign as divisor)
-pub fn mod_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn mod_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => {
             if y == 0 {
@@ -139,7 +139,7 @@ pub fn mod_values(a: &Value, b: &Value) -> LResult<Value> {
 }
 
 /// Remainder operation (truncated division - result has same sign as dividend)
-pub fn remainder_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn remainder_values(a: &Value, b: &Value) -> LResult<Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => {
             if y == 0 {
@@ -152,7 +152,7 @@ pub fn remainder_values(a: &Value, b: &Value) -> LResult<Value> {
 }
 
 /// Absolute value of a numeric value
-pub fn abs_value(a: &Value) -> LResult<Value> {
+pub(crate) fn abs_value(a: &Value) -> LResult<Value> {
     match a.as_int() {
         Some(n) => Ok(Value::int(n.abs())),
         None => match a.as_float() {
@@ -163,7 +163,7 @@ pub fn abs_value(a: &Value) -> LResult<Value> {
 }
 
 /// Get minimum of two numeric values
-pub fn min_values(a: &Value, b: &Value) -> Value {
+pub(crate) fn min_values(a: &Value, b: &Value) -> Value {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Value::int(x.min(y)),
         _ => match (a.as_float(), b.as_float()) {
@@ -174,7 +174,7 @@ pub fn min_values(a: &Value, b: &Value) -> Value {
 }
 
 /// Get maximum of two numeric values
-pub fn max_values(a: &Value, b: &Value) -> Value {
+pub(crate) fn max_values(a: &Value, b: &Value) -> Value {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Value::int(x.max(y)),
         _ => match (a.as_float(), b.as_float()) {

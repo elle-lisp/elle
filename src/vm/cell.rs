@@ -8,7 +8,7 @@ use crate::vm::core::VM;
 /// Uses LocalCell (not Cell) because MakeCell is emitted by the compiler for
 /// mutable captured variables, which should auto-unwrap on LoadUpvalue.
 /// User-created cells via `box` use a different code path.
-pub fn handle_make_cell(vm: &mut VM) {
+pub(crate) fn handle_make_cell(vm: &mut VM) {
     let value = vm
         .fiber
         .stack
@@ -27,7 +27,7 @@ pub fn handle_make_cell(vm: &mut VM) {
 
 /// Handle UnwrapCell instruction - extracts value from a cell
 /// Pops cell from stack, unwraps it, pushes the value
-pub fn handle_unwrap_cell(vm: &mut VM) {
+pub(crate) fn handle_unwrap_cell(vm: &mut VM) {
     let cell_val = vm
         .fiber
         .stack
@@ -46,7 +46,7 @@ pub fn handle_unwrap_cell(vm: &mut VM) {
 
 /// Handle UpdateCell instruction - updates a cell's contents
 /// Pops new_value, then cell from stack, updates cell, pushes new_value
-pub fn handle_update_cell(vm: &mut VM) {
+pub(crate) fn handle_update_cell(vm: &mut VM) {
     let new_value = vm
         .fiber
         .stack

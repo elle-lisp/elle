@@ -78,59 +78,59 @@
 
 ## === Tables and Structs ===
 
-(assert-true (table? (table)) "table creation empty")
+(assert-true (struct? (@struct)) "@struct creation empty")
 
-(assert-eq (let ((t (table)))
+(assert-eq (let ((t (@struct)))
              (put t "key" 42)
              (get t "key"))
            42
-           "table put and get")
+           "@struct put and get")
 
 (assert-true (struct? (struct)) "struct creation empty")
 
-(assert-eq (= (type-of (table)) :table) true "type-of table")
+(assert-eq (= (type-of (@struct)) :@struct) true "type-of @struct")
 (assert-eq (= (type-of (struct)) :struct) true "type-of struct")
 
-(assert-eq (let ((t (table "a" 1 "b" 2)))
+(assert-eq (let ((t (@struct "a" 1 "b" 2)))
              (+ (get t "a") (get t "b")))
            3
-           "table with string keys")
+           "@struct with string keys")
 
 (assert-eq (let ((s (struct "x" 10 "y" 20)))
              (+ (get s "x") (get s "y")))
            30
            "struct with string keys")
 
-(assert-eq (let ((t (table "a" 1)))
-             (has-key? t "a"))
+(assert-eq (let ((t (@struct "a" 1)))
+             (has? t "a"))
            true
-           "table has-key? true")
+           "@struct has? true")
 
-(assert-eq (let ((t (table "a" 1)))
-             (has-key? t "b"))
+(assert-eq (let ((t (@struct "a" 1)))
+             (has? t "b"))
            false
-           "table has-key? missing")
+           "@struct has? missing")
 
-## === Table Mutation ===
+## === @struct Mutation ===
 
-(assert-eq (let ((t (table)))
+(assert-eq (let ((t (@struct)))
              (put t "a" 1)
              (put t "a" 2)
              (get t "a"))
            2
-           "table mutation")
+           "@struct mutation")
 
 (assert-eq (let ((s (struct "x" 42)))
              (get s "x"))
            42
            "struct immutability")
 
-(assert-eq (let ((outer (table)))
-             (put outer "inner" (table))
+(assert-eq (let ((outer (@struct)))
+             (put outer "inner" (@struct))
              (put (get outer "inner") "value" 42)
              (get (get outer "inner") "value"))
            42
-           "nested table operations")
+           "nested @struct operations")
 
 (assert-eq (begin
              (defmacro add-one (x) `(+ ,x 1))
@@ -141,21 +141,21 @@
 (assert-eq (-> 5 (+ 3) (* 2)) 16 "threading macro first")
 (assert-eq (->> 5 (+ 3) (* 2)) 16 "threading macro last")
 
-(assert-eq (let ((t (table "a" 1 "b" 2)))
+(assert-eq (let ((t (@struct "a" 1 "b" 2)))
              (length (keys t)))
            2
-           "table keys")
+           "@struct keys")
 
-(assert-eq (let ((t (table "a" 1 "b" 2)))
+(assert-eq (let ((t (@struct "a" 1 "b" 2)))
              (length (values t)))
            2
-           "table values")
+           "@struct values")
 
-(assert-eq (let ((t (table "a" 1 "b" 2)))
+(assert-eq (let ((t (@struct "a" 1 "b" 2)))
              (del t "a")
-             (has-key? t "a"))
+             (has? t "a"))
            false
-           "table del")
+           "@struct del")
 
 (assert-eq (let ((s (struct "x" 1)))
              (let ((s2 (put s "x" 2)))
@@ -163,10 +163,10 @@
            (list 1 2)
            "struct put returns new")
 
-(assert-eq (let ((t (table)))
+(assert-eq (let ((t (@struct)))
              (get t "missing" 42))
            42
-           "get with default")
+           "get @struct with default")
 
 ## === Let Binding Semantics ===
 
@@ -180,17 +180,17 @@
 
 (assert-eq (let ((x 1)) (let ((x 2)) x)) 2 "let nested shadowing")
 
-## === Polymorphic get - Tuples ===
+## === Polymorphic get - Arrays ===
 
-(assert-eq (get [1 2 3] 0) 1 "get tuple by index")
-(assert-eq (get [1 2 3] 1) 2 "get tuple by index middle")
-(assert-eq (get [1 2 3] 2) 3 "get tuple by index last")
-(assert-eq (get [1 2 3] 10) nil "get tuple out of bounds")
-(assert-eq (get [1 2 3] 10 :missing) :missing "get tuple out of bounds with default")
-(assert-eq (get [1 2 3] -1) nil "get tuple negative index")
-(assert-eq (get [1 2 3] -1 :default) :default "get tuple negative index with default")
-(assert-eq (get [] 0) nil "get empty tuple")
-(assert-err (fn () (get [1 2 3] :key)) "get tuple non-integer index error")
+(assert-eq (get [1 2 3] 0) 1 "get array by index")
+(assert-eq (get [1 2 3] 1) 2 "get array by index middle")
+(assert-eq (get [1 2 3] 2) 3 "get array by index last")
+(assert-eq (get [1 2 3] 10) nil "get array out of bounds")
+(assert-eq (get [1 2 3] 10 :missing) :missing "get array out of bounds with default")
+(assert-eq (get [1 2 3] -1) nil "get array negative index")
+(assert-eq (get [1 2 3] -1 :default) :default "get array negative index with default")
+(assert-eq (get [] 0) nil "get empty array")
+(assert-err (fn () (get [1 2 3] :key)) "get array non-integer index error")
 
 ## === Polymorphic get - Arrays ===
 
@@ -223,13 +223,13 @@
 (assert-eq (get {:a 1} :b :missing) :missing "get struct missing key with default")
 (assert-eq (get {} :a) nil "get empty struct")
 
-## === Polymorphic get - Tables ===
+## === Polymorphic get - @structs ===
 
-(assert-eq (get @{:a 1} :a) 1 "get table by keyword")
-(assert-eq (get @{"x" 10} "x") 10 "get table by string key")
-(assert-eq (get @{:a 1} :b) nil "get table missing key")
-(assert-eq (get @{:a 1} :b :missing) :missing "get table missing key with default")
-(assert-eq (get @{} :a) nil "get empty table")
+(assert-eq (get @{:a 1} :a) 1 "get @struct by keyword")
+(assert-eq (get @{"x" 10} "x") 10 "get @struct by string key")
+(assert-eq (get @{:a 1} :b) nil "get @struct missing key")
+(assert-eq (get @{:a 1} :b :missing) :missing "get @struct missing key with default")
+(assert-eq (get @{} :a) nil "get empty @struct")
 
 ## === get Error Cases ===
 
@@ -239,39 +239,39 @@
 (assert-err (fn () (get 42 0)) "get unsupported type")
 (assert-err (fn () (get nil 0)) "get nil type")
 
-## === put - Tuples ===
+## === put - Arrays ===
 
-(assert-eq (get (put [1 2 3] 0 99) 0) 99 "put tuple by index")
-(assert-eq (get (put [1 2 3] 1 99) 1) 99 "put tuple by index middle")
-(assert-eq (get (put [1 2 3] 2 99) 2) 99 "put tuple by index last")
-(assert-err (fn () (put [1 2 3] 10 99)) "put tuple out of bounds")
-(assert-err (fn () (put [1 2 3] -1 99)) "put tuple negative index")
+(assert-eq (get (put [1 2 3] 0 99) 0) 99 "put array by index")
+(assert-eq (get (put [1 2 3] 1 99) 1) 99 "put array by index middle")
+(assert-eq (get (put [1 2 3] 2 99) 2) 99 "put array by index last")
+(assert-err (fn () (put [1 2 3] 10 99)) "put array out of bounds")
+(assert-err (fn () (put [1 2 3] -1 99)) "put array negative index")
 
 (assert-eq (let ((t [1 2 3]))
              (let ((t2 (put t 0 99)))
                (list t t2)))
            (list [1 2 3] [99 2 3])
-           "put tuple immutable original unchanged")
+           "put array immutable original unchanged")
 
-(assert-err (fn () (put [1 2 3] :key 99)) "put tuple non-integer index error")
-(assert-err (fn () (put [] 0 99)) "put empty tuple errors")
+(assert-err (fn () (put [1 2 3] :key 99)) "put array non-integer index error")
+(assert-err (fn () (put [] 0 99)) "put empty array errors")
 
-## === put - Arrays ===
+## === put - @arrays ===
 
-(assert-eq (get (put @[1 2 3] 0 99) 0) 99 "put array by index")
-(assert-eq (get (put @[1 2 3] 1 99) 1) 99 "put array by index middle")
-(assert-eq (get (put @[1 2 3] 2 99) 2) 99 "put array by index last")
-(assert-err (fn () (put @[1 2 3] 10 99)) "put array out of bounds")
-(assert-err (fn () (put @[1 2 3] -1 99)) "put array negative index")
+(assert-eq (get (put @[1 2 3] 0 99) 0) 99 "put @array by index")
+(assert-eq (get (put @[1 2 3] 1 99) 1) 99 "put @array by index middle")
+(assert-eq (get (put @[1 2 3] 2 99) 2) 99 "put @array by index last")
+(assert-err (fn () (put @[1 2 3] 10 99)) "put @array out of bounds")
+(assert-err (fn () (put @[1 2 3] -1 99)) "put @array negative index")
 
 (assert-eq (let ((a @[1 2 3]))
              (let ((a2 (put a 0 99)))
                (identical? a a2)))
            true
-           "put array mutable same reference")
+           "put @array mutable same reference")
 
-(assert-err (fn () (put @[1 2 3] :key 99)) "put array non-integer index error")
-(assert-err (fn () (put @[] 0 99)) "put empty array errors")
+(assert-err (fn () (put @[1 2 3] :key 99)) "put @array non-integer index error")
+(assert-err (fn () (put @[] 0 99)) "put empty @array errors")
 
 ## === put - Strings ===
 
@@ -305,19 +305,19 @@
 
 (assert-eq (get (put {} :a 1) :a) 1 "put empty struct")
 
-## === put - Tables ===
+## === put - @structs ===
 
-(assert-eq (get (put @{:a 1} :a 99) :a) 99 "put table by keyword")
-(assert-eq (get (put @{:a 1} :b 2) :a) 1 "put table new key a")
-(assert-eq (get (put @{:a 1} :b 2) :b) 2 "put table new key b")
+(assert-eq (get (put @{:a 1} :a 99) :a) 99 "put @struct by keyword")
+(assert-eq (get (put @{:a 1} :b 2) :a) 1 "put @struct new key a")
+(assert-eq (get (put @{:a 1} :b 2) :b) 2 "put @struct new key b")
 
 (assert-eq (let ((t @{:a 1}))
              (let ((t2 (put t :a 99)))
                (identical? t t2)))
            true
-           "put table mutable same reference")
+           "put @struct mutable same reference")
 
-(assert-eq (get (put @{} :a 1) :a) 1 "put empty table")
+(assert-eq (get (put @{} :a 1) :a) 1 "put empty @struct")
 
 ## === put Error Cases ===
 
@@ -499,33 +499,33 @@
            true
            "append arrays returns same reference")
 
-## === append - Tuples ===
+## === append - Arrays ===
 
-(assert-eq (length (append [1 2] [3 4])) 4 "append tuples returns new")
+(assert-eq (length (append [1 2] [3 4])) 4 "append arrays returns new")
 
 (assert-eq (let ((t [1 2]))
              (let ((t2 (append t [3 4])))
                (list t t2)))
            (list [1 2] [1 2 3 4])
-           "append tuples original unchanged")
+           "append arrays original unchanged")
 
-## === append - Strings ===
+## === append - @strings ===
 
-(assert-eq (append "hello" " world") "hello world" "append strings")
+(assert-eq (append "hello" " world") "hello world" "append @strings")
 
 (assert-eq (let ((s "hello"))
              (let ((s2 (append s " world")))
                (list s s2)))
            (list "hello" "hello world")
-           "append strings returns new")
+           "append @strings returns new")
 
 ## === append - Empty Collections ===
 
-(assert-eq (length (append @[] @[1 2])) 2 "append empty arrays")
-(assert-eq (length (append @[1 2] @[])) 2 "append to empty array")
-(assert-eq (length (append [] [1 2])) 2 "append empty tuples")
-(assert-eq (append "" "hello") "hello" "append empty strings")
-(assert-eq (append "hello" "") "hello" "append to empty string")
+(assert-eq (length (append @[] @[1 2])) 2 "append empty @arrays")
+(assert-eq (length (append @[1 2] @[])) 2 "append to empty @array")
+(assert-eq (length (append [] [1 2])) 2 "append empty arrays")
+(assert-eq (append "" "hello") "hello" "append empty @strings")
+(assert-eq (append "hello" "") "hello" "append to empty @string")
 
 ## === append - Error Cases ===
 
@@ -535,36 +535,40 @@
 (assert-err (fn () (append @[1 2] [3 4])) "append mismatched types error")
 (assert-err (fn () (append 42 99)) "append unsupported type error")
 
-## === concat - Arrays ===
+## === concat - @arrays ===
 
-(assert-eq (length (concat @[1 2] @[3 4])) 4 "concat arrays returns new")
+(assert-eq (length (concat @[1 2] @[3 4])) 4 "concat @arrays returns new")
 
 (assert-eq (let ((a @[1 2]))
              (let ((a2 (concat a @[3 4])))
                (list a a2)))
            (list @[1 2] @[1 2 3 4])
-           "concat arrays original unchanged")
+           "concat @arrays original unchanged")
 
-## === concat - Tuples ===
+## === concat - Arrays ===
 
-(assert-eq (length (concat [1 2] [3 4])) 4 "concat tuples returns new")
+(assert-eq (length (concat [1 2] [3 4])) 4 "concat arrays returns new")
 
-## === concat - Strings ===
+## === concat - @strings ===
 
-(assert-eq (concat "hello" " world") "hello world" "concat strings")
+(assert-eq (concat "hello" " world") "hello world" "concat @strings")
 
 ## === concat - Empty Collections ===
 
-(assert-eq (length (concat @[] @[1 2])) 2 "concat empty arrays")
-(assert-eq (length (concat @[1 2] @[])) 2 "concat to empty array")
-(assert-eq (length (concat [] [1 2])) 2 "concat empty tuples")
-(assert-eq (concat "" "hello") "hello" "concat empty strings")
+(assert-eq (length (concat @[] @[1 2])) 2 "concat empty @arrays")
+(assert-eq (length (concat @[1 2] @[])) 2 "concat to empty @array")
+(assert-eq (length (concat [] [1 2])) 2 "concat empty arrays")
+(assert-eq (concat "" "hello") "hello" "concat empty @strings")
+
+## === concat - Variadic ===
+
+(assert-eq (concat [1]) [1] "concat single array identity")
+(assert-eq (concat @[1 2] @[3 4] @[5 6]) @[1 2 3 4 5 6] "concat three @arrays")
+(assert-eq (concat "a" "b" "c") "abc" "concat three strings")
 
 ## === concat - Error Cases ===
 
 (assert-err (fn () (eval '(concat))) "concat wrong arity no args")
-(assert-err (fn () (eval '(concat @[1 2]))) "concat wrong arity one arg")
-(assert-err (fn () (eval '(concat @[1 2] @[3 4] @[5 6]))) "concat wrong arity too many args")
 (assert-err (fn () (concat @[1 2] [3 4])) "concat mismatched types error")
 (assert-err (fn () (concat 42 99)) "concat unsupported type error")
 
@@ -593,4 +597,15 @@
   "each simple")
 
 (assert-eq (let ((sum 0)) (each x in '(1 2 3) (assign sum (+ sum x))) sum) 6
-  "each with in")
+   "each with in")
+
+## === describe ===
+
+(assert-eq (describe |1 2 3|) "<set (3 elements)>" "describe set")
+(assert-eq (describe @|1 2 3|) "<@set (3 elements)>" "describe @set")
+(assert-eq (describe [1 2 3]) "<array (3 elements)>" "describe array")
+(assert-eq (describe @[1 2 3]) "<@array (3 elements)>" "describe @array")
+(assert-eq (describe {:a 1}) "<struct (1 entries)>" "describe struct")
+(assert-eq (describe @{:a 1}) "<@struct (1 entries)>" "describe @struct")
+(assert-eq (describe (bytes 1 2 3)) "<bytes (3 bytes)>" "describe bytes")
+(assert-eq (describe (@bytes 1 2 3)) "<@bytes (3 bytes)>" "describe @bytes")

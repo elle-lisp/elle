@@ -95,7 +95,7 @@ fn format_value(
     if let Some(_ptr) = value.as_heap_ptr() {
         let obj = unsafe { deref(*value) };
         match obj {
-            HeapObject::Array(v) => {
+            HeapObject::LArrayMut(v) => {
                 if let Ok(elements) = v.try_borrow() {
                     if elements.is_empty() {
                         return "[]".to_string();
@@ -112,18 +112,18 @@ fn format_value(
             HeapObject::Cons(cons) => {
                 return format_cons(&cons.first, &cons.rest, indent, config, symbol_table);
             }
-            HeapObject::Table(_) => {
+            HeapObject::LStructMut(_) => {
                 // For Phase 1, just return a placeholder
                 return "{{...}}".to_string();
             }
-            HeapObject::Struct(_) => {
+            HeapObject::LStruct(_) => {
                 // For Phase 1, just return a placeholder
                 return "{{...}}".to_string();
             }
             HeapObject::Closure(_) => return "#<closure>".to_string(),
             HeapObject::NativeFn(_) => return "#<native-fn>".to_string(),
             HeapObject::LibHandle(_) => return "#<lib-handle>".to_string(),
-            HeapObject::Tuple(elems) => {
+            HeapObject::LArray(elems) => {
                 let items: Vec<String> = elems
                     .iter()
                     .map(|e| format_value(e, indent, config, symbol_table))
@@ -138,9 +138,9 @@ fn format_value(
             HeapObject::Binding(_) => return "#<binding>".to_string(),
             HeapObject::FFISignature(_, _) => return "<ffi-signature>".to_string(),
             HeapObject::FFIType(_) => return "<ffi-type>".to_string(),
-            HeapObject::Buffer(_) => return "@\"...\"".to_string(),
-            HeapObject::Bytes(_) => return "#bytes[...]".to_string(),
-            HeapObject::Blob(_) => return "#blob[...]".to_string(),
+            HeapObject::LStringMut(_) => return "@\"...\"".to_string(),
+            HeapObject::LBytes(_) => return "#bytes[...]".to_string(),
+            HeapObject::LBytesMut(_) => return "#blob[...]".to_string(),
             HeapObject::ManagedPointer(cell) => {
                 return match cell.get() {
                     Some(addr) => format!("<pointer 0x{:x}>", addr),
@@ -149,7 +149,7 @@ fn format_value(
             }
             HeapObject::External(ext) => return format!("#<{}>", ext.type_name),
             HeapObject::Parameter { id, .. } => return format!("<parameter:{}>", id),
-            HeapObject::String(s) => return format!("\"{}\"", s.escape_default()),
+            HeapObject::LString(s) => return format!("\"{}\"", s.escape_default()),
             HeapObject::LSet(s) => {
                 let items: Vec<String> = s
                     .iter()

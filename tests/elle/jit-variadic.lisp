@@ -31,7 +31,7 @@
 (assert-eq (variadic-fn 10) "10" "variadic call 10")
 (assert-eq (variadic-fn 11) "11" "variadic call 11")
 (assert-eq (variadic-fn 12) "12" "variadic call 12")
-(assert-eq (variadic-fn 13 :extra) "13 :extra" "variadic call 13 with rest arg")
+(assert-eq (variadic-fn 13 :extra) "13 extra" "variadic call 13 with rest arg")
 (assert-eq (variadic-fn 14) "14" "variadic call 14")
 (assert-eq (variadic-fn 15) "15" "variadic call 15")
 

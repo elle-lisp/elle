@@ -46,7 +46,7 @@
 
 (defn literal? [expr]
   "Check if an expression is a literal number."
-  (if (tuple? expr)
+  (if (array? expr)
     (if (= (get expr 0) :lit)
       true
       false)
@@ -80,7 +80,7 @@
 (defn expr-type [expr]
   "Return a keyword describing an expression's node type."
   (cond
-    ((not (tuple? expr)) :invalid)
+    ((not (array? expr)) :invalid)
     ((= (get expr 0) :lit)  :literal)
     ((= (get expr 0) :neg)  :unary)
     ((= (get expr 0) :add)  :binary)
@@ -145,11 +145,11 @@
 
 (defn check-expr [expr]
   "Push warnings about suspicious expressions."
-  (when (not (tuple? expr))
+  (when (not (array? expr))
     (push warnings :not-a-tuple))
-  (when (and (tuple? expr) (= (get expr 0) :div))
+  (when (and (array? expr) (= (get expr 0) :div))
     (push warnings :has-division))
-  (unless (tuple? expr)
+  (unless (array? expr)
     (push warnings :also-not-a-tuple)))
 
 (check-expr [:add [:lit 1] [:lit 2]])
@@ -328,7 +328,7 @@
 (defn validate-expr [expr]
   "Check that an expression tree is well-formed."
   (block :check
-    (when (not (tuple? expr))
+    (when (not (array? expr))
       (break :check :not-a-tuple))
     (when (empty? expr)
       (break :check :empty-tuple))
@@ -402,8 +402,8 @@
 # (match value (pattern body) ...)
 #
 # Patterns: literals (42, "hi", :kw, true, nil), _ (wildcard),
-# x (binding), (a b) (list), (h . t) (cons), [a b] (tuple),
-# @[a b] (array), {:k v} (struct), @{:k v} (table),
+# x (binding), (a b) (list), (h . t) (cons), [a b] (@array),
+# @[a b] (@array), {:k v} (struct), @{:k v} (@struct),
 # (pat when guard body) (guarded arm).
 
 # --- Pattern basics ---

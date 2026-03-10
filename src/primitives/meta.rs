@@ -19,7 +19,7 @@ static GENSYM_COUNTER: AtomicU32 = AtomicU32::new(0);
 ///   (let ((tmp (gensym "tmp")))
 ///     `(let ((,tmp 42)) ,body)))
 /// ```
-pub fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
     let prefix = if args.is_empty() {
         "G".to_string()
     } else if let Some(s) = args[0].with_string(|s| s.to_string()) {
@@ -65,7 +65,7 @@ pub fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
 ///   `(let ((,(datum->syntax test 'it) ,test))
 ///      (if ,(datum->syntax test 'it) ,then ,else)))
 /// ```
-pub fn prim_datum_to_syntax(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_datum_to_syntax(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -124,7 +124,7 @@ pub fn prim_datum_to_syntax(args: &[Value]) -> (SignalBits, Value) {
 /// `(syntax->datum stx)` → value
 ///
 /// If the argument is not a syntax object, it is returned unchanged.
-pub fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -161,7 +161,7 @@ pub fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for meta-programming operations.
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "meta/gensym",
         func: prim_gensym,

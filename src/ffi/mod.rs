@@ -5,9 +5,11 @@
 
 pub mod call;
 pub mod callback;
+pub(crate) mod from_c;
 pub mod loader;
 pub mod marshal;
 pub mod primitives;
+pub(crate) mod to_c;
 pub mod types;
 
 use callback::CallbackStore;
@@ -15,7 +17,7 @@ use loader::LibraryHandle;
 use std::collections::HashMap;
 
 /// The FFI subsystem manages loaded libraries and active callbacks.
-pub struct FFISubsystem {
+pub(crate) struct FFISubsystem {
     /// Loaded libraries: id -> handle
     libraries: HashMap<u32, LibraryHandle>,
     /// Next library ID to assign
@@ -57,14 +59,6 @@ impl FFISubsystem {
     /// Get a loaded library by ID.
     pub fn get_library(&self, id: u32) -> Option<&LibraryHandle> {
         self.libraries.get(&id)
-    }
-
-    /// List all loaded libraries.
-    pub fn loaded_libraries(&self) -> Vec<(u32, String)> {
-        self.libraries
-            .iter()
-            .map(|(id, lib)| (*id, lib.path.clone()))
-            .collect()
     }
 
     /// Get mutable access to the callback store.

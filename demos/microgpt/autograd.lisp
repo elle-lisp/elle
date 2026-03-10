@@ -72,7 +72,7 @@
   (let* ([topo @[]]
          [visited @{}])
     (letrec ([walk (fn [node]
-      (when (not (has-key? visited (v-id node)))
+      (when (not (has? visited (v-id node)))
         (put visited (v-id node) true)
         (each child in (get node :children)
           (walk child))

@@ -6,7 +6,7 @@
 
 use elle::ffi::marshal::MarshalledArg;
 use elle::ffi::types::TypeDesc;
-use elle::primitives::ffi::{
+use elle::primitives::memory::{
     prim_ffi_align, prim_ffi_free, prim_ffi_malloc, prim_ffi_read, prim_ffi_size, prim_ffi_write,
 };
 use elle::value::fiber::{SIG_ERROR, SIG_OK};
@@ -416,9 +416,9 @@ proptest! {
         prop_assert_eq!(read.0, SIG_OK, "read failed");
 
         // Compare field by field
-        let original = val.as_array().unwrap();
+        let original = val.as_array_mut().unwrap();
         let original = original.borrow();
-        let result = read.1.as_array().unwrap();
+        let result = read.1.as_array_mut().unwrap();
         let result = result.borrow();
         prop_assert_eq!(original.len(), result.len(), "field count mismatch");
 
@@ -514,13 +514,13 @@ proptest! {
 
         // Too few values
         if sd.fields.len() > 1 {
-            let too_few = Value::array(vec![Value::int(0); sd.fields.len() - 1]);
+            let too_few = Value::array_mut(vec![Value::int(0); sd.fields.len() - 1]);
             let write = prim_ffi_write(&[ptr, Value::ffi_type(desc.clone()), too_few]);
             prop_assert_eq!(write.0, SIG_ERROR, "should reject too few fields");
         }
 
         // Too many values
-        let too_many = Value::array(vec![Value::int(0); sd.fields.len() + extra]);
+        let too_many = Value::array_mut(vec![Value::int(0); sd.fields.len() + extra]);
         let write = prim_ffi_write(&[ptr, Value::ffi_type(desc), too_many]);
         prop_assert_eq!(write.0, SIG_ERROR, "should reject too many fields");
 
@@ -691,7 +691,7 @@ proptest! {
                 _ => Value::int(i as i64),
             })
             .collect();
-        let val = Value::array(vals.clone());
+        let val = Value::array_mut(vals.clone());
 
         let size = desc.size().unwrap();
         let alloc = prim_ffi_malloc(&[Value::int(size as i64)]);
@@ -705,7 +705,7 @@ proptest! {
         let read = prim_ffi_read(&[ptr, type_val]);
         prop_assert_eq!(read.0, SIG_OK, "read failed");
 
-        let result = read.1.as_array().unwrap();
+        let result = read.1.as_array_mut().unwrap();
         let result = result.borrow();
         prop_assert_eq!(result.len(), count, "element count mismatch");
 

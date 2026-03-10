@@ -4,21 +4,24 @@ use crate::vm::VM;
 
 use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
 use super::{
-    allocator, arithmetic, array, bitwise, buffer, bytes, cell, chan, comparison, concurrency,
-    convert, coroutines, debug, display, ffi, fibers, fileio, format, io, json, list, logic, math,
-    meta, modules, net, package, parameters, path, ports, process, read, sets, sort, stream,
-    string, structs, table, time, types,
+    allocator, arena, arithmetic, array, bitwise, buffer, bytes, calling, cell, chan, comparison,
+    concurrency, convert, coroutines, debug, disassembly, display, fiber_introspect, fibers,
+    fileio, format, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
+    modules, net, package, parameters, path, ports, process, read, sets, sort, stream, string,
+    structs, time, types, unix,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
 /// array; this list is the single place that enumerates them.
 pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     allocator::PRIMITIVES,
+    arena::PRIMITIVES,
     arithmetic::PRIMITIVES,
     array::PRIMITIVES,
     bitwise::PRIMITIVES,
     buffer::PRIMITIVES,
     bytes::PRIMITIVES,
+    calling::PRIMITIVES,
     cell::PRIMITIVES,
     chan::PRIMITIVES,
     comparison::PRIMITIVES,
@@ -26,19 +29,24 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     concurrency::PRIMITIVES,
     coroutines::PRIMITIVES,
     debug::PRIMITIVES,
+    disassembly::PRIMITIVES,
     display::PRIMITIVES,
-    ffi::PRIMITIVES,
+    fiber_introspect::PRIMITIVES,
     fibers::PRIMITIVES,
     fileio::PRIMITIVES,
     format::PRIMITIVES,
+    introspection::PRIMITIVES,
     io::PRIMITIVES,
     json::PRIMITIVES,
     list::PRIMITIVES,
+    loading::PRIMITIVES,
     logic::PRIMITIVES,
     math::PRIMITIVES,
+    memory::PRIMITIVES,
     meta::PRIMITIVES,
     modules::PRIMITIVES,
     net::PRIMITIVES,
+    unix::PRIMITIVES,
     package::PRIMITIVES,
     parameters::PRIMITIVES,
     path::PRIMITIVES,
@@ -50,7 +58,7 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     stream::PRIMITIVES,
     string::PRIMITIVES,
     structs::PRIMITIVES,
-    table::PRIMITIVES,
+    lstruct::PRIMITIVES,
     time::PRIMITIVES,
     types::PRIMITIVES,
 ];
@@ -170,7 +178,7 @@ pub fn cached_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
 /// Called by `init_stdlib` after stdlib execution. Updates the
 /// PRIMITIVE_META_CACHE so that `cached_primitive_meta` returns
 /// metadata including stdlib exports.
-pub fn update_primitive_meta_cache(
+pub(crate) fn update_primitive_meta_cache(
     exports: &std::collections::HashMap<
         crate::value::SymbolId,
         (crate::value::Value, crate::effects::Effect),

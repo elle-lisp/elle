@@ -5,7 +5,7 @@ use crate::symbols::SymbolIndex;
 use serde_json::{json, Value};
 
 /// Find all references to a symbol at a given position
-pub fn find_references(
+pub(crate) fn find_references(
     line: u32,
     character: u32,
     include_declaration: bool,

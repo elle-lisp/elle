@@ -190,7 +190,7 @@
 # ========================================
 
 # Write JSON to a file and read it back — the natural use case.
-(def config (table))
+(def config (@struct))
 (put config "app" "elle-test")
 (put config "version" 1)
 (put config "debug" false)

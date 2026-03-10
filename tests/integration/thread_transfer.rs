@@ -152,7 +152,7 @@ fn test_compiled_closure_has_location_map() {
     let mut symbols = SymbolTable::new();
     let source = "(fn (x) (+ x 1))";
 
-    let result = compile(source, &mut symbols);
+    let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
 
     let compiled = result.unwrap();
@@ -292,7 +292,7 @@ fn test_location_map_has_valid_line_numbers() {
     // Multi-line source to verify line tracking
     let source = "(fn (x)\n  (+ x\n     1))";
 
-    let result = compile(source, &mut symbols);
+    let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
 
     let compiled = result.unwrap();
@@ -341,7 +341,7 @@ proptest! {
         let source = format!("(fn (x) (+ x {}))", a);
         let mut symbols = SymbolTable::new();
 
-        let result = compile(&source, &mut symbols);
+        let result = compile(&source, &mut symbols, "<test>");
         prop_assert!(result.is_ok(), "Compilation should succeed for: {}", source);
 
         let compiled = result.unwrap();

@@ -1,6 +1,7 @@
 pub mod arithmetic;
 pub mod call;
 pub mod cell;
+// Note: jit_entry is not pub — it only adds impl VM methods
 pub mod closure;
 pub mod comparison;
 pub mod control;
@@ -10,6 +11,7 @@ pub mod dispatch;
 pub mod eval;
 pub mod execute;
 pub mod fiber;
+mod jit_entry;
 pub mod literals;
 pub mod parameters;
 pub mod signal;

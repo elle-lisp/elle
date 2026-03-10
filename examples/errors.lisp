@@ -19,7 +19,7 @@
 # 1. Raising and catching errors
 # ========================================
 
-# Errors in Elle are values signaled via fibers. By convention, a tuple
+# Errors in Elle are values signaled via fibers. By convention, an array
 # [:keyword "message"] is used, but any value works. (error val) is a
 # prelude macro that expands to (fiber/signal 1 val).
 
@@ -225,7 +225,7 @@
 
 # A fiber's mask determines whether errors are terminal or resumable.
 # mask=0: errors propagate to parent, fiber enters :error (terminal)
-# mask=1: parent catches errors, fiber stays :suspended (resumable)
+# mask=1: parent catches errors, fiber stays :paused (resumable)
 
 # Fiber with mask=0: error propagates to parent
 (def f0 (fiber/new (fn [] (error {:error :boom :message "kaboom"})) 0))
@@ -250,7 +250,7 @@
 (assert-eq (fiber/status f0) :error "fiber still :error after failed resume")
 
 
-# Fiber with mask=1: errors are caught, fiber stays :suspended
+# Fiber with mask=1: errors are caught, fiber stays :paused
 (def f1 (fiber/new (fn [] (error {:error :caught-boom :message "handled"})) 1))
 (fiber/resume f1 nil)
 
@@ -258,7 +258,7 @@
 (def value1 (fiber/value f1))
 (display "  mask=1 fiber status: ") (print status1)
 (display "  mask=1 fiber value: ") (print value1)
-(assert-eq status1 :suspended "mask=1: fiber is :suspended, not :error")
+(assert-eq status1 :paused "mask=1: fiber is :paused, not :error")
 (assert-eq (get value1 :error) :caught-boom "mask=1: error value accessible")
 
 # A suspended fiber can be resumed (though it has nothing left to do).
@@ -277,7 +277,7 @@
 
 (def f2 (fiber/new (fn [] (yield :waiting) :done) 3))
 (fiber/resume f2 nil)
-(assert-eq (fiber/status f2) :suspended "cancel target: starts suspended")
+(assert-eq (fiber/status f2) :paused "cancel target: starts paused")
 (assert-eq (fiber/value f2) :waiting "cancel target: yielded value")
 
 (fiber/cancel f2 {:error :cancelled :message "externally cancelled"})

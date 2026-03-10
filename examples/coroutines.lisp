@@ -25,16 +25,16 @@
 # coro/resume steps it forward; yield suspends and returns a value.
 (def co (coro/new (fn [] (yield 42))))
 (assert-true (coro? co) "coro/new returns a coroutine")
-(assert-eq (coro/status co) :created "initial status is :created")
+(assert-eq (coro/status co) :new "initial status is :new")
 
 (def v (coro/resume co))
 (display "  first resume: ") (print v)
 (assert-eq v 42 "first resume returns yielded value")
-(assert-eq (coro/status co) :suspended "status after yield is :suspended")
+(assert-eq (coro/status co) :paused "status after yield is :paused")
 (assert-false (coro/done? co) "not done while suspended")
 
 (coro/resume co)
-(assert-eq (coro/status co) :done "status after body completes is :done")
+(assert-eq (coro/status co) :dead "status after body completes is :dead")
 (assert-true (coro/done? co) "done after completion")
 
 
@@ -54,7 +54,7 @@
 
 (coro/resume co2)
 (assert-eq (coro/value co2) 30 "value after third yield")
-(assert-eq (coro/status co2) :suspended "still suspended after final yield")
+(assert-eq (coro/status co2) :paused "still paused after final yield")
 
 
 # ========================================
@@ -161,8 +161,8 @@
 (print (coro/resume evens))
 # 1 2 3 4 5 6
 
-(assert-eq (coro/status odds) :suspended "odds still suspended")
-(assert-eq (coro/status evens) :suspended "evens still suspended")
+(assert-eq (coro/status odds) :paused "odds still paused")
+(assert-eq (coro/status evens) :paused "evens still paused")
 
 
 # ========================================
@@ -208,7 +208,7 @@
 (print (coro/resume main))
 # 10 20 30
 
-(assert-eq (coro/status main) :suspended "main suspended after final yield")
+(assert-eq (coro/status main) :paused "main paused after final yield")
 
 # Verify values came through correctly
 (def sub2 (coro/new (fn [] (yield :a) (yield :b))))

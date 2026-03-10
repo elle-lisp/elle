@@ -25,7 +25,7 @@ fn test_print_hir_failing_case() {
         (my-fold process 0 (list 1 2)))"#;
 
     // Parse
-    let syntax = read_syntax(code).expect("parse failed");
+    let syntax = read_syntax(code, "<test>").expect("parse failed");
 
     // Expand
     let mut expander = Expander::new();

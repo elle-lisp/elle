@@ -14,17 +14,17 @@
 # ============================================================================
 
 # slice_full_range_is_identity: slicing the full range returns the original
-(assert-string-eq (string/slice "hello" 0 5) "hello"
+(assert-string-eq (slice "hello" 0 5) "hello"
   "slice full range (hello)")
-(assert-string-eq (string/slice "abc" 0 3) "abc"
+(assert-string-eq (slice "abc" 0 3) "abc"
   "slice full range (abc)")
-(assert-string-eq (string/slice "" 0 0) ""
+(assert-string-eq (slice "" 0 0) ""
   "slice full range (empty)")
 
 # slice_at_zero_to_zero: slicing from 0 to 0 returns empty string
-(assert-string-eq (string/slice "hello" 0 0) ""
+(assert-string-eq (slice "hello" 0 0) ""
   "slice 0 to 0 (hello)")
-(assert-string-eq (string/slice "abc" 0 0) ""
+(assert-string-eq (slice "abc" 0 0) ""
   "slice 0 to 0 (abc)")
 
 # ============================================================================
@@ -146,7 +146,7 @@
   "downcase empty")
 (assert-string-eq (string/trim "") ""
   "trim empty")
-(assert-string-eq (string/slice "" 0 0) ""
+(assert-string-eq (slice "" 0 0) ""
   "slice empty")
 
 # whitespace_only_trim: trimming whitespace-only string returns empty
@@ -164,32 +164,32 @@
 # ============================================================================
 
 # slice_start_end_order: valid range succeeds
-(assert-string-eq (string/slice "hello" 0 2) "he"
+(assert-string-eq (slice "hello" 0 2) "he"
   "slice valid range: he")
-(assert-string-eq (string/slice "abcdef" 1 4) "bcd"
+(assert-string-eq (slice "abcdef" 1 4) "bcd"
   "slice valid range: bcd")
-(assert-string-eq (string/slice "test" 0 4) "test"
+(assert-string-eq (slice "test" 0 4) "test"
   "slice valid range: full string")
 
-# slice_oob_end_returns_nil: OOB end index returns nil
-(assert-eq (string/slice "hello" 0 100) nil
-  "slice OOB end returns nil (hello)")
-(assert-eq (string/slice "abc" 0 50) nil
-  "slice OOB end returns nil (abc)")
-(assert-eq (string/slice "" 0 1) nil
-  "slice OOB end returns nil (empty)")
+# slice_oob_end_clamps: OOB end index clamps to length
+(assert-string-eq (slice "hello" 0 100) "hello"
+  "slice OOB end clamps (hello)")
+(assert-string-eq (slice "abc" 0 50) "abc"
+  "slice OOB end clamps (abc)")
+(assert-string-eq (slice "" 0 1) ""
+  "slice OOB end clamps (empty)")
 
-# slice_oob_start_returns_nil: OOB start index returns nil
-(assert-eq (string/slice "hello" 100 101) nil
-  "slice OOB start returns nil (hello)")
-(assert-eq (string/slice "abc" 50 51) nil
-  "slice OOB start returns nil (abc)")
+# slice_oob_start_clamps: OOB start index clamps to length
+(assert-string-eq (slice "hello" 100 101) ""
+  "slice OOB start clamps (hello)")
+(assert-string-eq (slice "abc" 50 51) ""
+  "slice OOB start clamps (abc)")
 
-# slice_reversed_range_returns_nil: reversed range returns nil
-(assert-eq (string/slice "hello" 3 1) nil
-  "slice reversed range returns nil (hello)")
-(assert-eq (string/slice "abcdef" 5 2) nil
-  "slice reversed range returns nil (abcdef)")
+# slice_reversed_range_returns_empty: reversed range returns empty
+(assert-string-eq (slice "hello" 3 1) ""
+  "slice reversed range returns empty (hello)")
+(assert-string-eq (slice "abcdef" 5 2) ""
+  "slice reversed range returns empty (abcdef)")
 
 # ============================================================================
 # Split / Join roundtrip (migrated from property tests)
@@ -204,9 +204,9 @@
   "split/join roundtrip: pipe")
 
 # split_produces_tuple: split produces a tuple
-(assert-true (tuple? (string/split "a,b" ","))
+(assert-true (array? (string/split "a,b" ","))
   "split produces a tuple")
-(assert-true (tuple? (string/split "hello" "l"))
+(assert-true (array? (string/split "hello" "l"))
   "split produces a tuple (hello)")
 
 # ============================================================================

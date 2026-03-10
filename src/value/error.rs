@@ -42,7 +42,7 @@ pub fn format_error(value: Value) -> String {
     }
 
     // Legacy tuple error: [:error "msg"] (backward compat for user-constructed errors)
-    if let Some(elems) = value.as_tuple() {
+    if let Some(elems) = value.as_array() {
         if elems.len() == 2 {
             if let Some(msg) = elems[1].with_string(|s| s.to_string()) {
                 if let Some(name) = elems[0].as_keyword_name() {
@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn test_format_error_legacy_tuple() {
         // Legacy tuple error for backward compatibility
-        let err = Value::tuple(vec![
+        let err = Value::array(vec![
             Value::keyword("type-error"),
             Value::string("expected integer"),
         ]);

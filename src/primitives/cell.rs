@@ -10,7 +10,7 @@ use crate::value::{error_val, Value};
 /// (box value) -> cell
 ///
 /// Creates a mutable cell that can be modified with rebox
-pub fn prim_box(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_box(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -29,7 +29,7 @@ pub fn prim_box(args: &[Value]) -> (SignalBits, Value) {
 /// (unbox cell) -> value
 ///
 /// Returns the current value stored in the cell
-pub fn prim_unbox(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_unbox(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -59,7 +59,7 @@ pub fn prim_unbox(args: &[Value]) -> (SignalBits, Value) {
 /// (rebox cell value) -> value
 ///
 /// Sets the cell to contain the new value and returns the new value
-pub fn prim_rebox(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_rebox(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -90,7 +90,7 @@ pub fn prim_rebox(args: &[Value]) -> (SignalBits, Value) {
 /// (box? value) -> bool
 ///
 /// Returns true if the value is a box, false otherwise
-pub fn prim_box_p(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_box_p(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -104,7 +104,7 @@ pub fn prim_box_p(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].is_cell()))
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "box",
         func: prim_box,
@@ -145,7 +145,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if a value is a box.",
         params: &["value"],
-        category: "cell",
+        category: "predicate",
         example: "(box? (box 1)) #=> true\n(box? 42) #=> false",
         aliases: &[],
     },

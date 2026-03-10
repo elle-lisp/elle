@@ -10,7 +10,7 @@ The analysis phase transforms expanded `Syntax` trees into `HIR` by resolving al
 
 3. **Mutation Tracking**: Variables modified with `set` are marked as mutated. Combined with capture information, this determines which variables need cell boxing for correct semantics.
 
-4. **Effect Inference**: Each expression is tagged with its effect (`Pure`, `Yields`, or `Polymorphic`). Effects propagate upward through the tree.
+4. **Effect Inference**: Each expression is tagged with its effect (`Inert`, `Yields`, or `Polymorphic`). Effects propagate upward through the tree.
 
 ## Scope Rules
 

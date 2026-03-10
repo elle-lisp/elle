@@ -5,7 +5,7 @@ use crate::reader::{Token, TokenWithLoc};
 use std::collections::HashMap;
 
 /// A rewrite rule that examines a token and optionally produces an edit.
-pub trait RewriteRule {
+pub(crate) trait RewriteRule {
     /// Human-readable rule name.
     fn name(&self) -> &str;
 
@@ -14,12 +14,14 @@ pub trait RewriteRule {
 }
 
 /// Rename symbols by exact match. Data-driven from a HashMap.
-pub struct RenameSymbol {
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct RenameSymbol {
     rule_name: String,
     renames: HashMap<String, String>,
 }
 
 impl RenameSymbol {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(name: impl Into<String>, renames: HashMap<String, String>) -> Self {
         RenameSymbol {
             rule_name: name.into(),

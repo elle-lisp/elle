@@ -22,7 +22,7 @@ use std::collections::HashSet;
 /// `Root` is the scrutinee itself. Each variant descends one level
 /// into a compound value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum AccessPath {
+pub(crate) enum AccessPath {
     /// The scrutinee itself.
     Root,
     /// Car (head) of a cons cell at the given path.
@@ -34,13 +34,13 @@ pub enum AccessPath {
     /// Slice from index `i` to end of a tuple/array at the given path.
     /// Used for `& rest` patterns in tuple/array destructuring.
     Slice(Box<AccessPath>, usize),
-    /// Value at keyword key in a struct/table at the given path.
+    /// Value at keyword key in a struct at the given path.
     Key(Box<AccessPath>, PatternKey),
 }
 
 /// A constructor represents the "shape" that a pattern tests for.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Constructor {
+pub(crate) enum Constructor {
     /// Literal value (int, float, string, keyword, bool).
     Literal(PatternLiteral),
     /// Cons cell (pair).
@@ -49,17 +49,17 @@ pub enum Constructor {
     Nil,
     /// Empty list `()`.
     EmptyList,
-    /// Tuple of exactly `n` elements.
-    Tuple(usize),
-    /// Tuple of at least `n` fixed elements (has `& rest`).
-    TupleRest(usize),
-    /// Array of exactly `n` elements.
+    /// Immutable array of exactly `n` elements.
     Array(usize),
-    /// Array of at least `n` fixed elements (has `& rest`).
+    /// Immutable array of at least `n` fixed elements (has `& rest`).
     ArrayRest(usize),
+    /// Mutable array of exactly `n` elements.
+    ArrayMut(usize),
+    /// Mutable array of at least `n` fixed elements (has `& rest`).
+    ArrayMutRest(usize),
     /// Struct with these keys (open match — presence, not exclusivity).
     Struct(Vec<PatternKey>),
-    /// Table with these keys (open match).
+    /// @Struct with these keys (open match).
     Table(Vec<PatternKey>),
     /// Immutable set (type guard only, arity 1 — the binding gets the whole value).
     Set,
@@ -73,9 +73,9 @@ impl Constructor {
         match self {
             Constructor::Literal(_) | Constructor::Nil | Constructor::EmptyList => 0,
             Constructor::Cons => 2,
-            Constructor::Tuple(n) | Constructor::Array(n) => *n,
+            Constructor::Array(n) | Constructor::ArrayMut(n) => *n,
             // Rest variants include the rest element as an extra sub-pattern.
-            Constructor::TupleRest(n) | Constructor::ArrayRest(n) => *n + 1,
+            Constructor::ArrayRest(n) | Constructor::ArrayMutRest(n) => *n + 1,
             Constructor::Struct(keys) | Constructor::Table(keys) => keys.len(),
             Constructor::Set | Constructor::SetMut => 1,
         }
@@ -203,16 +203,16 @@ fn pattern_constructor(pat: &HirPattern) -> Option<Constructor> {
         }
         HirPattern::Tuple { elements, rest } => {
             if rest.is_some() {
-                Some(Constructor::TupleRest(elements.len()))
+                Some(Constructor::ArrayRest(elements.len()))
             } else {
-                Some(Constructor::Tuple(elements.len()))
+                Some(Constructor::Array(elements.len()))
             }
         }
         HirPattern::Array { elements, rest } => {
             if rest.is_some() {
-                Some(Constructor::ArrayRest(elements.len()))
+                Some(Constructor::ArrayMutRest(elements.len()))
             } else {
-                Some(Constructor::Array(elements.len()))
+                Some(Constructor::ArrayMut(elements.len()))
             }
         }
         HirPattern::Struct { entries } => Some(Constructor::Struct(
@@ -341,9 +341,9 @@ fn collect_constructor_strings(pat: &HirPattern, out: &mut HashSet<String>) {
 /// Collect distinct constructors in a column.
 ///
 /// Looks inside or-patterns to find their constituent constructors.
-/// Struct and Table constructors with different key sets are merged
+/// Struct and @Struct constructors with different key sets are merged
 /// into a single constructor with the union of all keys, because
-/// struct/table patterns are "open" (a value can match multiple
+/// struct patterns are "open" (a value can match multiple
 /// patterns with different key sets).
 fn collect_constructors(matrix: &PatternMatrix, col: usize) -> Vec<Constructor> {
     let mut seen = Vec::new();
@@ -367,9 +367,9 @@ fn collect_constructors_from_pattern(pat: &HirPattern, seen: &mut Vec<Constructo
 }
 
 /// Merge all Struct constructors into one with the union of keys,
-/// and all Table constructors into one with the union of keys.
+/// and all @Struct constructors into one with the union of keys.
 ///
-/// Struct/table patterns are "open" — they check for key presence,
+/// Struct/@struct patterns are "open" — they check for key presence,
 /// not exclusivity. Two struct patterns with different key sets can
 /// both match the same value, so they must be treated as the same
 /// constructor to avoid the decision tree committing to one branch
@@ -393,7 +393,7 @@ fn merge_struct_table_constructors(ctors: &mut Vec<Constructor>) {
         ctors.push(Constructor::Struct(struct_keys));
     }
 
-    // Merge Table keys
+    // Merge @Struct keys
     let mut table_keys: Vec<PatternKey> = Vec::new();
     let mut has_table = false;
     for ctor in ctors.iter() {
@@ -455,14 +455,17 @@ fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<HirPattern>
         HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => {
             let mut sub = elements.clone();
             // For rest constructors, include the rest pattern as an extra sub-pattern.
-            if matches!(ctor, Constructor::TupleRest(_) | Constructor::ArrayRest(_)) {
+            if matches!(
+                ctor,
+                Constructor::ArrayRest(_) | Constructor::ArrayMutRest(_)
+            ) {
                 sub.push(rest.as_deref().cloned().unwrap_or(HirPattern::Wildcard));
             }
             sub
         }
         HirPattern::Struct { entries } | HirPattern::Table { entries } => {
             // The constructor carries the merged key set (union of all
-            // struct/table patterns in the column). Produce a sub-pattern
+            // struct patterns in the column). Produce a sub-pattern
             // for each key in the merged set: the pattern's sub-pattern
             // for keys it mentions, Wildcard for keys it doesn't.
             let merged_keys = match ctor {
@@ -491,9 +494,9 @@ fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<HirPattern>
 
 /// Check if a pattern's constructor is compatible with a given constructor.
 ///
-/// For most constructors, this is exact equality. For Struct and Table,
+/// For most constructors, this is exact equality. For Struct and @Struct,
 /// any struct pattern is compatible with any Struct constructor (and
-/// similarly for Table), because struct/table patterns are "open" —
+/// similarly for @Struct), because struct patterns are "open" —
 /// they check key presence, not exclusivity. The merged constructor
 /// carries the union of all keys.
 fn constructor_compatible(pat_ctor: &Constructor, target: &Constructor) -> bool {
@@ -625,12 +628,12 @@ fn expand_access(col_access: &[AccessPath], col: usize, ctor: &Constructor) -> V
             new_access.push(AccessPath::Car(Box::new(base.clone())));
             new_access.push(AccessPath::Cdr(Box::new(base.clone())));
         }
-        Constructor::Tuple(n) | Constructor::Array(n) => {
+        Constructor::Array(n) | Constructor::ArrayMut(n) => {
             for i in 0..*n {
                 new_access.push(AccessPath::Index(Box::new(base.clone()), i));
             }
         }
-        Constructor::TupleRest(n) | Constructor::ArrayRest(n) => {
+        Constructor::ArrayRest(n) | Constructor::ArrayMutRest(n) => {
             for i in 0..*n {
                 new_access.push(AccessPath::Index(Box::new(base.clone()), i));
             }
@@ -756,488 +759,5 @@ fn collect_reachable(tree: &DecisionTree, out: &mut HashSet<usize>) {
     }
 }
 
-// ── Tests ──────────────────────────────────────────────────────────
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::hir::{HirPattern, PatternLiteral};
-
-    // Helper: create a literal int pattern.
-    fn lit_int(n: i64) -> HirPattern {
-        HirPattern::Literal(PatternLiteral::Int(n))
-    }
-
-    // Helper: create a keyword pattern.
-    fn lit_kw(s: &str) -> HirPattern {
-        HirPattern::Literal(PatternLiteral::Keyword(s.to_string()))
-    }
-
-    #[test]
-    fn test_single_wildcard() {
-        // Single arm: (_ body) → Leaf { arm_index: 0 }
-        let matrix = PatternMatrix {
-            rows: vec![PatternRow::new(vec![HirPattern::Wildcard], None, 0)],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match tree {
-            DecisionTree::Leaf {
-                arm_index,
-                bindings,
-            } => {
-                assert_eq!(arm_index, 0);
-                assert!(bindings.is_empty());
-            }
-            _ => panic!("expected Leaf, got {:?}", tree),
-        }
-    }
-
-    #[test]
-    fn test_two_literals() {
-        // (match x (1 ...) (2 ...) (_ ...))
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(vec![lit_int(1)], None, 0),
-                PatternRow::new(vec![lit_int(2)], None, 1),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 2),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match &tree {
-            DecisionTree::Switch { cases, default, .. } => {
-                assert_eq!(cases.len(), 2);
-                assert_eq!(cases[0].0, Constructor::Literal(PatternLiteral::Int(1)));
-                assert_eq!(cases[1].0, Constructor::Literal(PatternLiteral::Int(2)));
-                assert!(default.is_some());
-                // Default should be a Leaf for arm 2
-                match default.as_deref().unwrap() {
-                    DecisionTree::Leaf { arm_index, .. } => assert_eq!(*arm_index, 2),
-                    _ => panic!("expected Leaf default"),
-                }
-            }
-            _ => panic!("expected Switch, got {:?}", tree),
-        }
-    }
-
-    #[test]
-    fn test_cons_pattern() {
-        // (match x ((h . t) ...) (_ ...))
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(
-                    vec![HirPattern::Cons {
-                        head: Box::new(HirPattern::Wildcard),
-                        tail: Box::new(HirPattern::Wildcard),
-                    }],
-                    None,
-                    0,
-                ),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match &tree {
-            DecisionTree::Switch { cases, default, .. } => {
-                assert_eq!(cases.len(), 1);
-                assert_eq!(cases[0].0, Constructor::Cons);
-                assert!(default.is_some());
-            }
-            _ => panic!("expected Switch, got {:?}", tree),
-        }
-    }
-
-    #[test]
-    fn test_or_pattern_expansion() {
-        // Or(1, 2, 3) should expand to 3 patterns
-        let or_pat = HirPattern::Or(vec![lit_int(1), lit_int(2), lit_int(3)]);
-        let expanded = expand_or_pattern(&or_pat);
-        assert_eq!(expanded.len(), 3);
-    }
-
-    #[test]
-    fn test_guard_node() {
-        // A row with guard and all-wildcard patterns produces a Guard node.
-        // We use a dummy Hir for the guard.
-        use crate::syntax::Span;
-        let dummy_guard = Hir::inert(crate::hir::HirKind::Bool(true), Span::synthetic());
-
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(vec![HirPattern::Wildcard], Some(dummy_guard), 0),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match &tree {
-            DecisionTree::Guard {
-                arm_index,
-                otherwise,
-                ..
-            } => {
-                assert_eq!(*arm_index, 0);
-                match otherwise.as_ref() {
-                    DecisionTree::Leaf { arm_index, .. } => assert_eq!(*arm_index, 1),
-                    _ => panic!("expected Leaf otherwise"),
-                }
-            }
-            _ => panic!("expected Guard, got {:?}", tree),
-        }
-    }
-
-    #[test]
-    fn test_reachable_arms() {
-        // Two distinct literals + wildcard → all 3 arms reachable
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(vec![lit_int(1)], None, 0),
-                PatternRow::new(vec![lit_int(2)], None, 1),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 2),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        let reachable = find_reachable_arms(&tree);
-        assert_eq!(reachable.len(), 3);
-        assert!(reachable.contains(&0));
-        assert!(reachable.contains(&1));
-        assert!(reachable.contains(&2));
-    }
-
-    #[test]
-    fn test_unreachable_arm_detected() {
-        // Wildcard before literal → literal is unreachable
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(vec![HirPattern::Wildcard], None, 0),
-                PatternRow::new(vec![lit_int(1)], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        let reachable = find_reachable_arms(&tree);
-        assert!(reachable.contains(&0));
-        assert!(!reachable.contains(&1));
-    }
-
-    #[test]
-    fn test_nested_patterns() {
-        // (match x ((1 . _) ...) ((2 . _) ...) (_ ...))
-        // Should produce a Switch on Root (IsPair), then inside the Cons
-        // case, a Switch on Car(Root) for the literal values.
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(
-                    vec![HirPattern::Cons {
-                        head: Box::new(lit_int(1)),
-                        tail: Box::new(HirPattern::Wildcard),
-                    }],
-                    None,
-                    0,
-                ),
-                PatternRow::new(
-                    vec![HirPattern::Cons {
-                        head: Box::new(lit_int(2)),
-                        tail: Box::new(HirPattern::Wildcard),
-                    }],
-                    None,
-                    1,
-                ),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 2),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-
-        // Top level: Switch on Root for Cons
-        match &tree {
-            DecisionTree::Switch {
-                access,
-                cases,
-                default,
-            } => {
-                assert_eq!(*access, AccessPath::Root);
-                assert_eq!(cases.len(), 1); // One constructor: Cons
-                assert_eq!(cases[0].0, Constructor::Cons);
-                assert!(default.is_some());
-
-                // Inside the Cons case: Switch on Car(Root) for literals
-                match &cases[0].1 {
-                    DecisionTree::Switch {
-                        access,
-                        cases: inner_cases,
-                        ..
-                    } => {
-                        assert_eq!(*access, AccessPath::Car(Box::new(AccessPath::Root)));
-                        assert_eq!(inner_cases.len(), 2);
-                        assert_eq!(
-                            inner_cases[0].0,
-                            Constructor::Literal(PatternLiteral::Int(1))
-                        );
-                        assert_eq!(
-                            inner_cases[1].0,
-                            Constructor::Literal(PatternLiteral::Int(2))
-                        );
-                    }
-                    _ => panic!("expected nested Switch"),
-                }
-            }
-            _ => panic!("expected Switch, got {:?}", tree),
-        }
-    }
-
-    #[test]
-    fn test_nil_pattern() {
-        // (match x (nil ...) (_ ...))
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(vec![HirPattern::Nil], None, 0),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match &tree {
-            DecisionTree::Switch { cases, .. } => {
-                assert_eq!(cases.len(), 1);
-                assert_eq!(cases[0].0, Constructor::Nil);
-            }
-            _ => panic!("expected Switch"),
-        }
-    }
-
-    #[test]
-    fn test_empty_list_pattern() {
-        // (match x (() ...) (_ ...))
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(
-                    vec![HirPattern::List {
-                        elements: vec![],
-                        rest: None,
-                    }],
-                    None,
-                    0,
-                ),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match &tree {
-            DecisionTree::Switch { cases, .. } => {
-                assert_eq!(cases.len(), 1);
-                assert_eq!(cases[0].0, Constructor::EmptyList);
-            }
-            _ => panic!("expected Switch"),
-        }
-    }
-
-    #[test]
-    fn test_list_pattern_as_cons_chain() {
-        // (match x ((a b) ...) (_ ...))
-        // A 2-element list pattern should decompose as Cons at the top level.
-        use crate::hir::Binding;
-        use crate::value::heap::BindingScope;
-        use crate::value::SymbolId;
-
-        let binding_a = Binding::new(SymbolId(0), BindingScope::Local);
-        let binding_b = Binding::new(SymbolId(1), BindingScope::Local);
-
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(
-                    vec![HirPattern::List {
-                        elements: vec![HirPattern::Var(binding_a), HirPattern::Var(binding_b)],
-                        rest: None,
-                    }],
-                    None,
-                    0,
-                ),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-
-        // Top level should be Switch with Cons constructor
-        match &tree {
-            DecisionTree::Switch { cases, .. } => {
-                assert_eq!(cases[0].0, Constructor::Cons);
-            }
-            _ => panic!("expected Switch"),
-        }
-    }
-
-    #[test]
-    fn test_tuple_pattern() {
-        // (match x ([1 2] ...) (_ ...))
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(
-                    vec![HirPattern::Tuple {
-                        elements: vec![lit_int(1), lit_int(2)],
-                        rest: None,
-                    }],
-                    None,
-                    0,
-                ),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match &tree {
-            DecisionTree::Switch { cases, .. } => {
-                assert_eq!(cases.len(), 1);
-                assert_eq!(cases[0].0, Constructor::Tuple(2));
-            }
-            _ => panic!("expected Switch"),
-        }
-    }
-
-    #[test]
-    fn test_struct_pattern() {
-        // (match x ({:x _ :y _} ...) (_ ...))
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(
-                    vec![HirPattern::Struct {
-                        entries: vec![
-                            (PatternKey::Keyword("x".to_string()), HirPattern::Wildcard),
-                            (PatternKey::Keyword("y".to_string()), HirPattern::Wildcard),
-                        ],
-                    }],
-                    None,
-                    0,
-                ),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match &tree {
-            DecisionTree::Switch { cases, .. } => {
-                assert_eq!(
-                    cases[0].0,
-                    Constructor::Struct(vec![
-                        PatternKey::Keyword("x".to_string()),
-                        PatternKey::Keyword("y".to_string()),
-                    ])
-                );
-            }
-            _ => panic!("expected Switch"),
-        }
-    }
-
-    #[test]
-    fn test_guard_arm_not_unreachable() {
-        // Guard arm before same pattern without guard → both reachable
-        // (guard may fail, so the second arm is reachable)
-        use crate::syntax::Span;
-        let dummy_guard = Hir::inert(crate::hir::HirKind::Bool(true), Span::synthetic());
-
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(vec![HirPattern::Wildcard], Some(dummy_guard), 0),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        let reachable = find_reachable_arms(&tree);
-        assert!(reachable.contains(&0));
-        assert!(reachable.contains(&1));
-    }
-
-    #[test]
-    fn test_empty_matrix_produces_fail() {
-        let matrix = PatternMatrix { rows: vec![] };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        assert!(matches!(tree, DecisionTree::Fail));
-    }
-
-    #[test]
-    fn test_constructor_arity() {
-        assert_eq!(Constructor::Literal(PatternLiteral::Int(1)).arity(), 0);
-        assert_eq!(Constructor::Nil.arity(), 0);
-        assert_eq!(Constructor::EmptyList.arity(), 0);
-        assert_eq!(Constructor::Cons.arity(), 2);
-        assert_eq!(Constructor::Tuple(3).arity(), 3);
-        assert_eq!(Constructor::Array(2).arity(), 2);
-        assert_eq!(
-            Constructor::Struct(vec![
-                PatternKey::Keyword("a".into()),
-                PatternKey::Keyword("b".into())
-            ])
-            .arity(),
-            2
-        );
-        assert_eq!(
-            Constructor::Table(vec![PatternKey::Keyword("x".into())]).arity(),
-            1
-        );
-    }
-
-    #[test]
-    fn test_keyword_literals_distinct() {
-        // (match x (:a ...) (:b ...) (_ ...))
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(vec![lit_kw("a")], None, 0),
-                PatternRow::new(vec![lit_kw("b")], None, 1),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 2),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match &tree {
-            DecisionTree::Switch { cases, .. } => {
-                assert_eq!(cases.len(), 2);
-                assert_eq!(
-                    cases[0].0,
-                    Constructor::Literal(PatternLiteral::Keyword("a".to_string()))
-                );
-                assert_eq!(
-                    cases[1].0,
-                    Constructor::Literal(PatternLiteral::Keyword("b".to_string()))
-                );
-            }
-            _ => panic!("expected Switch"),
-        }
-    }
-
-    #[test]
-    fn test_or_pattern_in_matrix() {
-        // Or-pattern should be expanded into multiple rows in from_arms.
-        // We simulate this by constructing the matrix directly with
-        // an or-pattern that was NOT expanded (to test specialize).
-        let matrix = PatternMatrix {
-            rows: vec![
-                PatternRow::new(vec![HirPattern::Or(vec![lit_int(1), lit_int(2)])], None, 0),
-                PatternRow::new(vec![HirPattern::Wildcard], None, 1),
-            ],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        // The or-pattern is not a wildcard, so it should trigger
-        // specialization. The constructors should be Int(1) and Int(2).
-        let reachable = find_reachable_arms(&tree);
-        assert!(reachable.contains(&0));
-        assert!(reachable.contains(&1));
-    }
-
-    #[test]
-    fn test_var_binding_collected() {
-        // A variable pattern should produce a binding in the Leaf.
-        use crate::hir::Binding;
-        use crate::value::heap::BindingScope;
-        use crate::value::SymbolId;
-
-        let binding = Binding::new(SymbolId(42), BindingScope::Local);
-        let matrix = PatternMatrix {
-            rows: vec![PatternRow::new(vec![HirPattern::Var(binding)], None, 0)],
-        };
-        let tree = matrix.compile(vec![AccessPath::Root]);
-        match &tree {
-            DecisionTree::Leaf {
-                arm_index,
-                bindings,
-            } => {
-                assert_eq!(*arm_index, 0);
-                assert_eq!(bindings.len(), 1);
-                assert_eq!(bindings[0].0, binding);
-                assert_eq!(bindings[0].1, AccessPath::Root);
-            }
-            _ => panic!("expected Leaf with binding"),
-        }
-    }
-}
+mod tests;

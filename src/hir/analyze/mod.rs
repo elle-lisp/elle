@@ -17,6 +17,7 @@
 mod binding;
 mod call;
 mod destructure;
+mod fileletrec;
 mod forms;
 mod lambda;
 mod special;

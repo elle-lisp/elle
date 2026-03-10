@@ -99,11 +99,11 @@ fn extract_params(
     }
     let pval = args[2];
     // Try tuple first (slice access)
-    if let Some(elems) = pval.as_tuple() {
+    if let Some(elems) = pval.as_array() {
         return elems.iter().map(|v| value_to_sql(*v, name)).collect();
     }
     // Try array
-    if let Some(arr) = pval.as_array() {
+    if let Some(arr) = pval.as_array_mut() {
         let arr = arr.borrow();
         return arr.iter().map(|v| value_to_sql(*v, name)).collect();
     }

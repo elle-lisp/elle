@@ -67,7 +67,7 @@
 
 (defn vec-add [a b]
   "Element-wise autograd addition of two vectors."
-  (array-map2 v+ a b))
+  (@array-map2 v+ a b))
 
 (defn rms-norm [vec-in]
   "RMS normalization: x / sqrt(mean(x^2) + eps)."
@@ -149,7 +149,7 @@
           (let* ([layer-keys (get kv-keys li)]
                  [layer-vals (get kv-values li)]
                  [n-t (length layer-keys)]
-                 [x-attn (array/new *n-embd* (make-value 0.0))])
+                 [x-attn (@array/new *n-embd* (make-value 0.0))])
             # Multi-head attention
             (var h 0)
             (while (< h *n-head*)
@@ -191,7 +191,7 @@
         (let* ([x-residual2 x])
            (assign x (rms-norm x))
            (assign x (mat-vec-mul fc1 x))
-           (assign x (array-map vrelu x))
+           (assign x (@array-map vrelu x))
            (assign x (mat-vec-mul fc2 x))
            (assign x (vec-add x x-residual2))))
        (assign li (+ li 1)))

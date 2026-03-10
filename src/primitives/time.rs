@@ -14,7 +14,7 @@ fn process_epoch() -> &'static Instant {
 
 /// Returns seconds elapsed since process start (monotonic clock)
 /// (clock/monotonic)
-pub fn prim_clock_monotonic(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_clock_monotonic(args: &[Value]) -> (SignalBits, Value) {
     if !args.is_empty() {
         return (
             SIG_ERROR,
@@ -33,7 +33,7 @@ pub fn prim_clock_monotonic(args: &[Value]) -> (SignalBits, Value) {
 
 /// Returns thread CPU time in seconds
 /// (clock/cpu)
-pub fn prim_clock_cpu(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_clock_cpu(args: &[Value]) -> (SignalBits, Value) {
     if !args.is_empty() {
         return (
             SIG_ERROR,
@@ -63,7 +63,7 @@ pub fn prim_clock_cpu(args: &[Value]) -> (SignalBits, Value) {
 
 /// Returns seconds since Unix epoch (wall clock)
 /// (clock/realtime)
-pub fn prim_clock_realtime(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_clock_realtime(args: &[Value]) -> (SignalBits, Value) {
     if !args.is_empty() {
         return (
             SIG_ERROR,
@@ -88,7 +88,7 @@ pub fn prim_clock_realtime(args: &[Value]) -> (SignalBits, Value) {
 
 /// Sleeps for the specified number of seconds
 /// (time/sleep seconds)
-pub fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -135,7 +135,7 @@ pub fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for time operations
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/monotonic",
         func: prim_clock_monotonic,

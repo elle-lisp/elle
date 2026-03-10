@@ -16,8 +16,9 @@ pub fn analyze(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    source_name: &str,
 ) -> Result<AnalyzeResult, String> {
-    let syntax = read_syntax(source)?;
+    let syntax = read_syntax(source, source_name)?;
 
     let (mut expander, meta) = cache::get_cached_expander_and_meta();
 
@@ -37,10 +38,11 @@ pub fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    source_name: &str,
 ) -> Result<AnalyzeResult, String> {
     intern_primitive_names(symbols);
 
-    let syntaxes = read_syntax_all(source)?;
+    let syntaxes = read_syntax_all(source, source_name)?;
 
     let (mut expander, meta) = cache::get_cached_expander_and_meta();
 

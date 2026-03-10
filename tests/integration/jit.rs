@@ -1229,7 +1229,7 @@ fn test_jit_make_array() {
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(load_arg(Reg(2), 2));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::MakeArray {
+        LirInstr::MakeArrayMut {
             dst: Reg(3),
             elements: vec![Reg(0), Reg(1), Reg(2)],
         },
@@ -1248,8 +1248,8 @@ fn test_jit_make_array() {
         ],
     )
     .unwrap();
-    assert!(result.is_array());
-    let vec = result.as_array().unwrap();
+    assert!(result.is_array_mut());
+    let vec = result.as_array_mut().unwrap();
     let borrowed = vec.borrow();
     assert_eq!(borrowed.len(), 3);
     assert_eq!(borrowed[0].as_int(), Some(1));
@@ -1405,6 +1405,7 @@ fn test_jit_self_tail_call_loop() {
         (count-down 100000))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(result.is_ok(), "count-down failed: {:?}", result);
     assert_eq!(result.unwrap().as_int(), Some(0));
@@ -1428,6 +1429,7 @@ fn test_jit_self_tail_call_accumulator() {
         (sum-to 10000 0))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(result.is_ok(), "sum-to failed: {:?}", result);
     // sum 1..10000 = 50005000
@@ -1457,6 +1459,7 @@ fn test_jit_self_tail_call_with_swapped_args() {
         (swap-test 3 10))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(result.is_ok(), "swap-test failed: {:?}", result);
     assert_eq!(result.unwrap().as_int(), Some(7));
@@ -1481,6 +1484,7 @@ fn test_jit_self_tail_call_fibonacci_iterative() {
         (fib-iter 20 0 1))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(result.is_ok(), "fib-iter failed: {:?}", result);
     // fib(20) = 6765
@@ -1901,6 +1905,7 @@ fn test_jit_mutual_recursion_even_odd() {
         (list (is-even? 10) (is-odd? 10) (is-even? 11) (is-odd? 11)))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(result.is_ok(), "even-odd failed: {:?}", result);
     // (is-even? 10) = true, (is-odd? 10) = false, (is-even? 11) = false, (is-odd? 11) = true
@@ -1943,6 +1948,7 @@ fn test_jit_mutual_recursion_deep() {
         (list (ping 0) (pong 0) (ping 1) (pong 1) (ping 100) (pong 100)))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(result.is_ok(), "ping-pong failed: {:?}", result);
     let list = result.unwrap();
@@ -1973,42 +1979,43 @@ fn test_jit_mutual_recursion_nqueens_small() {
     let result = eval(
         r#"(letrec
          ((check-safe-helper
-           (fn (col remaining row-offset)
-             (if (empty? remaining)
-               true
-               (let ((placed-col (first remaining)))
-                 (if (or (= col placed-col)
-                         (= row-offset (abs (- col placed-col))))
-                   false
-                   (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
+            (fn (col remaining row-offset)
+              (if (empty? remaining)
+                true
+                (let ((placed-col (first remaining)))
+                  (if (or (= col placed-col)
+                          (= row-offset (abs (- col placed-col))))
+                    false
+                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
 
-         (safe?
-           (fn (col queens)
-             (check-safe-helper col queens 1)))
+          (safe?
+            (fn (col queens)
+              (check-safe-helper col queens 1)))
 
-        (try-cols-helper
-          (fn (n col queens row)
-            (if (= col n)
-              (list)
-              (if (safe? col queens)
-                (let ((new-queens (cons col queens)))
-                  (append (solve-helper n (+ row 1) new-queens)
-                          (try-cols-helper n (+ col 1) queens row)))
-                (try-cols-helper n (+ col 1) queens row)))))
+         (try-cols-helper
+           (fn (n col queens row)
+             (if (= col n)
+               (list)
+               (if (safe? col queens)
+                 (let ((new-queens (cons col queens)))
+                   (append (solve-helper n (+ row 1) new-queens)
+                           (try-cols-helper n (+ col 1) queens row)))
+                 (try-cols-helper n (+ col 1) queens row)))))
 
-        (solve-helper
-          (fn (n row queens)
-            (if (= row n)
-              (list (reverse queens))
-              (try-cols-helper n 0 queens row))))
+         (solve-helper
+           (fn (n row queens)
+             (if (= row n)
+               (list (reverse queens))
+               (try-cols-helper n 0 queens row))))
 
-        (solve-nqueens
-          (fn (n)
-            (solve-helper n 0 (list)))))
+         (solve-nqueens
+           (fn (n)
+             (solve-helper n 0 (list)))))
 
-        (length (solve-nqueens 8)))"#,
+         (length (solve-nqueens 8)))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(result.is_ok(), "nqueens failed: {:?}", result);
     // 8-queens has 92 solutions
@@ -2035,6 +2042,7 @@ fn test_jit_mutual_recursion_three_way() {
         (list (fa 0) (fa 1) (fa 2) (fa 3) (fa 6) (fa 9)))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(result.is_ok(), "three-way failed: {:?}", result);
     let list = result.unwrap();
@@ -2070,6 +2078,7 @@ fn test_jit_solo_fib_e2e() {
         (fib 20))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(result.is_ok(), "fib(20) failed: {:?}", result);
     assert_eq!(result.unwrap().as_int(), Some(6765));
@@ -2112,6 +2121,7 @@ fn test_jit_batch_global_mutation_known_limitation() {
         (helper 5))"#,
         &mut symbols,
         &mut vm,
+        "<test>",
     );
     assert!(
         result.is_ok(),

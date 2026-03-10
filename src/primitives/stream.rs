@@ -191,7 +191,7 @@ fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "stream/read-line",
         func: prim_stream_read_line,

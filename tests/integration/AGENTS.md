@@ -56,7 +56,7 @@ use crate::common::setup;
 fn test_with_vm_access() {
     let (mut symbols, mut vm) = setup();
     // Direct VM access for advanced testing
-    let result = eval_all("(+ 1 2)", &mut symbols, &mut vm).unwrap();
+    let result = eval_all("(+ 1 2)", &mut symbols, &mut vm, "<test>").unwrap();
     assert_eq!(result.last().unwrap(), &Value::int(3));
 }
 ```

@@ -8,13 +8,13 @@
 
 (def map (fn (f coll)
   (cond
-    ((or (array? coll) (tuple? coll) (bytes? coll) (blob? coll))
+    ((or (array? coll) (array? coll) (bytes? coll) (bytes? coll))
      (letrec ((loop (fn (i acc)
                       (if (>= i (length coll))
                         (reverse acc)
                         (loop (+ i 1) (cons (f (get coll i)) acc))))))
        (loop 0 ())))
-    ((or (string? coll) (buffer? coll))
+    ((or (string? coll) (string? coll))
      (letrec ((loop (fn (i acc)
                       (if (>= i (length coll))
                         (reverse acc)
@@ -89,7 +89,7 @@
        (if (pred (first coll))
          (all? pred (rest coll))
          false)))
-    ((or (array? coll) (tuple? coll))
+    ((or (array? coll) (array? coll))
      (letrec ((loop (fn (i)
                       (if (>= i (length coll))
                         true
@@ -107,7 +107,7 @@
        (if (pred (first coll))
          true
          (any? pred (rest coll)))))
-    ((or (array? coll) (tuple? coll))
+    ((or (array? coll) (array? coll))
      (letrec ((loop (fn (i)
                       (if (>= i (length coll))
                         false
@@ -125,7 +125,7 @@
        (if (pred (first coll))
          (first coll)
          (find pred (rest coll)))))
-    ((or (array? coll) (tuple? coll))
+    ((or (array? coll) (array? coll))
      (letrec ((loop (fn (i)
                       (if (>= i (length coll))
                         nil
@@ -145,7 +145,7 @@
                         i
                         (go (+ i 1) (rest l)))))))
        (go 0 coll)))
-    ((or (array? coll) (tuple? coll))
+    ((or (array? coll) (array? coll))
      (letrec ((loop (fn (i)
                       (if (>= i (length coll))
                         nil
@@ -159,7 +159,7 @@
   (cond
     ((or (pair? coll) (empty? coll))
      (fold (fn (n x) (if (pred x) (+ n 1) n)) 0 coll))
-    ((or (array? coll) (tuple? coll))
+    ((or (array? coll) (array? coll))
      (letrec ((loop (fn (i n)
                       (if (>= i (length coll))
                         n
@@ -177,7 +177,7 @@
     ((to-list (fn (c)
        (cond
          ((or (pair? c) (empty? c)) c)
-         ((or (array? c) (tuple? c))
+         ((or (array? c) (array? c))
           (letrec ((loop (fn (i acc)
                            (if (>= i (length c))
                              (reverse acc)
@@ -191,7 +191,7 @@
           (let ((arr @[]))
             (each x in lst (push arr x))
             arr))
-         ((tuple? orig) (apply tuple lst)))))
+         ((array? orig) (apply tuple lst)))))
      (zip-lists (fn (lists)
        (if (any? empty? lists)
          ()
@@ -218,7 +218,7 @@
            (cond
              ((pair? x)
               (append (flat x) (flat (rest lst))))
-             ((or (array? x) (tuple? x))
+             ((or (array? x) (array? x))
               (append (flat (to-list x)) (flat (rest lst))))
              (true
               (cons x (flat (rest lst))))))))))
@@ -228,7 +228,7 @@
        (let ((result @[]))
          (each x in (flat (to-list coll)) (push result x))
          result))
-      ((tuple? coll)
+      ((array? coll)
        (apply tuple (flat (to-list coll))))
       (true (error [:type-error "flatten: not a sequence"]))))))
 
@@ -252,7 +252,7 @@
                                 (loop (+ i 1))))))))
            (loop 0))
          result))
-      ((tuple? coll)
+      ((array? coll)
        (let ((lst (tw-list (letrec ((loop (fn (i acc)
                                             (if (>= i (length coll))
                                               (reverse acc)
@@ -286,7 +286,7 @@
                               (loop (+ i 1))))))
              (loop start))
            result)))
-      ((tuple? coll)
+      ((array? coll)
        (let ((lst (dw-list (letrec ((loop (fn (i acc)
                                             (if (>= i (length coll))
                                               (reverse acc)
@@ -301,7 +301,7 @@
       ((dist-list (fn (lst)
          (if (empty? lst)
            ()
-           (if (has-key? seen (first lst))
+           (if (has? seen (first lst))
              (dist-list (rest lst))
              (begin (put seen (first lst) true)
                     (cons (first lst) (dist-list (rest lst)))))))))
@@ -310,11 +310,11 @@
         ((array? coll)
          (let ((result @[]))
            (each x in coll
-             (unless (has-key? seen x)
+             (unless (has? seen x)
                (put seen x true)
                (push result x)))
            result))
-        ((tuple? coll)
+        ((array? coll)
          (let ((lst (dist-list (letrec ((loop (fn (i acc)
                                                (if (>= i (length coll))
                                                  (reverse acc)
@@ -326,7 +326,7 @@
 (def frequencies (fn (coll)
   (let ((counts @{}))
     (each x in coll
-      (put counts x (+ 1 (if (has-key? counts x) (get counts x) 0))))
+      (put counts x (+ 1 (if (has? counts x) (get counts x) 0))))
     (freeze counts))))
 
 (def mapcat (fn (f coll)
@@ -338,7 +338,7 @@
        (each x in coll
          (each y in (f x) (push result y)))
        result))
-    ((tuple? coll)
+    ((array? coll)
      (apply tuple (fold (fn (acc x) (append acc (f x))) ()
                         (letrec ((loop (fn (i acc)
                                          (if (>= i (length coll))
@@ -351,7 +351,7 @@
   (let ((groups @{}))
     (each x in coll
       (let ((k (f x)))
-        (if (has-key? groups k)
+        (if (has? groups k)
           (push (get groups k) x)
           (put groups k @[x]))))
     groups)))
@@ -372,7 +372,7 @@
                           (loop (+ i 1))))))
          (loop 0))
        result))
-    ((tuple? coll)
+    ((array? coll)
      (apply tuple
        (letrec ((go (fn (i)
                       (if (>= i (length coll))
@@ -402,7 +402,7 @@
                             (loop (+ i n)))))))
          (loop 0))
        result))
-    ((tuple? coll)
+    ((array? coll)
      (letrec ((to-list (fn (c)
                           (letrec ((loop (fn (i acc)
                                           (if (>= i (length c))
@@ -437,7 +437,7 @@
                               (loop (+ i 1))))))
              (loop 1))
            result)))
-      ((tuple? coll)
+      ((array? coll)
        (let ((lst (ip-list (letrec ((loop (fn (i acc)
                                            (if (>= i (length coll))
                                              (reverse acc)
@@ -460,7 +460,7 @@
   (let ((cache @{}))
     (fn (& args)
       (let ((key (if (= (length args) 1) (first args) (string args))))
-        (if (has-key? cache key)
+        (if (has? cache key)
           (get cache key)
           (let ((result (f ;args)))
             (put cache key result)
@@ -471,7 +471,7 @@
     ((to-list (fn (c)
        (cond
          ((or (pair? c) (empty? c)) c)
-         ((or (array? c) (tuple? c))
+         ((or (array? c) (array? c))
           (letrec ((loop (fn (i acc)
                            (if (>= i (length c))
                              (reverse acc)
@@ -485,7 +485,7 @@
           (let ((arr @[]))
             (each x in lst (push arr x))
             arr))
-         ((tuple? orig) (apply tuple lst)))))
+         ((array? orig) (apply tuple lst)))))
      (merge (fn (a b)
        (cond
          ((empty? a) b)
@@ -701,9 +701,9 @@
 
 ## ── Standard port parameters ────────────────────────────────────────
 
-(def *stdin*  (make-parameter (port/stdin)))
-(def *stdout* (make-parameter (port/stdout)))
-(def *stderr* (make-parameter (port/stderr)))
+(def *stdin*  (parameter (port/stdin)))
+(def *stdout* (parameter (port/stdout)))
+(def *stderr* (parameter (port/stderr)))
 
 ## ── Scheduler ───────────────────────────────────────────────────────
 
@@ -713,10 +713,10 @@
     (let ((backend (io/backend :sync)))
       (fiber/resume fiber)
       (forever
-        (case (fiber/status fiber)
-          :dead      (break (fiber/value fiber))
-          :error     (fiber/propagate fiber)
-          :suspended (cond
+       (case (fiber/status fiber)
+         :dead      (break (fiber/value fiber))
+         :error     (fiber/propagate fiber)
+         :paused (cond
                        ((not (= 0 (bit/and (fiber/bits fiber) 1)))
                         (fiber/propagate fiber))
                        ((not (= 0 (bit/and (fiber/bits fiber) 512)))
@@ -724,7 +724,7 @@
                        (true
                         (fiber/resume fiber))))))))
 
-(def *scheduler* (make-parameter sync-scheduler))
+(def *scheduler* (parameter sync-scheduler))
 
 (def ev/spawn
   (fn [closure]
@@ -754,10 +754,10 @@
             (while (> (length runnable) 0)
               (let ((fiber (pop runnable)))
                 (fiber/resume fiber)
-                (case (fiber/status fiber)
-                  :dead      nil
-                  :error     (fiber/propagate fiber)
-                  :suspended (cond
+                 (case (fiber/status fiber)
+                   :dead      nil
+                   :error     (fiber/propagate fiber)
+                   :paused (cond
                                ((not (= 0 (bit/and (fiber/bits fiber) 1)))
                                 (fiber/propagate fiber))
                                ((not (= 0 (bit/and (fiber/bits fiber) 512)))
@@ -778,10 +778,10 @@
                     (if (nil? (get c :error))
                       (begin
                         (fiber/resume fiber (get c :value))
-                        (case (fiber/status fiber)
-                          :dead      nil
-                          :error     (fiber/propagate fiber)
-                          :suspended (cond
+                         (case (fiber/status fiber)
+                           :dead      nil
+                           :error     (fiber/propagate fiber)
+                           :paused (cond
                                        ((not (= 0 (bit/and (fiber/bits fiber) 1)))
                                         (fiber/propagate fiber))
                                        ((not (= 0 (bit/and (fiber/bits fiber) 512)))

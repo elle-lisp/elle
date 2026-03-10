@@ -310,22 +310,22 @@
 (assert-eq (let (([a & r] [10 20 30])) (+ a (get r 0))) 30
   "rest array in let")
 
-# test_rest_tuple_basic — rest binding preserves tuple type
+# test_rest_array_basic — rest binding preserves array type
 (begin
   (def [a & r] [1 2 3])
-  (assert-true (tuple? r) "rest tuple basic: r is a tuple")
-  (assert-eq (get r 0) 2 "rest tuple basic: r[0]")
-  (assert-eq (get r 1) 3 "rest tuple basic: r[1]"))
+  (assert-true (array? r) "rest array basic: r is an array")
+  (assert-eq (get r 0) 2 "rest array basic: r[0]")
+  (assert-eq (get r 1) 3 "rest array basic: r[1]"))
 
-# test_rest_tuple_empty_rest
+# test_rest_array_empty_rest
 (begin
   (def [a b & r] [1 2])
-  (assert-true (tuple? r) "rest tuple empty: r is a tuple")
-  (assert-eq (length r) 0 "rest tuple empty rest"))
+  (assert-true (array? r) "rest array empty: r is an array")
+  (assert-eq (length r) 0 "rest array empty rest"))
 
-# test_rest_tuple_in_let
+# test_rest_array_in_let
 (assert-eq (let (([a & r] [10 20 30])) (+ a (get r 0))) 30
-  "rest tuple in let")
+  "rest array in let")
 
 # test_rest_array_type_preserved
 (begin
@@ -428,108 +428,108 @@
     "variadic compile time arity: 0 args fails"))
 
 # ============================================================
-# Table/struct destructuring
+# Struct/table destructuring
 # ============================================================
 
-# test_def_table_basic
+# test_def_struct_basic
 (begin
   (def {:name n :age a} {:name "Alice" :age 30})
-  (assert-string-eq n "Alice" "def table basic: name")
-  (assert-eq a 30 "def table basic: age"))
+  (assert-string-eq n "Alice" "def struct basic: name")
+  (assert-eq a 30 "def struct basic: age"))
 
-# test_def_table_missing_key
+# test_def_struct_missing_key
 (begin
   (def {:missing m} {:other 42})
-  (assert-eq m nil "def table missing key"))
+  (assert-eq m nil "def struct missing key"))
 
-# test_def_table_wrong_type
+# test_def_struct_wrong_type
 (begin
   (def {:x x} 42)
-  (assert-eq x nil "def table wrong type"))
+  (assert-eq x nil "def struct wrong type"))
 
-# test_table_missing_key_is_nil (duplicate coverage, kept for completeness)
+# test_struct_missing_key_is_nil (duplicate coverage, kept for completeness)
 (begin
   (def {:missing m2} {:other 42})
-  (assert-eq m2 nil "table missing key is nil"))
+  (assert-eq m2 nil "struct missing key is nil"))
 
-# test_table_wrong_type_is_nil
+# test_struct_wrong_type_is_nil
 (begin
   (def {:x x2} 42)
-  (assert-eq x2 nil "table wrong type is nil"))
+  (assert-eq x2 nil "struct wrong type is nil"))
 
-# test_table_empty_pattern
+# test_struct_empty_pattern
 (begin
   (def {} {:x 1})
-  (assert-eq :ok :ok "table empty pattern"))
+  (assert-eq :ok :ok "struct empty pattern"))
 
-# test_var_table
+# test_var_struct
 (begin
   (var {:x x3} {:x 99})
-  (assert-eq x3 99 "var table"))
+  (assert-eq x3 99 "var struct"))
 
-# test_let_table
+# test_let_struct
 (assert-eq (let (({:x x :y y} {:x 10 :y 20})) (+ x y)) 30
-  "let table")
+  "let struct")
 
-# test_let_star_table
+# test_let_star_struct
 (assert-eq (let* (({:x x} {:x 5}) ({:y y} {:y x})) (+ x y)) 10
-  "let* table")
+  "let* struct")
 
-# test_fn_param_table
+# test_fn_param_struct
 (begin
   (defn f6 ({:x x :y y}) (+ x y))
-  (assert-eq (f6 {:x 3 :y 4}) 7 "fn param table"))
+  (assert-eq (f6 {:x 3 :y 4}) 7 "fn param struct"))
 
-# test_table_nested
+# test_struct_nested
 (begin
   (def {:point {:x px :y py}} {:point {:x 3 :y 4}})
-  (assert-eq (+ px py) 7 "table nested"))
+  (assert-eq (+ px py) 7 "struct nested"))
 
-# test_table_with_mutable_table
+# test_struct_with_mutable_table
 (begin
   (def {:a a4} @{:a 99})
-  (assert-eq a4 99 "table with mutable table"))
+  (assert-eq a4 99 "struct with mutable table"))
 
-# test_table_in_match — bind match result to var (known bug workaround)
+# test_struct_in_match — bind match result to var (known bug workaround)
 (var match-circle
   (match {:type :circle :radius 5}
     ({:type :circle :radius r} r)
     ({:type :square :side s} s)
     (_ 0)))
-(assert-eq match-circle 5 "table in match: circle")
+(assert-eq match-circle 5 "struct in match: circle")
 
-# test_table_match_fallthrough
+# test_struct_match_fallthrough
 (var match-square
   (match {:type :square :side 7}
     ({:type :circle :radius r} r)
     ({:type :square :side s} s)
     (_ 0)))
-(assert-eq match-square 7 "table match fallthrough: square")
+(assert-eq match-square 7 "struct match fallthrough: square")
 
-# test_table_match_wildcard_fallback
+# test_struct_match_wildcard_fallback
 (var match-fallback
   (match 42
     ({:x x} x)
     (_ :no-match)))
-(assert-eq match-fallback :no-match "table match wildcard fallback")
+(assert-eq match-fallback :no-match "struct match wildcard fallback")
 
-# test_table_expression_position
-(assert-eq (get {:a 1 :b 2} :a) 1 "table expression position")
+# test_struct_expression_position
+(assert-eq (get {:a 1 :b 2} :a) 1 "struct expression position")
 
-# test_table_empty
+# test_struct_empty
 (begin
   (def {} {:x 1})
-  (assert-eq :ok :ok "table empty"))
+  (assert-eq :ok :ok "struct empty"))
 
-# test_table_mixed_with_list
+# test_struct_mixed_with_list
 (begin
   (def (a5 {:x x5}) (list 1 {:x 2}))
-  (assert-eq (+ a5 x5) 3 "table mixed with list"))
+  (assert-eq (+ a5 x5) 3 "struct mixed with list"))
 
-# test_table_wildcard_value
+# test_struct_wildcard_value
 (begin
   (def {:x _ :y y6} {:x 10 :y 20})
-  (assert-eq y6 20 "table wildcard value"))
+  (assert-eq y6 20 "struct wildcard value"))
 
 # ============================================================
 # Tuple destructuring
@@ -570,17 +570,17 @@
 (var match-struct (match {:a 1} ({:a x} x) (_ :no-match)))
 (assert-eq match-struct 1 "match struct pattern matches struct")
 
-# test_match_struct_pattern_does_not_match_table
+# test_match_struct_pattern_does_not_match_mutable_table
 (var match-struct-tbl (match @{:a 1} ({:a x} x) (_ :no-match)))
-(assert-eq match-struct-tbl :no-match "match struct pattern does not match table")
+(assert-eq match-struct-tbl :no-match "match struct pattern does not match @struct")
 
-# test_match_table_pattern_matches_table
+# test_match_mutable_table_pattern_matches_mutable_table
 (var match-tbl (match @{:a 1} (@{:a x} x) (_ :no-match)))
-(assert-eq match-tbl 1 "match table pattern matches table")
+(assert-eq match-tbl 1 "match @struct pattern matches @struct")
 
-# test_match_table_pattern_does_not_match_struct
+# test_match_mutable_table_pattern_does_not_match_struct
 (var match-tbl-str (match {:a 1} (@{:a x} x) (_ :no-match)))
-(assert-eq match-tbl-str :no-match "match table pattern does not match struct")
+(assert-eq match-tbl-str :no-match "match @struct pattern does not match struct")
 
 # test_destructure_non_sequential_gives_nil
 (assert-eq (let (([a b] 42)) a) nil "destructure non-sequential int gives nil")
@@ -883,97 +883,97 @@
   2
   "letrec wildcard destructure")
 
-# Table destructuring properties
+# Struct destructuring properties
 # Migrated from tests/property/destructuring.rs
 # ============================================================
 
-# def_table_roundtrip_int: (def {:a v} {:a X}) yields v == X
+# def_struct_roundtrip_int: (def {:a v} {:a X}) yields v == X
 (begin
   (def {:a v} {:a 42})
-  (assert-eq v 42 "table destructure roundtrip: 42"))
+  (assert-eq v 42 "struct destructure roundtrip: 42"))
 (begin
   (def {:a v2} {:a -7})
-  (assert-eq v2 -7 "table destructure roundtrip: -7"))
+  (assert-eq v2 -7 "struct destructure roundtrip: -7"))
 (begin
   (def {:a v3} {:a 0})
-  (assert-eq v3 0 "table destructure roundtrip: 0"))
+  (assert-eq v3 0 "struct destructure roundtrip: 0"))
 
-# def_table_equiv_get: destructuring ≡ manual get
+# def_struct_equiv_get: destructuring ≡ manual get
 (let ((t {:a 10 :b 20}))
   (let (({:a a :b b} {:a 10 :b 20}))
     (assert-eq (+ a b) (+ (get t :a) (get t :b))
-      "table destructure equiv get")))
+      "struct destructure equiv get")))
 
-# def_table_multi_key
+# def_struct_multi_key
 (begin
   (def {:x x :y y :z z} {:x 1 :y 2 :z 3})
-  (assert-eq (+ x (+ y z)) 6 "table destructure multi-key"))
+  (assert-eq (+ x (+ y z)) 6 "struct destructure multi-key"))
 
-# def_table_missing_key_is_nil
+# def_struct_missing_key_is_nil
 (begin
   (def {:missing m} {:other 42})
-  (assert-true (nil? m) "table missing key is nil (property)"))
+  (assert-true (nil? m) "struct missing key is nil (property)"))
 
-# def_table_non_table_is_nil
+# def_struct_non_struct_is_nil
 (begin
   (def {:a a} 42)
-  (assert-true (nil? a) "table non-table gives nil (property)"))
+  (assert-true (nil? a) "struct non-struct gives nil (property)"))
 
-# fn_param_table_equiv_get
+# fn_param_struct_equiv_get
 (begin
   (defn f-destr ({:a a :b b}) (+ a b))
   (defn g-manual (t) (+ (get t :a) (get t :b)))
   (assert-eq (f-destr {:a 10 :b 20}) (g-manual {:a 10 :b 20})
-    "fn param table equiv get"))
+    "fn param struct equiv get"))
 
-# fn_param_table_mixed: table param + regular param
+# fn_param_struct_mixed: struct param + regular param
 (begin
   (defn f-mixed ({:x x} y) (+ x y))
-  (assert-eq (f-mixed {:x 10} 20) 30 "fn param table mixed"))
+  (assert-eq (f-mixed {:x 10} 20) 30 "fn param struct mixed"))
 
-# let_table_destr
+# let_struct_destr
 (assert-eq (let (({:a a :b b} {:a 3 :b 7})) (+ a b)) 10
-  "let table destructure (property)")
+  "let struct destructure (property)")
 
-# let_star_table_forward_ref
+# let_star_struct_forward_ref
 (assert-eq (let* (({:x v} {:x 5}) ({:y w} {:y v})) (+ v w)) 10
-  "let* table forward ref (property)")
+  "let* struct forward ref (property)")
 
-# nested_table_destr
+# nested_struct_destr
 (begin
   (def {:p {:x px :y py}} {:p {:x 3 :y 4}})
-  (assert-eq (+ px py) 7 "nested table destructure (property)"))
+  (assert-eq (+ px py) 7 "nested struct destructure (property)"))
 
-# nested_table_missing_inner
+# nested_struct_missing_inner
 (begin
   (def {:p {:missing m}} {:p {:x 42}})
-  (assert-true (nil? m) "nested table missing inner (property)"))
+  (assert-true (nil? m) "nested struct missing inner (property)"))
 
-# match_table_extracts
+# match_struct_extracts
 (var mt-extract (match {:val 42} ({:val v} v) (_ :fail)))
-(assert-eq mt-extract 42 "match table extracts (property)")
+(assert-eq mt-extract 42 "match struct extracts (property)")
 
-# match_table_rejects_non_table
+# match_struct_rejects_non_struct
 (var mt-reject (match 42 ({:a a} a) (_ :no-match)))
-(assert-eq mt-reject :no-match "match table rejects non-table (property)")
+(assert-eq mt-reject :no-match "match struct rejects non-struct (property)")
 
-# match_table_literal_key_discriminates
+# match_struct_literal_key_discriminates
 (var mt-disc (match {:type :a :val 42}
   ({:type :b :val v} (+ v 1000))
   ({:type :a :val v} v)
   (_ :fail)))
-(assert-eq mt-disc 42 "match table literal key discriminates (property)")
+(assert-eq mt-disc 42 "match struct literal key discriminates (property)")
 
-# match_table_wrong_literal_falls_through
+# match_struct_wrong_literal_falls_through
 (var mt-fall (match {:type :square :val 10}
   ({:type :circle :val v} v)
   ({:type :square :val v} (+ v 100))
   (_ :fail)))
-(assert-eq mt-fall 110 "match table wrong literal falls through (property)")
+(assert-eq mt-fall 110 "match struct wrong literal falls through (property)")
 
 # match_mutable_table
 (var mt-mut (match @{:val 42} (@{:val v} v) (_ :fail)))
-(assert-eq mt-mut 42 "match mutable table (property)")
+(assert-eq mt-mut 42 "match mutable @struct (property)")
 
 # ============================================================================
 # Error tests (from integration/destructuring.rs)

@@ -15,10 +15,10 @@ use crate::value::{error_val, Value};
 /// - buffer → string (lossy UTF-8)
 /// - blob → bytes
 fn freeze_value(v: Value) -> Value {
-    if let Some(arr) = v.as_array() {
+    if let Some(arr) = v.as_array_mut() {
         let items: Vec<Value> = arr.borrow().iter().map(|x| freeze_value(*x)).collect();
-        Value::tuple(items)
-    } else if let Some(tbl) = v.as_table() {
+        Value::array(items)
+    } else if let Some(tbl) = v.as_struct_mut() {
         let map: std::collections::BTreeMap<crate::value::TableKey, Value> = tbl
             .borrow()
             .iter()
@@ -28,10 +28,10 @@ fn freeze_value(v: Value) -> Value {
     } else if let Some(s) = v.as_set_mut() {
         let items: BTreeSet<Value> = s.borrow().iter().map(|x| freeze_value(*x)).collect();
         Value::set(items)
-    } else if let Some(buf) = v.as_buffer() {
+    } else if let Some(buf) = v.as_string_mut() {
         let bytes = buf.borrow().clone();
         Value::string(String::from_utf8_lossy(&bytes).into_owned())
-    } else if let Some(blob) = v.as_blob() {
+    } else if let Some(blob) = v.as_bytes_mut() {
         let data = blob.borrow().clone();
         Value::bytes(data)
     } else {
@@ -44,7 +44,7 @@ fn freeze_value(v: Value) -> Value {
 /// (set elem1 elem2 ...) -> set
 ///
 /// Creates an immutable set, deduplicating elements and freezing mutable values
-pub fn prim_set(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_set(args: &[Value]) -> (SignalBits, Value) {
     let mut set = BTreeSet::new();
     for arg in args {
         set.insert(freeze_value(*arg));
@@ -57,7 +57,7 @@ pub fn prim_set(args: &[Value]) -> (SignalBits, Value) {
 /// (@set elem1 elem2 ...) -> @set
 ///
 /// Creates a mutable set, deduplicating elements and freezing mutable values
-pub fn prim_at_set(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_at_set(args: &[Value]) -> (SignalBits, Value) {
     let mut set = BTreeSet::new();
     for arg in args {
         set.insert(freeze_value(*arg));
@@ -70,7 +70,7 @@ pub fn prim_at_set(args: &[Value]) -> (SignalBits, Value) {
 /// (set? value) -> bool
 ///
 /// Returns true for both immutable and mutable sets. Use (type-of x) to distinguish.
-pub fn prim_is_set(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_is_set(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -91,7 +91,7 @@ pub fn prim_is_set(args: &[Value]) -> (SignalBits, Value) {
 /// (contains? set value) -> bool
 ///
 /// Returns true if the value is a member of the set
-pub fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -126,7 +126,7 @@ pub fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// For immutable sets, returns a new set with the element added.
 /// For mutable sets, modifies in place and returns the set.
-pub fn prim_add(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_add(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -164,7 +164,7 @@ pub fn prim_add(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// For immutable sets, returns a new set with the element removed.
 /// For mutable sets, modifies in place and returns the set.
-pub fn prim_del(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -202,7 +202,7 @@ pub fn prim_del(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing all elements from both sets.
-pub fn prim_union(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_union(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -235,7 +235,7 @@ pub fn prim_union(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing only elements present in both sets.
-pub fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -269,7 +269,7 @@ pub fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing elements in set1 but not in set2.
-pub fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -301,7 +301,7 @@ pub fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
 /// (set->array set) -> array or tuple
 ///
 /// Immutable set → tuple, mutable set → array. Elements in sorted order.
-pub fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -313,10 +313,10 @@ pub fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
     }
     if let Some(s) = args[0].as_set() {
         let items: Vec<Value> = s.iter().copied().collect();
-        (SIG_OK, Value::tuple(items))
+        (SIG_OK, Value::array(items))
     } else if let Some(s) = args[0].as_set_mut() {
         let items: Vec<Value> = s.borrow().iter().copied().collect();
-        (SIG_OK, Value::array(items))
+        (SIG_OK, Value::array_mut(items))
     } else {
         (
             SIG_ERROR,
@@ -338,7 +338,7 @@ pub fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
 /// Immutable inputs (list, tuple, string, bytes, set) → immutable set.
 /// Mutable inputs (array, buffer, blob, @set) → mutable set.
 /// Mutable values are frozen on insertion.
-pub fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -381,7 +381,7 @@ pub fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Tuple (immutable) → immutable set
-    if let Some(elems) = v.as_tuple() {
+    if let Some(elems) = v.as_array() {
         let set: BTreeSet<Value> = elems.iter().map(|x| freeze_value(*x)).collect();
         return (SIG_OK, Value::set(set));
     }
@@ -409,13 +409,13 @@ pub fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Array (mutable) → mutable set
-    if let Some(arr) = v.as_array() {
+    if let Some(arr) = v.as_array_mut() {
         let set: BTreeSet<Value> = arr.borrow().iter().map(|x| freeze_value(*x)).collect();
         return (SIG_OK, Value::set_mut(set));
     }
 
     // Buffer (mutable) → mutable set of single-char strings
-    if let Some(buf) = v.as_buffer() {
+    if let Some(buf) = v.as_string_mut() {
         let mut set = BTreeSet::new();
         let bytes = buf.borrow();
         let s = String::from_utf8_lossy(&bytes);
@@ -426,7 +426,7 @@ pub fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Blob (mutable) → mutable set of ints
-    if let Some(blob) = v.as_blob() {
+    if let Some(blob) = v.as_bytes_mut() {
         let set: BTreeSet<Value> = blob
             .borrow()
             .iter()
@@ -452,7 +452,7 @@ pub fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "set",
         func: prim_set,
