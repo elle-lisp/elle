@@ -92,7 +92,7 @@
          [clamped (if (> scaled 9) 9 scaled)]
          [chars " .:-=+*#%@"]
          [idx (if (< clamped 0) 0 clamped)])
-    (string/char-at chars idx)))
+    (get chars idx)))
 
 (defn find-max [m]
   "Find the maximum value in the matrix."

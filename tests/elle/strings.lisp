@@ -156,8 +156,8 @@
 # single_character_operations: single character operations
 (assert-true (= (length "a") 1)
   "length of single char")
-(assert-string-eq (string/char-at "a" 0) "a"
-  "char-at single char")
+(assert-string-eq (get "a" 0) "a"
+  "get single char")
 
 # ============================================================================
 # Slice boundary checking (migrated from property tests)
@@ -238,22 +238,22 @@
   "string->integer errors on xyz")
 
 # ============================================================================
-# Index/char-at operations (migrated from property tests)
+# Index/get operations (migrated from property tests)
 # ============================================================================
 
-# char_at_valid_index: char-at returns single character
-(assert-string-eq (string/char-at "hello" 0) "h"
-  "char-at index 0")
-(assert-string-eq (string/char-at "hello" 4) "o"
-  "char-at index 4")
-(assert-string-eq (string/char-at "abc" 1) "b"
-  "char-at index 1")
+# get_valid_index: get returns single character
+(assert-string-eq (get "hello" 0) "h"
+  "get string index 0")
+(assert-string-eq (get "hello" 4) "o"
+  "get string index 4")
+(assert-string-eq (get "abc" 1) "b"
+  "get string index 1")
 
-# char_at_out_of_bounds_errors: char-at OOB errors
-(assert-err (fn [] (string/char-at "hi" 1000))
-  "char-at OOB errors (hi)")
-(assert-err (fn [] (string/char-at "abc" 100))
-  "char-at OOB errors (abc)")
+# get_out_of_bounds_returns_nil: get OOB returns nil
+(assert-eq (get "hi" 1000) nil
+  "get string OOB returns nil (hi)")
+(assert-eq (get "abc" 100) nil
+  "get string OOB returns nil (abc)")
 
 # string_index_finds_char: string/index finds character
 (assert-eq (string/index "hello" "l") 2

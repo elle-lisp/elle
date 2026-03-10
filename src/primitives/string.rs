@@ -161,65 +161,6 @@ pub(crate) fn prim_string_find(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Get a character at an index from a string or buffer
-pub(crate) fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("char-at: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let (s, _is_buffer) = match as_text(&args[0], "char-at") {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-
-    let index = match args[1].as_int() {
-        Some(n) => n as usize,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("char-at: expected integer, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
-    let grapheme_count = s.graphemes(true).count();
-
-    if index >= grapheme_count {
-        return (
-            SIG_ERROR,
-            error_val(
-                "error",
-                format!(
-                    "char-at: index {} out of bounds (length {})",
-                    index, grapheme_count
-                ),
-            ),
-        );
-    }
-
-    match s.graphemes(true).nth(index) {
-        Some(g) => (SIG_OK, Value::string(g)),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "error",
-                format!(
-                    "char-at: index {} out of bounds (length {})",
-                    index, grapheme_count
-                ),
-            ),
-        ),
-    }
-}
-
 /// Split string or buffer on delimiter, returning a tuple
 pub(crate) fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
@@ -638,17 +579,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/find \"hello\" \"ll\") #=> 2",
         aliases: &["string-index", "string/index", "string-find"],
-    },
-    PrimitiveDef {
-        name: "string/char-at",
-        func: prim_char_at,
-        effect: Effect::inert(),
-        arity: Arity::Exact(2),
-        doc: "Get character at index as a single-character string.",
-        params: &["s", "idx"],
-        category: "string",
-        example: "(string/char-at \"hello\" 1) #=> \"e\"",
-        aliases: &["char-at"],
     },
     PrimitiveDef {
         name: "string/split",

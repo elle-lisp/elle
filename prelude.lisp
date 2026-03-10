@@ -141,7 +141,7 @@
 
 ## each - iterate over a sequence
 ## Dispatches on type: lists use first/rest, indexed types use get/length,
-## strings use char-at/length.
+## strings use get/length.
 ## (each x coll body...) or (each x in coll body...)
 (defmacro each (var iter-or-in & forms)
   (let* ((has-in (and (not (empty? forms))
@@ -176,7 +176,7 @@
                  (,g-idx 0))
             (while (< ,g-idx ,g-len)
               (begin
-                (let ((,var (string/char-at ,g-iter ,g-idx)))
+                (let ((,var (get ,g-iter ,g-idx)))
                   ,;body)
                 (assign ,g-idx (+ ,g-idx 1))))))
            ((set? ,g-iter)

@@ -50,7 +50,7 @@
     (each name in names
       (var i 0)
       (while (< i (length name))
-         (put chars (string/char-at name i) true)
+         (put chars (get name i) true)
          (assign i (+ i 1))))
     (let* ([sorted-chars (sort-strings (keys chars))]
            [char->id @{}]
@@ -75,7 +75,7 @@
          [ids @[bos]])
     (var i 0)
     (while (< i (length name))
-       (push ids (get char->id (string/char-at name i)))
+       (push ids (get char->id (get name i)))
        (assign i (+ i 1)))
     (push ids bos)
     ids))

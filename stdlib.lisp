@@ -18,7 +18,7 @@
      (letrec ((loop (fn (i acc)
                       (if (>= i (length coll))
                         (reverse acc)
-                        (loop (+ i 1) (cons (f (string/char-at coll i)) acc))))))
+                         (loop (+ i 1) (cons (f (get coll i)) acc))))))
        (loop 0 ())))
     ((or (pair? coll) (empty? coll))
      (if (empty? coll)

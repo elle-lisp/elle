@@ -1084,7 +1084,7 @@ e                  ⟹ 2.71828...
 (string-downcase "HELLO")          ⟹ "hello"
 (substring "hello" 1 4)            ⟹ "ell"
 (string-index "hello" "ll")        ⟹ 2
-(char-at "hello" 0)                ⟹ "h"
+(get "hello" 0)                    ⟹ "h"
 (string-split "a,b,c" ",")         ⟹ ("a" "b" "c")
 (string-replace "hello" "l" "L")   ⟹ "heLLo"
 (string-trim "  hello  ")          ⟹ "hello"

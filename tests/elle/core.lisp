@@ -316,10 +316,10 @@
 (assert-eq (string-index "hello" "l") 2 "string-index found")
 (assert-eq (string-index "hello" "x") nil "string-index not found")
 
-# test_char_at
-(assert-string-eq (char-at "hello" 0) "h" "char-at 0")
-(assert-string-eq (char-at "hello" 1) "e" "char-at 1")
-(assert-string-eq (char-at "hello" 4) "o" "char-at 4")
+# test_get_string
+(assert-string-eq (get "hello" 0) "h" "get string 0")
+(assert-string-eq (get "hello" 1) "e" "get string 1")
+(assert-string-eq (get "hello" 4) "o" "get string 4")
 
 # ============================================================================
 # Array operations

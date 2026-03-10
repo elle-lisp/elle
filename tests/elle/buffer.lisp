@@ -128,7 +128,7 @@
 
 (assert-true (string? (string/trim @"  hello  ")) "trim buffer returns buffer")
 
-(assert-eq (string/char-at @"hello" 1) "e" "char-at on buffer returns e")
+(assert-eq (get @"hello" 1) "e" "get on buffer returns e")
 
 # ============================================================================
 # Buffer split

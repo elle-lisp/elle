@@ -134,7 +134,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
   ```janet
   (length "café")           # => 4, not 5 bytes
-  (string/char-at "café" 3) # => "é"
+  (get "café" 3)              # => "é"
   (slice "café" 0 2)        # => "ca"
   (first "café")            # => "c"
   (rest "café")             # => "afé"

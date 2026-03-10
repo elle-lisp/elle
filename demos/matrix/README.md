@@ -105,7 +105,7 @@ Temperature is mapped to a 10-character gradient:
          [clamped (if (> scaled 9) 9 scaled)]
          [chars " .:-=+*#%@"]
          [idx (if (< clamped 0) 0 clamped)])
-    (string/char-at chars idx)))
+    (get chars idx)))
 ```
 
 - ` ` (space) = cold (0.0)
