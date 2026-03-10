@@ -59,7 +59,7 @@ impl Expander {
     /// has primitives registered but before user code expansion.
     pub fn load_prelude(&mut self, symbols: &mut SymbolTable, vm: &mut VM) -> Result<(), String> {
         const PRELUDE: &str = include_str!("../../../prelude.lisp");
-        let syntaxes = crate::reader::read_syntax_all(PRELUDE)?;
+        let syntaxes = crate::reader::read_syntax_all(PRELUDE, "<internal>")?;
         for syntax in syntaxes {
             self.expand(syntax, symbols, vm)?;
         }
@@ -122,17 +122,17 @@ impl Expander {
                 // Not a macro call - expand children recursively
                 self.expand_list(items, syntax.span, syntax.scopes, symbols, vm)
             }
-            SyntaxKind::Tuple(items) => {
+            SyntaxKind::Array(items) => {
                 self.expand_tuple(items, syntax.span, syntax.scopes, symbols, vm)
             }
-            SyntaxKind::Array(items) => {
-                self.expand_array(items, syntax.span, syntax.scopes, symbols, vm)
+            SyntaxKind::ArrayMut(items) => {
+                self.expand_array_mut(items, syntax.span, syntax.scopes, symbols, vm)
             }
             SyntaxKind::Struct(items) => {
                 self.expand_struct(items, syntax.span, syntax.scopes, symbols, vm)
             }
-            SyntaxKind::Table(items) => {
-                self.expand_table(items, syntax.span, syntax.scopes, symbols, vm)
+            SyntaxKind::StructMut(items) => {
+                self.expand_struct_mut(items, syntax.span, syntax.scopes, symbols, vm)
             }
             SyntaxKind::Set(items) => {
                 self.expand_set(items, syntax.span, syntax.scopes, symbols, vm)
@@ -178,7 +178,7 @@ impl Expander {
 
         // Get parameter list
         let params_syntax = items[2].as_list_or_tuple().ok_or_else(|| {
-            if matches!(items[2].kind, SyntaxKind::Array(_)) {
+            if matches!(items[2].kind, SyntaxKind::ArrayMut(_)) {
                 format!(
                     "{}: macro parameters must use (...) or [...], not @[...]",
                     items[2].span
@@ -253,13 +253,13 @@ impl Expander {
                     .map(|item| self.add_scope_recursive(item, scope))
                     .collect(),
             ),
-            SyntaxKind::Tuple(items) => SyntaxKind::Tuple(
+            SyntaxKind::Array(items) => SyntaxKind::Array(
                 items
                     .into_iter()
                     .map(|item| self.add_scope_recursive(item, scope))
                     .collect(),
             ),
-            SyntaxKind::Array(items) => SyntaxKind::Array(
+            SyntaxKind::ArrayMut(items) => SyntaxKind::ArrayMut(
                 items
                     .into_iter()
                     .map(|item| self.add_scope_recursive(item, scope))
@@ -271,7 +271,7 @@ impl Expander {
                     .map(|item| self.add_scope_recursive(item, scope))
                     .collect(),
             ),
-            SyntaxKind::Table(items) => SyntaxKind::Table(
+            SyntaxKind::StructMut(items) => SyntaxKind::StructMut(
                 items
                     .into_iter()
                     .map(|item| self.add_scope_recursive(item, scope))
@@ -346,13 +346,13 @@ impl Expander {
             .map(|item| self.expand(item.clone(), symbols, vm))
             .collect();
         Ok(Syntax::with_scopes(
-            SyntaxKind::Tuple(expanded?),
+            SyntaxKind::Array(expanded?),
             span,
             scopes,
         ))
     }
 
-    fn expand_array(
+    fn expand_array_mut(
         &mut self,
         items: &[Syntax],
         span: Span,
@@ -365,7 +365,7 @@ impl Expander {
             .map(|item| self.expand(item.clone(), symbols, vm))
             .collect();
         Ok(Syntax::with_scopes(
-            SyntaxKind::Array(expanded?),
+            SyntaxKind::ArrayMut(expanded?),
             span,
             scopes,
         ))
@@ -390,7 +390,7 @@ impl Expander {
         ))
     }
 
-    fn expand_table(
+    fn expand_struct_mut(
         &mut self,
         items: &[Syntax],
         span: Span,
@@ -403,7 +403,7 @@ impl Expander {
             .map(|item| self.expand(item.clone(), symbols, vm))
             .collect();
         Ok(Syntax::with_scopes(
-            SyntaxKind::Table(expanded?),
+            SyntaxKind::StructMut(expanded?),
             span,
             scopes,
         ))

@@ -6,7 +6,7 @@
 
 use elle::ffi::marshal::MarshalledArg;
 use elle::ffi::types::TypeDesc;
-use elle::primitives::ffi::{
+use elle::primitives::memory::{
     prim_ffi_align, prim_ffi_free, prim_ffi_malloc, prim_ffi_read, prim_ffi_size, prim_ffi_write,
 };
 use elle::value::fiber::{SIG_ERROR, SIG_OK};

@@ -71,12 +71,12 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Symbol(name) => {
                 out.push((name.as_str(), syntax.scopes.as_slice()));
             }
-            SyntaxKind::List(items) | SyntaxKind::Tuple(items) | SyntaxKind::Array(items) => {
+            SyntaxKind::List(items) | SyntaxKind::Array(items) | SyntaxKind::ArrayMut(items) => {
                 for item in items {
                     Self::extract_pattern_names(item, out);
                 }
             }
-            SyntaxKind::Struct(items) | SyntaxKind::Table(items) => {
+            SyntaxKind::Struct(items) | SyntaxKind::StructMut(items) => {
                 // Struct/table patterns are alternating keyword/pattern pairs;
                 // only extract names from the value patterns (odd indices)
                 for item in items.iter().skip(1).step_by(2) {
@@ -92,10 +92,10 @@ impl<'a> Analyzer<'a> {
         matches!(
             &syntax.kind,
             SyntaxKind::List(_)
-                | SyntaxKind::Tuple(_)
                 | SyntaxKind::Array(_)
+                | SyntaxKind::ArrayMut(_)
                 | SyntaxKind::Struct(_)
-                | SyntaxKind::Table(_)
+                | SyntaxKind::StructMut(_)
         )
     }
 
@@ -357,7 +357,7 @@ impl<'a> Analyzer<'a> {
                 };
                 Ok(HirPattern::List { elements, rest })
             }
-            SyntaxKind::Tuple(items) | SyntaxKind::Array(items) => {
+            SyntaxKind::Array(items) | SyntaxKind::ArrayMut(items) => {
                 // Both [...] and @[...] destructure the same way in binding forms
                 // (no type guard — ArrayMutRefOrNil handles both)
                 let (fixed, rest_syntax) = Self::split_rest_pattern(items, span)?;
@@ -373,12 +373,12 @@ impl<'a> Analyzer<'a> {
                 };
                 Ok(HirPattern::Tuple { elements, rest })
             }
-            SyntaxKind::Struct(items) | SyntaxKind::Table(items) => {
+            SyntaxKind::Struct(items) | SyntaxKind::StructMut(items) => {
                 // Both {...} and @{...} destructure the same way in binding forms
                 // (no type guard — TableGetOrNil handles both)
                 if items.len() % 2 != 0 {
                     return Err(format!(
-                        "{}: struct/table destructuring requires keyword-pattern pairs",
+                        "{}: struct destructuring requires keyword-pattern pairs",
                         span
                     ));
                 }
@@ -392,14 +392,14 @@ impl<'a> Analyzer<'a> {
                             }
                             _ => {
                                 return Err(format!(
-                                    "{}: struct/table destructuring key must be a keyword or quoted symbol, got {}",
+                                    "{}: struct destructuring key must be a keyword or quoted symbol, got {}",
                                     span, pair[0]
                                 ))
                             }
                         },
                         _ => {
                             return Err(format!(
-                                "{}: struct/table destructuring key must be a keyword or quoted symbol, got {}",
+                                "{}: struct destructuring key must be a keyword or quoted symbol, got {}",
                                 span, pair[0]
                             ))
                         }

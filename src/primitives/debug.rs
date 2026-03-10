@@ -28,7 +28,7 @@ pub(crate) fn prim_debug_print(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Label can be a string or symbol. Symbols are resolved to their
 /// name via the thread-local symbol table (same access pattern as
-/// symbol->string).
+/// string).
 pub(crate) fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (

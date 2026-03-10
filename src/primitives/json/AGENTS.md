@@ -32,9 +32,9 @@ JSON parsing and serialization primitives.
 
 | Name | Arity | Effect | Purpose |
 |------|-------|--------|---------|
-| `json/parse` | 1 | Pure | Parse JSON string to Elle value |
-| `json/serialize` | 1 | Pure | Serialize Elle value to compact JSON |
-| `json/serialize-pretty` | 1 | Pure | Serialize Elle value to pretty JSON |
+| `json/parse` | 1 | Inert | Parse JSON string to Elle value |
+| `json/serialize` | 1 | Inert | Serialize Elle value to compact JSON |
+| `json/serialize-pretty` | 1 | Inert | Serialize Elle value to pretty JSON |
 
 ## JSON ↔ Elle value mapping
 

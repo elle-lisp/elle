@@ -6,24 +6,47 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
-/// (arena/count) — return current heap arena object count
+/// (arena/count) or (arena/count :fiber) or (arena/count :global)
 ///
-/// Returns a bare integer. Unlike arena/stats (which returns a struct),
-/// this has zero measurement overhead — integers are immediate values.
+/// Return current heap object count. Default is :fiber (bumpalo object count
+/// for child fibers, 0 for root). :global returns HEAP_ARENA object count.
+///
+/// Operates directly on thread-local state (no SIG_QUERY).
 pub(crate) fn prim_arena_count(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
+    if args.len() > 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("arena/count: expected 0 arguments, got {}", args.len()),
+                format!("arena/count: expected 0-1 arguments, got {}", args.len()),
             ),
         );
     }
-    (
-        SIG_QUERY,
-        Value::cons(Value::keyword("arena/count"), Value::NIL),
-    )
+    let is_global = if args.len() == 1 {
+        match args[0].as_keyword_name() {
+            Some("global") => true,
+            Some("fiber") => false,
+            _ => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "value-error",
+                        "arena/count: argument must be :fiber or :global".to_string(),
+                    ),
+                )
+            }
+        }
+    } else {
+        false
+    };
+    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    if is_global || heap_ptr.is_null() {
+        use crate::value::heap::heap_arena_len;
+        (SIG_OK, Value::int(heap_arena_len() as i64))
+    } else {
+        let count = unsafe { (*heap_ptr).len() };
+        (SIG_OK, Value::int(count as i64))
+    }
 }
 
 /// (arena/stats) — return heap arena statistics
@@ -66,29 +89,6 @@ pub(crate) fn prim_scope_stats(args: &[Value]) -> (SignalBits, Value) {
     (
         SIG_QUERY,
         Value::cons(Value::keyword("arena/scope-stats"), Value::NIL),
-    )
-}
-
-/// (environment) — return the current global environment as a struct
-///
-/// Returns a struct mapping keyword names to values for all defined
-/// globals:
-/// ```text
-/// {:+ <native-fn> :cons <native-fn> :my-var 42 ...}
-/// ```
-pub(crate) fn prim_environment(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("environment: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
-    (
-        SIG_QUERY,
-        Value::cons(Value::keyword("environment"), Value::NIL),
     )
 }
 
@@ -210,7 +210,7 @@ pub(crate) fn prim_arena_object_limit(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, result)
 }
 
-/// (arena/bytes) or (arena/bytes :global)
+/// (arena/bytes) or (arena/bytes :fiber) or (arena/bytes :global)
 ///
 /// Return bytes consumed. :fiber = bumpalo allocated_bytes() for child fibers
 /// (0 for root). :global = HEAP_ARENA object count × 128 (estimated object size).
@@ -226,18 +226,22 @@ pub(crate) fn prim_arena_bytes(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let is_global = args.len() == 1 && {
-        if args[0].as_keyword_name() == Some("global") {
-            true
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "value-error",
-                    "arena/bytes: argument must be :global".to_string(),
-                ),
-            );
+    let is_global = if args.len() == 1 {
+        match args[0].as_keyword_name() {
+            Some("global") => true,
+            Some("fiber") => false,
+            _ => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "value-error",
+                        "arena/bytes: argument must be :fiber or :global".to_string(),
+                    ),
+                )
+            }
         }
+    } else {
+        false
     };
     let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
     if is_global || heap_ptr.is_null() {
@@ -446,11 +450,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "arena/count",
         func: prim_arena_count,
         effect: Effect::inert(),
-        arity: Arity::Exact(0),
-        doc: "Return current heap arena object count as an integer (zero measurement overhead).",
-        params: &[],
+        arity: Arity::Range(0, 1),
+        doc: "Return current heap object count. :fiber (default) = bumpalo count for child fibers (0 for root), :global = HEAP_ARENA count.",
+        params: &["scope?"],
         category: "meta",
-        example: "(arena/count)",
+        example: "(arena/count) or (arena/count :fiber) or (arena/count :global)",
         aliases: &["arena-count"],
     },
     PrimitiveDef {
@@ -486,17 +490,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(arena/object-limit)",
         aliases: &[],
     },
-    PrimitiveDef {
-        name: "arena/bytes",
-        func: prim_arena_bytes,
-        effect: Effect::inert(),
-        arity: Arity::Range(0, 1),
-        doc: "Return bytes consumed. :fiber = bumpalo bytes, :global = estimated from object count × 128.",
-        params: &["scope?"],
-        category: "meta",
-        example: "(arena/bytes)",
-        aliases: &[],
-    },
+     PrimitiveDef {
+         name: "arena/bytes",
+         func: prim_arena_bytes,
+         effect: Effect::inert(),
+         arity: Arity::Range(0, 1),
+         doc: "Return bytes consumed. :fiber (default) = bumpalo bytes, :global = estimated from object count × 128.",
+         params: &["scope?"],
+         category: "meta",
+         example: "(arena/bytes) or (arena/bytes :fiber) or (arena/bytes :global)",
+         aliases: &[],
+     },
     PrimitiveDef {
         name: "arena/checkpoint",
         func: prim_arena_checkpoint,
@@ -563,15 +567,5 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(let* ([f (fiber/new (fn [] 42) 1)] [_ (fiber/resume f nil)]) (arena/fiber-stats f))",
         aliases: &[],
     },
-    PrimitiveDef {
-        name: "environment",
-        func: prim_environment,
-        effect: Effect::inert(),
-        arity: Arity::Exact(0),
-        doc: "Return the current global environment as a struct mapping keyword names to values.",
-        params: &[],
-        category: "meta",
-        example: "(environment)",
-        aliases: &[],
-    },
+
 ];

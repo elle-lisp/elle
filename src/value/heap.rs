@@ -99,7 +99,7 @@ pub enum HeapObject {
     /// Mutable array
     LArrayMut(RefCell<Vec<Value>>),
 
-    /// Mutable table (hash map)
+    /// Mutable struct (hash map)
     LStructMut(RefCell<BTreeMap<TableKey, Value>>),
 
     /// Immutable struct
@@ -332,7 +332,7 @@ impl std::fmt::Debug for HeapObject {
                     write!(f, "[<borrowed>]")
                 }
             }
-            HeapObject::LStructMut(_) => write!(f, "<table>"),
+            HeapObject::LStructMut(_) => write!(f, "<@struct>"),
             HeapObject::LStruct(_) => write!(f, "<struct>"),
             HeapObject::Closure(_) => write!(f, "<closure>"),
             HeapObject::LArray(elems) => {

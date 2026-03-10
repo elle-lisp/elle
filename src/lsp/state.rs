@@ -88,7 +88,12 @@ impl CompilerState {
         doc.symbol_index = SymbolIndex::new();
 
         // Analyze using the file-as-letrec pipeline
-        let analysis = match analyze_file(&doc.source_text, &mut self.symbol_table, &mut self.vm) {
+        let analysis = match analyze_file(
+            &doc.source_text,
+            &mut self.symbol_table,
+            &mut self.vm,
+            "<lsp>",
+        ) {
             Ok(result) => result,
             Err(e) => {
                 // Analysis error - add as diagnostic

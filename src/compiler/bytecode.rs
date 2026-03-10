@@ -178,7 +178,7 @@ pub enum Instruction {
     IsArrayMut,
     /// Type check: is value a struct?
     IsStruct,
-    /// Type check: is value a table?
+    /// Type check: is value a @struct?
     IsTable,
     /// Get array length as integer
     ArrayMutLen,

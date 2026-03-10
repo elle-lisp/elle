@@ -77,7 +77,7 @@ HIR (bindings are inline — no separate HashMap)
    cells. Immutable captured locals are captured by value directly.
 
 4. **Effects combine upward.** A `begin` has the combined effect of its
-   children. A `fn` body's effect is stored but the fn itself is Pure.
+   children. A `fn` body's effect is stored but the fn itself is Inert.
 
 5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its
    own `Vec<CaptureInfo>` listing what it captures and how.
@@ -108,17 +108,17 @@ HIR (bindings are inline — no separate HashMap)
     current scope. `let*` is desugared to nested `let` in the expander,
     so the analyzer never sees `let*`.
 
-11. **Destructured bindings use silent nil semantics.** Missing list/array/table
+11. **Destructured bindings use silent nil semantics.** Missing list/@array/@struct
      elements produce `nil`, not errors. Wrong-type values produce `nil`
      for all bindings. No runtime type checks.
 
-12. **`HirPattern::Table` supports table/struct destructuring.**
+12. **`HirPattern::Table` supports @struct/struct destructuring.**
      `HirPattern::Table { entries: Vec<(PatternKey, HirPattern)> }` maps
      keyword or symbol keys to sub-patterns. `PatternKey::Keyword(String)`
      for `:foo` keys, `PatternKey::Symbol(SymbolId)` for `'foo` keys.
      In binding forms (`def`, `var`, `let`, `fn` params),
      uses `TableGetOrNil` with silent nil. In `match` patterns, emits an
-     `IsTable` type guard first so non-table values fall through to the next arm.
+     `IsStructMut` type guard first so non-@struct values fall through to the next arm.
 
 13. **`Block` and `Break` are compile-time control flow.** `HirKind::Block`
     has a `BlockId` and optional name. `HirKind::Break` targets a `BlockId`.
@@ -160,8 +160,8 @@ HIR (bindings are inline — no separate HashMap)
       (local or global). Subsequent segments become keyword arguments to
       `get`. This produces standard `HirKind::Call` nodes — no special
       HIR variant. The `get` binding always resolves to the global
-      primitive, matching the pattern used for tuple/array/struct/table
-      literal desugaring. All synthesized nodes carry the original
+       primitive, matching the pattern used for array/@array/struct/@struct
+       literal desugaring. All synthesized nodes carry the original
       symbol's span.
 
 19. **`Parameterize` creates dynamic binding frames.**

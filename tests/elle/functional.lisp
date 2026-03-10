@@ -14,10 +14,10 @@
     (assert-eq (get result 2) 3 "sort: array sorted third")
     (assert-true (identical? result arr) "sort: array mutated in place")))
 (let ((result (sort [3 1 2])))
-  (assert-true (array? result) "sort: tuple returns tuple")
-  (assert-eq (get result 0) 1 "sort: tuple sorted first")
-  (assert-eq (get result 1) 2 "sort: tuple sorted second")
-  (assert-eq (get result 2) 3 "sort: tuple sorted third"))
+  (assert-true (array? result) "sort: array returns array")
+  (assert-eq (get result 0) 1 "sort: array sorted first")
+  (assert-eq (get result 1) 2 "sort: array sorted second")
+  (assert-eq (get result 2) 3 "sort: array sorted third"))
 
 ## ── range ───────────────────────────────────────────────────────────
 (let ((r (range 5)))
@@ -156,7 +156,7 @@
   (assert-true (array? z) "zip: array input returns array")
   (assert-eq (length z) 3 "zip: array length"))
 (let ((z (zip [1 2] [:a :b])))
-  (assert-true (array? z) "zip: tuple input returns tuple"))
+  (assert-true (array? z) "zip: array input returns array"))
 
 ## ── flatten ─────────────────────────────────────────────────────────
 (assert-list-eq (flatten (list 1 (list 2 3) (list 4 (list 5))))
@@ -176,7 +176,7 @@
   (assert-true (array? tw) "take-while: array returns array")
   (assert-eq (length tw) 2 "take-while: array length"))
 (let ((tw (take-while even? [2 4 5 6])))
-  (assert-true (array? tw) "take-while: tuple returns tuple"))
+  (assert-true (array? tw) "take-while: array returns array"))
 
 ## ── drop-while ──────────────────────────────────────────────────────
 (assert-list-eq (drop-while even? (list 2 4 5 6)) (list 5 6) "drop-while: list")
@@ -186,7 +186,7 @@
   (assert-true (array? dw) "drop-while: array returns array")
   (assert-eq (length dw) 2 "drop-while: array length"))
 (let ((dw (drop-while even? [2 4 5 6])))
-  (assert-true (array? dw) "drop-while: tuple returns tuple"))
+  (assert-true (array? dw) "drop-while: array returns array"))
 
 ## ── distinct ────────────────────────────────────────────────────────
 (assert-list-eq (distinct (list 1 2 1 3 2 4)) (list 1 2 3 4) "distinct: list")
@@ -195,7 +195,7 @@
   (assert-true (array? d) "distinct: array returns array")
   (assert-eq (length d) 4 "distinct: array deduped"))
 (let ((d (distinct [1 2 1 3 2 4])))
-  (assert-true (array? d) "distinct: tuple returns tuple"))
+  (assert-true (array? d) "distinct: array returns array"))
 
 ## ── frequencies ─────────────────────────────────────────────────────
 (let ((freq (frequencies (list :a :b :a :c :b :a))))
@@ -287,7 +287,7 @@
   (assert-eq (get result 1) -2 "sort-by: array second")
   (assert-eq (get result 2) -3 "sort-by: array third"))
 (let ((result (sort-by abs [3 1 2])))
-  (assert-true (array? result) "sort-by: tuple returns tuple"))
+  (assert-true (array? result) "sort-by: array returns array"))
 
 ## ── freeze / thaw ────────────────────────────────────────────────────
 (let ((t @{:a 1 :b 2}))
@@ -298,7 +298,7 @@
 
 (let ((s {:a 1 :b 2}))
   (let ((t (thaw s)))
-    (assert-true (struct? t) "thaw: returns table")
+    (assert-true (struct? t) "thaw: returns @struct")
     (assert-eq (get t :a) 1 "thaw: preserves values")
     (put t :c 3)
     (assert-eq (get t :c) 3 "thaw: result is mutable")))

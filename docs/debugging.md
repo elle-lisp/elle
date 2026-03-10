@@ -23,7 +23,7 @@ get information about it. All are `NativeFn`. Primitives that need VM access use
 | Primitive | Signature | Returns | Notes |
 |-----------|-----------|---------|-------|
 | `jit?` | `(jit? value)` | `true` or `false` | True if value is a closure with JIT-compiled native code |
-| `pure?` | `(pure? value)` | `true` or `false` | True if value is a closure with `Effect::Pure` |
+| `pure?` | `(pure? value)` | `true` or `false` | True if value is a closure with `Effect::Inert` |
 | `coro?` | `(coro? value)` | `true` or `false` | True if value is a closure with `Effect::Yields` |
 | `mutates-params?` | `(mutates-params? value)` | `true` or `false` | True if value is a closure whose body mutates any of its own parameters (i.e., `cell_params_mask != 0`) |
 | `closure?` | `(closure? value)` | `true` or `false` | True if value is a closure (bytecode, not native/vm-aware) |
@@ -32,7 +32,7 @@ Implementation: each is a simple predicate that examines the `Value` and,
 for closures, reads fields on the `Closure` struct.
 
 - `jit?` checks `closure.jit_code.is_some()`
-- `pure?` checks `closure.effect == Effect::Pure`
+- `pure?` checks `closure.effect == Effect::Inert`
 - `coro?` checks `closure.effect == Effect::Yields`
 - `mutates-params?` checks `closure.cell_params_mask != 0` (any cell-wrapped params)
 - `closure?` checks `value.as_closure().is_some()`

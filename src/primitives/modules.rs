@@ -93,7 +93,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             }
         };
 
-        let result = match crate::pipeline::compile_file(&contents, symbols) {
+        let result = match crate::pipeline::compile_file(&contents, symbols, &path) {
             Ok(r) => r,
             Err(e) => {
                 return (

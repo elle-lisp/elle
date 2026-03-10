@@ -485,7 +485,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "array",
         example: "(@array 1 2 3) #=> @[1 2 3]",
-        aliases: &["array"],
+        aliases: &[],
     },
     PrimitiveDef {
         name: "array/new",

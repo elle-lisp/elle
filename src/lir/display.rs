@@ -157,7 +157,7 @@ impl fmt::Display for LirInstr {
             LirInstr::IsArray { dst, src } => write!(f, "{} ← tuple?({})", dst, src),
             LirInstr::IsArrayMut { dst, src } => write!(f, "{} ← array?({})", dst, src),
             LirInstr::IsStruct { dst, src } => write!(f, "{} ← struct?({})", dst, src),
-            LirInstr::IsTable { dst, src } => write!(f, "{} ← table?({})", dst, src),
+            LirInstr::IsTable { dst, src } => write!(f, "{} ← struct?({})", dst, src),
             LirInstr::ArrayMutLen { dst, src } => write!(f, "{} ← len({})", dst, src),
 
             // === Cell Operations ===

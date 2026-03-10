@@ -20,8 +20,8 @@ Source locations flow through the entire pipeline, enabling precise error messag
 | `lir` | SSA form with virtual registers and basic blocks |
 | `compiler` | Bytecode instruction definitions and debug formatting |
 | `vm` | Bytecode execution engine and builtin documentation |
-| `value` | Runtime value representation (NaN-boxed 8-byte values) |
-| `effects` | Effect type system (`Pure`, `Yields`, `Polymorphic`) |
+| `value` | Runtime value representation (NaN-boxed 8-byte values): LArray, LArrayMut, LStruct, LStructMut, LString, LStringMut, LBytes, LBytesMut, LSet, LSetMut |
+| `effects` | Effect type system (`Inert`, `Yields`, `Polymorphic`) |
 | `lint` | Diagnostic types and static analysis rules |
 | `symbols` | Symbol table and IDE feature support |
 | `error` | Error types and source location mapping |

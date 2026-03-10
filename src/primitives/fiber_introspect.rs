@@ -192,10 +192,9 @@ pub(crate) fn prim_fiber_propagate(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    // Validate: fiber must be in error or suspended state with a signal
+    // Validate: fiber must be in error or paused state with a signal
     let has_signal = handle.with(|fiber| {
-        matches!(fiber.status, FiberStatus::Error | FiberStatus::Suspended)
-            && fiber.signal.is_some()
+        matches!(fiber.status, FiberStatus::Error | FiberStatus::Paused) && fiber.signal.is_some()
     });
 
     if !has_signal {
@@ -245,7 +244,7 @@ pub(crate) fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
     // Validate: fiber must be in a cancellable state
     let status = handle.with(|fiber| fiber.status);
     match status {
-        FiberStatus::New | FiberStatus::Suspended => {
+        FiberStatus::New | FiberStatus::Paused => {
             // Valid for cancel — store the error value on the fiber
             handle.with_mut(|fiber| {
                 fiber.signal = Some((SIG_ERROR, args.get(1).copied().unwrap_or(Value::NIL)));

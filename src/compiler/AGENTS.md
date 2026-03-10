@@ -27,7 +27,7 @@ Bytecode instruction definitions and debug formatting.
    bytecode. Add new instructions at the end.
 
 2. **Effect inference is conservative.** Unknown calls are `IO`. Only proven
-   pure code is `Pure`.
+   pure code is `Inert`.
 
 ## Key types
 
@@ -48,8 +48,8 @@ Bytecode instruction definitions and debug formatting.
 
 Type guard instructions are used in pattern matching to check value types:
 
-- `IsNil`, `IsEmptyList`, `IsPair`, `IsArray`, `IsArrayMut`, `IsStruct`, `IsTable`
-  — check immutable collection types
+- `IsNil`, `IsEmptyList`, `IsPair`, `IsArray`, `IsArrayMut`, `IsStruct`, `IsStructMut`
+  — check collection types
 - `IsSet`, `IsSetMut` — check set types (immutable and mutable)
 - `IsNumber`, `IsSymbol` — check scalar types
 

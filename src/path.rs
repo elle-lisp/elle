@@ -11,7 +11,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 // =============================================================================
 
 /// Join path components. Absolute components replace the prefix.
-pub(crate) fn join(components: &[&str]) -> String {
+pub fn join(components: &[&str]) -> String {
     let mut buf = Utf8PathBuf::new();
     for c in components {
         buf.push(c);
@@ -20,12 +20,12 @@ pub(crate) fn join(components: &[&str]) -> String {
 }
 
 /// Parent directory. Returns `None` for root and empty string.
-pub(crate) fn parent(path: &str) -> Option<&str> {
+pub fn parent(path: &str) -> Option<&str> {
     Utf8Path::new(path).parent().map(Utf8Path::as_str)
 }
 
 /// File name (last component). Returns `None` for root or empty.
-pub(crate) fn filename(path: &str) -> Option<&str> {
+pub fn filename(path: &str) -> Option<&str> {
     Utf8Path::new(path).file_name()
 }
 

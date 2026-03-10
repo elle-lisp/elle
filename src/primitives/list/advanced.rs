@@ -192,130 +192,153 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Polymorphic concat - always returns new value, never mutates
-/// Works on arrays, tuples, and strings
-/// `(concat collection1 collection2)`
+/// Concatenate one or more collections of the same type.
+/// Collects all elements in a single pass, then builds the result once.
 pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("concat: expected 2 arguments, got {}", args.len()),
-            ),
-        );
+    // Single argument: return as-is (identity)
+    if args.len() == 1 {
+        return (SIG_OK, args[0]);
     }
 
-    // Buffer - return new buffer
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        if let Some(other_buf_ref) = args[1].as_string_mut() {
-            let borrowed = buf_ref.borrow();
-            let other_borrowed = other_buf_ref.borrow();
-            let mut result = borrowed.clone();
-            result.extend(other_borrowed.iter());
-            return (SIG_OK, Value::string_mut(result));
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "concat: both arguments must be same type, got buffer and {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
+    // Dispatch on the type of the first argument
+    // @string
+    if args[0].as_string_mut().is_some() {
+        // Pre-calculate total length
+        let mut total_len = 0usize;
+        for (i, arg) in args.iter().enumerate() {
+            match arg.as_string_mut() {
+                Some(buf_ref) => total_len += buf_ref.borrow().len(),
+                None => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "concat: argument {} is {}, expected @string",
+                                i + 1,
+                                arg.type_name()
+                            ),
+                        ),
+                    )
+                }
+            }
         }
-    }
-
-    // Array - return new array
-    if let Some(vec_ref) = args[0].as_array_mut() {
-        if let Some(other_vec_ref) = args[1].as_array_mut() {
-            let borrowed = vec_ref.borrow();
-            let other_borrowed = other_vec_ref.borrow();
-            let mut result = borrowed.clone();
-            result.extend(other_borrowed.iter().cloned());
-            return (SIG_OK, Value::array_mut(result));
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "concat: both arguments must be same type, got array and {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
+        let mut result = Vec::with_capacity(total_len);
+        for arg in args {
+            let buf_ref = arg.as_string_mut().unwrap();
+            result.extend(buf_ref.borrow().iter());
         }
+        return (SIG_OK, Value::string_mut(result));
     }
 
-    // Tuple - return new tuple
-    if let Some(elems) = args[0].as_array() {
-        if let Some(other_elems) = args[1].as_array() {
-            let mut result = elems.to_vec();
-            result.extend(other_elems.iter().cloned());
-            return (SIG_OK, Value::array(result));
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "concat: both arguments must be same type, got tuple and {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
+    // @array
+    if args[0].as_array_mut().is_some() {
+        let mut total_len = 0usize;
+        for (i, arg) in args.iter().enumerate() {
+            match arg.as_array_mut() {
+                Some(vec_ref) => total_len += vec_ref.borrow().len(),
+                None => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "concat: argument {} is {}, expected @array",
+                                i + 1,
+                                arg.type_name()
+                            ),
+                        ),
+                    )
+                }
+            }
         }
+        let mut result = Vec::with_capacity(total_len);
+        for arg in args {
+            let vec_ref = arg.as_array_mut().unwrap();
+            result.extend(vec_ref.borrow().iter().cloned());
+        }
+        return (SIG_OK, Value::array_mut(result));
     }
 
-    // String - return new string
+    // array (immutable)
+    if args[0].as_array().is_some() {
+        let mut total_len = 0usize;
+        for (i, arg) in args.iter().enumerate() {
+            match arg.as_array() {
+                Some(elems) => total_len += elems.len(),
+                None => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "concat: argument {} is {}, expected array",
+                                i + 1,
+                                arg.type_name()
+                            ),
+                        ),
+                    )
+                }
+            }
+        }
+        let mut result = Vec::with_capacity(total_len);
+        for arg in args {
+            let elems = arg.as_array().unwrap();
+            result.extend(elems.iter().cloned());
+        }
+        return (SIG_OK, Value::array(result));
+    }
+
+    // string (immutable)
     if args[0].is_string() {
-        if args[1].is_string() {
-            let s = args[0].with_string(|s| s.to_string()).unwrap();
-            let other_s = args[1].with_string(|s| s.to_string()).unwrap();
-            let mut result = s;
-            result.push_str(&other_s);
-            return (SIG_OK, Value::string(result.as_str()));
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "concat: both arguments must be same type, got string and {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        }
-    }
-
-    // List (cons-based) - return new list
-    if args[0].is_cons() || args[0].is_empty_list() {
-        let mut first = match args[0].list_to_vec() {
-            Ok(v) => v,
-            Err(e) => return (SIG_ERROR, error_val("type-error", format!("concat: {}", e))),
-        };
-        let second = match args[1].list_to_vec() {
-            Ok(v) => v,
-            Err(_) => {
+        let mut total_len = 0usize;
+        for (i, arg) in args.iter().enumerate() {
+            if arg.is_string() {
+                arg.with_string(|s| total_len += s.len());
+            } else {
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
                         format!(
-                            "concat: both arguments must be same type, got list and {}",
-                            args[1].type_name()
+                            "concat: argument {} is {}, expected string",
+                            i + 1,
+                            arg.type_name()
                         ),
                     ),
-                )
+                );
             }
-        };
-        first.extend(second);
+        }
+        let mut result = String::with_capacity(total_len);
+        for arg in args {
+            arg.with_string(|s| result.push_str(s));
+        }
+        return (SIG_OK, Value::string(result.as_str()));
+    }
+
+    // list (cons-based)
+    if args[0].is_cons() || args[0].is_empty_list() {
+        let mut all_elements = Vec::new();
+        for (i, arg) in args.iter().enumerate() {
+            match arg.list_to_vec() {
+                Ok(v) => all_elements.extend(v),
+                Err(_) => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "concat: argument {} is {}, expected list",
+                                i + 1,
+                                arg.type_name()
+                            ),
+                        ),
+                    )
+                }
+            }
+        }
         let mut result = Value::EMPTY_LIST;
-        for val in first.into_iter().rev() {
+        for val in all_elements.into_iter().rev() {
             result = Value::cons(val, result);
         }
         return (SIG_OK, result);
@@ -327,14 +350,14 @@ pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "concat: expected collection (list, array, tuple, string, or buffer), got {}",
+                "concat: expected collection (list, array, @array, string, or @string), got {}",
                 args[0].type_name()
             ),
         ),
     )
 }
 
-/// Reverse a sequence (list, tuple, array, string)
+/// Reverse a sequence (list, array, @array, string)
 pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (

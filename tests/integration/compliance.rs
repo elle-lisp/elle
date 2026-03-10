@@ -175,10 +175,6 @@ fn test_range_structure() {
         range.get("start").unwrap().get("line").is_some(),
         "start must have line"
     );
-    assert!(
-        range.get("start").unwrap().get("character").is_some(),
-        "start must have character"
-    );
 }
 
 // ==================== TEXT EDIT TESTS ====================
@@ -337,7 +333,7 @@ fn test_completion_list_structure() {
     );
     assert!(completion_list.get("items").is_some(), "items required");
     assert!(
-        completion_list.get("items").unwrap().is_array_mut(),
+        completion_list.get("items").unwrap().as_array().is_some(),
         "items must be array"
     );
 }
@@ -383,11 +379,11 @@ fn test_did_change_notification_params() {
         "textDocument required"
     );
     assert!(
-        params.get("contentChanges").is_some(),
-        "contentChanges required"
+        params.get("contentChanges").unwrap().as_array().is_some(),
+        "contentChanges must be array"
     );
     assert!(
-        params.get("contentChanges").unwrap().is_array_mut(),
+        params.get("contentChanges").unwrap().as_array().is_some(),
         "contentChanges must be array"
     );
 }

@@ -47,7 +47,7 @@ pub enum HirPattern {
         entries: Vec<(PatternKey, HirPattern)>,
     },
 
-    /// Match a table @{...} by keyword or symbol keys (emits IsTable guard)
+    /// Match a mutable struct @{...} by keyword or symbol keys (emits IsTable guard)
     Table {
         entries: Vec<(PatternKey, HirPattern)>,
     },

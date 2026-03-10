@@ -10,7 +10,7 @@ use elle::SymbolTable;
 /// Helper that compiles but doesn't execute (for testing compilation only)
 fn compiles(input: &str) -> bool {
     let mut symbols = SymbolTable::new();
-    compile(input, &mut symbols).is_ok()
+    compile(input, &mut symbols, "<test>").is_ok()
 }
 
 // ============ Literal Tests ============
@@ -161,7 +161,7 @@ fn test_call_simple() {
     // Note: Function calls to built-in symbols like + may fail during lowering
     // because the new pipeline doesn't yet have full integration with built-in symbols.
     let mut symbols = SymbolTable::new();
-    let result = compile("(+ 1 2)", &mut symbols);
+    let result = compile("(+ 1 2)", &mut symbols, "<test>");
     // We accept either success or a specific error about unbound variables
     // since the new pipeline is still being integrated
     match result {
@@ -176,7 +176,7 @@ fn test_call_nested() {
     // Note: Function calls to built-in symbols like + may fail during lowering
     // because the new pipeline doesn't yet have full integration with built-in symbols.
     let mut symbols = SymbolTable::new();
-    let result = compile("(+ (+ 1 2) 3)", &mut symbols);
+    let result = compile("(+ (+ 1 2) 3)", &mut symbols, "<test>");
     // We accept either success or a specific error about unbound variables
     // since the new pipeline is still being integrated
     match result {
@@ -283,21 +283,21 @@ fn test_nested_lets_and_lambdas() {
 fn test_empty_input() {
     let mut symbols = SymbolTable::new();
     // Empty input should fail gracefully
-    let result = compile("", &mut symbols);
+    let result = compile("", &mut symbols, "<test>");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_whitespace_only() {
     let mut symbols = SymbolTable::new();
-    let result = compile("   \n\t  ", &mut symbols);
+    let result = compile("   \n\t  ", &mut symbols, "<test>");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_comment_only() {
     let mut symbols = SymbolTable::new();
-    let result = compile("# this is a comment", &mut symbols);
+    let result = compile("# this is a comment", &mut symbols, "<test>");
     assert!(result.is_err());
 }
 
@@ -306,7 +306,7 @@ fn test_comment_only() {
 #[test]
 fn test_bytecode_not_empty() {
     let mut symbols = SymbolTable::new();
-    let result = compile("42", &mut symbols).unwrap();
+    let result = compile("42", &mut symbols, "<test>").unwrap();
     assert!(
         !result.bytecode.instructions.is_empty(),
         "Bytecode should not be empty"
@@ -316,7 +316,7 @@ fn test_bytecode_not_empty() {
 #[test]
 fn test_bytecode_has_return() {
     let mut symbols = SymbolTable::new();
-    let result = compile("42", &mut symbols).unwrap();
+    let result = compile("42", &mut symbols, "<test>").unwrap();
     // Bytecode should have instructions
     let last_instr = result.bytecode.instructions.last();
     assert!(last_instr.is_some(), "Bytecode should have instructions");
@@ -327,21 +327,21 @@ fn test_bytecode_has_return() {
 #[test]
 fn test_unmatched_paren() {
     let mut symbols = SymbolTable::new();
-    let result = compile("(+ 1 2", &mut symbols);
+    let result = compile("(+ 1 2", &mut symbols, "<test>");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_extra_closing_paren() {
     let mut symbols = SymbolTable::new();
-    let result = compile("(+ 1 2))", &mut symbols);
+    let result = compile("(+ 1 2))", &mut symbols, "<test>");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_invalid_syntax() {
     let mut symbols = SymbolTable::new();
-    let result = compile("(if)", &mut symbols);
+    let result = compile("(if)", &mut symbols, "<test>");
     // Should fail during analysis or lowering
     assert!(result.is_err());
 }
@@ -353,8 +353,8 @@ fn test_same_code_same_bytecode() {
     let mut symbols1 = SymbolTable::new();
     let mut symbols2 = SymbolTable::new();
 
-    let result1 = compile("(let ((x 10)) x)", &mut symbols1).unwrap();
-    let result2 = compile("(let ((x 10)) x)", &mut symbols2).unwrap();
+    let result1 = compile("(let ((x 10)) x)", &mut symbols1, "<test>").unwrap();
+    let result2 = compile("(let ((x 10)) x)", &mut symbols2, "<test>").unwrap();
 
     // Both should compile successfully
     assert!(!result1.bytecode.instructions.is_empty());
@@ -375,6 +375,7 @@ fn test_deeply_nested_expressions() {
     let result = compile(
         "(+ (+ (+ (+ (+ (+ (+ (+ (+ (+ 1 2) 3) 4) 5) 6) 7) 8) 9) 10) 11)",
         &mut symbols,
+        "<test>",
     );
     match result {
         Ok(_) => {}                                    // Success is fine
@@ -400,7 +401,7 @@ fn test_quasiquote() {
     // Quasiquote is an advanced meta-programming feature
     // The new pipeline may not support it yet
     let mut symbols = SymbolTable::new();
-    let result = compile("`(1 2 3)", &mut symbols);
+    let result = compile("`(1 2 3)", &mut symbols, "<test>");
     // Accept either success or failure - this is an advanced feature
     let _ = result;
 }
@@ -410,7 +411,7 @@ fn test_unquote() {
     // Unquote is an advanced meta-programming feature
     // The new pipeline may not support it yet
     let mut symbols = SymbolTable::new();
-    let result = compile("`(1 ,x 3)", &mut symbols);
+    let result = compile("`(1 ,x 3)", &mut symbols, "<test>");
     // Accept either success or failure - this is an advanced feature
     let _ = result;
 }
@@ -420,7 +421,7 @@ fn test_unquote_splicing() {
     // Unquote-splicing is an advanced meta-programming feature
     // The new pipeline may not support it yet
     let mut symbols = SymbolTable::new();
-    let result = compile("`(1 ,;x 3)", &mut symbols);
+    let result = compile("`(1 ,;x 3)", &mut symbols, "<test>");
     // Accept either success or failure - this is an advanced feature
     let _ = result;
 }
@@ -436,7 +437,7 @@ fn test_let_shadowing() {
 fn test_let_with_complex_init() {
     // Note: Function calls to built-in symbols like + may fail during lowering
     let mut symbols = SymbolTable::new();
-    let result = compile("(let ((x (+ 1 2))) x)", &mut symbols);
+    let result = compile("(let ((x (+ 1 2))) x)", &mut symbols, "<test>");
     match result {
         Ok(_) => {}                                    // Success is fine
         Err(e) if e.contains("Unbound variable") => {} // Expected during integration

@@ -83,10 +83,10 @@ pub(crate) fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
 
     let status = handle.with(|fiber| fiber.status);
     let name = match status {
-        FiberStatus::New => "created",
-        FiberStatus::Alive => "running",
-        FiberStatus::Suspended => "suspended",
-        FiberStatus::Dead => "done",
+        FiberStatus::New => "new",
+        FiberStatus::Alive => "alive",
+        FiberStatus::Paused => "paused",
+        FiberStatus::Dead => "dead",
         FiberStatus::Error => "error",
     };
 
@@ -214,7 +214,7 @@ pub(crate) fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
 
     // Validate status and store resume value
     let status_err = handle.with_mut(|fiber| match fiber.status {
-        FiberStatus::New | FiberStatus::Suspended => {
+        FiberStatus::New | FiberStatus::Paused => {
             fiber.signal = Some((SIG_OK, resume_value));
             None
         }
@@ -287,7 +287,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_coroutine_status,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Get the status of a coroutine (:created, :running, :suspended, :done, :error)",
+        doc: "Get the status of a coroutine (:new, :alive, :paused, :dead, :error)",
         params: &["coroutine"],
         category: "coro",
         example: "(coro/status co)",

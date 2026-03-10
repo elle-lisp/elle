@@ -98,7 +98,7 @@ pub(crate) fn prim_fiber_resume(args: &[Value]) -> (SignalBits, Value) {
 
     // Validate fiber status and store resume value
     let status_err = handle.with_mut(|fiber| match fiber.status {
-        FiberStatus::New | FiberStatus::Suspended => {
+        FiberStatus::New | FiberStatus::Paused => {
             fiber.signal = Some((SIG_OK, resume_value));
             None
         }
@@ -433,7 +433,7 @@ mod tests {
         for status in [
             FiberStatus::New,
             FiberStatus::Alive,
-            FiberStatus::Suspended,
+            FiberStatus::Paused,
             FiberStatus::Dead,
             FiberStatus::Error,
         ] {

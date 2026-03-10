@@ -10,7 +10,7 @@
 #   Comparison/logic — =, <, >, not, and, or (short-circuiting)
 #   Bitwise          — bit/and, bit/or, bit/xor, bit/not, bit/shl, bit/shr
 #   Type conversions — number->string, string->integer, integer, float, ...
-#   Mutability split — [tuple] vs @[array], {struct} vs @{table}, "str" vs @"buf"
+#   Mutability split — [array] vs @[array], {struct} vs @{struct}, "str" vs @"str"
 #   Bytes and blobs  — immutable/mutable binary data
 #   Boxes            — first-class mutable cells
 #   Equality         — = does structural equality on data, reference on functions
@@ -202,7 +202,7 @@
 
 # Symbol/keyword → string
 (assert-eq (symbol->string 'hello) "hello" "symbol->string")
-(assert-eq (keyword->string :hello) "hello" "keyword->string (no colon)")
+(assert-eq (string :hello) "hello" "string keyword (no colon)")
 
 # Round-trip: int → string → int
 (assert-eq (string->integer (number->string 99)) 99 "round-trip int")
@@ -237,7 +237,7 @@
 # 9. Bytes and blobs
 # ========================================
 
-# bytes (immutable) and blob (mutable) — raw binary data
+# bytes (immutable) and @bytes (mutable) — raw binary data
 (def b (bytes 72 101 108 108 111))   # "Hello" in ASCII
 (display "  (bytes 72 101 108 108 111) → \"") (display (bytes->string b)) (print "\"")
 (display "  hex: ") (print (bytes->hex b))

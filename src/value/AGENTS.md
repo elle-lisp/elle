@@ -43,7 +43,7 @@ Runtime value representation using NaN-boxing.
 | `SharedAllocator` | `shared_alloc.rs` | Bump allocator for zero-copy inter-fiber value exchange |
 | `Parameter` | `heap.rs` | Dynamic binding with id and default value, looked up at runtime |
 | `LSet` | `heap.rs` | Immutable set (`BTreeSet<Value>`), no `RefCell` |
-| `LSetMut` | `heap.rs` | Mutable set (`RefCell<BTreeSet<Value>>`) |
+| `LSetMut` | `heap.rs` | Mutable set (`RefCell<BTreeSet<Value>>`) (type name `:@set`) |
 
 ### Fiber fields for parent/child chain
 
@@ -139,11 +139,11 @@ Two set types exist, following the immutable/mutable split:
 
 - **`LSet(BTreeSet<Value>)`** — immutable set, no `RefCell`. Created via
   `Value::set()`. Accessed via `Value::as_set()`. Displays as `|1 2 3|`.
-  `type_name()` returns `"set"`.
+  `type_name()` returns `"set"`. Type keyword: `:set`.
 
 - **`LSetMut(RefCell<BTreeSet<Value>>)`** — mutable set, wrapped in `RefCell`.
   Created via `Value::set_mut()`. Accessed via `Value::as_set_mut()`. Displays
-  as `@|1 2 3|`. `type_name()` returns `"@set"`.
+  as `@|1 2 3|`. `type_name()` returns `"@set"`. Type keyword: `:@set`.
 
 Set membership uses structural equality (from `Value: Eq`). When a mutable value
 is inserted into a set, it is frozen (converted to its immutable equivalent).

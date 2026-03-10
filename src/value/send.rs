@@ -162,8 +162,8 @@ impl SendValue {
             // Float values that couldn't be stored inline
             HeapObject::Float(f) => Ok(SendValue::Float(*f)),
 
-            // Unsafe: mutable tables
-            HeapObject::LStructMut(_) => Err("Cannot send mutable table".to_string()),
+            // Unsafe: mutable structs
+            HeapObject::LStructMut(_) => Err("Cannot send mutable struct".to_string()),
 
             // Unsafe: closures (contain function pointers and mutable state)
             HeapObject::Closure(_) => Err("Cannot send closure directly".to_string()),

@@ -1174,8 +1174,8 @@ impl Lowerer {
                 Ok(())
             }
             HirPattern::Table { entries } => {
-                // Table @{...} pattern matching for `match`.
-                // Check if value is a table, then use TableGetOrNil for each key.
+                // @struct @{...} pattern matching for `match`.
+                // Check if value is a @struct, then use TableGetOrNil for each key.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -1195,7 +1195,7 @@ impl Lowerer {
                     });
                 }
 
-                // Type guard: reject non-table values
+                // Type guard: reject non-@struct values
                 let is_table_reg = self.fresh_reg();
                 self.emit(LirInstr::IsTable {
                     dst: is_table_reg,

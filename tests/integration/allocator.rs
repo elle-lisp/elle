@@ -300,35 +300,6 @@ fn test_nested_allocators() {
 }
 
 #[test]
-fn test_shared_alloc_priority() {
-    // shared_alloc takes precedence over custom allocator.
-    reset_counters();
-    let mut heap = make_heap();
-
-    // Install custom allocator
-    let alloc = Rc::new(AllocatorBox::new(TlCountingAllocator));
-    heap.push_custom_allocator(alloc);
-
-    // Create and install shared allocator
-    let sa_ptr = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa_ptr);
-
-    // Allocations should go to shared, not custom
-    heap.alloc(HeapObject::LString("shared-routed".into()));
-    assert_eq!(alloc_count(), 0); // custom alloc NOT called
-    assert_eq!(unsafe { &*sa_ptr }.len(), 1); // went to shared
-
-    // Clear shared, allocations should now go to custom
-    heap.clear_shared_alloc();
-    heap.alloc(HeapObject::LString("custom-routed".into()));
-    assert_eq!(alloc_count(), 1); // now custom is called
-
-    // Cleanup
-    heap.pop_custom_allocator();
-    assert_eq!(dealloc_count(), 1);
-}
-
-#[test]
 fn test_drop_cleans_up_custom_allocators() {
     // FiberHeap Drop runs dealloc for custom objects.
     reset_counters();

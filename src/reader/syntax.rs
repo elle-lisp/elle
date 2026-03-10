@@ -295,7 +295,7 @@ impl SyntaxReader {
                     let end_loc = self.current_location();
                     self.advance();
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
-                    return Ok(Syntax::new(SyntaxKind::Tuple(elements), span));
+                    return Ok(Syntax::new(SyntaxKind::Array(elements), span));
                 }
                 Some(OwnedToken::Pipe) => {
                     let set_loc = self.current_location();
@@ -358,7 +358,7 @@ impl SyntaxReader {
                             self.advance();
 
                             let span = self.merge_spans(start_loc, &end_loc, &elements);
-                            return Ok(Syntax::new(SyntaxKind::Array(elements), span));
+                            return Ok(Syntax::new(SyntaxKind::ArrayMut(elements), span));
                         }
                         _ => elements.push(self.read()?),
                     }
@@ -382,7 +382,7 @@ impl SyntaxReader {
                             self.advance();
 
                             let span = self.merge_spans(start_loc, &end_loc, &elements);
-                            return Ok(Syntax::new(SyntaxKind::Table(elements), span));
+                            return Ok(Syntax::new(SyntaxKind::StructMut(elements), span));
                         }
                         _ => elements.push(self.read()?),
                     }

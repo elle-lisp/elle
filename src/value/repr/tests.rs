@@ -188,7 +188,7 @@ fn test_table_constructor() {
         let borrowed = table_ref.borrow();
         assert_eq!(borrowed.len(), 0);
     } else {
-        panic!("Expected table");
+        panic!("Expected @struct");
     }
 }
 
@@ -298,8 +298,8 @@ fn test_truthiness_semantics() {
     let non_empty_vec = Value::array_mut(vec![Value::int(1)]);
     assert!(non_empty_vec.is_truthy(), "non-empty array is truthy");
 
-    // Table is truthy
-    assert!(Value::struct_mut().is_truthy(), "table is truthy");
+    // @struct is truthy
+    assert!(Value::struct_mut().is_truthy(), "@struct is truthy");
 
     // Cell is truthy
     assert!(Value::cell(Value::int(42)).is_truthy(), "cell is truthy");

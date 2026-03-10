@@ -83,12 +83,8 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "boolean?",
     "keyword?",
     "array?",
-    "tuple?",
-    "table?",
     "struct?",
-    "buffer?",
     "bytes?",
-    "blob?",
     "pointer?",
     "fiber?",
     "closure?",
@@ -98,7 +94,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "box?",
     // Collection predicates → bool
     "empty?",
-    "has-key?",
+    "has?",
     // String predicates → bool (canonical + aliases)
     "string/contains?",
     "string-contains?",

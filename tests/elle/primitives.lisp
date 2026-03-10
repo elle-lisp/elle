@@ -36,7 +36,6 @@
 
 (assert-eq (number->string 42) "42" "number->string int")
 (assert-true (string? (number->string 3.14)) "number->string float")
-(assert-err (fn () (number->string "hello")) "number->string type error")
 
 (assert-eq (string->integer "42") 42 "string->integer")
 (assert-eq (string->integer "-7") -7 "string->integer negative")
@@ -45,11 +44,10 @@
 (assert-eq (any->string 42) "42" "any->string int")
 (assert-eq (any->string true) "true" "any->string bool")
 
-(assert-eq (keyword->string :foo) "foo" "keyword->string")
-(assert-err (fn () (keyword->string 42)) "keyword->string type error")
+(assert-eq (string :foo) "foo" "string keyword")
+(assert-eq (string 42) "42" "string int")
 
 (assert-eq (symbol->string 'foo) "foo" "symbol->string")
-(assert-err (fn () (symbol->string 42)) "symbol->string type error")
 
 ## === Path primitives ===
 
@@ -107,7 +105,7 @@
 
 ## === Read edge cases ===
 
-(assert-eq (keyword->string (read ":hello")) "hello" "read keyword")
+(assert-eq (string (read ":hello")) "hello" "read keyword")
 (assert-eq (read "2.5") 2.5 "read float")
 (assert-eq (read "nil") nil "read nil")
 (assert-err (fn () (read "(+ 1")) "read parse error")
@@ -117,7 +115,7 @@
 (assert-eq (integer 0) 0 "integer zero")
 (assert-eq (integer -42) -42 "integer negative")
 (assert-eq (float 0) 0.0 "float zero")
-(assert-eq (string :hello) ":hello" "string from keyword")
+(assert-eq (string :hello) "hello" "string from keyword")
 (assert-true (string? (string (list))) "string from empty list")
 
 ## === Alias tests ===

@@ -90,7 +90,7 @@ Coroutines are suspendable computations:
 On `yield`:
 1. Create a `ContinuationFrame` capturing IP, stack, env
 2. Build `ContinuationData` with the frame chain
-3. Mark coroutine as `Suspended`
+3. Mark coroutine as `Paused`
 4. Return `VmResult::Yielded { value, continuation }`
 
 On resume:

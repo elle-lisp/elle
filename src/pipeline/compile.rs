@@ -14,13 +14,17 @@ use crate::syntax::{Span, Syntax, SyntaxKind};
 ///
 /// Creates an internal VM for macro expansion. Macro side effects
 /// don't persist beyond compilation.
-pub fn compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String> {
+pub fn compile(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<CompileResult, String> {
     // Ensure caller's SymbolTable has primitive names interned so that
     // SymbolIds match the cached PrimitiveMeta.
     intern_primitive_names(symbols);
 
     // Phase 1: Parse to Syntax
-    let syntax = read_syntax(source)?;
+    let syntax = read_syntax(source, source_name)?;
 
     // Phase 2: Macro expansion (cached VM for macro bodies)
     let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();
@@ -85,10 +89,14 @@ pub(super) fn classify_form(syntax: &Syntax) -> FileForm<'_> {
 /// All top-level forms are analyzed together, enabling mutual recursion.
 /// Returns a single `CompileResult`. Primitives are pre-bound as immutable
 /// Global bindings in an outer scope.
-pub fn compile_file(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String> {
+pub fn compile_file(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<CompileResult, String> {
     intern_primitive_names(symbols);
 
-    let syntaxes = read_syntax_all(source)?;
+    let syntaxes = read_syntax_all(source, source_name)?;
 
     let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();
     // SAFETY: The cached VM is thread-local and pipeline functions are not

@@ -1711,17 +1711,19 @@ fn test_json_serialize_errors() {
 
 // Disassembly tests
 #[test]
-fn test_disbit_returns_array_of_strings() {
+fn test_disjit_returns_array_for_pure_closure() {
     let (_vm, mut symbols, meta) = setup();
-    let disbit = get_primitive(&meta, &mut symbols, "disbit");
+    let disjit = get_primitive(&meta, &mut symbols, "disjit");
 
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _effects = register_primitives(&mut vm2, &mut symbols2);
-    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2, "<test>").unwrap();
 
-    let disasm = call_primitive(&disbit, &[result]).unwrap();
-    let vec = disasm.as_array_mut().expect("disbit should return an array");
+    let disasm = call_primitive(&disjit, &[result]).unwrap();
+    let vec = disasm
+        .as_array_mut()
+        .expect("disbit should return an array");
     let vec = vec.borrow();
     assert!(!vec.is_empty(), "disbit should return non-empty array");
     for elem in vec.iter() {
@@ -1746,16 +1748,16 @@ fn test_disbit_arity_error() {
 }
 
 #[test]
-fn test_disjit_returns_array_for_pure_closure() {
+fn test_disbit_returns_array_for_pure_closure() {
     let (_vm, mut symbols, meta) = setup();
-    let disjit = get_primitive(&meta, &mut symbols, "disjit");
+    let disbit = get_primitive(&meta, &mut symbols, "disbit");
 
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _effects = register_primitives(&mut vm2, &mut symbols2);
-    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2, "<test>").unwrap();
 
-    let ir = call_primitive(&disjit, &[result]).unwrap();
+    let ir = call_primitive(&disbit, &[result]).unwrap();
     if !ir.is_nil() {
         let vec = ir.as_array_mut().expect("disjit should return an array");
         let vec = vec.borrow();
@@ -1793,7 +1795,7 @@ fn eval_full(input: &str) -> Result<Value, elle::error::LError> {
     let _effects = register_primitives(&mut vm, &mut symbols);
     elle::context::set_symbol_table(&mut symbols as *mut SymbolTable);
     elle::primitives::init_stdlib(&mut vm, &mut symbols);
-    pipeline_eval(input, &mut symbols, &mut vm).map_err(elle::error::LError::from)
+    pipeline_eval(input, &mut symbols, &mut vm, "<test>").map_err(elle::error::LError::from)
 }
 
 #[test]

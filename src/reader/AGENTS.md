@@ -70,12 +70,12 @@ The lexer recognizes these delimiters (characters that cannot appear in symbol n
 | Delimiter | Token | Purpose |
 |-----------|-------|---------|
 | `(` `)` | `LParen`, `RParen` | List forms |
-| `[` `]` | `LBracket`, `RBracket` | Tuple literals (immutable) |
+| `[` `]` | `LBracket`, `RBracket` | Array literals (immutable) |
 | `{` `}` | `LBrace`, `RBrace` | Struct literals (immutable) |
 | `\|` | `Pipe` | Set literal delimiter |
-| `@[` | `AtBracket` | Mutable array literal prefix |
-| `@{` | `AtBrace` | Mutable table literal prefix |
-| `@\|` | `AtPipe` | Mutable set literal prefix |
+| `@[` | `AtBracket` | @array literal prefix (mutable) |
+| `@{` | `AtBrace` | @struct literal prefix (mutable) |
+| `@\|` | `AtPipe` | @set literal prefix (mutable) |
 | `'` | `Quote` | Quote reader macro |
 | `` ` `` | `Quasiquote` | Quasiquote reader macro |
 | `,` | `Unquote` | Unquote reader macro (inside quasiquote) |

@@ -77,10 +77,10 @@ impl Syntax {
         self.scope_exempt = true;
         match &mut self.kind {
             SyntaxKind::List(items)
-            | SyntaxKind::Tuple(items)
             | SyntaxKind::Array(items)
+            | SyntaxKind::ArrayMut(items)
             | SyntaxKind::Struct(items)
-            | SyntaxKind::Table(items)
+            | SyntaxKind::StructMut(items)
             | SyntaxKind::Set(items)
             | SyntaxKind::SetMut(items) => {
                 for item in items {
@@ -138,7 +138,7 @@ impl Syntax {
     /// of `[...]` remain tuple literals.
     pub fn as_list_or_tuple(&self) -> Option<&[Syntax]> {
         match &self.kind {
-            SyntaxKind::List(items) | SyntaxKind::Tuple(items) => Some(items),
+            SyntaxKind::List(items) | SyntaxKind::Array(items) => Some(items),
             _ => None,
         }
     }
@@ -154,10 +154,10 @@ impl Syntax {
             SyntaxKind::Keyword(_) => "keyword",
             SyntaxKind::String(_) => "string",
             SyntaxKind::List(_) => "list",
-            SyntaxKind::Tuple(_) => "tuple",
             SyntaxKind::Array(_) => "array",
+            SyntaxKind::ArrayMut(_) => "@array",
             SyntaxKind::Struct(_) => "struct",
-            SyntaxKind::Table(_) => "table",
+            SyntaxKind::StructMut(_) => "@struct",
             SyntaxKind::Set(_) => "set",
             SyntaxKind::SetMut(_) => "mutable set",
             SyntaxKind::Quote(_) => "quote",
@@ -183,14 +183,14 @@ pub enum SyntaxKind {
 
     // Compounds
     List(Vec<Syntax>),
-    /// Bracket-delimited immutable tuple: `[...]`
-    Tuple(Vec<Syntax>),
-    /// Bracket-delimited mutable array: `@[...]`
+    /// Bracket-delimited immutable array: `[...]`
     Array(Vec<Syntax>),
+    /// Bracket-delimited mutable array: `@[...]`
+    ArrayMut(Vec<Syntax>),
     /// Brace-delimited immutable struct: `{...}`
     Struct(Vec<Syntax>),
-    /// Brace-delimited mutable table: `@{...}`
-    Table(Vec<Syntax>),
+    /// Brace-delimited mutable struct: `@{...}`
+    StructMut(Vec<Syntax>),
     /// Pipe-delimited immutable set literal: `|...|`
     Set(Vec<Syntax>),
     /// Pipe-delimited mutable set literal: `@|...|`
@@ -353,7 +353,7 @@ mod tests {
             Syntax::new(SyntaxKind::Int(1), span.clone()),
             Syntax::new(SyntaxKind::Int(2), span.clone()),
         ];
-        let syntax = Syntax::new(SyntaxKind::Tuple(items), span);
+        let syntax = Syntax::new(SyntaxKind::Array(items), span);
         assert_eq!(syntax.to_string(), "[1 2]");
     }
 
@@ -364,7 +364,7 @@ mod tests {
             Syntax::new(SyntaxKind::Int(1), span.clone()),
             Syntax::new(SyntaxKind::Int(2), span.clone()),
         ];
-        let syntax = Syntax::new(SyntaxKind::Array(items), span);
+        let syntax = Syntax::new(SyntaxKind::ArrayMut(items), span);
         assert_eq!(syntax.to_string(), "@[1 2]");
     }
 
@@ -454,7 +454,7 @@ mod tests {
             Syntax::new(SyntaxKind::Int(1), span.clone()),
             Syntax::new(SyntaxKind::Int(2), span.clone()),
         ];
-        let syntax = Syntax::new(SyntaxKind::Tuple(items), span);
+        let syntax = Syntax::new(SyntaxKind::Array(items), span);
         let result = expander.expand(syntax, &mut symbols, &mut vm);
         assert!(result.is_ok());
         let expanded = result.unwrap();
@@ -472,7 +472,7 @@ mod tests {
             Syntax::new(SyntaxKind::Int(1), span.clone()),
             Syntax::new(SyntaxKind::Int(2), span.clone()),
         ];
-        let syntax = Syntax::new(SyntaxKind::Array(items), span);
+        let syntax = Syntax::new(SyntaxKind::ArrayMut(items), span);
         let result = expander.expand(syntax, &mut symbols, &mut vm);
         assert!(result.is_ok());
         let expanded = result.unwrap();

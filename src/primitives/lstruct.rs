@@ -1,4 +1,4 @@
-//! Table operations primitives (mutable hash tables)
+//! Struct operations primitives (mutable hash tables)
 //!
 //! Polymorphic collection access (get, put) is in `access.rs`.
 use crate::effects::Effect;
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use super::access::{prim_get, prim_put};
 
-/// Declarative table of table primitives.
+/// Declarative table of struct primitives.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "@struct",
@@ -19,7 +19,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(0),
         doc: "Create a mutable struct from key-value pairs",
         params: &[],
-        category: "table",
+        category: "struct",
         example: "(@struct :a 1 :b 2)",
         aliases: &["table"],
     },
@@ -28,9 +28,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_get,
         effect: Effect::inert(),
         arity: Arity::Range(2, 3),
-        doc: "Get a value from a collection (tuple, array, string, table, or struct) by index or key, with optional default",
+        doc: "Get a value from a collection (tuple, array, string, struct) by index or key, with optional default",
         params: &["collection", "key", "default"],
-        category: "table",
+        category: "struct",
         example: "(get [1 2 3] 0)",
         aliases: &[],
     },
@@ -39,10 +39,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_put,
         effect: Effect::inert(),
         arity: Arity::Exact(3),
-        doc: "Put a key-value pair into a table or struct",
+        doc: "Put a key-value pair into a struct",
         params: &["collection", "key", "value"],
-        category: "table",
-        example: "(put (table) :a 1)",
+        category: "struct",
+        example: "(put (@struct) :a 1)",
         aliases: &[],
     },
     PrimitiveDef {
@@ -50,10 +50,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_del,
         effect: Effect::inert(),
         arity: Arity::Exact(2),
-        doc: "Delete a key from a table or struct",
+        doc: "Delete a key from a struct",
         params: &["collection", "key"],
-        category: "table",
-        example: "(del (table :a 1) :a)",
+        category: "struct",
+        example: "(del (@struct :a 1) :a)",
         aliases: &[],
     },
     PrimitiveDef {
@@ -61,10 +61,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_keys,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Get all keys from a table or struct as a list",
+        doc: "Get all keys from a struct as a list",
         params: &["collection"],
-        category: "table",
-        example: "(keys (table :a 1 :b 2))",
+        category: "struct",
+        example: "(keys (@struct :a 1 :b 2))",
         aliases: &[],
     },
     PrimitiveDef {
@@ -72,10 +72,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_values,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Get all values from a table or struct as a list",
+        doc: "Get all values from a struct as a list",
         params: &["collection"],
-        category: "table",
-        example: "(values (table :a 1 :b 2))",
+        category: "struct",
+        example: "(values (@struct :a 1 :b 2))",
         aliases: &[],
     },
      PrimitiveDef {
@@ -85,21 +85,21 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
          arity: Arity::Exact(2),
          doc: "Check if a collection has a key or element",
          params: &["collection", "key"],
-         category: "table",
-         example: "(has? (table :a 1) :a)",
+         category: "struct",
+         example: "(has? (@struct :a 1) :a)",
          aliases: &["has-key?"],
      },
 ];
 
-/// Create a mutable table from key-value pairs
-/// (table key1 val1 key2 val2 ...)
+/// Create a mutable struct from key-value pairs
+/// (@struct key1 val1 key2 val2 ...)
 pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
     if !args.len().is_multiple_of(2) {
         return (
             SIG_ERROR,
             error_val(
                 "error",
-                "table: requires an even number of arguments (key-value pairs)".to_string(),
+                "@struct: requires an even number of arguments (key-value pairs)".to_string(),
             ),
         );
     }
@@ -125,9 +125,9 @@ pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::struct_mut_from(map))
 }
 
-/// Polymorphic del - works on tables, structs, and sets
-/// For tables: mutates in-place and returns the table
-/// For structs: returns a new struct without the field (immutable)
+/// Polymorphic del - works on structs and sets
+/// For @struct: mutates in-place and returns the struct
+/// For struct: returns a new struct without the field (immutable)
 /// For sets: delegates to set-specific del
 /// `(del collection key)`
 pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
@@ -160,20 +160,20 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
     };
 
     if args[0].is_struct_mut() {
-        let table = match args[0].as_struct_mut() {
+        let mstruct = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("del: expected table, got {}", args[0].type_name()),
+                        format!("del: expected struct, got {}", args[0].type_name()),
                     ),
                 )
             }
         };
-        table.borrow_mut().remove(&key);
-        (SIG_OK, args[0]) // Return the mutated table
+        mstruct.borrow_mut().remove(&key);
+        (SIG_OK, args[0]) // Return the mutated struct
     } else if args[0].is_struct() {
         let s = match args[0].as_struct() {
             Some(st) => st,
@@ -195,16 +195,13 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!(
-                    "del: expected table, struct, or set, got {}",
-                    args[0].type_name()
-                ),
+                format!("del: expected struct or set, got {}", args[0].type_name()),
             ),
         )
     }
 }
 
-/// Polymorphic keys - works on both tables and structs
+/// Polymorphic keys - works on both structs
 /// `(keys collection)`
 pub(crate) fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -218,19 +215,19 @@ pub(crate) fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
     }
 
     if args[0].is_struct_mut() {
-        let table = match args[0].as_struct_mut() {
+        let mstruct = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("keys: expected table, got {}", args[0].type_name()),
+                        format!("keys: expected struct, got {}", args[0].type_name()),
                     ),
                 )
             }
         };
-        let borrowed = table.borrow();
+        let borrowed = mstruct.borrow();
         let keys: Vec<Value> = borrowed.keys().map(|k| k.to_value()).collect();
         (SIG_OK, crate::value::list(keys))
     } else if args[0].is_struct() {
@@ -253,16 +250,13 @@ pub(crate) fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!(
-                    "keys: expected table or struct, got {}",
-                    args[0].type_name()
-                ),
+                format!("keys: expected struct, got {}", args[0].type_name()),
             ),
         )
     }
 }
 
-/// Polymorphic values - works on both tables and structs
+/// Polymorphic values - works on both structs
 /// `(values collection)`
 pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -276,19 +270,19 @@ pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
     }
 
     if args[0].is_struct_mut() {
-        let table = match args[0].as_struct_mut() {
+        let mstruct = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("values: expected table, got {}", args[0].type_name()),
+                        format!("values: expected struct, got {}", args[0].type_name()),
                     ),
                 )
             }
         };
-        let borrowed = table.borrow();
+        let borrowed = mstruct.borrow();
         let values: Vec<Value> = borrowed.values().copied().collect();
         (SIG_OK, crate::value::list(values))
     } else if args[0].is_struct() {
@@ -311,26 +305,28 @@ pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!(
-                    "values: expected table or struct, got {}",
-                    args[0].type_name()
-                ),
+                format!("values: expected struct, got {}", args[0].type_name()),
             ),
         )
     }
 }
 
-/// Polymorphic has-key? - works on both tables and structs
-/// `(has-key? collection key)`
+/// Polymorphic has? - works on structs and sets
+/// `(has? collection key)`
 pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("has-key?: expected 2 arguments, got {}", args.len()),
+                format!("has?: expected 2 arguments, got {}", args.len()),
             ),
         );
+    }
+
+    // Delegate to set membership check
+    if args[0].is_set() || args[0].is_set_mut() {
+        return crate::primitives::sets::prim_contains(args);
     }
 
     let key = match TableKey::from_value(&args[1]) {
@@ -347,19 +343,19 @@ pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
     };
 
     if args[0].is_struct_mut() {
-        let table = match args[0].as_struct_mut() {
+        let mstruct = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("has-key?: expected table, got {}", args[0].type_name()),
+                        format!("has-key?: expected struct, got {}", args[0].type_name()),
                     ),
                 )
             }
         };
-        (SIG_OK, Value::bool(table.borrow().contains_key(&key)))
+        (SIG_OK, Value::bool(mstruct.borrow().contains_key(&key)))
     } else if args[0].is_struct() {
         let s = match args[0].as_struct() {
             Some(st) => st,
@@ -379,10 +375,7 @@ pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!(
-                    "has-key?: expected table or struct, got {}",
-                    args[0].type_name()
-                ),
+                format!("has?: expected struct or set, got {}", args[0].type_name()),
             ),
         )
     }

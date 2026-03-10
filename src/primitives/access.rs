@@ -1,14 +1,14 @@
 //! Polymorphic collection access primitives (get, put).
 //!
 //! These functions work on multiple collection types:
-//! - `get`: retrieves values from tuples, arrays, strings, buffers, bytes, blobs, lists, tables, and structs
-//! - `put`: updates values in arrays, tuples, strings, buffers, blobs, tables, and structs
+//! - `get`: retrieves values from tuples, arrays, strings, buffers, bytes, blobs, lists, and structs
+//! - `put`: updates values in arrays, tuples, strings, buffers, blobs, and structs
 
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{error_val, TableKey, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Polymorphic get - works on tuples, arrays, strings, tables, and structs
+/// Polymorphic get - works on tuples, arrays, strings, and structs
 /// `(get collection key [default])`
 pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 || args.len() > 3 {
@@ -204,16 +204,16 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
             .unwrap();
     }
 
-    // Table (mutable keyed collection)
+    // Struct (mutable keyed collection)
     if args[0].is_struct_mut() {
-        let table = match args[0].as_struct_mut() {
+        let mstruct = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("get: expected table, got {}", args[0].type_name()),
+                        format!("get: expected struct, got {}", args[0].type_name()),
                     ),
                 )
             }
@@ -230,7 +230,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        let borrowed = table.borrow();
+        let borrowed = mstruct.borrow();
         return (SIG_OK, borrowed.get(&key).copied().unwrap_or(default));
     }
 
@@ -307,19 +307,18 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "get: expected collection (list, tuple, array, string, buffer, table, or struct), got {}",
+                "get: expected collection (list, tuple, array, string, buffer, or struct), got {}",
                 args[0].type_name()
             ),
         ),
     )
 }
 
-/// Polymorphic put - works on tuples, arrays, strings, tables, and structs
+/// Polymorphic put - works on tuples, arrays, strings, and structs
 /// For arrays: mutates in-place and returns the array
 /// For tuples: returns a new tuple with the updated element (immutable)
 /// For strings: returns a new string with the updated character (immutable)
-/// For tables: mutates in-place and returns the table
-/// For structs: returns a new struct with the updated field (immutable)
+/// For structs: mutates in-place (@struct) or returns new (struct)
 /// `(put collection key value)`
 pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 3 {
@@ -569,7 +568,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             .unwrap();
     }
 
-    // Table (mutable keyed collection) - mutate in place
+    // Struct (mutable keyed collection) - mutate in place
     let key = match TableKey::from_value(&args[1]) {
         Some(k) => k,
         None => {
@@ -585,20 +584,20 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     let value = args[2];
 
     if args[0].is_struct_mut() {
-        let table = match args[0].as_struct_mut() {
+        let mstruct = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("put: expected table, got {}", args[0].type_name()),
+                        format!("put: expected struct, got {}", args[0].type_name()),
                     ),
                 )
             }
         };
-        table.borrow_mut().insert(key, value);
-        return (SIG_OK, args[0]); // Return the mutated table
+        mstruct.borrow_mut().insert(key, value);
+        return (SIG_OK, args[0]); // Return the mutated struct
     }
 
     // Struct (immutable keyed collection) - return new struct
@@ -626,7 +625,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "put: expected collection (tuple, array, string, buffer, table, or struct), got {}",
+                "put: expected collection (tuple, array, string, buffer, or struct), got {}",
                 args[0].type_name()
             ),
         ),

@@ -12,7 +12,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let params_syntax = items[1].as_list_or_tuple().ok_or_else(|| {
-            if matches!(items[1].kind, SyntaxKind::Array(_)) {
+            if matches!(items[1].kind, SyntaxKind::ArrayMut(_)) {
                 format!(
                     "{}: lambda parameters must use (...) or [...], not @[...]",
                     items[1].span

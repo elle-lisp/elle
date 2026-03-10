@@ -39,7 +39,7 @@ pub(crate) fn prim_read(args: &[Value]) -> (SignalBits, Value) {
     };
 
     // Parse the first form
-    let syntax = match read_syntax(&source) {
+    let syntax = match read_syntax(&source, "<read>") {
         Ok(s) => s,
         Err(e) => return (SIG_ERROR, error_val("read-error", e)),
     };
@@ -91,7 +91,7 @@ pub(crate) fn prim_read_all(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let syntaxes = match read_syntax_all(&source) {
+    let syntaxes = match read_syntax_all(&source, "<read>") {
         Ok(s) => s,
         Err(e) => return (SIG_ERROR, error_val("read-error", e)),
     };

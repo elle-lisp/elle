@@ -54,14 +54,15 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         let elements: Result<Vec<String>, String> = borrowed.iter().map(serialize_value).collect();
         Ok(format!("[{}]", elements?.join(",")))
     } else if let Some(t) = value.as_struct_mut() {
-        let table = t.borrow();
+        let mstruct = t.borrow();
         let mut pairs = Vec::new();
-        for (k, v) in table.iter() {
+        for (k, v) in mstruct.iter() {
             let key_str = match k {
                 TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
                 _ => {
                     return Err(
-                        "Table keys must be strings or keywords for JSON serialization".to_string(),
+                        "@struct keys must be strings or keywords for JSON serialization"
+                            .to_string(),
                     )
                 }
             };
@@ -101,7 +102,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             HeapTag::LString => Err("String should have been handled above".to_string()),
             HeapTag::Cons => Err("Cons should have been handled above".to_string()),
             HeapTag::LArrayMut => Err("Array should have been handled above".to_string()),
-            HeapTag::LStructMut => Err("Table should have been handled above".to_string()),
+            HeapTag::LStructMut => Err("@struct should have been handled above".to_string()),
             HeapTag::LStruct => Err("Struct should have been handled above".to_string()),
             HeapTag::Closure => Err("Cannot serialize closures to JSON".to_string()),
             HeapTag::LArray => {
@@ -214,17 +215,18 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             indent
         ))
     } else if let Some(t) = value.as_struct_mut() {
-        let table = t.borrow();
-        if table.is_empty() {
+        let mstruct = t.borrow();
+        if mstruct.is_empty() {
             return Ok("{}".to_string());
         }
         let mut pairs = Vec::new();
-        for (k, v) in table.iter() {
+        for (k, v) in mstruct.iter() {
             let key_str = match k {
                 TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
                 _ => {
                     return Err(
-                        "Table keys must be strings or keywords for JSON serialization".to_string(),
+                        "@struct keys must be strings or keywords for JSON serialization"
+                            .to_string(),
                     )
                 }
             };
@@ -277,7 +279,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             HeapTag::LString => Err("String should have been handled above".to_string()),
             HeapTag::Cons => Err("Cons should have been handled above".to_string()),
             HeapTag::LArrayMut => Err("Array should have been handled above".to_string()),
-            HeapTag::LStructMut => Err("Table should have been handled above".to_string()),
+            HeapTag::LStructMut => Err("@struct should have been handled above".to_string()),
             HeapTag::LStruct => Err("Struct should have been handled above".to_string()),
             HeapTag::Closure => Err("Cannot serialize closures to JSON".to_string()),
             HeapTag::LArray => {

@@ -152,34 +152,34 @@ impl VM {
         &self.location_map
     }
 
-    /// Set the current source location for error reporting
     /// Format a runtime error value with source location.
     pub(crate) fn format_error_with_location(&self, err_value: Value) -> String {
-        let mut result = format!("{}", err_value);
+        let mut result = String::new();
 
-        // Add stack trace (shallowest frame first, drilling down to error origin)
+        // Stack trace first (shallowest frame first, drilling down to error origin)
         let trace = self.capture_stack_trace();
         if !trace.is_empty() {
             const MAX_TRACE_DEPTH: usize = 20;
             for frame in trace.iter().rev().take(MAX_TRACE_DEPTH) {
                 if let Some(name) = &frame.function_name {
-                    result.push_str(&format!("\n  in {}", name));
+                    result.push_str(&format!("  in {}", name));
                     if let Some(loc) = &frame.location {
                         result.push_str(&format!(" at {}", loc));
                     }
+                    result.push('\n');
                 }
             }
             if trace.len() > MAX_TRACE_DEPTH {
                 result.push_str(&format!(
-                    "\n  ... {} more frames",
+                    "  ... {} more frames\n",
                     trace.len() - MAX_TRACE_DEPTH
                 ));
             }
         }
 
-        // Error location and source context come last (the exact error origin)
+        // Error location and source context
         if let Some(loc) = &self.error_loc {
-            result.push_str(&format!("\n  at {}", loc));
+            result.push_str(&format!("  at {}\n", loc));
 
             // Add source context if available
             if let Some(source) = crate::error::formatting::load_source_for_loc(loc) {
@@ -190,17 +190,16 @@ impl VM {
                     } else {
                         line.to_string()
                     };
-                    result.push_str(&format!("\n   {} | {}", loc.line, truncated));
+                    result.push_str(&format!("   {}\n", truncated));
 
                     let caret = crate::error::formatting::highlight_column(&line, loc.col);
-                    result.push_str(&format!(
-                        "\n   {} | {}",
-                        " ".repeat(loc.line.to_string().len()),
-                        caret
-                    ));
+                    result.push_str(&format!("   {}\n", caret));
                 }
             }
         }
+
+        // Error value last
+        result.push_str(&format!("✗ Runtime error: {:?}", err_value));
 
         result
     }

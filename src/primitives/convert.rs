@@ -159,7 +159,7 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
     }
 
     if let Some(name) = val.as_keyword_name() {
-        return (SIG_OK, Value::string(format!(":{}", name)));
+        return (SIG_OK, Value::string(name));
     }
 
     // Handle heap types (Cons, Array, etc.)
@@ -231,36 +231,6 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
     (SIG_OK, Value::string(format!("{:?}", val)))
 }
 
-/// Convert number to string
-pub(crate) fn prim_number_to_string(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("number->string: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
-    match args[0].as_int() {
-        Some(n) => (SIG_OK, Value::string(n.to_string())),
-        None => match args[0].as_float() {
-            Some(f) => (SIG_OK, Value::string(f.to_string())),
-            None => (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "number->string: expected number, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            ),
-        },
-    }
-}
-
 // ============ SCHEME-STYLE CONVERSION ALIASES ============
 
 /// Convert string to integer (Scheme-style name)
@@ -275,89 +245,8 @@ pub(crate) fn prim_string_to_float(args: &[Value]) -> (SignalBits, Value) {
     prim_to_float(args)
 }
 
-/// Convert any value to string (Scheme-style name)
-/// `(any->string val)`
-pub(crate) fn prim_any_to_string(args: &[Value]) -> (SignalBits, Value) {
-    prim_to_string(args)
-}
-
-/// Convert keyword to string (without colon prefix)
-/// `(keyword->string kw)` → `"name"`
-pub(crate) fn prim_keyword_to_string(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("keyword->string: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
-    match args[0].as_keyword_name() {
-        Some(name) => (SIG_OK, Value::string(name)),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "keyword->string: expected keyword, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        ),
-    }
-}
-
-/// `(symbol->string sym)` → `"name"`
-pub(crate) fn prim_symbol_to_string(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("symbol->string: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
-    match args[0].as_symbol() {
-        Some(id) => match crate::context::resolve_symbol_name(id) {
-            Some(name) => (SIG_OK, Value::string(name)),
-            None => (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("Symbol ID {} not found in symbol table", id),
-                ),
-            ),
-        },
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "symbol->string: expected symbol, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        ),
-    }
-}
-
 /// Declarative primitive definitions for conversion module.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "number->string",
-        func: prim_number_to_string,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Convert number to string.",
-        params: &["n"],
-        category: "conversion",
-        example: "(number->string 42) #=> \"42\"",
-        aliases: &[],
-    },
     PrimitiveDef {
         name: "string->integer",
         func: prim_string_to_int,
@@ -381,44 +270,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "any->string",
-        func: prim_any_to_string,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Convert any value to its string representation.",
-        params: &["x"],
-        category: "conversion",
-        example: "(any->string 42) #=> \"42\"\n(any->string true) #=> \"true\"",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "symbol->string",
-        func: prim_symbol_to_string,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Convert symbol to string (without quote).",
-        params: &["sym"],
-        category: "conversion",
-        example: "(symbol->string 'foo) #=> \"foo\"",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "keyword->string",
-        func: prim_keyword_to_string,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Convert keyword to string (without colon prefix).",
-        params: &["kw"],
-        category: "conversion",
-        example: "(keyword->string :foo) #=> \"foo\"",
-        aliases: &[],
-    },
-    PrimitiveDef {
         name: "integer",
         func: prim_to_int,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Convert value to integer. Accepts int, float, or string.",
+        doc: "Convert value to integer (48-bit signed). Accepts int, float, or string.",
         params: &["x"],
         category: "conversion",
         example: "(integer 3.7) #=> 3\n(integer \"42\") #=> 42",
@@ -444,6 +300,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["values"],
         category: "conversion",
         example: "(string \"count: \" 42) #=> \"count: 42\"",
-        aliases: &[],
+        aliases: &["any->string", "number->string", "symbol->string"],
     },
 ];

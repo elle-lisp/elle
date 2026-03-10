@@ -8,7 +8,7 @@
 # lists, arrays, tuples, strings, and grapheme-aware text processing.
 #
 # Demonstrates:
-#   Literal syntax    — [tuple]  @[array]  {struct}  @{table}  "string"  @"buffer"
+#   Literal syntax    — [array]  @[array]  {struct}  @{struct}  "string"  @"string"
 #   Mutability        — @ prefix means mutable; bare means immutable
 #   Polymorphic ops   — get, length, empty?, append, concat across types
 #   put semantics     — mutates mutable types, copies immutable types
@@ -32,9 +32,9 @@
 # ========================================
 #
 # Bare delimiters are immutable; @-prefixed are mutable.
-#   [...]  tuple      @[...]  array
-#   {...}  struct     @{...}  table
-#   "..."  string     @"..."  buffer
+#   [...]  array      @[...]  @array
+#   {...}  struct     @{...}  @struct
+#   "..."  string     @"..."  @string
 
 # A contact is an immutable struct — once created, it never changes.
 (def alice {:name "Alice" :email "alice@example.com" :tags [:dev :lead]})
@@ -105,10 +105,10 @@
 
 # Unpack tags by position
 (def [first-tag second-tag] atags)
-(assert-eq first-tag :dev "tuple destructure: first tag")
-(assert-eq second-tag :lead "tuple destructure: second tag")
+(assert-eq first-tag :dev "array destructure: first tag")
+(assert-eq second-tag :lead "array destructure: second tag")
 
-# Nested destructuring in let: struct containing a tuple
+# Nested destructuring in let: struct containing an array
 (let ([{:name n :tags [t & _]} (get book "carol")])
   (assert-eq n "Carol" "let destructure: name")
   (assert-eq t :ops "let destructure: first tag")
@@ -215,7 +215,7 @@
   "Format a tag tuple as [dev, lead]."
   (var parts (list))
   (each t in tags
-    (assign parts (append parts (list (keyword->string t)))))
+    (assign parts (append parts (list (string t)))))
   (-> "[" (append (string/join parts ", ")) (append "]")))
 
 (defn format-contact [{:name name :email email :tags tags}]

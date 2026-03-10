@@ -713,10 +713,10 @@
     (let ((backend (io/backend :sync)))
       (fiber/resume fiber)
       (forever
-        (case (fiber/status fiber)
-          :dead      (break (fiber/value fiber))
-          :error     (fiber/propagate fiber)
-          :suspended (cond
+       (case (fiber/status fiber)
+         :dead      (break (fiber/value fiber))
+         :error     (fiber/propagate fiber)
+         :paused (cond
                        ((not (= 0 (bit/and (fiber/bits fiber) 1)))
                         (fiber/propagate fiber))
                        ((not (= 0 (bit/and (fiber/bits fiber) 512)))
@@ -754,10 +754,10 @@
             (while (> (length runnable) 0)
               (let ((fiber (pop runnable)))
                 (fiber/resume fiber)
-                (case (fiber/status fiber)
-                  :dead      nil
-                  :error     (fiber/propagate fiber)
-                  :suspended (cond
+                 (case (fiber/status fiber)
+                   :dead      nil
+                   :error     (fiber/propagate fiber)
+                   :paused (cond
                                ((not (= 0 (bit/and (fiber/bits fiber) 1)))
                                 (fiber/propagate fiber))
                                ((not (= 0 (bit/and (fiber/bits fiber) 512)))
@@ -778,10 +778,10 @@
                     (if (nil? (get c :error))
                       (begin
                         (fiber/resume fiber (get c :value))
-                        (case (fiber/status fiber)
-                          :dead      nil
-                          :error     (fiber/propagate fiber)
-                          :suspended (cond
+                         (case (fiber/status fiber)
+                           :dead      nil
+                           :error     (fiber/propagate fiber)
+                           :paused (cond
                                        ((not (= 0 (bit/and (fiber/bits fiber) 1)))
                                         (fiber/propagate fiber))
                                        ((not (= 0 (bit/and (fiber/bits fiber) 512)))

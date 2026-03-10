@@ -57,11 +57,11 @@
 (assert-eq (integer (float 0)) 0 "integer(float(0)) == 0")
 
 # keyword_to_string
-# (keyword->string :kw) should convert keyword to string
-(assert-string-eq (keyword->string :hello) "hello"
-                  "keyword->string(:hello) == \"hello\"")
-(assert-string-eq (keyword->string :x) "x"
-                  "keyword->string(:x) == \"x\"")
+# (string :kw) should convert keyword to string
+(assert-string-eq (string :hello) "hello"
+                  "string(:hello) == \"hello\"")
+(assert-string-eq (string :x) "x"
+                  "string(:x) == \"x\"")
 
 # any_to_string
 # (any->string val) should convert any value to string representation
@@ -88,5 +88,5 @@
   "string multi: mixed types")
 (assert-string-eq (string "bool: " true ", nil: " nil) "bool: true, nil: nil"
   "string multi: bool and nil")
-(assert-string-eq (string "kw: " :hello) "kw: :hello"
+(assert-string-eq (string "kw: " :hello) "kw: hello"
   "string multi: keyword")

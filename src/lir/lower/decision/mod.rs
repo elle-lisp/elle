@@ -34,7 +34,7 @@ pub(crate) enum AccessPath {
     /// Slice from index `i` to end of a tuple/array at the given path.
     /// Used for `& rest` patterns in tuple/array destructuring.
     Slice(Box<AccessPath>, usize),
-    /// Value at keyword key in a struct/table at the given path.
+    /// Value at keyword key in a struct at the given path.
     Key(Box<AccessPath>, PatternKey),
 }
 
@@ -59,7 +59,7 @@ pub(crate) enum Constructor {
     ArrayMutRest(usize),
     /// Struct with these keys (open match — presence, not exclusivity).
     Struct(Vec<PatternKey>),
-    /// Table with these keys (open match).
+    /// @Struct with these keys (open match).
     Table(Vec<PatternKey>),
     /// Immutable set (type guard only, arity 1 — the binding gets the whole value).
     Set,
@@ -341,9 +341,9 @@ fn collect_constructor_strings(pat: &HirPattern, out: &mut HashSet<String>) {
 /// Collect distinct constructors in a column.
 ///
 /// Looks inside or-patterns to find their constituent constructors.
-/// Struct and Table constructors with different key sets are merged
+/// Struct and @Struct constructors with different key sets are merged
 /// into a single constructor with the union of all keys, because
-/// struct/table patterns are "open" (a value can match multiple
+/// struct patterns are "open" (a value can match multiple
 /// patterns with different key sets).
 fn collect_constructors(matrix: &PatternMatrix, col: usize) -> Vec<Constructor> {
     let mut seen = Vec::new();
@@ -367,9 +367,9 @@ fn collect_constructors_from_pattern(pat: &HirPattern, seen: &mut Vec<Constructo
 }
 
 /// Merge all Struct constructors into one with the union of keys,
-/// and all Table constructors into one with the union of keys.
+/// and all @Struct constructors into one with the union of keys.
 ///
-/// Struct/table patterns are "open" — they check for key presence,
+/// Struct/@struct patterns are "open" — they check for key presence,
 /// not exclusivity. Two struct patterns with different key sets can
 /// both match the same value, so they must be treated as the same
 /// constructor to avoid the decision tree committing to one branch
@@ -393,7 +393,7 @@ fn merge_struct_table_constructors(ctors: &mut Vec<Constructor>) {
         ctors.push(Constructor::Struct(struct_keys));
     }
 
-    // Merge Table keys
+    // Merge @Struct keys
     let mut table_keys: Vec<PatternKey> = Vec::new();
     let mut has_table = false;
     for ctor in ctors.iter() {
@@ -465,7 +465,7 @@ fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<HirPattern>
         }
         HirPattern::Struct { entries } | HirPattern::Table { entries } => {
             // The constructor carries the merged key set (union of all
-            // struct/table patterns in the column). Produce a sub-pattern
+            // struct patterns in the column). Produce a sub-pattern
             // for each key in the merged set: the pattern's sub-pattern
             // for keys it mentions, Wildcard for keys it doesn't.
             let merged_keys = match ctor {
@@ -494,9 +494,9 @@ fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<HirPattern>
 
 /// Check if a pattern's constructor is compatible with a given constructor.
 ///
-/// For most constructors, this is exact equality. For Struct and Table,
+/// For most constructors, this is exact equality. For Struct and @Struct,
 /// any struct pattern is compatible with any Struct constructor (and
-/// similarly for Table), because struct/table patterns are "open" —
+/// similarly for @Struct), because struct patterns are "open" —
 /// they check key presence, not exclusivity. The merged constructor
 /// carries the union of all keys.
 fn constructor_compatible(pat_ctor: &Constructor, target: &Constructor) -> bool {

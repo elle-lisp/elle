@@ -26,7 +26,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   The compilation pipeline is: Source → Reader → Syntax → Expander → Analyzer → HIR → Lowerer → LIR → Emitter → Bytecode → VM. Each stage infers more than the last. The analyzer resolves all bindings to their definitions, computes which variables each closure captures, infers the effect of every expression, and flags lint violations — all before bytecode is emitted. This is why the linter catches errors at compile time, why the effect system is sound, and why the JIT can make intelligent decisions about what to compile natively.
   </details>
 
-- **A sound effect system, inferred not declared.** Every function is automatically classified as `Pure`, `Yields`, or `Polymorphic`. The compiler enforces this: a pure context cannot call a yielding function. No annotations required. This is what makes the fiber/concurrency story coherent — the compiler knows which functions can suspend.
+- **A sound effect system, inferred not declared.** Every function is automatically classified as `Inert`, `Yields`, or `Polymorphic`. The compiler enforces this: a pure context cannot call a yielding function. No annotations required. This is what makes the fiber/concurrency story coherent — the compiler knows which functions can suspend.
 
   ```janet
   # Pure function — inferred automatically
@@ -110,25 +110,25 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Modern Lisp syntax with no parser ambiguity.** Macros operate on syntax trees, not text. See [`prelude.lisp`](prelude.lisp) for hygienic macros and standard forms.
 
-- **Collection literals with mutable/immutable split.** Bare delimiters are immutable: `[1 2 3]` (tuple), `{:key val}` (struct), `"hello"` (string). `@`-prefixed are mutable: `@[1 2 3]` (array), `@{:key val}` (table), `@"hello"` (buffer).
+- **Collection literals with mutable/immutable split.** Bare delimiters are immutable: `[1 2 3]` (array), `{:key val}` (struct), `"hello"` (string). `@`-prefixed are mutable: `@[1 2 3]` (@array), `@{:key val}` (@struct), `@"hello"` (@string).
 
-  ```janet
-  # Immutable
-  (def t [1 2 3])           # tuple
-  (def s {:name "Bob"})     # struct
-  (def str "hello")         # string
-  (def s |1 2 3|)           # set
+   ```janet
+   # Immutable
+   (def a [1 2 3])           # array
+   (def s {:name "Bob"})     # struct
+   (def str "hello")         # string
+   (def s |1 2 3|)           # set
 
-  # Mutable
-  (def a @[1 2 3])          # array
-  (def tbl @{:name "Bob"})  # table
-  (def buf @"hello")        # buffer
-  (def ms @|1 2 3|)         # mutable set
+   # Mutable
+   (def a @[1 2 3])          # @array
+   (def tbl @{:name "Bob"})  # @struct
+   (def buf @"hello")        # @string
+   (def ms @|1 2 3|)         # @set
 
-  # Bytes and blobs (no literal syntax)
-  (def b (bytes 1 2 3))     # immutable bytes
-  (def bl (blob 1 2 3))     # mutable blob
-  ```
+   # Bytes and blobs (no literal syntax)
+   (def b (bytes 1 2 3))     # bytes
+   (def bl (blob 1 2 3))     # @bytes
+   ```
 
 - **Strings are sequences of grapheme clusters.** `length`, slicing, indexing, and iteration all count grapheme clusters — not bytes, not codepoints.
 
@@ -205,11 +205,11 @@ Every collection type has an immutable variant and a mutable variant. Bare liter
 
 | Immutable | Mutable | Literal | `@`-literal |
 |-----------|---------|---------|-------------|
-| tuple | array | `[1 2 3]` | `@[1 2 3]` |
-| struct | table | `{:a 1}` | `@{:a 1}` |
-| string | buffer | `"hello"` | `@"hello"` |
-| bytes | blob | *(no literal)* | *(no literal)* |
-| set | mutable set | `\|1 2 3\|` | `@\|1 2 3\|` |
+| array | @array | `[1 2 3]` | `@[1 2 3]` |
+| struct | @struct | `{:a 1}` | `@{:a 1}` |
+| string | @string | `"hello"` | `@"hello"` |
+| bytes | @bytes | *(no literal)* | *(no literal)* |
+| set | @set | `\|1 2 3\|` | `@\|1 2 3\|` |
 
 The `@` prefix means "mutable version of this literal." The types within each pair share the same logical structure but differ in mutability.
 
@@ -233,25 +233,25 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 [1 2 3]                             @[1 2 3]
 {:name "Bob" :age 25}               @{:name "Bob" :age 25}
 "hello"                             @"hello"
-(bytes 1 2 3)                       (blob 1 2 3)
+(bytes 1 2 3)                       (@bytes 1 2 3)
 |1 2 3|                             @|1 2 3|
 ```
 
-**Tuple** — fixed-length immutable sequence. Error values are tuples: `[:division-by-zero "message"]`. Bracket destructuring works on both tuples and arrays.
+**Array** — fixed-length immutable sequence. Error values are arrays: `[:division-by-zero "message"]`. Bracket destructuring works on both arrays and @arrays.
 
-**Array** — mutable resizable sequence. `(array-set! a 0 99)`, `(array-ref a 0)`, `(array-length a)`.
+**@Array** — mutable resizable sequence. `(array-set! a 0 99)`, `(array-ref a 0)`, `(array-length a)`.
 
 **Struct** — immutable ordered dictionary. `(get s :key)`. Keys are typically keywords.
 
-**Table** — mutable ordered dictionary. `(get t :key)`, `(put t :key val)`, `(del t :key)`, `(keys t)`, `(values t)`, `(has? t :key)`.
+**@Struct** — mutable ordered dictionary. `(get t :key)`, `(put t :key val)`, `(del t :key)`, `(keys t)`, `(values t)`, `(has? t :key)`.
 
 **String** — immutable interned text. Equality is O(1). Indexing and length count grapheme clusters, not bytes.
 
-**Buffer** — mutable byte sequence. `@"hello"` desugars to `(string->buffer "hello")`. Supports `get`, `put`, `push`, `pop`, `length`, `append`, `concat`.
+**@String** — mutable byte sequence. `@"hello"` desugars to `(string->@string "hello")`. Supports `get`, `put`, `push`, `pop`, `length`, `append`, `concat`.
 
 **Bytes** — immutable binary data. No literal syntax; constructed via `(bytes 1 2 3)` or `(string->bytes "hello")`. Displays as `#bytes[hex ...]`.
 
-**Blob** — mutable binary data. No literal syntax; constructed via `(blob 1 2 3)` or `(string->blob "hello")`. Displays as `#blob[hex ...]`.
+**@Bytes** — mutable binary data. No literal syntax; constructed via `(@bytes 1 2 3)` or `(string->@bytes "hello")`. Displays as `#@bytes[hex ...]`.
 
 **Set** — immutable unordered collection of unique values. `|1 2 3|` literal syntax. `(set 1 2 3)` constructor. `(contains? s val)`, `(add s val)`, `(del s val)`, `(union s1 s2)`, `(intersection s1 s2)`, `(difference s1 s2)`. Mutable values are frozen on insertion.
 
@@ -333,15 +333,15 @@ Exactly two values are falsy. Everything else is truthy.
 | `string?` | string |
 | `pair?` | cons cell |
 | `list?` | cons cell or empty list |
-| `empty?` | empty list, empty array, empty tuple, empty table, empty struct, empty buffer |
+| `empty?` | empty list, empty @array, empty array, empty @struct, empty struct, empty @string |
 | `array?` | array |
-| `tuple?` | tuple |
-| `table?` | table |
+| `@array?` | @array |
+| `@struct?` | @struct |
 | `struct?` | struct |
-| `set?` | set (immutable or mutable) |
-| `buffer?` | buffer |
+| `set?` | set (immutable or @set) |
+| `@string?` | @string |
 | `bytes?` | bytes |
-| `blob?` | blob |
+| `@bytes?` | @bytes |
 | `function?` | closure or native function |
 | `closure?` | closure only |
 | `primitive?` | native function only |
@@ -363,19 +363,19 @@ Exactly two values are falsy. Everything else is truthy.
 | empty list | `()` |
 | string | `hello` (no quotes) |
 | cons | `(1 2 3)` or `(a . b)` for improper |
-| tuple | `[1 2 3]` |
-| array | `@[1 2 3]` |
+| array | `[1 2 3]` |
+| @array | `@[1 2 3]` |
 | struct | `{:a 1}` |
-| table | `@{:a 1}` |
+| @struct | `@{:a 1}` |
 | set | `\|1 2 3\|` |
-| mutable set | `@\|1 2 3\|` |
+| @set | `@\|1 2 3\|` |
 | bytes | `#bytes[01 02 03]` |
-| blob | `#blob[01 02 03]` |
+| @bytes | `#@bytes[01 02 03]` |
 | closure | `<closure>` |
 | native fn | `<native-fn>` |
 | fiber | `<fiber:status>` |
 | cell | `<cell value>` |
-| buffer | `@"hello"` |
+| @string | `@"hello"` |
 | pointer | `<pointer 0x...>` |
 
 ## Control Flow

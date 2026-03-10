@@ -12,9 +12,6 @@ mod effects {
 mod ffi {
     include!("ffi.rs");
 }
-mod path {
-    include!("path.rs");
-}
 mod ordering {
     include!("ordering.rs");
 }

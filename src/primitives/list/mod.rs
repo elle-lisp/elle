@@ -111,7 +111,7 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
     }
     // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
+        if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
             if items.is_empty() {
                 return (SIG_OK, Value::NIL);
             }
@@ -175,7 +175,7 @@ pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
     }
     // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
+        if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
             if items.is_empty() {
                 let empty =
                     crate::syntax::Syntax::new(SyntaxKind::List(vec![]), syntax.span.clone());
@@ -226,7 +226,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         };
         (SIG_OK, Value::int(vec.len() as i64))
     } else if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
+        if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
             (SIG_OK, Value::int(items.len() as i64))
         } else {
             (
@@ -352,7 +352,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
     }
 
     let result = if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) | SyntaxKind::Tuple(items) = &syntax.kind {
+        if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
             items.is_empty()
         } else {
             return (
@@ -511,7 +511,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_length,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Get the length of a collection (list, string, vector, table, struct, symbol, or keyword)",
+        doc: "Get the length of a collection (list, string, array, table, struct, symbol, or keyword)",
         params: &["collection"],
         category: "list",
         example: "(length (list 1 2 3))",
@@ -543,11 +543,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "concat",
         func: prim_concat,
         effect: Effect::inert(),
-        arity: Arity::Exact(2),
-        doc: "Concatenate two collections, always returns new value, never mutates.",
-        params: &["collection1", "collection2"],
+        arity: Arity::AtLeast(1),
+        doc: "Concatenate one or more collections of the same type. Returns a new value.",
+        params: &["collections"],
         category: "list",
-        example: "(concat @[1 2] @[3 4])",
+        example: "(concat [1 2] [3 4]) #=> [1 2 3 4]",
         aliases: &[],
     },
     PrimitiveDef {

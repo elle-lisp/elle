@@ -235,7 +235,7 @@ mod tests {
             "(letrec ((f (fn (& args) nil)) (g (fn (& args) nil)) (h (fn (& args) nil))) {})",
             source
         );
-        let syntax = read_syntax(&wrapped).expect("parse failed");
+        let syntax = read_syntax(&wrapped, "<test>").expect("parse failed");
         let mut expander = Expander::new();
         let expanded = expander
             .expand(syntax, &mut symbols, &mut vm)
