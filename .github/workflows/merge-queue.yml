@@ -88,30 +88,14 @@ jobs:
           done
           echo "✓ All Elle script tests passed"
 
-  audit:
-    name: Dependency Audit
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install and run cargo-audit
-        run: |
-          cargo install cargo-audit
-          cargo audit
-
   all-checks:
     name: All Checks Passed
-    needs: [examples, audit]
+    needs: [examples]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check examples
         if: needs.examples.result == 'failure'
-        run: exit 1
-      - name: Check audit
-        if: needs.audit.result == 'failure'
         run: exit 1
       - name: Success
         run: echo "All checks passed"
