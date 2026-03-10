@@ -239,11 +239,11 @@
 
 # bytes (immutable) and @bytes (mutable) — raw binary data
 (def b (bytes 72 101 108 108 111))   # "Hello" in ASCII
-(display "  (bytes 72 101 108 108 111) → \"") (display (bytes->string b)) (print "\"")
+(display "  (bytes 72 101 108 108 111) → \"") (display (string b)) (print "\"")
 (display "  hex: ") (print (bytes->hex b))
 (assert-eq (length b) 5 "bytes length")
 (assert-eq (get b 0) 72 "get returns integer byte value")  # not a char
-(assert-eq (bytes->string b) "Hello" "bytes->string (UTF-8)")
+(assert-eq (string b) "Hello" "bytes->string (UTF-8)")
 
 # each over bytes yields integers (byte values)
 (var byte-sum 0)
@@ -252,12 +252,12 @@
 (assert-eq byte-sum 6 "each over bytes sums integers")
 
 # Conversions: string ↔ bytes ↔ @bytes ↔ @string
-(def b2 (string->bytes "hi"))        # string → bytes
-(assert-eq (bytes->string b2) "hi" "round-trip string->bytes->string")
+(def b2 (bytes "hi"))                # string → bytes
+(assert-eq (string b2) "hi" "round-trip string->bytes->string")
 (def bl2 (thaw b2))                  # bytes → @bytes (mutable copy)
 (assert-eq (type bl2) :@bytes "thaw bytes to @bytes")
-(def buf (bytes->buffer (string->bytes "test")))  # string → bytes → @string
-(assert-eq (type buf) :@string "bytes->@string")
+(def buf (thaw "test"))               # string → @string (mutable copy)
+(assert-eq (type buf) :@string "thaw string to @string")
 
 # Slice — half-open range [start, end)
 (def sliced (slice (bytes 10 20 30 40 50) 1 3))  # bytes at index 1,2

@@ -34,9 +34,9 @@ In `match`, `[...]` matches arrays (`IsArray`), `@[...]` matches @arrays (`IsArr
 
 ## Implementation details
 
-### Two cell types: Cell vs LocalCell
+### Two lbox types: LBox vs LocalLBox
 
-Two cell types exist: `Cell` (user-created via `box`, explicit) and `LocalCell` (compiler-created for mutable captures, auto-unwrapped).
+Two lbox types exist: `LBox` (user-created via `box`, explicit) and `LocalLBox` (compiler-created for mutable captures, auto-unwrapped).
 
 ### Coroutine primitives as fiber wrappers
 

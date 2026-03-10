@@ -74,7 +74,7 @@ Tests are organized by feature area:
 | `json.lisp` | JSON serialization |
 | `regex.lisp` | Regular expressions |
 | `bytes.lisp` | Bytes operations |
-| `buffer.lisp` | Buffer operations |
+| `string.lisp` | String and @string operations |
 
 ## Running Elle scripts
 

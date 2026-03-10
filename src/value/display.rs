@@ -41,7 +41,7 @@ impl fmt::Display for Value {
 
         if let Some(id) = self.as_symbol() {
             return if let Some(name) = resolve_symbol(id) {
-                write!(f, "{}", name)
+                write!(f, "'{}", name)
             } else {
                 write!(f, "#<sym:{}>", id)
             };
@@ -117,10 +117,10 @@ impl fmt::Display for Value {
             return write!(f, "<closure>");
         }
 
-        // Cell
-        if let Some(cell_ref) = self.as_cell() {
+        // Box
+        if let Some(cell_ref) = self.as_lbox() {
             let val = cell_ref.borrow();
-            return write!(f, "<cell {}>", val);
+            return write!(f, "<box {}>", val);
         }
 
         // Fiber
@@ -154,7 +154,7 @@ impl fmt::Display for Value {
             return write!(f, "#<binding>");
         }
 
-        // Buffer
+        // @string
         if let Some(buf_ref) = self.as_string_mut() {
             let borrowed = buf_ref.borrow();
             write!(f, "@\"")?;
@@ -185,10 +185,10 @@ impl fmt::Display for Value {
             return write!(f, "]");
         }
 
-        // Blob (mutable binary data)
+        // @bytes (mutable binary data)
         if let Some(blob_ref) = self.as_bytes_mut() {
             let borrowed = blob_ref.borrow();
-            write!(f, "#blob[")?;
+            write!(f, "#@bytes[")?;
             for (i, byte) in borrowed.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
@@ -198,7 +198,7 @@ impl fmt::Display for Value {
             return write!(f, "]");
         }
 
-        // Tuple
+        // Array (immutable)
         if let Some(elems) = self.as_array() {
             write!(f, "[")?;
             for (i, v) in elems.iter().enumerate() {
@@ -292,7 +292,7 @@ impl fmt::Debug for Value {
         }
         if let Some(id) = self.as_symbol() {
             return if let Some(name) = resolve_symbol(id) {
-                write!(f, "{}", name)
+                write!(f, "'{}", name)
             } else {
                 write!(f, "#<sym:{}>", id)
             };
@@ -328,7 +328,7 @@ impl fmt::Debug for Value {
             }
             return write!(f, "]");
         }
-        // Buffer
+        // @string
         if let Some(buf_ref) = self.as_string_mut() {
             let borrowed = buf_ref.borrow();
             write!(f, "@\"")?;
@@ -356,10 +356,10 @@ impl fmt::Debug for Value {
             }
             return write!(f, "]");
         }
-        // Blob (mutable binary data)
+        // @bytes (mutable binary data)
         if let Some(blob_ref) = self.as_bytes_mut() {
             let borrowed = blob_ref.borrow();
-            write!(f, "#blob[")?;
+            write!(f, "#@bytes[")?;
             for (i, byte) in borrowed.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
@@ -368,7 +368,7 @@ impl fmt::Debug for Value {
             }
             return write!(f, "]");
         }
-        // Tuple
+        // Array (immutable)
         if let Some(elems) = self.as_array() {
             write!(f, "[")?;
             for (i, v) in elems.iter().enumerate() {

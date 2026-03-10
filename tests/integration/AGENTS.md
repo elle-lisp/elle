@@ -96,7 +96,7 @@ Tests are organized by feature area in separate files:
 | `lint.rs` | Linter behavior |
 | `lsp.rs` | LSP features |
 | `compliance.rs` | Language compliance |
-| `buffer.rs` | Buffer operations |
+| ~~`buffer.rs`~~ | Merged into `string.rs` |
 | `splice.rs` | Splice syntax |
 | `bytes.rs` | Bytes operations |
 | `regex.rs` | Regular expressions |

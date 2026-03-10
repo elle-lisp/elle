@@ -46,16 +46,16 @@ impl PartialEq for Value {
                 // Closure comparison (compare by reference)
                 (HeapObject::Closure(c1), HeapObject::Closure(c2)) => std::rc::Rc::ptr_eq(c1, c2),
 
-                // Tuple comparison (compare contents element-wise)
+                // Array comparison (compare contents element-wise)
                 (HeapObject::LArray(t1), HeapObject::LArray(t2)) => t1 == t2,
 
-                // Buffer comparison (compare contents)
+                // @string comparison (compare contents)
                 (HeapObject::LStringMut(b1), HeapObject::LStringMut(b2)) => {
                     *b1.borrow() == *b2.borrow()
                 }
 
-                // Cell comparison (compare contents)
-                (HeapObject::Cell(c1, _), HeapObject::Cell(c2, _)) => *c1.borrow() == *c2.borrow(),
+                // Box comparison (compare contents)
+                (HeapObject::LBox(c1, _), HeapObject::LBox(c2, _)) => *c1.borrow() == *c2.borrow(),
 
                 // Float comparison — bitwise, not IEEE, so NaN == NaN (same bits)
                 (HeapObject::Float(f1), HeapObject::Float(f2)) => f1.to_bits() == f2.to_bits(),
@@ -110,7 +110,7 @@ impl PartialEq for Value {
                 // Bytes comparison (compare contents)
                 (HeapObject::LBytes(b1), HeapObject::LBytes(b2)) => b1 == b2,
 
-                // Blob comparison (compare contents)
+                // @bytes comparison (compare contents)
                 (HeapObject::LBytesMut(b1), HeapObject::LBytesMut(b2)) => {
                     *b1.borrow() == *b2.borrow()
                 }
@@ -191,7 +191,7 @@ impl Hash for Value {
                 }
                 HeapObject::LStringMut(rc) => rc.borrow().hash(state),
                 HeapObject::LBytesMut(rc) => rc.borrow().hash(state),
-                HeapObject::Cell(rc, _) => rc.borrow().hash(state),
+                HeapObject::LBox(rc, _) => rc.borrow().hash(state),
 
                 // Structural-but-special heap types
                 HeapObject::Float(f) => f.to_bits().hash(state),
@@ -273,7 +273,7 @@ fn type_rank(v: &Value) -> u8 {
             HeapTag::LStruct => 15,
             HeapTag::LStructMut => 16,
             HeapTag::Closure => 17,
-            HeapTag::Cell => 18,
+            HeapTag::LBox => 18,
             HeapTag::NativeFn => 19,
             HeapTag::LibHandle => 20,
             HeapTag::ThreadHandle => 21,
@@ -365,7 +365,7 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         // Cons — (first, rest) lexicographic
         (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1.cmp(c2),
 
-        // Tuple — element-wise lexicographic
+        // Array — element-wise lexicographic
         (HeapObject::LArray(t1), HeapObject::LArray(t2)) => t1.cmp(t2),
 
         // Array — element-wise lexicographic (borrow)
@@ -378,14 +378,14 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         // Bytes — byte-wise lexicographic
         (HeapObject::LBytes(b1), HeapObject::LBytes(b2)) => b1.cmp(b2),
 
-        // Buffer — byte-wise lexicographic (borrow)
+        // @string — byte-wise lexicographic (borrow)
         (HeapObject::LStringMut(b1), HeapObject::LStringMut(b2)) => {
             let r1 = b1.borrow();
             let r2 = b2.borrow();
             r1.cmp(&*r2)
         }
 
-        // Blob — byte-wise lexicographic (borrow)
+        // @bytes — byte-wise lexicographic (borrow)
         (HeapObject::LBytesMut(b1), HeapObject::LBytesMut(b2)) => {
             let r1 = b1.borrow();
             let r2 = b2.borrow();
@@ -395,8 +395,8 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         // Struct — entry-wise lexicographic (BTreeMap iteration is sorted)
         (HeapObject::LStruct(s1), HeapObject::LStruct(s2)) => s1.iter().cmp(s2.iter()),
 
-        // Cell — by contained value (borrow)
-        (HeapObject::Cell(c1, _), HeapObject::Cell(c2, _)) => {
+        // Box — by contained value (borrow)
+        (HeapObject::LBox(c1, _), HeapObject::LBox(c2, _)) => {
             let v1 = c1.borrow();
             let v2 = c2.borrow();
             v1.cmp(&*v2)

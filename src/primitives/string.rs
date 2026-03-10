@@ -545,8 +545,54 @@ pub(crate) fn prim_uri_encode(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
+/// Create an @string from byte arguments
+/// (@string) => empty @string
+/// (@string 72 101 108) => @string with those bytes
+pub(crate) fn prim_buffer(args: &[Value]) -> (SignalBits, Value) {
+    let mut bytes = Vec::with_capacity(args.len());
+    for (i, arg) in args.iter().enumerate() {
+        match arg.as_int() {
+            Some(n) if (0..=255).contains(&n) => bytes.push(n as u8),
+            Some(n) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("@string: byte {} out of range 0-255: {}", i, n),
+                    ),
+                )
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "@string: expected integer, got {} at position {}",
+                            arg.type_name(),
+                            i
+                        ),
+                    ),
+                )
+            }
+        }
+    }
+    (SIG_OK, Value::string_mut(bytes))
+}
+
 /// Declarative primitive definitions for string module.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "@string",
+        func: prim_buffer,
+        effect: Effect::inert(),
+        arity: Arity::AtLeast(0),
+        doc: "Create a mutable string from byte arguments.",
+        params: &[],
+        category: "string",
+        example: "(@string 72 101 108 108 111)",
+        aliases: &[],
+    },
     PrimitiveDef {
         name: "string/upcase",
         func: prim_string_upcase,

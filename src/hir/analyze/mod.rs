@@ -538,15 +538,15 @@ mod tests {
         let binding = Binding::new(sym, BindingScope::Local);
         assert!(!binding.is_mutated());
         assert!(!binding.is_captured());
-        assert!(!binding.needs_cell());
+        assert!(!binding.needs_lbox());
 
         binding.mark_mutated();
         assert!(binding.is_mutated());
-        assert!(!binding.needs_cell());
+        assert!(!binding.needs_lbox());
 
         binding.mark_captured();
         assert!(binding.is_captured());
-        assert!(binding.needs_cell());
+        assert!(binding.needs_lbox());
     }
 
     #[test]
@@ -559,11 +559,11 @@ mod tests {
         assert!(binding.is_immutable());
         assert!(binding.is_captured());
         assert!(!binding.is_prebound());
-        assert!(!binding.needs_cell());
+        assert!(!binding.needs_lbox());
     }
 
     #[test]
-    fn test_immutable_prebound_captured_local_needs_cell() {
+    fn test_immutable_prebound_captured_local_needs_lbox() {
         // An immutable local that is prebound (def in begin, letrec) AND
         // captured DOES need a cell — the capture may happen before the
         // binding is initialized (self-recursion, forward references).
@@ -574,17 +574,17 @@ mod tests {
         assert!(binding.is_immutable());
         assert!(binding.is_captured());
         assert!(binding.is_prebound());
-        assert!(binding.needs_cell());
+        assert!(binding.needs_lbox());
     }
 
     #[test]
-    fn test_mutable_captured_local_needs_cell() {
+    fn test_mutable_captured_local_needs_lbox() {
         // A mutable local (var) that is captured DOES need a cell.
         let binding = Binding::new(SymbolId(3), BindingScope::Local);
         binding.mark_captured();
         assert!(!binding.is_immutable());
         assert!(binding.is_captured());
-        assert!(binding.needs_cell());
+        assert!(binding.needs_lbox());
     }
 
     #[test]
@@ -592,11 +592,11 @@ mod tests {
         // An immutable local that is NOT captured should not need a cell.
         let binding = Binding::new(SymbolId(4), BindingScope::Local);
         binding.mark_immutable();
-        assert!(!binding.needs_cell());
+        assert!(!binding.needs_lbox());
     }
 
     #[test]
-    fn test_immutable_mutated_captured_local_needs_cell() {
+    fn test_immutable_mutated_captured_local_needs_lbox() {
         // Edge case: a binding marked immutable but also mutated and captured.
         // Immutable wins — no cell needed. (In practice, the analyzer would
         // reject set on an immutable binding, so this shouldn't happen.)
@@ -604,7 +604,7 @@ mod tests {
         binding.mark_immutable();
         binding.mark_mutated();
         binding.mark_captured();
-        assert!(!binding.needs_cell());
+        assert!(!binding.needs_lbox());
     }
 
     // === Scope-aware binding resolution tests ===

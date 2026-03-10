@@ -25,7 +25,7 @@ get information about it. All are `NativeFn`. Primitives that need VM access use
 | `jit?` | `(jit? value)` | `true` or `false` | True if value is a closure with JIT-compiled native code |
 | `pure?` | `(pure? value)` | `true` or `false` | True if value is a closure with `Effect::Inert` |
 | `coro?` | `(coro? value)` | `true` or `false` | True if value is a closure with `Effect::Yields` |
-| `mutates-params?` | `(mutates-params? value)` | `true` or `false` | True if value is a closure whose body mutates any of its own parameters (i.e., `cell_params_mask != 0`) |
+| `mutates-params?` | `(mutates-params? value)` | `true` or `false` | True if value is a closure whose body mutates any of its own parameters (i.e., `lbox_params_mask != 0`) |
 | `closure?` | `(closure? value)` | `true` or `false` | True if value is a closure (bytecode, not native/vm-aware) |
 
 Implementation: each is a simple predicate that examines the `Value` and,
@@ -34,14 +34,14 @@ for closures, reads fields on the `Closure` struct.
 - `jit?` checks `closure.jit_code.is_some()`
 - `pure?` checks `closure.effect == Effect::Inert`
 - `coro?` checks `closure.effect == Effect::Yields`
-- `mutates-params?` checks `closure.cell_params_mask != 0` (any cell-wrapped params)
+- `mutates-params?` checks `closure.lbox_params_mask != 0` (any lbox-wrapped params)
 - `closure?` checks `value.as_closure().is_some()`
 - `global?` takes a symbol, checks `vm.get_global(sym_id).is_some()`
 
-Note: `cell_params_mask` tracks which *parameters* are mutated inside the
-closure body and need `LocalCell` wrapping. It does **not** indicate whether
+Note: `lbox_params_mask` tracks which *parameters* are mutated inside the
+closure body and need `LocalLBox` wrapping. It does **not** indicate whether
 the closure captures mutable bindings from an outer scope. Those are
-`LocalCell` values in the closure's `env` vector — detecting them would
+`LocalLBox` values in the closure's `env` vector — detecting them would
 require scanning `env`, which is a different (and more expensive) operation.
 
 ### 1.2 Exception tracking: `fn/errors?`

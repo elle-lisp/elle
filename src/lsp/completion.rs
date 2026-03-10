@@ -94,7 +94,7 @@ pub(crate) fn get_completions(
             SymbolKind::Builtin,
             "Concatenate collections (non-mutating)",
         ),
-        ("rebox", SymbolKind::Builtin, "Set cell value"),
+        ("rebox", SymbolKind::Builtin, "Set box value"),
         ("push", SymbolKind::Builtin, "Push element onto array"),
         ("pop", SymbolKind::Builtin, "Pop element from array"),
     ];

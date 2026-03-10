@@ -40,7 +40,7 @@ pub(crate) fn handle_return(vm: &mut VM) -> Value {
     // Unwrap Cell (internal cells for mutable captures)
     // User code should never see a Cell - it's an implementation detail
     if let Some(_cell_ptr) = value.as_heap_ptr() {
-        if let Some(cell_val) = value.as_cell() {
+        if let Some(cell_val) = value.as_lbox() {
             let inner = cell_val.borrow();
             *inner
         } else {

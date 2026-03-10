@@ -53,7 +53,7 @@ cargo test --test integration -- --nocapture
 
 Tests are organized by feature:
 
-- **Closures**: Capture, mutation, cell boxing
+- **Closures**: Capture, mutation, lbox boxing
 - **Control flow**: If, while, match, break
 - **Binding forms**: Let, def, var, destructuring
 - **Macros**: Expansion, hygiene, quasiquote

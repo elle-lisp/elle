@@ -27,7 +27,7 @@ trade-offs and pick up where we left off.
 Elle previously had separate mechanisms for coroutines (continuation
 capture/replay), exception handling (handler stack with unwind semantics),
 and effect inference (boolean fields for yields and errors). The JIT could
-only compile pure functions.
+only compile inert functions.
 
 These have been unified into a single mechanism: **fibers with signals**.
 Coroutines are fibers that yield. Errors are signals. The effect system
@@ -242,7 +242,7 @@ caller can provide a pre-allocated buffer, deny the allocation, or grant it.
 capability. If the callee never needs FFI, no signal — full speed. If it
 does need FFI, it signals, and the caller handles the denial.
 
-**"This callback must be pure"**: The caller grants *no* capabilities. If the
+**"This callback must be inert"**: The caller grants *no* capabilities. If the
 callback tries to do anything — yield, error, IO, allocate — it signals.
 The caller treats any signal as a contract violation.
 
@@ -436,11 +436,11 @@ Operations:
 
 The compiler walks the AST and infers effects:
 
-- A literal is pure (no bits)
+- A literal is inert (no bits)
 - A primitive has known effect bits (declared at registration)
 - A call's effect is the callee's effect combined with the call overhead
 - A `begin` block's effect is the union of its children
-- A lambda's body effect is stored on the lambda but the lambda itself is pure
+- A lambda's body effect is stored on the lambda but the lambda itself is inert
 - A handler that catches signal X removes bit X from the enclosed expression's
   effect
 
@@ -510,7 +510,7 @@ signal, specifically).
 
 ### The Current Problem
 
-The JIT can only compile pure functions because it can't handle yields or
+The JIT can only compile inert functions because it can't handle yields or
 errors — it would need to save and restore the native stack, which is
 complex and platform-specific.
 
@@ -528,9 +528,9 @@ The JIT doesn't need to capture continuations or switch stacks. It just
 checks a return code and propagates. This is the same thing Janet's C code
 does — check the signal, propagate if not caught.
 
-This means the JIT can compile *any* function, not just pure ones. The
-overhead for non-pure functions is one branch per call (checking the signal).
-For pure functions (where the compiler can prove no signals), the branch can
+This means the JIT can compile *any* function, not just inert ones. The
+overhead for non-inert functions is one branch per call (checking the signal).
+For inert functions (where the compiler can prove no signals), the branch can
 be elided entirely.
 
 ### Effect-Guided Optimization
@@ -541,8 +541,8 @@ The compiler's effect information guides JIT decisions:
 - **Errors only**: signal checks needed, but no yield/continuation overhead
 - **Yields**: full signal protocol, but the JIT still compiles the function —
   it just includes the propagation path
-- **Known pure callback**: when a higher-order function is called with a
-  provably-pure callback, the JIT can specialize the inner loop to skip
+- **Known inert callback**: when a higher-order function is called with a
+   provably-inert callback, the JIT can specialize the inner loop to skip
   signal checks
 
 
@@ -661,8 +661,8 @@ request backend execution. Separating them allows:
 ### Effect Declarations
 
 ```janet
-(def (pure-add x y)
-  (declare (effects))           ;# no effects — pure
+(def (inert-add x y)
+  (declare (effects))           ;# no effects — inert
   (+ x y))
 
 (def (may-fail x)
@@ -690,7 +690,7 @@ Steps 1–3 are complete. Steps 4–7 are future work.
    propagates: u32 }`. Inference tracks signal bits. Old `yield_behavior`
     and `may_error` fields replaced.
 
-4. ❌ **Relax JIT restrictions.** JIT still restricted to pure functions.
+4. ❌ **Relax JIT restrictions.** JIT still restricted to inert functions.
    Signal-aware calling convention not yet implemented.
 
 5. ❌ **User-defined signals.** Bit positions 16–31 reserved but no

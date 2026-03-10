@@ -1,7 +1,7 @@
-// Buffer type tests
+// @string type tests
 //
 // Display formatting and byte-level Unicode tests that require Rust APIs.
-// Basic operation tests migrated to tests/elle/buffer.lisp.
+// Basic operation tests migrated to tests/elle/string.lisp.
 
 use crate::common::eval_source;
 
@@ -21,7 +21,7 @@ fn test_buffer_display_empty() {
 
 #[test]
 fn test_buffer_get_unicode() {
-    // Buffer with UTF-8 multi-byte character
+    // @string with UTF-8 multi-byte character
     let result = eval_source(r#"(get @"café" 3)"#).unwrap();
     assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "é");
 }

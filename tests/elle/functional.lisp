@@ -312,7 +312,7 @@
 
 (let ((a [1 2 3]))
   (let ((ma (thaw a)))
-    (assert-true (@array? ma) "thaw array: returns @array")
+    (assert-eq (type-of ma) :@array "thaw array: returns @array")
     (assert-eq (get ma 0) 1 "thaw array: preserves values")
     (push ma 4)
     (assert-eq (length ma) 4 "thaw array: result is mutable")))
@@ -337,7 +337,7 @@
 
 (let ((b (bytes 1 2 3)))
   (let ((mb (thaw b)))
-    (assert-true (@bytes? mb) "thaw bytes: returns @bytes")
+    (assert-eq (type-of mb) :@bytes "thaw bytes: returns @bytes")
     (assert-eq (get mb 0) 1 "thaw bytes: preserves values")))
 
 (assert-eq (type-of (freeze (freeze (@bytes 1 2 3)))) :bytes "freeze: idempotent on bytes")

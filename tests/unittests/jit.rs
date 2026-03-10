@@ -9,7 +9,7 @@ mod jit_tests {
 
     #[test]
     fn test_jit_triggered_by_hot_loop() {
-        // Call a pure function 20 times — should trigger JIT at call 10
+        // Call an inert function 20 times — should trigger JIT at call 10
         let code = r#"(begin
             (defn add1 (x) (+ x 1))
             (defn loop (n acc)
@@ -251,11 +251,11 @@ mod jit_tests {
 
     #[test]
     fn test_jit_callee_exception_propagates() {
-        // A pure function calls another pure function that throws.
+        // An inert function calls another inert function that throws.
         // The JIT must propagate the exception, not swallow it.
         //
-        // `helper` is pure (just does division).
-        // `f` is pure (calls a pure function and adds 1).
+        // `helper` is inert (just does division).
+        // `f` is inert (calls an inert function and adds 1).
         // When `f` is JIT-compiled and calls `helper` with x=0,
         // the division-by-zero exception must propagate correctly.
         let result = eval_source(
@@ -409,8 +409,8 @@ mod jit_tests {
 
     #[test]
     fn test_jit_mixed_pure_and_fiber_functions() {
-        // A pure function and a fiber-using function coexist.
-        // The pure function gets JIT-compiled; the fiber one doesn't.
+        // An inert function and a fiber-using function coexist.
+        // The inert function gets JIT-compiled; the fiber one doesn't.
         // Both produce correct results.
         let result = eval_source(
             r#"(begin

@@ -4,7 +4,7 @@ use crate::vm::VM;
 
 use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
 use super::{
-    allocator, arena, arithmetic, array, bitwise, buffer, bytes, calling, cell, chan, comparison,
+    allocator, arena, arithmetic, array, bitwise, bytes, calling, cell, chan, comparison,
     concurrency, convert, coroutines, debug, disassembly, display, fiber_introspect, fibers,
     fileio, format, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
     modules, net, package, parameters, path, ports, process, read, sets, sort, stream, string,
@@ -19,7 +19,6 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     arithmetic::PRIMITIVES,
     array::PRIMITIVES,
     bitwise::PRIMITIVES,
-    buffer::PRIMITIVES,
     bytes::PRIMITIVES,
     calling::PRIMITIVES,
     cell::PRIMITIVES,

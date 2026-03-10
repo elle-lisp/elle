@@ -277,74 +277,18 @@ pub(crate) fn prim_is_primitive(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].is_native_fn()))
 }
 
-/// Check if value is a mutable array (@array)
-pub(crate) fn prim_is_array_mut(args: &[Value]) -> (SignalBits, Value) {
+/// Check if value is mutable (can be modified in-place)
+pub(crate) fn prim_is_mutable(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("@array?: expected 1 argument, got {}", args.len()),
+                format!("mutable?: expected 1 argument, got {}", args.len()),
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].as_array_mut().is_some()))
-}
-
-/// Check if value is a mutable string (@string)
-pub(crate) fn prim_is_string_mut(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("@string?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    (SIG_OK, Value::bool(args[0].is_string_mut()))
-}
-
-/// Check if value is mutable bytes (@bytes)
-pub(crate) fn prim_is_bytes_mut(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("@bytes?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    (SIG_OK, Value::bool(args[0].is_bytes_mut()))
-}
-
-/// Check if value is a mutable struct (@struct)
-pub(crate) fn prim_is_struct_mut(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("@struct?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    (SIG_OK, Value::bool(args[0].as_struct_mut().is_some()))
-}
-
-/// Check if value is a mutable set (@set)
-pub(crate) fn prim_is_set_mut(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("@set?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    (SIG_OK, Value::bool(args[0].is_set_mut()))
+    (SIG_OK, Value::bool(args[0].is_mutable()))
 }
 
 /// Check if value is numerically zero
@@ -456,7 +400,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "predicate",
         example:
             "(string? \"hello\") #=> true\n(string? @\"hello\") #=> true\n(string? 42) #=> false",
-        aliases: &["buffer?"],
+        aliases: &[],
     },
     PrimitiveDef {
         name: "boolean?",
@@ -533,61 +477,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["value"],
         category: "predicate",
         example: "(bytes? (bytes 1 2 3)) #=> true\n(bytes? (@bytes 1 2 3)) #=> true\n(bytes? 42) #=> false",
-        aliases: &["blob?"],
-    },
-    PrimitiveDef {
-        name: "@array?",
-        func: prim_is_array_mut,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Check if value is a mutable array (@array).",
-        params: &["value"],
-        category: "predicate",
-        example: "(@array? @[1 2 3]) #=> true\n(@array? [1 2 3]) #=> false\n(@array? 42) #=> false",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "@string?",
-        func: prim_is_string_mut,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Check if value is a mutable string (@string).",
-        params: &["value"],
-        category: "predicate",
-        example: "(@string? @\"hello\") #=> true\n(@string? \"hello\") #=> false\n(@string? 42) #=> false",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "@bytes?",
-        func: prim_is_bytes_mut,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Check if value is mutable bytes (@bytes).",
-        params: &["value"],
-        category: "predicate",
-        example: "(@bytes? (@bytes 1 2 3)) #=> true\n(@bytes? (bytes 1 2 3)) #=> false\n(@bytes? 42) #=> false",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "@struct?",
-        func: prim_is_struct_mut,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Check if value is a mutable struct (@struct).",
-        params: &["value"],
-        category: "predicate",
-        example: "(@struct? @{:a 1}) #=> true\n(@struct? {:a 1}) #=> false\n(@struct? 42) #=> false",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "@set?",
-        func: prim_is_set_mut,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Check if value is a mutable set (@set).",
-        params: &["value"],
-        category: "predicate",
-        example: "(@set? @|1 2 3|) #=> true\n(@set? |1 2 3|) #=> false\n(@set? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -610,6 +499,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["value"],
         category: "predicate",
         example: "(primitive? +) #=> true\n(primitive? (fn (x) x)) #=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "mutable?",
+        func: prim_is_mutable,
+        effect: Effect::inert(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is mutable (can be modified in-place).",
+        params: &["value"],
+        category: "predicate",
+        example: "(mutable? @[1 2 3]) #=> true\n(mutable? [1 2 3]) #=> false",
         aliases: &[],
     },
     PrimitiveDef {

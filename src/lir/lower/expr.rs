@@ -94,7 +94,7 @@ impl Lowerer {
 
         if let Some(&slot) = self.binding_to_slot.get(binding) {
             // Check if this binding needs cell unwrapping
-            let needs_cell = binding.needs_cell();
+            let needs_lbox = binding.needs_lbox();
 
             // Check if this is an upvalue (capture or parameter) or a local
             let is_upvalue = self.upvalue_bindings.contains(binding);
@@ -103,18 +103,18 @@ impl Lowerer {
             if self.in_lambda && is_upvalue {
                 // In a lambda, captures, parameters, and locally-defined variables are accessed via LoadCapture
                 // Note: LoadCapture (which emits LoadUpvalue) auto-unwraps LocalCell,
-                // so we don't need to emit LoadCell for captured variables
+                // so we don't need to emit LoadLBox for captured variables
                 self.emit(LirInstr::LoadCapture { dst, index: slot });
                 Ok(dst)
             } else {
                 // Outside lambdas, local variables use LoadLocal
                 self.emit(LirInstr::LoadLocal { dst, slot });
 
-                if needs_cell {
+                if needs_lbox {
                     // Unwrap the cell to get the actual value
                     // Only needed for locals, not captures (LoadCapture auto-unwraps)
                     let value_reg = self.fresh_reg();
-                    self.emit(LirInstr::LoadCell {
+                    self.emit(LirInstr::LoadLBox {
                         dst: value_reg,
                         cell: dst,
                     });
@@ -213,18 +213,18 @@ impl Lowerer {
                     }
 
                     // Check if this binding needs a cell
-                    let needs_cell = binding.needs_cell();
+                    let needs_lbox = binding.needs_lbox();
 
                     // Only create cells for top-level locals (outside lambdas)
                     // Inside lambdas, the VM creates cells for locally-defined variables
                     // when building the closure environment
-                    if needs_cell && !self.in_lambda {
+                    if needs_lbox && !self.in_lambda {
                         // Create a cell containing nil
                         // This cell will be captured by nested lambdas
                         // and updated when the Define is lowered
                         let nil_reg = self.emit_const(LirConst::Nil)?;
                         let cell_reg = self.fresh_reg();
-                        self.emit(LirInstr::MakeCell {
+                        self.emit(LirInstr::MakeLBox {
                             dst: cell_reg,
                             value: nil_reg,
                         });

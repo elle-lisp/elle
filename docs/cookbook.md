@@ -129,7 +129,7 @@ dispatches it via `handle_primitive_signal()` in `src/vm/signal.rs`.
 ## 2. Adding a New Heap Type
 
 A heap type is a new kind of runtime value stored behind a NaN-boxed
-pointer. Use the `Buffer` type as a reference — it's a recent, clean
+pointer. Use the `LStringMut` type as a reference — it's a recent, clean
 example.
 
 ### Files to modify (in order)
@@ -166,7 +166,7 @@ example.
 // In HeapTag enum — assign next available discriminant:
 pub enum HeapTag {
     // ... existing ...
-    MyType = 22,  // next after Buffer = 21
+    MyType = 22,  // next after LStringMut = 21
 }
 
 // In HeapObject enum:
@@ -218,10 +218,10 @@ impl Value {
 ```
 
 **Step 4: `src/value/display.rs`** — Add arms in both `Display` and
-`Debug` impls (search for existing heap type formatting like `Buffer`):
+`Debug` impls (search for existing heap type formatting like `LStringMut`):
 
 ```rust
-// In Display impl, after buffer handling:
+// In Display impl, after @string handling:
 if let Some(data) = self.as_my_type() {
     return write!(f, "<my-type:{}>", data);
 }

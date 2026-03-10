@@ -54,7 +54,7 @@ impl Binding {
     /// Exception: pre-bound immutable locals (from begin pass 1 or letrec
     /// pass 1) still need cells because they may be captured before their
     /// initializer runs (self-recursion, forward references).
-    pub fn needs_cell(&self) -> bool {
+    pub fn needs_lbox(&self) -> bool {
         let inner = self.inner().borrow();
         match inner.scope {
             BindingScope::Local => inner.is_captured && (!inner.is_immutable || inner.is_prebound),

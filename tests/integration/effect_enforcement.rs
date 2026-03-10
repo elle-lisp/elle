@@ -4,7 +4,7 @@
 // - Direct yield has Yields effect
 // - Calling a yielding function propagates Yields effect
 // - Polymorphic effects (like map) resolve based on argument effects
-// - Pure functions remain pure
+// - Inert functions remain inert
 // - assign invalidates effect tracking
 
 use elle::effects::Effect;

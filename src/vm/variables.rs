@@ -46,9 +46,9 @@ pub(crate) fn handle_load_upvalue(
     // - Symbol: push as-is (literal symbol values)
     // - Other: push as-is
 
-    if val.is_local_cell() {
+    if val.is_local_lbox() {
         // Auto-unwrap compiler-created local cells
-        if let Some(cell_ref) = val.as_cell() {
+        if let Some(cell_ref) = val.as_lbox() {
             let inner = *cell_ref.borrow();
             vm.fiber.stack.push(inner);
         }
@@ -107,13 +107,13 @@ pub(crate) fn handle_store_upvalue(
     // Handle cell-based storage for shared mutable captures.
     // Upvalues are always cells (LocalCell for mutable captures).
     let env_val = env[idx];
-    if env_val.is_cell() {
-        if let Some(cell_ref) = env_val.as_cell() {
+    if env_val.is_lbox() {
+        if let Some(cell_ref) = env_val.as_lbox() {
             let mut cell_mut = cell_ref.borrow_mut();
             *cell_mut = val;
         }
         vm.fiber.stack.push(val);
     } else {
-        panic!("VM bug: Cannot mutate non-cell closure environment variables");
+        panic!("VM bug: Cannot mutate non-lbox closure environment variables");
     }
 }

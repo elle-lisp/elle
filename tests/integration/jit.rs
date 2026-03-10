@@ -1262,8 +1262,8 @@ fn test_jit_make_array() {
 // =============================================================================
 
 #[test]
-fn test_jit_make_cell() {
-    // fn(x) -> make_cell(x)
+fn test_jit_make_lbox() {
+    // fn(x) -> make_lbox(x)
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
@@ -1272,7 +1272,7 @@ fn test_jit_make_cell() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::MakeCell {
+        LirInstr::MakeLBox {
             dst: Reg(1),
             value: Reg(0),
         },
@@ -1283,14 +1283,14 @@ fn test_jit_make_cell() {
     func.entry = Label(0);
 
     let result = compile_and_call(&func, &[Value::int(42).to_bits()]).unwrap();
-    assert!(result.is_local_cell());
-    let cell = result.as_cell().unwrap();
+    assert!(result.is_local_lbox());
+    let cell = result.as_lbox().unwrap();
     assert_eq!(cell.borrow().as_int(), Some(42));
 }
 
 #[test]
-fn test_jit_load_cell() {
-    // fn(cell) -> load_cell(cell)
+fn test_jit_load_lbox() {
+    // fn(cell) -> load_lbox(cell)
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
@@ -1299,7 +1299,7 @@ fn test_jit_load_cell() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCell {
+        LirInstr::LoadLBox {
             dst: Reg(1),
             cell: Reg(0),
         },
@@ -1309,14 +1309,14 @@ fn test_jit_load_cell() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let cell = Value::local_cell(Value::int(42));
+    let cell = Value::local_lbox(Value::int(42));
     let result = compile_and_call(&func, &[cell.to_bits()]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
 #[test]
-fn test_jit_store_cell() {
-    // fn(cell, value) -> store_cell(cell, value); load_cell(cell)
+fn test_jit_store_lbox() {
+    // fn(cell, value) -> store_lbox(cell, value); load_lbox(cell)
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
@@ -1326,14 +1326,14 @@ fn test_jit_store_cell() {
     entry.instructions.push(load_arg(Reg(0), 0)); // cell
     entry.instructions.push(load_arg(Reg(1), 1)); // value
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::StoreCell {
+        LirInstr::StoreLBox {
             cell: Reg(0),
             value: Reg(1),
         },
         span(),
     ));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCell {
+        LirInstr::LoadLBox {
             dst: Reg(2),
             cell: Reg(0),
         },
@@ -1343,7 +1343,7 @@ fn test_jit_store_cell() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let cell = Value::local_cell(Value::int(0));
+    let cell = Value::local_lbox(Value::int(0));
     let result = compile_and_call(&func, &[cell.to_bits(), Value::int(42).to_bits()]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }

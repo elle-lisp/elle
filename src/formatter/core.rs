@@ -131,7 +131,7 @@ fn format_value(
                 return format!("[{}]", items.join(" "));
             }
             HeapObject::ThreadHandle(_) => return "#<thread-handle>".to_string(),
-            HeapObject::Cell(_, _) => return "#<cell>".to_string(),
+            HeapObject::LBox(_, _) => return "#<box>".to_string(),
             HeapObject::Float(_) => return "#<float>".to_string(),
             HeapObject::Fiber(_) => return "#<fiber>".to_string(),
             HeapObject::Syntax(s) => return format!("#<syntax:{}>", s),
@@ -140,7 +140,7 @@ fn format_value(
             HeapObject::FFIType(_) => return "<ffi-type>".to_string(),
             HeapObject::LStringMut(_) => return "@\"...\"".to_string(),
             HeapObject::LBytes(_) => return "#bytes[...]".to_string(),
-            HeapObject::LBytesMut(_) => return "#blob[...]".to_string(),
+            HeapObject::LBytesMut(_) => return "#@bytes[...]".to_string(),
             HeapObject::ManagedPointer(cell) => {
                 return match cell.get() {
                     Some(addr) => format!("<pointer 0x{:x}>", addr),
